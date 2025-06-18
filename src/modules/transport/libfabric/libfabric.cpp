@@ -1548,7 +1548,7 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
     }
 
     /* Be thread safe at the level of the endpoint completion context. */
-    domain_attr.threading = FI_THREAD_COMPLETION;
+    domain_attr.threading = FI_THREAD_SAFE;
 
     ep_attr.type = FI_EP_RDM;  // Reliable datagrams
 
