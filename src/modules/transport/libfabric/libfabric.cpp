@@ -1547,6 +1547,12 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
         info.caps |= FI_MSG;
     }
 
+    if (use_staged_atomics) {
+        /* Staged atomics require message ordering for fence */
+        info.tx_attr->msg_order |= FI_ORDER_SAS;
+        info.rx_attr->msg_order |= FI_ORDER_SAS;
+    }
+
     /* Be thread safe at the level of the endpoint completion context. */
     domain_attr.threading = FI_THREAD_SAFE;
 
