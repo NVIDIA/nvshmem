@@ -512,7 +512,7 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
 
         status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, 1);
         if (unlikely(status)) {
-            NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
+            NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_inline\n");
             exit(-1);
         }
     }
