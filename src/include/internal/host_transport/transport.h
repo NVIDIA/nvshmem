@@ -184,9 +184,9 @@ typedef struct nvshmem_transport {
     int n_pes;
     std::unordered_map<void *, void *> *alias_va_map;
     std::unordered_map<void *, size_t> *egm_map;
-} nvshmem_transport_v1;
+} nvshmem_transport_v2;
 
-typedef nvshmem_transport_v1 *nvshmem_transport_t;
+typedef nvshmem_transport_v2 *nvshmem_transport_t;
 
 int nvshmemt_p2p_init(nvshmem_transport_t *transport);
 
