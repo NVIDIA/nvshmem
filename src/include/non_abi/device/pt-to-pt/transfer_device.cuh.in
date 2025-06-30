@@ -150,9 +150,8 @@ NVSHMEMI_TRANSFER_STATIC __device__ NVSHMEMI_TRANSFER_INLINE void nvshmemi_trans
     {
         int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
         if (!myIdx) {
-            nvshmemi_proxy_rma_nbi(rptr, lptr, bytes, pe, NVSHMEMI_OP_PUT);
-            nvshmemi_proxy_fence();
-            nvshmemi_proxy_amo_nonfetch<uint64_t>(sig_addr, signal, pe, sig_op);
+            nvshmemi_proxy_put_signal_nbi(rptr, lptr, bytes, pe, NVSHMEMI_OP_PUT_SIGNAL, sig_addr,
+                                          signal, sig_op);
             if (is_nbi == 0) {
                 nvshmemi_proxy_quiet(false);
                 if (SCOPE == nvshmemi_threadgroup_thread)

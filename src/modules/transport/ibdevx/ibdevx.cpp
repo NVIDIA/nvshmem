@@ -2076,6 +2076,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.show_info = nvshmemt_ibdevx_show_info;
     transport->host_ops.progress = nvshmemt_ibdevx_progress;
     transport->host_ops.enforce_cst = nvshmemt_ibdevx_enforce_cst_at_target;
+    transport->host_ops.put_signal = nvshmemt_put_signal;
 
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
     transport->is_successfully_initialized = true;

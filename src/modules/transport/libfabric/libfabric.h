@@ -9,6 +9,9 @@
 #include <deque>
 #include <vector>
 #include <mutex>
+#include <unordered_map>
+#include <utility>
+
 // IWYU pragma: no_include <bits/stdint-uintn.h>
 
 #include "non_abi/nvshmem_build_options.h"
@@ -139,6 +142,8 @@ class threadSafeOpQueue {
     }
 };
 
+struct nvshmemt_libfabric_gdr_op_ctx;
+typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
 typedef struct {
     struct fi_info *prov_info;
     struct fi_info *all_prov_info;
@@ -161,11 +166,15 @@ typedef struct {
     size_t num_recvs;
     void *recv_buf;
     struct transport_mem_handle_info_cache *cache;
+    uint64_t *proxy_put_signal_per_peer_seq_counter;
+    std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
+        *proxy_put_signal_comp_map;
 } nvshmemt_libfabric_state_t;
 
 typedef enum {
     NVSHMEMT_LIBFABRIC_SEND,
     NVSHMEMT_LIBFABRIC_ACK,
+    NVSHMEMT_LIBFABRIC_MATCH,
 } nvshmemt_libfabric_recv_t;
 
 typedef struct {
@@ -209,7 +218,7 @@ typedef struct nvshmemt_libfabric_gdr_ret_amo_op {
     g_elem_t elem;
 } nvshmemt_libfabric_gdr_ret_amo_op_t;
 
-typedef struct nvshmemt_libfabric_gdr_op_ctx {
+struct nvshmemt_libfabric_gdr_op_ctx {
     nvshmemt_libfabric_recv_t type;
     nvshmemt_libfabric_endpoint_t *ep;
     union {
@@ -217,4 +226,4 @@ typedef struct nvshmemt_libfabric_gdr_op_ctx {
         nvshmemt_libfabric_gdr_send_amo_op_t send_amo;
         nvshmemt_libfabric_gdr_ret_amo_op_t ret_amo;
     };
-} nvshmemt_libfabric_gdr_op_ctx_t;
+};

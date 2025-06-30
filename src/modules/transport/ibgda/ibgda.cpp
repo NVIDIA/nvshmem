@@ -4058,6 +4058,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.enforce_cst = NULL;
     transport->host_ops.add_device_remote_mem_handles =
         nvshmemt_ibgda_add_device_remote_mem_handles;
+    transport->host_ops.put_signal = NULL;
 
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
     transport->is_successfully_initialized = true;

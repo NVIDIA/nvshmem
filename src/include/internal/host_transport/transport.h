@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <unordered_map>
+#include <vector>
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -122,6 +123,12 @@ typedef int (*amo_handle)(struct nvshmem_transport *tcurr, int pe, void *curetpt
                           amo_memdesc_t *target, amo_bytesdesc_t bytesdesc, int is_proxy);
 typedef int (*fence_handle)(struct nvshmem_transport *tcurr, int pe, int is_proxy);
 typedef int (*quiet_handle)(struct nvshmem_transport *tcurr, int pe, int is_proxy);
+typedef int (*put_signal_handle)(struct nvshmem_transport *tcurr, int pe, rma_verb_t write_verb,
+                                 std::vector<rma_memdesc_t> &write_remote,
+                                 std::vector<rma_memdesc_t> &write_local,
+                                 std::vector<rma_bytesdesc_t> &write_bytesdesc, amo_verb_t sig_verb,
+                                 amo_memdesc_t *sig_target, amo_bytesdesc_t sig_bytesdesc,
+                                 int is_proxy);
 
 struct nvshmem_transport_host_ops {
     int (*can_reach_peer)(int *access, nvshmem_transport_pe_info_t *peer_info,
@@ -140,6 +147,7 @@ struct nvshmem_transport_host_ops {
     amo_handle amo;
     fence_handle fence;
     quiet_handle quiet;
+    put_signal_handle put_signal;
     int (*enforce_cst)(struct nvshmem_transport *transport);
     int (*enforce_cst_at_target)(struct nvshmem_transport *transport);
     int (*add_device_remote_mem_handles)(struct nvshmem_transport *transport, int transport_stride,

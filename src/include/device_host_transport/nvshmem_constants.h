@@ -72,6 +72,7 @@ typedef enum {
 #define PROXY_DMA_REQ_BYTES 32
 #define PROXY_AMO_REQ_BYTES 40
 #define PROXY_INLINE_REQ_BYTES 24
+#define PROXY_PUT_WITH_SIG_REQ_BYTES 48
 
 typedef enum {
     NVSHMEM_STATUS_NOT_INITIALIZED = 0,

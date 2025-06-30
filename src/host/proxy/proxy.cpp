@@ -895,6 +895,171 @@ inline void copy_from_channel(proxy_state_t *state, proxy_channel_t *ch, void *d
     proxy_update_processed(ch, num_bytes);
 }
 
+inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
+                                      int *is_processed) {
+    int pe, status = 0;
+    base_request_t *base_req;
+    put_signal_request_0 *ps_req_0;
+    put_signal_request_1 *ps_req_1;
+    put_signal_request_2 *ps_req_2;
+    put_signal_request_3 *ps_req_3;
+    put_signal_request_4 *ps_req_4;
+    struct nvshmem_transport *tcurr;
+    uint8_t flag;
+    uint64_t rwrite_offset, rsig_offset;
+    void *lwrite_ptr, *rwrite_ptr, *rsig_ptr;
+    rma_verb_t write_verb;
+    rma_bytesdesc_t write_bytes_desc;
+    rma_memdesc_t write_remote_desc, write_local_desc;
+    std::vector<rma_memdesc_t> local_write_desc_vec, remote_write_desc_vec;
+    std::vector<rma_bytesdesc_t> write_bytes_vec;
+    size_t chunk_size, local_chunk_size, remote_chunk_size, size_remaining;
+    amo_verb_t sig_verb;
+    amo_memdesc_t sig_target_desc;
+    amo_bytesdesc_t sig_bytes_desc;
+
+    base_req = (base_request_t *)WRAPPED_CHANNEL_BUF(state, ch, ch->processed);
+    rwrite_offset = (uint64_t)(((uint64_t)(base_req->roffset_high) << 8) | (base_req->roffset_low));
+
+    /*
+     * ATOMICITY AND MEMORY ORDERING BEHAVIOR:
+     *
+     * This section implements a lock-free producer-consumer protocol between
+     * GPU device code (producer) and host proxy (consumer) using memory-mapped
+     * communication buffers with flag-based synchronization.
+     *
+     * PROTOCOL OVERVIEW:
+     * - Circular buffer is initialized to 0
+     * - Flag value depends on buffer position: flag = !(position >> log_size) & 1,
+     *   where position increases indefinitly
+     * - 1st iteration through circular buffer flag = 1, 2nd iteration flag = 0, alternating
+     *   between 1 and 0.  The existing value in the circular buffer will be the opposite of the
+     *   expected flag value (1 or 0) until the gpu writes the flag.
+     * - Device atomically writes request data in 8-byte chunks with flag always being
+     *   the last byte in the chunk
+     * - Host busy-waits on flags, relying on eventual consistency of memory system
+     * - Flow control ensures buffer space availability before device writes
+     *
+     * ATOMICITY REQUIREMENTS:
+     * - Individual 8-byte request entries are written atomically by device
+     *
+     * MEMORY ORDERING GUARANTEES:
+     * - Host uses volatile loads to prevent compiler optimization of flag reads
+     * - Memory barriers (__sync_synchronize/asm volatile) prevent reordering of:
+     *   - Memory used in put_signal operation has been updated before use (via flag)
+     *   - Marking put_signal operation complete before operation has finished
+     */
+
+    ps_req_0 = (put_signal_request_0 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 8));
+    flag = COUNTER_TO_FLAG(state, (ch->processed + 8));
+    while (*((volatile uint8_t *)&ps_req_0->flag) != flag)
+        ;
+
+    ps_req_1 = (put_signal_request_1 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 16));
+    flag = COUNTER_TO_FLAG(state, (ch->processed + 16));
+    while (*((volatile uint8_t *)&ps_req_1->flag) != flag)
+        ;
+
+    ps_req_2 = (put_signal_request_2 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 24));
+    flag = COUNTER_TO_FLAG(state, (ch->processed + 24));
+    while (*((volatile uint8_t *)&ps_req_2->flag) != flag)
+        ;
+
+    ps_req_3 = (put_signal_request_3 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 32));
+    flag = COUNTER_TO_FLAG(state, (ch->processed + 32));
+    while (*((volatile uint8_t *)&ps_req_3->flag) != flag)
+        ;
+
+    ps_req_4 = (put_signal_request_4 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 40));
+    flag = COUNTER_TO_FLAG(state, (ch->processed + 40));
+    while (*((volatile uint8_t *)&ps_req_4->flag) != flag)
+        ;
+
+#if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
+    __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
+                           // (breaks rma)
+#elif defined(NVSHMEM_X86_64)
+    asm volatile("" : : : "memory");
+#endif
+
+    pe = ps_req_2->pe;
+
+    /* build write parameters */
+    write_verb.desc = NVSHMEMI_OP_PUT;
+    write_verb.is_nbi = 1;
+    write_verb.is_stream = 0;
+    write_verb.cstrm = NULL;
+    rwrite_ptr = (void *)((char *)(nvshmemi_device_state.heap_base) + rwrite_offset);
+    lwrite_ptr = (void *)(((uint64_t)(ps_req_0->laddr_write_high) << 32) |
+                          ((uint64_t)(ps_req_0->laddr_write_3) << 16) |
+                          ((uint64_t)(ps_req_0->laddr_write_2) << 8) | ps_req_1->laddr_write_low);
+    size_remaining =
+        (size_t)(((size_t)(ps_req_1->write_size_high) << 16) | (ps_req_1->write_size_low));
+    while (size_remaining) {
+        write_bytes_desc.srcstride = 1;
+        write_bytes_desc.deststride = 1;
+        write_bytes_desc.elembytes = 1;
+        write_local_desc.ptr = lwrite_ptr;
+        NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(write_remote_desc.ptr, rwrite_ptr, pe);
+        write_remote_desc.offset = (char *)rwrite_ptr - (char *)nvshmemi_device_state.heap_base;
+        local_chunk_size = size_remaining;
+        remote_chunk_size = size_remaining;
+        nvshmemi_get_local_mem_handle(&write_local_desc.handle, &local_chunk_size, lwrite_ptr,
+                                      state->transport_id[pe]);
+        nvshmemi_get_remote_mem_handle(&write_remote_desc, &remote_chunk_size, rwrite_ptr, pe,
+                                       state->transport_id[pe]);
+        chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
+        write_bytes_desc.nelems = chunk_size;
+
+        local_write_desc_vec.push_back(write_local_desc);
+        remote_write_desc_vec.push_back(write_remote_desc);
+        write_bytes_vec.push_back(write_bytes_desc);
+
+        size_remaining -= chunk_size;
+        lwrite_ptr = (char *)lwrite_ptr + chunk_size;
+        rwrite_ptr = (char *)rwrite_ptr + chunk_size;
+    }
+
+    /* build signal parameters */
+    memset(&sig_target_desc, 0, sizeof(amo_memdesc_t));
+    sig_verb.desc = (nvshmemi_amo_t)ps_req_3->sig_op;
+    rsig_offset =
+        (uint64_t)(((uint64_t)(ps_req_3->rsigoffset_high) << 8) | (ps_req_3->rsigoffset_low));
+    rsig_ptr = (void *)((char *)(nvshmemi_device_state.heap_base) + rsig_offset);
+    sig_target_desc.remote_memdesc.offset = rsig_offset;
+    sig_target_desc.val = (uint64_t)(((uint64_t)(ps_req_4->sigval_high) << 32) |
+                                     ((uint64_t)(ps_req_4->sigval_3) << 16) |
+                                     ((uint64_t)(ps_req_4->sigval_2) << 8) | ps_req_3->sigval_low);
+    NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(sig_target_desc.remote_memdesc.ptr, rsig_ptr, pe);
+    nvshmemi_get_remote_mem_handle(&sig_target_desc.remote_memdesc, NULL, rsig_ptr, pe,
+                                   state->transport_id[pe]);
+    sig_bytes_desc.elembytes = sizeof(uint64_t);
+
+    TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_addr, pe);
+
+    tcurr = state->transport[pe];
+    status = tcurr->host_ops.put_signal(tcurr, pe, write_verb, remote_write_desc_vec,
+                                        local_write_desc_vec, write_bytes_vec, sig_verb,
+                                        &sig_target_desc, sig_bytes_desc, 1);
+    if (unlikely(status)) {
+        NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_put_signal\n");
+        exit(-1);
+    }
+
+#if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
+    __sync_synchronize();  // XXX: prevents complete_d store reordered to before return from
+                           // ibv_post_send (breaks rma -> quiet)
+#endif
+
+    *is_processed = 1;
+    proxy_update_processed(ch, PROXY_PUT_WITH_SIG_REQ_BYTES);
+    TRACE(NVSHMEM_PROXY,
+          "[%d] process_channel_put_signal/proxy_update_processed processed %ld complete %ld",
+          state->nvshmemi_state->mype, ch->processed, *ch->complete);
+
+    return status;
+}
+
 inline void progress_channels(proxy_state_t *proxy_state) {
     int status = 0;
 
@@ -966,6 +1131,11 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                         TRACE(NVSHMEM_PROXY, "host proxy: received FENCE \n");
                         status = process_channel_fence(proxy_state, ch);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_fence\n");
+                        break;
+                    case NVSHMEMI_OP_PUT_SIGNAL:
+                        TRACE(NVSHMEM_PROXY, "host proxy: received NVSHMEMI_OP_PUT_SIGNAL \n");
+                        status = process_channel_put_signal(proxy_state, ch, &is_processed);
+                        NVSHMEMI_NZ_EXIT(status, "error in process_channel_put_signal\n");
                         break;
                     default:
                         fprintf(stderr, "invalid op type encountered in proxy \n");

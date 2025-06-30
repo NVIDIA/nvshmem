@@ -125,4 +125,83 @@ typedef struct __attribute__((packed)) amo_request_3 {
 } amo_request_3_t;
 static_assert(sizeof(amo_request_3) == 8, "request_size must be 8 bytes.");
 
+/*
+ * PUT_SIGNAL REQUEST STRUCTURE DEFINITIONS
+ *
+ * The put_signal operation requires 48 bytes total (6 x 8-byte entries) to encode:
+ * - Base Request for identifying type of operation and target offset
+ * - RMA parameters
+ * - Atomic parameters
+ *
+ * Each 8-byte entry follows the pattern: [data_bits][flag_byte]
+ * Flag alternates 0/1 based on circular buffer iteration for lock-free synchronization.
+ *
+ * MEMORY LAYOUT DIAGRAM:
+ *
+ * Entry 0 (base_request_t):
+ * [rwrite_offset_high:32][rwrite_offset_low:8][op:8][group_size:8][flag:8] Entry 1 (put_signal_0):
+ * [laddr_write_high:32][laddr_write_3:16][laddr_write_2:8][flag:8] Entry 2 (put_signal_1):
+ * [write_size_high:32][write_size_low:16][laddr_write_low:8][flag:8] Entry 3 (put_signal_2):
+ * [reserved:32][pe:16][reserved:8][flag:8] Entry 4 (put_signal_3):
+ * [rsigoffset_high:32][rsigoffset_low:8][sig_op:8][sigval_low:8][flag:8] Entry 5 (put_signal_4):
+ * [sigval_high:32][sigval_3:16][sigval_2:8][flag:8]
+ *
+ */
+
+/* put_signal_request_0
+ * 56               | 8
+ * laddr_write_high | flag */
+typedef struct __attribute__((packed)) put_signal_request_0 {
+    volatile uint8_t flag;
+    uint8_t laddr_write_2;
+    uint16_t laddr_write_3;
+    uint32_t laddr_write_high;
+} put_signal_request_0_t;
+static_assert(sizeof(put_signal_request_0) == 8, "request_size must be 8 bytes.");
+
+/* put_signal_request_1
+ * 32              | 16             | 8               | 8
+ * write_size_high | write_size_low | lwrite_addr_low | flag */
+typedef struct __attribute__((packed)) put_signal_request_1 {
+    volatile uint8_t flag;
+    uint8_t laddr_write_low;
+    uint16_t write_size_low;
+    uint32_t write_size_high;
+} put_signal_request_1_t;
+static_assert(sizeof(put_signal_request_1) == 8, "request_size must be 8 bytes.");
+
+/* put_signal_request_2
+ * 32    | 16 | 8     | 8
+ * resv2 | pe | resv1 | flag */
+typedef struct __attribute__((packed)) put_signal_request_2 {
+    volatile uint8_t flag;
+    uint8_t resv1;
+    uint16_t pe;
+    uint32_t resv2;
+} put_signal_request_2_t;
+static_assert(sizeof(put_signal_request_2) == 8, "request_size must be 8 bytes.");
+
+/* put_signal_request_3
+ * 32              | 8              | 8      | 8          | 8
+ * rsigoffset_high | rsigoffset_low | sig_op | sigval_low | flag */
+typedef struct __attribute__((packed)) put_signal_request_3 {
+    volatile uint8_t flag;
+    uint8_t sigval_low;
+    uint8_t sig_op;
+    uint8_t rsigoffset_low;
+    uint32_t rsigoffset_high;
+} put_signal_request_3_t;
+static_assert(sizeof(put_signal_request_3) == 8, "request_size must be 8 bytes.");
+
+/* put_signal_request_4
+ * 56          | 8
+ * sigval_high | flag */
+typedef struct __attribute__((packed)) put_signal_request_4 {
+    volatile uint8_t flag;
+    uint8_t sigval_2;
+    uint16_t sigval_3;
+    uint32_t sigval_high;
+} put_signal_request_4_t;
+static_assert(sizeof(put_signal_request_4) == 8, "request_size must be 8 bytes.");
+
 #endif

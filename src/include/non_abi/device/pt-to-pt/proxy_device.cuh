@@ -238,6 +238,95 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
     transfer_dma(rptr, lptr, bytes, pe, op);
 }
 
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_put_signal_nbi(
+    void *rwrite_ptr, void *lwrite_ptr, size_t write_bytes, int pe, nvshmemi_op_t channel_op,
+    void *sig_addr, uint64_t sig_val, nvshmemi_amo_t sig_op) {
+    uint64_t idx, tail_idx, *req;
+    int size = PROXY_PUT_WITH_SIG_REQ_BYTES;
+    int group_size = 1;
+    void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
+    void *base_ptr = nvshmemi_device_state_d.heap_base;
+    const uint64_t mask_lowest_byte = 0xFFFFFFFFFFFFFF00u;
+    const uint64_t mask_upper_7_bytes = 0x00000000000000FFu;
+
+    __threadfence();
+
+    /* idx is an ever increasing counter. Since it is 64 bit integer, practically
+    it will not overflow */
+    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    tail_idx = idx + (size - 1);
+
+    // flow-control
+    check_channel_availability(tail_idx);
+
+    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    /* curr_flag is either 0 or 1. Starting at idx = 0 to idx =
+     * nvshmemi_device_state_d.proxy_channel_buf_size - 1, it will be 1, then for next
+     * nvshmemi_device_state_d.proxy_channel_buf_size idx values it will be 0, and so
+     * on.
+     */
+    uint64_t rwrite_offset = (uint64_t)((char *)rwrite_ptr - (char *)base_ptr);
+    uint64_t lwrite_addr = (uint64_t)lwrite_ptr;
+    uint64_t op = channel_op;
+    uint16_t pe_u16 = pe;
+    uint64_t write_size_u64 = write_bytes;
+
+    /* base_request_t
+     * 32                 | 8                 | 8  | 8          | 8
+     * rwrite_offset_high | rwrite_offset_low | op | group_size | flag */
+    *((volatile uint64_t *)req) =
+        (uint64_t)((rwrite_offset << 24) | (op << 16) | (group_size << 8) | curr_flag);
+
+    /* put_signal_request_0
+     * 56               | 8
+     * laddr_write_high | flag */
+    idx += CHANNEL_ENTRY_BYTES;
+    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint64_t laddr_write_high = lwrite_addr & mask_lowest_byte;
+
+    *((volatile uint64_t *)req) = laddr_write_high | curr_flag;
+
+    /* put_signal_request_1
+     * 32              | 16             | 8               | 8
+     * write_size_high | write_size_low | lwrite_addr_low | flag */
+    idx += CHANNEL_ENTRY_BYTES;
+    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint64_t lwrite_addr_low = lwrite_addr & mask_upper_7_bytes;
+    *((volatile uint64_t *)req) =
+        (uint64_t)(write_size_u64 << 16 | lwrite_addr_low << 8 | curr_flag);
+
+    /* put_signal_request_2
+     * 32    | 16 | 8     | 8
+     * resv2 | pe | resv1 | flag */
+    idx += CHANNEL_ENTRY_BYTES;
+    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    *((volatile uint64_t *)req) = (uint64_t)((pe_u16 << 16) | curr_flag);
+
+    /* put_signal_request_3
+     * 32              | 8              | 8      | 8          | 8
+     * rsigoffset_high | rsigoffset_low | sig_op | sigval_low | flag */
+    idx += CHANNEL_ENTRY_BYTES;
+    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint64_t rsigoffset = (uint64_t)((char *)sig_addr - (char *)base_ptr);
+    uint64_t sigval_low = sig_val & mask_upper_7_bytes;
+    *((volatile uint64_t *)req) =
+        (uint64_t)((rsigoffset << 24) | (sig_op << 16) | (sigval_low << 8) | curr_flag);
+
+    /* put_signal_request_4
+     * 56          | 8
+     * sigval_high | flag */
+    idx += CHANNEL_ENTRY_BYTES;
+    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint64_t sigval_high = sig_val & mask_lowest_byte;
+    *((volatile uint64_t *)req) = sigval_high | curr_flag;
+}
+
 template <typename T>
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_proxy_rma_g(void *source,
                                                                                 int pe) {

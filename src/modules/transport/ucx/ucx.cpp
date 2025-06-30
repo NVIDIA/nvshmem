@@ -1446,6 +1446,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.progress = nvshmemt_ucx_progress;
     transport->host_ops.enforce_cst = nvshmemt_ucx_enforce_cst_at_target;
     transport->host_ops.enforce_cst_at_target = NULL;
+    transport->host_ops.put_signal = nvshmemt_put_signal;
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
     transport->state = (void *)ucx_state;
     transport->is_successfully_initialized = true;
