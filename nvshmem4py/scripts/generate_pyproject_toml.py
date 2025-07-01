@@ -28,13 +28,14 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["nvshmem", "nvshmem.bindings", "nvshmem.core"]
+packages = ["nvshmem", "nvshmem.bindings", "nvshmem.bindings.device", "nvshmem.bindings.device.numba", "nvshmem.core"]
 include-package-data = true
 
 [tool.setuptools.package-data]
 "nvshmem.core" = ["*.py"]  # Match Python package name, not filesystem path
 "nvshmem.bindings" = ["*.py", "*.pxd","*.so"]
 "nvshmem.bindings._internal" = ["*.py", "*.pxd", "*.so"]
+"nvshmem.bindings.device.numba" = ["*.py", "entry_point.h"]
 
 
 [tool.setuptools_scm]
@@ -49,6 +50,7 @@ dev = [
     "pytest>=6.0",
     "black",
     "isort",
+    "numba-cuda[cu12]>=0.19.1",
 ]
 
 [tool.black]
