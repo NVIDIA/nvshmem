@@ -160,8 +160,6 @@ typedef struct nvshmem_transport {
     int api_version;
     nvshmem_transport_inline_lib_code_type_t type;
     int *cap;
-    /* APIs */
-    struct nvshmem_transport_host_ops host_ops;
     /* Handles to bootstrap and internal state */
     bootstrap_handle_t *boot_handle;
     void *state;
@@ -184,6 +182,8 @@ typedef struct nvshmem_transport {
     int n_pes;
     std::unordered_map<void *, void *> *alias_va_map;
     std::unordered_map<void *, size_t> *egm_map;
+    /* APIs */
+    struct nvshmem_transport_host_ops host_ops;
 } nvshmem_transport_v2;
 
 typedef nvshmem_transport_v2 *nvshmem_transport_t;
