@@ -846,13 +846,13 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
 
     assert(write_remote.size() == write_local.size() &&
            write_local.size() == write_bytes_desc.size());
-    for (int i = 0; i < write_remote.size(); i++) {
+    for (size_t i = 0; i < write_remote.size(); i++) {
         status =
             nvshmemt_libfabric_rma_impl(tcurr, pe, write_verb, &write_remote[i], &write_local[i],
                                         write_bytes_desc[i], is_proxy, &sequence_count);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT(
-                "Error in nvshmemt_put_signal_unordered, could not submit write #%d\n", i);
+                "Error in nvshmemt_put_signal_unordered, could not submit write #%lu\n", i);
             goto out;
         }
     }

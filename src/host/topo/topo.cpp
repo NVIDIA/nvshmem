@@ -197,16 +197,20 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     pe_selected_devices = (int *)calloc(n_pes_node * max_dev_per_pe, sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(pe_selected_devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate memory for PE/NIC Mapping.\n");
-    for (pe_id = 0; pe_id < n_pes_node * max_dev_per_pe; pe_id++) {
-        pe_selected_devices[pe_id] = -1;
+    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
+            pe_selected_devices[pe_id * max_dev_per_pe + dev_id] = -1;
+        }
     }
 
     pe_device_distance =
         (enum pci_distance *)calloc(n_pes_node * max_dev_per_pe, sizeof(enum pci_distance));
     NVSHMEMI_NULL_ERROR_JMP(pe_device_distance, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate memory for PE/NIC Mapping.\n");
-    for (pe_id = 0; pe_id < n_pes_node * max_dev_per_pe; pe_id++) {
-        pe_device_distance[pe_id] = PATH_COUNT;
+    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
+            pe_device_distance[pe_id * max_dev_per_pe + dev_id] = PATH_COUNT;
+        }
     }
 
     used_devs = (int *)calloc(ndev, sizeof(int));
@@ -322,67 +326,78 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     }
 
     /* loop two, load balance the NICs. */
-    for (pe_id = 0; pe_id < n_pes_node * max_dev_per_pe; pe_id++) {
-        int nic_density;
-        if (pe_selected_devices[pe_id] < 0) {
-            continue;
-        }
-        nic_density = used_devs[pe_selected_devices[pe_id]];
+    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
+            int pe_pair_idx = pe_id * max_dev_per_pe + dev_id;
+            int nic_density;
+            if (pe_selected_devices[pe_pair_idx] < 0) {
+                continue;
+            }
+            nic_density = used_devs[pe_selected_devices[pe_pair_idx]];
 
-        /* Can't find a less populated NIC if ours is only assigned to 1 gpu. */
-        if (nic_density < 2) {
-            continue;
-        }
-
-        for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end(); pairs_iter++) {
-            /* Never change for a less optimal NIC. */
-
-            if ((*pairs_iter).pe_idx != pe_id) {
+            /* Can't find a less populated NIC if ours is only assigned to 1 gpu. */
+            if (nic_density < 2) {
                 continue;
             }
 
-            if (pci_distance_perf[(*pairs_iter).pcie_distance] <
-                pci_distance_perf[pe_device_distance[pe_id]]) {
-                break;
-            }
+            /* Calculate PE Index from nic_id. Each PE gets max_dev_per_pe assigned to them.
+             * If there are 8 NIC's and 4 PE's, the nic -> PE mapping looks like
+             * nic_id:  0   1   2   3   4   5   6   7
+             * pe_idx:  0   0   1   1   2   2   3   3
+             */
+            int pe_idx = (pe_pair_idx - (pe_pair_idx % max_dev_per_pe)) / max_dev_per_pe;
+            for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end();
+                 pairs_iter++) {
+                /* Never change for a less optimal NIC. */
 
-            if ((nic_density - used_devs[(*pairs_iter).dev_idx]) >= 2) {
-                INFO(NVSHMEM_TOPO, "Re-Pairing PE %d with device %d at distance %d\n",
-                     (*pairs_iter).pe_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
-                used_devs[pe_selected_devices[pe_id]]--;
-                used_devs[(*pairs_iter).dev_idx]++;
-                nic_density = used_devs[(*pairs_iter).dev_idx];
-                pe_selected_devices[pe_id] = (*pairs_iter).dev_idx;
-                pe_device_distance[pe_id] = (*pairs_iter).pcie_distance;
-                if (nic_density < 2) {
+                if ((*pairs_iter).pe_idx != pe_idx) {
+                    continue;
+                }
+
+                if (pci_distance_perf[(*pairs_iter).pcie_distance] <
+                    pci_distance_perf[pe_device_distance[pe_pair_idx]]) {
                     break;
+                }
+
+                if ((nic_density - used_devs[(*pairs_iter).dev_idx]) >= 2) {
+                    INFO(NVSHMEM_TOPO, "Re-Pairing PE %d with device %d at distance %d\n",
+                         (*pairs_iter).pe_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
+                    used_devs[pe_selected_devices[pe_pair_idx]]--;
+                    used_devs[(*pairs_iter).dev_idx]++;
+                    nic_density = used_devs[(*pairs_iter).dev_idx];
+                    pe_selected_devices[pe_pair_idx] = (*pairs_iter).dev_idx;
+                    pe_device_distance[pe_pair_idx] = (*pairs_iter).pcie_distance;
+                    if (nic_density < 2) {
+                        break;
+                    }
                 }
             }
         }
-    }
 
-    for (pe_pair_index = 0; pe_pair_index < max_dev_per_pe; pe_pair_index++) {
-        if (pe_selected_devices[mype_array_index + pe_pair_index] >= 0) {
-            mydev_index = pe_selected_devices[mype_array_index + pe_pair_index];
-            device_arr[pe_pair_index] = mydev_index;
-            mype_device_count++;
-            INFO(NVSHMEM_TOPO, "Our PE is sharing its NIC at index %d with %d other PEs.\n",
-                 used_devs[mydev_index], mype_device_count);
+        for (pe_pair_index = 0; pe_pair_index < max_dev_per_pe; pe_pair_index++) {
+            if (pe_selected_devices[mype_array_index + pe_pair_index] >= 0) {
+                mydev_index = pe_selected_devices[mype_array_index + pe_pair_index];
+                device_arr[pe_pair_index] = mydev_index;
+                mype_device_count++;
+                INFO(NVSHMEM_TOPO, "Our PE is sharing its NIC at index %d with %d other PEs.\n",
+                     used_devs[mydev_index], mype_device_count);
+            }
         }
-    }
 
-    if (mype_device_count == 0) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                           "No NICs were assigned to our PE.\n");
-    }
+        if (mype_device_count == 0) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                               "No NICs were assigned to our PE.\n");
+        }
 
-    /* No need to report this in a loop - All Devices will have the same perf characteristics. */
-    if (pci_distance_perf[pe_device_distance[mype_array_index]] < pci_distance_perf[PATH_PIX]) {
-        nvshmemi_state->are_nics_ll128_compliant = false;
-        INFO(NVSHMEM_TOPO,
-             "Our PE is connected to a NIC with pci distance %s."
-             "this will provide less than optimal performance.\n",
-             pci_distance_string[pe_device_distance[mype_array_index]]);
+        /* No need to report this in a loop - All Devices will have the same perf characteristics.
+         */
+        if (pci_distance_perf[pe_device_distance[mype_array_index]] < pci_distance_perf[PATH_PIX]) {
+            nvshmemi_state->are_nics_ll128_compliant = false;
+            INFO(NVSHMEM_TOPO,
+                 "Our PE is connected to a NIC with pci distance %s."
+                 "this will provide less than optimal performance.\n",
+                 pci_distance_string[pe_device_distance[mype_array_index]]);
+        }
     }
 
 out:
@@ -542,8 +557,6 @@ int nvshmemi_detect_same_device(nvshmemi_state_t *state) {
             nvshmemi_is_mpg_run = 1;
             status = 0;
         }
-        /*NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
-                     "two PEs sharing a GPU is not supported \n");*/
     }
 
 out:
