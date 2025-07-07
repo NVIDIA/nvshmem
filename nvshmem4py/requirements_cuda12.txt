@@ -2,6 +2,6 @@
 # They are non-negotiables
 nvidia-nvshmem-cu12
 cuda-python>=12.0,<=12.9.1
-cuda.core==0.2.0
+cuda.core==0.3.0
 numpy
 Cython>=0.29.24

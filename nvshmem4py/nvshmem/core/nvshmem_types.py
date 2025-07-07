@@ -20,6 +20,8 @@ from cuda.core.experimental._stream import Stream
 
 from nvshmem.bindings import malloc, free, ptr
 
+logger = logging.getLogger("nvshmem")
+
 __all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource"]
 
 logger = logging.getLogger("nvshmem")
@@ -118,7 +120,7 @@ class NvshmemResource(MemoryResource):
         ptr = malloc(size)
         if not ptr or ptr == 0:
             raise NvshmemError(f"Failed to allocate memory of bytes {size}")
-        r_buf = Buffer(ptr=ptr, size=size, mr=self)
+        r_buf = Buffer.from_handle(ptr=ptr, size=size, mr=self)
         logger.debug(f"Created Buffer on resource {self} at address {ptr} with size {size} on stream {stream}")
         self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": False, "freed": False}
         return r_buf
@@ -191,7 +193,7 @@ class NvshmemResource(MemoryResource):
         logger.debug(f"Did not find peer buffer with address {result}. Creating a new one.")
 
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
-        r_buf = Buffer(ptr=result, size=buffer.size, mr=self)
+        r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
         
         self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": True, "freed": False}
         return r_buf
