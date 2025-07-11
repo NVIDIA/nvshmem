@@ -213,6 +213,21 @@ typedef struct nvshmemt_libfabric_gdr_send_amo_op {
     int ret_ep;
 } nvshmemt_libfabric_gdr_send_amo_op_t;
 
+/* Wire data for put-signal gdr staged atomics
+ * 32 bytes
+ * | 4 type | 2 op | 2 num_writes | 8 sequence_count | 8 signal | 8 target_addr |
+ */
+typedef struct nvshmemt_libfabric_gdr_signal_op {
+    nvshmemt_libfabric_recv_t type;  /* Must be first */
+    uint16_t op;
+    uint16_t num_writes;
+    uint64_t sequence_count;
+    uint64_t sig_val;
+    void* target_addr;
+} nvshmemt_libfabric_gdr_signal_op_t;
+/*  EFA's inline send size is 32 bytes */
+static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) == 32);
+
 typedef struct nvshmemt_libfabric_gdr_ret_amo_op {
     void *ret_addr;
     g_elem_t elem;
