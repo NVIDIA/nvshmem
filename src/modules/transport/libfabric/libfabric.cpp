@@ -383,10 +383,30 @@ out:
     return status;
 }
 
+nvshmemt_libfabric_gdr_op_ctx_t *nvshmemt_inplace_copy_sig_op_to_gdr_op(nvshmemt_libfabric_gdr_signal_op *sig_op) {
+    nvshmemt_libfabric_gdr_op_ctx_t *amo;
+    uint16_t op = sig_op->op;
+    uint64_t sig_val = sig_op->sig_val;
+    void* target_addr = sig_op->target_addr;
+
+    amo = (nvshmemt_libfabric_gdr_op_ctx_t *) sig_op;
+    amo->send_amo.op = (nvshmemi_amo_t) op;
+    amo->send_amo.target_addr = target_addr;
+    amo->send_amo.swap_add = sig_val;
+    /* Both send_amo.size, and type are not required to be set b/c
+     * the templated atomic operation  perform_gdrcopy_amo<uint64_t>()
+     * is called in nvshmemt_libfabric_put_signal_completion(), avoid
+     * setting them to save instructions.
+     */
+
+    return amo;
+}
+
 int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
                                              nvshmemt_libfabric_endpoint_t *ep,
                                              struct fi_cq_data_entry *entry, fi_addr_t *addr) {
     nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_gdr_signal_op *sig_op = NULL;
     nvshmemt_libfabric_gdr_op_ctx_t *op = NULL;
     bool is_write_comp = entry->flags & FI_REMOTE_CQ_DATA;
     int status = 0, progress_count;
@@ -404,9 +424,18 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
         map_key = *addr << 48 | (entry->data & mask_upper_2_bytes);
         progress_count = -1;
     } else {
-        op = (nvshmemt_libfabric_gdr_op_ctx_t *)entry->op_context;
-        map_key = *addr << 48 | (op->send_amo.comp & mask_upper_2_bytes);
-        progress_count = (int)op->send_amo.retflag;
+        sig_op = (nvshmemt_libfabric_gdr_signal_op *)entry->op_context;
+        map_key = *addr << 48 | (sig_op->sequence_count & mask_upper_2_bytes);
+        progress_count = (int)sig_op->num_writes;
+
+        /* The EFA provider has an inline send size of 32 bytes.
+         * The gdr atomic fi_send message is 72 bytes and does not
+         * fit inside the efa_provider's 32 byte inline send window.
+         * Hence, we send a 32 byte nvshmemt_libfabric_gdr_signal_op over the wire,
+         * and re-arrange the memory in-place to allow for re-use of the gdr atomic
+         * code.
+         */
+        op = nvshmemt_inplace_copy_sig_op_to_gdr_op(sig_op);
     }
 
     iter = state->proxy_put_signal_comp_map->find(map_key);
@@ -606,10 +635,9 @@ static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_v
     return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, is_proxy, NULL);
 }
 
-static int nvshmemt_libfabric_gdr_amo_impl(struct nvshmem_transport *transport, int pe,
-                                           void *curetptr, amo_verb_t verb, amo_memdesc_t *remote,
-                                           amo_bytesdesc_t bytesdesc, int is_proxy,
-                                           uint64_t *sequence_count) {
+static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
+                                      amo_verb_t verb, amo_memdesc_t *remote,
+                                      amo_bytesdesc_t bytesdesc, int is_proxy) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_endpoint_t *ep;
     nvshmemt_libfabric_gdr_op_ctx_t *amo;
@@ -643,14 +671,8 @@ static int nvshmemt_libfabric_gdr_amo_impl(struct nvshmem_transport *transport, 
     amo->send_amo.swap_add = remote->val;
     amo->send_amo.size = bytesdesc.elembytes;
     amo->send_amo.ret_ep = transport->my_pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
-
-    if (sequence_count) {
-        amo->type = NVSHMEMT_LIBFABRIC_MATCH;
-        amo->send_amo.comp = *sequence_count;
-    } else {
-        amo->type = NVSHMEMT_LIBFABRIC_SEND;
-        amo->send_amo.comp = remote->cmp;
-    }
+    amo->type = NVSHMEMT_LIBFABRIC_SEND;
+    amo->send_amo.comp = remote->cmp;
 
     num_retries = 0;
     do {
@@ -667,13 +689,6 @@ static int nvshmemt_libfabric_gdr_amo_impl(struct nvshmem_transport *transport, 
 
 out:
     return status;
-}
-
-static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
-                                      amo_verb_t verb, amo_memdesc_t *remote,
-                                      amo_bytesdesc_t bytesdesc, int is_proxy) {
-    return nvshmemt_libfabric_gdr_amo_impl(transport, pe, curetptr, verb, remote, bytesdesc,
-                                           is_proxy, NULL);
 }
 
 static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
@@ -828,6 +843,61 @@ out:
     return status;
 }
 
+static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,
+                                         void *curetptr, amo_verb_t verb, amo_memdesc_t *remote,
+                                         amo_bytesdesc_t bytesdesc, int is_proxy,
+                                         uint64_t sequence_count, uint16_t num_writes) {
+    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_endpoint_t *ep;
+    nvshmemt_libfabric_gdr_signal_op_t *signal;
+    uint64_t num_retries = 0;
+    int target_ep, ep_idx;
+    int status = 0;
+
+    if (is_proxy) {
+        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
+    } else {
+        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
+    }
+
+    ep = &libfabric_state->eps[ep_idx];
+    target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
+
+    static_assert(sizeof(nvshmemt_libfabric_gdr_op_ctx) >= sizeof(nvshmemt_libfabric_gdr_signal_op_t));
+    do {
+        signal = (nvshmemt_libfabric_gdr_signal_op_t *)nvshmemtLibfabricOpQueue.getNextSend();
+        status = signal == NULL ? -EAGAIN : 0;
+    } while (try_again(transport, &status, &num_retries));
+
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Unable to retrieve signal operation buffer.");
+        goto out;
+    }
+
+    signal->type = NVSHMEMT_LIBFABRIC_MATCH;
+    signal->op = verb.desc;
+    signal->sequence_count = sequence_count;
+    signal->target_addr = remote->remote_memdesc.ptr;
+    signal->sig_val = remote->val;
+    signal->num_writes = num_writes;
+
+    num_retries = 0;
+    do {
+        status = fi_send(ep->endpoint, (void *)signal, sizeof(nvshmemt_libfabric_gdr_signal_op_t), NULL,
+                         target_ep, (void *)signal);
+    } while (try_again(transport, &status, &num_retries));
+
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Received an error when trying to post a signal operation.\n");
+        status = NVSHMEMX_ERROR_INTERNAL;
+    } else {
+        ep->submitted_ops++;
+    }
+
+out:
+    return status;
+}
+
 int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_verb_t write_verb,
                                   std::vector<rma_memdesc_t> &write_remote,
                                   std::vector<rma_memdesc_t> &write_local,
@@ -858,12 +928,9 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
         }
     }
 
-    /* Repurpose retflag to store num_writes */
-    sig_target->retflag = write_remote.size();
     assert(use_staged_atomics == true);
-    status = nvshmemt_libfabric_gdr_amo_impl(tcurr, pe, NULL, sig_verb, sig_target, sig_bytes_desc,
-                                             is_proxy, &sequence_count);
-
+    status = nvshmemt_libfabric_gdr_signal(tcurr, pe, NULL, sig_verb, sig_target, sig_bytes_desc,
+                                           is_proxy, sequence_count, (uint16_t) write_remote.size());
 out:
     if (status) {
         NVSHMEMI_ERROR_PRINT(
