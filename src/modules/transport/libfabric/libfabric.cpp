@@ -187,6 +187,8 @@ static inline int try_again(nvshmem_transport_t transport, int *status, uint64_t
 
     if (*status == -FI_EAGAIN) {
         if (*num_retries >= NVSHMEMT_LIBFABRIC_MAX_RETRIES) {
+            NVSHMEMI_WARN_PRINT("Max amount of libfabric retries reached, %d: %s\n", *status,
+                                fi_strerror(*status * -1));
             *status = NVSHMEMX_ERROR_INTERNAL;
             return 0;
         }
@@ -195,6 +197,8 @@ static inline int try_again(nvshmem_transport_t transport, int *status, uint64_t
     }
 
     if (*status != 0) {
+        NVSHMEMI_WARN_PRINT("Error in libfabric operation (%d): %s.\n", *status,
+                            fi_strerror(*status * -1));
         *status = NVSHMEMX_ERROR_INTERNAL;
         return 0;
     }
@@ -656,8 +660,7 @@ static int nvshmemt_libfabric_gdr_amo_impl(struct nvshmem_transport *transport, 
     } while (try_again(transport, &status, &num_retries));
 
     if (status) {
-        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation. %s\n",
-                             fi_strerror(status * -1));
+        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
     } else {
         ep->submitted_ops++;
@@ -820,8 +823,7 @@ static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, v
 
 out:
     if (status) {
-        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation. %s\n",
-                             fi_strerror(status * -1));
+        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
     }
     return status;
@@ -867,8 +869,7 @@ out:
     if (status) {
         NVSHMEMI_ERROR_PRINT(
             "Received an error when trying to perform a nvshmem_proxy_put_signal_unordered "
-            "operation. %s\n",
-            fi_strerror(status * -1));
+            "operation.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
     }
     return status;
