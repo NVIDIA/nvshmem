@@ -53,21 +53,21 @@ typedef enum nvshmemi_cmp_type {
     NVSHMEM_CMP_SENTINEL = INT_MAX,
 } nvshmemx_cmp_type_t;
 
-enum nvshmemi_thread_support {
+typedef enum nvshmemi_thread_support {
     NVSHMEM_THREAD_SINGLE = 0,
     NVSHMEM_THREAD_FUNNELED,
     NVSHMEM_THREAD_SERIALIZED,
     NVSHMEM_THREAD_MULTIPLE,
     NVSHMEM_THREAD_TYPE_SENTINEL = INT_MAX,
-};
+} nvshmemx_thread_support_t;
 
-enum {
+typedef enum {
     PROXY_GLOBAL_EXIT_NOT_REQUESTED = 0,
     PROXY_GLOBAL_EXIT_INIT,
     PROXY_GLOBAL_EXIT_REQUESTED,
     PROXY_GLOBAL_EXIT_FINISHED,
     PROXY_GLOBAL_EXIT_MAX_STATE = INT_MAX
-};
+} nvshmemx_proxy_status_t;
 
 #define PROXY_DMA_REQ_BYTES 32
 #define PROXY_AMO_REQ_BYTES 40

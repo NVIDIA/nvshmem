@@ -1003,7 +1003,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /include/non_abi/nvshmem_build_options.h$;\
 /include/non_abi/nvshmem_version.h$;\
 /nvshmem4py/cmake/addCybind.cmake;\
-/nvshmem4py/cybind_assets/;\
+/nvshmem4py/build_assets/;\
 /perftest/perftest_install/;\
 /test/test_install/;
 /scripts/create_imex.sh;\
