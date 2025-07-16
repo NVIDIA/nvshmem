@@ -27,7 +27,7 @@ import logging
 from enum import IntEnum
 from typing import Tuple
 
-__all__ = ["put_signal", "signal_wait", "put", "get", "quiet"]
+__all__ = ["put_signal", "signal_op", "signal_wait", "put", "get", "quiet", "SignalOp"]
 
 logger = logging.getLogger("nvshmem")
 
@@ -75,7 +75,7 @@ def _get_buffers(dst, src) -> Tuple[Buffer, Buffer]:
 
 def _call_putget(dst: object, src: object, op:str = "put", 
                  signal: bool=False, signal_var: Buffer = 0, signal_val: int = 0, signal_op: SignalOp = 0,
-                 remote_pe: int = 0, stream: Stream=None) -> None:
+                 remote_pe: int = 0, stream: NvshmemStreamsType=None) -> None:
     """
     Internal helper to invoke host-initiated NVSHMEM put/get with optional signaling.
 
@@ -124,10 +124,10 @@ def _call_putget(dst: object, src: object, op:str = "put",
         f_args = [
                   dst_buf.handle, src_buf.handle, safe_size, 
                   signal_var.handle, signal_val, signal_op,
-                  remote_pe, int(stream.handle)
+                  remote_pe, int(stream.__cuda_stream__()[1])
                  ]
     else:
-        f_args = [dst_buf.handle, src_buf.handle, safe_size, remote_pe, int(stream.handle)]
+        f_args = [dst_buf.handle, src_buf.handle, safe_size, remote_pe, int(stream.__cuda_stream__()[1])]
 
     func(*f_args)
 
@@ -158,8 +158,36 @@ def put_signal(dst: object, src: object,
                  signal=True, signal_var=signal_var, signal_val=signal_val, signal_op=signal_op,
                  remote_pe=remote_pe, stream=stream)
 
+def signal_op(signal_var: Buffer, signal_val: int, signal_op: SignalOp, remote_pe: int=-1, stream: NvshmemStreamsType=None) -> None:
+    """
+    Performs a signal operation on a CUDA stream. Equivalent to a ``put_signal`` but with no data movement.
 
-def signal_wait(signal_var: Buffer, signal_val: int, signal_op: ComparisonType, stream: Stream=None) -> None:
+    Args:
+        - signal_var (Buffer): Symmetric memory buffer used as the signal variable.
+        - signal_val (int): Value to use in the signal operation.
+        - signal_op (SignalOp): Signal operation type.
+        - remote_pe (int): Target PE for the signal operation.
+        - stream (Stream): CUDA stream to issue the signal operation on.
+
+    Raises:
+        - ``NotImplementedError``: If stream is None.
+        - ``ValueError``: If the signal buffer is invalid or too small.
+        - ``NvshmemError``: If any operations do not complete successfully
+    """
+    if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
+        raise NvshmemInvalid("NVSHMEM Library is not initialized")
+    user_nvshmem_dev, other_dev = _get_device()
+    if not isinstance(signal_var, Buffer) or signal_var.size < 8:
+            raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
+    if stream is None:
+        logger.error("Non on-stream signal operations are not yet implemented")
+        raise NotImplemented
+    bindings.signal_op_on_stream(signal_var.handle, signal_val, signal_op, remote_pe, int(stream.__cuda_stream__()[1]))
+    if other_dev is not None:
+        other_dev.set_current()
+
+
+def signal_wait(signal_var: Buffer, signal_val: int, signal_op: ComparisonType, stream: NvshmemStreamsType=None) -> None:
     """
     Waits until a symmetric signal variable satisfies a given condition.
 
@@ -179,13 +207,13 @@ def signal_wait(signal_var: Buffer, signal_val: int, signal_op: ComparisonType, 
         raise NotImplemented
     user_nvshmem_dev, other_dev = _get_device()
 
-    bindings.signal_wait_until_on_stream(signal_var.handle, signal_op, signal_val, int(stream.handle))
+    bindings.signal_wait_until_on_stream(signal_var.handle, signal_op, signal_val, int(stream.__cuda_stream__()[1]))
 
     if other_dev is not None:
         other_dev.set_current()
 
 
-def quiet(stream: Stream=None) -> None:
+def quiet(stream: NvshmemStreamsType=None) -> None:
     """
     Ensures completion of all previously issued NVSHMEM operations on the given stream.
 
@@ -206,11 +234,11 @@ def quiet(stream: Stream=None) -> None:
         raise NotImplemented
     user_nvshmem_dev, other_dev = _get_device()
     # Because quiet doesn't have a datatype, it's a special case and doesn't need to use _call_putget function
-    bindings.quiet_on_stream(int(stream.handle))
+    bindings.quiet_on_stream(int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
 
-def put(dst: object, src: object, remote_pe: int=-1, stream: Stream=None):
+def put(dst: object, src: object, remote_pe: int=-1, stream: NvshmemStreamsType=None):
     """
     Performs a host-initiated NVSHMEM put operation on a CUDA stream.
 
@@ -228,7 +256,7 @@ def put(dst: object, src: object, remote_pe: int=-1, stream: Stream=None):
     _call_putget(dst, src, op="put", signal=False,
                  remote_pe=remote_pe, stream=stream)
 
-def get(dst: object, src: object, remote_pe: int=-1, stream: Stream=None):
+def get(dst: object, src: object, remote_pe: int=-1, stream: NvshmemStreamsType=None):
     """
     Performs a host-initiated NVSHMEM get operation on a CUDA stream.
 

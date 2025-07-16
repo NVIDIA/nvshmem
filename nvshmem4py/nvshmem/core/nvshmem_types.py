@@ -13,6 +13,7 @@ These are the Python datatypes for NVSHMEM
 """
 import uuid
 import logging
+from typing import Union
 
 from cuda.core.experimental._memory import MemoryResource, Buffer
 from cuda.core.experimental import Device, system
@@ -20,9 +21,15 @@ from cuda.core.experimental._stream import Stream
 
 from nvshmem.bindings import malloc, free, ptr
 
-logger = logging.getLogger("nvshmem")
+try:
+    import torch
+    from torch.cuda import Stream as torch_stream
+    _torch_enabled = True
+except:
+    torch_stream = None
 
-__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource"]
+
+__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType"]
 
 logger = logging.getLogger("nvshmem")
 
@@ -43,6 +50,19 @@ NVSHMEM4Py Library:
     NVSHMEM4Py version: {self.nvshmem4py_version}
 """
 
+"""
+Wrapper class for cuda.core StreamInteroperability protocol
+"""
+class NvshmemStream:
+    def __init__(self, pt_stream):
+        self.pt_stream = pt_stream
+        self.handle = pt_stream.cuda_stream
+
+    def __cuda_stream__(self):
+        stream_id = self.pt_stream.cuda_stream
+        return (0, stream_id)  # Return format required by CUDA Python
+
+NvshmemStreamsType = Union[torch_stream, NvshmemStream, Stream]
 
 """
 Exceptions
@@ -102,7 +122,7 @@ class NvshmemResource(MemoryResource):
         self._mem_references = {}
 
 
-    def allocate(self, size: int, stream: Stream=None) -> Buffer:
+    def allocate(self, size: int, stream: NvshmemStreamsType=None) -> Buffer:
         """
         Allocate memory on the device using NVSHMEM.
 
@@ -125,7 +145,7 @@ class NvshmemResource(MemoryResource):
         self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": False, "freed": False}
         return r_buf
 
-    def deallocate(self, ptr: int, size: int, stream: Stream=None) -> None:
+    def deallocate(self, ptr: int, size: int, stream: NvshmemStreamsType=None) -> None:
         """
         Placeholder method for deallocation.
 
