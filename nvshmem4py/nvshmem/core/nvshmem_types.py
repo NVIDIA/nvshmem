@@ -190,20 +190,34 @@ class NvshmemResource(MemoryResource):
             # NVShmem handles these internally.
             if not self._mem_references[ptr]["is_peer_buffer"]:
                 free(ptr)
+                # If the buffer has a child (peer) buffer, free it now
+                child_ptr = self._mem_references[ptr].get("child", None)
+                if child_ptr is not None:
+                    # Child is a pointer which may still be tracked.
+                    child_entry = self._mem_references[child_ptr]
+                    child_buffer = child_entry.get("buffer", None) 
+                    if child_buffer is not None:
+                        self._mem_references[child_ptr]["freed"] = True
+                        del self._mem_references[child_ptr]["buffer"]
+                        del self._mem_references[ptr]["child"]
                 logger.debug(f"Freed buffer at address {ptr}")
             else:
                 logger.debug("free() requested on a peer buffer. Not calling free()")
+                self._mem_references[ptr]["freed"] = True
+                del self._mem_references[ptr]["buffer"]
             
 
     def get_peer_buffer(self, buffer: Buffer, pe: int) -> Buffer:
 
         # This should be the pointer on the calling PE
         # None or raising an exception is the failing case
-        result = ptr(buffer._mnff.ptr, pe)
+        parent_ptr = buffer.handle
+        result = ptr(parent_ptr, pe)
         if result is None:
             raise NvshmemError("Failed to retrieve peer buffer")
 
-        if self._mem_references.get(result, None) is not None:
+        entry = self._mem_references.get(result, None)
+        if entry is not None and not entry["freed"]:
             # Someone already called get_peer_buffer on the Buffer
             # Increase ref count and return existing buffer
             self._mem_references[result]["ref_count"] += 1
@@ -215,11 +229,13 @@ class NvshmemResource(MemoryResource):
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
         
-        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": True, "freed": False}
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": True, "freed": False, "parent": parent_ptr}
+        self._mem_references[parent_ptr]["child"] = result
+
         return r_buf
 
     def set_freed(self, buffer: Buffer) -> None:
-        ptr = buffer._mnff.ptr
+        ptr = buffer.handle
         if self._mem_references.get(ptr) is None:
             raise NvshmemError("Freed a buffer that is not tracked")
         if self._mem_references[ptr]['is_peer_buffer']:
