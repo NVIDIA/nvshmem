@@ -23,6 +23,7 @@
 #include "device_host/nvshmem_common.cuh"
 #include "device_host_transport/nvshmem_constants.h"
 #include "host/nvshmem_macros.h"
+#include "host/nvshmem_coll_api.h"
 #include "non_abi/nvshmem_version.h"
 
 int nvshmemi_init_thread(int requested_thread_support, int *provided_thread_support,

@@ -18,7 +18,7 @@ from nvshmem.core.nvshmem_types import *
 import nvshmem.core.utils as utils
 import nvshmem.core.memory as memory
 from nvshmem import __version__
-from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus
+from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus, _except_on_del
 
 from cuda.core.experimental._memory import Buffer, MemoryResource
 from cuda.core.experimental import Device, system
@@ -102,7 +102,7 @@ def get_unique_id(empty=False) -> bindings.uniqueid:
     bindings.get_uniqueid(unique_id.ptr)
     return unique_id
 
-def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nranks: int=None, mpi_comm: Comm=None, initializer_method: str="") -> None:
+def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nranks: int=None, mpi_comm: Comm=None, initializer_method: str="", except_on_del=True) -> None:
     """
     Initialize the NVSHMEM runtime with either MPI or UID-based bootstrapping.
 
@@ -115,6 +115,8 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         - mpi_comm (``mpi4py.MPI.Comm``, optional): MPI communicator to use for MPI-based initialization.
             Defaults to ``MPI.COMM_WORLD`` if ``None`` and ``initializer_method`` is "mpi".
         - initializer_method (str): Specifies the initialization method. Must be either "mpi" or "uid".
+        - except_on_del (bool): Controls the behavior when a leak of an NVSHMEM buffer is discovered. If True, raise an exception (defailt)
+                                If False, print an error message.
 
     Raises:
         - NvshmemInvalid: If an invalid initialization method is provided, or required arguments
@@ -141,6 +143,8 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
     """
     # If Device is None, that's ok.
     _cached_device["device"] = device
+
+    _except_on_del["value"] = except_on_del
 
     attr = bindings.InitAttr()
 

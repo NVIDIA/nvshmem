@@ -42,12 +42,15 @@ def _free_all_buffers() -> None:
             mr._mem_references[ptr]["freed"] = True
             mr.deallocate(ptr, 0)
 
-def buffer(size) -> Buffer:
+def buffer(size, release=False) -> Buffer:
     """
     Allocates an NVSHMEM-backed CUDA buffer.
 
     Args:
         size (int): The size in bytes of the buffer to allocate.
+        release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
 
     Returns:
         ``cuda.core.Buffer``: A DLPack-compatible CUDA buffer with NVSHMEM backing.
@@ -71,7 +74,8 @@ def buffer(size) -> Buffer:
         resource = NvshmemResource(user_nvshmem_dev)
         _mr_references[dev_id] = resource
 
-    buf = resource.allocate(size)
+    buf = resource.allocate(size, release=release)
+
     if other_dev is not None:
         other_dev.set_current()
     return buf
@@ -94,7 +98,7 @@ def free(buffer: Buffer) -> None:
     # _get_device() excepts if no device is current
     user_nvshmem_dev, other_dev = _get_device()
 
-    if not isinstance(buffer, Buffer) or not hasattr(buffer, "_mnff"):
+    if not (isinstance(buffer, Buffer)) or not hasattr(buffer, "handle"):
         raise NvshmemInvalid("Tried to free a buffer not from NVSHmem")
 
     buffer.memory_resource.set_freed(buffer)

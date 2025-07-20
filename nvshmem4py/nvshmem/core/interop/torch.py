@@ -90,7 +90,7 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
     tensor = torch.utils.dlpack.from_dlpack(buf)
     return tensor.view(dtype).view(shape)
 
-def bytetensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
+def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False) -> Tensor:
     """
     Create a PyTorch tensor from NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -100,6 +100,9 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
     Args:
        - shape (tuple or list of int): Shape of the desired tensor.
        - dtype (``str``, ``np.dtype``, or ``torch.dtype``, optional): Data type of the tensor. Defaults to ``"float32"``.
+       - release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
 
     Returns:
         torch.Tensor: A raw PyTorch tensor referencing the NVSHMEM-allocated memory.
@@ -111,7 +114,7 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
         return
     if dtype is None:
         dtype = torch.get_default_dtype()
-    buf = buffer(get_size(shape, dtype))
+    buf = buffer(get_size(shape, dtype), release=release)
     tensor = torch.utils.dlpack.from_dlpack(buf) 
     return tensor
 

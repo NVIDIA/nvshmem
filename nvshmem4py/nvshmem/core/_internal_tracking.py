@@ -43,3 +43,8 @@ _cached_device = {"device": None}
 Debug mode is used to avoid redundant calls to Device()
 """
 _debug_mode = False
+
+"""
+Controls the behavior when a buffer is released without being freed
+"""
+_except_on_del = {"value": True}

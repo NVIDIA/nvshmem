@@ -20,6 +20,7 @@ from cuda.core.experimental import Device, system
 from cuda.core.experimental._stream import Stream
 
 from nvshmem.bindings import malloc, free, ptr
+from nvshmem.core._internal_tracking import _except_on_del
 
 try:
     import torch
@@ -122,13 +123,14 @@ class NvshmemResource(MemoryResource):
         self._mem_references = {}
 
 
-    def allocate(self, size: int, stream: NvshmemStreamsType=None) -> Buffer:
+    def allocate(self, size: int, stream: Stream=None, release=False) -> Buffer:
         """
         Allocate memory on the device using NVSHMEM.
 
         Args:
             - size (int): Number of bytes to allocate.
             - stream (optional): CUDA stream for allocation context (not used here).
+            - release (bool, optional): do not track the buffer if True
 
         Returns:
             ``Buffer``: A buffer object wrapping the allocated device memory.
@@ -142,7 +144,13 @@ class NvshmemResource(MemoryResource):
             raise NvshmemError(f"Failed to allocate memory of bytes {size}")
         r_buf = Buffer.from_handle(ptr=ptr, size=size, mr=self)
         logger.debug(f"Created Buffer on resource {self} at address {ptr} with size {size} on stream {stream}")
-        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": False, "freed": False}
+        if not release:
+            buf_ref = r_buf
+        else:
+            # If we're not holding references, create our own shadow-buffer
+            buf_ref = Buffer.from_handle(ptr=r_buf.handle, size=r_buf.size, mr=self)
+        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "is_peer_buffer": False, "freed": False}
+
         return r_buf
 
     def deallocate(self, ptr: int, size: int, stream: NvshmemStreamsType=None) -> None:
@@ -168,7 +176,11 @@ class NvshmemResource(MemoryResource):
 
         # If someone got here without calling free(), we have to except
         if not self._mem_references[ptr]["is_peer_buffer"] and not self._mem_references[ptr]["freed"]:
-            raise NvshmemError(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
+            if _except_on_del["value"]:
+                raise NvshmemError(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
+            else:
+                logger.error(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
+                return
 
         # remove the reference
         # We keep the references around to legalize freed-ness.
@@ -204,7 +216,9 @@ class NvshmemResource(MemoryResource):
             else:
                 logger.debug("free() requested on a peer buffer. Not calling free()")
                 self._mem_references[ptr]["freed"] = True
-                del self._mem_references[ptr]["buffer"]
+                buf_entry = self._mem_references[ptr].get("buffer", None)
+                if buf_entry is not None:
+                    del self._mem_references[ptr]["buffer"]
             
 
     def get_peer_buffer(self, buffer: Buffer, pe: int) -> Buffer:
@@ -213,6 +227,7 @@ class NvshmemResource(MemoryResource):
         # None or raising an exception is the failing case
         parent_ptr = buffer.handle
         result = ptr(parent_ptr, pe)
+
         if result is None:
             raise NvshmemError("Failed to retrieve peer buffer")
 

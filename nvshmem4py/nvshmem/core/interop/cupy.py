@@ -62,7 +62,7 @@ def array_get_buffer(array: ndarray) -> Tuple[Buffer, int, str]:
     return buf, get_size(array.shape, array.dtype), str(array.dtype)
 
 
-def array(shape: Tuple[int], dtype: str="float32") -> ndarray:
+def array(shape: Tuple[int], dtype: str="float32", release=False) -> ndarray:
     """
     Create a CuPy array view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -71,7 +71,10 @@ def array(shape: Tuple[int], dtype: str="float32") -> ndarray:
 
     Args:
        -  shape (tuple or list of int): Shape of the desired array.
-       -dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
+       - dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
+       - release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
 
     Any future calls to ``.view()`` on this object should set copy=False, to avoid copying the object off of the sheap
 
@@ -85,7 +88,7 @@ def array(shape: Tuple[int], dtype: str="float32") -> ndarray:
         logger.error("Can not create CuPy array: CuPy not installed.")
         raise ModuleNotFoundError
 
-    buf = nvshmem.core.buffer(get_size(shape, dtype))
+    buf = nvshmem.core.buffer(get_size(shape, dtype), release=release)
     # Important! Disable copy to force allocation to stay on sheap
     cupy_array = cupy.from_dlpack(buf, copy=False)
     view = cupy_array.view(dtype).reshape(shape)
