@@ -94,35 +94,35 @@
         }                                                             \
     }
 
-#define NVSHMEMI_TEAM_INITIALIZER                                                               \
-    {                                                                                           \
-        (2 << 16) + sizeof(nvshmemi_team_t),                       /* version */                \
-            TEAM_SCALAR_INVALID,                                   /* my_pe */                  \
-            TEAM_SCALAR_INVALID,                                   /* start */                  \
-            TEAM_SCALAR_INVALID,                                   /* stride */                 \
-            TEAM_SCALAR_INVALID,                                   /* size */                   \
-            TEAM_SCALAR_INVALID,                                   /* team_idx */               \
-            NVSHMEMI_TEAM_CONFIG_INITIALIZER, TEAM_SCALAR_INVALID, /* config_mask */            \
-            NULL,                                                  /* nccl_comm */              \
-            NVSHMEMI_RED_REX_INITIALIZER, TEAM_ULSCALAR_INVALID,   /* rdxn_count */             \
-            TEAM_USCALAR_INVALID,                                  /* ll_flag */                \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[0] */       \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[1] */       \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_count */         \
-            TEAM_ULSCALAR_INVALID,                                 /* bcast_count */            \
-            TEAM_ULSCALAR_INVALID,                                 /* bcast_sync_offset */      \
-            TEAM_ULSCALAR_INVALID,                                 /* fcollect_count */         \
-            TEAM_USCALAR_INVALID,                                  /* fcollect_ll_flag */       \
-            false,                                                 /* are_gpus_p2p_connected */ \
-            false,                                                 /* is_team_node */           \
-            TEAM_SCALAR_INVALID,                                   /* team_node */              \
-            false,                                                 /* is_team_same_mype_node */ \
-            TEAM_SCALAR_INVALID,                                   /* team_same_mype_node */    \
-            NULL,                                                  /* nvls_rsc */               \
-            NULL,                                                  /* nvls_rsc_base_ptr */      \
-        {                                                                                       \
-            TEAM_SCALAR_INVALID                                                                 \
-        } /* team_dups */                                                                       \
+#define NVSHMEMI_TEAM_INITIALIZER                                                                 \
+    {                                                                                             \
+        (2 << 16) + sizeof(nvshmemi_team_t),                       /* version */                  \
+            TEAM_SCALAR_INVALID,                                   /* my_pe */                    \
+            TEAM_SCALAR_INVALID,                                   /* start */                    \
+            TEAM_SCALAR_INVALID,                                   /* stride */                   \
+            TEAM_SCALAR_INVALID,                                   /* size */                     \
+            TEAM_SCALAR_INVALID,                                   /* team_idx */                 \
+            NVSHMEMI_TEAM_CONFIG_INITIALIZER, TEAM_SCALAR_INVALID, /* config_mask */              \
+            NULL,                                                  /* nccl_comm */                \
+            NVSHMEMI_RED_REX_INITIALIZER, TEAM_ULSCALAR_INVALID,   /* rdxn_count */               \
+            TEAM_USCALAR_INVALID,                                  /* ll_flag */                  \
+            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[0] */         \
+            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[1] */         \
+            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_count */           \
+            TEAM_ULSCALAR_INVALID,                                 /* bcast_count */              \
+            TEAM_ULSCALAR_INVALID,                                 /* bcast_sync_offset */        \
+            TEAM_ULSCALAR_INVALID,                                 /* fcollect_count */           \
+            TEAM_USCALAR_INVALID,                                  /* fcollect_ll_flag */         \
+            false,                                                 /* are_gpus_p2p_connected */   \
+            false,                                                 /* is_team_node */             \
+            TEAM_SCALAR_INVALID,                                   /* team_node */                \
+            false,                                                 /* is_team_same_mype_node */   \
+            TEAM_SCALAR_INVALID,                                   /* team_same_mype_node */      \
+            NULL,                                                  /* nvls_rsc */                 \
+            NULL,                                                  /* nvls_rsc_base_ptr */        \
+            {TEAM_SCALAR_INVALID},                                 /* team_dups */                \
+            TEAM_ULSCALAR_INVALID,                                 /* p2p_sync_on_stream_count */ \
+            NULL,                                                  /* pe_mapping */               \
     }
 
 #define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                          \
@@ -299,7 +299,11 @@ typedef struct {
     void *nvls_rsc;          /* To be cast to nvshmemi_nvls_rsc whenever used */
     void *nvls_rsc_base_ptr; /* Shared b/w GPU threads of this team */
     nvshmem_team_t team_dups[128];
-    int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
+    uint64_t p2p_sync_on_stream_count;
+    int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct
+                      This must be the last field in the struct. Any new fields will need
+                      to come before it and will require additional logic in the internal team
+                      code to handle the version differences. */
 } nvshmemi_team_v3;
 
 typedef struct {
@@ -356,7 +360,7 @@ typedef struct {
 } nvshmemi_team_v1;
 static_assert(sizeof(nvshmemi_team_v1) == 256, "team_v1 must be 256 bytes.");
 static_assert(sizeof(nvshmemi_team_v2) == 784, "team_v2 must be 784 bytes.");
-static_assert(sizeof(nvshmemi_team_v3) == 792, "team_v3 must be 792 bytes.");
+static_assert(sizeof(nvshmemi_team_v3) == 800, "team_v3 must be 800 bytes.");
 
 typedef nvshmemi_team_v3 nvshmemi_team_t;
 

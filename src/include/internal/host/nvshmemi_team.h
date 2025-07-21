@@ -60,4 +60,6 @@ int nvshmemi_team_translate_pe_to_team_world_wrap(nvshmemi_team_t *src_team, int
 
 int nvshmemi_team_translate_pe_from_team_world(nvshmemi_team_t *dest_team, int src_pe);
 
+void *nvshmemi_ptr(const void *addr, int pe);
+
 #endif

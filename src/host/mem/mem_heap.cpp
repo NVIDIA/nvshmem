@@ -2370,7 +2370,7 @@ exit_and_return:
     NVSHMEMU_THREAD_CS_EXIT();
 }
 
-void *nvshmem_ptr(const void *ptr, int pe) {
+void *nvshmemi_ptr(const void *ptr, int pe) {
     if (ptr >= nvshmemi_device_state.heap_base) {
         uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
 
@@ -2383,6 +2383,8 @@ void *nvshmem_ptr(const void *ptr, int pe) {
 
     return NULL;
 }
+
+void *nvshmem_ptr(const void *ptr, int pe) { return nvshmemi_ptr(ptr, pe); }
 
 void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr) {
     uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;

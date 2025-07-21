@@ -362,6 +362,7 @@ enum nvshmemi_team_op_t {
     FCOLLECT,
     REDUCE,
     FCOLLECT_128,
+    P2P_SYNC_ON_STREAM,
     OP_SENTINEL = INT_MAX
 };
 

@@ -190,16 +190,13 @@ static int nvshmemi_team_allocate_team(nvshmemi_team_t **host_ptr, nvshmemi_team
     if (host_ptr == NULL) {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
-
     **host_ptr = NVSHMEMI_TEAM_INITIALIZER;
 
     // Set the pe_mapping pointer to point to the memory right after the struct
     (*host_ptr)->pe_mapping = (int *)((*host_ptr) + 1);
 
     NVSHMEMI_TEAM_PE_MAPPING_INITIALIZER(*host_ptr, npes);
-
     nvshmemi_team_copy_pe_mapping(*host_ptr, *device_ptr, npes);
-
     return NVSHMEMX_SUCCESS;
 }
 
@@ -622,12 +619,12 @@ static inline size_t get_psync_len_per_team() {
        consecutive broadcast, when all buffers are used, a barrier is called and then again we begin
        from the start of the buffer fcollect: Two sets of buffer are used to alternate between -
        same way as in reduce. The other fator of 2 is because when using LL double the space is
-       needed to fuse flag with data */
+       needed to fuse flag with data. Npes is added for p2p_sync_on_stream space. */
 
     size_t ans = (2 * NVSHMEMI_SYNC_SIZE +
                   nvshmemi_device_state.gpu_coll_env_params_var.reduce_scratch_size / sizeof(long) +
                   NVSHMEMI_BCAST_SYNC_SIZE + fcollect_sync_size + 2 * NVSHMEMI_ALLTOALL_SYNC_SIZE +
-                  fcollect_ll128_sync_size);
+                  fcollect_ll128_sync_size + nvshmemi_state->npes);
     return ans;
 }
 
@@ -913,6 +910,7 @@ int nvshmemi_team_init(void) {
     nvshmemi_team_world->bcast_count = 0;
     nvshmemi_team_world->bcast_sync_offset = 0;
     nvshmemi_team_world->fcollect_count = 0;
+    nvshmemi_team_world->p2p_sync_on_stream_count = 0;
     nvshmemi_team_world->is_team_node = false;
     nvshmemi_team_world->is_team_same_mype_node = false;
 
@@ -1007,6 +1005,7 @@ team_shared_setup:
     nvshmemi_team_shared->bcast_count = 0;
     nvshmemi_team_shared->bcast_sync_offset = 0;
     nvshmemi_team_shared->fcollect_count = 0;
+    nvshmemi_team_shared->p2p_sync_on_stream_count = 0;
     nvshmemi_team_shared->are_gpus_p2p_connected = 1;
 
     nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_shared);
@@ -1058,6 +1057,7 @@ team_shared_setup:
     nvshmemi_team_node->bcast_count = 0;
     nvshmemi_team_node->bcast_sync_offset = 0;
     nvshmemi_team_node->fcollect_count = 0;
+    nvshmemi_team_node->p2p_sync_on_stream_count = 0;
 
     nvshmemi_team_node->start = start;
     nvshmemi_team_node->stride = (stride == -1) ? 1 : stride;
@@ -1099,6 +1099,7 @@ team_shared_setup:
     nvshmemi_team_same_mype_node->bcast_count = 0;
     nvshmemi_team_same_mype_node->bcast_sync_offset = 0;
     nvshmemi_team_same_mype_node->fcollect_count = 0;
+    nvshmemi_team_same_mype_node->p2p_sync_on_stream_count = 0;
     nvshmemi_team_same_mype_node->is_team_node = false;
     nvshmemi_team_same_mype_node->is_team_same_mype_node = true;
 
@@ -1140,6 +1141,7 @@ team_shared_setup:
     nvshmemi_team_same_gpu->bcast_count = 0;
     nvshmemi_team_same_gpu->bcast_sync_offset = 0;
     nvshmemi_team_same_gpu->fcollect_count = 0;
+    nvshmemi_team_same_gpu->p2p_sync_on_stream_count = 0;
     nvshmemi_team_same_gpu->config_mask = 0;
     nvshmemi_team_same_gpu->my_pe = (nvshmemi_state->mype - start) / stride;
     nvshmemi_team_same_gpu->start = start;
@@ -1184,6 +1186,7 @@ team_shared_setup:
         nvshmemi_team_gpu_leaders->bcast_count = 0;
         nvshmemi_team_gpu_leaders->bcast_sync_offset = 0;
         nvshmemi_team_gpu_leaders->fcollect_count = 0;
+        nvshmemi_team_gpu_leaders->p2p_sync_on_stream_count = 0;
 
         nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_gpu_leaders);
         nvshmemi_team_set_p2p_connectivity(nvshmemi_team_gpu_leaders);
@@ -1703,6 +1706,7 @@ int nvshmemi_team_allocate_resources(nvshmemi_team_t *myteam, nvshmemi_team_t *m
     myteam->bcast_count = 0;
     myteam->bcast_sync_offset = 0;
     myteam->fcollect_count = 0;
+    myteam->p2p_sync_on_stream_count = 0;
 
     if (parent_team) {
         if (parent_team->is_team_node) {
@@ -2367,8 +2371,9 @@ void nvshmemi_team_destroy(nvshmemi_team_t *team) {
 
 long *nvshmemi_team_get_psync(nvshmemi_team_t *team, nvshmemi_team_op_t op) {
     long *team_psync;
-    size_t psync_fcollect_len;
+    size_t psync_fcollect_len, fcollect_ll128_sync_size;
     psync_fcollect_len = get_fcollect_psync_len_per_team();
+    fcollect_ll128_sync_size = get_fcollect_ll128_psync_len_per_team();
     team_psync = &nvshmemi_psync_pool[team->team_idx * get_psync_len_per_team()];
     switch (op) {
         case SYNC:
@@ -2400,6 +2405,12 @@ long *nvshmemi_team_get_psync(nvshmemi_team_t *team, nvshmemi_team_op_t op) {
                                    sizeof(long) +
                                NVSHMEMI_BCAST_SYNC_SIZE + psync_fcollect_len +
                                2 * NVSHMEMI_ALLTOALL_SYNC_SIZE];
+        case P2P_SYNC_ON_STREAM:
+            return &team_psync[2 * NVSHMEMI_SYNC_SIZE +
+                               nvshmemi_device_state.gpu_coll_env_params_var.reduce_scratch_size /
+                                   sizeof(long) +
+                               NVSHMEMI_BCAST_SYNC_SIZE + psync_fcollect_len +
+                               2 * NVSHMEMI_ALLTOALL_SYNC_SIZE + fcollect_ll128_sync_size];
         default:
             WARN("Incorrect argument to nvshmemi_team_get_psync\n");
             return NULL;

@@ -15,6 +15,7 @@
 #include "internal/host/nvshmem_internal.h"  // for nccl_version, nvshmemi...
 #include "internal/host/util.h"              // for NCCL_CHECK
 #include "non_abi/nvshmem_build_options.h"   // for NVSHMEM_USE_NCCL
+#include "internal/host/nvshmemi_team.h"
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"  // for ncclComm, ncclComm_t
 #endif
@@ -26,8 +27,8 @@ void nvshmemi_call_alltoall_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
 template <typename TYPE>
 int nvshmemi_alltoall_on_stream(nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nelems,
                                 cudaStream_t stream) {
-#ifdef NVSHMEM_USE_NCCL
     nvshmemi_team_t *teami = nvshmemi_team_pool[team];
+#ifdef NVSHMEM_USE_NCCL
     int team_n_pes = nvshmem_team_n_pes(team);
     if (nvshmemi_use_nccl && nvshmemi_get_nccl_dt<TYPE>() != ncclNumTypes &&
         ((nccl_version >= 2700 && team_n_pes <= 4096 /* NCCL limit for Group API */) ||
@@ -46,7 +47,22 @@ int nvshmemi_alltoall_on_stream(nvshmem_team_t team, TYPE *dest, const TYPE *sou
     } else
 #endif /* NVSHMEM_USE_NCCL */
     {
-        nvshmemi_call_alltoall_on_stream_kernel<TYPE>(team, dest, source, nelems, stream);
+        if (teami->are_gpus_p2p_connected && !nvshmemi_disable_ce_collectives &&
+            teami->nvls_rsc_base_ptr != NULL && nvshmemi_can_use_cuda_64_bit_stream_memops) {
+            for (int i = 1; i <= teami->size; i++) {
+                int dst_pe = (teami->my_pe + i) % teami->size;
+                if (nvshmemi_disable_self_write_ce_coll) {
+                    if (dst_pe == teami->my_pe) continue;
+                }
+                CUDA_RUNTIME_CHECK(cudaMemcpyAsync(
+                    nvshmemi_ptr(dest + teami->my_pe * nelems,
+                                 nvshmemi_team_translate_pe_to_team_world_wrap(teami, dst_pe)),
+                    source + nelems * dst_pe, nelems * sizeof(TYPE), cudaMemcpyDefault, stream));
+            }
+            nvshmemi_coll_p2p_sync(teami, stream);
+        } else {
+            nvshmemi_call_alltoall_on_stream_kernel<TYPE>(team, dest, source, nelems, stream);
+        }
     }
     return 0;
 }

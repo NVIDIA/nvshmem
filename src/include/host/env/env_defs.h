@@ -302,6 +302,12 @@ NVSHMEMI_ENV_DEF(REDUCESCATTER_ALGO, int, 0, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Reduce Scatter algorithm to be used. \n"
                  "  * 0 - use default algorithm selection strategy\n")
 
+NVSHMEMI_ENV_DEF(DISABLE_CE_COLLECTIVES, bool, true, NVSHMEMI_ENV_CAT_COLLECTIVES,
+                 "Disable CopyEngine (CE) based on_stream collectives implementation")
+NVSHMEMI_ENV_DEF(DISABLE_SELF_WRITE_CE_COLL, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
+                 "Disable self-writes in CopyEngine (CE) based on_stream collectives "
+                 "implementation. Used for testing purposes only.")
+
 /** Transport **/
 
 #ifdef NVSHMEM_DEFAULT_UCX

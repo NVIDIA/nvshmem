@@ -101,6 +101,8 @@ extern uint64_t *nvshmemi_host_hashes;
 extern nvshmem_options_t nvshmem_options;
 extern int nvshmemi_cuda_driver_version;
 extern int nvshmemi_use_nccl;
+extern int nvshmemi_disable_ce_collectives;
+extern bool nvshmemi_disable_self_write_ce_coll;
 extern bool nvshmemi_is_mps_available;
 extern int nccl_version;
 extern long nvshmemi_max_teams;
