@@ -29,7 +29,7 @@ import logging
 
 logger = logging.getLogger("nvshmem")
 
-__all__ = ["reduce", "reducescatter", "alltoall", "fcollect", "broadcast", "barrier", "sync", "collective_on_buffer"]
+__all__ = ["reduce", "reducescatter", "alltoall", "fcollect", "broadcast", "barrier", "sync", "barrier_all", "sync_all", "collective_on_buffer"]
 
 """
 On-Stream Collectives
@@ -249,6 +249,8 @@ def barrier(team: Teams, stream: NvshmemStreamsType=None) -> None:
     """
     Executes a team-wide barrier on a specified CUDA stream.
 
+    Does not support MPG use cases
+
     Args:
         - team: NVSHMEM team handle.
         - stream (Stream): CUDA stream for synchronization.
@@ -263,6 +265,8 @@ def sync(team: Teams, stream: NvshmemStreamsType=None) -> None:
     """
     Executes a team-wide sync on a specified CUDA stream.
 
+    Does not support MPG use cases
+
     Args:
         - team: NVSHMEM team handle.
         - stream (Stream): CUDA stream for synchronization.
@@ -270,6 +274,36 @@ def sync(team: Teams, stream: NvshmemStreamsType=None) -> None:
     user_nvshmem_dev, other_dev = _get_device()
     # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
     bindings.team_sync_on_stream(team, int(stream.__cuda_stream__()[1]))
+    if other_dev is not None:
+        other_dev.set_current()
+
+def barrier_all(stream: NvshmemStreamsType=None) -> None:
+    """
+    Executes a runtime-wide barrier on a specified CUDA stream.
+
+    Supports MPG use cases
+
+    Args:
+        - stream (Stream): CUDA stream for synchronization.
+    """
+    user_nvshmem_dev, other_dev = _get_device()
+    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
+    bindings.barrier_all_on_stream(int(stream.__cuda_stream__()[1]))
+    if other_dev is not None:
+        other_dev.set_current()
+
+def sync_all(stream: NvshmemStreamsType=None) -> None:
+    """
+    Executes a runtime-wide sync on a specified CUDA stream.
+    
+    Supports MPG use cases
+
+    Args:
+        - stream (Stream): CUDA stream for synchronization.
+    """
+    user_nvshmem_dev, other_dev = _get_device()
+    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
+    bindings.sync_all_on_stream(int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
 
