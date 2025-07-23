@@ -10,6 +10,7 @@
 
 #if defined(__CUDACC_RDC__) && !defined(__NVSHMEM_NUMBA_SUPPORT__)
 #define EXTERN_CONSTANT extern __constant__
+
 #elif defined(__clang__)
 #define EXTERN_CONSTANT extern __constant__ __attribute__((address_space(4)))
 #else
@@ -19,8 +20,13 @@ EXTERN_CONSTANT nvshmemi_device_host_state_t nvshmemi_device_state_d;
 #undef EXTERN_CONSTANT
 
 #ifdef __NVSHMEM_NUMBA_SUPPORT__
+/* disable device-side asserts for Numba builds */
+#ifdef assert
+#undef assert
+#endif
 static __constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {
     NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
+#define assert(x) ((void)0)
 #endif
 
 typedef enum {

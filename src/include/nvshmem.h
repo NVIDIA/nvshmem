@@ -15,7 +15,8 @@
 
 #include "non_abi/nvshmem_build_options.h"
 /* NVRTC only compiles device code. Leave out host headers */
-#if !defined __CUDACC_RTC__ && !defined __clang_llvm_bitcode_lib__
+#if !defined __CUDACC_RTC__ && !defined __clang_llvm_bitcode_lib__ && \
+    !defined __NVSHMEM_NUMBA_SUPPORT__
 #include "nvshmem_host.h"
 #endif
 /* NVSHMEM4PY hostlib can't parse device headers */
