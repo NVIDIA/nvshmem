@@ -278,7 +278,7 @@ def finalize() -> None:
     non_peer_bufs = []
     for mr in _mr_references.values():
         for ptr, buf in mr._mem_references.items():
-            if not buf["is_peer_buffer"] and buf["ref_count"] > 0:
+            if not buf["is_peer_buffer"] and buf["ref_count"] > 0 and not buf["freed"]:
                 logger.error(f"Found un-freed memory object with address {ptr} at fini time")
                 non_peer_bufs.append(buf)
     if len(non_peer_bufs) > 0:
