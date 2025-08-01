@@ -414,8 +414,7 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
         if (!is_write_comp) iter->second.first = op;
         iter->second.second += progress_count;
     } else {
-        (*state->proxy_put_signal_comp_map)[map_key] = std::make_pair(op, progress_count);
-        goto out;
+        iter = state->proxy_put_signal_comp_map->insert(std::make_pair(map_key, std::make_pair(op, progress_count))).first;
     }
 
     if (!iter->second.second) {
