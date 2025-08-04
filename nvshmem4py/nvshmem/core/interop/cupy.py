@@ -62,7 +62,7 @@ def array_get_buffer(array: ndarray) -> Tuple[Buffer, int, str]:
     return buf, get_size(array.shape, array.dtype), str(array.dtype)
 
 
-def array(shape: Tuple[int], dtype: str="float32", release=False) -> ndarray:
+def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C") -> ndarray:
     """
     Create a CuPy array view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -70,11 +70,12 @@ def array(shape: Tuple[int], dtype: str="float32", release=False) -> ndarray:
     and returns a reshaped and retyped view of that memory.
 
     Args:
-       -  shape (tuple or list of int): Shape of the desired array.
+       - shape (tuple or list of int): Shape of the desired array.
        - dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
        - release (bool, optional): Do not track this buffer internally to NVSHMEM
                 If True, it is the user's responsibility to hold references to the buffer until free() is called
                 otherwise, deadlocks may occur.
+       - morder (``str``, optional): The memory format to use. ``"C"`` for C-style, and ``"F"`` for "Fortran-style
 
     Any future calls to ``.view()`` on this object should set copy=False, to avoid copying the object off of the sheap
 
@@ -88,13 +89,19 @@ def array(shape: Tuple[int], dtype: str="float32", release=False) -> ndarray:
         logger.error("Can not create CuPy array: CuPy not installed.")
         raise ModuleNotFoundError
 
+    if morder not in ("C", "F"):
+        raise NvshmemInvalid("Requested array with invalid memory order")
+
     buf = nvshmem.core.buffer(get_size(shape, dtype), release=release)
     # Important! Disable copy to force allocation to stay on sheap
     cupy_array = cupy.from_dlpack(buf, copy=False)
     view = cupy_array.view(dtype).reshape(shape)
+    # CuPy defaults to C-style
+    if morder == "F":
+        view = view.reshape(shape, order="F")
     return view
 
-def bytearray(shape: Tuple[int], dtype: str="float32", device_id: int=None) -> ndarray:
+def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id: int=None, morder="C") -> ndarray:
     """
     Create a raw CuPy byte array from NVSHMEM-allocated memory.
 
@@ -109,6 +116,10 @@ def bytearray(shape: Tuple[int], dtype: str="float32", device_id: int=None) -> n
     Args:
         - shape (tuple or list of int): Shape of the desired array.
         - dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
+        - release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
+        - morder (``str``, optional): The memory format to use. ``"C"`` for C-style, and ``"F"`` for "Fortran-style
 
     Returns:
         ``cupy.ndarray``: A CuPy array backed by NVSHMEM-allocated memory.
@@ -118,9 +129,7 @@ def bytearray(shape: Tuple[int], dtype: str="float32", device_id: int=None) -> n
     """
     if not _cupy_enabled:
         return
-    buf = nvshmem.core.buffer(get_size(shape, dtype))
-    cupy_array = cupy.from_dlpack(buf, copy=False)
-    return cupy_array
+    return array(shape, dtype="int8", release=release, morder=morder) 
 
 def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
     """

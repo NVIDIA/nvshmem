@@ -30,6 +30,7 @@ __all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer
 try:
     import torch
     from torch import float32
+    from torch import uint8
     from torch import Tensor
     from torch import dtype
     _torch_enabled = True
@@ -38,6 +39,7 @@ except:
     torch = None
     Tensor = None
     dtype = None
+    uint8 = None
     _torch_enabled = False
 
 def _is_tensor(tensor: Union[Tensor, object]) -> bool:
@@ -65,7 +67,7 @@ def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
         raise NvshmemInvalid("Tried to retrieve buffer from Tensor not tracked by nvshmem")
     return buf, (torch.numel(tensor) * tensor.element_size()), str(tensor.dtype)
 
-def tensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
+def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C") -> Tensor:
     """
     Create a PyTorch tensor view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -75,6 +77,10 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
     Args:
         - shape (tuple or list of int): Shape of the desired tensor.
         - dtype (torch.dtype, optional): Data type of the tensor. Defaults to ``torch.float32``.
+        - release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
+        - morder (``str``, optional): The memory format to use. ``"C"`` for C-style, and ``"F"`` for "Fortran-style
 
     Returns:
         torch.Tensor: A PyTorch tensor view on the NVSHMEM-allocated buffer.
@@ -84,13 +90,24 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32) -> Tensor:
     """
     if not _torch_enabled:
         return
+
+    if morder not in ("C", "F"):
+        raise NvshmemInvalid("Tensor with invalid memory format requested")
+
     if dtype is None:
         dtype = torch.get_default_dtype() 
-    buf = buffer(get_size(shape, dtype))
+    buf = buffer(get_size(shape, dtype), release=release)
     tensor = torch.utils.dlpack.from_dlpack(buf)
-    return tensor.view(dtype).view(shape)
+    view = tensor.view(dtype).view(shape)
+    if morder == "F":
+        # Compute Fortran-style (column-major) strides
+        strides = [1]
+        for dim in shape[:-1]:
+            strides.append(strides[-1] * dim)
+        view = view.as_strided(size=shape, stride=strides)
+    return view
 
-def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False) -> Tensor:
+def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C") -> Tensor:
     """
     Create a PyTorch tensor from NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -103,6 +120,7 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False) -> Tenso
        - release (bool, optional): Do not track this buffer internally to NVSHMEM
                 If True, it is the user's responsibility to hold references to the buffer until free() is called
                 otherwise, deadlocks may occur.
+        - morder (``str``, optional): The memory format to use. ``"C"`` for C-style, and ``"F"`` for "Fortran-style
 
     Returns:
         torch.Tensor: A raw PyTorch tensor referencing the NVSHMEM-allocated memory.
@@ -114,9 +132,7 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False) -> Tenso
         return
     if dtype is None:
         dtype = torch.get_default_dtype()
-    buf = buffer(get_size(shape, dtype), release=release)
-    tensor = torch.utils.dlpack.from_dlpack(buf) 
-    return tensor
+    return tensor(shape, dtype=uint8, release=release, morder=morder)
 
 def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
     """
