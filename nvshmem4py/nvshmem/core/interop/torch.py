@@ -25,7 +25,7 @@ from cuda.core.experimental._stream import Stream
 
 from typing import Tuple, Union
 
-__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor"]
+__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor"]
 
 try:
     import torch
@@ -143,6 +143,42 @@ def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
     buf, size, dtype  = tensor_get_buffer(tensor)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
     return torch.utils.dlpack.from_dlpack(peer_buf).view(tensor.dtype).view(tensor.shape)
+
+def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
+    """
+    Returns a PyTorch Tensor view on multicast-accessible memory corresponding to the input tensor.
+
+    This function takes a PyTorch tensor that wraps NVSHMEM-allocated memory and returns a new tensor
+    that uses a Multicast Memory alias for that buffer, obtained via ``nvshmemx_mc_ptr``. The resulting tensor
+    is suitable for use in GPU kernels that leverage multicast features such as NVSwitch-based SHARP collectives.
+    
+    The Tensor passed into it must be allocated by NVSHMEM4Py.
+
+    IMPORTANT:
+        - The returned tensor's memory cannot be accessed from the host (CPU). It is only valid for use
+          in GPU kernels. Host-side access or copying is undefined behavior and may result in errors.
+
+    NOTE: This function does not copy data. It provides a device-side view of the same underlying memory,
+    but aliased for multicast access. Any modifications made through the returned tensor will affect the
+    same memory region.
+
+    Args:
+        tensor (``torch.Tensor``): A PyTorch tensor backed by NVSHMEM-allocated memory.
+        team (``Teams``): The NVSHMEM team for which multicast access is requested.
+
+    Returns:
+        ``torch.Tensor``: A PyTorch tensor view on the multicast alias of the NVSHMEM buffer.
+
+    Raises:
+        ``NvshmemInvalid``: If the input tensor is not backed by NVSHMEM memory or multicast is not supported.
+        ``NvshmemError``: If the tensor's backing buffer is not properly tracked or initialized.
+    """
+    if not _torch_enabled:
+        return
+    buf, size, dtype  = tensor_get_buffer(tensor)
+    mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
+    return torch.utils.dlpack.from_dlpack(mc_buf).view(tensor.dtype).view(tensor.shape)
+
 
 def free_tensor(tensor: Tensor) -> None:
     """

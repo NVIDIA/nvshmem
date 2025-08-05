@@ -20,7 +20,7 @@ from nvshmem.core.utils import _get_device, dtype_nbytes
 from nvshmem.core.interop.torch import _is_tensor, tensor_get_buffer
 from nvshmem.core.interop.cupy import _is_array, array_get_buffer
 from nvshmem.core._internal_tracking import _mr_references, _is_initialized, InternalInitStatus
-from nvshmem.core.direct import Teams, team_n_pes, n_pes
+from nvshmem.core.direct import team_n_pes, n_pes
 from nvshmem.core.nvshmem_types import *
 import nvshmem.bindings as bindings
 

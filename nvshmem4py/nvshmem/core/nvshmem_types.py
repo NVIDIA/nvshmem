@@ -13,13 +13,14 @@ These are the Python datatypes for NVSHMEM
 """
 import uuid
 import logging
+from enum import IntEnum
 from typing import Union
 
 from cuda.core.experimental._memory import MemoryResource, Buffer
 from cuda.core.experimental import Device, system
 from cuda.core.experimental._stream import Stream
 
-from nvshmem.bindings import malloc, free, ptr
+from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id
 from nvshmem.core._internal_tracking import _except_on_del
 
 try:
@@ -29,10 +30,14 @@ try:
 except:
     torch_stream = None
 
-
-__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType"]
+__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType", "BufferTypes", "Teams"]
 
 logger = logging.getLogger("nvshmem")
+
+"""
+IntEnum which matches 1:1 with ``nvshmem_team_id_t``
+"""
+Teams = Team_id
 
 """
 Version class
@@ -84,6 +89,14 @@ class NvshmemError(Exception):
         return f"<NvshmemError: {self.msg}>"
 
 """
+Buffer types for NvshmemResource
+"""
+class BufferTypes(IntEnum):
+    NORMAL = 0
+    PEER = 1
+    MULTIMEM = 2
+
+"""
 Memory Resource
 """
 class NvshmemResource(MemoryResource):
@@ -114,8 +127,8 @@ class NvshmemResource(MemoryResource):
             "device": <int>,
             # An object of type cuda.core.experimental._memory.Buffer()
             "buffer": <Buffer>,
-            # Used to make free a no-op for peer buffers 
-            "is_peer_buffer": Bool,
+            # Different buffers (peer, mc) have different needs
+            "type": Enum,
             # Used to raise an exception when the GC reaches here without free() getting called
             "freed": Bool
             }
@@ -144,13 +157,13 @@ class NvshmemResource(MemoryResource):
             raise NvshmemError(f"Failed to allocate memory of bytes {size}")
         r_buf = Buffer.from_handle(ptr=ptr, size=size, mr=self)
         logger.debug(f"Created Buffer on resource {self} at address {ptr} with size {size} on stream {stream}")
+
         if not release:
             buf_ref = r_buf
         else:
             # If we're not holding references, create our own shadow-buffer
             buf_ref = Buffer.from_handle(ptr=r_buf.handle, size=r_buf.size, mr=self)
-        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "is_peer_buffer": False, "freed": False}
-
+        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False}
         return r_buf
 
     def deallocate(self, ptr: int, size: int, stream: NvshmemStreamsType=None) -> None:
@@ -175,7 +188,7 @@ class NvshmemResource(MemoryResource):
             return
 
         # If someone got here without calling free(), we have to except
-        if not self._mem_references[ptr]["is_peer_buffer"] and not self._mem_references[ptr]["freed"]:
+        if self._mem_references[ptr]["type"] == BufferTypes.NORMAL and not self._mem_references[ptr]["freed"]:
             if _except_on_del["value"]:
                 raise NvshmemError(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
             else:
@@ -192,7 +205,7 @@ class NvshmemResource(MemoryResource):
             # The counter is already 0, so we must have already freed the pointer. Just return.
             logger.debug(f"Ref count on {ptr} is already 0. Already freed.")
             return
-        logger.debug(f"New ref count on {'peer' if  self._mem_references[ptr]['is_peer_buffer'] else ''} buf {ptr} {self._mem_references[ptr]['ref_count'] }")
+        logger.debug(f"New ref count on {self._mem_references[ptr]['type'].name} buf {ptr} {self._mem_references[ptr]['ref_count'] }")
         # If this was the last reference to that pointer, free the pointer
         # The MR itself has a ref_count, but we want to free only when the last call is made.
         # Leave this as if ( == 1) and if it's 0, we will delete the reference
@@ -200,7 +213,7 @@ class NvshmemResource(MemoryResource):
             # If the buffer is a peer buffer, don't do anything 
             # except delete it from the tracker
             # NVShmem handles these internally.
-            if not self._mem_references[ptr]["is_peer_buffer"]:
+            if self._mem_references[ptr]["type"] == BufferTypes.NORMAL:
                 free(ptr)
                 # If the buffer has a child (peer) buffer, free it now
                 child_ptr = self._mem_references[ptr].get("child", None)
@@ -243,17 +256,39 @@ class NvshmemResource(MemoryResource):
 
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
-        
-        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "is_peer_buffer": True, "freed": False, "parent": parent_ptr}
-        self._mem_references[parent_ptr]["child"] = result
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.PEER, "freed": False}
+        return r_buf
 
+    def get_mc_buffer(self, team: Teams, buffer: Buffer) -> Buffer:
+
+        # This should be the pointer on the calling PE
+        # None or raising an exception is the failing case
+        parent_ptr = buffer.handle
+        result = mc_ptr(team, parent_ptr)
+        if result is None:
+            raise NvshmemError("Failed to retrieve multicast buffer")
+
+        entry = self._mem_references.get(result, None)
+        if entry is not None and not entry["freed"]:
+            # Someone already called get_peer_buffer on the Buffer
+            # Increase ref count and return existing buffer
+            self._mem_references[result]["ref_count"] += 1
+            logger.debug(f"Found already tracked MC buffer with address {result}. Returning it. Ref count {self._mem_references[result]['ref_count']}")
+            return self._mem_references[result]["buffer"]
+
+        logger.debug(f"Did not find MC buffer with address {result}. Creating a new one.")
+
+        # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
+        r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.MULTIMEM , "freed": False, "parent": parent_ptr}
+        self._mem_references[parent_ptr]["child"] = result
         return r_buf
 
     def set_freed(self, buffer: Buffer) -> None:
         ptr = buffer.handle
         if self._mem_references.get(ptr) is None:
             raise NvshmemError("Freed a buffer that is not tracked")
-        if self._mem_references[ptr]['is_peer_buffer']:
+        if self._mem_references[ptr]['type'] != BufferTypes.NORMAL:
             return
         self._mem_references[ptr]["freed"] = True
 

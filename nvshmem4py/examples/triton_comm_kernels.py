@@ -24,7 +24,6 @@ import torch
 import triton
 import triton.language as tl
 import nvshmem.core as nvshmem
-from nvshmem.bindings import mc_ptr  # Gets a device-accessible remote pointer
 from mpi4py import MPI
 from cuda.core.experimental import Device, system
 
@@ -137,7 +136,8 @@ if mype == 0:
 buf_sz = tensor.numel() * tensor.element_size()  # Size in bytes
 
 # Obtain a remote multicast-compatible pointer (usable only from device code)
-remote_mc_ptr = mc_ptr(nvshmem.Teams.TEAM_WORLD, tensor.data_ptr())
+remote_mc_tensor = nvshmem.get_multicast_tensor(nvshmem.Teams.TEAM_WORLD, tensor)
+
 
 print(f"[PE {mype}] Tensor before broadcast:", tensor)
 

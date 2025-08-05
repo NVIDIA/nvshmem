@@ -21,7 +21,7 @@ from nvshmem.core.utils import _get_device
 from cuda.core.experimental import Device, system
 from cuda.core.experimental._memory import Buffer
 
-__all__ = ['buffer', 'free', 'get_peer_buffer']
+__all__ = ['buffer', 'free', 'get_peer_buffer', 'get_multicast_buffer']
 
 logger = logging.getLogger("nvshmem")
 
@@ -115,7 +115,7 @@ def get_peer_buffer(buffer: Buffer, pe: int):
     """
     Returns a peer buffer associated with an NVSHMEM-allocated object.
 
-    This is the Python object equivalent of nvshmem.ptr, which:
+    This is the Python object equivalent of nvshmem_ptr, which:
         - Given a pointer to an object on the NVSHMEM Symmetric Heap
         - Returns a pointer to a local object to which loads and stores can be performed
 
@@ -151,4 +151,52 @@ def get_peer_buffer(buffer: Buffer, pe: int):
     if other_dev is not None:
         other_dev.set_current()
     return peer_buffer
+
+def get_multicast_buffer(team: Teams, buffer: Buffer) -> Buffer:
+    """
+    Returns a peer buffer associated with an NVSHMEM-allocated object which uses Multicast Memory.
+
+    This is the Python object equivalent of ``nvshmemx_mc_ptr``, which:
+        - Given a pointer to an object on the NVSHMEM Symmetric Heap
+        - Returns a pointer to a local object to which multicast loads and stores can be performed
+
+    The Python equivalent returns a cuda.core.Buffer which starts at the address of the Buffer passed in, with the same size as the Buffer passed in.
+
+    For more information on ``nvshmemx_mc_ptr``, see https://docs.nvidia.com/nvshmem/api/using.html#communication-model, or
+      https://docs.nvidia.com/nvshmem/api/gen/api/setup.html?highlight=mc_ptr#c.nvshmemx_mc_ptr
+
+    The ``get_multicast_buffer`` function offers a quick means to leverage NVSwitch based multicast and reduction offload features also referred to as NVLink SHARP.
+
+    IMPORTANT: The buffer allocated by ``get_multicast_buffer`` may NOT be accessed from the host (CPU). It can only be accessed by GPU kernels.
+
+    NOTE: At present, copy_from() and copy_to() are not supported for Multicast buffers.
+
+    Args:
+        - buffer (``cuda.core.Buffer``): A multicast buffer allocated with NVSHMEM.
+        - Team (``Teams`` enum): The team which this multicast memory applies to
+
+    Returns:
+        - ``cuda.core.Buffer``: The buffer object representing the remote peer's buffer.
+            User need not call ``nvshmem.core.free()`` on this Buffer. It will be a no-op
+
+    Raises:
+        - ``NvshmemInvalid``: If the input buffer is not a valid NVSHMEM buffer.
+                              or if the platform does not support Multicast memory
+        - ``NvshmemError``: If the buffer is not tracked internally or no team information is found.
+    """
+    if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
+        raise NvshmemInvalid("NVSHMEM Library is not initialized")
+
+    # _get_device() excepts if no device is current
+    user_nvshmem_dev, other_dev = _get_device()
+
+    if not isinstance(buffer, Buffer) or not hasattr(buffer, "_mnff"):
+        raise NvshmemInvalid("Tried to use a buffer not from NVSHmem")
+    
+    mr = buffer.memory_resource
+    peer_buffer = mr.get_mc_buffer(team, buffer)
+    if other_dev is not None:
+        other_dev.set_current()
+    return peer_buffer
+ 
  

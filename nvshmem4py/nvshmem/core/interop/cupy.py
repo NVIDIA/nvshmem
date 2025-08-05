@@ -22,7 +22,7 @@ from typing import Tuple, Union
 from cuda.core.experimental._memory import Buffer
 from cuda.core.experimental import Device
 
-__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array"]
+__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array"]
 
 logger = logging.getLogger("nvshmem")
 
@@ -140,6 +140,43 @@ def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
     buf, size, dtype = array_get_buffer(array)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
     return cupy.from_dlpack(peer_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
+def get_multicast_array(team: Teams, array: ndarray) -> ndarray:
+    """
+    Returns a CuPy array view on multicast-accessible memory corresponding to the input array.
+
+    This function takes a CuPy Array that wraps NVSHMEM-allocated memory and returns a new array
+    that uses a Multicast Memory alias for that buffer, obtained via ``nvshmemx_mc_ptr``. The resulting array
+    is suitable for use in GPU kernels that leverage multicast features such as NVSwitch-based SHARP collectives.
+    
+    The Array passed into it must be allocated by NVSHMEM4Py.
+
+    IMPORTANT:
+        - The returned array's memory cannot be accessed from the host (CPU). It is only valid for use
+          in GPU kernels. Host-side access or copying is undefined behavior and may result in errors.
+
+    NOTE: This function does not copy data. It provides a device-side view of the same underlying memory,
+    but aliased for multicast access. Any modifications made through the returned array will affect the
+    same memory region.
+
+    Args:
+        array (``ndarray``): A CuPy Array backed by NVSHMEM-allocated memory.
+        team (``Teams``): The NVSHMEM team for which multicast access is requested.
+
+    Returns:
+        ``ndarray``: A PyTorch array view on the multicast alias of the NVSHMEM buffer.
+
+    Raises:
+        ``NvshmemInvalid``: If the input array is not backed by NVSHMEM memory or multicast is not supported.
+        ``NvshmemError``: If the array's backing buffer is not properly tracked or initialized.
+    """
+    if not _cupy_enabled:
+        return
+
+    buf, size, dtype  = array_get_buffer(array)
+    mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
+    return cupy.from_dlpack(mc_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
 
 def free_array(array: ndarray) -> None:
     """
