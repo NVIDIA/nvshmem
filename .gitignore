@@ -88,6 +88,15 @@ cmake_install.cmake
 # nvshmem4py objects
 nvshmem4py/CMakeFiles/
 nvshmem4py/*.cmake
+nvshmem4py/nvshmem/bindings/*.pyx
+nvshmem4py/nvshmem/bindings/*.pxd
 nvshmem4py/nvshmem/bindings/*.cpp
+nvshmem4py/nvshmem/bindings/_internal/*.pyx
+nvshmem4py/nvshmem/bindings/_internal/*.pxd
 nvshmem4py/nvshmem/bindings/_internal/*.cpp
 nvshmem4py/*.egg-info
+nvshmem4py/nvshmem/version.py
+nvshmem4py/pyproject.toml
+
+# Filesystem objects
+.DS_STORE
