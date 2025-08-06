@@ -37,9 +37,12 @@ def _free_all_buffers() -> None:
     for key in sorted(_mr_references.keys()):
         mr = _mr_references[key]
         for ptr in sorted(mr._mem_references.keys()):
+            if mr._mem_references[ptr]["type"] != BufferTypes.NORMAL:
+                continue
             logger.info(f"Found object open at pointer {ptr} and ref count {mr._mem_references[ptr]['ref_count']}. Freeing it.")
             # We already printed the warning message so we can safely suppress the message
             mr._mem_references[ptr]["freed"] = True
+            mr._mem_references[ptr]["released"] = True
             mr.deallocate(ptr, 0)
 
 def buffer(size, release=False) -> Buffer:

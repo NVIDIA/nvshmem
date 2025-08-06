@@ -130,7 +130,9 @@ class NvshmemResource(MemoryResource):
             # Different buffers (peer, mc) have different needs
             "type": Enum,
             # Used to raise an exception when the GC reaches here without free() getting called
-            "freed": Bool
+            "freed": Bool,
+            # Used to track whether the user expects us to prevent them from experiencing deadlocks
+            "released": Bool
             }
         """
         self._mem_references = {}
@@ -163,7 +165,8 @@ class NvshmemResource(MemoryResource):
         else:
             # If we're not holding references, create our own shadow-buffer
             buf_ref = Buffer.from_handle(ptr=r_buf.handle, size=r_buf.size, mr=self)
-        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False}
+        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False, "released": release}
+
         return r_buf
 
     def deallocate(self, ptr: int, size: int, stream: NvshmemStreamsType=None) -> None:
@@ -186,6 +189,11 @@ class NvshmemResource(MemoryResource):
         if self._mem_references.get(ptr) is None:
             logger.debug("Freed a buffer that is not tracked")
             return
+
+        # If a buffer is released, always assume it's been freed.
+        released  = self._mem_references[ptr].get("released", False)
+        if released:
+            self._mem_references[ptr]["freed"] = True
 
         # If someone got here without calling free(), we have to except
         if self._mem_references[ptr]["type"] == BufferTypes.NORMAL and not self._mem_references[ptr]["freed"]:
@@ -210,6 +218,11 @@ class NvshmemResource(MemoryResource):
         # The MR itself has a ref_count, but we want to free only when the last call is made.
         # Leave this as if ( == 1) and if it's 0, we will delete the reference
         if self._mem_references[ptr]["ref_count"] == 0:
+            # If released, we need to del our shadow-buffer too.
+            if released:
+                buf_entry = self._mem_references[ptr].get("buffer", None)
+                if buf_entry is not None:
+                    del self._mem_references[ptr]["buffer"]
             # If the buffer is a peer buffer, don't do anything 
             # except delete it from the tracker
             # NVShmem handles these internally.
@@ -256,8 +269,11 @@ class NvshmemResource(MemoryResource):
 
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
-        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.PEER, "freed": False}
+
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.PEER, "freed": False, "parent": parent_ptr, "released": False}
+        self._mem_references[parent_ptr]["child"] = result
         return r_buf
+
 
     def get_mc_buffer(self, team: Teams, buffer: Buffer) -> Buffer:
 
@@ -280,7 +296,7 @@ class NvshmemResource(MemoryResource):
 
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
-        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.MULTIMEM , "freed": False, "parent": parent_ptr}
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.MULTIMEM , "freed": False, "parent": parent_ptr, "released": False}
         self._mem_references[parent_ptr]["child"] = result
         return r_buf
 

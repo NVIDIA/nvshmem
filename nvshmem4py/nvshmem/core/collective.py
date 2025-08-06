@@ -168,7 +168,10 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
 
     src_size = src.size
     dest_size = dest.size
-    size = dest_size
+    if coll in ("fcollect", "alltoall"):
+        size = src_size
+    else:
+        size = dest_size
 
     # We assume the user has passed the correct dest_size.
     # If the user doesn't, they will encouter some kind of Exception later on
