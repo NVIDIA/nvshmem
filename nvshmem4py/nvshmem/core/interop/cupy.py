@@ -95,10 +95,7 @@ def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C") ->
     buf = nvshmem.core.buffer(get_size(shape, dtype), release=release)
     # Important! Disable copy to force allocation to stay on sheap
     cupy_array = cupy.from_dlpack(buf, copy=False)
-    view = cupy_array.view(dtype).reshape(shape)
-    # CuPy defaults to C-style
-    if morder == "F":
-        view = view.reshape(shape, order="F")
+    view = cupy_array.view(dtype).reshape(shape, order=morder)
     return view
 
 def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id: int=None, morder="C") -> ndarray:

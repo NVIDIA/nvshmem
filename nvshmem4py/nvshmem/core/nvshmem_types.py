@@ -189,11 +189,7 @@ class NvshmemResource(MemoryResource):
         if self._mem_references.get(ptr) is None:
             logger.debug("Freed a buffer that is not tracked")
             return
-
-        # If a buffer is released, always assume it's been freed.
         released  = self._mem_references[ptr].get("released", False)
-        if released:
-            self._mem_references[ptr]["freed"] = True
 
         # If someone got here without calling free(), we have to except
         if self._mem_references[ptr]["type"] == BufferTypes.NORMAL and not self._mem_references[ptr]["freed"]:
@@ -218,11 +214,6 @@ class NvshmemResource(MemoryResource):
         # The MR itself has a ref_count, but we want to free only when the last call is made.
         # Leave this as if ( == 1) and if it's 0, we will delete the reference
         if self._mem_references[ptr]["ref_count"] == 0:
-            # If released, we need to del our shadow-buffer too.
-            if released:
-                buf_entry = self._mem_references[ptr].get("buffer", None)
-                if buf_entry is not None:
-                    del self._mem_references[ptr]["buffer"]
             # If the buffer is a peer buffer, don't do anything 
             # except delete it from the tracker
             # NVShmem handles these internally.

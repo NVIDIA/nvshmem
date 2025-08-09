@@ -173,11 +173,9 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
     else:
         size = dest_size
 
-    # We assume the user has passed the correct dest_size.
-    # If the user doesn't, they will encouter some kind of Exception later on
-    if coll in ("reduce", "reducescatter", "fcollect",):
+    if coll != "alltoall":
         size_elem = max(1, size // dtype_nbytes(dtype))
-    elif coll in ("alltoall", "broadcast"):
+    else:
         size_elem = max(1, size // (n_pes() * dtype_nbytes(dtype)))
 
     func_name = ""
