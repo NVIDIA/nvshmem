@@ -33,9 +33,11 @@ except ImportError:
     Comm = None
     _mpi4py_enabled = False
 
-__all__ = ['get_unique_id', 'init', 'finalize', 'get_version']
+__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', "UniqueID"]
 
 logger = logging.getLogger("nvshmem")
+
+UniqueID = bindings.uniqueid
 
 def get_version() -> Version:
     """
@@ -66,7 +68,7 @@ def get_version() -> Version:
                    nvshmem4py_version=__version__,
                    libnvshmem_version=f"{int(lib_major.value)}.{int(lib_minor.value)}.{lib_patch.value}") 
 
-def get_unique_id(empty=False) -> bindings.uniqueid:
+def get_unique_id(empty=False) -> UniqueID:
     """
     Retrieve or create a unique ID used for UID-based NVSHMEM initialization.
 

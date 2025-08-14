@@ -13,8 +13,8 @@ These are the Python datatypes for NVSHMEM
 """
 import uuid
 import logging
-from enum import IntEnum
 from typing import Union
+from enum import Enum, IntEnum
 
 from cuda.core.experimental._memory import MemoryResource, Buffer
 from cuda.core.experimental import Device, system
@@ -23,6 +23,10 @@ from cuda.core.experimental._stream import Stream
 from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id
 from nvshmem.core._internal_tracking import _except_on_del
 
+logger = logging.getLogger("nvshmem")
+
+__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType", "MutableEnum", "Teams", "BufferTypes"]
+
 try:
     import torch
     from torch.cuda import Stream as torch_stream
@@ -30,14 +34,86 @@ try:
 except:
     torch_stream = None
 
-__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType", "BufferTypes", "Teams"]
+"""
+Mutable Enum to support team creation
+"""
+class MutableEnum:
+    def __init__(self, **kwargs):
+        self._members = {}
+        for key, value in kwargs.items():
+            self._members[key] = value
 
-logger = logging.getLogger("nvshmem")
+    @classmethod
+    def from_enum(cls, enum_cls: Enum):
+        # Extract members from the standard enum class and create a MutableEnum instance
+        members = {member.name: member.value for member in enum_cls}
+        return cls(**members)
 
+    def add(self, key, value):
+        if key in self._members:
+            raise ValueError(f"Member '{key}' already exists.")
+        self._members[key] = value
+
+    def remove(self, key):
+        if key not in self._members:
+            raise ValueError(f"Member '{key}' does not exist.")
+        del self._members[key]
+    
+    def remove_by_value(self, value):
+        """
+        Remove a member by value.
+        This is useful when we want to remove a team by its handle.
+        Calling this function on a value notin the Enum is idempotent.
+
+        Args:
+            - value (int): The value of the member to remove.
+
+        Returns:
+            None
+
+        Raises:
+        """
+        for key, val in self._members.items():
+            if val == value:
+                del self._members[key]
+                return
+
+    def __getattr__(self, item):
+        if item in self._members:
+            return self._members[item]
+        raise AttributeError(f"No such member: {item}")
+
+    def __getitem__(self, item):
+        if item in self._members:
+            return self._members[item]
+        raise KeyError(f"No such member: {item}")
+
+    def __contains__(self, item):
+        return item in self._members
+
+    def __repr__(self):
+        members = ", ".join(f"{k}={v}" for k, v in self._members.items())
+        return f"<MutableEnum {members}>"
+
+    def keys(self):
+        return self._members.keys()
+
+    def values(self):
+        return self._members.values()
+
+    def items(self):
+        return self._members.items()
+     
+    def __iter__(self):
+        return iter(self._members)
+    
 """
 IntEnum which matches 1:1 with ``nvshmem_team_id_t``
+
+This is a special Mutable enum so we can add elements to it later after a team was created.
 """
-Teams = Team_id
+Teams = MutableEnum.from_enum(Team_id)
+
 
 """
 Version class
