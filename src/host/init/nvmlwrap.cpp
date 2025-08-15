@@ -1,4 +1,5 @@
 #include "internal/host/nvmlwrap.h"
+#include <cuda.h>                                        // for CUDA_VERSION
 #include <dlfcn.h>                                       // for dlsym, dlclose, dlopen
 #include <stdio.h>                                       // for NULL, snprintf
 #include <string.h>                                      // for memset
@@ -41,6 +42,8 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
                  status);
         LOAD_SYM(*nvml_handle, "nvmlDeviceGetGpuFabricInfoV",
                  nvml_ftable->nvmlDeviceGetGpuFabricInfoV, 1, status);
+        LOAD_SYM(*nvml_handle, "nvmlDeviceGetFieldValues", nvml_ftable->nvmlDeviceGetFieldValues, 0,
+                 status);
     }
 
     if (status != NVSHMEMX_SUCCESS) {

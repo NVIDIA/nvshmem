@@ -33,7 +33,7 @@ void nvshmem_quiet(void) {
 
     int tbitmap = nvshmemi_state->transport_bitmap;
     if (nvshmemi_state->used_internal_streams) {
-        for (int s = 0; s < MAX_PEER_STREAMS; s++) {
+        for (int s = 0; s < nvshmemi_options.MAX_PEER_STREAMS; s++) {
             if (nvshmemi_state->active_internal_streams[s]) {
                 cudaStream_t custrm = nvshmemi_state->custreams[s];
                 CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(custrm), status, out);
@@ -63,7 +63,7 @@ out:
 
 void nvshmemi_quiesce_internal_streams(cudaStream_t cstrm) {
     if (nvshmemi_state->used_internal_streams) {
-        for (int s = 0; s < MAX_PEER_STREAMS; s++) {
+        for (int s = 0; s < nvshmemi_options.MAX_PEER_STREAMS; s++) {
             cudaStream_t custrm = nvshmemi_state->custreams[s];
             cudaEvent_t cuev = nvshmemi_state->cuevents[s];
 

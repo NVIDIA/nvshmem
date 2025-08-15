@@ -189,14 +189,16 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
                                                        uint64_t signal, void *local, void *remote,
                                                        ptrdiff_t lstride, ptrdiff_t rstride,
                                                        int sig_op, int pe) {
-    cudaStream_t custrm = nvshmemi_state->custreams[pe % MAX_PEER_STREAMS];
-    cudaEvent_t cuev = nvshmemi_state->cuevents[pe % MAX_PEER_STREAMS];
+    const int distance = (pe - nvshmemi_state->mype + nvshmemi_state->npes) % nvshmemi_state->npes;
+    const int stream_idx = distance % nvshmemi_options.MAX_PEER_STREAMS;
+    cudaStream_t custrm = nvshmemi_state->custreams[stream_idx];
+    cudaEvent_t cuev = nvshmemi_state->cuevents[stream_idx];
     void *destptr_actual, *srcptr_actual;
     rma_memdesc_t dest, src;
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, lstride, rstride};
 
     if (verb.is_nbi) {
-        nvshmemi_state->active_internal_streams[pe % MAX_PEER_STREAMS] = 1;
+        nvshmemi_state->active_internal_streams[stream_idx] = 1;
         nvshmemi_state->used_internal_streams = 1;
     }
 

@@ -22,6 +22,7 @@
 #include <list>
 
 #include "host/nvshmemx_api.h"
+#include "internal/host/nvmlwrap.h"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmem_nvtx.hpp"
@@ -574,7 +575,7 @@ int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
     int status = 0;
     free(state->selected_transport_for_rma);
     free(state->selected_transport_for_amo);
-    for (int i = 0; i < MAX_PEER_STREAMS; i++) {
+    for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->custreams[i]), status, out);
         CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cuevents[i]), status, out);
     }
@@ -627,14 +628,52 @@ static int nvshmemi_setup_nvshmem_handles(nvshmemi_state_t *state) {
     return status;
 }
 
+static bool has_nvswitch() {
+    void *nvml_handle = nullptr;
+    struct nvml_function_table nvml_ftable;
+    bool has_nvswitch = false;
+    nvmlFieldValue_t fv;
+    int dev;
+    CUdevice cu_dev;
+    CUDA_RUNTIME_CHECK(cudaGetDevice(&dev));
+    CUCHECK(nvshmemi_cuda_syms, cuDeviceGet(&cu_dev, dev));
+    
+    char pciBusId[] = "00000000:00:00.0";
+    CUDA_RUNTIME_CHECK(cudaDeviceGetPCIBusId(pciBusId, sizeof(pciBusId), dev));
+    nvmlDevice_t nvml_dev;
+
+    /* start NVML Library */
+    nvshmemi_nvml_ftable_init(&nvml_ftable, &nvml_handle);
+
+    NVML_CHECK(nvml_ftable.nvmlInit());
+
+    NVML_CHECK(nvml_ftable.nvmlDeviceGetHandleByPciBusId(pciBusId, &nvml_dev));
+
+    fv.fieldId = NVML_FI_DEV_NVSWITCH_CONNECTED_LINK_COUNT;
+    NVML_CHECK(nvml_ftable.nvmlDeviceGetFieldValues(nvml_dev, 1, &fv));
+    has_nvswitch = fv.value.uiVal > 0;
+
+    NVML_CHECK(nvml_ftable.nvmlShutdown());
+    nvshmemi_nvml_ftable_fini(&nvml_ftable, &nvml_handle);
+
+    return has_nvswitch;
+}
+
 static int nvshmemi_setup_cuda_handles(nvshmemi_state_t *state) {
     int status = 0;
-    state->custreams = (cudaStream_t *)malloc(MAX_PEER_STREAMS * sizeof(cudaStream_t));
-    state->cuevents = (cudaEvent_t *)malloc(MAX_PEER_STREAMS * sizeof(cudaEvent_t));
-    state->active_internal_streams = (bool *)calloc(MAX_PEER_STREAMS, sizeof(bool));
+    if ((has_nvswitch() && !nvshmemi_options.MAX_PEER_STREAMS_provided) || nvshmemi_options.MAX_PEER_STREAMS <= 0) {
+        nvshmemi_options.MAX_PEER_STREAMS = 1;
+        INFO(NVSHMEM_INIT, "NVSHMEM has set MAX_PEER_STREAMS to 1");
+    }
+    state->custreams =
+        (cudaStream_t *)malloc(nvshmemi_options.MAX_PEER_STREAMS * sizeof(cudaStream_t));
+    state->cuevents =
+        (cudaEvent_t *)malloc(nvshmemi_options.MAX_PEER_STREAMS * sizeof(cudaEvent_t));
+    state->active_internal_streams =
+        (bool *)calloc(nvshmemi_options.MAX_PEER_STREAMS, sizeof(bool));
     int leastPriority, greatestPriority;
     CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-    for (int i = 0; i < MAX_PEER_STREAMS; i++) {
+    for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamCreateWithPriority(
                                     &state->custreams[i], cudaStreamNonBlocking, greatestPriority),
                                 status, out);

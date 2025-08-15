@@ -26,7 +26,7 @@ void nvshmem_fence(void) {
             struct nvshmem_transport *tcurr =
                 ((nvshmem_transport_t *)nvshmemi_state->transports)[j];
             if ((tcurr->attr & NVSHMEM_TRANSPORT_ATTR_NO_ENDPOINTS)) {
-                for (int s = 0; s < MAX_PEER_STREAMS; s++) {
+                for (int s = 0; s < nvshmemi_options.MAX_PEER_STREAMS; s++) {
                     cudaStream_t custrm = nvshmemi_state->custreams[s];
                     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(custrm), status, out);
                 }
