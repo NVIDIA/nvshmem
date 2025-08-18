@@ -405,7 +405,6 @@ nvshmemt_libfabric_gdr_op_ctx_t *nvshmemt_inplace_copy_sig_op_to_gdr_op(nvshmemt
 int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
                                              nvshmemt_libfabric_endpoint_t *ep,
                                              struct fi_cq_data_entry *entry, fi_addr_t *addr) {
-    nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_gdr_signal_op *sig_op = NULL;
     nvshmemt_libfabric_gdr_op_ctx_t *op = NULL;
     bool is_write_comp = entry->flags & FI_REMOTE_CQ_DATA;
@@ -438,12 +437,12 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
         op = nvshmemt_inplace_copy_sig_op_to_gdr_op(sig_op);
     }
 
-    iter = state->proxy_put_signal_comp_map->find(map_key);
-    if (iter != state->proxy_put_signal_comp_map->end()) {
+    iter = ep->proxy_put_signal_comp_map->find(map_key);
+    if (iter != ep->proxy_put_signal_comp_map->end()) {
         if (!is_write_comp) iter->second.first = op;
         iter->second.second += progress_count;
     } else {
-        iter = state->proxy_put_signal_comp_map->insert(std::make_pair(map_key, std::make_pair(op, progress_count))).first;
+        iter = ep->proxy_put_signal_comp_map->insert(std::make_pair(map_key, std::make_pair(op, progress_count))).first;
     }
 
     if (!iter->second.second) {
@@ -451,7 +450,7 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
             op = iter->second.first;
         }
         perform_gdrcopy_amo<uint64_t>(transport, op);
-        state->proxy_put_signal_comp_map->erase(iter);
+        ep->proxy_put_signal_comp_map->erase(iter);
         status = fi_recv(ep->endpoint, op, sizeof(nvshmemt_libfabric_gdr_op_ctx_t), NULL,
                          FI_ADDR_UNSPEC, op);
     }
@@ -907,13 +906,17 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     int target_ep, status;
     uint64_t sequence_count;
+    int ep_idx;
 
-    if (is_proxy)
-        target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    else
-        target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
+    if (is_proxy) {
+        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
+        target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
+    } else {
+        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
+        target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
+    }
 
-    sequence_count = libfabric_state->proxy_put_signal_per_peer_seq_counter[target_ep]++;
+    sequence_count = libfabric_state->eps[ep_idx].proxy_put_signal_per_peer_seq_counter[target_ep]++;
 
     assert(write_remote.size() == write_local.size() &&
            write_local.size() == write_bytes_desc.size());
@@ -1361,11 +1364,6 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
         nvshmemtLibfabricOpQueue.putToSendBulk((char *)state->send_buf, elem_size,
                                                state->num_sends);
-
-        state->proxy_put_signal_per_peer_seq_counter =
-            (uint64_t *)calloc(NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * n_pes, sizeof(uint64_t));
-        state->proxy_put_signal_comp_map =
-            new std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>();
     }
 
     status = fi_fabric(state->prov_info->fabric_attr, &state->fabric, NULL);
@@ -1459,6 +1457,14 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to allocate endpoint: %d: %s\n", status,
                               fi_strerror(status * -1));
+
+        /* Initialize per-endpoint proxy_put_signal_comp_map */
+        state->eps[i].proxy_put_signal_comp_map =
+            new std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>();
+
+        /* Initialize per-endpoint proxy_put_signal_per_peer_seq_counter */
+        state->eps[i].proxy_put_signal_per_peer_seq_counter =
+            (uint64_t *)calloc(NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * n_pes, sizeof(uint64_t));
 
         /* FI_OPT_CUDA_API_PERMITTED was introduced in libfabric 1.18.0 */
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
@@ -1585,6 +1591,10 @@ out:
     if (status != 0) {
         if (state->eps) {
             for (int i = 0; i < NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS; i++) {
+                if (state->eps[i].proxy_put_signal_comp_map)
+                    delete state->eps[i].proxy_put_signal_comp_map;
+                if (state->eps[i].proxy_put_signal_per_peer_seq_counter)
+                    free(state->eps[i].proxy_put_signal_per_peer_seq_counter);
                 if (state->eps[i].endpoint) {
                     fi_close(&state->eps[i].endpoint->fid);
                     state->eps[i].endpoint = NULL;
@@ -1650,16 +1660,16 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
 
     if (libfabric_state->send_buf) free(libfabric_state->send_buf);
     if (libfabric_state->recv_buf) free(libfabric_state->recv_buf);
-    if (libfabric_state->proxy_put_signal_per_peer_seq_counter)
-        free(libfabric_state->proxy_put_signal_per_peer_seq_counter);
-    if (libfabric_state->proxy_put_signal_comp_map)
-        delete libfabric_state->proxy_put_signal_comp_map;
     if (libfabric_state->prov_info) {
         fi_freeinfo(libfabric_state->prov_info);
     }
 
     if (libfabric_state->eps) {
         for (int i = 0; i < NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS; i++) {
+            if (libfabric_state->eps[i].proxy_put_signal_comp_map)
+                delete libfabric_state->eps[i].proxy_put_signal_comp_map;
+            if (libfabric_state->eps[i].proxy_put_signal_per_peer_seq_counter)
+                free(libfabric_state->eps[i].proxy_put_signal_per_peer_seq_counter);
             if (libfabric_state->eps[i].endpoint) {
                 status = fi_close(&libfabric_state->eps[i].endpoint->fid);
                 if (status) {

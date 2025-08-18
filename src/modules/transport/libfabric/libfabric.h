@@ -55,11 +55,17 @@ typedef struct {
     char name[NVSHMEMT_LIBFABRIC_EP_LEN];
 } nvshmemt_libfabric_ep_name_t;
 
+struct nvshmemt_libfabric_gdr_op_ctx;
+typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
+
 typedef struct {
     struct fid_ep *endpoint;
     struct fid_cq *cq;
     struct fid_cntr *counter;
     uint64_t submitted_ops;
+    uint64_t *proxy_put_signal_per_peer_seq_counter;
+    std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
+        *proxy_put_signal_comp_map;
 } nvshmemt_libfabric_endpoint_t;
 
 typedef enum {
@@ -142,8 +148,6 @@ class threadSafeOpQueue {
     }
 };
 
-struct nvshmemt_libfabric_gdr_op_ctx;
-typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
 typedef struct {
     struct fi_info *prov_info;
     struct fi_info *all_prov_info;
@@ -166,9 +170,6 @@ typedef struct {
     size_t num_recvs;
     void *recv_buf;
     struct transport_mem_handle_info_cache *cache;
-    uint64_t *proxy_put_signal_per_peer_seq_counter;
-    std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
-        *proxy_put_signal_comp_map;
 } nvshmemt_libfabric_state_t;
 
 typedef enum {
