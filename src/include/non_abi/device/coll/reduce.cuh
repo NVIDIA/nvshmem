@@ -44,11 +44,11 @@ namespace cg = cooperative_groups;
 template <typename T, rdxn_ops_t op>
 #if !defined __CUDACC_RTC__
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename std::enable_if<std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #else
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename cuda::std::enable_if<cuda::std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #endif
     switch (op) {
@@ -76,11 +76,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
 template <typename T, rdxn_ops_t op>
 #if !defined __CUDACC_RTC__
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename std::enable_if<!std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<!::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #else
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename cuda::std::enable_if<!cuda::std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<!::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #endif
     switch (op) {
@@ -236,7 +236,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         int groupSize = nvshmemi_threadgroup_size<SCOPE>();                                        \
         int nelems = nelem_major_dim * nelem_minor_dim; /* # vec elems*/                           \
         using vtype = int4;                                                                        \
-        if constexpr (cuda::std::is_empty<tuple_t>::value) {                                       \
+        if constexpr (::cuda::std::is_empty<tuple_t>::value) {                                     \
             /* If no predicate, we vectorize the operation */                                      \
             for (size_t j = myIdx * UNROLL; j < nelems; j += groupSize * UNROLL) {                 \
                 uint32_t u4[4 * UNROLL];                                                           \
@@ -361,7 +361,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         int groupSize = nvshmemi_threadgroup_size<SCOPE>();                                        \
         int nelems = nelem_major_dim * nelem_minor_dim;                                            \
                                                                                                    \
-        if constexpr (cuda::std::is_empty<tuple_t>::value) {                                       \
+        if constexpr (::cuda::std::is_empty<tuple_t>::value) {                                     \
             /* If no predicate, we vectorize the operation */                                      \
             for (size_t j = myIdx; j < nelems; j += groupSize) {                                   \
                 CXX_TYPE val1[2];                                                                  \
@@ -477,7 +477,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();                                    \
         int groupSize = nvshmemi_threadgroup_size<SCOPE>();                                        \
         int nelems = nelem_major_dim * nelem_minor_dim;                                            \
-        if constexpr (cuda::std::is_empty<tuple_t>::value) {                                       \
+        if constexpr (::cuda::std::is_empty<tuple_t>::value) {                                     \
             /* Case: no predicate */                                                               \
             for (size_t j = myIdx; j < nelems; j += groupSize) {                                   \
                 CXX_TYPE val1;                                                                     \
@@ -547,38 +547,38 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
             const int nelem_minor_dim, const int src_stride_minor_dim,                             \
             const int dst_stride_minor_dim, const int src_stride_major_dim,                        \
             const int dst_stride_major_dim, tuple_t start_coord, tuple_t boundary) {               \
-        if constexpr (cuda::std::is_same<vtype, int4>::value) {                                    \
+        if constexpr (::cuda::std::is_same<vtype, int4>::value) {                                  \
             nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v4<                  \
                 elemType, SCOPE, tuple_t, 1, ONESHOT, major_dim, minor_dim>(                       \
                 dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,              \
                 dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord,     \
                 boundary);                                                                         \
-        } else if constexpr (cuda::std::is_same<vtype, uint64_t>::value) {                         \
+        } else if constexpr (::cuda::std::is_same<vtype, uint64_t>::value) {                       \
             nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v2<                  \
                 elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                          \
                 dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,              \
                 dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord,     \
                 boundary);                                                                         \
-        } else if constexpr (cuda::std::is_same<vtype, uint32_t>::value) {                         \
+        } else if constexpr (::cuda::std::is_same<vtype, uint32_t>::value) {                       \
             nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v1<                  \
                 elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                          \
                 dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,              \
                 dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord,     \
                 boundary);                                                                         \
         } else {                                                                                   \
-            if (cuda::std::is_same<vtype, int4>::value) {                                          \
+            if (::cuda::std::is_same<vtype, int4>::value) {                                        \
                 nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v4<              \
                     elemType, SCOPE, tuple_t, 1, ONESHOT, major_dim, minor_dim>(                   \
                     dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,          \
                     dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord, \
                     boundary);                                                                     \
-            } else if (cuda::std::is_same<vtype, uint64_t>::value) {                               \
+            } else if (::cuda::std::is_same<vtype, uint64_t>::value) {                             \
                 nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v2<              \
                     elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                      \
                     dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,          \
                     dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord, \
                     boundary);                                                                     \
-            } else if (cuda::std::is_same<vtype, uint32_t>::value) {                               \
+            } else if (::cuda::std::is_same<vtype, uint32_t>::value) {                             \
                 nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v1<              \
                     elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                      \
                     dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,          \
@@ -816,8 +816,10 @@ NVSHMEMI_MCAST_TILE_ALLREDUCE_THREADGROUP(uint32_t, bf16x2, MAX)
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadgroup(
     TYPE *__restrict__ dest, const TYPE *__restrict__ src, size_t nreduce) {
-    constexpr bool is_unsigned = std::is_integral<TYPE>::value && std::is_unsigned<TYPE>::value;
-    constexpr bool is_signed = std::is_integral<TYPE>::value && std::is_signed<TYPE>::value;
+    constexpr bool is_unsigned =
+        ::cuda::std::is_integral<TYPE>::value && cuda::std::is_unsigned<TYPE>::value;
+    constexpr bool is_signed =
+        ::cuda::std::is_integral<TYPE>::value && ::cuda::std::is_signed<TYPE>::value;
     constexpr bool is_float_v = is_float<TYPE>::value;
     constexpr bool is_double_v = is_double<TYPE>::value;
     constexpr bool is_half_v = is_half<TYPE>::value;
@@ -2036,13 +2038,14 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
     assert(0 && "Tile-granular APIs need C++ 17");
 #endif
 
-    static_assert(cuda::std::is_same<typename src_tensor_t::value_type,
-                                     typename dst_tensor_t::value_type>::value,
+    static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
+                                       typename dst_tensor_t::value_type>::value,
                   "Source and destination tensors must have the same type");
 
-    static_assert(cuda::std::is_same<decltype(cuda::std::declval<src_tensor_t>().shape()),
-                                     decltype(cuda::std::declval<dst_tensor_t>().shape())>::value,
-                  "Source and destination tensors must have same shape");
+    static_assert(
+        ::cuda::std::is_same<decltype(::cuda::std::declval<src_tensor_t>().shape()),
+                             decltype(::cuda::std::declval<dst_tensor_t>().shape())>::value,
+        "Source and destination tensors must have same shape");
 
     static_assert((algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI) ||
                       (algo == nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI),
@@ -2135,13 +2138,14 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
     assert(0 && "Tile-granular APIs need C++ 17");
 #endif
 
-    static_assert(cuda::std::is_same<typename src_tensor_t::value_type,
-                                     typename dst_tensor_t::value_type>::value,
+    static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
+                                       typename dst_tensor_t::value_type>::value,
                   "Source and destination tensors must have the same type");
 
-    static_assert(cuda::std::is_same<decltype(cuda::std::declval<src_tensor_t>().shape()),
-                                     decltype(cuda::std::declval<dst_tensor_t>().shape())>::value,
-                  "Source and destination tensors must have same shape");
+    static_assert(
+        ::cuda::std::is_same<decltype(::cuda::std::declval<src_tensor_t>().shape()),
+                             decltype(::cuda::std::declval<dst_tensor_t>().shape())>::value,
+        "Source and destination tensors must have same shape");
 
     static_assert((algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI),
                   "Unsupported tile Reduce algorithm. "

@@ -88,8 +88,7 @@ struct Tensor {
     const Layout _layout;
 
     __host__ __device__ constexpr Tensor(T* data, Layout layout) : _data(data), _layout(layout) {}
-    Tensor(Layout layout) : _data(NULL), _layout(layout) {}
-
+    __host__ __device__ Tensor(Layout layout) : _data(NULL), _layout(layout) {}
     __host__ __device__ constexpr Layout layout() const { return _layout; }
 
     __host__ __device__ T* data() { return _data; }

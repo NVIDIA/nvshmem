@@ -35,5 +35,19 @@
 #define NVSHMEMI_DEVICE_ALWAYS_INLINE __attribute__((always_inline))
 #define NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __attribute__((always_inline))
 #endif
+#endif
 
+#if defined __NVSHMEM_NUMBA_SUPPORT__
+#undef NVSHMEMI_DEVICE_INLINE
+#undef NVSHMEMI_DEVICE_ALWAYS_INLINE
+#undef NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE
+// See
+// https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html?highlight=__noinline__#inline-hint
+// This will not eliminate the symbol from LTOIR, but also marks the signature
+// with llvm attribute always_inline, so when the linker sees this and use with another function
+// it will aggressively inline the function into its call site.
+#define NVSHMEMI_DEVICE_INLINE __inline_hint__
+#define NVSHMEMI_DEVICE_ALWAYS_INLINE __inline_hint__
+#define NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __inline_hint__
+#undef NVSHMEM_ENABLE_ALL_DEVICE_INLINING
 #endif
