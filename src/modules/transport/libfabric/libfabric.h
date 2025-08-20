@@ -11,6 +11,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include "rdma/fabric.h"
 
 // IWYU pragma: no_include <bits/stdint-uintn.h>
 
@@ -46,6 +47,9 @@
 #endif
 
 #define NVSHMEMT_LIBFABRIC_MAX_RETRIES (1ULL << 20)
+
+#define container_of(ptr, type, field) \
+	((type *) ((char *)ptr - offsetof(type, field)))
 
 typedef struct {
     char name[NVSHMEMT_LIBFABRIC_DOMAIN_LEN];
@@ -169,6 +173,7 @@ typedef struct {
     void *send_buf;
     size_t num_recvs;
     void *recv_buf;
+    struct fid_mr *mr;
     struct transport_mem_handle_info_cache *cache;
 } nvshmemt_libfabric_state_t;
 
@@ -242,4 +247,5 @@ struct nvshmemt_libfabric_gdr_op_ctx {
         nvshmemt_libfabric_gdr_send_amo_op_t send_amo;
         nvshmemt_libfabric_gdr_ret_amo_op_t ret_amo;
     };
+    struct fi_context2 ofi_context;
 };
