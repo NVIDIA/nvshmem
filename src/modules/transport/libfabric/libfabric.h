@@ -67,7 +67,7 @@ typedef struct {
     struct fid_cq *cq;
     struct fid_cntr *counter;
     uint64_t submitted_ops;
-    uint64_t *proxy_put_signal_per_peer_seq_counter;
+    uint32_t *proxy_put_signal_per_peer_seq_counter;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
         *proxy_put_signal_comp_map;
 } nvshmemt_libfabric_endpoint_t;
@@ -221,15 +221,16 @@ typedef struct nvshmemt_libfabric_gdr_send_amo_op {
 
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
- * | 4 type | 2 op | 2 num_writes | 8 sequence_count | 8 signal | 8 target_addr |
+ * | 4 type | 2 op | 2 num_writes | 8 signal | 8 target_addr | 4 sequence_count | 4 resv
  */
 typedef struct nvshmemt_libfabric_gdr_signal_op {
     nvshmemt_libfabric_recv_t type;  /* Must be first */
     uint16_t op;
     uint16_t num_writes;
-    uint64_t sequence_count;
     uint64_t sig_val;
     void* target_addr;
+    uint32_t sequence_count;
+    uint32_t resv;
 } nvshmemt_libfabric_gdr_signal_op_t;
 /*  EFA's inline send size is 32 bytes */
 static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) == 32);
