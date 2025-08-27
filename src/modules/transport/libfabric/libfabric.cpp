@@ -415,7 +415,6 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
     bool is_write_comp = entry->flags & FI_REMOTE_CQ_DATA;
     int status = 0, progress_count;
     uint64_t map_key;
-    const uint64_t mask_upper_2_bytes = 0x0000FFFFFFFFFFFFu;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>::iterator iter;
 
     if (unlikely(*addr == FI_ADDR_NOTAVAIL)) {
@@ -425,11 +424,11 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
     }
 
     if (is_write_comp) {
-        map_key = *addr << 48 | (entry->data & mask_upper_2_bytes);
+        map_key = *addr << 32 | (uint32_t)entry->data;
         progress_count = -1;
     } else {
         sig_op = (nvshmemt_libfabric_gdr_signal_op *) container_of(entry->op_context, nvshmemt_libfabric_gdr_op_ctx_t, ofi_context);
-        map_key = *addr << 48 | (sig_op->sequence_count & mask_upper_2_bytes);
+        map_key = *addr << 32 | sig_op->sequence_count;
         progress_count = (int)sig_op->num_writes;
 
         /* The EFA provider has an inline send size of 32 bytes.
@@ -518,7 +517,7 @@ static int nvshmemt_libfabric_show_info(struct nvshmem_transport *transport, int
 static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                        rma_memdesc_t *remote, rma_memdesc_t *local,
                                        rma_bytesdesc_t bytesdesc, int is_proxy,
-                                       uint64_t *imm_data) {
+                                       uint32_t *imm_data) {
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle;
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     struct iovec p_op_l_iov;
@@ -856,7 +855,7 @@ out:
 static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,
                                          void *curetptr, amo_verb_t verb, amo_memdesc_t *remote,
                                          amo_bytesdesc_t bytesdesc, int is_proxy,
-                                         uint64_t sequence_count, uint16_t num_writes) {
+                                         uint32_t sequence_count, uint16_t num_writes) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_endpoint_t *ep;
     nvshmemt_libfabric_gdr_op_ctx_t *context;
@@ -917,7 +916,7 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
                                   amo_bytesdesc_t sig_bytes_desc, int is_proxy) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     int target_ep, status;
-    uint64_t sequence_count;
+    uint32_t sequence_count;
     int ep_idx;
 
     if (is_proxy) {
@@ -1487,7 +1486,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
         /* Initialize per-endpoint proxy_put_signal_per_peer_seq_counter */
         state->eps[i].proxy_put_signal_per_peer_seq_counter =
-            (uint64_t *)calloc(NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * n_pes, sizeof(uint64_t));
+            (uint32_t *)calloc(NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * n_pes, sizeof(uint32_t));
 
         /* FI_OPT_CUDA_API_PERMITTED was introduced in libfabric 1.18.0 */
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
