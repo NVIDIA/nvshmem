@@ -1,0 +1,43 @@
+Name: NVSHMEM Device Bindings
+Version: {{CONFIG_VERSION}}
+Entry Point: {{ENTRY_POINT_PATH}}
+# The list of files, from which the APIs is allow-listed.
+File List:
+    - {{NVSHMEM_HOME}}/src/include/device/nvshmem_coll_defines.cuh
+    - {{NVSHMEM_HOME}}/src/include/device/nvshmem_defines.h
+    - {{NVSHMEM_HOME}}/src/include/device/nvshmemx_coll_defines.cuh
+    - {{NVSHMEM_HOME}}/src/include/device/nvshmemx_defines.h
+
+GPU Arch:
+   # sm_70 is used to parse the declarations of nvshmem API. When code is jitted
+   # at runtime, Numba will use the runtime CC to generate code.
+  - sm_70 
+
+Clang Include Paths:
+  - {{NVSHMEM_HOME}}/src/include
+
+Macro-expanded Function Prefixes:
+  - nvshmem_
+  - nvshmemx_
+
+Predefined Macros:
+  - __NVSHMEM_NUMBA_SUPPORT__
+
+Output Name: {{OUTPUT_NAME}}
+
+Cooperative Launch Required Functions Regex:
+{{COOPERATIVE_LAUNCH_REQUIRED_FUNCTIONS}}
+
+API Prefix Removal:
+  Function:
+    - "nvshmem_"
+    - "nvshmemx_"
+
+Additional Import:
+  - "nvshmem.bindings"
+
+Module Callbacks:
+  setup: "lambda x: nvshmem.bindings.cumodule_init(int(x))"
+  teardown: "lambda x: nvshmem.bindings.cumodule_finalize(int(x))"
+
+Shim Include Override: "\"entry_point.h\""

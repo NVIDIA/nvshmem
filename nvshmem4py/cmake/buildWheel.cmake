@@ -19,6 +19,7 @@ function(BuildWheel WHEEL_TARGET PY_VER PYTHON_EXECUTABLE CUDA_VER)
 
     if(NOT TARGET make_venv_${PY_VER})
         add_custom_target(make_venv_${PY_VER}
+            COMMAND rm -rf ${VENV_DIR}
             COMMAND ${PYTHON_EXECUTABLE} -m venv ${VENV_DIR}
             COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip
             COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt
@@ -60,6 +61,10 @@ function(BuildWheel WHEEL_TARGET PY_VER PYTHON_EXECUTABLE CUDA_VER)
 
     if(TARGET build_bindings_cybind)
         add_dependencies(${WHEEL_TARGET} build_bindings_cybind)
+    endif()
+
+    if(TARGET build_bindings_numbast)
+        add_dependencies(${WHEEL_TARGET} build_bindings_numbast)
     endif()
 
     if(NOT EXISTS ${VENV_PYTHON_EXECUTABLE})
