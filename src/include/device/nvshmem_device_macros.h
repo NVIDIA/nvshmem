@@ -37,7 +37,6 @@
 #endif
 #endif
 
-
 #ifdef __NVSHMEM_NUMBA_SUPPORT__
 // IBGDA support requires host library definitions, NVRTC does not compile them.
 // TODO: @wangm to look into ibgda code and see what we should to do support compiling

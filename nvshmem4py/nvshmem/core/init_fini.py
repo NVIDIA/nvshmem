@@ -11,6 +11,7 @@
 import logging
 import os
 import ctypes
+from typing import Union
 
 import nvshmem.core
 import nvshmem.bindings as bindings
@@ -22,6 +23,7 @@ from nvshmem.core._internal_tracking import _mr_references, _cached_device, _deb
 
 from cuda.core.experimental._memory import Buffer, MemoryResource
 from cuda.core.experimental import Device, system
+from cuda.core.experimental._module import ObjectCode
 
 import numpy as np
 
@@ -33,7 +35,7 @@ except ImportError:
     Comm = None
     _mpi4py_enabled = False
 
-__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', "UniqueID"]
+__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init', 'library_finalize', 'UniqueID']
 
 logger = logging.getLogger("nvshmem")
 
@@ -292,5 +294,101 @@ def finalize() -> None:
     # Cybind converts the success status code to NoneType
     if fini_status != None:
         raise NvshmemError("Failed to finalize Hostlib")
+        
+def module_init(mod: NvshmemKernelObject) -> None:
+    """
+    Initialize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
 
-    nvshmem.core._internal_tracking._is_initialized["status"] = InternalInitStatus.DE_INITIALIZED
+    Typically, this is called once per uniquely compiled object, prior to launching the kernel. Internally, it can manage multiple init/finalize via refcounting.
+
+    The same object passed in here must be passed into the corresponding module_finalize call. This function modifies the object in place.
+
+    Args:
+        - mod (NvshmemKernelObject): The same object passed in here must be passed into the corresponding module_finalize call. This function modifies the object in place.
+
+    Raises:
+        NvshmemError: If the NVSHMEM module initialization fails.
+
+    Example:
+        >>> nvshmem.core.module_init(mod)
+    """
+    if mod.handle is None:
+        raise NvshmemInvalid("Invalid module type passed in")
+    status = bindings.cumodule_init(int(mod.handle))
+    print(f"CUmodule init status: {status}")
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to initialize CUmodule for NVSHMEM")
+
+def module_finalize(mod: NvshmemKernelObject) -> None:
+    """
+    Finalize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
+
+    This is called once per uniquely compiled object, post teardown of the kernel.
+
+    The user should pass the same NvshmemKernelObject that was passed to module_init into this function.
+
+    Args:
+        - mod (NvshmemKernelObject): The module that NVSHMEM will finalize
+
+    Raises:
+        NvshmemError: If the NVSHMEM module finalization fails.
+
+    Example:
+        >>> nvshmem.core.module_finalize(mod)
+    """
+    # At init time, we stored the handle of the loaded module
+    if mod.finalize_handle is None:
+        raise NvshmemInvalid("Module not initialized")
+    status = bindings.cumodule_finalize(int(mod.handle))
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to finalize CUmodule for NVSHMEM")
+
+def library_init(lib: NvshmemKernelObject) -> None:
+    """
+    Initialize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
+
+    Typically, this is called once per uniquely compiled object, prior to launching the kernel. Internally, it can manage multiple init/finalize via refcounting.
+
+    The same object passed in here must be passed into the corresponding library_finalize call. This function modifies the object in place.
+
+    Args:
+        - lib (NvshmemKernelObject): The library that NVSHMEM will initialize
+    
+    Raises:
+        NvshmemError: If the NVSHMEM module initialization fails.
+
+            The same object passed in here must be passed into the corresponding module_finalize call. This function modifies the object in place.
+
+    Example:
+        >>> nvshmem.core.module_init(mod)
+    """
+    if lib.handle is  None:
+        raise NvshmemInvalid("Invalid library type passed in")
+    status = bindings.culibrary_init(lib.handle)
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to initialize CULibrary for NVSHMEM")
+
+def library_finalize(lib: NvshmemKernelObject) -> None:
+    """
+    Finalize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
+
+    Typically, this is called once per uniquely compiled object, post teardown of the kernel. Internally, it can manage multiple init/finalize via refcounting.
+    
+    Args:
+        - lib (NvshmemKernelObject): The library that NVSHMEM will finalize
+
+    The user should pass the same NvshmemKernelObject that was passed to library_init into this function.
+
+    Raises:
+        NvshmemError: If the NVSHMEM module finalization fails.
+
+    Example:
+        >>> nvshmem.core.module_finalize(mod)
+    """
+    # At init time, we stored the handle of the loaded module
+    if lib.handle is None:
+        raise NvshmemInvalid("Library not initialized")
+    status = bindings.culibrary_finalize(int(lib.handle))
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to finalize CULibrary for NVSHMEM")
+    

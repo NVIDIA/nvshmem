@@ -17,15 +17,16 @@ from typing import Union
 from enum import Enum, IntEnum
 
 from cuda.core.experimental._memory import MemoryResource, Buffer
-from cuda.core.experimental import Device, system
+from cuda.core.experimental import Device, system, ObjectCode
 from cuda.core.experimental._stream import Stream
+import cuda.bindings.driver
 
 from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id
 from nvshmem.core._internal_tracking import _except_on_del
 
 logger = logging.getLogger("nvshmem")
 
-__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType", "MutableEnum", "Teams", "BufferTypes"]
+__all__ = ["Version", "NvshmemInvalid", "NvshmemError", "NvshmemResource", "NvshmemStream", "NvshmemStreamsType", "MutableEnum", "Teams", "BufferTypes", "NvshmemKernelObject"]
 
 try:
     import torch
@@ -106,14 +107,64 @@ class MutableEnum:
      
     def __iter__(self):
         return iter(self._members)
-    
+
 """
 IntEnum which matches 1:1 with ``nvshmem_team_id_t``
 
 This is a special Mutable enum so we can add elements to it later after a team was created.
 """
 Teams = MutableEnum.from_enum(Team_id)
+    
+class NvshmemKernelObject:
 
+    def __new__(self, *args, **kwargs):
+        raise RuntimeError(
+            "NvshmemKernelObject objects cannot be instantiated directly. "
+            "Please use NvshmemKernelObject APIs (from_cubin, from_handle)"
+        )
+    
+    @classmethod
+    def _init(cls, handle: int):
+        self = super().__new__(cls)
+        self.handle = handle
+        return self
+    
+    @staticmethod
+    def from_handle(handle: int=None):
+        """
+        Create a NvshmemKernelObject from a handle
+        """
+        return NvshmemKernelObject._init(handle=int(handle))
+
+    @staticmethod
+    def from_obj(obj: ObjectCode):
+        """
+        Create a NvshmemKernelObject from a ObjectCode
+        """
+        return NvshmemKernelObject._init(handle=int(obj.handle))
+    
+    @staticmethod
+    def from_obj_bytes(obj_bytes: bytes):
+        """
+        Create a NvshmemKernelObject from a bytes-string of the assembled CUDA object.
+        """
+        obj =  ObjectCode.from_cubin(obj_bytes)
+        return NvshmemKernelObject._init(handle=int(obj.handle))
+
+    @staticmethod
+    def from_triton(triton_kernel: "JITFunction"):
+        """
+        Create a NvshmemKernelObject from a Triton kernel compiled with JITFunction
+        """
+        return NvshmemKernelObject._init(handle=int(triton_kernel.handle))
+    
+    # TODO: convert to class when cuda.bindings.Kernel is imported
+    @staticmethod
+    def from_cuda_bindings(cuda_kernel: cuda.bindings.driver.CUmodule):
+        """
+        Create a NvshmemKernelObject from a CUDA kernel
+        """
+        return NvshmemKernelObject._init(handle=int(cuda_kernel.handle))
 
 """
 Version class
