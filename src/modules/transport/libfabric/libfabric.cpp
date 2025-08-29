@@ -1471,12 +1471,12 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
     if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
         state->num_sends =
-            current_fabric->tx_attr->size * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * t->n_pes;
+            current_fabric->tx_attr->size * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS;
         state->num_recvs =
-            current_fabric->rx_attr->size * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * t->n_pes;
+            current_fabric->rx_attr->size * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS;
         size_t elem_size = sizeof(nvshmemt_libfabric_gdr_op_ctx_t);
 
-        num_recvs_per_pe = state->num_recvs / (t->n_pes * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS);
+        num_recvs_per_pe = state->num_recvs / NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS;
 
         state->recv_buf = calloc(state->num_sends + state->num_recvs, elem_size);
         NVSHMEMI_NULL_ERROR_JMP(state->recv_buf, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
