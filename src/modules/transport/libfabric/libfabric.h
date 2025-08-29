@@ -67,6 +67,7 @@ typedef struct {
     struct fid_cq *cq;
     struct fid_cntr *counter;
     uint64_t submitted_ops;
+    uint64_t completed_staged_atomics;
     uint32_t *proxy_put_signal_per_peer_seq_counter;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
         *proxy_put_signal_comp_map;
@@ -83,6 +84,11 @@ typedef enum {
     NVSHMEMT_LIBFABRIC_CONTEXT_SEND_AMO,
     NVSHMEMT_LIBFABRIC_CONTEXT_RECV_AMO
 } nvshemmt_libfabric_context_t;
+
+typedef enum {
+    NVSHMEMT_LIBFABRIC_IMM_PUT_SIGNAL_SEQ = 0,
+    NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK,
+} nvshmemt_libfabric_imm_cq_data_hdr_t;
 
 class threadSafeOpQueue {
    private:
@@ -175,6 +181,9 @@ typedef struct {
     void *recv_buf;
     struct fid_mr *mr;
     struct transport_mem_handle_info_cache *cache;
+    void **remote_addr_staged_amo_ack;
+    uint64_t *rkey_staged_amo_ack;
+    struct fid_mr *mr_staged_amo_ack;
 } nvshmemt_libfabric_state_t;
 
 typedef enum {
@@ -230,7 +239,7 @@ typedef struct nvshmemt_libfabric_gdr_signal_op {
     uint64_t sig_val;
     void* target_addr;
     uint32_t sequence_count;
-    uint32_t resv;
+    uint32_t src_pe;
 } nvshmemt_libfabric_gdr_signal_op_t;
 /*  EFA's inline send size is 32 bytes */
 static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) == 32);
