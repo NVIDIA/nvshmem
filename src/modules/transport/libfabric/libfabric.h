@@ -216,7 +216,7 @@ typedef struct nvshmemt_libfabric_gdr_send_amo_op {
     uint64_t swap_add;
     uint64_t comp;
     uint32_t size;
-    int ret_ep;
+    int src_pe;
 } nvshmemt_libfabric_gdr_send_amo_op_t;
 
 /* Wire data for put-signal gdr staged atomics
@@ -249,4 +249,5 @@ struct nvshmemt_libfabric_gdr_op_ctx {
         nvshmemt_libfabric_gdr_ret_amo_op_t ret_amo;
     };
     struct fi_context2 ofi_context;
+    fi_addr_t src_addr;
 };

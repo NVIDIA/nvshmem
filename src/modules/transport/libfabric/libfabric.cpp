@@ -62,6 +62,7 @@ static bool use_gdrcopy = false;
 
 #define MAX_COMPLETIONS_PER_CQ_POLL 300
 #define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK 0xFFFFFFF
+#define NVSHMEM_STAGED_AMO_WIREDATA_SIZE sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2) - sizeof(fi_addr_t)
 
 static bool use_staged_atomics = false;
 threadSafeOpQueue nvshmemtLibfabricOpQueue;
@@ -88,6 +89,8 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
     op = container_of(entry->op_context, nvshmemt_libfabric_gdr_op_ctx_t, ofi_context);
     /* FI_CONTEXT2 support requires that every operation with a completion has a context */
     assert(op);
+    assert(addr);
+    op->src_addr = *addr;
 
     if (entry->flags & FI_SEND) {
         nvshmemtLibfabricOpQueue.putToSend(op);
@@ -303,8 +306,8 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
 
         do {
             status =
-                fi_send(op->ep->endpoint, (void *)resp_op, sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2),
-                        fi_mr_desc(libfabric_state->mr), received_op->ret_ep, &resp_op->ofi_context);
+                fi_send(op->ep->endpoint, (void *)resp_op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
+                        fi_mr_desc(libfabric_state->mr), op->src_addr, &resp_op->ofi_context);
         } while (try_again(transport, &status, &num_retries));
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to respond to atomic request.\n");
@@ -376,7 +379,7 @@ int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport) {
         }
 
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to process atomic.\n");
-        status = fi_recv(op->ep->endpoint, (void *)op, sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2),
+        status = fi_recv(op->ep->endpoint, (void *)op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                          fi_mr_desc(libfabric_state->mr), FI_ADDR_UNSPEC, &op->ofi_context);
         if (status) {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to re-post recv.\n");
@@ -456,7 +459,7 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
         }
         perform_gdrcopy_amo<uint64_t>(transport, op);
         ep->proxy_put_signal_comp_map->erase(iter);
-        status = fi_recv(ep->endpoint, op, sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2),
+        status = fi_recv(ep->endpoint, op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                          fi_mr_desc(libfabric_state->mr), FI_ADDR_UNSPEC, &op->ofi_context);
     }
 
@@ -680,13 +683,13 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
     amo->send_amo.retflag = remote->retflag;
     amo->send_amo.swap_add = remote->val;
     amo->send_amo.size = bytesdesc.elembytes;
-    amo->send_amo.ret_ep = transport->my_pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
+    amo->send_amo.src_pe = transport->my_pe;
     amo->type = NVSHMEMT_LIBFABRIC_SEND;
     amo->send_amo.comp = remote->cmp;
 
     num_retries = 0;
     do {
-        status = fi_send(ep->endpoint, (void *)amo, sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2), fi_mr_desc(libfabric_state->mr),
+        status = fi_send(ep->endpoint, (void *)amo, NVSHMEM_STAGED_AMO_WIREDATA_SIZE, fi_mr_desc(libfabric_state->mr),
                          target_ep, &amo->ofi_context);
     } while (try_again(transport, &status, &num_retries));
 
@@ -1576,8 +1579,8 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
                 op = (nvshmemt_libfabric_gdr_op_ctx_t *)state->recv_buf;
                 op = op + ((num_recvs_per_pe * i) + j);
                 assert(op != NULL);
-                status = fi_recv(state->eps[i].endpoint, op,
-                                 sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2), fi_mr_desc(state->mr), FI_ADDR_UNSPEC, &op->ofi_context);
+                status = fi_recv(state->eps[i].endpoint, op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
+                                 fi_mr_desc(state->mr), FI_ADDR_UNSPEC, &op->ofi_context);
             }
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "Unable to post recv to ep. Error: %d: %s\n", status,
