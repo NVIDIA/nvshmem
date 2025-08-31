@@ -1049,9 +1049,11 @@ add_custom_target(package_src_target
     COMMAND "${CMAKE_COMMAND}" --build . --target package_source
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Package Build"
-    DEPENDS build_bindings_cybind build_bindings_numbast
+    DEPENDS build_bindings_cybind
     VERBATIM
 )
-# End Installation definitions
 
-
+# TODO: @benjaming make Numbast non-conditional when build environment is ready for it
+if(TARGET build_bindings_numbast AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+    add_dependencies(package_src_target build_bindings_numbast)
+endif()
