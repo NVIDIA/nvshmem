@@ -1004,7 +1004,7 @@ out:
     return status;
 }
 
-int nvshmemt_ibdevx_progress(nvshmem_transport_t t) {
+int nvshmemt_ibdevx_progress(nvshmem_transport_t t, int is_proxy) {
     int status = 0;
     struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
     transport_ibdevx_state_t *ibdevx_state = (transport_ibdevx_state_t *)transport->state;

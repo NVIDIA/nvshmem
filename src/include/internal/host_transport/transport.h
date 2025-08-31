@@ -141,7 +141,7 @@ struct nvshmem_transport_host_ops {
                               struct nvshmem_transport *transport);
     int (*finalize)(struct nvshmem_transport *transport);
     int (*show_info)(struct nvshmem_transport *transport, int style);
-    int (*progress)(struct nvshmem_transport *transport);
+    int (*progress)(struct nvshmem_transport *transport, int is_proxy);
 
     rma_handle rma;
     amo_handle amo;
