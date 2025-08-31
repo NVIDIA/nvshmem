@@ -987,9 +987,9 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
         target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
     }
 
-    sequence_count = libfabric_state->eps[ep_idx].proxy_put_signal_per_peer_seq_counter[target_ep];
-    libfabric_state->eps[ep_idx].proxy_put_signal_per_peer_seq_counter[target_ep] =
-        (libfabric_state->eps[ep_idx].proxy_put_signal_per_peer_seq_counter[target_ep] + 1)
+    sequence_count = libfabric_state->eps[ep_idx].proxy_put_signal_seq_counter;
+    libfabric_state->eps[ep_idx].proxy_put_signal_seq_counter =
+        (libfabric_state->eps[ep_idx].proxy_put_signal_seq_counter + 1)
         & NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
 
     assert(write_remote.size() == write_local.size() &&
@@ -1544,10 +1544,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         state->eps[i].proxy_put_signal_comp_map =
             new std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>();
 
-        /* Initialize per-endpoint proxy_put_signal_per_peer_seq_counter */
-        state->eps[i].proxy_put_signal_per_peer_seq_counter =
-            (uint32_t *)calloc(NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS * n_pes, sizeof(uint32_t));
-
+        state->eps[i].proxy_put_signal_seq_counter = 0;
         state->eps[i].completed_staged_atomics = 0;
 
         /* FI_OPT_CUDA_API_PERMITTED was introduced in libfabric 1.18.0 */
@@ -1715,8 +1712,6 @@ out:
             for (int i = 0; i < NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS; i++) {
                 if (state->eps[i].proxy_put_signal_comp_map)
                     delete state->eps[i].proxy_put_signal_comp_map;
-                if (state->eps[i].proxy_put_signal_per_peer_seq_counter)
-                    free(state->eps[i].proxy_put_signal_per_peer_seq_counter);
                 if (state->eps[i].endpoint) {
                     fi_close(&state->eps[i].endpoint->fid);
                     state->eps[i].endpoint = NULL;
@@ -1788,8 +1783,6 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
         for (int i = 0; i < NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS; i++) {
             if (libfabric_state->eps[i].proxy_put_signal_comp_map)
                 delete libfabric_state->eps[i].proxy_put_signal_comp_map;
-            if (libfabric_state->eps[i].proxy_put_signal_per_peer_seq_counter)
-                free(libfabric_state->eps[i].proxy_put_signal_per_peer_seq_counter);
             if (libfabric_state->eps[i].endpoint) {
                 status = fi_close(&libfabric_state->eps[i].endpoint->fid);
                 if (status) {

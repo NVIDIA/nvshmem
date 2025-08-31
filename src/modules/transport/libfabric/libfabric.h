@@ -68,7 +68,7 @@ typedef struct {
     struct fid_cntr *counter;
     uint64_t submitted_ops;
     uint64_t completed_staged_atomics;
-    uint32_t *proxy_put_signal_per_peer_seq_counter;
+    uint32_t proxy_put_signal_seq_counter;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
         *proxy_put_signal_comp_map;
 } nvshmemt_libfabric_endpoint_t;
