@@ -182,7 +182,7 @@ NVSHMEMI_ENV_DEF(
 NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 32l, NVSHMEMI_ENV_CAT_OTHER,
                  "Maximum number of simultaneous teams allowed")
 
-NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)128 * (1 << 30)),
+NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)256 * (1 << 30)),
                  NVSHMEMI_ENV_CAT_OTHER, "Maximum memory per GPU")
 
 NVSHMEMI_ENV_DEF(MAX_PEER_STREAMS, int, 16, NVSHMEMI_ENV_CAT_OTHER,
