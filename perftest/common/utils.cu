@@ -371,7 +371,7 @@ void finalize_wrapper() {
 #endif
 }
 
-void datatype_parse(char *optarg, datatype_t *datatype) {
+void datatype_parse(const char *optarg, datatype_t *datatype) {
     if (!strcmp(optarg, "int")) {
         datatype->type = NVSHMEM_INT;
         datatype->size = sizeof(int);
@@ -699,16 +699,22 @@ void print_table_v1(const char *job_name, const char *subjob_name, const char *v
     int npes = nvshmem_n_pes();
     double avg, algbw, busbw;
 
-    char **tokens = (char **)malloc(3 * sizeof(char *));
+    const char *tokens[3] = { };
     const char *delim = "-";
     char copy[strlen(subjob_name) + 1];
     strcpy(copy, subjob_name);
-    char *token = strtok(copy, delim);
-    i = 0;
-    while (token != NULL) {
-        tokens[i] = strdup(token);
+    const char *token = strtok(copy, delim);
+
+    int token_count = 0;
+    while (token != NULL && token_count < 3) {
+        tokens[token_count] = token;
         token = strtok(NULL, delim);
-        i++;
+        token_count++;
+    }
+
+    // Set default values for missing tokens
+    for (i = token_count; i < 3; i++) {
+        tokens[i] = "";
     }
 
     int datatype_size = 4;
