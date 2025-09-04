@@ -1053,7 +1053,16 @@ add_custom_target(package_src_target
     VERBATIM
 )
 
-# TODO: @benjaming make Numbast non-conditional when build environment is ready for it
-if(TARGET build_bindings_numbast AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+# TODO: @benjaming remove this when Numbast is non-conditional
+# Also remove L1066-1069
+add_custom_target(package_src_target_with_device_bindings
+    COMMAND "${CMAKE_COMMAND}" -E env NVSHMEM_BUILD_PYTHON_DEVICE_LIB=1 "${CMAKE_COMMAND}" --build . --target package_source
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    COMMENT "Package Build with device bindings"
+    DEPENDS build_bindings_cybind build_bindings_numbast
+    VERBATIM
+)
+
+if(TARGET build_bindings_numbast)
     add_dependencies(package_src_target build_bindings_numbast)
 endif()
