@@ -20,7 +20,7 @@ import nvshmem.core.utils as utils
 import nvshmem.core.memory as memory
 from nvshmem import __version__
 from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus, _except_on_del
-
+from cuda.pathfinder import load_nvidia_dynamic_lib
 from cuda.core.experimental._memory import Buffer, MemoryResource
 from cuda.core.experimental import Device, system
 from cuda.core.experimental._module import ObjectCode
@@ -54,6 +54,11 @@ def get_version() -> Version:
 
     ``Version.libnvshmem_version`` is the version of NVSHMEM library that this package has opened
     """
+    # Load the nvshmemem host library
+    # Must happen before we use bindings
+    # We use this explicilty here because user is allowed to call get_version before init is called
+    # Repeat calls during initwill be no-ops
+    load_nvidia_dynamic_lib("nvshmem_host")
     # Spec version
     spec_major = ctypes.c_int()
     spec_minor = ctypes.c_int()
@@ -98,6 +103,12 @@ def get_unique_id(empty=False) -> UniqueID:
         ...
         >>> nvshmem.core.init(uid=uid, rank=rank, nranks=size, initializer_method="uid")
     """
+    # Load the nvshmemem host library
+    # Must happen before we use bindings
+    # We use this explicilty here because user is allowed to call get_unique_id before init is called
+    # Repeat calls during initwill be no-ops
+    load_nvidia_dynamic_lib("nvshmem_host")
+
     unique_id = bindings.uniqueid()
     if empty:
         return unique_id
@@ -136,6 +147,9 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         - UID-based init is useful for bootstrapping over non-MPI runtimes or custom transports.
         - Internally, this sets up a ``bindings.InitAttr()`` structure which is passed to
           the NVSHMEM host library.
+        - This function uses the ``cuda.core`` Pathfinder module to locate and load the NVSHMEM host library.
+          The documentation for this function, including the search order can be found at 
+          https://nvidia.github.io/cuda-python/cuda-pathfinder/latest/generated/cuda.pathfinder.load_nvidia_dynamic_lib.html#cuda.pathfinder.load_nvidia_dynamic_lib
 
     Example:
         >>> from mpi4py import MPI
@@ -149,6 +163,10 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
     _cached_device["device"] = device
 
     _except_on_del["value"] = except_on_del
+
+    # Load the nvshmemem host library
+    # Must happen before we use bindings
+    load_nvidia_dynamic_lib("nvshmem_host")
 
     attr = bindings.InitAttr()
 
