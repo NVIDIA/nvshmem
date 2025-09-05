@@ -25,7 +25,7 @@ from cuda.core.experimental._stream import Stream
 
 from typing import Tuple, Union
 
-__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor"]
+__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor", "register_external_tensor", "unregister_external_tensor"]
 
 try:
     import torch
@@ -179,6 +179,24 @@ def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
     mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
     return torch.utils.dlpack.from_dlpack(mc_buf).view(tensor.dtype).view(tensor.shape)
 
+def register_external_tensor(tensor: Tensor) -> Tensor:
+    """
+    Register an external tensor with NVSHMEM.
+    """
+    if not _torch_enabled:
+        return
+    buf = Buffer.from_handle(int(tensor.data_ptr()), get_size(tensor.shape, tensor.dtype))
+    registered_buf = nvshmem.core.register_external_buffer(buf)
+    return torch.utils.dlpack.from_dlpack(registered_buf).view(tensor.dtype).view(tensor.shape)
+
+def unregister_external_tensor(tensor: Tensor) -> None:
+    """
+    Unregister an external tensor with NVSHMEM.
+    """
+    if not _torch_enabled:
+        return
+    buf, size, dtype = tensor_get_buffer(tensor)
+    nvshmem.core.unregister_external_buffer(buf)
 
 def free_tensor(tensor: Tensor) -> None:
     """

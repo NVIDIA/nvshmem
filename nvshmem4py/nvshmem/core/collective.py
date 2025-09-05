@@ -148,8 +148,8 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
         raise NvshmemInvalid("Called collective on an invalid Buffer")
 
     # Assert that these buffers are tracked by nvshmem
-    if not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(src.handle) \
-       or not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(dest.handle):
+    if not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(int(src.handle)) \
+       or not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(int(dest.handle)):
         raise NvshmemInvalid("Tried to perform a collective on a buffer not allocated by NVSHMEM4Py")
 
     if not coll in valid_collectives:
@@ -187,10 +187,10 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
 
     # We have a string of the coll function name
     coll_func = getattr(bindings, func_name)
-    function_args = [team, dest._mnff.ptr, src._mnff.ptr, size_elem, int(stream.__cuda_stream__()[1])]
+    function_args = [team, int(dest.handle), int(src.handle), size_elem, int(stream.__cuda_stream__()[1])]
     if coll == "broadcast":
         # Rewrite the whole thing instead of append to make the ordering requirements more obvious
-        function_args = [team, dest._mnff.ptr, src._mnff.ptr, size_elem, root, int(stream.__cuda_stream__()[1])]
+        function_args = [team, int(dest.handle), int(src.handle), size_elem, root, int(stream.__cuda_stream__()[1])]
     if enable_timing:
         stream.record(start_event)
     result = coll_func(*function_args)

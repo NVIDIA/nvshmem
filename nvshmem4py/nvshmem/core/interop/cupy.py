@@ -22,7 +22,7 @@ from typing import Tuple, Union
 from cuda.core.experimental._memory import Buffer
 from cuda.core.experimental import Device
 
-__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array"]
+__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array", "register_external_array", "unregister_external_array"]
 
 logger = logging.getLogger("nvshmem")
 
@@ -174,6 +174,24 @@ def get_multicast_array(team: Teams, array: ndarray) -> ndarray:
     mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
     return cupy.from_dlpack(mc_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
 
+def register_external_array(array: ndarray) -> ndarray:
+    """
+    Register an external array with NVSHMEM.
+    """
+    if not _cupy_enabled:
+        return
+    buf = Buffer.from_handle(int(array.data.ptr), get_size(array.shape, array.dtype))
+    registered_buf = nvshmem.core.register_external_buffer(buf)
+    return cupy.from_dlpack(registered_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
+def unregister_external_array(array: ndarray) -> None:
+    """
+    Unregister an external array with NVSHMEM.
+    """
+    if not _cupy_enabled:
+        return
+    buf, size, dtype = array_get_buffer(array)
+    nvshmem.core.unregister_external_buffer(buf)
 
 def free_array(array: ndarray) -> None:
     """

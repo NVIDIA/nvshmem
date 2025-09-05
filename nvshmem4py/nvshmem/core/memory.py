@@ -21,7 +21,7 @@ from nvshmem.core.utils import _get_device
 from cuda.core.experimental import Device, system
 from cuda.core.experimental._memory import Buffer
 
-__all__ = ['buffer', 'free', 'get_peer_buffer', 'get_multicast_buffer']
+__all__ = ['buffer', 'free', 'get_peer_buffer', 'get_multicast_buffer', 'register_external_buffer', 'unregister_external_buffer']
 
 logger = logging.getLogger("nvshmem")
 
@@ -154,6 +154,67 @@ def get_peer_buffer(buffer: Buffer, pe: int):
     if other_dev is not None:
         other_dev.set_current()
     return peer_buffer
+
+def register_external_buffer(buffer: Buffer) -> Buffer:
+    """
+    Register an external buffer with NVSHMEM.
+    
+    This function is a collective. All participating PEs must call ``register_external_buffer()`` in concert.
+    This function will return a new buffer object that wraps a symmetric pointer to the external buffer.
+    Users must pass this buffer to NVSHMEM operations, rather than the original buffer.
+
+    Args:
+        - buffer (``cuda.core.Buffer``): A buffer to register with NVSHMEM.
+
+    Returns: 
+        - ``cuda.core.Buffer``: A buffer object wrapping the registered external buffer.
+
+    The user must call ``unregister_external_buffer()` on the buffer returned by this 
+    function to unregister the buffer from NVSHMEM when they are done with it.
+    """
+    if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
+        raise NvshmemInvalid("NVSHMEM Library is not initialized")
+    
+    # _get_device() excepts if no device is current
+    user_nvshmem_dev, other_dev = _get_device()
+
+    # Unlike other functions, we do not expect the buffer to be tracked by NVSHMEM
+    mr = _mr_references.get(user_nvshmem_dev.device_id)
+    if mr is None:
+        raise NvshmemInvalid("Tried to register an external buffer on a device that is not initialized with NVSHMEM")
+    registered_buffer = mr.register_external_buffer(buffer)
+    if other_dev is not None:
+        other_dev.set_current()
+    if registered_buffer is not None:
+        return registered_buffer
+
+def unregister_external_buffer(buffer: Buffer) -> None:
+    """
+    Unregister an external buffer with NVSHMEM.
+
+    This function is a collective. All participating PEs must call ``unregister_external_buffer()`` in concert.
+    
+    Args:
+        - buffer (``cuda.core.Buffer``): The buffer returned by ``register_external_buffer()`` to unregister.
+    
+    Raises:
+        - ``NvshmemInvalid``: If NVSHMEM is not initialized or buffer is invalid.
+    """
+    if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
+        raise NvshmemInvalid("NVSHMEM Library is not initialized")
+    
+    # _get_device() excepts if no device is current
+    user_nvshmem_dev, other_dev = _get_device()
+
+    if not isinstance(buffer, Buffer) or not hasattr(buffer, "_mnff"):
+        raise NvshmemInvalid("Tried to use a buffer not from NVSHmem")
+    
+    mr = _mr_references.get(user_nvshmem_dev.device_id)
+    if mr is None:
+        raise NvshmemInvalid("Tried to unregister an external buffer on a device that is not initialized with NVSHMEM")
+    mr.unregister_external_buffer(buffer)
+    if other_dev is not None:
+        other_dev.set_current()
 
 def get_multicast_buffer(team: Teams, buffer: Buffer) -> Buffer:
     """

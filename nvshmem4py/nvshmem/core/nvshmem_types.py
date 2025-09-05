@@ -21,7 +21,7 @@ from cuda.core.experimental import Device, system, ObjectCode
 from cuda.core.experimental._stream import Stream
 import cuda.bindings.driver
 
-from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id
+from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id, buffer_register_symmetric, buffer_unregister_symmetric
 from nvshmem.core._internal_tracking import _except_on_del
 
 logger = logging.getLogger("nvshmem")
@@ -219,9 +219,11 @@ class NvshmemError(Exception):
 Buffer types for NvshmemResource
 """
 class BufferTypes(IntEnum):
-    NORMAL = 0
-    PEER = 1
-    MULTIMEM = 2
+    NORMAL = 0 # Normal buffer
+    PEER = 1 # Peer buffer (nvshmem_ptr)
+    MULTIMEM = 2 # Multicast buffer (nvshmemx_mc_ptr)
+    EXTERNAL = 3 # External buffer (nvshmemx_buffer_register)
+
 
 """
 Memory Resource
@@ -426,6 +428,56 @@ class NvshmemResource(MemoryResource):
             return
         self._mem_references[ptr]["freed"] = True
 
+    def register_external_buffer(self, buffer: Buffer, call_register: bool = True) -> Buffer:
+        """
+        Register an external buffer with NVSHMEM.
+
+        Args:
+            - buffer (Buffer): The buffer to register.
+            - call_register (bool, optional): Whether to call the register function on the buffer.
+                                              This should be False if the buffer is already registered
+                                              or was allocated via nvshmem_malloc outside of NVSHMEM4Py
+        Returns:
+            Buffer: A buffer object wrapping the registered external buffer.
+            Users must pass this buffer to NVSHMEM operations, rather than the original buffer.
+        """
+        ptr = int(buffer.handle)
+        if self._mem_references.get(ptr) is not None:
+            if self._mem_references[ptr]['type'] != BufferTypes.EXTERNAL:
+                raise NvshmemError("Tried to register an external buffer that is already tracked as a different type of buffer")
+            self._mem_references[ptr]["ref_count"] += 1
+            logger.warning(f"Found already tracked external buffer with address {ptr}. Returning it. Ref count {self._mem_references[ptr]['ref_count']}")
+            return self._mem_references[ptr].get("buffer", None)
+        if call_register:
+            registered_ptr = buffer_register_symmetric(int(ptr), int(buffer.size), 0)
+            if registered_ptr is None:
+                raise NvshmemError("Failed to register external buffer")
+            registered_ptr = int(registered_ptr)
+            logger.debug(f"Registered external buffer with address {ptr}.")
+            new_buf = Buffer.from_handle(ptr=registered_ptr, size=buffer.size, mr=self)
+            logger.debug(f"Created new buffer with address {new_buf.handle}.")
+        else:
+            registered_ptr = int(ptr)
+            new_buf = buffer
+        self._mem_references[int(registered_ptr)] = {"ref_count": 1, "resource": self, "buffer": new_buf, "type": BufferTypes.EXTERNAL, "freed": False, "released": not call_register}
+        logger.debug(f"Registered external buffer with address {registered_ptr}. Ref count {self._mem_references[registered_ptr]['ref_count']}")
+        return new_buf
+
+    def unregister_external_buffer(self, buffer: Buffer) -> None:
+        ptr = int(buffer.handle)
+        if self._mem_references.get(ptr) is None:
+            logger.warning(f"Tried to unregister an external buffer that is not tracked with address {ptr}. Make sure you pass the buffer that NVSHMEM4Py returned to you")
+            raise NvshmemError("Tried to unregister an external buffer that is not tracked")
+        if self._mem_references[ptr]['type'] != BufferTypes.EXTERNAL:
+            raise NvshmemError("Tried to unregister an external buffer that is not external")
+        del self._mem_references[ptr]["buffer"]
+        self._mem_references[ptr]["ref_count"] = 0
+        self._mem_references[ptr]["freed"] = True
+        if not self._mem_references[ptr]["released"]:
+            buffer_unregister_symmetric(ptr, buffer.size)
+
+        self._mem_references[int(ptr)]["freed"] = True
+        logger.debug(f"Unregistered external buffer with address {ptr}. Ref count {self._mem_references[ptr]['ref_count']}")
 
     @property
     def is_device_accessible(self) -> bool:
