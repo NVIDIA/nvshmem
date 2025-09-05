@@ -4,8 +4,10 @@
  * See License.txt for license information
  */
 
+#include <assert.h>
 #include <stdint.h>  // IWYU pragma: keep
 #include <stddef.h>
+#include <string.h>
 #include <deque>
 #include <vector>
 #include <mutex>
@@ -62,13 +64,130 @@ typedef struct {
 struct nvshmemt_libfabric_gdr_op_ctx;
 typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
 
+#define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT 28
+#define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK ((1U << NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT) - 1)
+
+/**
+ * The last sequence number is reserved for atomic-only operations.
+ * This will not be returned by the sequence counter.
+ */
+#define NVSHMEM_STAGED_AMO_SEQ_NUM NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK
+
+/**
+ * Type used for tracking sequence numbers for put-signal operations
+ *
+ * A sequence number is associated with each put-signal operation. This type
+ * manages allocation of sequence numbers and return of sequence numbers via
+ * acks from the remote side.
+ */
+struct nvshmemt_libfabric_endpoint_seq_counter_t {
+
+    constexpr static uint32_t num_sequence_bits = NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT;
+
+    /**
+     * Sequence counter is composed of:
+     *
+     * |----------<num_sequence_bits>----------|
+     * | <num_category_bits> <num_index_bits>  |
+     */
+    constexpr static uint32_t num_category_bits = 1;
+    constexpr static uint32_t num_categories = (1U << num_category_bits);
+
+    constexpr static uint32_t num_index_bits = (num_sequence_bits - num_category_bits);
+
+    constexpr static uint32_t index_mask = ((1U << num_index_bits) - 1);
+    constexpr static uint32_t category_mask = (1U << num_index_bits);
+
+    constexpr static uint32_t sequence_mask = NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
+
+    /**
+     * The "category" is the bits before the index bit(s). Returns the category
+     * bits shifted to the right.
+     */
+    constexpr static uint32_t get_category(uint32_t seq_num)
+    {
+        return ((seq_num & category_mask) >> num_index_bits);
+    }
+
+    /**
+     * The "index" is the bits after the category bit(s)
+     */
+    constexpr static uint32_t get_index(uint32_t seq_num)
+    {
+        return seq_num & index_mask;
+    }
+
+    /* ------------------------------ */
+    /* Member variables */
+
+    uint32_t sequence_counter;
+    uint32_t pending_acks[num_categories];
+
+    /**
+     * Reset counter and pending acks to zero
+     */
+    void reset()
+    {
+        sequence_counter = 0;
+        memset(pending_acks, 0, sizeof(pending_acks));
+    }
+
+    /**
+     * Obtain the next sequence number.
+     *
+     * @return -1 if no sequence number available
+     */
+    int32_t next_seq_num()
+    {
+        /* Skip this sequence number if reserved */
+        if (sequence_counter == NVSHMEM_STAGED_AMO_SEQ_NUM) {
+            sequence_counter = (sequence_counter + 1) & sequence_mask;
+        }
+
+        uint32_t seq_num = sequence_counter;
+
+        uint32_t category = get_category(seq_num);
+
+        /* For first sequence number of category, check if category is available */
+        if (get_index(seq_num) == 0) {
+            if (pending_acks[category] != 0) {
+                /* No sequence number available */
+                return -1;
+            }
+        }
+
+        /* Can't have more outstanding acks than sequence numbers in the category */
+        assert(pending_acks[category] <= index_mask);
+        /* Increment pending acks */
+        ++pending_acks[category];
+
+        /* Increment sequence counter */
+        sequence_counter = (sequence_counter + 1) & sequence_mask;
+        return seq_num;
+    }
+
+    /**
+     * Mark a previously issued seq_num as complete, decremeting the pending
+     * acks counter for the category
+     */
+    void return_acked_seq_num(uint32_t seq_num)
+    {
+        assert(seq_num != NVSHMEM_STAGED_AMO_SEQ_NUM);
+
+        uint32_t category = get_category(seq_num);
+
+        assert(pending_acks[category] > 0);
+        --pending_acks[category];
+    }
+};
+
 typedef struct {
     struct fid_ep *endpoint;
     struct fid_cq *cq;
     struct fid_cntr *counter;
     uint64_t submitted_ops;
     uint64_t completed_staged_atomics;
-    uint32_t proxy_put_signal_seq_counter;
+    nvshmemt_libfabric_endpoint_seq_counter_t put_signal_seq_counter;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
         *proxy_put_signal_comp_map;
 } nvshmemt_libfabric_endpoint_t;
