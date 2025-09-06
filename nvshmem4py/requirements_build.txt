@@ -1,0 +1,13 @@
+# These are the build-time python/pip requirements for nvshmem4py
+# They are mostly required to run Cybind and build wheels
+networkx
+numpy
+pycparser
+build
+Cython>=0.29.24
+setuptools==68
+setuptools_scm
+testresources
+wheel
+auditwheel
+patchelf

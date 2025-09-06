@@ -1,0 +1,7 @@
+# These are optional dependencies
+# nvshmem4py is aware of and interoperable with them
+# but doesn't depend on them
+mpi4py
+--find-links https://download.pytorch.org/whl/cu118/torch_stable.html
+torch==2.2.0+cu118
+ml-dtypes

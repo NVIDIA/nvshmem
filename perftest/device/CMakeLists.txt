@@ -1,0 +1,13 @@
+set(NVSHMEM_TEST_PREFIX "perf_device_")
+
+macro(nvshmem_add_perftest SOURCE)
+  nvshmem_add_perftest_prefix(${SOURCE} ${NVSHMEM_TEST_PREFIX})
+endmacro()
+if(NVSHMEM_BUILD_BITCODE_LIBRARY)
+  macro(nvshmem_add_cubin_perftest SOURCE)
+    nvshmem_add_cubin_perftest_prefix(${SOURCE} ${NVSHMEM_TEST_PREFIX})
+  endmacro()
+endif()
+add_subdirectory(tile)
+add_subdirectory(coll)
+add_subdirectory(pt-to-pt)

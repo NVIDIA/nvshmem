@@ -1,0 +1,6 @@
+# These are optional dependencies
+# nvshmem4py is aware of and interoperable with them
+# but doesn't depend on them
+mpi4py
+torch
+ml-dtypes

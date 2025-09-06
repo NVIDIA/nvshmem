@@ -1,0 +1,7 @@
+# These are the run-time dependencies of nvshmem4py
+# They are non-negotiables
+nvidia-nvshmem-cu13
+cuda-python>=13.0
+cuda.core==0.2.0
+numpy
+Cython>=0.29.24

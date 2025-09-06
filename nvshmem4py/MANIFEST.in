@@ -1,0 +1,14 @@
+include pyproject.toml
+include setup.py
+include README.md
+include License.txt
+include requirements_cuda11.txt
+include requirements_cuda12.txt
+include requirements_cuda13.txt
+include nvshmem/bindings/_internal/*.pyx
+include nvshmem/bindings/_internal/*.pxd
+include nvshmem/bindings/*.pxd
+include nvshmem/bindings/*.pyx
+include nvshmem/bindings/_internal/*.cpp
+include nvshmem/core/*.py
+recursive-include nvshmem *

@@ -1,0 +1,2 @@
+nvshmem_add_perftest(tile_allreduce_latency.cu)
+nvshmem_add_perftest(tile_allgather_latency.cu)

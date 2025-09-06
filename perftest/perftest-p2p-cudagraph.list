@@ -1,0 +1,8 @@
+/host/coll/barrier_all_on_stream
+/host/coll/barrier_on_stream
+/host/coll/sync_all_on_stream
+/host/coll/sync_on_stream
+/host/coll/alltoall_on_stream
+/host/coll/broadcast_on_stream
+/host/coll/fcollect_on_stream
+/host/coll/reduction_on_stream
