@@ -1007,6 +1007,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /nvshmem4py/build_assets/;\
 /perftest/perftest_install/;\
 /test/test_install/;
+/scripts/cleanup_ignore_files.sh
 /scripts/create_imex.sh;\
 /scripts/dependency_installer.sh;\
 /scripts/include_checker.sh;\
