@@ -100,7 +100,7 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
     if (entry->flags & FI_REMOTE_CQ_DATA) {
         nvshmemt_libfabric_imm_cq_data_hdr_t imm_header = nvshmemt_get_write_with_imm_hdr(entry->data);
         if (NVSHMEMT_LIBFABRIC_IMM_PUT_SIGNAL_SEQ == imm_header) {
-            nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr, is_proxy);
+            status = nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr, is_proxy);
             goto out;
         } else if (NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK == imm_header) {
             nvshmemt_libfabric_put_signal_ack_completion(ep, entry);
@@ -124,7 +124,7 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
         nvshmemtLibfabricOpQueue.putToSend(op);
     } else if (op->type == NVSHMEMT_LIBFABRIC_MATCH) {
         /* Must happen after entry->flags & FI_SEND to avoid send completions */
-        nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr, is_proxy);
+        status = nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr, is_proxy);
     } else if (entry->flags & FI_RECV) {
         op->ep = ep;
         nvshmemtLibfabricOpQueue.putToRecv(op);
@@ -186,7 +186,8 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int is_pro
                     struct fi_cq_data_entry *entry = (struct fi_cq_data_entry *)buf;
                     fi_addr_t *addr = src_addr;
                     for (int i = 0; i < qstatus; i++, entry++, addr++) {
-                        nvshmemt_libfabric_gdr_process_completion(transport, ep, entry, addr, is_proxy);
+                        status = nvshmemt_libfabric_gdr_process_completion(transport, ep, entry, addr, is_proxy);
+                        if (status) return NVSHMEMX_ERROR_INTERNAL;
                     }
                 } else {
                     NVSHMEMI_WARN_PRINT("Got %zd unexpected events on EP\n", qstatus);
@@ -378,7 +379,7 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
         op->ep->submitted_ops++;
     }
 
-    gdrcopy_amo_ack(transport, op->ep, op->src_addr, sequence_count, op->send_amo.src_pe, is_proxy);
+    status = gdrcopy_amo_ack(transport, op->ep, op->src_addr, sequence_count, op->send_amo.src_pe, is_proxy);
 out:
     return status;
 }
