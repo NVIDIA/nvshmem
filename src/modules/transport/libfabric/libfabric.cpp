@@ -530,7 +530,11 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
         if (is_write_comp) {
             op = iter->second.first;
         }
-        perform_gdrcopy_amo<uint64_t>(transport, op, sequence_count, is_proxy);
+        gdrRecvMutex.lock();
+        status = perform_gdrcopy_amo<uint64_t>(transport, op, sequence_count, is_proxy);
+        gdrRecvMutex.unlock();
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Error in put_signal_completion gdrcopy signaling operation.\n");
         ep->proxy_put_signal_comp_map->erase(iter);
         status = fi_recv(ep->endpoint, op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                          fi_mr_desc(libfabric_state->mr), FI_ADDR_UNSPEC, &op->ofi_context);
