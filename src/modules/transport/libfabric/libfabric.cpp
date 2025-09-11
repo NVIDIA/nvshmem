@@ -99,7 +99,7 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
     if (entry->flags & FI_REMOTE_CQ_DATA) {
         nvshmemt_libfabric_imm_cq_data_hdr_t imm_header = nvshmemt_get_write_with_imm_hdr(entry->data);
         if (NVSHMEMT_LIBFABRIC_IMM_PUT_SIGNAL_SEQ == imm_header) {
-            nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr);
+            status = nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr);
             goto out;
         } else if (NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK == imm_header) {
             nvshmemt_libfabric_put_signal_ack_completion(ep, entry);
@@ -123,7 +123,7 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
         nvshmemtLibfabricOpQueue.putToSend(op);
     } else if (op->type == NVSHMEMT_LIBFABRIC_MATCH) {
         /* Must happen after entry->flags & FI_SEND to avoid send completions */
-        nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr);
+        status = nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr);
     } else if (entry->flags & FI_RECV) {
         op->ep = ep;
         nvshmemtLibfabricOpQueue.putToRecv(op);
@@ -152,12 +152,13 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport) {
 
             if (nerr > 0) {
                 char str[100] = "\0";
-                const char *err_str = fi_cq_strerror(libfabric_state->eps[i].cq, err.prov_errno,
+                const char *err_str = fi_cq_strerror(libfabric_state->eps[i].cq,
+                                                     err.prov_errno,
                                                      err.err_data, str, 100);
                 NVSHMEMI_WARN_PRINT(
-                    "CQ %d reported error (%d): %s\n\tProvider error: %s\n\tSupplemental error "
+                    "CQ reported error (%d): %s\n\tProvider error: %s\n\tSupplemental error "
                     "info: %s\n",
-                    i, err.err, fi_strerror(err.err), err_str ? err_str : "none",
+                    err.err, fi_strerror(err.err), err_str ? err_str : "none",
                     strlen(str) ? str : "none");
             } else if (nerr == -FI_EAGAIN) {
                 NVSHMEMI_WARN_PRINT("fi_cq_readerr returned -FI_EAGAIN\n");
@@ -182,7 +183,8 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport) {
                         struct fi_cq_data_entry *entry = (struct fi_cq_data_entry *)buf;
                         fi_addr_t *addr = src_addr;
                         for (int i = 0; i < qstatus; i++, entry++, addr++) {
-                            nvshmemt_libfabric_gdr_process_completion(transport, ep, entry, addr);
+                            status = nvshmemt_libfabric_gdr_process_completion(transport, ep, entry, addr);
+                            if (status) return NVSHMEMX_ERROR_INTERNAL;
                         }
                     } else {
                         NVSHMEMI_WARN_PRINT("Got %zd unexpected events on EP %d\n", qstatus, i);
@@ -375,7 +377,7 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
         op->ep->submitted_ops++;
     }
 
-    gdrcopy_amo_ack(transport, op->ep, op->src_addr, sequence_count, op->send_amo.src_pe);
+    status = gdrcopy_amo_ack(transport, op->ep, op->src_addr, sequence_count, op->send_amo.src_pe);
 out:
     return status;
 }
