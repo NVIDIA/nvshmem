@@ -209,7 +209,7 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
                             "Unable to allocate memory for PE/NIC Mapping.\n");
     for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
         for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            pe_device_distance[pe_id * max_dev_per_pe + dev_id] = PATH_COUNT;
+            pe_device_distance[pe_id * max_dev_per_pe + dev_id] = PATH_SYS;
         }
     }
 
