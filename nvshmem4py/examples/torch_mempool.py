@@ -6,7 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
-# See COPYRIGHT.txt for license information
+# See License.txt for license information
 
 # Based on https://docs.pytorch.org/docs/stable/notes/cuda.html#cuda-memory-management 
 
