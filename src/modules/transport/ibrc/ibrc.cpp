@@ -1112,7 +1112,7 @@ out:
     return status;
 }
 
-int nvshmemt_ibrc_progress(nvshmem_transport_t t) {
+int nvshmemt_ibrc_progress(nvshmem_transport_t t, int is_proxy) {
     int status = 0;
     struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
     transport_ibrc_state_t *ibrc_state = (transport_ibrc_state_t *)transport->state;
