@@ -215,6 +215,13 @@ class NvshmemError(Exception):
     def __repr__(self):
         return f"<NvshmemError: {self.msg}>"
 
+class NvshmemWarning(UserWarning):
+    def __init__(self,  msg):
+        self.msg = msg
+
+    def __repr__(self):
+        return f"<NvshmemWarning: {self.msg}>"
+
 """
 Buffer types for NvshmemResource
 """

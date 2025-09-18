@@ -41,6 +41,9 @@ function(AddNumbast GIT_TAG)
     set(NUMBAST_LD_LIBRARY_PATH "LD_LIBRARY_PATH=${ASTCANOPY_CMAKE_INSTALL_PREFIX}/lib:$ENV{LD_LIBRARY_PATH}")
     set(NUMBAST_COMMAND "env" "${NUMBAST_LD_LIBRARY_PATH}" "${VENV_PYTHON_EXECUTABLE}" "-m" "numbast" "--cfg-path" "${ASSET_DIR}/numbast/config_nvshmem.yml" "--output-dir" "${NUMBAST_OUTPUT_DIR}")
     
+    # High Level Bindings Settings
+    set(HIGH_LEVEL_BINDINGS_OUTPUT_DIR ${NUMBAST_OUTPUT_DIR}/high_level/)
+
     # OUTPUT_DIR is the place to store each steps output file for cmake to validate step
     set(OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/externals/output")
 
@@ -51,6 +54,7 @@ function(AddNumbast GIT_TAG)
     file(MAKE_DIRECTORY "${ASSET_DIR}")
     file(MAKE_DIRECTORY "${OUTPUT_DIR}")
     file(MAKE_DIRECTORY "${NUMBAST_OUTPUT_DIR}")
+    file(MAKE_DIRECTORY "${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}")
 
 
     # Step 0: Clean the the numbast working directory
@@ -148,13 +152,31 @@ function(AddNumbast GIT_TAG)
     # Step 6: Copy generated bindings into nvshmem4py
     add_custom_target(
         get_numbast_output
-        COMMAND cp -rf ${NUMBAST_OUTPUT_DIR}/${OUTPUT_NAME} ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py
+        COMMAND cp -rvf ${NUMBAST_OUTPUT_DIR}/${OUTPUT_NAME} ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py
         # entry_point.h is both the entry point for parsing decls, and the entry point for Numba runtime compilation.
-    	COMMAND cp -rf ${ASSET_DIR}/numbast/numbast_entry_point.h ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/entry_point.h
+    	COMMAND cp -rvf ${ASSET_DIR}/numbast/numbast_entry_point.h ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/entry_point.h
         DEPENDS run_numbast
     )
 
+    # Step 7: Generate High Level Bindings
+    add_custom_target(
+        generate_high_level_bindings
+        COMMAND mkdir -p ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
+        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/generate_rma.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
+        COMMAND touch ${OUTPUT_DIR}/generate_high_level_bindings.txt
+        COMMENT "Generating High Level Bindings..."
+        DEPENDS get_numbast_output
+    )
+
+    # Step 8: Copy generated high level bindings into nvshmem4py
+    add_custom_target(
+        get_high_level_bindings
+        COMMAND cp -rvf ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}/* ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/core/device/numba/
+        COMMENT "Copying High Level Bindings into nvshmem4py"
+        DEPENDS generate_high_level_bindings
+    )
+
     # Final target to trigger everything
-    add_custom_target(build_bindings_${PACKAGE_NAME} DEPENDS get_numbast_output)
+    add_custom_target(build_bindings_${PACKAGE_NAME} DEPENDS get_high_level_bindings)
 
 endfunction()

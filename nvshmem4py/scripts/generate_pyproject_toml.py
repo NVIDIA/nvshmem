@@ -28,11 +28,21 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["nvshmem", "nvshmem.bindings", "nvshmem.bindings.device", "nvshmem.bindings.device.numba", "nvshmem.core"]
+packages = [
+    "nvshmem",
+    "nvshmem.bindings",
+    "nvshmem.bindings.device",
+    "nvshmem.bindings.device.numba",
+    "nvshmem.core",
+    "nvshmem.core.device",
+    "nvshmem.core.device.numba"
+]
 include-package-data = true
 
 [tool.setuptools.package-data]
 "nvshmem.core" = ["*.py"]  # Match Python package name, not filesystem path
+"nvshmem.core.device" = ["*.py"]
+"nvshmem.core.device.numba" = ["*.py"]
 "nvshmem.bindings" = ["*.py", "*.pxd","*.so"]
 "nvshmem.bindings._internal" = ["*.py", "*.pxd", "*.so"]
 "nvshmem.bindings.device.numba" = ["*.py", "entry_point.h"]
@@ -48,6 +58,7 @@ version_scheme = "guess-next-dev"
 [project.optional-dependencies]
 dev = [
     "pytest>=6.0",
+    "pytest-mpi",
     "black",
     "isort",
     "numba-cuda[cu12]>=0.19.1",
