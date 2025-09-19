@@ -1881,11 +1881,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Failed to get paths for PCI devices.");
         if (((struct ibrc_device *)ibrc_state->devices)[ibrc_state->dev_ids[i]].data_direct &&
-            ibrc_state->options->IB_NUM_RC_PER_DEVICE < 4) {
-            // Need 4 QPs for achieving bandwidth in data direct device
-            ibrc_state->options->IB_NUM_RC_PER_DEVICE = 4;
+            !ibrc_state->options->IB_NUM_RC_PER_DEVICE_provided) {
+            // Need 8 QPs for achieving bandwidth in data direct device
+            ibrc_state->options->IB_NUM_RC_PER_DEVICE = 8;
             INFO(ibrc_state->log_level,
-                 "Setting IB_NUM_RC_PER_DEVICE = 4 as data direct device is detected");
+                 "Setting IB_NUM_RC_PER_DEVICE = 8 as data direct device is detected");
         }
     }
 
