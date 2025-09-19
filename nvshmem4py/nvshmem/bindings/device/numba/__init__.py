@@ -1,3 +1,15 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+#
+# See License.txt for license information
+
+from cuda.pathfinder import find_nvidia_header_directory
+
 from numba import config
 
 import os
@@ -8,28 +20,12 @@ from nvshmem.core.nvshmem_types import NvshmemWarning
 if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
     from ._numbast import *
 
-    # TODO: use this when find_nvidia_header_directory is available
-    # from cuda.pathfinder import find_nvidia_header_directory
-
-    # INCLUDE_PATH = find_nvidia_header_directory("nvshmem")
-    # if "nvshmem.h" not in os.listdir(INCLUDE_PATH):
-    #     raise RuntimeError("nvshmem.h not found, package may not be properly installed")
-
-    # $1/nvshmem_pkg/lib/libnvshmem_host.so.3
-    LD_PRELOAD = os.environ.get("LD_PRELOAD", "")
-    if not LD_PRELOAD:
-        raise RuntimeError("LD_PRELOAD is not set. Please set it to the path of the nvshmem library.")
-    if "libnvshmem_host.so" not in LD_PRELOAD:
-        raise RuntimeError("libnvshmem_host.so not found in LD_PRELOAD, package may not be properly installed")
-
-    # $1/nvshmem_pkg/
-    PACKAGE_PATH = os.path.dirname(os.path.dirname(LD_PRELOAD))
-    # $1/nvshmem_pkg/include 
-    INCLUDE_PATH = os.path.join(PACKAGE_PATH, "include")
+    INCLUDE_PATH = find_nvidia_header_directory("nvshmem")
+    if "nvshmem.h" not in os.listdir(INCLUDE_PATH):
+        raise RuntimeError("nvshmem.h not found, package may not be properly installed")
 
     if not os.path.exists(INCLUDE_PATH):
         raise RuntimeError(f"NVSHMEM headers not found at {INCLUDE_PATH}. Please confirm that nvshmem is installed correctly.")
-
 
     # Path to this folder to look for entry point file
     this_folder = os.path.dirname(os.path.abspath(__file__))
