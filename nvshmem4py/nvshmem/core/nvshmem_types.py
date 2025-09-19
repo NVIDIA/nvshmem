@@ -22,7 +22,6 @@ from cuda.core.experimental._stream import Stream
 import cuda.bindings.driver
 
 from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id, buffer_register_symmetric, buffer_unregister_symmetric
-from nvshmem.core._internal_tracking import _except_on_del
 
 logger = logging.getLogger("nvshmem")
 
@@ -268,13 +267,17 @@ class NvshmemResource(MemoryResource):
             # Used to raise an exception when the GC reaches here without free() getting called
             "freed": Bool,
             # Used to track whether the user expects us to prevent them from experiencing deadlocks
-            "released": Bool
+            "released": Bool,
+            # Used to track whether the user expects us to raise an exception when the buffer is not tracked or has already been freed
+            # True -> raise an exception
+            # False -> print an error message
+            "except_on_del": Bool
             }
         """
         self._mem_references = {}
 
 
-    def allocate(self, size: int, stream: Stream=None, release=False) -> Buffer:
+    def allocate(self, size: int, stream: Stream=None, release=False, except_on_del=True) -> Buffer:
         """
         Allocate memory on the device using NVSHMEM.
 
@@ -282,6 +285,8 @@ class NvshmemResource(MemoryResource):
             - size (int): Number of bytes to allocate.
             - stream (optional): CUDA stream for allocation context (not used here).
             - release (bool, optional): do not track the buffer if True
+            - except_on_del (bool, optional): If True, raise an exception if the buffer is not tracked or has already been freed.
+                If False, print an error message.
 
         Returns:
             ``Buffer``: A buffer object wrapping the allocated device memory.
@@ -301,7 +306,7 @@ class NvshmemResource(MemoryResource):
         else:
             # If we're not holding references, create our own shadow-buffer
             buf_ref = Buffer.from_handle(ptr=r_buf.handle, size=r_buf.size, mr=self)
-        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False, "released": release}
+        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False, "released": release, "except_on_del": except_on_del}
 
         return r_buf
 
@@ -329,10 +334,12 @@ class NvshmemResource(MemoryResource):
 
         # If someone got here without calling free(), we have to except
         if self._mem_references[ptr]["type"] == BufferTypes.NORMAL and not self._mem_references[ptr]["freed"]:
-            if _except_on_del["value"]:
+            if self._mem_references[ptr].get("except_on_del", True):
                 raise NvshmemError(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
             else:
-                logger.error(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
+                if not self._mem_references[ptr].get("warned", False):
+                    logger.error(f'Buffer {self._mem_references[ptr]["buffer"]} freed implicitly.')
+                    self._mem_references[ptr]["warned"] = True
                 return
 
         # remove the reference
@@ -397,7 +404,7 @@ class NvshmemResource(MemoryResource):
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
 
-        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.PEER, "freed": False, "parent": parent_ptr, "released": False}
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.PEER, "freed": False, "parent": parent_ptr, "released": False, "except_on_del": False}
         self._mem_references[parent_ptr]["child"] = result
         return r_buf
 
@@ -423,7 +430,7 @@ class NvshmemResource(MemoryResource):
 
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
-        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.MULTIMEM , "freed": False, "parent": parent_ptr, "released": False}
+        self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.MULTIMEM , "freed": False, "parent": parent_ptr, "released": False, "except_on_del": False}
         self._mem_references[parent_ptr]["child"] = result
         return r_buf
 

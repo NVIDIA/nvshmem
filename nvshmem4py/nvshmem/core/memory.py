@@ -34,18 +34,24 @@ def _free_all_buffers() -> None:
 
     Logs each deallocation for debugging or auditing purposes.
     """
+    found_leak = False
     for key in sorted(_mr_references.keys()):
         mr = _mr_references[key]
         for ptr in sorted(mr._mem_references.keys()):
-            if mr._mem_references[ptr]["type"] != BufferTypes.NORMAL:
+            if mr._mem_references[ptr]["type"] != BufferTypes.NORMAL or mr._mem_references[ptr]["freed"]:
                 continue
+            found_leak = True
             logger.info(f"Found object open at pointer {ptr} and ref count {mr._mem_references[ptr]['ref_count']}. Freeing it.")
             # We already printed the warning message so we can safely suppress the message
             mr._mem_references[ptr]["freed"] = True
             mr._mem_references[ptr]["released"] = True
+            mr._mem_references[ptr]["except_on_del"] = False
+            mr._mem_references[ptr]["ref_count"] = 0
             mr.deallocate(ptr, 0)
+    if found_leak:
+        logger.error("Some NVSHMEM Symmetric memory was not freed explicitly (you may have forgotten to clean up before finalizing, or an unrelated exception crashed the program before it was freed)")
 
-def buffer(size, release=False) -> Buffer:
+def buffer(size, release=False, except_on_del=True) -> Buffer:
     """
     Allocates an NVSHMEM-backed CUDA buffer.
 
@@ -54,6 +60,8 @@ def buffer(size, release=False) -> Buffer:
         release (bool, optional): Do not track this buffer internally to NVSHMEM
                 If True, it is the user's responsibility to hold references to the buffer until free() is called
                 otherwise, deadlocks may occur.
+        except_on_del (bool, optional): If True, raise an exception if the buffer is not tracked or has already been freed.
+                If False, print an error message.
 
     Returns:
         ``cuda.core.Buffer``: A DLPack-compatible CUDA buffer with NVSHMEM backing.
@@ -77,7 +85,7 @@ def buffer(size, release=False) -> Buffer:
         resource = NvshmemResource(user_nvshmem_dev)
         _mr_references[dev_id] = resource
 
-    buf = resource.allocate(size, release=release)
+    buf = resource.allocate(size, release=release, except_on_del=except_on_del)
 
     if other_dev is not None:
         other_dev.set_current()

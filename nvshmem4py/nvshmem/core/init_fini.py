@@ -19,7 +19,8 @@ from nvshmem.core.nvshmem_types import *
 import nvshmem.core.utils as utils
 import nvshmem.core.memory as memory
 from nvshmem import __version__
-from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus, _except_on_del
+from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus
+
 from cuda.pathfinder import load_nvidia_dynamic_lib
 from cuda.core.experimental._memory import Buffer, MemoryResource
 from cuda.core.experimental import Device, system
@@ -117,7 +118,7 @@ def get_unique_id(empty=False) -> UniqueID:
     bindings.get_uniqueid(unique_id.ptr)
     return unique_id
 
-def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nranks: int=None, mpi_comm: Comm=None, initializer_method: str="", except_on_del=True) -> None:
+def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nranks: int=None, mpi_comm: Comm=None, initializer_method: str="") -> None:
     """
     Initialize the NVSHMEM runtime with either MPI or UID-based bootstrapping.
 
@@ -130,8 +131,6 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         - mpi_comm (``mpi4py.MPI.Comm``, optional): MPI communicator to use for MPI-based initialization.
             Defaults to ``MPI.COMM_WORLD`` if ``None`` and ``initializer_method`` is "mpi".
         - initializer_method (str): Specifies the initialization method. Must be either "mpi" or "uid".
-        - except_on_del (bool): Controls the behavior when a leak of an NVSHMEM buffer is discovered. If True, raise an exception (defailt)
-                                If False, print an error message.
 
     Raises:
         - NvshmemInvalid: If an invalid initialization method is provided, or required arguments
@@ -161,8 +160,6 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
     """
     # If Device is None, that's ok.
     _cached_device["device"] = device
-
-    _except_on_del["value"] = except_on_del
 
     # Load the nvshmemem host library
     # Must happen before we use bindings
@@ -297,15 +294,6 @@ def finalize() -> None:
         >>> nvshmem.core.finalize()
     """
     logger.debug("nvshmem_finalize() called")
-    non_peer_bufs = []
-    for mr in _mr_references.values():
-        for ptr, buf in mr._mem_references.items():
-            if buf["type"] == BufferTypes.NORMAL and buf["ref_count"] > 0 and not buf["freed"]:
-                logger.error(f"Found un-freed memory object with address {ptr} at fini time")
-                non_peer_bufs.append(buf)
-    if len(non_peer_bufs) > 0:
-        logger.error(f"Found {len(non_peer_bufs)} un-freed memory objects at fini time")
-
     memory._free_all_buffers()
 
     fini_status = bindings.hostlib_finalize()

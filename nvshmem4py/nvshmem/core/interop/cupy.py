@@ -62,7 +62,7 @@ def array_get_buffer(array: ndarray) -> Tuple[Buffer, int, str]:
     return buf, get_size(array.shape, array.dtype), str(array.dtype)
 
 
-def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C") -> ndarray:
+def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C", except_on_del=True) -> ndarray:
     """
     Create a CuPy array view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -92,13 +92,13 @@ def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C") ->
     if morder not in ("C", "F"):
         raise NvshmemInvalid("Requested array with invalid memory order")
 
-    buf = nvshmem.core.buffer(get_size(shape, dtype), release=release)
+    buf = nvshmem.core.buffer(get_size(shape, dtype), release=release, except_on_del=except_on_del)
     # Important! Disable copy to force allocation to stay on sheap
     cupy_array = cupy.from_dlpack(buf, copy=False)
     view = cupy_array.view(dtype).reshape(shape, order=morder)
     return view
 
-def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id: int=None, morder="C") -> ndarray:
+def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id: int=None, morder="C", except_on_del=True) -> ndarray:
     """
     Create a raw CuPy byte array from NVSHMEM-allocated memory.
 
@@ -126,7 +126,7 @@ def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id:
     """
     if not _cupy_enabled:
         return
-    return array(shape, dtype="int8", release=release, morder=morder) 
+    return array(shape, dtype="int8", release=release, morder=morder, except_on_del=except_on_del) 
 
 def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
     """

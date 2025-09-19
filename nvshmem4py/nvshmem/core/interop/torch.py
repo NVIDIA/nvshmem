@@ -67,7 +67,7 @@ def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
         raise NvshmemInvalid("Tried to retrieve buffer from Tensor not tracked by nvshmem")
     return buf, (torch.numel(tensor) * tensor.element_size()), str(tensor.dtype)
 
-def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C") -> Tensor:
+def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a PyTorch tensor view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -96,7 +96,7 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C") 
 
     if dtype is None:
         dtype = torch.get_default_dtype() 
-    buf = buffer(get_size(shape, dtype), release=release)
+    buf = buffer(get_size(shape, dtype), release=release, except_on_del=except_on_del)
     tensor = torch.utils.dlpack.from_dlpack(buf)
     view = tensor.view(dtype).view(shape)
     if morder == "F":
@@ -107,7 +107,7 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C") 
         view = view.as_strided(size=shape, stride=strides)
     return view
 
-def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C") -> Tensor:
+def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a PyTorch tensor from NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -132,7 +132,7 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="
         return
     if dtype is None:
         dtype = torch.get_default_dtype()
-    return tensor(shape, dtype=uint8, release=release, morder=morder)
+    return tensor(shape, dtype=uint8, release=release, morder=morder, except_on_del=except_on_del)
 
 def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
     """
