@@ -882,6 +882,53 @@ static void nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_tea
     nvshmemi_team_populate_from_world_pe_mapping(team);
 }
 
+void nvshmemi_duplicate_team(nvshmem_team_t team, nvshmemi_team_t *my_team) {
+    int max_required_duplicate_teams = 0;
+
+    // Only duplicate teams if NVLS is supported
+    if (my_team->nvls_rsc_base_ptr == NULL) { return; }
+
+    /* Duplicating teams as part of collective calls prevents cuda graph capture, so we
+     * are duplicating teams as part of the initialization.
+     * Different collectives require different number of duplicate teams. We setup
+     * max of required number of duplicate teams (if MAX_CTA is not provided):
+     *   max(NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT,
+     *       NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT/ 2 teami->size),
+     *       NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT)
+     */
+    if (nvshmemi_options.MAX_CTAS_provided) {
+        max_required_duplicate_teams = nvshmemi_options.MAX_CTAS;
+    } else {
+        max_required_duplicate_teams = std::max(NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT,
+                                       std::max(NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT / 2 /* setting min team->size= 2 */,
+                                             NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT));
+    }
+    if (my_team->team_dups[1] == NVSHMEM_TEAM_INVALID) {
+        NVSHMEMU_FOR_EACH(i, max_required_duplicate_teams - 1) {
+            nvshmemi_team_split_strided(nvshmemi_team_pool[team], 0, 1, nvshmem_team_n_pes(team), NULL, 0,
+                                       &(my_team->team_dups[i + 1]), true);
+            INFO(NVSHMEM_TEAM, "Duplicate team ID: %d of parent team: %d; duplicate team: %zu / %zu\n",
+                 my_team->team_dups[i + 1], my_team->team_idx, i, max_required_duplicate_teams);
+            if (my_team->team_dups[i + 1] == NVSHMEM_TEAM_INVALID) {
+                NVSHMEMI_ERROR_EXIT(
+                    "Unable to allocate enough duplicate teams. This will cause significant "
+                    "performance degradation. Please increase NVSHMEM_MAX_TEAMS. Exiting\n");
+            }
+        }
+
+        off_t team_dups_offset = offsetof(nvshmemi_team_t, team_dups);
+        nvshmemi_team_t *teami_pool_device_addr;
+        CUDA_RUNTIME_CHECK(cudaMemcpy((void **)&teami_pool_device_addr,
+                                      &nvshmemi_device_state.team_pool[team],
+                                      sizeof(nvshmemi_team_t *), cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
+        off_t team_dups_device_addr = (off_t)((char *)teami_pool_device_addr + team_dups_offset);
+        CUDA_RUNTIME_CHECK(cudaMemcpy((void *)(team_dups_device_addr), &my_team->team_dups[0],
+                                      sizeof(nvshmem_team_t) * max_required_duplicate_teams, cudaMemcpyHostToDevice));
+        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
+    }
+}
+
 int nvshmemi_team_init(void) {
     long psync_len;
     int start, stride, size;
@@ -1256,6 +1303,7 @@ team_shared_setup:
     nvshmemi_team_pool[NVSHMEM_TEAM_NODE_INDEX] = nvshmemi_team_node;
     nvshmemi_team_pool[NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX] = nvshmemi_team_same_mype_node;
     nvshmemi_team_pool[NVSHMEM_TEAM_SAME_GPU_INDEX] = nvshmemi_team_same_gpu;
+
     if (nvshmemi_team_same_gpu->start == nvshmemi_state->mype)
         nvshmemi_team_pool[NVSHMEM_TEAM_GPU_LEADERS_INDEX] = nvshmemi_team_gpu_leaders;
 
@@ -1389,6 +1437,15 @@ team_shared_setup:
             cudaDeviceSetLimit(cudaLimitStackSize, nvshmemi_options.CUDA_LIMIT_STACK_SIZE));
     }
 #endif
+
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_WORLD_INDEX, nvshmemi_team_world);
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_SHARED_INDEX, nvshmemi_team_shared);
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_NODE_INDEX, nvshmemi_team_node);
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX, nvshmemi_team_same_mype_node);
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_SAME_GPU_INDEX, nvshmemi_team_same_gpu);
+    if (nvshmemi_team_same_gpu->start == nvshmemi_state->mype) {
+        nvshmemi_duplicate_team(NVSHMEM_TEAM_GPU_LEADERS_INDEX, nvshmemi_team_gpu_leaders);
+    }
 
 cleanup:
     if (scratch) {
@@ -1697,7 +1754,7 @@ int nvshmemi_team_set_team_idx(nvshmemi_team_t *myteam, nvshmemi_team_t *mydevic
 /* This must be called after the team has been populated*/
 int nvshmemi_team_allocate_resources(nvshmemi_team_t *myteam, nvshmemi_team_t *mydeviceteam,
                                      nvshmemi_team_t *parent_team, nvshmem_team_config_t *config,
-                                     long config_mask) {
+                                     long config_mask, bool is_dupl_team = false) {
     int status = NVSHMEMX_SUCCESS;
 
     myteam->rdxn_count = 0;
@@ -1724,7 +1781,7 @@ int nvshmemi_team_allocate_resources(nvshmemi_team_t *myteam, nvshmemi_team_t *m
         goto out;
     }
 #ifdef NVSHMEM_USE_NCCL
-    if (nvshmemi_use_nccl) nvshmemi_team_init_nccl_comm(myteam);
+    if (nvshmemi_use_nccl && !is_dupl_team) nvshmemi_team_init_nccl_comm(myteam);
 #endif
     /* Set Team Characteristics Start */
     nvshmemi_team_set_p2p_connectivity(myteam);
@@ -2014,6 +2071,7 @@ int nvshmemi_team_create(nvshmem_team_t *team, nvshmem_team_config_t *config, lo
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                            "Failed to allocate my_team\n");
     }
+    nvshmemi_duplicate_team(my_team->team_idx, my_team);
 out:
     if (status != NVSHMEMX_SUCCESS) {
         nvshmemi_team_destroy(my_team);
@@ -2123,7 +2181,7 @@ out:
 
 int nvshmemi_team_split_strided(nvshmemi_team_t *parent_team, int PE_start, int PE_stride,
                                 int PE_size, const nvshmem_team_config_t *config, long config_mask,
-                                nvshmem_team_t *new_team) {
+                                nvshmem_team_t *new_team, bool is_dupl_team) {
     int global_PE_start = -1;
     int global_PE_stride = -1;
     int global_PE_end = -1;
@@ -2194,10 +2252,13 @@ int nvshmemi_team_split_strided(nvshmemi_team_t *parent_team, int PE_start, int 
             myteam->pe_mapping[pe + myteam->size] = i;
         }
 
-        if (nvshmemi_team_allocate_resources(myteam, mydeviceteam, parent_team, NULL, 0) != 0) {
+        if (nvshmemi_team_allocate_resources(myteam, mydeviceteam, parent_team, NULL, 0, is_dupl_team) != 0) {
             *team_ret_val = NVSHMEMX_ERROR_INTERNAL;
         } else {
             *new_team = myteam->team_idx;
+        }
+        if (!is_dupl_team) {
+            nvshmemi_duplicate_team(myteam->team_idx, myteam);
         }
     }
 

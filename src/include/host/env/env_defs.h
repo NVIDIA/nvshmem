@@ -179,7 +179,7 @@ NVSHMEMI_ENV_DEF(
     G_BUF_SIZE, int, 1024 * 1024 * 8, NVSHMEMI_ENV_CAT_OTHER,
     "Size of the g_buf to perform shmem_g operations in parallel. Must be a multiple of 8B.")
 
-NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 32l, NVSHMEMI_ENV_CAT_OTHER,
+NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 128l, NVSHMEMI_ENV_CAT_OTHER,
                  "Maximum number of simultaneous teams allowed")
 
 NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)256 * (1 << 30)),
