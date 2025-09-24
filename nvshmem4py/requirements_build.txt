@@ -17,4 +17,4 @@ pyyaml
 click
 scikit-build-core
 ninja
-numba-cuda[cu12]>=0.19.1
+numba-cuda[cu12]==0.19.1

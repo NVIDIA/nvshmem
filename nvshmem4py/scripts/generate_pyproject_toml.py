@@ -61,7 +61,8 @@ dev = [
     "pytest-mpi",
     "black",
     "isort",
-    "numba-cuda[cu12]>=0.19.1",
+    # TODO: update before release
+    "numba-cuda[cu12]==0.19.1",
 ]
 
 [tool.black]
