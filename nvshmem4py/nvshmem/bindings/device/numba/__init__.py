@@ -10,7 +10,7 @@
 
 from cuda.pathfinder import find_nvidia_header_directory
 
-from numba import config
+from numba import cuda 
 
 import os
 import warnings
@@ -32,7 +32,7 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
     if not os.path.exists(os.path.join(this_folder, "entry_point.h")):
         raise RuntimeError("entry_point.h not found, package may not be properly installed")
 
-    config.CUDA_NVRTC_EXTRA_SEARCH_PATHS = ":".join([INCLUDE_PATH, this_folder])
+    cuda.config.CUDA_NVRTC_EXTRA_SEARCH_PATHS = ":".join([INCLUDE_PATH, this_folder])
 
 else:
     warnings.warn("Numba device bindings are not enabled", NvshmemWarning)
