@@ -36,7 +36,7 @@
     GEMM is fused with AllReduce using the NVSHMEM Tile-granular AllReduce API
 
     Compilation:
-        Please set NVSHMEM_BUILD_CUTLASS_EXAMPLES=ON in cmake and
+        Please set NVSHMEM_BUILD_WITH_CUTLASS=ON in cmake and
         set the environment variable CUTLASS_HOME=<path to CUTLASS directory>
 
     Usage:

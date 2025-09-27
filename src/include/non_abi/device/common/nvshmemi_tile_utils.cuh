@@ -12,6 +12,10 @@
 #include "cuda/std/utility"
 #include "host/nvshmem_macros.h"
 #include "device_host/nvshmem_tensor.h"
+#ifdef CUTLASS_ENABLED
+#include "cutlass/half.h"
+#include "cutlass/bfloat16.h"
+#endif
 
 using tuple5Int_t = cuda::std::tuple<int, int, int, int, int>;
 
@@ -64,6 +68,27 @@ __host__ __device__ __forceinline__ constexpr int get_constant(T val) {
     return get_constant_value<T>::value();
 }
 /**** End of Functions to get constant values at compile time ****/
+
+/**** Check if a type is defined, for checking CUTLASS specific datatypes ***/
+template <typename T>
+__host__ __device__ __forceinline__ constexpr bool is_cutlass_half() {
+#ifdef CUTLASS_ENABLED
+    return cuda::std::is_same<T, cutlass::half_t>::value;
+#else
+    return false;
+#endif
+}
+
+template <typename T>
+__host__ __device__ __forceinline__ constexpr bool is_cutlass_bfloat() {
+#ifdef CUTLASS_ENABLED
+    return cuda::std::is_same<T, cutlass::bfloat16_t>::value;
+#else
+    return false;
+#endif
+}
+
+/**** End ***/
 
 /***** Helper functions for tuples ******/
 // Traits to get tuple size at compile time

@@ -50,7 +50,7 @@ nvshmem_add_default_on_option(NVSHMEM_NVTX "Enable NVSHMEM NVTX support")
 message( "\n__BUILD__\n")
 nvshmem_add_default_on_option(NVSHMEM_BUILD_TESTS "Build tests")
 nvshmem_add_default_on_option(NVSHMEM_BUILD_EXAMPLES "Build examples")
-nvshmem_add_default_off_option(NVSHMEM_BUILD_CUTLASS_EXAMPLES "Build CUTLASS examples")
+nvshmem_add_default_off_option(NVSHMEM_BUILD_WITH_CUTLASS "Build with CUTLASS datatypes and examples")
 nvshmem_add_default_on_option(NVSHMEM_BUILD_PYTHON_LIB "Builds NVSHMEM4PY Wheels and Python source tarballs")
 # TODO: @benjaming switch to default-on once DVS can support NVSHMEM4Py Device builds
 nvshmem_add_default_off_option(NVSHMEM_BUILD_PYTHON_DEVICE_LIB "Builds NVSHMEM4PY Device Library")
@@ -100,6 +100,7 @@ nvshmem_add_default_environment_path(NVSHMEM_PREFIX "/usr/local/nvshmem" "path t
 nvshmem_add_default_environment_path(PMIX_HOME "/usr" "path to PMIX installation")
 nvshmem_add_default_environment_path(SHMEM_HOME "${MPI_HOME}" "path to SHMEM installation")
 nvshmem_add_default_environment_path(UCX_HOME "/usr/local/ucx" "path to UCX installation")
+nvshmem_add_default_environment_path(CUTLASS_HOME "" "path to CUTLASS directory")
 message( "___________________________________________________________________________________________________\n\n")
 
 
@@ -172,4 +173,5 @@ NCCL_HOME=${NCCL_HOME} \
 NVSHMEM_PREFIX=${NVSHMEM_PREFIX} \
 PMIX_HOME=${PMIX_HOME} \
 SHMEM_HOME=${SHMEM_HOME} \
+CUTLASS_HOME=${CUTLASS_HOME} \
 UCX_HOME=${UCX_HOME}\"")

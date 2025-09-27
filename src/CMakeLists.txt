@@ -27,6 +27,8 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
+                                -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
+                                -DCUTLASS_HOME=${CUTLASS_HOME}
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                                 -DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}
@@ -46,6 +48,12 @@ set_property(TARGET nvshmem_device PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BI
 if(CUDAToolkit_VERSION_MAJOR LESS 13)
   set(LIB_CXX_STANDARD 11)
 else()
+  set(LIB_CXX_STANDARD 17)
+endif()
+
+# CUTLASS needs C++ 17
+if(NVSHMEM_BUILD_WITH_CUTLASS)
+  message(WARNING "Setting CXX standard to C++ 17 for building with CUTLASS")
   set(LIB_CXX_STANDARD 17)
 endif()
 
@@ -376,6 +384,31 @@ target_include_directories(
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
             $<INSTALL_INTERFACE:include>
 )
+
+if (NVSHMEM_BUILD_WITH_CUTLASS)
+    target_compile_definitions(nvshmem PUBLIC CUTLASS_ENABLED)
+    target_compile_definitions(nvshmem_host PUBLIC CUTLASS_ENABLED)
+    target_compile_definitions(nvshmem_device INTERFACE CUTLASS_ENABLED)
+
+    if ("${CUTLASS_HOME}" STREQUAL "")
+        message(FATAL_ERROR "Please set CUTLASS_HOME to CUTLASS directory.")
+    endif()
+        set(CUTLASS_INCLUDE_DIR "${CUTLASS_HOME}/include")
+        set(CUTLASS_EXAMPLE_INCLUDE_DIR "${CUTLASS_HOME}/examples/common")
+        set(CUTLASS_UTIL_INCLUDE_DIR "${CUTLASS_HOME}/tools/util/include")
+
+    message(STATUS "CUTLASS include directory: ${CUTLASS_INCLUDE_DIR}")
+    target_include_directories(nvshmem PUBLIC
+            ${CUTLASS_UTIL_INCLUDE_DIR}
+            ${CUTLASS_INCLUDE_DIR}
+            ${CUTLASS_EXAMPLE_INCLUDE_DIR})
+
+    target_include_directories(nvshmem_host PUBLIC
+            ${CUTLASS_UTIL_INCLUDE_DIR}
+            ${CUTLASS_INCLUDE_DIR}
+            ${CUTLASS_EXAMPLE_INCLUDE_DIR})
+
+endif()
 
 target_link_libraries(nvshmem PRIVATE CUDA::cudart_static)
 target_link_libraries(nvshmem_host PRIVATE CUDA::cudart_static)

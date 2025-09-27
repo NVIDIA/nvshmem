@@ -25,6 +25,11 @@
 #include "fcollect.cuh"
 #include "broadcast.cuh"
 
+#ifdef CUTLASS_ENABLED
+#include "cutlass/half.h"
+#include "cutlass/bfloat16.h"
+#endif
+
 #ifdef __CUDACC__
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
@@ -216,6 +221,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
                     NVSHMEMI_MCAST_PTX_REG_TYPE_##PTX_TYPE(val1));                             \
         }                                                                                      \
     }
+
+#if defined(__cplusplus) && __cplusplus >= 201703L
 
 /* nvshmemi_<PTX_TYPE>_add_reduce_mcast16_v4_threadgroup(int4 *dest,const int4 *source, size_t
  * nelems) distributes contiguous "nelems" elements across the threadgroup. For tile collective,
@@ -590,6 +597,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
             }                                                                                      \
         }                                                                                          \
     }
+#endif  //__cplusplus >= 201703L
 
 // mcast ldreduce+st of 16B
 // The requirement to use these primitives is that nelems % UNROLL == 0
@@ -779,6 +787,8 @@ NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(f32)
 NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(f16x2)
 NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(bf16x2)
 
+// Tile specific macros
+#if defined(__cplusplus) && __cplusplus >= 201703L
 // ld_reduce errors on using .acc for min, max
 #undef NVSHMEMI_MCAST_MIN_MIXOP_f16x2
 #undef NVSHMEMI_MCAST_MIN_MIXOP_bf16x2
@@ -804,6 +814,7 @@ NVSHMEMI_MCAST_TILE_ALLREDUCE_THREADGROUP(uint32_t, bf16x2, MAX)
 #define NVSHMEMI_MCAST_MIN_MIXOP_bf16x2 "min.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_f16x2 "max.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_bf16x2 "max.acc::f32"
+#endif
 
 #if defined(__cplusplus) && __cplusplus >= 201703L
 #define IF_CONSTEXPR(expression) if constexpr (expression)
@@ -1788,6 +1799,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 }
 
 /******* Tile collective functions ********/
+#if defined(__cplusplus) && __cplusplus >= 201703L
 
 // Select implementation based on the operation, datatype
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, rdxn_ops_t op,
@@ -1828,7 +1840,11 @@ __device__ inline void nvshmemi_tile_allreduce_nvls_thread_vec(
     int nelem_major_dim = (size_major_dim * sizeof(T)) / sizeof(vtype);
     const int nelem_minor_dim = size_minor_dim;
 
-    if constexpr (is_half<T>::value) {
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
+                  "Unsupported datatype");
+
+    if constexpr (is_half<T>::value || is_cutlass_half<T>()) {
         if constexpr (op == RDXN_OPS_SUM) {
             nvshmemi_f16x2_tile_allreduceADD_mcast_threadgroup<vtype, T, scope, tuple_t, ONESHOT,
                                                                major_dim, minor_dim>(
@@ -1848,7 +1864,7 @@ __device__ inline void nvshmemi_tile_allreduce_nvls_thread_vec(
                 dst_stride_minor_dim_v, src_stride_major_dim_v, dst_stride_major_dim_v, start_coord,
                 boundary);
         }
-    } else if constexpr (is_bfloat<T>::value) {
+    } else if constexpr (is_bfloat<T>::value || is_cutlass_bfloat<T>()) {
         if constexpr (op == RDXN_OPS_SUM) {
             nvshmemi_bf16x2_tile_allreduceADD_mcast_threadgroup<vtype, T, scope, tuple_t, ONESHOT,
                                                                 major_dim, minor_dim>(
@@ -2025,6 +2041,7 @@ __device__ inline void nvshmemi_tile_allreduce_nvls_thread(nvshmem_team_t team,
         }
     }
 }
+#endif  // __cplusplus >= 201703L
 
 // Tile allreduce entrypoint
 // Call underlying function based on scope and algo
@@ -2036,7 +2053,7 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
     using T = typename src_tensor_t::value_type;
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
-#endif
+#else
 
     static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
                                        typename dst_tensor_t::value_type>::value,
@@ -2061,7 +2078,8 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
     static_assert((op == RDXN_OPS_SUM) || (op == RDXN_OPS_MIN) || (op == RDXN_OPS_MAX),
                   "Unsupported operation");
 
-    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value)),
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
     assert((src_tensor.data() != nullptr) && (dst_tensor.data() != nullptr) &&
@@ -2076,7 +2094,6 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
         "along one dimension");
 
     assert(!flag && "Currently non-zero flag value is unsupported");
-
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI) {
         // check for NVLS support in hardware
 #if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
@@ -2085,8 +2102,9 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
         // As this algo PULLs data from other PEs, we need to ensure src data is ready
         // Ensure all PEs have reached this point and pushed their data to local mem
 
-        __threadfence();  // ensure data is visible in local GPU mem
-        nvshmemi_sync_algo_threadgroup<scope>(team);
+        // @KP probably adds around 2 -4 us
+        //   __threadfence();  // ensure data is visible in local GPU mem
+        //   nvshmemi_sync_algo_threadgroup<scope>(team);
 
         // Only root will perform all reduce for two-shot
         if (root == -1) {
@@ -2123,6 +2141,7 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
 #endif
         return 0;
     }
+#endif  // __cplusplus >= 201703L
 }
 
 // Tile reduce entrypoint
@@ -2136,7 +2155,7 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
 
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
-#endif
+#else
 
     static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
                                        typename dst_tensor_t::value_type>::value,
@@ -2159,7 +2178,8 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
     static_assert((op == RDXN_OPS_SUM) || (op == RDXN_OPS_MIN) || (op == RDXN_OPS_MAX),
                   "Unsupported operation");
 
-    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value)),
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
     assert((src_tensor.data() != nullptr) && (dst_tensor.data() != nullptr) &&
@@ -2206,6 +2226,7 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
         // Extend as other algorithms are added
         return 0;
     }
+#endif  // __cplusplus >= 201703L
 }
 
 #endif /* __CUDA_ARCH__ */
