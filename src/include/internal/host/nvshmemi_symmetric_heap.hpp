@@ -9,7 +9,10 @@
 
 #include <climits>
 #include <cstdlib>
-#include <cstdbool>
+#if defined(HAVE_STDBOOL_H) && (__cplusplus < 201703L)
+# include <cstdbool>
+#endif
+
 #include <cuda.h>
 #include <memory>
 #include <tuple>

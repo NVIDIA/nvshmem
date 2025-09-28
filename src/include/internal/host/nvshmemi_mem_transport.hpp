@@ -8,7 +8,9 @@
 #define NVSHMEMI_MEM_TRANSPORT_HPP
 
 #include <cstdlib>
-#include <cstdbool>
+#if defined(HAVE_STDBOOL_H) && (__cplusplus < 201703L)
+# include <cstdbool>
+#endif
 #include <climits>
 #include <memory>
 #include <map>
