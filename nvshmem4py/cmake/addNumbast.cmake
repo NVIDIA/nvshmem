@@ -71,7 +71,7 @@ function(AddNumbast GIT_TAG)
     add_custom_target(
         clone_${PACKAGE_NAME}
         COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/build/externals
-        COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch ${ADDNUMBAST_GIT_TAG} https://github.com/nvidia/numbast.git ${BINDGEN_TOOL_REPO}
+        COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch bug-revert-build-change https://github.com/isVoid/numbast.git ${BINDGEN_TOOL_REPO}
         COMMAND touch ${OUTPUT_DIR}/git_clone.txt
         RESULT_VARIABLE clone_result
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/build/externals
@@ -163,6 +163,7 @@ function(AddNumbast GIT_TAG)
         generate_high_level_bindings
         COMMAND mkdir -p ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/generate_rma.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
+        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/generate_amo.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND touch ${OUTPUT_DIR}/generate_high_level_bindings.txt
         COMMENT "Generating High Level Bindings..."
         DEPENDS get_numbast_output
