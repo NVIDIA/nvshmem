@@ -2371,7 +2371,7 @@ exit_and_return:
 }
 
 void *nvshmemi_ptr(const void *ptr, int pe) {
-    if (ptr >= nvshmemi_device_state.heap_base) {
+    if (pe >= 0 && pe < nvshmemi_state->npes && ptr >= nvshmemi_device_state.heap_base) {
         uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
 
         if (offset < nvshmemi_device_state.heap_size) {
@@ -2387,6 +2387,9 @@ void *nvshmemi_ptr(const void *ptr, int pe) {
 void *nvshmem_ptr(const void *ptr, int pe) { return nvshmemi_ptr(ptr, pe); }
 
 void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr) {
+    if (team < 0 || team >= nvshmemi_max_teams || nvshmemi_team_pool[team] == NULL) {
+        return NULL;
+    }
     uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
     if (ptr >= nvshmemi_device_state.heap_base && offset < nvshmemi_device_state.heap_size) {
         nvls::nvshmemi_nvls_rsc *nvls =

@@ -535,6 +535,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi_threadgroup(T *de
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_mc_ptr(nvshmemi_team_t *team,
                                                                const void *ptr) {
+    if (team == NULL || team->nvls_rsc_base_ptr == NULL) {
+        return NULL;
+    } 
     ptrdiff_t offset = (char *)ptr - (char *)nvshmemi_device_state_d.heap_base;
     if (ptr >= nvshmemi_device_state_d.heap_base && offset < nvshmemi_device_state_d.heap_size &&
         team->nvls_rsc_base_ptr != NULL) {
@@ -546,15 +549,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_mc_ptr(nvshmemi_team_t *
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_ptr(const void *ptr, int pe) {
-    ptrdiff_t offset = (char *)ptr - (char *)nvshmemi_device_state_d.heap_base;
+    if (pe >= 0 && pe < nvshmemi_device_state_d.npes && ptr >= nvshmemi_device_state_d.heap_base) {
+        ptrdiff_t offset = (char *)ptr - (char *)nvshmemi_device_state_d.heap_base;
 
-    if (ptr >= nvshmemi_device_state_d.heap_base && offset < nvshmemi_device_state_d.heap_size) {
-        void *peer_addr = (void *)__ldg(
-            (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-        if (peer_addr != NULL) peer_addr = (void *)((char *)peer_addr + offset);
-        return peer_addr;
-    } else
-        return NULL;
+        if (offset < nvshmemi_device_state_d.heap_size) {
+            void *peer_addr = (void *)__ldg(
+                (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+            if (peer_addr != NULL) peer_addr = (void *)((char *)peer_addr + offset);
+            return peer_addr;
+        } 
+    }
+    return NULL;
 }
 
 template <typename T, int UNROLL>
