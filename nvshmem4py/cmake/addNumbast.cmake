@@ -163,6 +163,7 @@ function(AddNumbast GIT_TAG)
         generate_high_level_bindings
         COMMAND mkdir -p ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/generate_rma.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
+        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/generate_coll.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/generate_amo.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND touch ${OUTPUT_DIR}/generate_high_level_bindings.txt
         COMMENT "Generating High Level Bindings..."
