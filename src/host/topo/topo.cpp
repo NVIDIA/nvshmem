@@ -439,6 +439,11 @@ int nvshmemi_build_transport_map(nvshmemi_state_t *state) {
     int status = 0;
     int *local_map = NULL;
 
+    if (state->transport_map != NULL) {
+        free(state->transport_map);
+        state->transport_map = NULL;
+    }
+
     state->transport_map = (int *)calloc(state->npes * state->npes, sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(state->transport_map, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "access map allocation failed \n");

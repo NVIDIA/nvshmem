@@ -318,34 +318,42 @@ out:
     return status;
 }
 
+int nvshmemi_transport_finalize_one(nvshmemi_state_t *state, int transport_id) {
+    int status = 0;
+
+    assert(state->transports);
+    nvshmem_transport_t transport = state->transports[transport_id];
+    if (transport->is_successfully_initialized) {
+        if (transport->type == NVSHMEM_TRANSPORT_LIB_CODE_IBGDA) {
+            nvshmemi_device_state.ibgda_is_initialized = false;
+        }
+        if (transport->cache_handle) {
+            nvshmemi_transport_buffer_unregister_all(transport);
+            nvshmemi_local_mem_cache_fini((nvshmem_local_buf_cache_t *)transport->cache_handle);
+        }
+
+        status = transport->host_ops.finalize(transport);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "transport finalize failed \n");
+    }
+
+out:
+    status = nvshmemi_update_device_state();
+    nvshmemi_state->transport_bitmap &= ~(1 << transport_id);
+    state->transports[transport_id] = NULL;
+
+    return status;
+}
+
 int nvshmemi_transport_finalize(nvshmemi_state_t *state) {
     INFO(NVSHMEM_INIT, "In nvshmemi_transport_finalize");
     int status = 0;
-    nvshmem_transport_t *transports = NULL;
-    ;
 
     if (!state->transports) return 0;
 
-    transports = (nvshmem_transport_t *)state->transports;
-
     for (int i = 0; i < state->num_initialized_transports; i++) {
-        if (transports[i]->is_successfully_initialized) {
-            if (transports[i]->type == NVSHMEM_TRANSPORT_LIB_CODE_IBGDA) {
-                nvshmemi_device_state.ibgda_is_initialized = true;
-            }
-            if (transports[i]->cache_handle) {
-                nvshmemi_transport_buffer_unregister_all(transports[i]);
-                nvshmemi_local_mem_cache_fini(
-                    (nvshmem_local_buf_cache_t *)transports[i]->cache_handle);
-            }
-
-            status = transports[i]->host_ops.finalize(transports[i]);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "transport finalize failed \n");
-            status = nvshmemi_update_device_state();
-        }
+        nvshmemi_transport_finalize_one(state, i);
     }
-out:
+
     if (transport_lib) {
         dlclose(transport_lib);
         transport_lib = NULL;
@@ -357,15 +365,18 @@ out:
         transport_lib_IBGDA = NULL;
     }
 #endif
+
     return status;
 }
 
 int nvshmemi_setup_connections(nvshmemi_state_t *state) {
     int status = 0;
+
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
     nvshmem_transport_t tcurr;
 
     for (int i = 0; i < state->num_initialized_transports; i++) {
+        int current_status = 0;
         if (!((state->transport_bitmap) & (1 << i))) continue;
         tcurr = transports[i];
 
@@ -413,17 +424,25 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
          * letting us know it's managing devices internally.
          */
         if (tcurr->n_devices > 0 && selected_devices[0] == -1) {
-            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "No devices selected.\n");
+            NVSHMEMI_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
+                               "No devices selected.\n");
         }
 
-        status = tcurr->host_ops.connect_endpoints(tcurr, selected_devices, found_devices);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "connect EPS failed \n");
-        status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "barrier failed \n");
+        current_status = tcurr->host_ops.connect_endpoints(tcurr, selected_devices, found_devices);
+        NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
+                              "connect EPS failed \n");
+        current_status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
+                              "barrier failed \n");
 
-        status = nvshmemi_update_device_state();
+    handle_transport_error:
+        if (current_status != NVSHMEMX_SUCCESS) {
+            nvshmemi_transport_finalize_one(state, i);
+            status |= current_status;
+        } else {
+            status |= nvshmemi_update_device_state();
+        }
     }
 
-out:
     return status;
 }

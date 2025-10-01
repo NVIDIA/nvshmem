@@ -637,7 +637,7 @@ static bool has_nvswitch() {
     CUdevice cu_dev;
     CUDA_RUNTIME_CHECK(cudaGetDevice(&dev));
     CUCHECK(nvshmemi_cuda_syms, cuDeviceGet(&cu_dev, dev));
-    
+
     char pciBusId[] = "00000000:00:00.0";
     CUDA_RUNTIME_CHECK(cudaDeviceGetPCIBusId(pciBusId, sizeof(pciBusId), dev));
     nvmlDevice_t nvml_dev;
@@ -661,7 +661,8 @@ static bool has_nvswitch() {
 
 static int nvshmemi_setup_cuda_handles(nvshmemi_state_t *state) {
     int status = 0;
-    if ((has_nvswitch() && !nvshmemi_options.MAX_PEER_STREAMS_provided) || nvshmemi_options.MAX_PEER_STREAMS <= 0) {
+    if ((has_nvswitch() && !nvshmemi_options.MAX_PEER_STREAMS_provided) ||
+        nvshmemi_options.MAX_PEER_STREAMS <= 0) {
         nvshmemi_options.MAX_PEER_STREAMS = 1;
         INFO(NVSHMEM_INIT, "NVSHMEM has set MAX_PEER_STREAMS to 1");
     }
@@ -1069,8 +1070,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmem reserve static heaps failed \n");
 
+    /* nvshmemi_transport_init() will only fail if no transports including P2P are available */
     status = nvshmemi_transport_init(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem detect topo failed \n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem transport init failed \n");
 
     status = nvshmemi_build_transport_map(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "building transport map failed \n");
@@ -1081,9 +1083,13 @@ int nvshmemi_common_init(nvshmemi_state_t *state) {
     status = nvshmemi_setup_nvshmem_handles(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem handles setup failed \n");
 
+    /* If we fail when setting up connections, we need to rebuild the transport map */
     status = nvshmemi_setup_connections(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem setup connections failed \n");
+    if (status != NVSHMEMX_SUCCESS) {
+        status = nvshmemi_build_transport_map(state);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "building transport map failed \n");
+    }
 
     status = state->heap_obj->setup_symmetric_heap();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
