@@ -23,7 +23,12 @@
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"
+#ifdef __clang_llvm_bitcode_lib__
+__constant__ __attribute__((address_space(4), used))
+nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d = {};
+#else
 __constant__ __attribute__((used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;
+#endif
 #endif
 
 nvshmemi_device_state_t nvshmemi_device_only_state;

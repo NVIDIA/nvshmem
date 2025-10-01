@@ -30,8 +30,12 @@
 #cmakedefine NVSHMEM_ENABLE_ALL_DEVICE_INLINING
 #cmakedefine NVSHMEM_HOSTLIB_ONLY
 
-#if defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_HOSTLIB_ONLY
+#if defined NVSHMEM_HOSTLIB_ONLY
 #undef NVSHMEM_IBGDA_SUPPORT
 #undef NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY
+#define NVSHMEM_ENABLE_ALL_DEVICE_INLINING
+#endif
+
+#if defined __clang_llvm_bitcode_lib__
 #define NVSHMEM_ENABLE_ALL_DEVICE_INLINING
 #endif

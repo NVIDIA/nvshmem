@@ -285,8 +285,13 @@ typedef nvshmemi_ibgda_device_state_v1 nvshmemi_ibgda_device_state_t;
 
 #if defined(__CUDACC_RDC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
 #define EXTERN_CONSTANT extern __constant__
+#elif defined(__clang__)
+#define EXTERN_CONSTANT extern __constant__ __attribute__((address_space(4)))
+#else
+#define EXTERN_CONSTANT
+#endif
+
 EXTERN_CONSTANT nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;
 #undef EXTERN_CONSTANT
-#endif
 
 #endif /* _NVSHMEMI_IBGDA_COMMON_H_ */
