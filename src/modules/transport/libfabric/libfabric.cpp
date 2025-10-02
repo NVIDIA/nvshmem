@@ -1108,8 +1108,6 @@ skip:
         msg.context = NULL;
         msg.data = 0;
 
-        flags = FI_DELIVERY_COMPLETE;
-
         if (libfabric_state->prov_info->caps & FI_FENCE) flags |= FI_FENCE;
 
         status =
@@ -1541,10 +1539,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         state->prov_info->mode = 0;
     }
 
-    if ((state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_SLINGSHOT) ||
-        (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA)) {
-        state->prov_info->tx_attr->op_flags = FI_TRANSMIT_COMPLETE;
-    }
+    state->prov_info->tx_attr->op_flags = FI_DELIVERY_COMPLETE;
 
     cntr_attr.events = FI_CNTR_EVENTS_COMP;
     cntr_attr.wait_obj = FI_WAIT_UNSPEC;
@@ -1956,6 +1951,9 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
 
     /* Be thread safe at the level of the endpoint completion context. */
     domain_attr.threading = FI_THREAD_COMPLETION;
+
+    /* Require completion RMA completion at target for correctness of quiet */
+    info.tx_attr->op_flags = FI_DELIVERY_COMPLETE;
 
     ep_attr.type = FI_EP_RDM;  // Reliable datagrams
 
