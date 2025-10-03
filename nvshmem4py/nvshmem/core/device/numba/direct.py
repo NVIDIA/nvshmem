@@ -13,7 +13,6 @@ import nvshmem.bindings.device.numba as bindings
 import cffi
 from numba.core.extending import overload
 from numba.types import int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64, float16, Array
-# from numba.cuda.types import bfloat16
 
 __all__ = ["my_pe", "team_my_pe", "team_n_pes", "n_pes", "barrier_all", "sync_all", "signal_op", "signal_wait"]
 
