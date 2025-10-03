@@ -2218,11 +2218,11 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
                           "Failed to get allocation granularity of user buffer %p\n", ptr);
 
     if (size % mem_granularity_) {
-        size = ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_;
         WARN(
             "user buffer %p size %zu is not a multiple of heap granularity %zu, "
             "rounding up to %zu\n",
-            ptr, size, mem_granularity_, size);
+            ptr, size, mem_granularity_, ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_);
+        size = ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_;
     }
 out:
     status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(userAllocHandle));

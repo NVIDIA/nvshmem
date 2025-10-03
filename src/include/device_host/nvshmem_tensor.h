@@ -107,8 +107,16 @@ typedef enum {
     NVLS_ONE_SHOT_PULL_NBI = 1,
     NVLS_TWO_SHOT_PUSH_NBI = 2,
     NVLS_TWO_SHOT_PULL_NBI = 3,
-    NVSHMEMI_TILE_ALGO_SENTINEL = INT_MAX
+    NVSHMEMI_TILE_COLL_ALGO_SENTINEL = INT_MAX
 } tile_coll_algo_t;
+
+typedef enum {
+    PEER_PUSH_NBI = 0,
+    PEER_PULL_NBI = 0, // Both PULL/PUSH have same behavior
+    REMOTE_PUSH_NBI = 1,
+    REMOTE_PULL_NBI = 1,
+    NVSHMEMI_TILE_ALGO_SENTINEL = INT_MAX
+} tile_algo_t;
 
 }  // namespace nvshmemx
 #endif

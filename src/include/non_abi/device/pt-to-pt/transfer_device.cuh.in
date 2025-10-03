@@ -261,6 +261,7 @@ NVSHMEMI_TRANSFER_STATIC __device__ NVSHMEMI_TRANSFER_INLINE void nvshmemi_trans
     template __device__ void nvshmemi_transfer_quiet<SCOPE>(bool use_membar);
 
 TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_QUIET);
+TRANSFER_DECL_QUIET(NVSHMEMI_THREADGROUP_WARPGROUP);
 #undef TRANSFER_DECL_QUIET
 
 template <threadgroup_t SCOPE>

@@ -141,6 +141,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet() {
 
 template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
 template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_WARP>();
+template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_WARPGROUP>();
 template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>();
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence() {

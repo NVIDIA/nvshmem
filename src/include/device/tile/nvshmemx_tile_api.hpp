@@ -73,6 +73,45 @@ DECL_NVSHMEMX_OP_TILE_REDUCE(_warp);       // warp
 DECL_NVSHMEMX_OP_TILE_REDUCE(_warpgroup);  // warpgroup
 DECL_NVSHMEMX_OP_TILE_REDUCE(_block);      // block
 
+// Tile Put
+#define DECL_NVSHMEMX_TILE_PUT_THREADGROUP(SCOPE_SUFFIX)                                              \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                         \
+              nvshmemx::tile_algo_t algo>                                                        \
+    NVSHMEMI_DEVICE_PREFIX int tile_put##SCOPE_SUFFIX(src_tensor_t src,                          \
+                                                      dst_tensor_t dst, tuple_t start_coord,     \
+                                                      tuple_t boundary, int pe, uint64_t flag);
+
+DECL_NVSHMEMX_TILE_PUT_THREADGROUP();            // thread
+DECL_NVSHMEMX_TILE_PUT_THREADGROUP(_warp);       // warp
+DECL_NVSHMEMX_TILE_PUT_THREADGROUP(_warpgroup);  // warpgroup
+DECL_NVSHMEMX_TILE_PUT_THREADGROUP(_block);      // block
+
+// Tile Get
+#define DECL_NVSHMEMX_TILE_GET_THREADGROUP(SCOPE_SUFFIX)                                              \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                         \
+              nvshmemx::tile_algo_t algo>                                                             \
+    NVSHMEMI_DEVICE_PREFIX int tile_get##SCOPE_SUFFIX(src_tensor_t src,                               \
+                                                            dst_tensor_t dst, tuple_t start_coord,    \
+                                                            tuple_t boundary, int pe, uint64_t flag);
+
+DECL_NVSHMEMX_TILE_GET_THREADGROUP();            // thread
+DECL_NVSHMEMX_TILE_GET_THREADGROUP(_warp);       // warp
+DECL_NVSHMEMX_TILE_GET_THREADGROUP(_warpgroup);  // warpgroup
+DECL_NVSHMEMX_TILE_GET_THREADGROUP(_block);      // block
+
+// Tile Broadcast
+#define DECL_NVSHMEMX_TILE_BCAST_THREADGROUP(SCOPE_SUFFIX)                                              \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                           \
+              nvshmemx::tile_coll_algo_t algo>                                                          \
+    NVSHMEMI_DEVICE_PREFIX int tile_broadcast##SCOPE_SUFFIX(nvshmem_team_t team, src_tensor_t src,      \
+                                                            dst_tensor_t dst, tuple_t start_coord,      \
+                                                            tuple_t boundary, uint64_t flag);
+
+DECL_NVSHMEMX_TILE_BCAST_THREADGROUP();            // thread
+DECL_NVSHMEMX_TILE_BCAST_THREADGROUP(_warp);       // warp
+DECL_NVSHMEMX_TILE_BCAST_THREADGROUP(_warpgroup);  // warpgroup
+DECL_NVSHMEMX_TILE_BCAST_THREADGROUP(_block);      // block
+
 // Tile Coll Wait
 #define DECL_NVSHMEMX_TILE_COLLECTIVE_WAIT_THREADGROUP(SCOPE_SUFFIX)                   \
     template <nvshmemx::tile_coll_algo_t algo>                                         \
