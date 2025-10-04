@@ -12,11 +12,7 @@ CUDA_SEPARABLE_COMPILATION ON
 target_include_directories(nvshmem_perftest_helper
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nvshmem_perftest_helper PUBLIC CUDA::cudart CUDA::cuda_driver)
-if(NVSHMEM_TEST_STATIC_LIB)
-target_link_libraries(nvshmem_perftest_helper PUBLIC nvshmem)
-else()
 target_link_libraries(nvshmem_perftest_helper PUBLIC nvshmem_host nvshmem_device)
-endif()
 
 if(NVSHMEM_SHMEM_SUPPORT)
   target_compile_definitions(nvshmem_perftest_helper PUBLIC NVSHMEMTEST_SHMEM_SUPPORT)

@@ -229,15 +229,11 @@ set_target_properties(${ACTIVE_BOOTSTRAPS}
 
 # Start nvshmem lib definitions
 add_library(
-  nvshmem STATIC
-)
-
-add_library(
   nvshmem_host SHARED
 )
 
 ## Start generic variable configuration
-set_target_properties(nvshmem nvshmem_host
+set_target_properties(nvshmem_host
                       PROPERTIES POSITION_INDEPENDENT_CODE ON
                       CXX_STANDARD_REQUIRED ON
                       CUDA_STANDARD_REQUIRED ON
@@ -363,17 +359,6 @@ set(NVSHMEM_HOST_SOURCES
 )
 
 target_include_directories(
-  nvshmem
-  PRIVATE include
-          include/host/env
-          host/stream/coll
-          host/coll
-          host/topo
-  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-            $<INSTALL_INTERFACE:include>
-)
-
-target_include_directories(
   nvshmem_host
   PRIVATE include
           include/host/env
@@ -386,7 +371,6 @@ target_include_directories(
 )
 
 if (NVSHMEM_BUILD_WITH_CUTLASS)
-    target_compile_definitions(nvshmem PUBLIC CUTLASS_ENABLED)
     target_compile_definitions(nvshmem_host PUBLIC CUTLASS_ENABLED)
     target_compile_definitions(nvshmem_device INTERFACE CUTLASS_ENABLED)
 
@@ -398,11 +382,6 @@ if (NVSHMEM_BUILD_WITH_CUTLASS)
         set(CUTLASS_UTIL_INCLUDE_DIR "${CUTLASS_HOME}/tools/util/include")
 
     message(STATUS "CUTLASS include directory: ${CUTLASS_INCLUDE_DIR}")
-    target_include_directories(nvshmem PUBLIC
-            ${CUTLASS_UTIL_INCLUDE_DIR}
-            ${CUTLASS_INCLUDE_DIR}
-            ${CUTLASS_EXAMPLE_INCLUDE_DIR})
-
     target_include_directories(nvshmem_host PUBLIC
             ${CUTLASS_UTIL_INCLUDE_DIR}
             ${CUTLASS_INCLUDE_DIR}
@@ -410,13 +389,10 @@ if (NVSHMEM_BUILD_WITH_CUTLASS)
 
 endif()
 
-target_link_libraries(nvshmem PRIVATE CUDA::cudart_static)
 target_link_libraries(nvshmem_host PRIVATE CUDA::cudart_static)
 if (CCCL_FOUND AND CUDAToolkit_VERSION_MAJOR GREATER 12)
-  target_link_libraries(nvshmem PUBLIC CCCL::CCCL)
   target_link_libraries(nvshmem_host PUBLIC CCCL::CCCL)
 endif()
-nvshmem_library_set_base_config(nvshmem)
 nvshmem_library_set_base_config(nvshmem_host)
 ## End generic variable configuration
 
@@ -595,7 +571,6 @@ set_target_properties(${ACTIVE_TRANSPORTS}
 
 ## Start dependencies
 if(NVSHMEM_USE_NCCL)
-  target_include_directories(nvshmem PRIVATE ${NCCL_INCLUDE})
   target_include_directories(nvshmem_host PRIVATE ${NCCL_INCLUDE})
 endif()
 
@@ -638,20 +613,18 @@ endif()
 target_link_libraries(nvshmem_host PRIVATE nvshmem_device)
 target_link_options(nvshmem_host PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../nvshmem_host.sym")
 set_source_files_properties(${NVSHMEM_HOST_SOURCES} ${NVSHMEM_DEVICE_SOURCES} PROPERTIES COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CUDA>:--maxrregcount=32>)
-target_sources(nvshmem PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT} ${NVSHMEM_DEVICE_SOURCES} ${NVSHMEM_DEVICE_SOURCES_NOMAXREGCOUNT})
 target_sources(nvshmem_host PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT})
-
-add_library(NVSHMEM::nvshmem ALIAS nvshmem)
 
 ## End final lib prep
 # End nvshmem lib definitions
 
 # Start nvshmem-info definitions.
 add_executable(nvshmem-info)
-target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp)
+target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp host/util/env_vars.cpp host/util/util.cpp host/init/init_nvtx.cpp)
 set_target_properties(nvshmem-info PROPERTIES CXX_STANDARD_REQUIRED ON CXX_STANDARD ${LIB_CXX_STANDARD} RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
-target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem)
+target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem_host nvshmem_device)
 target_include_directories(nvshmem-info PRIVATE include include/host/env)
+target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # End nvshmem-info definitions.
 
 # Start header configuration and export
@@ -907,7 +880,7 @@ export(
 )
 
 install(
-	TARGETS nvshmem nvshmem_host nvshmem-info ${ACTIVE_BOOTSTRAPS} ${ACTIVE_TRANSPORTS}
+	TARGETS nvshmem_host nvshmem-info ${ACTIVE_BOOTSTRAPS} ${ACTIVE_TRANSPORTS}
   EXPORT NVSHMEMTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib

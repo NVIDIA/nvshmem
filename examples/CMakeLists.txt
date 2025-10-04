@@ -37,7 +37,6 @@ if(NOT SubBuild)
   option(NVSHMEM_DEVEL "Toggles NVSHMEM devel compilation settings" $ENV{NVSHMEM_DEVEL})
   option(NVSHMEM_MPI_SUPPORT "Enable compilation of the MPI bootstrap and MPI-specific code" ${NVSHMEM_MPI_SUPPORT_DEFAULT})
   option(NVSHMEM_SHMEM_SUPPORT "Enable Compilation of the SHMEM bootstrap and SHMEM specific code" $ENV{NVSHMEM_SHMEM_SUPPORT})
-  option(NVSHMEM_TEST_STATIC_LIB "Force tests to link only against the combined nvshmem.a binary" $ENV{NVSHMEM_TEST_STATIC_LIB})
   option(NVSHMEM_VERBOSE "Enable the ptxas verbose compilation option" $ENV{NVSHMEM_VERBOSE})
   set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
   set(MPI_HOME ${MPI_HOME_DEFAULT} CACHE PATH "path to MPI installation")
@@ -86,7 +85,6 @@ if(NOT SubBuild)
   check_compiler_flag(CUDA -t4 NVCC_THREADS)
 
   find_package(NVSHMEM REQUIRED HINTS ${NVSHMEM_PREFIX}/lib/cmake/nvshmem)
-  add_library(nvshmem ALIAS nvshmem::nvshmem)
   add_library(nvshmem_host ALIAS nvshmem::nvshmem_host)
   add_library(nvshmem_device ALIAS nvshmem::nvshmem_device)
 
@@ -125,11 +123,7 @@ endif()
 
 add_library(nvshmem_example_helper INTERFACE)
 target_link_libraries(nvshmem_example_helper INTERFACE CUDA::cudart CUDA::cuda_driver)
-if(NVSHMEM_TEST_STATIC_LIB)
-target_link_libraries(nvshmem_example_helper INTERFACE nvshmem)
-else()
 target_link_libraries(nvshmem_example_helper INTERFACE nvshmem_host nvshmem_device)
-endif()
 
 # Unused by any examples currently compiled.
 # TODO: Resurrect the shmem-based-init example.
@@ -158,11 +152,7 @@ if(NVSHMEM_MPI_SUPPORT)
     target_compile_definitions(${NAME_} PRIVATE NVSHMEMTEST_MPI_SUPPORT)
 
     target_link_libraries(${NAME_} CUDA::cudart CUDA::cuda_driver)
-    if(NVSHMEM_TEST_STATIC_LIB)
-      target_link_libraries(${NAME_} nvshmem)
-    else()
-      target_link_libraries(${NAME_} nvshmem_host nvshmem_device)
-    endif()
+    target_link_libraries(${NAME_} nvshmem_host nvshmem_device)
   endforeach()
 
 endif()
