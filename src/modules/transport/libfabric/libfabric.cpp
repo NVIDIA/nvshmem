@@ -1087,7 +1087,7 @@ skip:
         struct iovec l_iov;
         struct fi_rma_iov r_iov;
         void *desc = libfabric_state->local_mr_desc[NVSHMEMT_LIBFABRIC_PROXY_EP_IDX];
-        uint64_t flags;
+        uint64_t flags = 0;
 
         memset(&msg, 0, sizeof(struct fi_msg_rma));
         memset(&l_iov, 0, sizeof(struct iovec));
@@ -1908,7 +1908,6 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
     struct fid_nic nic;
     struct fi_av_attr av_attr;
     struct fi_info *returned_fabrics, *current_fabric;
-    char *strncpy_output;
     int num_fabrics_returned = 0;
 
     int status = 0;
@@ -2015,16 +2014,14 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
                          NVSHMEMT_LIBFABRIC_DOMAIN_LEN)) {
                 break;
             } else if (i == state->num_domains) {
-                strncpy_output =
-                    strncpy(state->domain_names[state->num_domains].name,
-                            current_fabric->nic->device_attr->name, NVSHMEMT_LIBFABRIC_DOMAIN_LEN);
-                if (strncpy_output == NULL ||
-                    (uintptr_t)strncpy_output -
-                            (uintptr_t)state->domain_names[state->num_domains].name >=
-                        NVSHMEMT_LIBFABRIC_DOMAIN_LEN) {
+                size_t name_len = strlen(current_fabric->nic->device_attr->name);
+                if (name_len >= NVSHMEMT_LIBFABRIC_DOMAIN_LEN) {
                     NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                        "Unable to copy domain name for libfabric transport.");
                 }
+                (void) strncpy(state->domain_names[state->num_domains].name,
+                               current_fabric->nic->device_attr->name,
+                               NVSHMEMT_LIBFABRIC_DOMAIN_LEN);
                 state->num_domains++;
                 break;
             }

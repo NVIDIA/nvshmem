@@ -74,7 +74,6 @@ int sync_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, void
     double *h_thread_lat = (double *)h_tables[0];
     double *h_warp_lat = (double *)h_tables[1];
     double *h_block_lat = (double *)h_tables[2];
-    size_t size = 0;
 
     uint64_t tpb_size = (uint64_t)nvshm_test_num_tpb;
 
