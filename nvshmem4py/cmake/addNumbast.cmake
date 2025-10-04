@@ -71,7 +71,7 @@ function(AddNumbast GIT_TAG)
     add_custom_target(
         clone_${PACKAGE_NAME}
         COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/build/externals
-        COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch bug-revert-build-change https://github.com/isVoid/numbast.git ${BINDGEN_TOOL_REPO}
+        COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch ${ADDNUMBAST_GIT_TAG} https://github.com/NVIDIA/numbast.git ${BINDGEN_TOOL_REPO}
         COMMAND touch ${OUTPUT_DIR}/git_clone.txt
         RESULT_VARIABLE clone_result
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/build/externals
