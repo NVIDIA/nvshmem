@@ -491,14 +491,50 @@ static void nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
     return;
 }
 
-int nvshmemi_get_cucontext(nvshmemi_state_t *state) {
+int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL) {
+    int cuda_device_id = INIT_ARGS_SCALAR_INVALID;
     CUdevice cudevice;
     int leastPriority, greatestPriority;
     int status = NVSHMEMX_SUCCESS;
 
     CUCHECK(nvshmemi_cuda_syms, cuInit(0));
 
+    if (attr != NULL) {
+        if (attr->args.version == NVSHMEM_INIT_ARGS_V2_IDENTIFIER) {
+            cuda_device_id = attr->args.cuda_device_id;
+        }
+    }
+
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&cudevice));
+
+    if (cuda_device_id != INIT_ARGS_SCALAR_INVALID) {
+        if (nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
+            WARN(
+                "Two-stage initialization requested, but cuda_device_id is set. Using selected GPU "
+                "and skipping two-stage initialization.");
+            nvshmemi_options.BOOTSTRAP_TWO_STAGE = false;
+        }
+        if (!status) {
+            INFO(NVSHMEM_INIT,
+                 "cuda_device_id is set, but device was already selected in the application. Using "
+                 "new device %d.",
+                 cuda_device_id);
+        } else {
+            INFO(NVSHMEM_INIT, "cuda_device_id is set. Using user selected GPU at index %d",
+                 cuda_device_id);
+        }
+        status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&cudevice, cuda_device_id));
+        if (status != CUDA_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT(
+                "cuda_device_id is set, but device at index %d is not valid. Failing "
+                "initialization.",
+                cuda_device_id);
+            status = NVSHMEMX_ERROR_GPU_NOT_SELECTED;
+
+            goto out;
+        }
+    }
+
     if (status || nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
         if (nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
             TRACE(NVSHMEM_INIT, "Two-stage initialization requested");
@@ -955,7 +991,7 @@ static void nvshmemi_query_cuda_attributes() {
     nvshmemi_is_vmm_supported = gdrdma_vmm && vmm_support;
 }
 
-int nvshmemi_common_init(nvshmemi_state_t *state) {
+int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     int status = 0;
     void *dev_state_ptr = NULL;
     void *transport_dev_state_ptr = NULL;
@@ -1011,7 +1047,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state) {
                  "Rail optimization not supported for symmetric heap in device memory");
         }
     }
-    status = nvshmemi_get_cucontext(state);
+    status = nvshmemi_get_cucontext(state, attr);
     NZ_DEBUG_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem get cucontext failed \n");
 
     nvshmemi_query_cuda_attributes();
@@ -1145,9 +1181,9 @@ out:
     return status;
 }
 
-int nvshmemi_try_common_init(nvshmemi_state_t *state) {
+int nvshmemi_try_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     int status = 0;
-    status = nvshmemi_common_init(state);
+    status = nvshmemi_common_init(state, attr);
     if (status) {
         INFO(NVSHMEM_INIT, "nvshmemi_common_init failed, continuing");
         status = 0;
@@ -1246,7 +1282,7 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
             nvshmemi_init_nvshmemi_state(nvshmemi_state);
         }
 
-        status = nvshmemi_try_common_init(nvshmemi_state);
+        status = nvshmemi_try_common_init(nvshmemi_state, attr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "nvshmem common init failed \n");
     } else {

@@ -109,7 +109,7 @@ extern bool nvshmemi_is_mpg_run;
 extern bool nvshmemi_is_limited_mpg_run;
 
 int nvshmemi_proxy_level(nvshmemi_state_t *state);
-int nvshmemi_common_init(nvshmemi_state_t *state);
+int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL);
 int nvshmemi_init_g_buffer();
 void nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind);
 void nvshmemi_fini_symmetric_heap(nvshmemi_state_t *state);

@@ -56,7 +56,8 @@ static inline int nvshmemx_init_attr(unsigned int flags, nvshmemx_init_attr_t *a
     int status = 0, requested = NVSHMEM_THREAD_SERIALIZED, provided;
     nvshmemi_version_t app_nvshmem_version = {
         NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
-    if (attributes != NULL) {
+    if (attributes != NULL && attributes->version != NVSHMEM_INIT_ATTR_V2_IDENTIFIER &&
+        attributes->version != NVSHMEM_INIT_ATTR_V1_IDENTIFIER) {
         nvshmemx_init_init_attr_ver_only((*attributes));
     }
     status = nvshmemi_init_thread(requested, &provided, flags, attributes, app_nvshmem_version);

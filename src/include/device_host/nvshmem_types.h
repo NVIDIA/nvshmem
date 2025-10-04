@@ -1,7 +1,9 @@
 #ifndef NVSHMEM_TYPES_H
 #define NVSHMEM_TYPES_H
 
+#define INIT_ARGS_V2_PADDING 92
 #define INIT_ARGS_PADDING 96
+#define INIT_ARGS_SCALAR_INVALID -1
 #define TEAM_CONFIG_V2_PADDING 48
 #define TEAM_CONFIG_PADDING 56
 #define REDUCE_PADDING 32
@@ -42,6 +44,15 @@
         attr.args.uid_args.version = (1 << 16) + sizeof(nvshmemx_uniqueid_args_t); \
     } while (0);
 
+#define NVSHMEM_INIT_ARGS_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_args_t)
+#define NVSHMEMX_INIT_ARGS_V2_INITIALIZER                                   \
+    {                                                                       \
+        NVSHMEM_INIT_ARGS_V2_IDENTIFIER, /* version */                      \
+            NVSHMEMX_UNIQUEID_ARGS_INITIALIZER, INIT_ARGS_SCALAR_INVALID, { \
+            0                                                               \
+        }                                                                   \
+    }
+
 #define NVSHMEMX_INIT_ARGS_INITIALIZER                          \
     {                                                           \
         (1 << 16) + sizeof(nvshmemx_init_args_t), /* version */ \
@@ -50,11 +61,20 @@
         }                                                       \
     }
 
-#define NVSHMEMX_INIT_ATTR_INITIALIZER                           \
-    {                                                            \
-        (1 << 16) + sizeof(nvshmemx_init_attr_t), /* version */  \
-            NULL,                                 /* mpi_comm */ \
-            NVSHMEMX_INIT_ARGS_INITIALIZER                       \
+#define NVSHMEM_INIT_ATTR_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_attr_t)
+#define NVSHMEMX_INIT_ATTR_INITIALIZER                  \
+    {                                                   \
+        NVSHMEM_INIT_ATTR_V2_IDENTIFIER, /* version */  \
+            NULL,                        /* mpi_comm */ \
+            NVSHMEMX_INIT_ARGS_V2_INITIALIZER           \
+    }
+
+#define NVSHMEM_INIT_ATTR_V1_IDENTIFIER (1 << 16) + sizeof(nvshmemx_init_attr_t)
+#define NVSHMEMX_INIT_ATTR_V1_INITIALIZER               \
+    {                                                   \
+        NVSHMEM_INIT_ATTR_V1_IDENTIFIER, /* version */  \
+            NULL,                        /* mpi_comm */ \
+            NVSHMEMX_INIT_ARGS_INITIALIZER              \
     }
 
 #define NVSHMEMI_RED_REX_INITIALIZER                                        \
@@ -228,11 +248,26 @@ typedef enum {
 typedef struct {
     int version;
     nvshmemx_uniqueid_args_t uid_args;
+    int cuda_device_id;
+    char content[INIT_ARGS_V2_PADDING];
+} nvshmemx_init_args_v2;
+static_assert(sizeof(nvshmemx_init_args_v2) == 128, "init_args_v2 must be 128 bytes.");
+
+typedef struct {
+    int version;
+    nvshmemx_uniqueid_args_t uid_args;
     char content[INIT_ARGS_PADDING];
 } nvshmemx_init_args_v1;
 static_assert(sizeof(nvshmemx_init_args_v1) == 128, "init_args_v1 must be 128 bytes.");
 
-typedef nvshmemx_init_args_v1 nvshmemx_init_args_t;
+typedef nvshmemx_init_args_v2 nvshmemx_init_args_t;
+
+typedef struct {
+    int version;
+    void *mpi_comm;
+    nvshmemx_init_args_t args;
+} nvshmemx_init_attr_v2;
+static_assert(sizeof(nvshmemx_init_attr_v2) == 144, "init_attr_v2 must be 144 bytes.");
 
 typedef struct {
     int version;
@@ -241,7 +276,7 @@ typedef struct {
 } nvshmemx_init_attr_v1;
 static_assert(sizeof(nvshmemx_init_attr_v1) == 144, "init_attr_v1 must be 144 bytes.");
 
-typedef nvshmemx_init_attr_v1 nvshmemx_init_attr_t;
+typedef nvshmemx_init_attr_v2 nvshmemx_init_attr_t;
 
 typedef struct {
     int version;
