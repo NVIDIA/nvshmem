@@ -16,7 +16,7 @@ namespace nvshmemx {
 #define DEFN_NVSHMEMX_OP_TILE_ALLREDUCE_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX, OP)     \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
               nvshmemx::tile_coll_algo_t algo>                                        \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_allreduce##SC_SUFFIX(      \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_reduce##SC_SUFFIX(         \
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, int root, uint64_t flag) {                                  \
         nvshmemi_tile_allreduce<algo, src_tensor_t, dst_tensor_t, tuple_t,            \
@@ -26,7 +26,7 @@ namespace nvshmemx {
     }                                                                                 \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
               nvshmemx::tile_coll_algo_t algo>                                        \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_allreduce##SC_SUFFIX(      \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_reduce##SC_SUFFIX(         \
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, uint64_t flag) {                                            \
         nvshmemi_tile_allreduce<algo, src_tensor_t, dst_tensor_t, tuple_t,            \
@@ -52,7 +52,7 @@ DEFN_NVSHMEM_TILE_ALLREDUCE_THREADGROUP(block, _block, x);
 #define DEFN_NVSHMEMX_OP_TILE_REDUCE_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX, OP)                     \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                      \
               nvshmemx::tile_coll_algo_t algo>                                                     \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_reduce##SC_SUFFIX(                      \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_rooted_reduce##SC_SUFFIX(               \
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,              \
         tuple_t boundary, int root, uint64_t flag) {                                               \
         nvshmemi_tile_reduce<algo, src_tensor_t, dst_tensor_t, tuple_t, nvshmemi_threadgroup_##SC, \

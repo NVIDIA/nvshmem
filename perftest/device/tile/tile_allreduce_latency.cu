@@ -30,7 +30,7 @@ size_t round_up(int val, int gran) { return ((val + gran - 1) / gran) * gran; }
         if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {             \
             for (i = 0; i < iter; i++) {                                                      \
                 /* Only one tile, so root is always 0 */                                      \
-                nvshmemx::tile_##OP##_allreduce##TG<src_tensor_t, dst_tensor_t, empty, algo>( \
+                nvshmemx::tile_##OP##_reduce##TG<src_tensor_t, dst_tensor_t, empty, algo>( \
                     team, *src, *dst, {}, {}, 0, 0 /*flag*/);                                 \
                 nvshmemx::tile_collective_wait##TG<algo>(team, 0);                            \
             }                                                                                 \

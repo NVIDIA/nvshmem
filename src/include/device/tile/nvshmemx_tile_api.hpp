@@ -21,14 +21,14 @@ namespace nvshmemx {
 #define DECL_NVSHMEMX_OP_TILE_ALLREDUCE_THREADGROUP(SCOPE_SUFFIX, OP)                 \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
               nvshmemx::tile_coll_algo_t algo>                                        \
-    NVSHMEMI_DEVICE_PREFIX int tile_##OP##_allreduce##SCOPE_SUFFIX(                   \
+    NVSHMEMI_DEVICE_PREFIX int tile_##OP##_reduce##SCOPE_SUFFIX(                   \
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, int root, uint64_t flag);                                   \
                                                                                       \
     /* overloaded version for with no root, only for one shot */                      \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
               nvshmemx::tile_coll_algo_t algo>                                        \
-    NVSHMEMI_DEVICE_PREFIX int tile_##OP##_allreduce##SCOPE_SUFFIX(                   \
+    NVSHMEMI_DEVICE_PREFIX int tile_##OP##_reduce##SCOPE_SUFFIX(                   \
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, uint64_t flag);
 
@@ -59,7 +59,7 @@ DECL_NVSHMEMX_TILE_ALLGATHER_THREADGROUP(_block);      // block
 #define DECL_NVSHMEMX_OP_TILE_REDUCE_THREADGROUP(SCOPE_SUFFIX, OP)                    \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
               nvshmemx::tile_coll_algo_t algo>                                        \
-    NVSHMEMI_DEVICE_PREFIX int tile_##OP##_reduce##SCOPE_SUFFIX(                      \
+    NVSHMEMI_DEVICE_PREFIX int tile_##OP##_rooted_reduce##SCOPE_SUFFIX(               \
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, int root, uint64_t flag);
 
