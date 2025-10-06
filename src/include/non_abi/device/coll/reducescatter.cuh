@@ -55,7 +55,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
     for (int i = 1; i < teami->size; i++) {  // don't send to self
         int peer_pe_idx = (teami->my_pe + i) % teami->size;
         int peer_pe = nvshmemi_team_translate_pe(team, peer_pe_idx, NVSHMEM_TEAM_WORLD);
-        nvshmemii_put_nbi_threadgroup<TYPE, SCOPE>(
+        nvshmemii_put_nbi<TYPE, SCOPE>(
             (TYPE *)((char *)pWrk + teami->my_pe * nreduce * sizeof(TYPE)),
             source + peer_pe_idx * nreduce, nreduce, peer_pe);
     }

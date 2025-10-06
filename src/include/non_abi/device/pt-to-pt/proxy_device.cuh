@@ -42,6 +42,11 @@
 #include "device_host/nvshmem_proxy_channel.h"  // IWYU pragma: keep
 
 #ifdef __CUDA_ARCH__
+
+#ifndef likely
+#define likely(x) (__builtin_expect(!!(x), 1))
+#endif
+
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void check_channel_availability(
     uint64_t tail_idx) {
     uint64_t complete;
@@ -59,8 +64,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void check_channe
     }
 }
 
-NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_quiet(
-    bool use_membar) {
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_quiet() {
     uint64_t quiet_issue;
     quiet_issue = (*(volatile uint64_t *)nvshmemi_device_state_d.proxy_channels_issue);
     atomicMax((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_quiet_issue,
@@ -69,6 +73,50 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_qui
     nvshmemi_wait_until_greater_than_equals<uint64_t>(
         nvshmemi_device_state_d.proxy_channels_quiet_ack, quiet_issue,
         NVSHMEMI_CALL_SITE_PROXY_QUIET);
+}
+
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_qp_quiet(
+    int pe = NVSHMEMX_PE_ALL, nvshmemx_qp_handle_t *qp_handle = NULL, int num_qps = 1) {
+    uint64_t idx, tail_idx, *req;
+    int size = CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES;
+
+    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    tail_idx = idx + (size - 1);
+
+    // flow-control
+    check_channel_availability(tail_idx);
+
+    req = (uint64_t *)((uint64_t)nvshmemi_device_state_d.proxy_channels_buf +
+                       (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1)));
+    uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint64_t op = NVSHMEMI_OP_QUIET_QP;
+    uint64_t qp_count = num_qps;
+    uint16_t pe_u16 = pe;
+
+    *((volatile uint64_t *)req) = (uint64_t)((qp_count << 32) | (op << 16) | curr_flag);
+
+    for (int i = 0; i < num_qps; i++) {
+        idx += CHANNEL_ENTRY_BYTES;
+        req = (uint64_t *)((uint64_t)nvshmemi_device_state_d.proxy_channels_buf +
+                           (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1)));
+        curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+        *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_handle[i]) << 32) |
+                                                 (static_cast<uint64_t>(pe_u16) << 16) |
+                                                 (static_cast<uint64_t>(op) << 8) | curr_flag);
+    }
+    nvshmemi_wait_until_greater_than<uint64_t>(nvshmemi_device_state_d.proxy_channels_complete,
+                                               tail_idx, NVSHMEMI_CALL_SITE_PROXY_QUIET);
+}
+
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_quiet(
+    bool use_membar, int pe = NVSHMEMX_PE_ALL, nvshmemx_qp_handle_t *qp_handle = NULL,
+    int num_qps = 1) {
+    if (likely(pe == NVSHMEMX_PE_ALL || qp_handle == NULL)) {
+        proxy_quiet();
+    } else {
+        proxy_qp_quiet(pe, qp_handle, num_qps);
+    }
+
     if (use_membar) {
         __threadfence_system();  // XXX: prevents store to issue_d reordered to before load from
                                  // quiet_ack_d (breaks quiet -> rma)
@@ -155,7 +203,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void copy_to_channel(vo
 }
 
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma(
-    void *rptr, void *lptr, size_t bytes, int pe, int channel_op) {
+    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index) {
     uint64_t idx, tail_idx, *req;
     int size = PROXY_DMA_REQ_BYTES;
     int group_size = 1;
@@ -163,6 +211,11 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
     void *base_ptr = nvshmemi_device_state_d.heap_base;
     const uint64_t mask_lowest_byte = 0xFFFFFFFFFFFFFF00u;
     const uint64_t mask_upper_7_bytes = 0x00000000000000FFu;
+
+    if (qp_index != NVSHMEMX_QP_DEFAULT) {
+        channel_op =
+            static_cast<nvshmemi_op_t>(static_cast<int>(channel_op) + NVSHMEMI_OP_QP_OP_OFFSET);
+    }
 
     __threadfence();
 
@@ -214,11 +267,12 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
 
     /* put_dma_request_2
      * 32 | 16 | 8 | 8
-     * resv2 | pe | resv1 | flag */
+     * qp_index | pe | resv1 | flag */
     idx += CHANNEL_ENTRY_BYTES;
     req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
     curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
-    *((volatile uint64_t *)req) = (uint64_t)((pe_u16 << 16) | curr_flag);
+    *((volatile uint64_t *)req) =
+        (uint64_t)((static_cast<uint64_t>(qp_index) << 32) | (pe_u16 << 16) | curr_flag);
 }
 
 /*XXX : Only no const version is used*/
@@ -233,14 +287,16 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_rma
 }
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_rma_nbi(
-    void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op) {
+    void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     if (!bytes) return;
-    transfer_dma(rptr, lptr, bytes, pe, op);
+    transfer_dma(rptr, lptr, bytes, pe, op, qp_index);
 }
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_put_signal_nbi(
     void *rwrite_ptr, void *lwrite_ptr, size_t write_bytes, int pe, nvshmemi_op_t channel_op,
-    void *sig_addr, uint64_t sig_val, nvshmemi_amo_t sig_op) {
+    void *sig_addr, uint64_t sig_val, nvshmemi_amo_t sig_op,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     uint64_t idx, tail_idx, *req;
     int size = PROXY_PUT_WITH_SIG_REQ_BYTES;
     int group_size = 1;
@@ -248,6 +304,11 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
     void *base_ptr = nvshmemi_device_state_d.heap_base;
     const uint64_t mask_lowest_byte = 0xFFFFFFFFFFFFFF00u;
     const uint64_t mask_upper_7_bytes = 0x00000000000000FFu;
+
+    if (qp_index != NVSHMEMX_QP_DEFAULT) {
+        channel_op =
+            static_cast<nvshmemi_op_t>(static_cast<int>(channel_op) + NVSHMEMI_OP_QP_OP_OFFSET);
+    }
 
     __threadfence();
 
@@ -300,11 +361,12 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
 
     /* put_signal_request_2
      * 32    | 16 | 8     | 8
-     * resv2 | pe | resv1 | flag */
+     * qp_index | pe | resv1 | flag */
     idx += CHANNEL_ENTRY_BYTES;
     req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
     curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
-    *((volatile uint64_t *)req) = (uint64_t)((pe_u16 << 16) | curr_flag);
+    *((volatile uint64_t *)req) =
+        (uint64_t)((static_cast<uint64_t>(qp_index) << 32) | (pe_u16 << 16) | curr_flag);
 
     /* put_signal_request_3
      * 32              | 8              | 8      | 8          | 8
@@ -328,8 +390,8 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
 }
 
 template <typename T>
-NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_proxy_rma_g(void *source,
-                                                                                int pe) {
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
+nvshmemi_proxy_rma_g(void *source, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
 // check for CC >= 7.0 because the code depends on __match_all_sync
 #if __CUDA_ARCH__ >= 700
     constexpr unsigned int full_warp = 0xffffffffu;
@@ -367,8 +429,8 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_proxy_rma_g(
             nvshmemi_proxy_rma_nbi(source,
                                    (void *)(nvshmemi_device_state_d.proxy_channel_g_coalescing_buf +
                                             coalescing_buf_byte_offset),
-                                   NVSHMEMI_WARP_SIZE * sizeof(T), pe, NVSHMEMI_OP_G);
-            nvshmemi_proxy_quiet(false);
+                                   NVSHMEMI_WARP_SIZE * sizeof(T), pe, NVSHMEMI_OP_G, qp_index);
+            nvshmemi_proxy_quiet(false, pe, &qp_index, 1);
         }
         coalescing_buf_byte_offset = __shfl_sync(amask, coalescing_buf_byte_offset, 0);
         T *__restrict__ coalescing_buf = reinterpret_cast<T *>(
@@ -397,7 +459,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_proxy_rma_g(
                                                           NVSHMEMI_CALL_SITE_G_WAIT_FLAG);
 
         nvshmemi_proxy_rma_nbi(source, (void *)elem, sizeof(T), pe, NVSHMEMI_OP_G);
-        nvshmemi_proxy_quiet(false);
+        nvshmemi_proxy_quiet(false, pe, &qp_index, 1);
 
         __threadfence();
         T return_val = *(T *)(&(elem->data));
@@ -440,9 +502,10 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void convert_val_
 
 template <typename T>
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_inline(
-    void *rptr, T value, int pe, nvshmemi_op_t optype) {
+    void *rptr, T value, int pe, nvshmemi_op_t optype,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     uint64_t idx, tail_idx, *req;
-    int size = PROXY_INLINE_REQ_BYTES;
+    int size = PROXY_INLINE_REQ_BYTES + (qp_index != NVSHMEMX_QP_DEFAULT ? CHANNEL_ENTRY_BYTES : 0);
     int group_size = 1;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
@@ -489,21 +552,35 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_inl
     curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
     const uint64_t lvalue_high = lvalue_buffer & ~mask_4_bytes;
     *((volatile uint64_t *)req) = (lvalue_high | size_u64 << 16 | curr_flag);
+
+    /* put_inline_request_2
+     * 32 | 16 | 8 | 8
+     * qp_index | resv2 | resv | flag */
+    if (qp_index != NVSHMEMX_QP_DEFAULT) {
+        idx += CHANNEL_ENTRY_BYTES;
+        req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+        curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+        *((volatile uint64_t *)req) =
+            (uint64_t)((static_cast<uint64_t>(qp_index) << 32) | curr_flag);
+    }
 }
 
 template <typename T>
-NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_rma_p(void *rptr,
-                                                                                   const T value,
-                                                                                   int pe) {
-    transfer_inline<T>(rptr, value, pe, NVSHMEMI_OP_P);
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_rma_p(
+    void *rptr, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    if (qp_index != NVSHMEMX_QP_DEFAULT) {
+        transfer_inline<T>(rptr, value, pe, NVSHMEMI_OP_P_QP, qp_index);
+    } else {
+        transfer_inline<T>(rptr, value, pe, NVSHMEMI_OP_P, qp_index);
+    }
 }
 
 template <typename T>
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     void *rptr, uint64_t g_buf_counter /* used only for fetch atomics */, T swap_add, T compare,
-    int pe, nvshmemi_amo_t amo_op) {
+    int pe, nvshmemi_amo_t amo_op, nvshmemx_qp_handle_t qp_index) {
     uint64_t idx, tail_idx, *req;
-    int size = PROXY_AMO_REQ_BYTES;
+    int size = PROXY_AMO_REQ_BYTES + (qp_index != NVSHMEMX_QP_DEFAULT ? CHANNEL_ENTRY_BYTES : 0);
     int group_size = 1;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
@@ -517,7 +594,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
     uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
     uint64_t roffset = (uint64_t)((char *)rptr - (char *)base_ptr);
-    uint64_t op = NVSHMEMI_OP_AMO;
+    uint64_t op;
     uint64_t amo = amo_op;
     uint16_t pe_u16 = pe;
     uint64_t size_u64 = sizeof(T);
@@ -526,6 +603,12 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     const uint64_t mask_1_byte = 0x00FFFFFFFFFFFFFF;
     const uint64_t mask_4_bytes = 0x00000000FFFFFFFF;
     const uint64_t mask_7_bytes = 0x00000000000000FF;
+
+    if (qp_index != NVSHMEMX_QP_DEFAULT) {
+        op = NVSHMEMI_OP_AMO_QP;
+    } else {
+        op = NVSHMEMI_OP_AMO;
+    }
 
     convert_val_to_uint64(&swap_add_buffer, &swap_add, sizeof(T));
     convert_val_to_uint64(&compare_buffer, &compare, sizeof(T));
@@ -575,17 +658,30 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     /* assumes g_buf_counter <= (1 << 56) */
     const uint64_t g_buf_counter_low = g_buf_counter & mask_1_byte;
     *((volatile uint64_t *)req) = (g_buf_counter_low << 8 | curr_flag);
+
+    /* amo_request_4
+     * 32 | 16 | 8 | 8
+     * qp_index | resv2 | resv | flag */
+    if (qp_index != NVSHMEMX_QP_DEFAULT) {
+        idx += CHANNEL_ENTRY_BYTES;
+        req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+        curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+        *((volatile uint64_t *)req) =
+            (uint64_t)((static_cast<uint64_t>(qp_index) << 32) | curr_flag);
+    }
 }
 
 template <typename T>
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_amo_nonfetch(
-    void *rptr, T swap_add, int pe, nvshmemi_amo_t op) {
-    amo<T>(rptr, 0 /* dummy value */, swap_add, 0, pe, op);
+    void *rptr, T swap_add, int pe, nvshmemi_amo_t op,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    amo<T>(rptr, 0 /* dummy value */, swap_add, 0, pe, op, qp_index);
 }
 
 template <typename T>
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_amo_fetch(
-    void *rptr, void *lptr, T swap_add, T compare, int pe, nvshmemi_amo_t op) {
+    void *rptr, void *lptr, T swap_add, T compare, int pe, nvshmemi_amo_t op,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     uint64_t counter = atomicAdd(
         (unsigned long long int *)nvshmemi_device_state_d.proxy_channel_g_buf_head_ptr, 1);
     uint64_t idx = counter * sizeof(g_elem_t);
@@ -599,11 +695,11 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_amo
                                                       NVSHMEMI_CALL_SITE_AMO_FETCH_WAIT_FLAG);
     __threadfence();
 
-    amo<T>(rptr, counter, swap_add, compare, pe, op);
+    amo<T>(rptr, counter, swap_add, compare, pe, op, qp_index);
 
     /* The IBDEVX transport doesn't rely on an active message from the receiver for atomics. */
     if (nvshmemi_device_state_d.atomics_complete_on_quiet) {
-        nvshmemi_proxy_quiet(false);
+        nvshmemi_proxy_quiet(false, pe, &qp_index, 1);
         elem->flag += 1;
         /* MLNX NICs will typically return 8 byte atomics in host-endian and 4 byte atomics in
          * big-enian. This behavior is controlled by flags read from the NIC at runtime.
@@ -633,7 +729,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_amo
     *((T *)lptr) = return_val;
 }
 
-NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_fence() {
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_fence() {
     // making it a no-op as it is a no-op for IB RC, the only transport
     uint64_t idx, tail_idx, *req;
     int size = sizeof(uint64_t);
@@ -655,6 +751,55 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_fen
     *((volatile uint64_t *)req) = (uint64_t)((op << 16) | curr_flag);
 
     return;
+}
+
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_fence_qp(
+    int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps) {
+    // making it a no-op as it is a no-op for IB RC, the only transport
+    uint64_t idx, tail_idx, *req;
+    int size = CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES;
+
+    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    tail_idx = idx + (size - 1);
+
+    // flow-control
+    check_channel_availability(tail_idx);
+
+    req = (uint64_t *)((uint64_t)nvshmemi_device_state_d.proxy_channels_buf +
+                       (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1)));
+    uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint64_t op = NVSHMEMI_OP_FENCE_QP;
+    uint64_t qp_count = num_qps;
+
+    /* qp_sync_base_request
+     * 32 | 8 | 8 | 8 | 8
+     * qp_count | resv2 | op | resv | flag
+     */
+    *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_count) << 32) |
+                                             (static_cast<uint64_t>(op) << 16) | curr_flag);
+
+    /* qp_sync_request_0
+     * 32 | 16 | 8 | 8
+     * qp_index | pe | op | flag
+     */
+    for (int i = 0; i < num_qps; i++) {
+        idx += CHANNEL_ENTRY_BYTES;
+        req = (uint64_t *)((uint64_t)nvshmemi_device_state_d.proxy_channels_buf +
+                           (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1)));
+        curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+        *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_handle[i]) << 32) |
+                                                 (static_cast<uint64_t>(op) << 16) |
+                                                 (static_cast<uint64_t>(pe) << 8) | curr_flag);
+    }
+    return;
+}
+
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_fence(
+    int pe = NVSHMEMX_PE_ALL, nvshmemx_qp_handle_t *qp_handle = NULL, int num_qps = 1) {
+    if (likely(pe == NVSHMEMX_PE_ALL || qp_handle == NULL)) {
+        proxy_fence();
+    } else
+        proxy_fence_qp(pe, qp_handle, num_qps);
 }
 
 #endif /* __CUDA_ARCH__ */

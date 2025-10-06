@@ -49,7 +49,7 @@ void nvshmem_quiet(void) {
                 ((nvshmem_transport_t *)nvshmemi_state->transports)[j];
             for (int k = 0; k < nvshmemi_state->npes; k++) {
                 if (tcurr->host_ops.quiet) {
-                    status = tcurr->host_ops.quiet(tcurr, k, 0);
+                    status = tcurr->host_ops.quiet(tcurr, k, NVSHMEMX_QP_HOST);
                 }
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "nvshmem_quiet() failed \n");

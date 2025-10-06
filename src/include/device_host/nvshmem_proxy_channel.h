@@ -21,7 +21,7 @@ typedef union channel_bounce_buffer {
     uint64_t whole_buffer;
 } channel_bounce_buffer_t;
 
-/* base_request_t
+/* base_request
  * 32 | 8 | 8 | 8 | 8
  * roffset_high | roffset_low | op | group_size | flag */
 typedef struct __attribute__((packed)) base_request {
@@ -32,6 +32,31 @@ typedef struct __attribute__((packed)) base_request {
     uint32_t roffset_high; /*used as pe for base-only requests*/
 } base_request_t;
 static_assert(sizeof(base_request_t) == 8, "request_size must be 8 bytes.");
+
+/* qp_sync_base_request
+ * 8 | 32 | 8 | 8 | 8
+ * resv2 | qp_count | op | resv | flag
+ */
+typedef struct __attribute__((packed)) qp_sync_base_request {
+    volatile uint8_t flag;
+    uint8_t resv;
+    uint8_t op;
+    uint8_t resv2;
+    uint32_t qp_count;
+} qp_sync_base_request_t;
+static_assert(sizeof(qp_sync_base_request) == 8, "request_size must be 8 bytes.");
+
+/* qp_sync_request_0
+ * 32 | 16 | 8 | 8
+ * qp_index | pe | resv | flag
+ */
+typedef struct __attribute__((packed)) qp_sync_request_0 {
+    volatile uint8_t flag;
+    uint8_t op;
+    uint16_t pe;
+    uint32_t qp_index;
+} qp_sync_request_0_t;
+static_assert(sizeof(qp_sync_request_0) == 8, "request_size must be 8 bytes.");
 
 /* put_dma_request_0
  * 32 | 16 | 8 | 8
@@ -57,18 +82,18 @@ static_assert(sizeof(put_dma_request_1) == 8, "request_size must be 8 bytes.");
 
 /* put_dma_request_2
  * 32 | 16 | 8 | 8
- * resv2 | pe | resv | flag */
+ * qp_index | pe | resv | flag */
 typedef struct __attribute__((packed)) put_dma_request_2 {
     volatile uint8_t flag;
     uint8_t resv;
     uint16_t pe;
-    uint32_t resv1;
+    uint32_t qp_index;
 } put_dma_request_2_t;
 static_assert(sizeof(put_dma_request_2) == 8, "request_size must be 8 bytes.");
 
 /* put_inline_request_0
  * 32 | 16 | 8 | 8
- * loffset_high | loffset_low | pe | flag */
+ * lvalue_low | pe | resv | flag */
 typedef struct __attribute__((packed)) put_inline_request_0 {
     volatile uint8_t flag;
     uint8_t resv;
@@ -79,7 +104,7 @@ static_assert(sizeof(put_inline_request_0) == 8, "request_size must be 8 bytes."
 
 /* put_inline_request_1
  * 32 | 16 | 8 | 8
- * size_high | size_low | resv | flag */
+ * lvalue_high | size | resv | flag */
 typedef struct __attribute__((packed)) put_inline_request_1 {
     volatile uint8_t flag;
     uint8_t resv;
@@ -88,9 +113,20 @@ typedef struct __attribute__((packed)) put_inline_request_1 {
 } put_inline_request_1_t;
 static_assert(sizeof(put_inline_request_1) == 8, "request_size must be 8 bytes.");
 
+/* put_inline_request_2
+ * 32 | 16 | 8 | 8
+ * qp_index | resv2 | resv | flag */
+typedef struct __attribute__((packed)) put_inline_request_2 {
+    volatile uint8_t flag;
+    uint8_t resv;
+    uint16_t resv2;
+    uint32_t qp_index;
+} put_inline_request_2_t;
+static_assert(sizeof(put_inline_request_2) == 8, "request_size must be 8 bytes.");
+
 /* amo_request_0
  * 32 | 16 | 8 | 8
- * lvalue_low | pe | amo | flag */
+ * swap_add_low | pe | amo | flag */
 typedef struct __attribute__((packed)) amo_request_0 {
     volatile uint8_t flag;
     uint8_t amo;
@@ -101,7 +137,7 @@ static_assert(sizeof(amo_request_0) == 8, "request_size must be 8 bytes.");
 
 /* amo_request_1
  * 32 | 16 | 8 | 8
- * lvalue_high | resv | size | flag */
+ * swap_add_high | size | compare_low | flag */
 typedef struct __attribute__((packed)) amo_request_1 {
     volatile uint8_t flag;
     uint8_t compare_low;
@@ -112,7 +148,7 @@ static_assert(sizeof(amo_request_1) == 8, "request_size must be 8 bytes.");
 
 /* amo_request_2
  * 56 | 8
- * compare_high | flag */
+ * comapare_high | flag */
 typedef struct __attribute__((packed)) amo_request_2 {
     volatile uint8_t flag;
     uint8_t compare_high[7];
@@ -124,6 +160,11 @@ typedef struct __attribute__((packed)) amo_request_3 {
     uint8_t g_buf_counter[7];
 } amo_request_3_t;
 static_assert(sizeof(amo_request_3) == 8, "request_size must be 8 bytes.");
+
+/* amo_request_4
+ * 32 | 16 | 8 | 8
+ * qp_index | resv2 | resv | flag */
+typedef put_inline_request_2_t amo_request_4_t;
 
 /*
  * PUT_SIGNAL REQUEST STRUCTURE DEFINITIONS
@@ -172,12 +213,12 @@ static_assert(sizeof(put_signal_request_1) == 8, "request_size must be 8 bytes."
 
 /* put_signal_request_2
  * 32    | 16 | 8     | 8
- * resv2 | pe | resv1 | flag */
+ * qp_index | pe | resv1 | flag */
 typedef struct __attribute__((packed)) put_signal_request_2 {
     volatile uint8_t flag;
     uint8_t resv1;
     uint16_t pe;
-    uint32_t resv2;
+    uint32_t qp_index;
 } put_signal_request_2_t;
 static_assert(sizeof(put_signal_request_2) == 8, "request_size must be 8 bytes.");
 

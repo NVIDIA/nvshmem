@@ -428,7 +428,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                                "No devices selected.\n");
         }
 
-        current_status = tcurr->host_ops.connect_endpoints(tcurr, selected_devices, found_devices);
+        current_status =
+            tcurr->host_ops.connect_endpoints(tcurr, selected_devices, found_devices, NULL, 0);
         NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                               "connect EPS failed \n");
         current_status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);

@@ -113,7 +113,7 @@ __global__ void nvshmemi_team_index_kernel(
             if (global_pe_index == nvshmemi_device_state_d.mype) {
                 continue;
             }
-            nvshmemi_put_nbi_threadgroup<unsigned char, NVSHMEMI_THREADGROUP_THREAD>(
+            nvshmemi_put_nbi<unsigned char, NVSHMEMI_THREADGROUP_THREAD>(
                 local_ptr, local_ptr, N_PSYNC_BYTES, global_pe_index);
         }
 
@@ -160,7 +160,7 @@ __global__ void nvshmemi_team_mapping_kernel(
             pe_mapping[npes + nvshmemi_device_state_d.mype] = mype_in_team;
             continue;
         }
-        nvshmemi_put_nbi_threadgroup<int, NVSHMEMI_THREADGROUP_THREAD>(
+        nvshmemi_put_nbi<int, NVSHMEMI_THREADGROUP_THREAD>(
             (int *)&nvshmemi_team_creation_psync->pe_info[nvshmemi_device_state_d.mype].pe_in_team,
             (int *)&nvshmemi_team_creation_psync->pe_info[nvshmemi_device_state_d.mype].pe_in_team,
             1, i);

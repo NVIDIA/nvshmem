@@ -118,23 +118,23 @@ typedef struct amo_bytesdesc {
 
 typedef int (*rma_handle)(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                           rma_memdesc_t *remote, rma_memdesc_t *local, rma_bytesdesc_t bytesdesc,
-                          int is_proxy);
+                          int qp_index);
 typedef int (*amo_handle)(struct nvshmem_transport *tcurr, int pe, void *curetptr, amo_verb_t verb,
-                          amo_memdesc_t *target, amo_bytesdesc_t bytesdesc, int is_proxy);
-typedef int (*fence_handle)(struct nvshmem_transport *tcurr, int pe, int is_proxy);
-typedef int (*quiet_handle)(struct nvshmem_transport *tcurr, int pe, int is_proxy);
+                          amo_memdesc_t *target, amo_bytesdesc_t bytesdesc, int qp_index);
+typedef int (*fence_handle)(struct nvshmem_transport *tcurr, int pe, int qp_index, int is_multi);
+typedef int (*quiet_handle)(struct nvshmem_transport *tcurr, int pe, int qp_index);
 typedef int (*put_signal_handle)(struct nvshmem_transport *tcurr, int pe, rma_verb_t write_verb,
                                  std::vector<rma_memdesc_t> &write_remote,
                                  std::vector<rma_memdesc_t> &write_local,
                                  std::vector<rma_bytesdesc_t> &write_bytesdesc, amo_verb_t sig_verb,
                                  amo_memdesc_t *sig_target, amo_bytesdesc_t sig_bytesdesc,
-                                 int is_proxy);
+                                 int qp_index);
 
 struct nvshmem_transport_host_ops {
     int (*can_reach_peer)(int *access, nvshmem_transport_pe_info_t *peer_info,
                           struct nvshmem_transport *transport);
     int (*connect_endpoints)(struct nvshmem_transport *tcurr, int *selected_dev_ids,
-                             int num_selected_devs);
+                             int num_selected_devs, int *out_qp_indices, int num_qps);
     int (*get_mem_handle)(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size,
                           struct nvshmem_transport *transport, bool local_only);
     int (*release_mem_handle)(nvshmem_mem_handle_t *mem_handle,

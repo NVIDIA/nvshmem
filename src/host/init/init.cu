@@ -1914,3 +1914,49 @@ int nvshmemx_culibrary_finalize(CUlibrary library) {
 out:
     return status;
 }
+
+int nvshmemx_qp_create(int num_qps, nvshmemx_qp_handle_t **out_qp_array) {
+    int status = 0;
+    nvshmemx_qp_handle_t *out_qp_array_local = NULL;
+    nvshmem_transport_inline_lib_code_type_t transport_type = NVSHMEM_TRANSPORT_LIB_CODE_NONE;
+
+#ifdef NVSHMEM_IBGDA_SUPPORT
+    nvshmemi_device_host_state_t *device_state;
+    nvshmemi_get_device_state((void **)&device_state);
+    if (device_state->ibgda_is_initialized) {
+        transport_type = NVSHMEM_TRANSPORT_LIB_CODE_IBGDA;
+    }
+#endif
+
+    *out_qp_array = (nvshmemx_qp_handle_t *)calloc(num_qps, sizeof(nvshmemx_qp_handle_t));
+    NVSHMEMI_NULL_ERROR_JMP(*out_qp_array, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to create qps. failed\n");
+    out_qp_array_local = *out_qp_array;
+    for (int j = 0; j < num_qps; j++) {
+        out_qp_array_local[j] = NVSHMEMX_QP_DEFAULT;
+    }
+
+    for (int i = 0; i < nvshmemi_state->num_initialized_transports; i++) {
+        nvshmem_transport_t transport = (nvshmem_transport_t)nvshmemi_state->transports[i];
+        if (transport->type != transport_type) {
+            continue;
+        }
+        if (transport->host_ops.connect_endpoints) {
+            status =
+                transport->host_ops.connect_endpoints(transport, 0, 0, out_qp_array_local, num_qps);
+            NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "Unable to create qps. failed\n");
+            break;
+        }
+    }
+
+    if (out_qp_array_local[0] == NVSHMEMX_QP_DEFAULT) {
+        WARN("remote transport does not support multiple qps. Using default qp.\n");
+    }
+
+    nvshmemi_update_device_state();
+    status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "barrier failed \n");
+out:
+    return status;
+}

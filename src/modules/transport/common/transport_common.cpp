@@ -5,6 +5,7 @@
  */
 
 #include "transport_common.h"
+#include "device_host_transport/nvshmem_constants.h"
 #include <assert.h>
 #include <stdint.h>  // for uint64_t, uintptr_t
 #include <stdlib.h>  // for atoi, calloc, free, realloc
@@ -237,7 +238,7 @@ int nvshmemt_put_signal(struct nvshmem_transport *tcurr, int pe, rma_verb_t writ
                                      write_bytesdesc[i], is_proxy);
     }
 
-    if (tcurr->host_ops.fence) status = tcurr->host_ops.fence(tcurr, pe, is_proxy);
+    if (tcurr->host_ops.fence) status = tcurr->host_ops.fence(tcurr, pe, NVSHMEMX_QP_DEFAULT, 0);
     if (unlikely(status)) goto out;
 
     status = tcurr->host_ops.amo(tcurr, pe, NULL, sig_verb, sig_target, sig_bytesdesc, is_proxy);

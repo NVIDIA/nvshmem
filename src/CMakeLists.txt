@@ -596,17 +596,19 @@ configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CU
 ## End Numba support requirements
 
 ## Start inlining requirements
-if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
 set(INC_EXPORTS
     ${INC_EXPORTS}
     non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh
 )
+if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
 set(NVSHMEM_DEVICE_SOURCES
     ${NVSHMEM_DEVICE_SOURCES}
     device/comm/transfer_device.cu
 )
-configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CURRENT_SOURCE_DIR}/device/comm/transfer_device.cu COPYONLY)
 endif()
+
+configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CURRENT_SOURCE_DIR}/device/comm/transfer_device.cu COPYONLY)
+
 ## End inlining requirements
 
 ## Start final lib prep

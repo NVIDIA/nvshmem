@@ -272,13 +272,15 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
             localdesc.handle = NULL;
             NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(remotedesc.ptr, rptr, pe);
             nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, pe, t);
-            status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytesdesc, 0);
+            status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytesdesc,
+                                         NVSHMEMX_QP_HOST);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
                 exit(-1);
             }
         } else {
-            nvshmemi_process_multisend_rma(tcurr, t, pe, verb, rptr, lptr, nelems * elembytes, 0);
+            nvshmemi_process_multisend_rma(tcurr, t, pe, verb, rptr, lptr, nelems * elembytes,
+                                           NVSHMEMX_QP_HOST);
         }
         goto out;
     }

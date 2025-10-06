@@ -50,8 +50,9 @@
 
 #define NVSHMEMT_LIBFABRIC_MAX_RETRIES (1ULL << 20)
 
-#define container_of(ptr, type, field) \
-	((type *) ((char *)ptr - offsetof(type, field)))
+#ifndef container_of
+#define container_of(ptr, type, field) ((type *)((char *)ptr - offsetof(type, field)))
+#endif
 
 typedef struct {
     char name[NVSHMEMT_LIBFABRIC_DOMAIN_LEN];
@@ -65,7 +66,8 @@ struct nvshmemt_libfabric_gdr_op_ctx;
 typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
 
 #define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT 28
-#define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK ((1U << NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT) - 1)
+#define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK \
+    ((1U << NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT) - 1)
 
 /**
  * The last sequence number is reserved for atomic-only operations.
@@ -81,7 +83,6 @@ typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
  * acks from the remote side.
  */
 struct nvshmemt_libfabric_endpoint_seq_counter_t {
-
     constexpr static uint32_t num_sequence_bits = NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT;
 
     /**
@@ -104,18 +105,14 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
      * The "category" is the bits before the index bit(s). Returns the category
      * bits shifted to the right.
      */
-    constexpr static uint32_t get_category(uint32_t seq_num)
-    {
+    constexpr static uint32_t get_category(uint32_t seq_num) {
         return ((seq_num & category_mask) >> num_index_bits);
     }
 
     /**
      * The "index" is the bits after the category bit(s)
      */
-    constexpr static uint32_t get_index(uint32_t seq_num)
-    {
-        return seq_num & index_mask;
-    }
+    constexpr static uint32_t get_index(uint32_t seq_num) { return seq_num & index_mask; }
 
     /* ------------------------------ */
     /* Member variables */
@@ -126,8 +123,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     /**
      * Reset counter and pending acks to zero
      */
-    void reset()
-    {
+    void reset() {
         sequence_counter = 0;
         memset(pending_acks, 0, sizeof(pending_acks));
     }
@@ -137,8 +133,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
      *
      * @return -1 if no sequence number available
      */
-    int32_t next_seq_num()
-    {
+    int32_t next_seq_num() {
         /* Skip this sequence number if reserved */
         if (sequence_counter == NVSHMEM_STAGED_AMO_SEQ_NUM) {
             sequence_counter = (sequence_counter + 1) & sequence_mask;
@@ -170,8 +165,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
      * Mark a previously issued seq_num as complete, decremeting the pending
      * acks counter for the category
      */
-    void return_acked_seq_num(uint32_t seq_num)
-    {
+    void return_acked_seq_num(uint32_t seq_num) {
         assert(seq_num != NVSHMEM_STAGED_AMO_SEQ_NUM);
 
         uint32_t category = get_category(seq_num);
@@ -352,11 +346,11 @@ typedef struct nvshmemt_libfabric_gdr_send_amo_op {
  * | 4 type | 2 op | 2 num_writes | 8 signal | 8 target_addr | 4 sequence_count | 4 resv
  */
 typedef struct nvshmemt_libfabric_gdr_signal_op {
-    nvshmemt_libfabric_recv_t type;  /* Must be first */
+    nvshmemt_libfabric_recv_t type; /* Must be first */
     uint16_t op;
     uint16_t num_writes;
     uint64_t sig_val;
-    void* target_addr;
+    void *target_addr;
     uint32_t sequence_count;
     uint32_t src_pe;
 } nvshmemt_libfabric_gdr_signal_op_t;

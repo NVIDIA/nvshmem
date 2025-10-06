@@ -76,7 +76,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_intranode_tree_thre
             //printf("sending data %d to %d at offset %llu, peer_id: %d, size_per_peer: %llu,
     nelems: %llu\n", size_per_warp, child, offset, peer_id, size_per_peer, nelems);
             //printf("myIdx: %d, start: %lld, num_warps: %d\n", myIdx, start, num_warps);
-            nvshmemi_put_nbi_threadgroup<char, NVSHMEMI_THREADGROUP_WARP>(pWrk + recv_offset +
+            nvshmemi_put_nbi<char, NVSHMEMI_THREADGROUP_WARP>(pWrk + recv_offset +
     offset, pWrk + recv_offset + offset, size_per_warp, child);
         }
     } else  */
@@ -89,9 +89,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_intranode_tree_thre
             child_in_team = (child_in_team + PE_root) % teami->size;
             int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
 
-            nvshmemii_put_nbi_threadgroup<uint64_t, SCOPE>(
-                (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
-                nelems * sizeof(T) / sizeof(uint32_t), child);
+            nvshmemii_put_nbi<uint64_t, SCOPE>((uint64_t *)(pWrk + recv_offset),
+                                               (uint64_t *)(pWrk + recv_offset),
+                                               nelems * sizeof(T) / sizeof(uint32_t), child);
         }
     }
     if (PE_root == my_pe_in_team && dest != source)
@@ -135,7 +135,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_internode_tree_thre
         child_in_team = (child_in_team + PE_root) % teami->size;
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
 
-        nvshmemi_put_nbi_threadgroup<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
+        nvshmemi_put_nbi<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
             (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
             nelems * sizeof(T) / sizeof(uint32_t), child);
     }
@@ -182,7 +182,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
         if (is_remote)
-            nvshmemi_put_nbi_threadgroup<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
+            nvshmemi_put_nbi<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
                 (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
                 nelems * sizeof(T) / sizeof(uint32_t), child);
     }
@@ -196,9 +196,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
 
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
         if (!is_remote)
-            nvshmemii_put_nbi_threadgroup<uint64_t, SCOPE>(
-                (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
-                nelems * sizeof(T) / sizeof(uint32_t), child);
+            nvshmemii_put_nbi<uint64_t, SCOPE>((uint64_t *)(pWrk + recv_offset),
+                                               (uint64_t *)(pWrk + recv_offset),
+                                               nelems * sizeof(T) / sizeof(uint32_t), child);
     }
 
     if (PE_root == my_pe_in_team && dest != source)
@@ -242,7 +242,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_nonLL_tree_threadgr
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
         if (is_remote)
-            nvshmemi_put_signal_threadgroup<T, NVSHMEMI_THREADGROUP_THREAD>(
+            nvshmemi_put_signal<T, NVSHMEMI_THREADGROUP_THREAD>(
                 dest, (PE_root == my_pe_in_team) ? source : dest, nelems,
                 (uint64_t *)(pWrk + recv_offset), ll_flag, NVSHMEMI_AMO_SIGNAL_SET, child, 1);
     }
@@ -256,9 +256,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_nonLL_tree_threadgr
 
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
         if (!is_remote)
-            nvshmemii_put_signal_threadgroup<T, SCOPE>(
-                dest, (PE_root == my_pe_in_team) ? source : dest, nelems,
-                (uint64_t *)(pWrk + recv_offset), ll_flag, NVSHMEMI_AMO_SIGNAL_SET, child, 1);
+            nvshmemii_put_signal<T, SCOPE>(dest, (PE_root == my_pe_in_team) ? source : dest, nelems,
+                                           (uint64_t *)(pWrk + recv_offset), ll_flag,
+                                           NVSHMEMI_AMO_SIGNAL_SET, child, 1);
     }
 
     if (PE_root == my_pe_in_team && dest != source)
@@ -281,7 +281,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup
     if (root == nvshmemi_device_state_d.mype) {
         for (i = 0; i < teami->size; i++) {
             int pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, i);
-            nvshmemi_put_nbi_threadgroup<T, SCOPE>(dest, source, nelems, pe);
+            nvshmemi_put_nbi<T, SCOPE>(dest, source, nelems, pe);
         }
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
@@ -671,14 +671,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tile_bcast_threadgroup_v1
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, int major_dim,
           int minor_dim>
 __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup_vec(
-    nvshmem_team_t team, T *src, T *dst,
-    const int size_major_dim,
-    const int size_minor_dim,
-    const int src_stride_minor_dim,
-    const int dst_stride_minor_dim,
-    const int src_stride_major_dim,
-    const int dst_stride_major_dim,
-    tuple_t start_coord, tuple_t boundary) {
+    nvshmem_team_t team, T *src, T *dst, const int size_major_dim, const int size_minor_dim,
+    const int src_stride_minor_dim, const int dst_stride_minor_dim, const int src_stride_major_dim,
+    const int dst_stride_major_dim, tuple_t start_coord, tuple_t boundary) {
     // src is local, dst is multicast address
     vtype *src_v = reinterpret_cast<vtype *>(src);
     vtype *dst_v = reinterpret_cast<vtype *>(nvshmemx_mc_ptr(team, dst));
@@ -726,10 +721,9 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup_vec(
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
           int major_dim, int minor_dim>
-__device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team,
-                                                        src_tensor_t src_tensor,
-                                                        dst_tensor_t dst_tensor,
-                                                        tuple_t start_coord, tuple_t boundary) {
+__device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team, src_tensor_t src_tensor,
+                                                    dst_tensor_t dst_tensor, tuple_t start_coord,
+                                                    tuple_t boundary) {
     using T = typename src_tensor_t::value_type;
 
     // check for vector len == 4
@@ -741,14 +735,10 @@ __device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team,
         (((get_stride_element<minor_dim>(src_tensor) * sizeof(T)) % sizeof(int4)) == 0) &&
         (((get_stride_element<minor_dim>(dst_tensor) * sizeof(T)) % sizeof(int4)) == 0)) {
         nvshmemi_tile_bcast_nvls_threadgroup_vec<int4, T, scope, tuple_t, major_dim, minor_dim>(
-            team, src_tensor.data(), dst_tensor.data(),
-            get_shape_element<major_dim>(src_tensor),
-            get_shape_element<minor_dim>(src_tensor),
-            get_stride_element<minor_dim>(src_tensor),
-            get_stride_element<minor_dim>(dst_tensor),
-            get_stride_element<major_dim>(src_tensor),
-            get_stride_element<major_dim>(dst_tensor),
-            start_coord, boundary);
+            team, src_tensor.data(), dst_tensor.data(), get_shape_element<major_dim>(src_tensor),
+            get_shape_element<minor_dim>(src_tensor), get_stride_element<minor_dim>(src_tensor),
+            get_stride_element<minor_dim>(dst_tensor), get_stride_element<major_dim>(src_tensor),
+            get_stride_element<major_dim>(dst_tensor), start_coord, boundary);
 
     } else if (((size_t)src_tensor.data() % sizeof(uint64_t) == 0) &&
                ((size_t)dst_tensor.data() % sizeof(uint64_t) == 0) &&
@@ -758,37 +748,26 @@ __device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team,
                 0) &&
                (((get_stride_element<minor_dim>(dst_tensor) * sizeof(T)) % sizeof(uint64_t)) ==
                 0)) {
-        nvshmemi_tile_bcast_nvls_threadgroup_vec<uint64_t, T, scope, tuple_t, major_dim,
-                                                     minor_dim>(
-            team, src_tensor.data(), dst_tensor.data(),
-            get_shape_element<major_dim>(src_tensor),
-            get_shape_element<minor_dim>(src_tensor),
-            get_stride_element<minor_dim>(src_tensor),
-            get_stride_element<minor_dim>(dst_tensor),
-            get_stride_element<major_dim>(src_tensor),
-            get_stride_element<major_dim>(dst_tensor),
-            start_coord, boundary);
+        nvshmemi_tile_bcast_nvls_threadgroup_vec<uint64_t, T, scope, tuple_t, major_dim, minor_dim>(
+            team, src_tensor.data(), dst_tensor.data(), get_shape_element<major_dim>(src_tensor),
+            get_shape_element<minor_dim>(src_tensor), get_stride_element<minor_dim>(src_tensor),
+            get_stride_element<minor_dim>(dst_tensor), get_stride_element<major_dim>(src_tensor),
+            get_stride_element<major_dim>(dst_tensor), start_coord, boundary);
 
     } else {  // vector len 1
-        nvshmemi_tile_bcast_nvls_threadgroup_vec<uint32_t, T, scope, tuple_t, major_dim,
-                                                     minor_dim>(
-            team, src_tensor.data(), dst_tensor.data(),
-            get_shape_element<major_dim>(src_tensor),
-            get_shape_element<minor_dim>(src_tensor),
-            get_stride_element<minor_dim>(src_tensor),
-            get_stride_element<minor_dim>(dst_tensor),
-            get_stride_element<major_dim>(src_tensor),
-            get_stride_element<major_dim>(dst_tensor),
-            start_coord, boundary);
+        nvshmemi_tile_bcast_nvls_threadgroup_vec<uint32_t, T, scope, tuple_t, major_dim, minor_dim>(
+            team, src_tensor.data(), dst_tensor.data(), get_shape_element<major_dim>(src_tensor),
+            get_shape_element<minor_dim>(src_tensor), get_stride_element<minor_dim>(src_tensor),
+            get_stride_element<minor_dim>(dst_tensor), get_stride_element<major_dim>(src_tensor),
+            get_stride_element<major_dim>(dst_tensor), start_coord, boundary);
     }
 }
 // specialize for the vectorization
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope>
 __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
-                                                                src_tensor_t src_tensor,
-                                                                dst_tensor_t dst_tensor,
-                                                                tuple_t start_coord,
-                                                                tuple_t boundary) {
+                                                            src_tensor_t src_tensor,
+                                                            dst_tensor_t dst_tensor,
+                                                            tuple_t start_coord, tuple_t boundary) {
     using T = typename src_tensor_t::value_type;
     if constexpr ((get_constant(safe_get<0>(decltype(src_tensor.stride()){})) == 1) &&
                   (get_constant(safe_get<0>(decltype(dst_tensor.stride()){})) == 1)) {
@@ -798,8 +777,8 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
 
         ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim);
         nvshmemi_tile_bcast_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
-                                         minor_dim>(team, src_tensor, dst_tensor, start_coord,
-                                                    boundary);
+                                     minor_dim>(team, src_tensor, dst_tensor, start_coord,
+                                                boundary);
     } else if constexpr ((get_constant(safe_get<1>(decltype(src_tensor.stride()){})) == 1) &&
                          (get_constant(safe_get<1>(decltype(dst_tensor.stride()){})) == 1)) {
         // dim 1 major
@@ -808,8 +787,8 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
 
         ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim);
         nvshmemi_tile_bcast_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
-                                         minor_dim>(team, src_tensor, dst_tensor, start_coord,
-                                                    boundary);
+                                     minor_dim>(team, src_tensor, dst_tensor, start_coord,
+                                                boundary);
     } else {
         // No contiguous dimension found at compile time
         // TODO support when major dimension for src and tensor are different
@@ -819,8 +798,8 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
 
             ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim);
             nvshmemi_tile_bcast_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
-                                             minor_dim>(team, src_tensor, dst_tensor, start_coord,
-                                                        boundary);
+                                         minor_dim>(team, src_tensor, dst_tensor, start_coord,
+                                                    boundary);
         } else {
             // setting major_dim to 0, minor_dim to 1
             constexpr int major_dim = 0;
@@ -828,12 +807,11 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
 
             ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim);
             nvshmemi_tile_bcast_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
-                                             minor_dim>(team, src_tensor, dst_tensor, start_coord,
-                                                        boundary);
+                                         minor_dim>(team, src_tensor, dst_tensor, start_coord,
+                                                    boundary);
         }
     }
 }
-
 
 #endif /* __cplusplus >= 201703L */
 
@@ -841,8 +819,8 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
 template <nvshmemx::tile_coll_algo_t algo, typename src_tensor_t, typename dst_tensor_t,
           typename tuple_t, threadgroup_t scope>
 __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_tensor,
-                                              dst_tensor_t dst_tensor, tuple_t start_coord,
-                                              tuple_t boundary, uint64_t flag) {
+                                          dst_tensor_t dst_tensor, tuple_t start_coord,
+                                          tuple_t boundary, uint64_t flag) {
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
 #else
@@ -871,7 +849,7 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
 
     // TODO add other data types
     static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
-                  (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
     // check if both src and dst have same continuous dimension

@@ -144,10 +144,10 @@ out:
     return status;
 }
 
-inline void proxy_update_processed(proxy_channel_t *ch, int bytes) {
+inline void proxy_update_processed(proxy_channel_t *ch, int bytes, bool force_update = false) {
     ch->processed += bytes;
 
-    if ((ch->processed - ch->last_sync) >= 1024) {
+    if ((ch->processed - ch->last_sync) >= 1024 || force_update) {
         *ch->complete = ch->processed;
         ch->last_sync = ch->processed;
         TRACE(NVSHMEM_PROXY, "updated processed to device %llu", ch->processed);
@@ -385,6 +385,7 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
     put_dma_request_1_t *dma_req_1;
     put_dma_request_2_t *dma_req_2;
     int pe;
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT;
     size_t size;
     uint8_t flag;
     uint64_t roffset, laddr;
@@ -409,6 +410,10 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
     while (*((volatile uint8_t *)&dma_req_2->flag) != flag)
         ;
 
+    if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        qp_index = dma_req_2->qp_index;
+    }
+
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
     __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
                            // (breaks rma)
@@ -425,13 +430,17 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
     // issue transport DMA
     {
         rma_verb_t verb;
-        verb.desc = (nvshmemi_op_t)base_req->op;
+        if (base_req->op > NVSHMEMI_OP_QP_OP_OFFSET) {
+            verb.desc = (nvshmemi_op_t)(base_req->op - NVSHMEMI_OP_QP_OP_OFFSET);
+        } else {
+            verb.desc = (nvshmemi_op_t)base_req->op;
+        }
         verb.is_nbi = 1;
         verb.is_stream = 0;
         verb.cstrm = NULL;
         void *rptr = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
         nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                       rptr, (void *)laddr, size, 1);
+                                       rptr, (void *)laddr, size, qp_index);
     }
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
     __sync_synchronize();  // XXX: prevents complete_d store reordered to before return from
@@ -453,8 +462,10 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
     base_request_t *base_req;
     put_inline_request_0_t *inline_req_0;
     put_inline_request_1_t *inline_req_1;
+    put_inline_request_2_t *inline_req_2 = NULL;
     uint8_t flag;
     uint64_t roffset;
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT;
     nvshmemi_state_t *nvshmemi_state = state->nvshmemi_state;
 
     base_req = (base_request_t *)WRAPPED_CHANNEL_BUF(state, ch, ch->processed);
@@ -470,6 +481,14 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
     while (*((volatile uint8_t *)&inline_req_1->flag) != flag)
         ;
 
+    if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        inline_req_2 =
+            (put_inline_request_2_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 24));
+        flag = COUNTER_TO_FLAG(state, (ch->processed + 24));
+        while (*((volatile uint8_t *)&inline_req_2->flag) != flag)
+            ;
+    }
+
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
     __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
                            // (was present in dma function, was missing in inline function, breaks
@@ -477,6 +496,10 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
 #elif defined(NVSHMEM_X86_64)
     asm volatile("" : : : "memory");
 #endif
+
+    if (inline_req_2 != NULL) {
+        qp_index = inline_req_2->qp_index;
+    }
 
     uint32_t pe = inline_req_0->pe;
     uint64_t size = inline_req_1->size;
@@ -510,7 +533,7 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
         bytes.nelems = 1;
         bytes.elembytes = size;
 
-        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, 1);
+        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_inline\n");
             exit(-1);
@@ -523,9 +546,13 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
 
     *is_processed = 1;
 
-    proxy_update_processed(ch, PROXY_INLINE_REQ_BYTES);
+    if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        proxy_update_processed(ch, PROXY_INLINE_REQ_BYTES + CHANNEL_ENTRY_BYTES);
+    } else {
+        proxy_update_processed(ch, PROXY_INLINE_REQ_BYTES);
+    }
     TRACE(NVSHMEM_PROXY,
-          "[%d] process_channel_put_dma/proxy_update_processed processed %ld complete %ld",
+          "[%d] process_channel_inline/proxy_update_processed processed %ld complete %ld",
           state->nvshmemi_state->mype, ch->processed, *ch->complete);
 
     return status;
@@ -537,6 +564,9 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
     amo_request_0_t *req_0;
     amo_request_1_t *req_1;
     amo_request_2_t *req_2;
+    amo_request_3_t *req_3;
+    amo_request_4_t *req_4;
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT;
     uint8_t flag;
     uint64_t roffset;
 
@@ -558,17 +588,24 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
     while (*((volatile uint8_t *)&req_2->flag) != flag)
         ;
 
-    amo_request_3_t *req_3;
     req_3 = (amo_request_3_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 32));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 32));
     while (*((volatile uint8_t *)&req_3->flag) != flag)
         ;
 
+    if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        req_4 = (amo_request_4_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 40));
+        flag = COUNTER_TO_FLAG(state, (ch->processed + 40));
+        while (*((volatile uint8_t *)&req_4->flag) != flag)
+            ;
+        qp_index = static_cast<nvshmemx_qp_handle_t>(req_4->qp_index);
+    }
+
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
     __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
                            // (was present in dma function, was missing in inline function, breaks
                            // rma)
-#elif defined(_NVSHMEM_X86_64)
+#elif defined(NVSHMEM_X86_64)
     asm volatile("" : : : "memory");
 #endif
 
@@ -617,9 +654,9 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
         }
         bytes.elembytes = size;
 
-        status = tcurr->host_ops.amo(tcurr, pe, NULL, verb, &memdesc, bytes, 1);
+        status = tcurr->host_ops.amo(tcurr, pe, NULL, verb, &memdesc, bytes, qp_index);
         if (unlikely(status)) {
-            NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
+            NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_amo\n");
             exit(-1);
         }
     }
@@ -631,9 +668,13 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
 
     *is_processed = 1;
 
-    proxy_update_processed(ch, PROXY_AMO_REQ_BYTES);
+    if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        proxy_update_processed(ch, PROXY_AMO_REQ_BYTES + CHANNEL_ENTRY_BYTES);
+    } else {
+        proxy_update_processed(ch, PROXY_AMO_REQ_BYTES);
+    }
     INFO(NVSHMEM_PROXY,
-         "[%d] process_channel_put_dma/proxy_update_processed processed %ld complete %ld \n",
+         "[%d] process_channel_amo/proxy_update_processed processed %ld complete %ld \n",
          state->nvshmemi_state->mype, ch->processed, *ch->complete);
     /* Fetching atomics that complete on quiet need a consistency op to confirm proper ordering on
      * the device side. */
@@ -773,7 +814,7 @@ inline void progress_quiet(proxy_state_t *proxy_state) {
 
             tcurr = proxy_state->transport[i];
             if (tcurr == NULL) continue;
-            status = tcurr->host_ops.quiet(tcurr, i, 1);
+            status = tcurr->host_ops.quiet(tcurr, i, NVSHMEMX_QP_DEFAULT);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in progress_quiet \n");
                 exit(-1);
@@ -850,7 +891,7 @@ inline int process_channel_fence(proxy_state_t *proxy_state, proxy_channel_t *ch
 
         tcurr = proxy_state->transport[i];
 
-        if (tcurr->host_ops.fence) status = tcurr->host_ops.fence(tcurr, i, 1);
+        if (tcurr->host_ops.fence) status = tcurr->host_ops.fence(tcurr, i, NVSHMEMX_QP_DEFAULT, 0);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_fence \n");
             exit(-1);
@@ -858,6 +899,137 @@ inline int process_channel_fence(proxy_state_t *proxy_state, proxy_channel_t *ch
     }
 
     proxy_update_processed(ch, CHANNEL_ENTRY_BYTES);
+    return 0;
+}
+
+inline int process_channel_qp_fence(proxy_state_t *proxy_state, proxy_channel_t *ch) {
+    int status = 0;
+    int num_qps;
+    int num_pe;
+    uint8_t flag;
+    int is_multi;
+    nvshmemi_state_t *state = proxy_state->nvshmemi_state;
+
+    qp_sync_base_request_t *qp_sync_base_req;
+    qp_sync_request_0_t *qp_sync_req_0;
+
+    qp_sync_base_req =
+        (qp_sync_base_request_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch, ch->processed);
+
+#if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
+    __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
+                           // (was present in dma function, was missing in inline function, breaks
+                           // rma)
+#elif defined(NVSHMEM_X86_64)
+    asm volatile("" : : : "memory");
+#endif
+
+    num_qps = qp_sync_base_req->qp_count;
+    is_multi = num_qps > 1 ? 1 : 0;
+
+    for (int i = 0; i < num_qps; i++) {
+        qp_sync_req_0 = (qp_sync_request_0_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch,
+                                                                   (ch->processed + 8 + i * 8));
+        flag = COUNTER_TO_FLAG(proxy_state, (ch->processed + 8 + i * 8));
+        while (*((volatile uint8_t *)&qp_sync_req_0->flag) != flag)
+            ;
+    }
+
+#if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
+    __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
+                           // (was present in dma function, was missing in inline function, breaks
+                           // rma)
+#elif defined(NVSHMEM_X86_64)
+    asm volatile("" : : : "memory");
+#endif
+
+    for (int i = 0; i < num_qps; i++) {
+        qp_sync_req_0 = (qp_sync_request_0_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch,
+                                                                   (ch->processed + 8 + i * 8));
+        int qp_index = qp_sync_req_0->qp_index;
+
+        uint32_t base_pe = qp_sync_req_0->pe;
+        if (base_pe == NVSHMEMX_PE_ALL) {
+            base_pe = 0;
+            num_pe = state->npes;
+        } else {
+            num_pe = 1;
+        }
+        for (int j = 0; j < num_pe; j++) {
+            int pe = base_pe + j;
+            struct nvshmem_transport *tcurr = proxy_state->transport[pe];
+            if (tcurr->host_ops.fence)
+                status = tcurr->host_ops.fence(tcurr, pe, qp_index, is_multi);
+            if (unlikely(status)) {
+                NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_qp_fence\n");
+                exit(-1);
+            }
+        }
+    }
+
+    proxy_update_processed(ch, CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES);
+    return 0;
+}
+
+inline int process_channel_qp_quiet(proxy_state_t *proxy_state, proxy_channel_t *ch) {
+    int status = 0;
+    int num_qps;
+    int num_pe;
+    int start_pe;
+    uint8_t flag;
+    nvshmemi_state_t *state = proxy_state->nvshmemi_state;
+    TRACE(NVSHMEM_PROXY, "[%d] process_channel_qp_quiet", proxy_state->nvshmemi_state->mype);
+
+    qp_sync_base_request_t *qp_sync_base_req;
+    qp_sync_request_0_t *qp_sync_req_0;
+
+    qp_sync_base_req =
+        (qp_sync_base_request_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch, ch->processed);
+    num_qps = qp_sync_base_req->qp_count;
+
+    for (int i = 0; i < num_qps; i++) {
+        qp_sync_req_0 = (qp_sync_request_0_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch,
+                                                                   (ch->processed + 8 + i * 8));
+        flag = COUNTER_TO_FLAG(proxy_state, (ch->processed + 8 + i * 8));
+        while (*((volatile uint8_t *)&qp_sync_req_0->flag) != flag)
+            ;
+    }
+
+#if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
+    __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
+                           // (was present in dma function, was missing in inline function, breaks
+                           // rma)
+#elif defined(NVSHMEM_X86_64)
+    asm volatile("" : : : "memory");
+#endif
+
+    for (int i = 0; i < num_qps; i++) {
+        qp_sync_req_0 = (qp_sync_request_0_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch,
+                                                                   (ch->processed + 8 + i * 8));
+        if (qp_sync_req_0->pe == NVSHMEMX_PE_ALL) {
+            num_pe = state->npes;
+            start_pe = 0;
+        } else {
+            num_pe = 1;
+            start_pe = qp_sync_req_0->pe;
+        }
+        for (int j = start_pe; j < start_pe + num_pe; j++) {
+            int pe = j % state->npes;
+            struct nvshmem_transport *tcurr = proxy_state->transport[pe];
+            if (tcurr->host_ops.quiet)
+                status = tcurr->host_ops.quiet(tcurr, pe, qp_sync_req_0->qp_index);
+            if (unlikely(status)) {
+                NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_qp_quiet\n");
+                exit(-1);
+            }
+        }
+    }
+
+    if (proxy_state->issued_get) {
+        enforce_cst(proxy_state);
+    }
+
+    proxy_update_processed(ch, CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES, true);
     return 0;
 }
 
@@ -917,6 +1089,7 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     amo_verb_t sig_verb;
     amo_memdesc_t sig_target_desc;
     amo_bytesdesc_t sig_bytes_desc;
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT;
 
     base_req = (base_request_t *)WRAPPED_CHANNEL_BUF(state, ch, ch->processed);
     rwrite_offset = (uint64_t)(((uint64_t)(base_req->roffset_high) << 8) | (base_req->roffset_low));
@@ -984,6 +1157,10 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
 
     pe = ps_req_2->pe;
 
+    if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        qp_index = ps_req_2->qp_index;
+    }
+
     /* build write parameters */
     write_verb.desc = NVSHMEMI_OP_PUT;
     write_verb.is_nbi = 1;
@@ -1035,12 +1212,12 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
                                    state->transport_id[pe]);
     sig_bytes_desc.elembytes = sizeof(uint64_t);
 
-    TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_addr, pe);
+    TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_ptr, pe);
 
     tcurr = state->transport[pe];
     status = tcurr->host_ops.put_signal(tcurr, pe, write_verb, remote_write_desc_vec,
                                         local_write_desc_vec, write_bytes_vec, sig_verb,
-                                        &sig_target_desc, sig_bytes_desc, 1);
+                                        &sig_target_desc, sig_bytes_desc, qp_index);
     if (unlikely(status)) {
         NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_put_signal\n");
         exit(-1);
@@ -1103,13 +1280,16 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                 int is_processed = 1;
                 switch (channel_req[i]->op) {
                     case NVSHMEMI_OP_PUT:
+                    case NVSHMEMI_OP_PUT_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received PUT \n");
                         is_processed = 0;
                         status = process_channel_dma(proxy_state, ch, &is_processed);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_dma<PUT>\n");
                         break;
                     case NVSHMEMI_OP_G:
+                    case NVSHMEMI_OP_G_QP:
                     case NVSHMEMI_OP_GET:
+                    case NVSHMEMI_OP_GET_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received GET \n");
                         is_processed = 0;
                         status = process_channel_dma(proxy_state, ch, &is_processed);
@@ -1117,22 +1297,31 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_dma<GET>\n");
                         break;
                     case NVSHMEMI_OP_P:
+                    case NVSHMEMI_OP_P_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received P_CHAR \n");
                         is_processed = 0;
                         status = process_channel_inline(proxy_state, ch, &is_processed);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_inline<char>\n");
                         break;
                     case NVSHMEMI_OP_AMO:
+                    case NVSHMEMI_OP_AMO_QP:
                         is_processed = 0;
                         status = process_channel_amo(proxy_state, ch, &is_processed);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_inline<char>\n");
                         break;
                     case NVSHMEMI_OP_FENCE:
+                    case NVSHMEMI_OP_FENCE_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received FENCE \n");
-                        status = process_channel_fence(proxy_state, ch);
-                        NVSHMEMI_NZ_EXIT(status, "error in process_channel_fence\n");
+                        status = process_channel_qp_fence(proxy_state, ch);
+                        NVSHMEMI_NZ_EXIT(status, "error in process_channel_qp_fence\n");
+                        break;
+                    case NVSHMEMI_OP_QUIET_QP:
+                        TRACE(NVSHMEM_PROXY, "host proxy: received QUIET \n");
+                        status = process_channel_qp_quiet(proxy_state, ch);
+                        NVSHMEMI_NZ_EXIT(status, "error in process_channel_qp_quiet\n");
                         break;
                     case NVSHMEMI_OP_PUT_SIGNAL:
+                    case NVSHMEMI_OP_PUT_SIGNAL_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received NVSHMEMI_OP_PUT_SIGNAL \n");
                         status = process_channel_put_signal(proxy_state, ch, &is_processed);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_put_signal\n");

@@ -234,6 +234,7 @@
 #include <cuda/std/climits>
 #endif
 
+typedef int nvshmemx_qp_handle_t;
 typedef uint64_t nvshmemx_team_uniqueid_t;
 typedef int32_t nvshmem_team_t;
 typedef nvshmem_team_t nvshmemx_team_t;

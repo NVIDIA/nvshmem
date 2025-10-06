@@ -699,7 +699,7 @@ void print_table_v1(const char *job_name, const char *subjob_name, const char *v
     int npes = nvshmem_n_pes();
     double avg, algbw, busbw;
 
-    const char *tokens[3] = { };
+    const char *tokens[3] = {};
     const char *delim = "-";
     char copy[strlen(subjob_name) + 1];
     strcpy(copy, subjob_name);

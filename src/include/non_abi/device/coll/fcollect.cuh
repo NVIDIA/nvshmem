@@ -173,12 +173,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_allpush_ll
             next_pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
             if (NODE_SAFE) {
                 if (nvshmemi_ptr(pWrk, next_pe) == NULL) {
-                    nvshmemi_put_nbi_threadgroup<T, NVSHMEMI_THREADGROUP_THREAD>(
+                    nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(
                         pWrk + pack_offset, pWrk + pack_offset, psync_remote_write_elements,
                         next_pe);
                 }
             } else {
-                nvshmemi_put_nbi_threadgroup<T, NVSHMEMI_THREADGROUP_THREAD>(
+                nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(
                     pWrk + pack_offset, pWrk + pack_offset, psync_remote_write_elements, next_pe);
             }
         }
@@ -323,7 +323,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgr
     // nvshmemi_threadgroup_sync<SCOPE>();
     for (int ii = teami->my_pe; ii < teami->size + teami->my_pe; ii++) {
         next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
-        nvshmemi_put_nbi_threadgroup<T, SCOPE>(dest + dest_offset, source, nelems, next_rank);
+        nvshmemi_put_nbi<T, SCOPE>(dest + dest_offset, source, nelems, next_rank);
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
 }

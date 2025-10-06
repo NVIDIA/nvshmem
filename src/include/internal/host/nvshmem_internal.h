@@ -15,6 +15,7 @@
 #include <map>
 
 #include "device_host/nvshmem_common.cuh"
+#include "device_host_transport/nvshmem_constants.h"
 #include "internal/host/custom_malloc.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_types.h"
@@ -118,8 +119,9 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state);
 int nvshmemi_setup_mops_kernels(nvshmemi_state_t *state);
 void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                   cudaStream_t cstrm);
+__device__ void nvshmemi_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
+                                   nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 extern "C" {
-__device__ void nvshmemi_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
 void nvshmemi_get_mem_handle(void **dev_state_ptr, void **transport_dev_state_ptr);
 }
 
@@ -165,7 +167,7 @@ static inline void nvshmemi_get_remote_mem_handle(rma_memdesc_t *handle, size_t 
    lptr is local address - either symmetric or not */
 static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcurr, int transport_id,
                                                   int pe, rma_verb_t verb, void *rptr, void *lptr,
-                                                  size_t size, bool is_proxy) {
+                                                  size_t size, nvshmemx_qp_handle_t qp_index) {
     rma_memdesc_t localdesc, remotedesc;
     rma_bytesdesc_t bytes;
     bytes.srcstride = 1;
@@ -186,7 +188,7 @@ static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcur
         nvshmemi_get_remote_mem_handle(&remotedesc, &remote_chunk_size, rptr, pe, transport_id);
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         bytes.nelems = chunk_size;
-        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, is_proxy);
+        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
             exit(-1);

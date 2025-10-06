@@ -32,7 +32,7 @@ void nvshmem_fence(void) {
                 }
             } else if (tcurr->host_ops.fence) {
                 for (int k = 0; k < nvshmemi_state->npes; k++) {
-                    status = tcurr->host_ops.fence(tcurr, k, 0);
+                    status = tcurr->host_ops.fence(tcurr, k, 0, NVSHMEMX_QP_HOST);
                     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                           "nvshmem_fence() failed \n");
                 }

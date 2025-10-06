@@ -15,8 +15,10 @@
 
 #if !defined __CUDACC_RTC__
 #include <limits.h>
+#include <stdint.h>
 #else
 #include <cuda/std/climits>
+#include <cuda/std/cstdint>
 #endif
 #include "non_abi/nvshmem_version.h"
 
@@ -82,5 +84,20 @@ typedef enum {
     NVSHMEM_STATUS_FULL_MPG,
     NVSHMEM_STATUS_INVALID = INT_MAX,
 } nvshmemx_init_status_t;
+
+typedef enum {
+    NVSHMEMX_QP_HOST = 0,
+    NVSHMEMX_QP_DEFAULT = 1,
+    NVSHMEMX_QP_ANY = INT_MAX,
+    NVSHMEMX_QP_ALL = INT_MAX,
+} nvshmemx_qp_handle_index_t;
+
+/* in the proxy code, pe is represented as a 16-bit integer, so we use the 16th bit to represent any
+ * and all */
+typedef enum {
+    NVSHMEM_PE_INVALID = -1,
+    NVSHMEMX_PE_ANY = (1 << 15),
+    NVSHMEMX_PE_ALL = (1 << 15),
+} nvshmem_pe_index_t;
 
 #endif
