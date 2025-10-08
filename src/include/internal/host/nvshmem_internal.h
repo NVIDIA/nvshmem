@@ -15,6 +15,7 @@
 #include <map>
 
 #include "device_host/nvshmem_common.cuh"
+#include "device_host_transport/nvshmem_constants.h"
 #include "internal/host/custom_malloc.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_types.h"
@@ -29,8 +30,6 @@
 /* This is a requirement imposed by DMA-BUF which only supports 32-bit registrations */
 #define NVSHMEMI_DMA_BUF_MAX_LENGTH 0x100000000ULL
 #define NVSHMEMI_MAX_HANDLE_LENGTH 2147483648ULL
-
-#define MAX_PEER_STREAMS 3
 
 #define MAX_TRANSPORT_EP_COUNT 1
 
@@ -101,6 +100,8 @@ extern uint64_t *nvshmemi_host_hashes;
 extern nvshmem_options_t nvshmem_options;
 extern int nvshmemi_cuda_driver_version;
 extern int nvshmemi_use_nccl;
+extern int nvshmemi_disable_ce_collectives;
+extern bool nvshmemi_disable_self_write_ce_coll;
 extern bool nvshmemi_is_mps_available;
 extern int nccl_version;
 extern long nvshmemi_max_teams;
@@ -109,7 +110,7 @@ extern bool nvshmemi_is_mpg_run;
 extern bool nvshmemi_is_limited_mpg_run;
 
 int nvshmemi_proxy_level(nvshmemi_state_t *state);
-int nvshmemi_common_init(nvshmemi_state_t *state);
+int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL);
 int nvshmemi_init_g_buffer();
 void nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind);
 void nvshmemi_fini_symmetric_heap(nvshmemi_state_t *state);
@@ -118,8 +119,9 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state);
 int nvshmemi_setup_mops_kernels(nvshmemi_state_t *state);
 void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                   cudaStream_t cstrm);
+__device__ void nvshmemi_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
+                                   nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 extern "C" {
-__device__ void nvshmemi_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
 void nvshmemi_get_mem_handle(void **dev_state_ptr, void **transport_dev_state_ptr);
 }
 
@@ -165,7 +167,7 @@ static inline void nvshmemi_get_remote_mem_handle(rma_memdesc_t *handle, size_t 
    lptr is local address - either symmetric or not */
 static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcurr, int transport_id,
                                                   int pe, rma_verb_t verb, void *rptr, void *lptr,
-                                                  size_t size, bool is_proxy) {
+                                                  size_t size, nvshmemx_qp_handle_t qp_index) {
     rma_memdesc_t localdesc, remotedesc;
     rma_bytesdesc_t bytes;
     bytes.srcstride = 1;
@@ -186,7 +188,7 @@ static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcur
         nvshmemi_get_remote_mem_handle(&remotedesc, &remote_chunk_size, rptr, pe, transport_id);
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         bytes.nelems = chunk_size;
-        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, is_proxy);
+        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
             exit(-1);

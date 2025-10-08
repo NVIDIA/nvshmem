@@ -27,6 +27,8 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
+                                -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
+                                -DCUTLASS_HOME=${CUTLASS_HOME}
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                                 -DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}
@@ -46,6 +48,12 @@ set_property(TARGET nvshmem_device PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BI
 if(CUDAToolkit_VERSION_MAJOR LESS 13)
   set(LIB_CXX_STANDARD 11)
 else()
+  set(LIB_CXX_STANDARD 17)
+endif()
+
+# CUTLASS needs C++ 17
+if(NVSHMEM_BUILD_WITH_CUTLASS)
+  message(WARNING "Setting CXX standard to C++ 17 for building with CUTLASS")
   set(LIB_CXX_STANDARD 17)
 endif()
 
@@ -221,15 +229,11 @@ set_target_properties(${ACTIVE_BOOTSTRAPS}
 
 # Start nvshmem lib definitions
 add_library(
-  nvshmem STATIC
-)
-
-add_library(
   nvshmem_host SHARED
 )
 
 ## Start generic variable configuration
-set_target_properties(nvshmem nvshmem_host
+set_target_properties(nvshmem_host
                       PROPERTIES POSITION_INDEPENDENT_CODE ON
                       CXX_STANDARD_REQUIRED ON
                       CUDA_STANDARD_REQUIRED ON
@@ -355,17 +359,6 @@ set(NVSHMEM_HOST_SOURCES
 )
 
 target_include_directories(
-  nvshmem
-  PRIVATE include
-          include/host/env
-          host/stream/coll
-          host/coll
-          host/topo
-  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-            $<INSTALL_INTERFACE:include>
-)
-
-target_include_directories(
   nvshmem_host
   PRIVATE include
           include/host/env
@@ -377,18 +370,34 @@ target_include_directories(
             $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(nvshmem PRIVATE CUDA::cudart_static)
+if (NVSHMEM_BUILD_WITH_CUTLASS)
+    target_compile_definitions(nvshmem_host PUBLIC CUTLASS_ENABLED)
+    target_compile_definitions(nvshmem_device INTERFACE CUTLASS_ENABLED)
+
+    if ("${CUTLASS_HOME}" STREQUAL "")
+        message(FATAL_ERROR "Please set CUTLASS_HOME to CUTLASS directory.")
+    endif()
+        set(CUTLASS_INCLUDE_DIR "${CUTLASS_HOME}/include")
+        set(CUTLASS_EXAMPLE_INCLUDE_DIR "${CUTLASS_HOME}/examples/common")
+        set(CUTLASS_UTIL_INCLUDE_DIR "${CUTLASS_HOME}/tools/util/include")
+
+    message(STATUS "CUTLASS include directory: ${CUTLASS_INCLUDE_DIR}")
+    target_include_directories(nvshmem_host PUBLIC
+            ${CUTLASS_UTIL_INCLUDE_DIR}
+            ${CUTLASS_INCLUDE_DIR}
+            ${CUTLASS_EXAMPLE_INCLUDE_DIR})
+
+endif()
+
 target_link_libraries(nvshmem_host PRIVATE CUDA::cudart_static)
 if (CCCL_FOUND AND CUDAToolkit_VERSION_MAJOR GREATER 12)
-  target_link_libraries(nvshmem PUBLIC CCCL::CCCL)
   target_link_libraries(nvshmem_host PUBLIC CCCL::CCCL)
 endif()
-nvshmem_library_set_base_config(nvshmem)
 nvshmem_library_set_base_config(nvshmem_host)
 ## End generic variable configuration
 
 ## Start transports
-set(TRANSPORT_VERSION_MAJOR 3)
+set(TRANSPORT_VERSION_MAJOR 4)
 set(TRANSPORT_VERSION_MINOR 0)
 set(TRANSPORT_VERSION_PATCH 0)
 
@@ -562,7 +571,6 @@ set_target_properties(${ACTIVE_TRANSPORTS}
 
 ## Start dependencies
 if(NVSHMEM_USE_NCCL)
-  target_include_directories(nvshmem PRIVATE ${NCCL_INCLUDE})
   target_include_directories(nvshmem_host PRIVATE ${NCCL_INCLUDE})
 endif()
 
@@ -588,37 +596,37 @@ configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CU
 ## End Numba support requirements
 
 ## Start inlining requirements
-if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
 set(INC_EXPORTS
     ${INC_EXPORTS}
     non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh
 )
+if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
 set(NVSHMEM_DEVICE_SOURCES
     ${NVSHMEM_DEVICE_SOURCES}
     device/comm/transfer_device.cu
 )
-configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CURRENT_SOURCE_DIR}/device/comm/transfer_device.cu COPYONLY)
 endif()
+
+configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CURRENT_SOURCE_DIR}/device/comm/transfer_device.cu COPYONLY)
+
 ## End inlining requirements
 
 ## Start final lib prep
 target_link_libraries(nvshmem_host PRIVATE nvshmem_device)
 target_link_options(nvshmem_host PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../nvshmem_host.sym")
 set_source_files_properties(${NVSHMEM_HOST_SOURCES} ${NVSHMEM_DEVICE_SOURCES} PROPERTIES COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CUDA>:--maxrregcount=32>)
-target_sources(nvshmem PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT} ${NVSHMEM_DEVICE_SOURCES} ${NVSHMEM_DEVICE_SOURCES_NOMAXREGCOUNT})
 target_sources(nvshmem_host PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT})
-
-add_library(NVSHMEM::nvshmem ALIAS nvshmem)
 
 ## End final lib prep
 # End nvshmem lib definitions
 
 # Start nvshmem-info definitions.
 add_executable(nvshmem-info)
-target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp)
+target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp host/util/env_vars.cpp host/util/util.cpp host/init/init_nvtx.cpp)
 set_target_properties(nvshmem-info PROPERTIES CXX_STANDARD_REQUIRED ON CXX_STANDARD ${LIB_CXX_STANDARD} RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
-target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem)
+target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem_host nvshmem_device)
 target_include_directories(nvshmem-info PRIVATE include include/host/env)
+target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # End nvshmem-info definitions.
 
 # Start header configuration and export
@@ -653,6 +661,7 @@ set(INC_EXPORTS
     non_abi/device/pt-to-pt/ibgda_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh
     non_abi/device/pt-to-pt/utils_device.h
+    non_abi/device/pt-to-pt/tile.cuh
     non_abi/device/common/nvshmemi_tile_utils.cuh
     device_host/nvshmem_common.cuh
     device_host/nvshmem_tensor.h
@@ -873,7 +882,7 @@ export(
 )
 
 install(
-	TARGETS nvshmem nvshmem_host nvshmem-info ${ACTIVE_BOOTSTRAPS} ${ACTIVE_TRANSPORTS}
+	TARGETS nvshmem_host nvshmem-info ${ACTIVE_BOOTSTRAPS} ${ACTIVE_TRANSPORTS}
   EXPORT NVSHMEMTargets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -1003,9 +1012,11 @@ set(CPACK_SOURCE_IGNORE_FILES
 /include/non_abi/nvshmem_build_options.h$;\
 /include/non_abi/nvshmem_version.h$;\
 /nvshmem4py/cmake/addCybind.cmake;\
-/nvshmem4py/cybind_assets/;\
+/nvshmem4py/cmake/addNumbast.cmake;\
+/nvshmem4py/build_assets/;\
 /perftest/perftest_install/;\
 /test/test_install/;
+/scripts/cleanup_ignore_files.sh
 /scripts/create_imex.sh;\
 /scripts/dependency_installer.sh;\
 /scripts/include_checker.sh;\
@@ -1048,9 +1059,6 @@ add_custom_target(package_src_target
     COMMAND "${CMAKE_COMMAND}" --build . --target package_source
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Package Build"
-    DEPENDS build_bindings_cybind 
+    DEPENDS build_bindings_cybind build_bindings_numbast
     VERBATIM
 )
-# End Installation definitions
-
-

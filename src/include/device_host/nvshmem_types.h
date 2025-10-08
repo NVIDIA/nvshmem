@@ -1,7 +1,9 @@
 #ifndef NVSHMEM_TYPES_H
 #define NVSHMEM_TYPES_H
 
+#define INIT_ARGS_V2_PADDING 92
 #define INIT_ARGS_PADDING 96
+#define INIT_ARGS_SCALAR_INVALID -1
 #define TEAM_CONFIG_V2_PADDING 48
 #define TEAM_CONFIG_PADDING 56
 #define REDUCE_PADDING 32
@@ -42,6 +44,15 @@
         attr.args.uid_args.version = (1 << 16) + sizeof(nvshmemx_uniqueid_args_t); \
     } while (0);
 
+#define NVSHMEM_INIT_ARGS_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_args_t)
+#define NVSHMEMX_INIT_ARGS_V2_INITIALIZER                                   \
+    {                                                                       \
+        NVSHMEM_INIT_ARGS_V2_IDENTIFIER, /* version */                      \
+            NVSHMEMX_UNIQUEID_ARGS_INITIALIZER, INIT_ARGS_SCALAR_INVALID, { \
+            0                                                               \
+        }                                                                   \
+    }
+
 #define NVSHMEMX_INIT_ARGS_INITIALIZER                          \
     {                                                           \
         (1 << 16) + sizeof(nvshmemx_init_args_t), /* version */ \
@@ -50,11 +61,20 @@
         }                                                       \
     }
 
-#define NVSHMEMX_INIT_ATTR_INITIALIZER                           \
-    {                                                            \
-        (1 << 16) + sizeof(nvshmemx_init_attr_t), /* version */  \
-            NULL,                                 /* mpi_comm */ \
-            NVSHMEMX_INIT_ARGS_INITIALIZER                       \
+#define NVSHMEM_INIT_ATTR_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_attr_t)
+#define NVSHMEMX_INIT_ATTR_INITIALIZER                  \
+    {                                                   \
+        NVSHMEM_INIT_ATTR_V2_IDENTIFIER, /* version */  \
+            NULL,                        /* mpi_comm */ \
+            NVSHMEMX_INIT_ARGS_V2_INITIALIZER           \
+    }
+
+#define NVSHMEM_INIT_ATTR_V1_IDENTIFIER (1 << 16) + sizeof(nvshmemx_init_attr_t)
+#define NVSHMEMX_INIT_ATTR_V1_INITIALIZER               \
+    {                                                   \
+        NVSHMEM_INIT_ATTR_V1_IDENTIFIER, /* version */  \
+            NULL,                        /* mpi_comm */ \
+            NVSHMEMX_INIT_ARGS_INITIALIZER              \
     }
 
 #define NVSHMEMI_RED_REX_INITIALIZER                                        \
@@ -94,35 +114,35 @@
         }                                                             \
     }
 
-#define NVSHMEMI_TEAM_INITIALIZER                                                               \
-    {                                                                                           \
-        (2 << 16) + sizeof(nvshmemi_team_t),                       /* version */                \
-            TEAM_SCALAR_INVALID,                                   /* my_pe */                  \
-            TEAM_SCALAR_INVALID,                                   /* start */                  \
-            TEAM_SCALAR_INVALID,                                   /* stride */                 \
-            TEAM_SCALAR_INVALID,                                   /* size */                   \
-            TEAM_SCALAR_INVALID,                                   /* team_idx */               \
-            NVSHMEMI_TEAM_CONFIG_INITIALIZER, TEAM_SCALAR_INVALID, /* config_mask */            \
-            NULL,                                                  /* nccl_comm */              \
-            NVSHMEMI_RED_REX_INITIALIZER, TEAM_ULSCALAR_INVALID,   /* rdxn_count */             \
-            TEAM_USCALAR_INVALID,                                  /* ll_flag */                \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[0] */       \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[1] */       \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_count */         \
-            TEAM_ULSCALAR_INVALID,                                 /* bcast_count */            \
-            TEAM_ULSCALAR_INVALID,                                 /* bcast_sync_offset */      \
-            TEAM_ULSCALAR_INVALID,                                 /* fcollect_count */         \
-            TEAM_USCALAR_INVALID,                                  /* fcollect_ll_flag */       \
-            false,                                                 /* are_gpus_p2p_connected */ \
-            false,                                                 /* is_team_node */           \
-            TEAM_SCALAR_INVALID,                                   /* team_node */              \
-            false,                                                 /* is_team_same_mype_node */ \
-            TEAM_SCALAR_INVALID,                                   /* team_same_mype_node */    \
-            NULL,                                                  /* nvls_rsc */               \
-            NULL,                                                  /* nvls_rsc_base_ptr */      \
-        {                                                                                       \
-            TEAM_SCALAR_INVALID                                                                 \
-        } /* team_dups */                                                                       \
+#define NVSHMEMI_TEAM_INITIALIZER                                                                 \
+    {                                                                                             \
+        (2 << 16) + sizeof(nvshmemi_team_t),                       /* version */                  \
+            TEAM_SCALAR_INVALID,                                   /* my_pe */                    \
+            TEAM_SCALAR_INVALID,                                   /* start */                    \
+            TEAM_SCALAR_INVALID,                                   /* stride */                   \
+            TEAM_SCALAR_INVALID,                                   /* size */                     \
+            TEAM_SCALAR_INVALID,                                   /* team_idx */                 \
+            NVSHMEMI_TEAM_CONFIG_INITIALIZER, TEAM_SCALAR_INVALID, /* config_mask */              \
+            NULL,                                                  /* nccl_comm */                \
+            NVSHMEMI_RED_REX_INITIALIZER, TEAM_ULSCALAR_INVALID,   /* rdxn_count */               \
+            TEAM_USCALAR_INVALID,                                  /* ll_flag */                  \
+            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[0] */         \
+            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[1] */         \
+            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_count */           \
+            TEAM_ULSCALAR_INVALID,                                 /* bcast_count */              \
+            TEAM_ULSCALAR_INVALID,                                 /* bcast_sync_offset */        \
+            TEAM_ULSCALAR_INVALID,                                 /* fcollect_count */           \
+            TEAM_USCALAR_INVALID,                                  /* fcollect_ll_flag */         \
+            false,                                                 /* are_gpus_p2p_connected */   \
+            false,                                                 /* is_team_node */             \
+            TEAM_SCALAR_INVALID,                                   /* team_node */                \
+            false,                                                 /* is_team_same_mype_node */   \
+            TEAM_SCALAR_INVALID,                                   /* team_same_mype_node */      \
+            NULL,                                                  /* nvls_rsc */                 \
+            NULL,                                                  /* nvls_rsc_base_ptr */        \
+            {TEAM_SCALAR_INVALID},                                 /* team_dups */                \
+            TEAM_ULSCALAR_INVALID,                                 /* p2p_sync_on_stream_count */ \
+            NULL,                                                  /* pe_mapping */               \
     }
 
 #define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                          \
@@ -214,6 +234,7 @@
 #include <cuda/std/climits>
 #endif
 
+typedef int nvshmemx_qp_handle_t;
 typedef uint64_t nvshmemx_team_uniqueid_t;
 typedef int32_t nvshmem_team_t;
 typedef nvshmem_team_t nvshmemx_team_t;
@@ -228,11 +249,26 @@ typedef enum {
 typedef struct {
     int version;
     nvshmemx_uniqueid_args_t uid_args;
+    int cuda_device_id;
+    char content[INIT_ARGS_V2_PADDING];
+} nvshmemx_init_args_v2;
+static_assert(sizeof(nvshmemx_init_args_v2) == 128, "init_args_v2 must be 128 bytes.");
+
+typedef struct {
+    int version;
+    nvshmemx_uniqueid_args_t uid_args;
     char content[INIT_ARGS_PADDING];
 } nvshmemx_init_args_v1;
 static_assert(sizeof(nvshmemx_init_args_v1) == 128, "init_args_v1 must be 128 bytes.");
 
-typedef nvshmemx_init_args_v1 nvshmemx_init_args_t;
+typedef nvshmemx_init_args_v2 nvshmemx_init_args_t;
+
+typedef struct {
+    int version;
+    void *mpi_comm;
+    nvshmemx_init_args_t args;
+} nvshmemx_init_attr_v2;
+static_assert(sizeof(nvshmemx_init_attr_v2) == 144, "init_attr_v2 must be 144 bytes.");
 
 typedef struct {
     int version;
@@ -241,7 +277,7 @@ typedef struct {
 } nvshmemx_init_attr_v1;
 static_assert(sizeof(nvshmemx_init_attr_v1) == 144, "init_attr_v1 must be 144 bytes.");
 
-typedef nvshmemx_init_attr_v1 nvshmemx_init_attr_t;
+typedef nvshmemx_init_attr_v2 nvshmemx_init_attr_t;
 
 typedef struct {
     int version;
@@ -299,7 +335,11 @@ typedef struct {
     void *nvls_rsc;          /* To be cast to nvshmemi_nvls_rsc whenever used */
     void *nvls_rsc_base_ptr; /* Shared b/w GPU threads of this team */
     nvshmem_team_t team_dups[128];
-    int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
+    uint64_t p2p_sync_on_stream_count;
+    int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct
+                      This must be the last field in the struct. Any new fields will need
+                      to come before it and will require additional logic in the internal team
+                      code to handle the version differences. */
 } nvshmemi_team_v3;
 
 typedef struct {
@@ -356,7 +396,7 @@ typedef struct {
 } nvshmemi_team_v1;
 static_assert(sizeof(nvshmemi_team_v1) == 256, "team_v1 must be 256 bytes.");
 static_assert(sizeof(nvshmemi_team_v2) == 784, "team_v2 must be 784 bytes.");
-static_assert(sizeof(nvshmemi_team_v3) == 792, "team_v3 must be 792 bytes.");
+static_assert(sizeof(nvshmemi_team_v3) == 800, "team_v3 must be 800 bytes.");
 
 typedef nvshmemi_team_v3 nvshmemi_team_t;
 

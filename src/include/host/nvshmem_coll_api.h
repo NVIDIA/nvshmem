@@ -31,14 +31,6 @@ extern "C" {
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DECL_NVSHMEM_TYPENAME_ALLTOALL)
 #undef DECL_NVSHMEM_TYPENAME_ALLTOALL
 
-#define DECL_NVSHMEM_TYPENAME_ALLTOALLS(TYPENAME, TYPE)                                            \
-    NVSHMEMI_HOSTDEVICE_PREFIX int nvshmem_##TYPENAME##_alltoalls(nvshmem_team_t team, TYPE *dest, \
-                                                                  const TYPE *src, ptrdiff_t dst,  \
-                                                                  ptrdiff_t sst, size_t nelems);
-
-NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DECL_NVSHMEM_TYPENAME_ALLTOALLS)
-#undef DECL_NVSHMEM_TYPENAME_ALLTOALLS
-
 NVSHMEMI_HOSTDEVICE_PREFIX int nvshmem_alltoallmem(nvshmem_team_t team, void *dest, const void *src,
                                                    size_t nelems);
 

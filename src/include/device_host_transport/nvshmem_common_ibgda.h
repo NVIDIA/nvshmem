@@ -10,6 +10,8 @@
 #define NVSHMEMI_IBGDA_QP_MANAGEMENT_PADDING 24
 #define NVSHMEMI_IBGDA_STATE_PADDING 64
 
+#define NVSHMEMI_IBGDA_STATE_PADDING_V2 56
+
 #define NVSHMEMI_IBGDA_SCALAR_INVALID -1
 #define NVSHMEMI_IBGDA_USSCALAR_INVALID 0xFFFF
 #define NVSHMEMI_IBGDA_USCALAR_INVALID 0xFFFFFFFF
@@ -281,12 +283,72 @@ typedef struct {
 static_assert(sizeof(nvshmemi_ibgda_device_state_v1) == 8384,
               "ibgda_device_state_v1 must be 8384 bytes.");
 
-typedef nvshmemi_ibgda_device_state_v1 nvshmemi_ibgda_device_state_t;
+typedef struct {
+    int version;
+    uint32_t num_shared_dcis;
+    uint32_t num_exclusive_dcis;
+    nvshmemi_ibgda_device_qp_map_type_t dci_map_type;
+    uint32_t ndcts_per_pe;
+    uint32_t num_qp_groups;
+    uint32_t num_dct_groups;
+    uint32_t num_rc_per_pe;
+    nvshmemi_ibgda_device_qp_map_type_t rc_map_type;
+    uint32_t num_requests_in_batch; /* always a power of 2 */
+    size_t log2_cumem_granularity;
+    int num_devices_initialized;
+    bool nic_buf_on_gpumem;
+    bool support_half_av_seg;
+    bool may_skip_cst;
+    bool use_async_postsend;
 
-#if defined(__CUDACC_RDC__)
+    struct {
+        // lkeys[idx] gives the lkey of chunk idx.
+        nvshmemi_ibgda_device_key_t lkeys[NVSHMEMI_IBGDA_MAX_CONST_LKEYS];
+
+        // rkeys[idx * npes + pe] gives rkey of chunck idx targeting peer pe.
+        nvshmemi_ibgda_device_key_t rkeys[NVSHMEMI_IBGDA_MAX_CONST_RKEYS];
+
+        nvshmemi_ibgda_device_dct_t dcts[NVSHMEMI_IBGDA_MAX_CONST_DCTS];
+    } constmem;
+
+    struct {
+        uint8_t *qp_group_switches;
+        nvshmemi_ibgda_device_cq_t *cqs;  // For both dcis and rcs. CQs for DCIs come first.
+        nvshmemi_ibgda_device_qp_t *dcis;
+        nvshmemi_ibgda_device_qp_t *rcs;
+        nvshmemi_ibgda_device_local_only_mhandle *local_only_mhandle_head;
+
+        // For dcts that cannot be contained in constmem.lkeys.
+        // dcts[idx - NVSHMEMI_IBGDA_MAX_CONST_DCTS] gives the dct of idx.
+        nvshmemi_ibgda_device_dct_t *dcts;
+
+        // For lkeys that cannot be contained in constmem.lkeys.
+        // lkeys[idx - NVSHMEMI_IBGDA_MAX_CONST_LKEYS] gives the lkey of chunk idx.
+        nvshmemi_ibgda_device_key_t *lkeys;
+
+        // For rkeys that cannot be contained in constmem.rkeys.
+        // rkeys[(idx * npes + pe) - NVSHMEMI_IBGDA_MAX_CONST_RKEYS] gives rkey of chunck idx
+        // targeting peer pe.
+        nvshmemi_ibgda_device_key_t *rkeys;
+    } globalmem;
+    int num_default_rc_per_pe;
+    void *extra;
+    uint8_t reserved[NVSHMEMI_IBGDA_STATE_PADDING_V2];
+} nvshmemi_ibgda_device_state_v2;
+static_assert(sizeof(nvshmemi_ibgda_device_state_v2) == 8384,
+              "ibgda_device_state_v2 must be 8384 bytes.");
+
+typedef nvshmemi_ibgda_device_state_v2 nvshmemi_ibgda_device_state_t;
+
+#if defined(__CUDACC_RDC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
 #define EXTERN_CONSTANT extern __constant__
+#elif defined(__clang__)
+#define EXTERN_CONSTANT extern __constant__ __attribute__((address_space(4)))
+#else
+#define EXTERN_CONSTANT
+#endif
+
 EXTERN_CONSTANT nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;
 #undef EXTERN_CONSTANT
-#endif
 
 #endif /* _NVSHMEMI_IBGDA_COMMON_H_ */

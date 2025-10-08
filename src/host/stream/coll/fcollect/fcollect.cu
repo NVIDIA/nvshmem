@@ -14,7 +14,6 @@
 #include "host/nvshmem_api.h"
 
 #define NVSHMEMI_FCOLLECT_CTA_THRESHOLD 1048576
-#define NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT 32 /* # of GPUs x 4 CTA per GPU for DGX */
 
 std::map<std::string, size_t> nvshmemi_fcollect_maxblocksize;
 
@@ -58,34 +57,6 @@ void nvshmemi_call_fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
         } else {
             num_blocks = 1;
         }
-    }
-
-    if (num_blocks > 1 && teami->team_dups[1] == NVSHMEM_TEAM_INVALID) {
-        CUDA_RUNTIME_CHECK(cudaStreamSynchronize(
-            stream)); /* This is to synchronize with any prior operations submitted on this stream
-                         such as barrier that can deadlock with similar ops in split_strided */
-        NVSHMEMU_FOR_EACH(block_id, num_blocks - 1) {
-            nvshmem_team_split_strided(team, 0, 1, nvshmem_team_n_pes(team), NULL, 0,
-                                       &(teami->team_dups[block_id + 1]));
-            INFO(NVSHMEM_TEAM, "Duplicate team ID: %d of parent team: %d for CTA %zu\n",
-                 teami->team_dups[block_id + 1], teami->team_idx, block_id);
-            if (teami->team_dups[block_id + 1] == NVSHMEM_TEAM_INVALID) {
-                NVSHMEMI_ERROR_EXIT(
-                    "Unable to allocate enough teams for fcollect. This will cause significant "
-                    "performance degradation. Please increase NVSHMEM_MAX_TEAMS. Exiting\n");
-            }
-        }
-
-        off_t team_dups_offset = offsetof(nvshmemi_team_t, team_dups);
-        nvshmemi_team_t *teami_pool_device_addr;
-        CUDA_RUNTIME_CHECK(cudaMemcpy((void **)&teami_pool_device_addr,
-                                      &nvshmemi_device_state.team_pool[team],
-                                      sizeof(nvshmemi_team_t *), cudaMemcpyDeviceToHost));
-        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
-        off_t team_dups_device_addr = (off_t)((char *)teami_pool_device_addr + team_dups_offset);
-        CUDA_RUNTIME_CHECK(cudaMemcpy((void *)(team_dups_device_addr), &teami->team_dups[0],
-                                      sizeof(nvshmem_team_t) * num_blocks, cudaMemcpyHostToDevice));
-        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
     }
 
     fcollect_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, 0, stream>>>(

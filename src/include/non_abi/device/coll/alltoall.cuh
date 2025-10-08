@@ -50,8 +50,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
                 (void *)(dest + dst_offset), (void *)(source + src_offset), msgsize,
                 (void *)(psync + mype), 1ULL, NVSHMEMI_AMO_SIGNAL_ADD, next_rank, true);
         } else if (msgsize <= NVSHMEMI_ALLTOALL_SMALL_MSGSIZE) {
-            nvshmemi_put_nbi_threadgroup<T, NVSHMEMI_THREADGROUP_THREAD>(
-                dest + dst_offset, source + src_offset, nelems, next_rank);
+            nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(dest + dst_offset, source + src_offset,
+                                                             nelems, next_rank);
         }
     }
 
@@ -68,7 +68,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
                     (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p +
                     next_rank);
                 if (peer_base_addr) {
-                    nvshmemi_put_nbi_threadgroup<T, NVSHMEMI_THREADGROUP_WARP>(
+                    nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_WARP>(
                         dest + dst_offset, source + src_offset, nelems, next_rank);
                 }
             }
@@ -81,8 +81,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
             void *peer_base_addr = (void *)__ldg(
                 (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + next_rank);
             if (peer_base_addr) {
-                nvshmemi_put_nbi_threadgroup<T, SCOPE>(dest + dst_offset, source + src_offset,
-                                                       nelems, next_rank);
+                nvshmemi_put_nbi<T, SCOPE>(dest + dst_offset, source + src_offset, nelems,
+                                           next_rank);
             }
         }
     }

@@ -2218,11 +2218,11 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
                           "Failed to get allocation granularity of user buffer %p\n", ptr);
 
     if (size % mem_granularity_) {
-        size = ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_;
         WARN(
             "user buffer %p size %zu is not a multiple of heap granularity %zu, "
             "rounding up to %zu\n",
-            ptr, size, mem_granularity_, size);
+            ptr, size, mem_granularity_, ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_);
+        size = ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_;
     }
 out:
     status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(userAllocHandle));
@@ -2370,8 +2370,8 @@ exit_and_return:
     NVSHMEMU_THREAD_CS_EXIT();
 }
 
-void *nvshmem_ptr(const void *ptr, int pe) {
-    if (ptr >= nvshmemi_device_state.heap_base) {
+void *nvshmemi_ptr(const void *ptr, int pe) {
+    if (pe >= 0 && pe < nvshmemi_state->npes && ptr >= nvshmemi_device_state.heap_base) {
         uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
 
         if (offset < nvshmemi_device_state.heap_size) {
@@ -2384,7 +2384,12 @@ void *nvshmem_ptr(const void *ptr, int pe) {
     return NULL;
 }
 
+void *nvshmem_ptr(const void *ptr, int pe) { return nvshmemi_ptr(ptr, pe); }
+
 void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr) {
+    if (team < 0 || team >= nvshmemi_max_teams || nvshmemi_team_pool[team] == NULL) {
+        return NULL;
+    }
     uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
     if (ptr >= nvshmemi_device_state.heap_base && offset < nvshmemi_device_state.heap_size) {
         nvls::nvshmemi_nvls_rsc *nvls =

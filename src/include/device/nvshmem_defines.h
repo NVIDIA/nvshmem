@@ -95,10 +95,10 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_G_IMPL)
 #undef NVSHMEMI_TYPENAME_G_IMPL
 
 /*__device__ nvshmem_<typename>_put*/
-#define NVSHMEMI_TYPENAME_PUT_IMPL(TYPENAME, TYPE)                                             \
-    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_put(        \
-        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                               \
-        nvshmemi_put_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe); \
+#define NVSHMEMI_TYPENAME_PUT_IMPL(TYPENAME, TYPE)                                      \
+    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_put( \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                        \
+        nvshmemi_put<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe);      \
     }
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_PUT_IMPL)
 #undef NVSHMEMI_TYPENAME_PUT_IMPL
@@ -108,17 +108,17 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_PUT_IMPL)
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_put_signal( \
         TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal,    \
         int sig_op, int pe) {                                                                  \
-        nvshmemi_put_signal_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(                    \
-            dest, source, nelems, sig_addr, signal, sig_op, pe, 0);                            \
+        nvshmemi_put_signal<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, sig_addr, \
+                                                               signal, sig_op, pe, 0);         \
     }
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_PUT_SIGNAL_IMPL)
 #undef NVSHMEMI_TYPENAME_PUT_SIGNAL_IMPL
 
 /*__device__ nvshmem_<typename>_get*/
-#define NVSHMEMI_TYPENAME_GET_IMPL(TYPENAME, TYPE)                                             \
-    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_get(        \
-        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                               \
-        nvshmemi_get_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe); \
+#define NVSHMEMI_TYPENAME_GET_IMPL(TYPENAME, TYPE)                                      \
+    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_get( \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                        \
+        nvshmemi_get<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe);      \
     }
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_GET_IMPL)
 #undef NVSHMEMI_TYPENAME_GET_IMPL
@@ -127,40 +127,39 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_GET_IMPL)
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put8(void *dest,
                                                                        const void *source,
                                                                        size_t nelems, int pe) {
-    nvshmemi_put_threadgroup<int8_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int8_t *)dest, (const int8_t *)source, nelems, pe);
+    nvshmemi_put<int8_t, NVSHMEMI_THREADGROUP_THREAD>((int8_t *)dest, (const int8_t *)source,
+                                                      nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put16(void *dest,
                                                                         const void *source,
                                                                         size_t nelems, int pe) {
-    nvshmemi_put_threadgroup<int16_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int16_t *)dest, (const int16_t *)source, nelems, pe);
+    nvshmemi_put<int16_t, NVSHMEMI_THREADGROUP_THREAD>((int16_t *)dest, (const int16_t *)source,
+                                                       nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put32(void *dest,
                                                                         const void *source,
                                                                         size_t nelems, int pe) {
-    nvshmemi_put_threadgroup<int32_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int32_t *)dest, (const int32_t *)source, nelems, pe);
+    nvshmemi_put<int32_t, NVSHMEMI_THREADGROUP_THREAD>((int32_t *)dest, (const int32_t *)source,
+                                                       nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put64(void *dest,
                                                                         const void *source,
                                                                         size_t nelems, int pe) {
-    nvshmemi_put_threadgroup<int64_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int64_t *)dest, (const int64_t *)source, nelems, pe);
+    nvshmemi_put<int64_t, NVSHMEMI_THREADGROUP_THREAD>((int64_t *)dest, (const int64_t *)source,
+                                                       nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put128(void *dest,
                                                                          const void *source,
                                                                          size_t nelems, int pe) {
-    nvshmemi_put_threadgroup<int4, NVSHMEMI_THREADGROUP_THREAD>((int4 *)dest, (const int4 *)source,
-                                                                nelems, pe);
+    nvshmemi_put<int4, NVSHMEMI_THREADGROUP_THREAD>((int4 *)dest, (const int4 *)source, nelems, pe);
 }
 
 /*__device__ nvshmem_putmem_signal*/
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_putmem_signal(
     void *dest, const void *source, size_t bytes, uint64_t *sig_addr, uint64_t signal, int sig_op,
     int pe) {
-    nvshmemi_put_signal_threadgroup<char, NVSHMEMI_THREADGROUP_THREAD>(
-        (char *)dest, (const char *)source, bytes, sig_addr, signal, sig_op, pe, 0);
+    nvshmemi_put_signal<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source,
+                                                           bytes, sig_addr, signal, sig_op, pe, 0);
 }
 
 /*__device__ nvshmem_put<bits>_signal*/
@@ -176,55 +175,52 @@ NVSHMEMI_REPT_FOR_SIZES(NVSHMEMI_SIZE_PUT_SIGNAL_IMPL)
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get8(void *dest,
                                                                        const void *source,
                                                                        size_t nelems, int pe) {
-    nvshmemi_get_threadgroup<int8_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int8_t *)dest, (const int8_t *)source, nelems, pe);
+    nvshmemi_get<int8_t, NVSHMEMI_THREADGROUP_THREAD>((int8_t *)dest, (const int8_t *)source,
+                                                      nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get16(void *dest,
                                                                         const void *source,
                                                                         size_t nelems, int pe) {
-    nvshmemi_get_threadgroup<int16_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int16_t *)dest, (const int16_t *)source, nelems, pe);
+    nvshmemi_get<int16_t, NVSHMEMI_THREADGROUP_THREAD>((int16_t *)dest, (const int16_t *)source,
+                                                       nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get32(void *dest,
                                                                         const void *source,
                                                                         size_t nelems, int pe) {
-    nvshmemi_get_threadgroup<int32_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int32_t *)dest, (const int32_t *)source, nelems, pe);
+    nvshmemi_get<int32_t, NVSHMEMI_THREADGROUP_THREAD>((int32_t *)dest, (const int32_t *)source,
+                                                       nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get64(void *dest,
                                                                         const void *source,
                                                                         size_t nelems, int pe) {
-    nvshmemi_get_threadgroup<int64_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int64_t *)dest, (const int64_t *)source, nelems, pe);
+    nvshmemi_get<int64_t, NVSHMEMI_THREADGROUP_THREAD>((int64_t *)dest, (const int64_t *)source,
+                                                       nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get128(void *dest,
                                                                          const void *source,
                                                                          size_t nelems, int pe) {
-    nvshmemi_get_threadgroup<int4, NVSHMEMI_THREADGROUP_THREAD>((int4 *)dest, (const int4 *)source,
-                                                                nelems, pe);
+    nvshmemi_get<int4, NVSHMEMI_THREADGROUP_THREAD>((int4 *)dest, (const int4 *)source, nelems, pe);
 }
 
 /*__device__ nvshmem_putmem*/
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_putmem(void *dest,
                                                                          const void *source,
                                                                          size_t bytes, int pe) {
-    nvshmemi_put_threadgroup<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source,
-                                                                bytes, pe);
+    nvshmemi_put<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source, bytes, pe);
 }
 
 /*__device__ nvshmem_getmem*/
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_getmem(void *dest,
                                                                          const void *source,
                                                                          size_t bytes, int pe) {
-    nvshmemi_get_threadgroup<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source,
-                                                                bytes, pe);
+    nvshmemi_get<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source, bytes, pe);
 }
 
 /*__device__ nvshmem_<typename>_put_nbi*/
-#define NVSHMEMI_TYPENAME_PUT_NBI_IMPL(TYPENAME, TYPE)                                             \
-    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_put_nbi(        \
-        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                                   \
-        nvshmemi_put_nbi_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe); \
+#define NVSHMEMI_TYPENAME_PUT_NBI_IMPL(TYPENAME, TYPE)                                      \
+    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_put_nbi( \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                            \
+        nvshmemi_put_nbi<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe);      \
     }
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_PUT_NBI_IMPL)
 #undef NVSHMEMI_TYPENAME_PUT_NBI_IMPL
@@ -234,17 +230,17 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_PUT_NBI_IMPL)
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_put_signal_nbi( \
         TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal,        \
         int sig_op, int pe) {                                                                      \
-        nvshmemi_put_signal_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(                        \
-            dest, source, nelems, sig_addr, signal, sig_op, pe, 1);                                \
+        nvshmemi_put_signal<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, sig_addr,     \
+                                                               signal, sig_op, pe, 1);             \
     }
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_PUT_SIGNAL_NBI_IMPL)
 #undef NVSHMEMI_TYPENAME_PUT_SIGNAL_NBI_IMPL
 
 /*__device__ nvshmem_<typename>_get_nbi*/
-#define NVSHMEMI_TYPENAME_GET_NBI_IMPL(TYPENAME, TYPE)                                             \
-    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_get_nbi(        \
-        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                                   \
-        nvshmemi_get_nbi_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe); \
+#define NVSHMEMI_TYPENAME_GET_NBI_IMPL(TYPENAME, TYPE)                                      \
+    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##TYPENAME##_get_nbi( \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe) {                            \
+        nvshmemi_get_nbi<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems, pe);      \
     }
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_GET_NBI_IMPL)
 #undef NVSHMEMI_TYPENAME_GET_NBI_IMPL
@@ -253,80 +249,80 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TYPENAME_GET_NBI_IMPL)
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put8_nbi(void *dest,
                                                                            const void *source,
                                                                            size_t nelems, int pe) {
-    nvshmemi_put_nbi_threadgroup<int8_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int8_t *)dest, (const int8_t *)source, nelems, pe);
+    nvshmemi_put_nbi<int8_t, NVSHMEMI_THREADGROUP_THREAD>((int8_t *)dest, (const int8_t *)source,
+                                                          nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put16_nbi(void *dest,
                                                                             const void *source,
                                                                             size_t nelems, int pe) {
-    nvshmemi_put_nbi_threadgroup<int16_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int16_t *)dest, (const int16_t *)source, nelems, pe);
+    nvshmemi_put_nbi<int16_t, NVSHMEMI_THREADGROUP_THREAD>((int16_t *)dest, (const int16_t *)source,
+                                                           nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put32_nbi(void *dest,
                                                                             const void *source,
                                                                             size_t nelems, int pe) {
-    nvshmemi_put_nbi_threadgroup<int32_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int32_t *)dest, (const int32_t *)source, nelems, pe);
+    nvshmemi_put_nbi<int32_t, NVSHMEMI_THREADGROUP_THREAD>((int32_t *)dest, (const int32_t *)source,
+                                                           nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put64_nbi(void *dest,
                                                                             const void *source,
                                                                             size_t nelems, int pe) {
-    nvshmemi_put_nbi_threadgroup<int64_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int64_t *)dest, (const int64_t *)source, nelems, pe);
+    nvshmemi_put_nbi<int64_t, NVSHMEMI_THREADGROUP_THREAD>((int64_t *)dest, (const int64_t *)source,
+                                                           nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_put128_nbi(void *dest,
                                                                              const void *source,
                                                                              size_t nelems,
                                                                              int pe) {
-    nvshmemi_put_nbi_threadgroup<int4, NVSHMEMI_THREADGROUP_THREAD>(
-        (int4 *)dest, (const int4 *)source, nelems, pe);
+    nvshmemi_put_nbi<int4, NVSHMEMI_THREADGROUP_THREAD>((int4 *)dest, (const int4 *)source, nelems,
+                                                        pe);
 }
 /*__device__ nvshmem_get<bits>_nbi*/
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get8_nbi(void *dest,
                                                                            const void *source,
                                                                            size_t nelems, int pe) {
-    nvshmemi_get_nbi_threadgroup<int8_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int8_t *)dest, (const int8_t *)source, nelems, pe);
+    nvshmemi_get_nbi<int8_t, NVSHMEMI_THREADGROUP_THREAD>((int8_t *)dest, (const int8_t *)source,
+                                                          nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get16_nbi(void *dest,
                                                                             const void *source,
                                                                             size_t nelems, int pe) {
-    nvshmemi_get_nbi_threadgroup<int16_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int16_t *)dest, (const int16_t *)source, nelems, pe);
+    nvshmemi_get_nbi<int16_t, NVSHMEMI_THREADGROUP_THREAD>((int16_t *)dest, (const int16_t *)source,
+                                                           nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get32_nbi(void *dest,
                                                                             const void *source,
                                                                             size_t nelems, int pe) {
-    nvshmemi_get_nbi_threadgroup<int32_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int32_t *)dest, (const int32_t *)source, nelems, pe);
+    nvshmemi_get_nbi<int32_t, NVSHMEMI_THREADGROUP_THREAD>((int32_t *)dest, (const int32_t *)source,
+                                                           nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get64_nbi(void *dest,
                                                                             const void *source,
                                                                             size_t nelems, int pe) {
-    nvshmemi_get_nbi_threadgroup<int64_t, NVSHMEMI_THREADGROUP_THREAD>(
-        (int64_t *)dest, (const int64_t *)source, nelems, pe);
+    nvshmemi_get_nbi<int64_t, NVSHMEMI_THREADGROUP_THREAD>((int64_t *)dest, (const int64_t *)source,
+                                                           nelems, pe);
 }
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_get128_nbi(void *dest,
                                                                              const void *source,
                                                                              size_t nelems,
                                                                              int pe) {
-    nvshmemi_get_nbi_threadgroup<int4, NVSHMEMI_THREADGROUP_THREAD>(
-        (int4 *)dest, (const int4 *)source, nelems, pe);
+    nvshmemi_get_nbi<int4, NVSHMEMI_THREADGROUP_THREAD>((int4 *)dest, (const int4 *)source, nelems,
+                                                        pe);
 }
 /*__device__ nvshmem_putmem_nbi*/
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_putmem_nbi(void *dest,
                                                                              const void *source,
                                                                              size_t bytes, int pe) {
-    nvshmemi_put_nbi_threadgroup<char, NVSHMEMI_THREADGROUP_THREAD>(
-        (char *)dest, (const char *)source, bytes, pe);
+    nvshmemi_put_nbi<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source, bytes,
+                                                        pe);
 }
 
 /*__device__ nvshmem_putmem_signal_nbi*/
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_putmem_signal_nbi(
     void *dest, const void *source, size_t bytes, uint64_t *sig_addr, uint64_t signal, int sig_op,
     int pe) {
-    nvshmemi_put_signal_threadgroup<char, NVSHMEMI_THREADGROUP_THREAD>(
-        (char *)dest, (const char *)source, bytes, sig_addr, signal, sig_op, pe, 1);
+    nvshmemi_put_signal<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source,
+                                                           bytes, sig_addr, signal, sig_op, pe, 1);
 }
 
 /*__device__ nvshmem_put<bits>_signal*/
@@ -342,8 +338,8 @@ NVSHMEMI_REPT_FOR_SIZES(NVSHMEMI_SIZE_PUT_SIGNAL_NBI_IMPL)
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_getmem_nbi(void *dest,
                                                                              const void *source,
                                                                              size_t bytes, int pe) {
-    nvshmemi_get_nbi_threadgroup<char, NVSHMEMI_THREADGROUP_THREAD>(
-        (char *)dest, (const char *)source, bytes, pe);
+    nvshmemi_get_nbi<char, NVSHMEMI_THREADGROUP_THREAD>((char *)dest, (const char *)source, bytes,
+                                                        pe);
 }
 
 #define NVSHMEM_TYPE_IPUT(NAME, TYPE)                                                             \
@@ -646,7 +642,8 @@ NVSHMEMI_REPT_FOR_WAIT_TYPES(NVSHMEM_WAIT_UNTIL_ANY)
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
-        if (wait_set_is_empty == false && num_satisfied == 0) { /* do wait_any*/                   \
+        if (wait_set_is_empty == false &&                                                          \
+            num_satisfied == 0) { /* do NVSHMEMT_IB_COMMON_WAIT_ANY*/                              \
             indices[num_satisfied++] =                                                             \
                 nvshmem_##Name##_wait_until_any(ivars, nelems, status, cmp, cmp_value);            \
         }                                                                                          \
@@ -719,7 +716,8 @@ NVSHMEMI_REPT_FOR_WAIT_TYPES(NVSHMEM_WAIT_UNTIL_ANY_VECTOR)
             }                                                                                  \
         }                                                                                      \
                                                                                                \
-        if (wait_set_is_empty == false && num_satisfied == 0) { /* do wait_any*/               \
+        if (wait_set_is_empty == false &&                                                      \
+            num_satisfied == 0) { /* do NVSHMEMT_IB_COMMON_WAIT_ANY*/                          \
             indices[num_satisfied++] =                                                         \
                 nvshmem_##Name##_wait_until_any_vector(ivars, nelems, status, cmp, cmp_value); \
         }                                                                                      \
@@ -737,7 +735,9 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_quiet() {
     nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
 }
 
-NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_fence() { nvshmemi_fence(); }
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_fence() {
+    nvshmemi_fence<NVSHMEMI_THREADGROUP_THREAD>();
+}
 
 #define NVSHMEM_TYPE_ATOMIC_FETCH_ADD(Name, Type)                                                \
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE Type nvshmem_##Name##_atomic_fetch_add( \

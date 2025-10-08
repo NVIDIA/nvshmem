@@ -19,6 +19,7 @@
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host/nvshmem_common.cuh"
 #include "device_host_transport/nvshmem_common_transport.h"
+#include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
@@ -125,31 +126,6 @@ __device__ int nvshmemi_team_translate_pe(nvshmemi_team_t *src_team, int src_pe,
                                           nvshmemi_team_t *dest_team);
 __device__ long *nvshmemi_team_get_psync(nvshmemi_team_t *team, nvshmemi_team_op_t op);
 __device__ long *nvshmemi_team_get_sync_counter(nvshmemi_team_t *team);
-
-template <threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet() {
-    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-    if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
-        nvshmemi_transfer_quiet<SCOPE>(true);
-    } else {
-        if (!myIdx)
-            __threadfence_system(); /* Use __threadfence_system instead of __threadfence
-                                     for data visibility in case of intra-node GPU transfers */
-        nvshmemi_threadgroup_sync<SCOPE>();
-    }
-}
-
-template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
-template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_WARP>();
-template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>();
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence() {
-    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST) {
-        nvshmemi_transfer_fence<NVSHMEMI_THREADGROUP_THREAD>();
-    }
-    __threadfence_system(); /* Use __threadfence_system instead of __threadfence
-                               for data visibility in case of intra-node GPU transfers */
-}
 
 template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_test(volatile T *ivar, int cmp, T cmp_value) {
@@ -372,21 +348,54 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
     for (size_t i = myIdx; i < len; i += groupSize) dst_c[i] = src_c[i];
 }
 
-template <typename T>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(T *dest, const T value, int pe) {
-    const void *peer_base_addr =
-        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
-        T *dest_actual = (T *)((char *)(peer_base_addr) +
-                               ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
-        *dest_actual = value;
+/* qpair specific APIs */
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_PE_ALL,
+                                                             nvshmemx_qp_handle_t *qp_handle = NULL,
+                                                             int num_qps = NVSHMEMX_QP_ALL) {
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
+        nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
     } else {
-        nvshmemi_transfer_rma_p<T>((void *)dest, value, pe);
+        if (!myIdx)
+            __threadfence_system(); /* Use __threadfence_system instead of __threadfence
+                                     for data visibility in case of intra-node GPU transfers */
+        nvshmemi_threadgroup_sync<SCOPE>();
     }
 }
 
+template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>(
+    int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_WARP>(int pe,
+                                                                   nvshmemx_qp_handle_t *qp_handle,
+                                                                   int num_qps);
+template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>(int pe,
+                                                                    nvshmemx_qp_handle_t *qp_handle,
+                                                                    int num_qps);
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_PE_ALL,
+                                                             nvshmemx_qp_handle_t *qp_handle = NULL,
+                                                             int num_qps = NVSHMEMX_QP_ALL) {
+    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST) {
+        nvshmemi_transfer_fence<NVSHMEMI_THREADGROUP_THREAD>(pe, qp_handle, num_qps);
+    }
+    __threadfence_system(); /* Use __threadfence_system instead of __threadfence
+                               for data visibility in case of intra-node GPU transfers */
+}
+
+template __device__ void nvshmemi_fence<NVSHMEMI_THREADGROUP_THREAD>(
+    int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+template __device__ void nvshmemi_fence<NVSHMEMI_THREADGROUP_WARP>(int pe,
+                                                                   nvshmemx_qp_handle_t *qp_handle,
+                                                                   int num_qps);
+template __device__ void nvshmemi_fence<NVSHMEMI_THREADGROUP_BLOCK>(int pe,
+                                                                    nvshmemx_qp_handle_t *qp_handle,
+                                                                    int num_qps);
+
 template <typename T>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_g(const T *source, int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
+nvshmemi_g(const T *source, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (peer_base_addr) {
@@ -394,13 +403,92 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_g(const T *source, int pe) {
                                  ((char *)source - (char *)(nvshmemi_device_state_d.heap_base)));
         return *source_actual;
     } else {
-        return nvshmemi_transfer_rma_g<T>((void *)source, pe);
+        return nvshmemi_transfer_rma_g<T>((void *)source, pe, qp_index);
     }
 }
 
 template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_threadgroup(T *dest, const T *source,
-                                                                       size_t nelems, int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
+    T *dest, const T *source, size_t nelems, int pe,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemi_threadgroup_sync<SCOPE>();
+    void *peer_base_addr =
+        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+    if (peer_base_addr) {
+        char *source_actual = (char *)(peer_base_addr) +
+                              ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
+        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
+                                           nelems * sizeof(T));
+    } else {
+        nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
+                                                          nelems * sizeof(T), pe, qp_index);
+    }
+    nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
+    T *dest, const T *source, size_t nelems, int pe,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemi_threadgroup_sync<SCOPE>();
+    void *peer_base_addr =
+        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+    if (peer_base_addr) {
+        char *source_actual = (char *)(peer_base_addr) +
+                              ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
+        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
+                                           nelems * sizeof(T));
+    } else {
+        nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
+                                                      nelems * sizeof(T), pe, qp_index);
+    }
+    nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template <typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
+    T *dest, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    const void *peer_base_addr =
+        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+    if (peer_base_addr) {
+        T *dest_actual = (T *)((char *)(peer_base_addr) +
+                               ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
+        *dest_actual = value;
+    } else {
+        nvshmemi_transfer_rma_p<T>((void *)dest, value, pe, qp_index);
+    }
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
+    T *dest, const T *source, size_t nelems, int pe,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    void *peer_base_addr =
+        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+    if (peer_base_addr) {
+        char *dest_actual =
+            (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
+        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source,
+                                           nelems * sizeof(T));
+    } else {
+        nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
+                                                          nelems * sizeof(T), pe, qp_index);
+    }
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
+    T *dest, const T *source, size_t nelems, int pe,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemi_threadgroup_sync<SCOPE>();
+    nvshmemii_put_nbi<T, SCOPE>(dest, source, nelems, pe, qp_index);
+    nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
+    T *dest, const T *source, size_t nelems, int pe,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
@@ -411,14 +499,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_threadgroup(T *dest, 
                                            nelems * sizeof(T));
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
-                                                      nelems * sizeof(T), pe);
+                                                      nelems * sizeof(T), pe, qp_index);
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(uint64_t *sig_addr,
-                                                                 uint64_t signal, int sig_op,
-                                                                 int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && peer_base_addr != NULL) {
@@ -434,14 +522,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(uint64_t *sig_a
         atomicAdd_system((unsigned long long *)dest_actual, signal);
     } else {
         nvshmemi_transfer_amo_nonfetch<uint64_t>((void *)sig_addr, signal, pe,
-                                                 (nvshmemi_amo_t)sig_op);
+                                                 (nvshmemi_amo_t)sig_op, qp_index);
     }
 }
 
 template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal_threadgroup(
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
-    int pe, bool is_nbi) {
+    int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
@@ -453,88 +541,30 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal_threadgroup(
         nvshmemi_threadgroup_sync<SCOPE>();
         if (!myIdx) {
             __threadfence_system();
-            nvshmemi_signal_op(sig_addr, signal, sig_op, pe);
+            nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
     } else {
         nvshmemi_transfer_put_signal<SCOPE>((void *)dest, (void *)source, nelems * sizeof(T),
                                             (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe,
-                                            is_nbi);
+                                            is_nbi, qp_index);
     }
 }
 
 template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_signal_threadgroup(
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_signal(
     T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
-    int pe, bool is_nbi) {
+    int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_signal_threadgroup<T, SCOPE>(dest, source, nelems, sig_addr, signal, sig_op, pe,
-                                               is_nbi);
-    nvshmemi_threadgroup_sync<SCOPE>();
-}
-
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_threadgroup(T *dest, const T *source,
-                                                                       size_t nelems, int pe) {
-    nvshmemi_threadgroup_sync<SCOPE>();
-    void *peer_base_addr =
-        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
-        char *source_actual = (char *)(peer_base_addr) +
-                              ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
-                                           nelems * sizeof(T));
-    } else {
-        nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
-                                                      nelems * sizeof(T), pe);
-    }
-    nvshmemi_threadgroup_sync<SCOPE>();
-}
-
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi_threadgroup(T *dest,
-                                                                            const T *source,
-                                                                            size_t nelems, int pe) {
-    void *peer_base_addr =
-        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
-        char *dest_actual =
-            (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source,
-                                           nelems * sizeof(T));
-    } else {
-        nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
-                                                          nelems * sizeof(T), pe);
-    }
-}
-
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi_threadgroup(T *dest, const T *source,
-                                                                           size_t nelems, int pe) {
-    nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_nbi_threadgroup<T, SCOPE>(dest, source, nelems, pe);
-    nvshmemi_threadgroup_sync<SCOPE>();
-}
-
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi_threadgroup(T *dest, const T *source,
-                                                                           size_t nelems, int pe) {
-    nvshmemi_threadgroup_sync<SCOPE>();
-    void *peer_base_addr =
-        (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
-        char *source_actual = (char *)(peer_base_addr) +
-                              ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
-                                           nelems * sizeof(T));
-    } else {
-        nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
-                                                          nelems * sizeof(T), pe);
-    }
+    nvshmemii_put_signal<T, SCOPE>(dest, source, nelems, sig_addr, signal, sig_op, pe, is_nbi,
+                                   qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_mc_ptr(nvshmemi_team_t *team,
                                                                const void *ptr) {
+    if (team == NULL || team->nvls_rsc_base_ptr == NULL) {
+        return NULL;
+    }
     ptrdiff_t offset = (char *)ptr - (char *)nvshmemi_device_state_d.heap_base;
     if (ptr >= nvshmemi_device_state_d.heap_base && offset < nvshmemi_device_state_d.heap_size &&
         team->nvls_rsc_base_ptr != NULL) {
@@ -546,15 +576,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_mc_ptr(nvshmemi_team_t *
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_ptr(const void *ptr, int pe) {
-    ptrdiff_t offset = (char *)ptr - (char *)nvshmemi_device_state_d.heap_base;
+    if (pe >= 0 && pe < nvshmemi_device_state_d.npes && ptr >= nvshmemi_device_state_d.heap_base) {
+        ptrdiff_t offset = (char *)ptr - (char *)nvshmemi_device_state_d.heap_base;
 
-    if (ptr >= nvshmemi_device_state_d.heap_base && offset < nvshmemi_device_state_d.heap_size) {
-        void *peer_addr = (void *)__ldg(
-            (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-        if (peer_addr != NULL) peer_addr = (void *)((char *)peer_addr + offset);
-        return peer_addr;
-    } else
-        return NULL;
+        if (offset < nvshmemi_device_state_d.heap_size) {
+            void *peer_addr = (void *)__ldg(
+                (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+            if (peer_addr != NULL) peer_addr = (void *)((char *)peer_addr + offset);
+            return peer_addr;
+        }
+    }
+    return NULL;
 }
 
 template <typename T, int UNROLL>

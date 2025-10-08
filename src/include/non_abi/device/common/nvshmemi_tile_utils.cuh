@@ -12,6 +12,20 @@
 #include "cuda/std/utility"
 #include "host/nvshmem_macros.h"
 #include "device_host/nvshmem_tensor.h"
+#ifdef CUTLASS_ENABLED
+#include "cutlass/half.h"
+#include "cutlass/bfloat16.h"
+#endif
+
+#define ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim) \
+    do { \
+        if constexpr (sizeof(T) < 4) { \
+            assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) && \
+                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) && \
+                   "Currently for 16B datatypes, we only support tensors which are 32b aligned " \
+                   "along their continuous dimension"); \
+        } \
+    } while(0)
 
 using tuple5Int_t = cuda::std::tuple<int, int, int, int, int>;
 
@@ -64,6 +78,27 @@ __host__ __device__ __forceinline__ constexpr int get_constant(T val) {
     return get_constant_value<T>::value();
 }
 /**** End of Functions to get constant values at compile time ****/
+
+/**** Check if a type is defined, for checking CUTLASS specific datatypes ***/
+template <typename T>
+__host__ __device__ __forceinline__ constexpr bool is_cutlass_half() {
+#ifdef CUTLASS_ENABLED
+    return cuda::std::is_same<T, cutlass::half_t>::value;
+#else
+    return false;
+#endif
+}
+
+template <typename T>
+__host__ __device__ __forceinline__ constexpr bool is_cutlass_bfloat() {
+#ifdef CUTLASS_ENABLED
+    return cuda::std::is_same<T, cutlass::bfloat16_t>::value;
+#else
+    return false;
+#endif
+}
+
+/**** End ***/
 
 /***** Helper functions for tuples ******/
 // Traits to get tuple size at compile time
@@ -123,6 +158,16 @@ NVSHMEMI_HOSTDEVICE_PREFIX constexpr auto get_shape_element(
             I, T, Layout, is_index_in_bounds<I, decltype(tensor.shape())>::value>::get(tensor)) {
     return tensor_shape_element_impl<
         I, T, Layout, is_index_in_bounds<I, decltype(tensor.shape())>::value>::get(tensor);
+}
+
+// Up to 5D tensors
+template <typename T, class Layout>
+NVSHMEMI_HOSTDEVICE_PREFIX constexpr auto get_tensor_size(
+    const nvshmemx::Tensor<T, Layout>& tensor)
+    -> int {
+    return get_shape_element<0>(tensor) * get_shape_element<1>(tensor) *
+           get_shape_element<2>(tensor) * get_shape_element<3>(tensor) *
+           get_shape_element<4>(tensor);
 }
 
 /*** Accessor functions for stride ***/

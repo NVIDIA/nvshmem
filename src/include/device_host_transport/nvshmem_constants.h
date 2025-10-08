@@ -15,8 +15,10 @@
 
 #if !defined __CUDACC_RTC__
 #include <limits.h>
+#include <stdint.h>
 #else
 #include <cuda/std/climits>
+#include <cuda/std/cstdint>
 #endif
 #include "non_abi/nvshmem_version.h"
 
@@ -53,25 +55,26 @@ typedef enum nvshmemi_cmp_type {
     NVSHMEM_CMP_SENTINEL = INT_MAX,
 } nvshmemx_cmp_type_t;
 
-enum nvshmemi_thread_support {
+typedef enum nvshmemi_thread_support {
     NVSHMEM_THREAD_SINGLE = 0,
     NVSHMEM_THREAD_FUNNELED,
     NVSHMEM_THREAD_SERIALIZED,
     NVSHMEM_THREAD_MULTIPLE,
     NVSHMEM_THREAD_TYPE_SENTINEL = INT_MAX,
-};
+} nvshmemx_thread_support_t;
 
-enum {
+typedef enum {
     PROXY_GLOBAL_EXIT_NOT_REQUESTED = 0,
     PROXY_GLOBAL_EXIT_INIT,
     PROXY_GLOBAL_EXIT_REQUESTED,
     PROXY_GLOBAL_EXIT_FINISHED,
     PROXY_GLOBAL_EXIT_MAX_STATE = INT_MAX
-};
+} nvshmemx_proxy_status_t;
 
 #define PROXY_DMA_REQ_BYTES 32
 #define PROXY_AMO_REQ_BYTES 40
 #define PROXY_INLINE_REQ_BYTES 24
+#define PROXY_PUT_WITH_SIG_REQ_BYTES 48
 
 typedef enum {
     NVSHMEM_STATUS_NOT_INITIALIZED = 0,
@@ -81,5 +84,20 @@ typedef enum {
     NVSHMEM_STATUS_FULL_MPG,
     NVSHMEM_STATUS_INVALID = INT_MAX,
 } nvshmemx_init_status_t;
+
+typedef enum {
+    NVSHMEMX_QP_HOST = 0,
+    NVSHMEMX_QP_DEFAULT = 1,
+    NVSHMEMX_QP_ANY = INT_MAX,
+    NVSHMEMX_QP_ALL = INT_MAX,
+} nvshmemx_qp_handle_index_t;
+
+/* in the proxy code, pe is represented as a 16-bit integer, so we use the 16th bit to represent any
+ * and all */
+typedef enum {
+    NVSHMEM_PE_INVALID = -1,
+    NVSHMEMX_PE_ANY = (1 << 15),
+    NVSHMEMX_PE_ALL = (1 << 15),
+} nvshmem_pe_index_t;
 
 #endif

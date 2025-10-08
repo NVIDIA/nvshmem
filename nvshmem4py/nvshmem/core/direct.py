@@ -15,12 +15,17 @@ from their bindings
 
 import nvshmem.bindings as bindings
 
-__all__ = ["Teams", "my_pe", "team_my_pe", "team_n_pes", "n_pes", "team_n_pes", "ComparisonType", "SignalOp", "InitStatus"]
+__all__ = ["ComparisonType", "SignalOp", "InitStatus", "my_pe", "team_my_pe", "team_n_pes", "n_pes", "init_status"]
 
 """
-IntEnum which matches 1:1 with ``nvshmem_team_id_t``
+IntEnum which matches 1:1 with ``nvshmemx_cmp_type_t``
 """
-Teams = bindings.Team_id
+ComparisonType = bindings.Cmp_type
+
+"""
+IntEnum which matches 1:1 with the ``nvshmem_signal_op_t``
+"""
+SignalOp = bindings.Signal_op
 
 """
 IntEnum which matches 1:1 with ``nvshmemx_cmp_type_t``

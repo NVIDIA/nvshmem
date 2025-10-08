@@ -179,11 +179,15 @@ NVSHMEMI_ENV_DEF(
     G_BUF_SIZE, int, 1024 * 1024 * 8, NVSHMEMI_ENV_CAT_OTHER,
     "Size of the g_buf to perform shmem_g operations in parallel. Must be a multiple of 8B.")
 
-NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 32l, NVSHMEMI_ENV_CAT_OTHER,
+NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 128l, NVSHMEMI_ENV_CAT_OTHER,
                  "Maximum number of simultaneous teams allowed")
 
-NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)128 * (1 << 30)),
+NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)256 * (1 << 30)),
                  NVSHMEMI_ENV_CAT_OTHER, "Maximum memory per GPU")
+
+NVSHMEMI_ENV_DEF(MAX_PEER_STREAMS, int, 16, NVSHMEMI_ENV_CAT_OTHER,
+                 "Maximum number of cuda streams per node")
+
 #if defined(NVSHMEM_PPC64LE)
 #define NVSHMEMI_ENV_DISABLE_CUDA_VMM_DEFAULT true
 #else
@@ -301,6 +305,12 @@ NVSHMEMI_ENV_DEF(REDMAXLOC_ALGO, int, 1, NVSHMEMI_ENV_CAT_COLLECTIVES,
 NVSHMEMI_ENV_DEF(REDUCESCATTER_ALGO, int, 0, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Reduce Scatter algorithm to be used. \n"
                  "  * 0 - use default algorithm selection strategy\n")
+
+NVSHMEMI_ENV_DEF(DISABLE_CE_COLLECTIVES, bool, true, NVSHMEMI_ENV_CAT_COLLECTIVES,
+                 "Disable CopyEngine (CE) based on_stream collectives implementation")
+NVSHMEMI_ENV_DEF(DISABLE_SELF_WRITE_CE_COLL, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
+                 "Disable self-writes in CopyEngine (CE) based on_stream collectives "
+                 "implementation. Used for testing purposes only.")
 
 /** Transport **/
 

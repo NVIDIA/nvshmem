@@ -22,6 +22,7 @@
 #include <list>
 
 #include "host/nvshmemx_api.h"
+#include "internal/host/nvmlwrap.h"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmem_nvtx.hpp"
@@ -490,14 +491,50 @@ static void nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
     return;
 }
 
-int nvshmemi_get_cucontext(nvshmemi_state_t *state) {
+int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL) {
+    int cuda_device_id = INIT_ARGS_SCALAR_INVALID;
     CUdevice cudevice;
     int leastPriority, greatestPriority;
     int status = NVSHMEMX_SUCCESS;
 
     CUCHECK(nvshmemi_cuda_syms, cuInit(0));
 
+    if (attr != NULL) {
+        if (attr->args.version == NVSHMEM_INIT_ARGS_V2_IDENTIFIER) {
+            cuda_device_id = attr->args.cuda_device_id;
+        }
+    }
+
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&cudevice));
+
+    if (cuda_device_id != INIT_ARGS_SCALAR_INVALID) {
+        if (nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
+            WARN(
+                "Two-stage initialization requested, but cuda_device_id is set. Using selected GPU "
+                "and skipping two-stage initialization.");
+            nvshmemi_options.BOOTSTRAP_TWO_STAGE = false;
+        }
+        if (!status) {
+            INFO(NVSHMEM_INIT,
+                 "cuda_device_id is set, but device was already selected in the application. Using "
+                 "new device %d.",
+                 cuda_device_id);
+        } else {
+            INFO(NVSHMEM_INIT, "cuda_device_id is set. Using user selected GPU at index %d",
+                 cuda_device_id);
+        }
+        status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&cudevice, cuda_device_id));
+        if (status != CUDA_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT(
+                "cuda_device_id is set, but device at index %d is not valid. Failing "
+                "initialization.",
+                cuda_device_id);
+            status = NVSHMEMX_ERROR_GPU_NOT_SELECTED;
+
+            goto out;
+        }
+    }
+
     if (status || nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
         if (nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
             TRACE(NVSHMEM_INIT, "Two-stage initialization requested");
@@ -574,7 +611,7 @@ int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
     int status = 0;
     free(state->selected_transport_for_rma);
     free(state->selected_transport_for_amo);
-    for (int i = 0; i < MAX_PEER_STREAMS; i++) {
+    for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->custreams[i]), status, out);
         CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cuevents[i]), status, out);
     }
@@ -627,14 +664,53 @@ static int nvshmemi_setup_nvshmem_handles(nvshmemi_state_t *state) {
     return status;
 }
 
+static bool has_nvswitch() {
+    void *nvml_handle = nullptr;
+    struct nvml_function_table nvml_ftable;
+    bool has_nvswitch = false;
+    nvmlFieldValue_t fv;
+    int dev;
+    CUdevice cu_dev;
+    CUDA_RUNTIME_CHECK(cudaGetDevice(&dev));
+    CUCHECK(nvshmemi_cuda_syms, cuDeviceGet(&cu_dev, dev));
+
+    char pciBusId[] = "00000000:00:00.0";
+    CUDA_RUNTIME_CHECK(cudaDeviceGetPCIBusId(pciBusId, sizeof(pciBusId), dev));
+    nvmlDevice_t nvml_dev;
+
+    /* start NVML Library */
+    nvshmemi_nvml_ftable_init(&nvml_ftable, &nvml_handle);
+
+    NVML_CHECK(nvml_ftable.nvmlInit());
+
+    NVML_CHECK(nvml_ftable.nvmlDeviceGetHandleByPciBusId(pciBusId, &nvml_dev));
+
+    fv.fieldId = NVML_FI_DEV_NVSWITCH_CONNECTED_LINK_COUNT;
+    NVML_CHECK(nvml_ftable.nvmlDeviceGetFieldValues(nvml_dev, 1, &fv));
+    has_nvswitch = fv.value.uiVal > 0;
+
+    NVML_CHECK(nvml_ftable.nvmlShutdown());
+    nvshmemi_nvml_ftable_fini(&nvml_ftable, &nvml_handle);
+
+    return has_nvswitch;
+}
+
 static int nvshmemi_setup_cuda_handles(nvshmemi_state_t *state) {
     int status = 0;
-    state->custreams = (cudaStream_t *)malloc(MAX_PEER_STREAMS * sizeof(cudaStream_t));
-    state->cuevents = (cudaEvent_t *)malloc(MAX_PEER_STREAMS * sizeof(cudaEvent_t));
-    state->active_internal_streams = (bool *)calloc(MAX_PEER_STREAMS, sizeof(bool));
+    if ((has_nvswitch() && !nvshmemi_options.MAX_PEER_STREAMS_provided) ||
+        nvshmemi_options.MAX_PEER_STREAMS <= 0) {
+        nvshmemi_options.MAX_PEER_STREAMS = 1;
+        INFO(NVSHMEM_INIT, "NVSHMEM has set MAX_PEER_STREAMS to 1");
+    }
+    state->custreams =
+        (cudaStream_t *)malloc(nvshmemi_options.MAX_PEER_STREAMS * sizeof(cudaStream_t));
+    state->cuevents =
+        (cudaEvent_t *)malloc(nvshmemi_options.MAX_PEER_STREAMS * sizeof(cudaEvent_t));
+    state->active_internal_streams =
+        (bool *)calloc(nvshmemi_options.MAX_PEER_STREAMS, sizeof(bool));
     int leastPriority, greatestPriority;
     CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-    for (int i = 0; i < MAX_PEER_STREAMS; i++) {
+    for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamCreateWithPriority(
                                     &state->custreams[i], cudaStreamNonBlocking, greatestPriority),
                                 status, out);
@@ -915,7 +991,7 @@ static void nvshmemi_query_cuda_attributes() {
     nvshmemi_is_vmm_supported = gdrdma_vmm && vmm_support;
 }
 
-int nvshmemi_common_init(nvshmemi_state_t *state) {
+int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     int status = 0;
     void *dev_state_ptr = NULL;
     void *transport_dev_state_ptr = NULL;
@@ -971,7 +1047,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state) {
                  "Rail optimization not supported for symmetric heap in device memory");
         }
     }
-    status = nvshmemi_get_cucontext(state);
+    status = nvshmemi_get_cucontext(state, attr);
     NZ_DEBUG_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem get cucontext failed \n");
 
     nvshmemi_query_cuda_attributes();
@@ -1030,8 +1106,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmem reserve static heaps failed \n");
 
+    /* nvshmemi_transport_init() will only fail if no transports including P2P are available */
     status = nvshmemi_transport_init(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem detect topo failed \n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem transport init failed \n");
 
     status = nvshmemi_build_transport_map(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "building transport map failed \n");
@@ -1042,9 +1119,13 @@ int nvshmemi_common_init(nvshmemi_state_t *state) {
     status = nvshmemi_setup_nvshmem_handles(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem handles setup failed \n");
 
+    /* If we fail when setting up connections, we need to rebuild the transport map */
     status = nvshmemi_setup_connections(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem setup connections failed \n");
+    if (status != NVSHMEMX_SUCCESS) {
+        status = nvshmemi_build_transport_map(state);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "building transport map failed \n");
+    }
 
     status = state->heap_obj->setup_symmetric_heap();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1100,9 +1181,9 @@ out:
     return status;
 }
 
-int nvshmemi_try_common_init(nvshmemi_state_t *state) {
+int nvshmemi_try_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     int status = 0;
-    status = nvshmemi_common_init(state);
+    status = nvshmemi_common_init(state, attr);
     if (status) {
         INFO(NVSHMEM_INIT, "nvshmemi_common_init failed, continuing");
         status = 0;
@@ -1201,7 +1282,7 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
             nvshmemi_init_nvshmemi_state(nvshmemi_state);
         }
 
-        status = nvshmemi_try_common_init(nvshmemi_state);
+        status = nvshmemi_try_common_init(nvshmemi_state, attr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "nvshmem common init failed \n");
     } else {
@@ -1830,6 +1911,52 @@ int nvshmemx_culibrary_finalize(CUlibrary library) {
     status = unregister_state_ptr((void *)dptr, (void *)transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to unregister cumodule/culibrary state pointer. failed\n");
+out:
+    return status;
+}
+
+int nvshmemx_qp_create(int num_qps, nvshmemx_qp_handle_t **out_qp_array) {
+    int status = 0;
+    nvshmemx_qp_handle_t *out_qp_array_local = NULL;
+    nvshmem_transport_inline_lib_code_type_t transport_type = NVSHMEM_TRANSPORT_LIB_CODE_NONE;
+
+#ifdef NVSHMEM_IBGDA_SUPPORT
+    nvshmemi_device_host_state_t *device_state;
+    nvshmemi_get_device_state((void **)&device_state);
+    if (device_state->ibgda_is_initialized) {
+        transport_type = NVSHMEM_TRANSPORT_LIB_CODE_IBGDA;
+    }
+#endif
+
+    *out_qp_array = (nvshmemx_qp_handle_t *)calloc(num_qps, sizeof(nvshmemx_qp_handle_t));
+    NVSHMEMI_NULL_ERROR_JMP(*out_qp_array, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to create qps. failed\n");
+    out_qp_array_local = *out_qp_array;
+    for (int j = 0; j < num_qps; j++) {
+        out_qp_array_local[j] = NVSHMEMX_QP_DEFAULT;
+    }
+
+    for (int i = 0; i < nvshmemi_state->num_initialized_transports; i++) {
+        nvshmem_transport_t transport = (nvshmem_transport_t)nvshmemi_state->transports[i];
+        if (transport->type != transport_type) {
+            continue;
+        }
+        if (transport->host_ops.connect_endpoints) {
+            status =
+                transport->host_ops.connect_endpoints(transport, 0, 0, out_qp_array_local, num_qps);
+            NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "Unable to create qps. failed\n");
+            break;
+        }
+    }
+
+    if (out_qp_array_local[0] == NVSHMEMX_QP_DEFAULT) {
+        WARN("remote transport does not support multiple qps. Using default qp.\n");
+    }
+
+    nvshmemi_update_device_state();
+    status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "barrier failed \n");
 out:
     return status;
 }

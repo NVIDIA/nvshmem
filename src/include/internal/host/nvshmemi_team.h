@@ -33,7 +33,7 @@ int nvshmemi_team_create(nvshmem_team_t *team, nvshmem_team_config_t *config, lo
 
 int nvshmemi_team_split_strided(nvshmemi_team_t *parent_team, int PE_start, int PE_stride,
                                 int PE_size, const nvshmem_team_config_t *config, long config_mask,
-                                nvshmem_team_t *new_team);
+                                nvshmem_team_t *new_team, bool is_dupl_team=false);
 
 int nvshmemi_team_split_2d(nvshmemi_team_t *parent_team, int xrange,
                            const nvshmem_team_config_t *xaxis_config, long xaxis_mask,
@@ -59,5 +59,7 @@ int nvshmemi_team_translate_pe(nvshmemi_team_t *src_team, int src_pe, nvshmemi_t
 int nvshmemi_team_translate_pe_to_team_world_wrap(nvshmemi_team_t *src_team, int src_pe);
 
 int nvshmemi_team_translate_pe_from_team_world(nvshmemi_team_t *dest_team, int src_pe);
+
+void *nvshmemi_ptr(const void *addr, int pe);
 
 #endif

@@ -173,12 +173,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_allpush_ll
             next_pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
             if (NODE_SAFE) {
                 if (nvshmemi_ptr(pWrk, next_pe) == NULL) {
-                    nvshmemi_put_nbi_threadgroup<T, NVSHMEMI_THREADGROUP_THREAD>(
+                    nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(
                         pWrk + pack_offset, pWrk + pack_offset, psync_remote_write_elements,
                         next_pe);
                 }
             } else {
-                nvshmemi_put_nbi_threadgroup<T, NVSHMEMI_THREADGROUP_THREAD>(
+                nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(
                     pWrk + pack_offset, pWrk + pack_offset, psync_remote_write_elements, next_pe);
             }
         }
@@ -323,7 +323,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgr
     // nvshmemi_threadgroup_sync<SCOPE>();
     for (int ii = teami->my_pe; ii < teami->size + teami->my_pe; ii++) {
         next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
-        nvshmemi_put_nbi_threadgroup<T, SCOPE>(dest + dest_offset, source, nelems, next_rank);
+        nvshmemi_put_nbi<T, SCOPE>(dest + dest_offset, source, nelems, next_rank);
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
 }
@@ -506,6 +506,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     }
 }
 
+#if defined(__cplusplus) && __cplusplus >= 201703L
 // ************** Tile allgather **************/
 
 template <typename elemType, threadgroup_t SCOPE, typename tuple_t, int major_dim, int minor_dim>
@@ -1008,6 +1009,7 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t t
         }
     }
 }
+#endif  //__cplusplus >= 201703L
 
 // Tile allgather entrypoint
 // Call underlying function based on scope and algo
@@ -1018,7 +1020,7 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
                                               tuple_t boundary, uint64_t flag) {
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
-#endif
+#else
     using T = typename src_tensor_t::value_type;
 
     static_assert(
@@ -1042,8 +1044,8 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
             nvshmem_team_n_pes(team)) &&
            (get_shape_element<0>(dst_tensor) * get_shape_element<1>(dst_tensor)));
 
-    // TODO add other data types
-    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value)),
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
     // check if both src and dst have same continuous dimension
@@ -1075,6 +1077,7 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
         // Extend as other algorithms are added
         return 0;
     }
+#endif  //__cplusplus >= 201703L
 }
 #endif /* __CUDA_ARCH__ */
 #endif /* FCOLLECT_DEVICE_CUH */

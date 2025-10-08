@@ -22,7 +22,7 @@ from typing import Tuple, Union
 from cuda.core.experimental._memory import Buffer
 from cuda.core.experimental import Device
 
-__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array"]
+__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array", "register_external_array", "unregister_external_array"]
 
 logger = logging.getLogger("nvshmem")
 
@@ -62,7 +62,7 @@ def array_get_buffer(array: ndarray) -> Tuple[Buffer, int, str]:
     return buf, get_size(array.shape, array.dtype), str(array.dtype)
 
 
-def array(shape: Tuple[int], dtype: str="float32") -> ndarray:
+def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C", except_on_del=True) -> ndarray:
     """
     Create a CuPy array view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -70,8 +70,12 @@ def array(shape: Tuple[int], dtype: str="float32") -> ndarray:
     and returns a reshaped and retyped view of that memory.
 
     Args:
-       -  shape (tuple or list of int): Shape of the desired array.
-       -dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
+       - shape (tuple or list of int): Shape of the desired array.
+       - dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
+       - release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
+       - morder (``str``, optional): The memory format to use. ``"C"`` for C-style, and ``"F"`` for "Fortran-style
 
     Any future calls to ``.view()`` on this object should set copy=False, to avoid copying the object off of the sheap
 
@@ -85,13 +89,16 @@ def array(shape: Tuple[int], dtype: str="float32") -> ndarray:
         logger.error("Can not create CuPy array: CuPy not installed.")
         raise ModuleNotFoundError
 
-    buf = nvshmem.core.buffer(get_size(shape, dtype))
+    if morder not in ("C", "F"):
+        raise NvshmemInvalid("Requested array with invalid memory order")
+
+    buf = nvshmem.core.buffer(get_size(shape, dtype), release=release, except_on_del=except_on_del)
     # Important! Disable copy to force allocation to stay on sheap
     cupy_array = cupy.from_dlpack(buf, copy=False)
-    view = cupy_array.view(dtype).reshape(shape)
+    view = cupy_array.view(dtype).reshape(shape, order=morder)
     return view
 
-def bytearray(shape: Tuple[int], dtype: str="float32", device_id: int=None) -> ndarray:
+def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id: int=None, morder="C", except_on_del=True) -> ndarray:
     """
     Create a raw CuPy byte array from NVSHMEM-allocated memory.
 
@@ -106,6 +113,10 @@ def bytearray(shape: Tuple[int], dtype: str="float32", device_id: int=None) -> n
     Args:
         - shape (tuple or list of int): Shape of the desired array.
         - dtype (``str``, ``np.dtype``, or ``cupy.dtype``, optional): Data type of the array. Defaults to ``"float32"``.
+        - release (bool, optional): Do not track this buffer internally to NVSHMEM
+                If True, it is the user's responsibility to hold references to the buffer until free() is called
+                otherwise, deadlocks may occur.
+        - morder (``str``, optional): The memory format to use. ``"C"`` for C-style, and ``"F"`` for "Fortran-style
 
     Returns:
         ``cupy.ndarray``: A CuPy array backed by NVSHMEM-allocated memory.
@@ -115,9 +126,7 @@ def bytearray(shape: Tuple[int], dtype: str="float32", device_id: int=None) -> n
     """
     if not _cupy_enabled:
         return
-    buf = nvshmem.core.buffer(get_size(shape, dtype))
-    cupy_array = cupy.from_dlpack(buf, copy=False)
-    return cupy_array
+    return array(shape, dtype="int8", release=release, morder=morder, except_on_del=except_on_del) 
 
 def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
     """
@@ -128,6 +137,61 @@ def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
     buf, size, dtype = array_get_buffer(array)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
     return cupy.from_dlpack(peer_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
+def get_multicast_array(team: Teams, array: ndarray) -> ndarray:
+    """
+    Returns a CuPy array view on multicast-accessible memory corresponding to the input array.
+
+    This function takes a CuPy Array that wraps NVSHMEM-allocated memory and returns a new array
+    that uses a Multicast Memory alias for that buffer, obtained via ``nvshmemx_mc_ptr``. The resulting array
+    is suitable for use in GPU kernels that leverage multicast features such as NVSwitch-based SHARP collectives.
+    
+    The Array passed into it must be allocated by NVSHMEM4Py.
+
+    IMPORTANT:
+        - The returned array's memory cannot be accessed from the host (CPU). It is only valid for use
+          in GPU kernels. Host-side access or copying is undefined behavior and may result in errors.
+
+    NOTE: This function does not copy data. It provides a device-side view of the same underlying memory,
+    but aliased for multicast access. Any modifications made through the returned array will affect the
+    same memory region.
+
+    Args:
+        array (``ndarray``): A CuPy Array backed by NVSHMEM-allocated memory.
+        team (``Teams``): The NVSHMEM team for which multicast access is requested.
+
+    Returns:
+        ``ndarray``: A PyTorch array view on the multicast alias of the NVSHMEM buffer.
+
+    Raises:
+        ``NvshmemInvalid``: If the input array is not backed by NVSHMEM memory or multicast is not supported.
+        ``NvshmemError``: If the array's backing buffer is not properly tracked or initialized.
+    """
+    if not _cupy_enabled:
+        return
+
+    buf, size, dtype  = array_get_buffer(array)
+    mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
+    return cupy.from_dlpack(mc_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
+def register_external_array(array: ndarray) -> ndarray:
+    """
+    Register an external array with NVSHMEM.
+    """
+    if not _cupy_enabled:
+        return
+    buf = Buffer.from_handle(int(array.data.ptr), get_size(array.shape, array.dtype))
+    registered_buf = nvshmem.core.register_external_buffer(buf)
+    return cupy.from_dlpack(registered_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
+def unregister_external_array(array: ndarray) -> None:
+    """
+    Unregister an external array with NVSHMEM.
+    """
+    if not _cupy_enabled:
+        return
+    buf, size, dtype = array_get_buffer(array)
+    nvshmem.core.unregister_external_buffer(buf)
 
 def free_array(array: ndarray) -> None:
     """

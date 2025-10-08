@@ -56,7 +56,8 @@ static inline int nvshmemx_init_attr(unsigned int flags, nvshmemx_init_attr_t *a
     int status = 0, requested = NVSHMEM_THREAD_SERIALIZED, provided;
     nvshmemi_version_t app_nvshmem_version = {
         NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
-    if (attributes != NULL) {
+    if (attributes != NULL && attributes->version != NVSHMEM_INIT_ATTR_V2_IDENTIFIER &&
+        attributes->version != NVSHMEM_INIT_ATTR_V1_IDENTIFIER) {
         nvshmemx_init_init_attr_ver_only((*attributes));
     }
     status = nvshmemi_init_thread(requested, &provided, flags, attributes, app_nvshmem_version);
@@ -462,6 +463,146 @@ __device__ void nvshmemx_getmem_nbi_block(void *dest, const void *source, size_t
 
 NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op,
                                                    int pe);
+
+//////////////////// QP Create ////////////////////
+
+int nvshmemx_qp_create(int num_qps, nvshmemx_qp_handle_t **out_qp_array);
+
+//////////////////// QPair (qp) device APIs ////////////////////
+
+// Scalar put/get with qp
+#define NVSHMEMX_DECL_TYPE_QP_P(NAME, TYPE)                                      \
+    __device__ void nvshmemx_qp_##NAME##_p(TYPE *dest, const TYPE value, int pe, \
+                                           nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_P)
+#undef NVSHMEMX_DECL_TYPE_QP_P
+
+#define NVSHMEMX_DECL_TYPE_QP_G(NAME, TYPE)                            \
+    __device__ TYPE nvshmemx_qp_##NAME##_g(const TYPE *source, int pe, \
+                                           nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_G)
+#undef NVSHMEMX_DECL_TYPE_QP_G
+
+// Vector put/get with qp (thread scope)
+#define NVSHMEMX_DECL_TYPE_QP_PUT(NAME, TYPE)                                               \
+    __device__ void nvshmemx_qp_##NAME##_put(TYPE *dest, const TYPE *source, size_t nelems, \
+                                             int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT
+
+#define NVSHMEMX_DECL_TYPE_QP_GET(NAME, TYPE)                                               \
+    __device__ void nvshmemx_qp_##NAME##_get(TYPE *dest, const TYPE *source, size_t nelems, \
+                                             int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_GET)
+#undef NVSHMEMX_DECL_TYPE_QP_GET
+
+// Vector put/get with qp (NBI, thread scope)
+#define NVSHMEMX_DECL_TYPE_QP_PUT_NBI(NAME, TYPE)                                               \
+    __device__ void nvshmemx_qp_##NAME##_put_nbi(TYPE *dest, const TYPE *source, size_t nelems, \
+                                                 int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_NBI)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_NBI
+
+#define NVSHMEMX_DECL_TYPE_QP_GET_NBI(NAME, TYPE)                                               \
+    __device__ void nvshmemx_qp_##NAME##_get_nbi(TYPE *dest, const TYPE *source, size_t nelems, \
+                                                 int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_GET_NBI)
+#undef NVSHMEMX_DECL_TYPE_QP_GET_NBI
+
+// Vector put/get with qp (threadgroup scope)
+#define NVSHMEMX_DECL_TYPE_QP_PUT_THREADGROUP(NAME, TYPE)                                         \
+    __device__ void nvshmemx_qp_##NAME##_put_warp(TYPE *dest, const TYPE *source, size_t nelems,  \
+                                                  int pe, nvshmemx_qp_handle_t qp_index);         \
+    __device__ void nvshmemx_qp_##NAME##_put_block(TYPE *dest, const TYPE *source, size_t nelems, \
+                                                   int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_THREADGROUP)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_THREADGROUP
+
+#define NVSHMEMX_DECL_TYPE_QP_GET_THREADGROUP(NAME, TYPE)                                         \
+    __device__ void nvshmemx_qp_##NAME##_get_warp(TYPE *dest, const TYPE *source, size_t nelems,  \
+                                                  int pe, nvshmemx_qp_handle_t qp_index);         \
+    __device__ void nvshmemx_qp_##NAME##_get_block(TYPE *dest, const TYPE *source, size_t nelems, \
+                                                   int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_GET_THREADGROUP)
+#undef NVSHMEMX_DECL_TYPE_QP_GET_THREADGROUP
+
+// Vector put/get with qp (NBI, threadgroup scope)
+#define NVSHMEMX_DECL_TYPE_QP_PUT_NBI_THREADGROUP(NAME, TYPE)                                  \
+    __device__ void nvshmemx_qp_##NAME##_put_nbi_warp(                                         \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe, nvshmemx_qp_handle_t qp_index); \
+    __device__ void nvshmemx_qp_##NAME##_put_nbi_block(                                        \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_NBI_THREADGROUP)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_NBI_THREADGROUP
+
+#define NVSHMEMX_DECL_TYPE_QP_GET_NBI_THREADGROUP(NAME, TYPE)                                  \
+    __device__ void nvshmemx_qp_##NAME##_get_nbi_warp(                                         \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe, nvshmemx_qp_handle_t qp_index); \
+    __device__ void nvshmemx_qp_##NAME##_get_nbi_block(                                        \
+        TYPE *dest, const TYPE *source, size_t nelems, int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_GET_NBI_THREADGROUP)
+#undef NVSHMEMX_DECL_TYPE_QP_GET_NBI_THREADGROUP
+
+// Signal operations with qp
+__device__ void nvshmemx_qp_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
+                                      nvshmemx_qp_handle_t qp_index);
+
+#define NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL(NAME, TYPE)                                        \
+    __device__ void nvshmemx_qp_##NAME##_put_signal(                                        \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, \
+        int sig_op, int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL
+
+#define NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_THREADGROUP(NAME, TYPE)                            \
+    __device__ void nvshmemx_qp_##NAME##_put_signal_warp(                                   \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, \
+        int sig_op, int pe, nvshmemx_qp_handle_t qp_index);                                 \
+    __device__ void nvshmemx_qp_##NAME##_put_signal_block(                                  \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, \
+        int sig_op, int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_THREADGROUP)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_THREADGROUP
+
+#define NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI(NAME, TYPE)                                    \
+    __device__ void nvshmemx_qp_##NAME##_put_signal_nbi(                                    \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, \
+        int sig_op, int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI
+
+#define NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP(NAME, TYPE)                        \
+    __device__ void nvshmemx_qp_##NAME##_put_signal_nbi_warp(                               \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, \
+        int sig_op, int pe, nvshmemx_qp_handle_t qp_index);                                 \
+    __device__ void nvshmemx_qp_##NAME##_put_signal_nbi_block(                              \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, \
+        int sig_op, int pe, nvshmemx_qp_handle_t qp_index);
+
+NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP)
+#undef NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP
+
+// Quiet/Fence with qp
+__device__ void nvshmemx_qp_quiet(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+__device__ void nvshmemx_qp_quiet_warp(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+__device__ void nvshmemx_qp_quiet_block(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+
+__device__ void nvshmemx_qp_fence(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+__device__ void nvshmemx_qp_fence_warp(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+__device__ void nvshmemx_qp_fence_block(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
 
 #ifdef __cplusplus
 }

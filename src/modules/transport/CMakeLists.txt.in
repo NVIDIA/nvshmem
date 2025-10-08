@@ -97,7 +97,7 @@ endmacro()
 
 macro(nvshmem_transport_set_mlx5_config TRANSPORT_NAME)
   target_include_directories(nvshmem_transport_gdr_common PUBLIC ${GDRCOPY_INCLUDE})
-    target_link_libraries(${TRANSPORT_NAME} PRIVATE MLX5_lib)
+    target_link_libraries(${TRANSPORT_NAME} PRIVATE ${MLX5_lib})
 endmacro()
 
 macro(nvshmem_add_transport TRANSPORT_NAME SOURCE_LIST CUDA_FLAG GDR_FLAG IB_FLAG MLX5_FLAG)

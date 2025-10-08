@@ -88,8 +88,7 @@ struct Tensor {
     const Layout _layout;
 
     __host__ __device__ constexpr Tensor(T* data, Layout layout) : _data(data), _layout(layout) {}
-    Tensor(Layout layout) : _data(NULL), _layout(layout) {}
-
+    __host__ __device__ Tensor(Layout layout) : _data(NULL), _layout(layout) {}
     __host__ __device__ constexpr Layout layout() const { return _layout; }
 
     __host__ __device__ T* data() { return _data; }
@@ -108,8 +107,16 @@ typedef enum {
     NVLS_ONE_SHOT_PULL_NBI = 1,
     NVLS_TWO_SHOT_PUSH_NBI = 2,
     NVLS_TWO_SHOT_PULL_NBI = 3,
-    NVSHMEMI_TILE_ALGO_SENTINEL = INT_MAX
+    NVSHMEMI_TILE_COLL_ALGO_SENTINEL = INT_MAX
 } tile_coll_algo_t;
+
+typedef enum {
+    PEER_PUSH_NBI = 0,
+    PEER_PULL_NBI = 0, // Both PULL/PUSH have same behavior
+    REMOTE_PUSH_NBI = 1,
+    REMOTE_PULL_NBI = 1,
+    NVSHMEMI_TILE_ALGO_SENTINEL = INT_MAX
+} tile_algo_t;
 
 }  // namespace nvshmemx
 #endif

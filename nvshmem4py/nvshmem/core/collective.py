@@ -20,7 +20,7 @@ from nvshmem.core.utils import _get_device, dtype_nbytes
 from nvshmem.core.interop.torch import _is_tensor, tensor_get_buffer
 from nvshmem.core.interop.cupy import _is_array, array_get_buffer
 from nvshmem.core._internal_tracking import _mr_references, _is_initialized, InternalInitStatus
-from nvshmem.core.direct import Teams, team_n_pes, n_pes
+from nvshmem.core.direct import team_n_pes, n_pes
 from nvshmem.core.nvshmem_types import *
 import nvshmem.bindings as bindings
 
@@ -29,7 +29,7 @@ import logging
 
 logger = logging.getLogger("nvshmem")
 
-__all__ = ["reduce", "reducescatter", "alltoall", "fcollect", "broadcast", "barrier", "sync", "collective_on_buffer"]
+__all__ = ["reduce", "reducescatter", "alltoall", "fcollect", "broadcast", "barrier", "sync", "barrier_all", "sync_all", "collective_on_buffer"]
 
 """
 On-Stream Collectives
@@ -148,8 +148,8 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
         raise NvshmemInvalid("Called collective on an invalid Buffer")
 
     # Assert that these buffers are tracked by nvshmem
-    if not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(src.handle) \
-       or not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(dest.handle):
+    if not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(int(src.handle)) \
+       or not _mr_references.get(user_nvshmem_dev.device_id, {})._mem_references.get(int(dest.handle)):
         raise NvshmemInvalid("Tried to perform a collective on a buffer not allocated by NVSHMEM4Py")
 
     if not coll in valid_collectives:
@@ -168,13 +168,14 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
 
     src_size = src.size
     dest_size = dest.size
-    size = dest_size
+    if coll in ("fcollect", "alltoall"):
+        size = src_size
+    else:
+        size = dest_size
 
-    # We assume the user has passed the correct dest_size.
-    # If the user doesn't, they will encouter some kind of Exception later on
-    if coll in ("reduce", "reducescatter", "fcollect",):
+    if coll != "alltoall":
         size_elem = max(1, size // dtype_nbytes(dtype))
-    elif coll in ("alltoall", "broadcast"):
+    else:
         size_elem = max(1, size // (n_pes() * dtype_nbytes(dtype)))
 
     func_name = ""
@@ -186,10 +187,10 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
 
     # We have a string of the coll function name
     coll_func = getattr(bindings, func_name)
-    function_args = [team, dest._mnff.ptr, src._mnff.ptr, size_elem, int(stream.handle)]
+    function_args = [team, int(dest.handle), int(src.handle), size_elem, int(stream.__cuda_stream__()[1])]
     if coll == "broadcast":
         # Rewrite the whole thing instead of append to make the ordering requirements more obvious
-        function_args = [team, dest._mnff.ptr, src._mnff.ptr, size_elem, root, int(stream.handle)]
+        function_args = [team, int(dest.handle), int(src.handle), size_elem, root, int(stream.__cuda_stream__()[1])]
     if enable_timing:
         stream.record(start_event)
     result = coll_func(*function_args)
@@ -245,35 +246,69 @@ def _check_dtype(array: object) -> Tuple[Buffer, int, str]:
         other_dev.set_current()
     return buf, buf_size, nvshmem_dtype
 
-def barrier(team: Teams, stream: Stream=None) -> None:
+def barrier(team: Teams, stream: NvshmemStreamsType=None) -> None:
     """
     Executes a team-wide barrier on a specified CUDA stream.
 
+    Does not support MPG use cases
+
     Args:
         - team: NVSHMEM team handle.
         - stream (Stream): CUDA stream for synchronization.
     """
     user_nvshmem_dev, other_dev = _get_device()
     # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
-    bindings.barrier_on_stream(team, int(stream.handle))
+    bindings.barrier_on_stream(team, int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
 
-def sync(team: Teams, stream: Stream=None) -> None:
+def sync(team: Teams, stream: NvshmemStreamsType=None) -> None:
     """
     Executes a team-wide sync on a specified CUDA stream.
 
+    Does not support MPG use cases
+
     Args:
         - team: NVSHMEM team handle.
         - stream (Stream): CUDA stream for synchronization.
     """
     user_nvshmem_dev, other_dev = _get_device()
     # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
-    bindings.team_sync_on_stream(team, int(stream.handle))
+    bindings.team_sync_on_stream(team, int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
 
-def reduce(team: Teams, dst_array: object, src_array: object, op: str, stream: Stream=None):
+def barrier_all(stream: NvshmemStreamsType=None) -> None:
+    """
+    Executes a runtime-wide barrier on a specified CUDA stream.
+
+    Supports MPG use cases
+
+    Args:
+        - stream (Stream): CUDA stream for synchronization.
+    """
+    user_nvshmem_dev, other_dev = _get_device()
+    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
+    bindings.barrier_all_on_stream(int(stream.__cuda_stream__()[1]))
+    if other_dev is not None:
+        other_dev.set_current()
+
+def sync_all(stream: NvshmemStreamsType=None) -> None:
+    """
+    Executes a runtime-wide sync on a specified CUDA stream.
+    
+    Supports MPG use cases
+
+    Args:
+        - stream (Stream): CUDA stream for synchronization.
+    """
+    user_nvshmem_dev, other_dev = _get_device()
+    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
+    bindings.sync_all_on_stream(int(stream.__cuda_stream__()[1]))
+    if other_dev is not None:
+        other_dev.set_current()
+
+def reduce(team: Teams, dst_array: object, src_array: object, op: str, stream: NvshmemStreamsType=None):
     """
     Performs a reduction from src_array to dst_array on a CUDA stream.
 
@@ -286,7 +321,7 @@ def reduce(team: Teams, dst_array: object, src_array: object, op: str, stream: S
     """
     _call_collective("reduce", team, dst_array, src_array, op=op, stream=stream)
 
-def reducescatter(team: Teams, dst_array: object, src_array: object, op: str, stream: Stream=None):
+def reducescatter(team: Teams, dst_array: object, src_array: object, op: str, stream: NvshmemStreamsType=None):
     """
     Performs a reduce-scatter operation on a CUDA stream.
 
@@ -299,7 +334,7 @@ def reducescatter(team: Teams, dst_array: object, src_array: object, op: str, st
     """
     _call_collective("reducescatter", team, dst_array, src_array, op=op, stream=stream)
 
-def alltoall(team: Teams, dst_array: object, src_array: object, stream: Stream=None):
+def alltoall(team: Teams, dst_array: object, src_array: object, stream: NvshmemStreamsType=None):
     """
     Performs an all-to-all communication on a CUDA stream.
 
@@ -311,7 +346,7 @@ def alltoall(team: Teams, dst_array: object, src_array: object, stream: Stream=N
     """
     _call_collective("alltoall", team, dst_array, src_array, op=None, stream=stream)
 
-def fcollect(team: Teams, dst_array: object, src_array: object, stream: Stream=None):
+def fcollect(team: Teams, dst_array: object, src_array: object, stream: NvshmemStreamsType=None):
     """
     Performs a full-collective operation on a CUDA stream.
 
@@ -323,7 +358,7 @@ def fcollect(team: Teams, dst_array: object, src_array: object, stream: Stream=N
     """
     _call_collective("fcollect", team, dst_array, src_array, op=None, stream=stream)
 
-def broadcast(team: Teams, dst_array: object, src_array: object, root: int=0, stream: Stream=None):
+def broadcast(team: Teams, dst_array: object, src_array: object, root: int=0, stream: NvshmemStreamsType=None):
     """
     Broadcasts data from src_array to dst_array across the team on a CUDA stream.
 

@@ -144,7 +144,7 @@ class CollectiveAllReduceMulticastWarpSpecialized {
         nvshmemx::Tensor dstTensor =
             nvshmemx::Tensor(gAux_out.data(), nvshmemx::make_layout(tensor_shape, tensor_stride));
         int blkId = blockIdx.x + gridDim.x * blockIdx.y;
-        nvshmemx::tile_sum_allreduce_warpgroup<decltype(srcTensor), decltype(dstTensor),
+        nvshmemx::tile_sum_reduce_warpgroup<decltype(srcTensor), decltype(dstTensor),
                                                decltype(boundary),
                                                nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(
             params_ptr->teams[blkId], srcTensor, dstTensor, start_coord, boundary, root, 0);

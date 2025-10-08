@@ -16,6 +16,7 @@
 #include <deque>                     // for deque
 #include <unordered_map>
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvsh...
+#include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/nvshmem_version.h"
 #include "non_abi/nvshmemx_error.h"                                        // for NVSH...
 #include "non_abi/nvshmem_build_options.h"                                 // IWYU pragma: keep
@@ -52,7 +53,7 @@ static uint64_t nvshmemt_g_bogus_bounce_buffer = 0;
 static bool use_gdrcopy = 0;
 static bool use_local_atomics = 0;
 
-int nvshmemt_ucx_progress(nvshmem_transport_t transport);
+int nvshmemt_ucx_progress(nvshmem_transport_t transport, int is_proxy);
 
 static nvshmemt_ucx_mem_handle_info_t *get_mem_handle_info(nvshmem_transport_t transport,
                                                            transport_ucx_state_t *ucx_state,
@@ -421,7 +422,7 @@ error:
 }
 
 int nvshmemt_ucx_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                   int num_selected_devs) {
+                                   int num_selected_devs, int *out_qp_indices, int num_qps) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)t->state;
     ucx_ep_handle_t local_ep_handle, *ep_handles = NULL;
     ucs_status_t ucs_rc;
@@ -1007,7 +1008,7 @@ fetch_atomic:
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
-int nvshmemt_ucx_fence(struct nvshmem_transport *tcurr, int pe, int is_proxy) {
+int nvshmemt_ucx_fence(struct nvshmem_transport *tcurr, int pe, int qp_index, int is_multi) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)tcurr->state;
     ucs_status_t ucs_rc;
 
@@ -1019,7 +1020,7 @@ int nvshmemt_ucx_fence(struct nvshmem_transport *tcurr, int pe, int is_proxy) {
     return 0;
 }
 
-int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int is_proxy) {
+int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)tcurr->state;
     ucp_request_param_t param;
     void *ucs_status;
@@ -1030,13 +1031,13 @@ int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int is_proxy) {
     /* Since atomics are managed by a two-part request, we need to track them seperately. */
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gdrcopy) {
-        if (is_proxy) {
+        if (qp_index != NVSHMEMX_QP_HOST) {
             while (nvshmemt_ucx_submitted_proxy_atomics > nvshmemt_ucx_completed_proxy_atomics) {
-                nvshmemt_ucx_progress(tcurr);
+                nvshmemt_ucx_progress(tcurr, true);
             }
         } else {
             while (nvshmemt_ucx_submitted_host_atomics > nvshmemt_ucx_completed_host_atomics) {
-                nvshmemt_ucx_progress(tcurr);
+                nvshmemt_ucx_progress(tcurr, false);
             }
         }
     }
@@ -1064,7 +1065,7 @@ int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int is_proxy) {
     return 0;
 }
 
-int nvshmemt_ucx_progress(nvshmem_transport_t transport) {
+int nvshmemt_ucx_progress(nvshmem_transport_t transport, int is_proxy) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
 
     ucp_worker_progress(ucx_state->worker_context);
@@ -1446,6 +1447,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.progress = nvshmemt_ucx_progress;
     transport->host_ops.enforce_cst = nvshmemt_ucx_enforce_cst_at_target;
     transport->host_ops.enforce_cst_at_target = NULL;
+    transport->host_ops.put_signal = nvshmemt_put_signal;
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
     transport->state = (void *)ucx_state;
     transport->is_successfully_initialized = true;

@@ -7,13 +7,21 @@
 #ifndef NVSHMEMI_COLL_CPU_H
 #define NVSHMEMI_COLL_CPU_H 1
 
-#include <cuda_fp16.h>                     // for half
-#include <driver_types.h>                  // for CUstream_st, cudaStream_t
-#include <limits.h>                        // for CHAR_MIN
-#include <stdio.h>                         // for size_t, stderr, fflush
-#include "cpu_coll.h"                      // lines 13-13
-#include "device_host/nvshmem_common.cuh"  // for RDXN_OPS_AND, RDXN_OPS_MAX
-#include "internal/host/nvshmemi_types.h"  // for nvshmemi_state, nvshmemi_...
+#include <cuda.h>                              // for CUdeviceptr, CU_STREAM...
+#include <cuda_fp16.h>                         // for half
+#include <driver_types.h>                      // for CUstream_st, cudaStream_t
+#include <limits.h>                            // for CHAR_MIN
+#include <stdint.h>                            // for uint64_t
+#include <stdio.h>                             // for size_t, stderr, fflush
+#include "cpu_coll.h"                          // lines 15-15
+#include "device_host/nvshmem_common.cuh"      // for P2P_SYNC_ON_STREAM, RDXN_OPS_AND
+#include "device_host/nvshmem_types.h"         // for nvshmemi_team_t
+#include "internal/host/nvshmem_internal.h"    // for nvshmemi_cuda_syms
+#include "internal/host/nvshmemi_team.h"       // for nvshmemi_ptr, nvshmemi...
+#include "internal/host/nvshmemi_types.h"      // for nvshmemi_state, nvshme...
+#include "internal/host_transport/cudawrap.h"  // for CUPFN, nvshmemi_cuda_f...
+#include "non_abi/nvshmemx_error.h"            // for NVSHMEMI_NZ_EXIT
+
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"                           // for ncclDataType_t, ncclResult_t
 #include "non_abi/nvshmem_build_options.h"  // for NVSHMEM_USE_NCCL
@@ -174,6 +182,33 @@ extern struct nccl_function_table nccl_ftable;
 int nvshmemi_coll_common_cpu_init();
 void nvshmemi_coll_common_cpu_check_ll128_availability();
 int nvshmemi_coll_common_cpu_finalize();
+
+static inline void nvshmemi_coll_p2p_sync(nvshmemi_team_t* teami, CUstream stream) {
+    long* pWrk = (long*)nvshmemi_team_get_psync(teami, P2P_SYNC_ON_STREAM);
+    uint64_t seq_num = ++teami->p2p_sync_on_stream_count;
+    for (int i = 0; i < teami->size; i++) {
+        if (i != teami->my_pe) {
+            int status = CUPFN(
+                nvshmemi_cuda_syms,
+                cuStreamWriteValue64(stream, (CUdeviceptr)nvshmemi_ptr(pWrk + teami->my_pe, i),
+                                     seq_num, CU_STREAM_WRITE_VALUE_DEFAULT));
+            NVSHMEMI_NZ_EXIT(
+                status, "nvshmemi_coll_p2p_sync cuStreamWriteValue64() failed with status: %d\n",
+                status);
+        }
+    }
+    for (int i = 0; i < teami->size; i++) {
+        if (i != teami->my_pe) {
+            long* sync_addr = (long*)(pWrk + i);
+            int status =
+                CUPFN(nvshmemi_cuda_syms, cuStreamWaitValue64(stream, (CUdeviceptr)sync_addr,
+                                                              seq_num, CU_STREAM_WAIT_VALUE_GEQ));
+            NVSHMEMI_NZ_EXIT(
+                status, "nvshmemi_coll_p2p_sync cuStreamWaitValue64() failed with status: %d\n",
+                status);
+        }
+    }
+}
 
 #define NVSHMEMI_COLL_CPU_ERR_POP()                                                         \
     do {                                                                                    \

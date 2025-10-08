@@ -362,6 +362,7 @@ enum nvshmemi_team_op_t {
     FCOLLECT,
     REDUCE,
     FCOLLECT_128,
+    P2P_SYNC_ON_STREAM,
     OP_SENTINEL = INT_MAX
 };
 
@@ -425,6 +426,10 @@ typedef enum {
 #define NVSHMEMI_BCAST_SYNC_SIZE (10 * SYNC_SIZE)
 #define NVSHMEMI_ALLTOALL_SYNC_SIZE SYNC_SIZE
 #define NVSHMEMI_WARP_SIZE 32
+
+#define NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT 16
+#define NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT 16
+#define NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT 32 /* # of GPUs x 4 CTA per GPU for DGX */
 
 #define NVSHMEMI_DECL_THREAD_IDX_warp() \
     ;                                   \

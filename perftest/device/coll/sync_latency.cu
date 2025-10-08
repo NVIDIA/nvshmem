@@ -31,7 +31,7 @@ extern "C" {
     }                                                                                              \
                                                                                                    \
     __global__ void test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP(                \
-        nvshmem_team_t team, int iter) {                                                           \
+        int iter, nvshmem_team_t team) {                                                           \
         int i;                                                                                     \
         if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                          \
             for (i = 0; i < iter; i++) {                                                           \
@@ -74,12 +74,11 @@ int sync_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, void
     double *h_thread_lat = (double *)h_tables[0];
     double *h_warp_lat = (double *)h_tables[1];
     double *h_block_lat = (double *)h_tables[2];
-    size_t size = 0;
 
     uint64_t tpb_size = (uint64_t)nvshm_test_num_tpb;
 
-    void *sync_args_1[] = {&team, &skip};
-    void *sync_args_2[] = {&team, &iter};
+    void *sync_args_1[] = {&skip, &team};
+    void *sync_args_2[] = {&iter, &team};
     void *sync_all_args_1[] = {&skip};
     void *sync_all_args_2[] = {&iter};
     float milliseconds;

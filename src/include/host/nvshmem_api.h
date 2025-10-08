@@ -23,6 +23,7 @@
 #include "device_host/nvshmem_common.cuh"
 #include "device_host_transport/nvshmem_constants.h"
 #include "host/nvshmem_macros.h"
+#include "host/nvshmem_coll_api.h"
 #include "non_abi/nvshmem_version.h"
 
 int nvshmemi_init_thread(int requested_thread_support, int *provided_thread_support,
@@ -84,7 +85,6 @@ void *nvshmem_calloc(size_t, size_t);
 void *nvshmem_align(size_t, size_t);
 
 void nvshmem_free(void *ptr);
-void *nvshmem_realloc(void *ptr, size_t size);
 NVSHMEMI_HOSTDEVICE_PREFIX void *nvshmem_ptr(const void *ptr, int pe);
 NVSHMEMI_HOSTDEVICE_PREFIX void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr);
 

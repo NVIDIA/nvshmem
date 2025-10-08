@@ -25,6 +25,11 @@
 #include "fcollect.cuh"
 #include "broadcast.cuh"
 
+#ifdef CUTLASS_ENABLED
+#include "cutlass/half.h"
+#include "cutlass/bfloat16.h"
+#endif
+
 #ifdef __CUDACC__
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
@@ -44,11 +49,11 @@ namespace cg = cooperative_groups;
 template <typename T, rdxn_ops_t op>
 #if !defined __CUDACC_RTC__
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename std::enable_if<std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #else
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename cuda::std::enable_if<cuda::std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #endif
     switch (op) {
@@ -76,11 +81,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
 template <typename T, rdxn_ops_t op>
 #if !defined __CUDACC_RTC__
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename std::enable_if<!std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<!::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #else
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE
-    typename cuda::std::enable_if<!cuda::std::is_integral<T>::value, T>::type
+    typename ::cuda::std::enable_if<!::cuda::std::is_integral<T>::value, T>::type
     perform_gpu_rdxn(T op1, T op2) {
 #endif
     switch (op) {
@@ -217,6 +222,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         }                                                                                      \
     }
 
+#if defined(__cplusplus) && __cplusplus >= 201703L
+
 /* nvshmemi_<PTX_TYPE>_add_reduce_mcast16_v4_threadgroup(int4 *dest,const int4 *source, size_t
  * nelems) distributes contiguous "nelems" elements across the threadgroup. For tile collective,
  * input is a tile (often strided along a dimension), calling the above function along the contigous
@@ -236,7 +243,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         int groupSize = nvshmemi_threadgroup_size<SCOPE>();                                        \
         int nelems = nelem_major_dim * nelem_minor_dim; /* # vec elems*/                           \
         using vtype = int4;                                                                        \
-        if constexpr (cuda::std::is_empty<tuple_t>::value) {                                       \
+        if constexpr (::cuda::std::is_empty<tuple_t>::value) {                                     \
             /* If no predicate, we vectorize the operation */                                      \
             for (size_t j = myIdx * UNROLL; j < nelems; j += groupSize * UNROLL) {                 \
                 uint32_t u4[4 * UNROLL];                                                           \
@@ -361,7 +368,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         int groupSize = nvshmemi_threadgroup_size<SCOPE>();                                        \
         int nelems = nelem_major_dim * nelem_minor_dim;                                            \
                                                                                                    \
-        if constexpr (cuda::std::is_empty<tuple_t>::value) {                                       \
+        if constexpr (::cuda::std::is_empty<tuple_t>::value) {                                     \
             /* If no predicate, we vectorize the operation */                                      \
             for (size_t j = myIdx; j < nelems; j += groupSize) {                                   \
                 CXX_TYPE val1[2];                                                                  \
@@ -477,7 +484,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();                                    \
         int groupSize = nvshmemi_threadgroup_size<SCOPE>();                                        \
         int nelems = nelem_major_dim * nelem_minor_dim;                                            \
-        if constexpr (cuda::std::is_empty<tuple_t>::value) {                                       \
+        if constexpr (::cuda::std::is_empty<tuple_t>::value) {                                     \
             /* Case: no predicate */                                                               \
             for (size_t j = myIdx; j < nelems; j += groupSize) {                                   \
                 CXX_TYPE val1;                                                                     \
@@ -547,38 +554,38 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
             const int nelem_minor_dim, const int src_stride_minor_dim,                             \
             const int dst_stride_minor_dim, const int src_stride_major_dim,                        \
             const int dst_stride_major_dim, tuple_t start_coord, tuple_t boundary) {               \
-        if constexpr (cuda::std::is_same<vtype, int4>::value) {                                    \
+        if constexpr (::cuda::std::is_same<vtype, int4>::value) {                                  \
             nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v4<                  \
                 elemType, SCOPE, tuple_t, 1, ONESHOT, major_dim, minor_dim>(                       \
                 dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,              \
                 dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord,     \
                 boundary);                                                                         \
-        } else if constexpr (cuda::std::is_same<vtype, uint64_t>::value) {                         \
+        } else if constexpr (::cuda::std::is_same<vtype, uint64_t>::value) {                       \
             nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v2<                  \
                 elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                          \
                 dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,              \
                 dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord,     \
                 boundary);                                                                         \
-        } else if constexpr (cuda::std::is_same<vtype, uint32_t>::value) {                         \
+        } else if constexpr (::cuda::std::is_same<vtype, uint32_t>::value) {                       \
             nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v1<                  \
                 elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                          \
                 dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,              \
                 dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord,     \
                 boundary);                                                                         \
         } else {                                                                                   \
-            if (cuda::std::is_same<vtype, int4>::value) {                                          \
+            if (::cuda::std::is_same<vtype, int4>::value) {                                        \
                 nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v4<              \
                     elemType, SCOPE, tuple_t, 1, ONESHOT, major_dim, minor_dim>(                   \
                     dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,          \
                     dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord, \
                     boundary);                                                                     \
-            } else if (cuda::std::is_same<vtype, uint64_t>::value) {                               \
+            } else if (::cuda::std::is_same<vtype, uint64_t>::value) {                             \
                 nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v2<              \
                     elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                      \
                     dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,          \
                     dst_stride_minor_dim, src_stride_major_dim, dst_stride_major_dim, start_coord, \
                     boundary);                                                                     \
-            } else if (cuda::std::is_same<vtype, uint32_t>::value) {                               \
+            } else if (::cuda::std::is_same<vtype, uint32_t>::value) {                             \
                 nvshmemi_##PTX_TYPE##_tile_allreduce##OP_TYPE##_mcast_threadgroup_v1<              \
                     elemType, SCOPE, tuple_t, ONESHOT, major_dim, minor_dim>(                      \
                     dest, source, nelem_major_dim, nelem_minor_dim, src_stride_minor_dim,          \
@@ -590,6 +597,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
             }                                                                                      \
         }                                                                                          \
     }
+#endif  //__cplusplus >= 201703L
 
 // mcast ldreduce+st of 16B
 // The requirement to use these primitives is that nelems % UNROLL == 0
@@ -779,6 +787,8 @@ NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(f32)
 NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(f16x2)
 NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(bf16x2)
 
+// Tile specific macros
+#if defined(__cplusplus) && __cplusplus >= 201703L
 // ld_reduce errors on using .acc for min, max
 #undef NVSHMEMI_MCAST_MIN_MIXOP_f16x2
 #undef NVSHMEMI_MCAST_MIN_MIXOP_bf16x2
@@ -804,6 +814,7 @@ NVSHMEMI_MCAST_TILE_ALLREDUCE_THREADGROUP(uint32_t, bf16x2, MAX)
 #define NVSHMEMI_MCAST_MIN_MIXOP_bf16x2 "min.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_f16x2 "max.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_bf16x2 "max.acc::f32"
+#endif
 
 #if defined(__cplusplus) && __cplusplus >= 201703L
 #define IF_CONSTEXPR(expression) if constexpr (expression)
@@ -816,8 +827,10 @@ NVSHMEMI_MCAST_TILE_ALLREDUCE_THREADGROUP(uint32_t, bf16x2, MAX)
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadgroup(
     TYPE *__restrict__ dest, const TYPE *__restrict__ src, size_t nreduce) {
-    constexpr bool is_unsigned = std::is_integral<TYPE>::value && std::is_unsigned<TYPE>::value;
-    constexpr bool is_signed = std::is_integral<TYPE>::value && std::is_signed<TYPE>::value;
+    constexpr bool is_unsigned =
+        ::cuda::std::is_integral<TYPE>::value && cuda::std::is_unsigned<TYPE>::value;
+    constexpr bool is_signed =
+        ::cuda::std::is_integral<TYPE>::value && ::cuda::std::is_signed<TYPE>::value;
     constexpr bool is_float_v = is_float<TYPE>::value;
     constexpr bool is_double_v = is_double<TYPE>::value;
     constexpr bool is_half_v = is_half<TYPE>::value;
@@ -988,12 +1001,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_on_demand
     volatile TYPE *tmp_operand;
     int my_active_set_pe = ((nvshmemi_device_state_d.mype - start) / stride);
     tmp_operand = (TYPE *)pWrk;
-    nvshmemi_put_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems,
-                                                                nvshmemi_device_state_d.mype);
+    nvshmemi_put<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems,
+                                                    nvshmemi_device_state_d.mype);
     for (i = 1; i < size; i++) {
         next_rank = start + ((my_active_set_pe + i) % size) * stride;
-        nvshmemi_put_nbi_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>((TYPE *)tmp_operand, source,
-                                                                        nelems, next_rank);
+        nvshmemi_put_nbi<TYPE, NVSHMEMI_THREADGROUP_THREAD>((TYPE *)tmp_operand, source, nelems,
+                                                            next_rank);
         nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
         sync_dissem_threadgroup_2<NVSHMEMI_THREADGROUP_THREAD>(start, stride, size, pSync,
                                                                sync_counter);
@@ -1015,12 +1028,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_on_demand
     volatile TYPE *tmp_operand;
     int my_active_set_pe = teami->my_pe;
     tmp_operand = (volatile TYPE *)nvshmemi_team_get_psync(teami, REDUCE);
-    nvshmemi_put_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems,
-                                                                nvshmemi_device_state_d.mype);
+    nvshmemi_put<TYPE, NVSHMEMI_THREADGROUP_THREAD>(dest, source, nelems,
+                                                    nvshmemi_device_state_d.mype);
     for (i = 1 + my_active_set_pe; i < teami->size + my_active_set_pe; i++) {
         int next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, i);
-        nvshmemi_put_nbi_threadgroup<TYPE, NVSHMEMI_THREADGROUP_THREAD>((TYPE *)tmp_operand, source,
-                                                                        nelems, next_rank);
+        nvshmemi_put_nbi<TYPE, NVSHMEMI_THREADGROUP_THREAD>((TYPE *)tmp_operand, source, nelems,
+                                                            next_rank);
         nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
         sync_dissem_threadgroup<NVSHMEMI_THREADGROUP_THREAD>(team);
         op1 = (TYPE *)dest;
@@ -1061,9 +1074,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
 
     if (in_step2 == 0) {
         size_t offset = (step1_sendto - rank - 1) * nreduce;
-        nvshmemi_put_nbi_threadgroup<TYPE, SCOPE>(pWrk + offset, source, nreduce, step1_sendto);
+        nvshmemi_put_nbi<TYPE, SCOPE>(pWrk + offset, source, nreduce, step1_sendto);
         if (!myIdx) {
-            nvshmemi_fence();
+            nvshmemi_fence<nvshmemi_threadgroup_thread>();
             nvshmemi_signal_for_barrier<long>((long *)(pSync + rank), sync_counter[0],
                                               step1_sendto);
         }
@@ -1097,11 +1110,10 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
             nvshmemi_threadgroup_sync<SCOPE>();
             for (int i = 0; i < k - 1; i++) {
                 size_t offset = recv_offset + k * phase * nreduce + num_small * nreduce;
-                nvshmemi_put_nbi_threadgroup<TYPE, SCOPE>(pWrk + offset,
-                                                          pWrk + send_offset + phase * nreduce,
-                                                          nreduce, step2_nbrs[phase][i]);
+                nvshmemi_put_nbi<TYPE, SCOPE>(pWrk + offset, pWrk + send_offset + phase * nreduce,
+                                              nreduce, step2_nbrs[phase][i]);
             }
-            if (!myIdx) nvshmemi_fence();
+            if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
             nvshmemi_threadgroup_sync<SCOPE>();
             for (int i = myIdx; i < k - 1; i += groupSize) {
                 nvshmemi_signal_for_barrier<long>((long *)(pSync + rank), sync_counter[0],
@@ -1125,9 +1137,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
     /* Step 3 */
     if (step1_nrecvs > 0) {
         for (int i = 0; i < step1_nrecvs; i++) {
-            nvshmemi_put_nbi_threadgroup<TYPE, SCOPE>(dst, dst, nreduce, step1_recvfrom[i]);
+            nvshmemi_put_nbi<TYPE, SCOPE>(dst, dst, nreduce, step1_recvfrom[i]);
         }
-        if (!myIdx) nvshmemi_fence();
+        if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
         nvshmemi_threadgroup_sync<SCOPE>();
         for (int i = myIdx; i < step1_nrecvs; i += groupSize) {
             nvshmemi_signal_for_barrier<long>((long *)(pSync + rank), sync_counter[0],
@@ -1209,8 +1221,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_rdxn_segment_t
         (nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_scratch_size / 2) / sizeof(long);
 
     tmp_operand = (TYPE *)pWrk;
-    nvshmemi_put_nbi_threadgroup<TYPE, SCOPE>((TYPE *)dest, (const TYPE *)source, nelems,
-                                              nvshmemi_device_state_d.mype);
+    nvshmemi_put_nbi<TYPE, SCOPE>((TYPE *)dest, (const TYPE *)source, nelems,
+                                  nvshmemi_device_state_d.mype);
 
     rnds_floor = msg_len / nvshm_gpu_rdxn_seg_size;
     remainder = msg_len % nvshm_gpu_rdxn_seg_size;
@@ -1219,9 +1231,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_rdxn_segment_t
         exchange_size = nvshm_gpu_rdxn_seg_size;
         for (i = 1; i < teami->size; i++) {
             next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, my_active_set_pe + i);
-            nvshmemi_put_nbi_threadgroup<TYPE, SCOPE>((TYPE *)tmp_operand,
-                                                      (const TYPE *)source + offset,
-                                                      (exchange_size / sizeof(TYPE)), next_rank);
+            nvshmemi_put_nbi<TYPE, SCOPE>((TYPE *)tmp_operand, (const TYPE *)source + offset,
+                                          (exchange_size / sizeof(TYPE)), next_rank);
             nvshmemi_barrier_threadgroup<SCOPE>(team);
             op1 = (TYPE *)dest + offset;
             op2 = (TYPE *)tmp_operand;
@@ -1240,7 +1251,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_rdxn_segment_t
             for (i = pe_offset; ((round < pes_per_round) && (i < teami->size)); i++) {
                 next_rank =
                     nvshmemi_team_translate_pe_to_team_world_wrap(teami, my_active_set_pe + i);
-                nvshmemi_put_nbi_threadgroup<TYPE, SCOPE>(
+                nvshmemi_put_nbi<TYPE, SCOPE>(
                     (TYPE *)((TYPE *)tmp_operand + (round * (exchange_size / sizeof(TYPE)))),
                     (TYPE *)source + offset, (exchange_size / sizeof(TYPE)), next_rank);
                 round++;
@@ -1684,7 +1695,7 @@ nvshmemi_double2_maxloc_reduce_alltoall_block(nvshmem_team_t team, double2 *dest
     for (int i = myIdx + 1; i < n_pes; i += groupSize) {
         int peer = (my_pe + i) % n_pes;
         size_t offset = 2 * sizeof(double2) * (my_pe + 2);
-        nvshmemi_put_nbi_threadgroup<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
+        nvshmemi_put_nbi<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
             (uint64_t *)(pWrk + offset), (uint64_t *)(pWrk), sizeof(double2) / sizeof(uint32_t),
             nvshmemi_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD));
     }
@@ -1722,9 +1733,9 @@ nvshmemi_double2_maxloc_rooted_reduce_flat_block(nvshmem_team_t team, double2 *d
     if (nvshmemi_team_my_pe(team) != 0) {
         nvshmemi_packLL_naive<double2, SCOPE>((uint64_t *)pWrk, source, 1, ll_flag);
         size_t offset = 2 * sizeof(double2) * nvshmemi_team_my_pe(team);
-        nvshmemi_put_nbi_threadgroup<uint64_t, SCOPE>(
-            (uint64_t *)(pWrk + offset), (uint64_t *)(pWrk), sizeof(double2) / sizeof(uint32_t),
-            nvshmemi_team_translate_pe(team, 0, NVSHMEM_TEAM_WORLD));
+        nvshmemi_put_nbi<uint64_t, SCOPE>((uint64_t *)(pWrk + offset), (uint64_t *)(pWrk),
+                                          sizeof(double2) / sizeof(uint32_t),
+                                          nvshmemi_team_translate_pe(team, 0, NVSHMEM_TEAM_WORLD));
     } else {
         dest[0] = source[0];
         if (!myIdx) {
@@ -1786,6 +1797,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 }
 
 /******* Tile collective functions ********/
+#if defined(__cplusplus) && __cplusplus >= 201703L
 
 // Select implementation based on the operation, datatype
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, rdxn_ops_t op,
@@ -1826,7 +1838,11 @@ __device__ inline void nvshmemi_tile_allreduce_nvls_thread_vec(
     int nelem_major_dim = (size_major_dim * sizeof(T)) / sizeof(vtype);
     const int nelem_minor_dim = size_minor_dim;
 
-    if constexpr (is_half<T>::value) {
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
+                  "Unsupported datatype");
+
+    if constexpr (is_half<T>::value || is_cutlass_half<T>()) {
         if constexpr (op == RDXN_OPS_SUM) {
             nvshmemi_f16x2_tile_allreduceADD_mcast_threadgroup<vtype, T, scope, tuple_t, ONESHOT,
                                                                major_dim, minor_dim>(
@@ -1846,7 +1862,7 @@ __device__ inline void nvshmemi_tile_allreduce_nvls_thread_vec(
                 dst_stride_minor_dim_v, src_stride_major_dim_v, dst_stride_major_dim_v, start_coord,
                 boundary);
         }
-    } else if constexpr (is_bfloat<T>::value) {
+    } else if constexpr (is_bfloat<T>::value || is_cutlass_bfloat<T>()) {
         if constexpr (op == RDXN_OPS_SUM) {
             nvshmemi_bf16x2_tile_allreduceADD_mcast_threadgroup<vtype, T, scope, tuple_t, ONESHOT,
                                                                 major_dim, minor_dim>(
@@ -2023,6 +2039,7 @@ __device__ inline void nvshmemi_tile_allreduce_nvls_thread(nvshmem_team_t team,
         }
     }
 }
+#endif  // __cplusplus >= 201703L
 
 // Tile allreduce entrypoint
 // Call underlying function based on scope and algo
@@ -2034,15 +2051,16 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
     using T = typename src_tensor_t::value_type;
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
-#endif
+#else
 
-    static_assert(cuda::std::is_same<typename src_tensor_t::value_type,
-                                     typename dst_tensor_t::value_type>::value,
+    static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
+                                       typename dst_tensor_t::value_type>::value,
                   "Source and destination tensors must have the same type");
 
-    static_assert(cuda::std::is_same<decltype(cuda::std::declval<src_tensor_t>().shape()),
-                                     decltype(cuda::std::declval<dst_tensor_t>().shape())>::value,
-                  "Source and destination tensors must have same shape");
+    static_assert(
+        ::cuda::std::is_same<decltype(::cuda::std::declval<src_tensor_t>().shape()),
+                             decltype(::cuda::std::declval<dst_tensor_t>().shape())>::value,
+        "Source and destination tensors must have same shape");
 
     static_assert((algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI) ||
                       (algo == nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI),
@@ -2058,7 +2076,8 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
     static_assert((op == RDXN_OPS_SUM) || (op == RDXN_OPS_MIN) || (op == RDXN_OPS_MAX),
                   "Unsupported operation");
 
-    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value)),
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
     assert((src_tensor.data() != nullptr) && (dst_tensor.data() != nullptr) &&
@@ -2073,7 +2092,6 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
         "along one dimension");
 
     assert(!flag && "Currently non-zero flag value is unsupported");
-
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI) {
         // check for NVLS support in hardware
 #if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
@@ -2082,8 +2100,9 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
         // As this algo PULLs data from other PEs, we need to ensure src data is ready
         // Ensure all PEs have reached this point and pushed their data to local mem
 
-        __threadfence();  // ensure data is visible in local GPU mem
-        nvshmemi_sync_algo_threadgroup<scope>(team);
+        // @KP probably adds around 2 -4 us
+        //   __threadfence();  // ensure data is visible in local GPU mem
+        //   nvshmemi_sync_algo_threadgroup<scope>(team);
 
         // Only root will perform all reduce for two-shot
         if (root == -1) {
@@ -2120,6 +2139,7 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
 #endif
         return 0;
     }
+#endif  // __cplusplus >= 201703L
 }
 
 // Tile reduce entrypoint
@@ -2133,15 +2153,16 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
 
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
-#endif
+#else
 
-    static_assert(cuda::std::is_same<typename src_tensor_t::value_type,
-                                     typename dst_tensor_t::value_type>::value,
+    static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
+                                       typename dst_tensor_t::value_type>::value,
                   "Source and destination tensors must have the same type");
 
-    static_assert(cuda::std::is_same<decltype(cuda::std::declval<src_tensor_t>().shape()),
-                                     decltype(cuda::std::declval<dst_tensor_t>().shape())>::value,
-                  "Source and destination tensors must have same shape");
+    static_assert(
+        ::cuda::std::is_same<decltype(::cuda::std::declval<src_tensor_t>().shape()),
+                             decltype(::cuda::std::declval<dst_tensor_t>().shape())>::value,
+        "Source and destination tensors must have same shape");
 
     static_assert((algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI),
                   "Unsupported tile Reduce algorithm. "
@@ -2155,7 +2176,8 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
     static_assert((op == RDXN_OPS_SUM) || (op == RDXN_OPS_MIN) || (op == RDXN_OPS_MAX),
                   "Unsupported operation");
 
-    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value)),
+    static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
+                   (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
     assert((src_tensor.data() != nullptr) && (dst_tensor.data() != nullptr) &&
@@ -2202,6 +2224,7 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
         // Extend as other algorithms are added
         return 0;
     }
+#endif  // __cplusplus >= 201703L
 }
 
 #endif /* __CUDA_ARCH__ */

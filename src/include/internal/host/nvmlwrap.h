@@ -32,8 +32,20 @@ typedef struct {
 } nvmlGpuFabricInfo_v2_t;
 
 typedef nvmlGpuFabricInfo_v2_t nvmlGpuFabricInfoV_t;
+
 #endif
 /* end NVML Header defs. */
+
+#define NVML_CHECK(stmt)                                                                      \
+    do {                                                                                      \
+        nvmlReturn_t result = (stmt);                                                         \
+        if (unlikely(NVML_SUCCESS != result)) {                                               \
+            fprintf(stderr, "[%s:%d] NVML failed with error code %d \n", __FILE__, __LINE__,  \
+                    result);                                                                   \
+            exit(-1);                                                                         \
+        }                                                                                     \
+        assert(NVML_SUCCESS == result);                                                       \
+    } while (0)
 
 struct nvml_function_table {
     nvmlReturn_t (*nvmlInit)(void);
@@ -43,6 +55,8 @@ struct nvml_function_table {
                                            nvmlGpuP2PCapsIndex_enum caps,
                                            nvmlGpuP2PStatus_t *p2pStatus);
     nvmlReturn_t (*nvmlDeviceGetGpuFabricInfoV)(nvmlDevice_t device, nvmlGpuFabricInfoV_t *info);
+    nvmlReturn_t (*nvmlDeviceGetFieldValues)(nvmlDevice_t device, unsigned int count,
+                                             nvmlFieldValue_t *values);
 };
 
 int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nvml_handle);

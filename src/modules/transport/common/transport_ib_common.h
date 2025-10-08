@@ -41,6 +41,89 @@
 
 #define NETMASK(bits) (htonl(0xffffffff << (32 - bits)))
 
+typedef void *nvshmemt_ib_common_ep_ptr_t;
+
+typedef enum {
+    NVSHMEMT_IB_COMMON_WAIT_ANY = 0,
+    NVSHMEMT_IB_COMMON_WAIT_TWO = 1,
+    NVSHMEMT_IB_COMMON_WAIT_ALL = 2,
+    NVSHMEMT_IB_COMMON_WAIT_NONE = 3
+} nvshmemt_ib_wait_predicate_t;
+
+/* Generic ep structure that should be embedded at the top of transport-specific ep structures */
+struct nvshmemt_ib_common_ep {
+    volatile uint64_t head_op_id;
+    volatile uint64_t tail_op_id;
+    nvshmem_transport_t transport;
+};
+
+#ifndef MAX_NUM_PORTS
+#define MAX_NUM_PORTS 4
+#endif
+
+struct nvshmemt_ib_gid_info {
+    uint8_t link_layer;
+    union ibv_gid local_gid;
+    int32_t local_gid_index;
+};
+
+/* Common device structure - start with basic IB fields */
+struct nvshmemt_ib_common_device {
+    struct ibv_device *dev;
+    struct ibv_context *context;
+    struct ibv_pd *pd;
+    struct ibv_device_attr device_attr;
+    struct ibv_port_attr port_attr[MAX_NUM_PORTS];
+    struct nvshmemt_ib_gid_info gid_info[MAX_NUM_PORTS];
+    bool data_direct;
+};
+
+struct nvshmemt_ib_common_ftable {
+    int (*ep_create)(nvshmemt_ib_common_ep_ptr_t *ep, int dev_id, nvshmem_transport_t t);
+    int (*ep_get_handle)(struct nvshmemt_ib_common_ep_handle *ep_handle,
+                         nvshmemt_ib_common_ep_ptr_t ep);
+    int (*ep_connect)(nvshmemt_ib_common_ep_ptr_t ep,
+                      struct nvshmemt_ib_common_ep_handle *ep_handle);
+    int (*progress)(nvshmem_transport_t tcurr, int is_proxy);
+    int (*progress_recv)(nvshmem_transport_t tcurr, nvshmemt_ib_wait_predicate_t wait_predicate);
+};
+
+struct nvshmemt_ib_common_ep_handle {
+    uint32_t qpn;
+    uint16_t lid;
+    // ROCE
+    uint64_t spn;
+    uint64_t iid;
+};
+
+struct nvshmemt_ib_common_state {
+    void *devices;
+    int *dev_ids;
+    int *port_ids;
+    int n_dev_ids;
+    int ep_count;
+    int qp_depth;
+    int srq_depth;
+    int host_ep_index;
+    int cur_ep_index;
+    int selected_dev_id;
+    int log_level;
+    bool dmabuf_support;
+    nvshmemt_ib_common_ep_ptr_t cst_ep;
+    nvshmemt_ib_common_ep_ptr_t *ep;
+    struct nvshmemi_options_s *options;
+    struct nvshmemi_cuda_fn_table *table;
+    struct nvshmemt_ib_common_ftable *ib_transport_ftable;
+    struct transport_mem_handle_info_cache *cache;
+
+    /* Dynamic QP management fields */
+    int next_qp_index;        /* Next available QP index */
+    int cur_default_qp_index; /* Round-robin counter for DEFAULT QPs */
+    int cur_any_qp_index;     /* Round-robin counter for ANY QPs */
+};
+
+typedef struct nvshmemt_ib_common_state *nvshmemt_ib_common_state_t;
+
 struct nvshmemt_ib_common_mem_handle {
     struct ibv_mr *mr;
     void *buf;
@@ -48,12 +131,6 @@ struct nvshmemt_ib_common_mem_handle {
     uint32_t lkey;
     uint32_t rkey;
     bool local_only;
-};
-
-struct nvshmemt_ib_gid_info {
-    uint8_t link_layer;
-    union ibv_gid local_gid;
-    int32_t local_gid_index;
 };
 
 struct nvshmemt_ibv_function_table {
@@ -125,6 +202,22 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
 
 int nvshmemt_ib_common_release_mem_handle(struct nvshmemt_ibv_function_table *ftable,
                                           nvshmem_mem_handle_t *mem_handle, int log_level);
+
+int nvshmemt_ib_common_setup_cst_loopback(int dev_id, nvshmem_transport_t t);
+
+int nvshmemt_ib_common_check_poll_avail(nvshmem_transport_t tcurr, nvshmemt_ib_common_ep_ptr_t ep,
+                                        nvshmemt_ib_wait_predicate_t wait_predicate);
+
+int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index);
+
+int nvshmemt_ib_common_fence(nvshmem_transport_t tcurr, int pe, int qp_index, int is_multi);
+
+int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
+                                         int num_selected_devs, int *out_qp_indices, int num_qps);
+
+/* Helper function to get ep from qp index */
+nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,
+                                                                    int qp_index, int pe_index);
 
 /* The following code is for dynamic GID detection for RoCE platforms.
    It has been adapted from NCCL: https://gitlab-master.nvidia.com/nccl/nccl/-/merge_requests/359 */

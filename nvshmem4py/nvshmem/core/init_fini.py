@@ -11,6 +11,7 @@
 import logging
 import os
 import ctypes
+from typing import Union
 
 import nvshmem.core
 import nvshmem.bindings as bindings
@@ -20,8 +21,10 @@ import nvshmem.core.memory as memory
 from nvshmem import __version__
 from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus
 
+from cuda.pathfinder import load_nvidia_dynamic_lib
 from cuda.core.experimental._memory import Buffer, MemoryResource
 from cuda.core.experimental import Device, system
+from cuda.core.experimental._module import ObjectCode
 
 import numpy as np
 
@@ -33,9 +36,11 @@ except ImportError:
     Comm = None
     _mpi4py_enabled = False
 
-__all__ = ['get_unique_id', 'init', 'finalize', 'get_version']
+__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init', 'library_finalize', 'UniqueID']
 
 logger = logging.getLogger("nvshmem")
+
+UniqueID = bindings.uniqueid
 
 def get_version() -> Version:
     """
@@ -50,6 +55,11 @@ def get_version() -> Version:
 
     ``Version.libnvshmem_version`` is the version of NVSHMEM library that this package has opened
     """
+    # Load the nvshmemem host library
+    # Must happen before we use bindings
+    # We use this explicilty here because user is allowed to call get_version before init is called
+    # Repeat calls during initwill be no-ops
+    load_nvidia_dynamic_lib("nvshmem_host")
     # Spec version
     spec_major = ctypes.c_int()
     spec_minor = ctypes.c_int()
@@ -66,7 +76,7 @@ def get_version() -> Version:
                    nvshmem4py_version=__version__,
                    libnvshmem_version=f"{int(lib_major.value)}.{int(lib_minor.value)}.{lib_patch.value}") 
 
-def get_unique_id(empty=False) -> bindings.uniqueid:
+def get_unique_id(empty=False) -> UniqueID:
     """
     Retrieve or create a unique ID used for UID-based NVSHMEM initialization.
 
@@ -94,6 +104,12 @@ def get_unique_id(empty=False) -> bindings.uniqueid:
         ...
         >>> nvshmem.core.init(uid=uid, rank=rank, nranks=size, initializer_method="uid")
     """
+    # Load the nvshmemem host library
+    # Must happen before we use bindings
+    # We use this explicilty here because user is allowed to call get_unique_id before init is called
+    # Repeat calls during initwill be no-ops
+    load_nvidia_dynamic_lib("nvshmem_host")
+
     unique_id = bindings.uniqueid()
     if empty:
         return unique_id
@@ -130,6 +146,9 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         - UID-based init is useful for bootstrapping over non-MPI runtimes or custom transports.
         - Internally, this sets up a ``bindings.InitAttr()`` structure which is passed to
           the NVSHMEM host library.
+        - This function uses the ``cuda.core`` Pathfinder module to locate and load the NVSHMEM host library.
+          The documentation for this function, including the search order can be found at 
+          https://nvidia.github.io/cuda-python/cuda-pathfinder/latest/generated/cuda.pathfinder.load_nvidia_dynamic_lib.html#cuda.pathfinder.load_nvidia_dynamic_lib
 
     Example:
         >>> from mpi4py import MPI
@@ -141,6 +160,10 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
     """
     # If Device is None, that's ok.
     _cached_device["device"] = device
+
+    # Load the nvshmemem host library
+    # Must happen before we use bindings
+    load_nvidia_dynamic_lib("nvshmem_host")
 
     attr = bindings.InitAttr()
 
@@ -271,20 +294,107 @@ def finalize() -> None:
         >>> nvshmem.core.finalize()
     """
     logger.debug("nvshmem_finalize() called")
-    non_peer_bufs = []
-    for mr in _mr_references.values():
-        for ptr, buf in mr._mem_references.items():
-            if not buf["is_peer_buffer"] and buf["ref_count"] > 0:
-                logger.error(f"Found un-freed memory object with address {ptr} at fini time")
-                non_peer_bufs.append(buf)
-    if len(non_peer_bufs) > 0:
-        logger.error(f"Found {len(non_peer_bufs)} un-freed memory objects at fini time")
-
     memory._free_all_buffers()
 
     fini_status = bindings.hostlib_finalize()
     # Cybind converts the success status code to NoneType
     if fini_status != None:
         raise NvshmemError("Failed to finalize Hostlib")
+        
+def module_init(mod: NvshmemKernelObject) -> None:
+    """
+    Initialize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
 
-    nvshmem.core._internal_tracking._is_initialized["status"] = InternalInitStatus.DE_INITIALIZED
+    Typically, this is called once per uniquely compiled object, prior to launching the kernel. Internally, it can manage multiple init/finalize via refcounting.
+
+    The same object passed in here must be passed into the corresponding module_finalize call. This function modifies the object in place.
+
+    Args:
+        - mod (NvshmemKernelObject): The same object passed in here must be passed into the corresponding module_finalize call. This function modifies the object in place.
+
+    Raises:
+        NvshmemError: If the NVSHMEM module initialization fails.
+
+    Example:
+        >>> nvshmem.core.module_init(mod)
+    """
+    if mod.handle is None:
+        raise NvshmemInvalid("Invalid module type passed in")
+    status = bindings.cumodule_init(int(mod.handle))
+    print(f"CUmodule init status: {status}")
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to initialize CUmodule for NVSHMEM")
+
+def module_finalize(mod: NvshmemKernelObject) -> None:
+    """
+    Finalize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
+
+    This is called once per uniquely compiled object, post teardown of the kernel.
+
+    The user should pass the same NvshmemKernelObject that was passed to module_init into this function.
+
+    Args:
+        - mod (NvshmemKernelObject): The module that NVSHMEM will finalize
+
+    Raises:
+        NvshmemError: If the NVSHMEM module finalization fails.
+
+    Example:
+        >>> nvshmem.core.module_finalize(mod)
+    """
+    # At init time, we stored the handle of the loaded module
+    if mod.finalize_handle is None:
+        raise NvshmemInvalid("Module not initialized")
+    status = bindings.cumodule_finalize(int(mod.handle))
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to finalize CUmodule for NVSHMEM")
+
+def library_init(lib: NvshmemKernelObject) -> None:
+    """
+    Initialize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
+
+    Typically, this is called once per uniquely compiled object, prior to launching the kernel. Internally, it can manage multiple init/finalize via refcounting.
+
+    The same object passed in here must be passed into the corresponding library_finalize call. This function modifies the object in place.
+
+    Args:
+        - lib (NvshmemKernelObject): The library that NVSHMEM will initialize
+    
+    Raises:
+        NvshmemError: If the NVSHMEM module initialization fails.
+
+            The same object passed in here must be passed into the corresponding module_finalize call. This function modifies the object in place.
+
+    Example:
+        >>> nvshmem.core.module_init(mod)
+    """
+    if lib.handle is  None:
+        raise NvshmemInvalid("Invalid library type passed in")
+    status = bindings.culibrary_init(lib.handle)
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to initialize CULibrary for NVSHMEM")
+
+def library_finalize(lib: NvshmemKernelObject) -> None:
+    """
+    Finalize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
+
+    Typically, this is called once per uniquely compiled object, post teardown of the kernel. Internally, it can manage multiple init/finalize via refcounting.
+    
+    Args:
+        - lib (NvshmemKernelObject): The library that NVSHMEM will finalize
+
+    The user should pass the same NvshmemKernelObject that was passed to library_init into this function.
+
+    Raises:
+        NvshmemError: If the NVSHMEM module finalization fails.
+
+    Example:
+        >>> nvshmem.core.module_finalize(mod)
+    """
+    # At init time, we stored the handle of the loaded module
+    if lib.handle is None:
+        raise NvshmemInvalid("Library not initialized")
+    status = bindings.culibrary_finalize(int(lib.handle))
+    if status is not None and status != 0:
+        raise NvshmemError("Failed to finalize CULibrary for NVSHMEM")
+    

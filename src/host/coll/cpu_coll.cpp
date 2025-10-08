@@ -5,17 +5,17 @@
  */
 
 #include "cpu_coll.h"
-#include <assert.h>                                      // for assert
-#include <algorithm>                                     // for max
-#include <stdlib.h>                                      // for std
-#include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_opt...
-#include "device_host/nvshmem_types.h"                   // for gpu_coll_env...
+#include <assert.h>
+#include <stdlib.h>
+#include <algorithm>
+#include "bootstrap_host_transport/env_defs_internal.h"
+#include "device_host/nvshmem_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
-#include "internal/host/debug.h"             // for WARN
-#include "internal/host/nvshmem_internal.h"  // for nvshmemi_is_...
-#include "internal/host/util.h"              // for nvshmemi_opt...s
-#include "non_abi/nvshmem_build_options.h"   // for NVSHMEM_USE_...
-#include "non_abi/nvshmemx_error.h"          // for NVSHMEMI_WAR...
+#include "internal/host/debug.h"
+#include "internal/host/nvshmem_internal.h"
+#include "internal/host/util.h"
+#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/nvshmemx_error.h"
 
 #ifdef NVSHMEM_USE_NCCL
 #include <dlfcn.h>  // for dlsym, dlopen, RTLD...
@@ -34,6 +34,8 @@ struct nccl_function_table nccl_ftable;
 
 int nvshmemi_use_nccl = 0;
 int nccl_version;
+int nvshmemi_disable_ce_collectives;
+bool nvshmemi_disable_self_write_ce_coll;
 
 static int nvshmemi_coll_common_cpu_read_env() {
     int status = 0;
@@ -90,6 +92,9 @@ static int nvshmemi_coll_common_cpu_read_env() {
     nvshmemi_device_state.gpu_coll_env_params_var.reducescatter_algo =
         nvshmemi_options.REDUCESCATTER_ALGO;
     INFO(NVSHMEM_INIT, "ALGO: REDUCESCATTER_ALGO set to %d", nvshmemi_options.REDUCESCATTER_ALGO);
+
+    nvshmemi_disable_ce_collectives = nvshmemi_options.DISABLE_CE_COLLECTIVES;
+    nvshmemi_disable_self_write_ce_coll = nvshmemi_options.DISABLE_SELF_WRITE_CE_COLL;
     return status;
 }
 

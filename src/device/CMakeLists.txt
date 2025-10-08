@@ -72,6 +72,11 @@ else()
   set(LIB_CXX_STANDARD 17)
 endif()
 
+# CUTLASS needs C++ 17
+if(NVSHMEM_BUILD_WITH_CUTLASS)
+  set(LIB_CXX_STANDARD 17)
+endif()
+
 install(
   EXPORT NVSHMEMDeviceTargets
   NAMESPACE nvshmem::
@@ -93,18 +98,35 @@ install(
   PUBLIC_HEADER DESTINATION include
 )
 
+if (NVSHMEM_BUILD_WITH_CUTLASS)
+    target_compile_definitions(nvshmem_device PRIVATE CUTLASS_ENABLED)
+    if ("${CUTLASS_HOME}" STREQUAL "")
+        message(FATAL_ERROR "Please set CUTLASS_HOME to CUTLASS directory.")
+    endif()
+        set(CUTLASS_INCLUDE_DIR "${CUTLASS_HOME}/include")
+        set(CUTLASS_EXAMPLE_INCLUDE_DIR "${CUTLASS_HOME}/examples/common")
+        set(CUTLASS_UTIL_INCLUDE_DIR "${CUTLASS_HOME}/tools/util/include")
+
+    target_include_directories(nvshmem_device PUBLIC
+            ${CUTLASS_UTIL_INCLUDE_DIR}
+            ${CUTLASS_INCLUDE_DIR}
+            ${CUTLASS_EXAMPLE_INCLUDE_DIR})
+
+endif()
+
 set_target_properties(nvshmem_device
                       PROPERTIES POSITION_INDEPENDENT_CODE ON
                       CXX_STANDARD_REQUIRED ON
                       CUDA_STANDARD_REQUIRED ON
                       CXX_STANDARD "${LIB_CXX_STANDARD}"
-                      CUDA_STANDARD 11
+                      CUDA_STANDARD "${LIB_CXX_STANDARD}"
                       CUDA_SEPARABLE_COMPILATION ON
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../lib"
                       ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../lib"
 		      VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
 		      SOVERSION ${PROJECT_VERSION_MAJOR}
 )
+
 
 macro(nvshmem_library_set_base_config LIBNAME)
   target_compile_definitions(${LIBNAME}

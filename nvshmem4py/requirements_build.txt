@@ -11,3 +11,10 @@ testresources
 wheel
 auditwheel
 patchelf
+# The following are Numbast requirements
+pybind11
+pyyaml
+click
+scikit-build-core
+ninja
+numba-cuda[cu12]==0.20.0

@@ -5,16 +5,17 @@
  */
 
 #include "transport_ib_common.h"
-#include <assert.h>                            // for assert
-#include <cuda.h>                              // for CUdeviceptr, CU_MEM_RA...
-#include <cuda_runtime.h>                      // for cudaGetLastError, cuda...
-#include <dlfcn.h>                             // for dlclose, dlopen, RTLD_...
-#include <driver_types.h>                      // for cudaPointerAttributes
-#include <errno.h>                             // for errno
-#include <infiniband/verbs.h>                  // for IBV_ACCESS_LOCAL_WRITE
-#include <stdint.h>                            // for uintptr_t, uint64_t
-#include <string.h>                            // for strerror
-#include <unistd.h>                            // for access, close, sysconf
+#include <assert.h>            // for assert
+#include <cuda.h>              // for CUdeviceptr, CU_MEM_RA...
+#include <cuda_runtime.h>      // for cudaGetLastError, cuda...
+#include <dlfcn.h>             // for dlclose, dlopen, RTLD_...
+#include <driver_types.h>      // for cudaPointerAttributes
+#include <errno.h>             // for errno
+#include <infiniband/verbs.h>  // for IBV_ACCESS_LOCAL_WRITE
+#include <stdint.h>            // for uintptr_t, uint64_t
+#include <string.h>            // for strerror
+#include <unistd.h>            // for access, close, sysconf
+#include "device_host_transport/nvshmem_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
 #include "non_abi/nvshmemx_error.h"            // for NVSHMEMX_ERROR_INTERNAL
 #include "non_abi/nvshmem_build_options.h"     // for NVSHMEM_USE_MLX5DV
@@ -181,6 +182,307 @@ bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
     return true;
 out:
     return false;
+}
+
+int nvshmemt_ib_common_check_poll_avail(nvshmem_transport_t tcurr, nvshmemt_ib_common_ep_ptr_t ep,
+                                        nvshmemt_ib_wait_predicate_t wait_predicate) {
+    int status = 0;
+    uint32_t outstanding_count;
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)tcurr->state;
+    struct nvshmemt_ib_common_ep *common_ep = (struct nvshmemt_ib_common_ep *)ep;
+
+    assert(ib_state->qp_depth > 1);
+    if (wait_predicate == NVSHMEMT_IB_COMMON_WAIT_ANY) {
+        outstanding_count = (ib_state->qp_depth - 1);
+    } else if (wait_predicate == NVSHMEMT_IB_COMMON_WAIT_TWO) {
+        outstanding_count = (ib_state->qp_depth - 2);
+    } else if (wait_predicate == NVSHMEMT_IB_COMMON_WAIT_ALL) {
+        outstanding_count = 0;
+    } else {
+        outstanding_count = common_ep->head_op_id - common_ep->tail_op_id;
+    }
+
+    /* poll until space becomes available in local send qp */
+    while (((common_ep->head_op_id - common_ep->tail_op_id) > outstanding_count)) {
+        /* *second argument is a noop for now. */
+        status = ib_state->ib_transport_ftable->progress(tcurr, true);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "progress_send failed, outstanding_count: %d\n", outstanding_count);
+    }
+
+    if (ib_state->ib_transport_ftable->progress_recv) {
+        status = ib_state->ib_transport_ftable->progress_recv(tcurr, wait_predicate);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "progress_recv failed \n");
+    }
+
+out:
+    return status;
+}
+
+int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)tcurr->state;
+    nvshmemt_ib_common_ep_ptr_t ep;
+    int status = 0;
+    int n_pes = tcurr->n_pes;
+
+    if (pe == NVSHMEMX_PE_ANY) {
+        /* Loop over all PEs */
+        for (int pe_idx = 0; pe_idx < n_pes; pe_idx++) {
+            status = nvshmemt_ib_common_quiet(tcurr, pe_idx, qp_index);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "quiet failed for PE %d \n",
+                                  pe_idx);
+        }
+        return status;
+    }
+
+    if (qp_index == NVSHMEMX_QP_DEFAULT) {
+        /* Loop over all default QPs for this PE */
+        int default_qp_count = ib_state->options->IB_NUM_RC_PER_DEVICE;
+        for (int qp = 0; qp < default_qp_count; qp++) {
+            ep = nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp, pe);
+            if (ep) {
+                status =
+                    nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
+                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");
+            }
+        }
+    } else if (qp_index == NVSHMEMX_QP_ANY || qp_index == NVSHMEMX_QP_ALL) {
+        /* Loop over all QPs for this PE */
+        int total_qps = ib_state->next_qp_index;
+        for (int qp = 0; qp < total_qps; qp++) {
+            ep = nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp, pe);
+            if (ep) {
+                status =
+                    nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
+                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");
+            }
+        }
+    } else {
+        /* Single QP */
+        ep = nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+        if (ep) {
+            status = nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");
+        }
+    }
+
+out:
+    return status;
+}
+
+int nvshmemt_ib_common_fence(nvshmem_transport_t tcurr, int pe, int qp_index, int is_multi) {
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)tcurr->state;
+    int status = 0;
+    int n_pes = tcurr->n_pes;
+    bool multiple_qps = false;
+
+    if (pe == NVSHMEMX_PE_ANY) {
+        /* Loop over all PEs */
+        for (int pe_idx = 0; pe_idx < n_pes; pe_idx++) {
+            status = nvshmemt_ib_common_fence(tcurr, pe_idx, qp_index, is_multi);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "fence failed for PE %d \n",
+                                  pe_idx);
+        }
+        return status;
+    }
+
+    /* Check if this will result in fencing on more than one QP per PE */
+    if (qp_index == NVSHMEMX_QP_DEFAULT) {
+        multiple_qps = (ib_state->options->IB_NUM_RC_PER_DEVICE > 1);
+    } else if (qp_index == NVSHMEMX_QP_ANY || qp_index == NVSHMEMX_QP_ALL) {
+        multiple_qps = (ib_state->next_qp_index > 1);
+    }
+
+    if (multiple_qps || is_multi) {
+        /* Call quiet to ensure all operations complete before fencing */
+        status = nvshmemt_ib_common_quiet(tcurr, pe, qp_index);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "quiet failed \n");
+    }
+
+out:
+    return status;
+}
+
+int nvshmemt_ib_common_setup_cst_loopback(int dev_id, nvshmem_transport_t t) {
+    int status = 0;
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
+    struct nvshmemt_ib_common_ep_handle cst_ep_handle;
+
+    status = ib_state->ib_transport_ftable->ep_create(&ib_state->cst_ep, dev_id, t);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ep_create cst failed \n");
+
+    status = ib_state->ib_transport_ftable->ep_get_handle(&cst_ep_handle, ib_state->cst_ep);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ep_get_handle failed \n");
+
+    status = ib_state->ib_transport_ftable->ep_connect(ib_state->cst_ep, &cst_ep_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ep_connect failed \n");
+out:
+    return status;
+}
+
+int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
+                                         int num_selected_devs, int *out_qp_indices, int num_qps) {
+    /* transport side */
+    struct nvshmemt_ib_common_ep_handle *local_ep_handles = NULL, *ep_handles = NULL;
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
+    int n_pes = t->n_pes;
+    int status = 0;
+    int first_ep_idx;
+    bool is_initial_call = (ib_state->ep == NULL);
+
+    /* Calculate ep_count and total_eps based on call type */
+    int ep_count, total_eps, qps_to_create;
+
+    if (is_initial_call) {
+        /* Allow user to override IB_NUM_RC_PER_DEVICE if num_qps is provided */
+        if (num_qps > 0) {
+            ep_count = num_qps + 1; /* +1 for host EP */
+        } else {
+            ep_count = ib_state->options->IB_NUM_RC_PER_DEVICE + 1;
+        }
+        total_eps = n_pes * ep_count;
+        qps_to_create = ep_count;
+        ib_state->host_ep_index = NVSHMEMX_QP_HOST;
+        ib_state->selected_dev_id = selected_dev_ids[0];
+        ib_state->cur_ep_index = NVSHMEMX_QP_DEFAULT;
+        /* The initial call to connect endpoints will increment this to the first needed index*/
+        ib_state->next_qp_index = 0;
+        ib_state->cur_default_qp_index = NVSHMEMX_QP_DEFAULT;
+        ib_state->cur_any_qp_index = 0;
+
+        /* Allocate ep array for initial call */
+        ib_state->ep =
+            (nvshmemt_ib_common_ep_ptr_t *)calloc(total_eps, sizeof(nvshmemt_ib_common_ep_ptr_t));
+        NVSHMEMI_NULL_ERROR_JMP(ib_state->ep, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "failed allocating space for endpoints \n");
+        ib_state->ep_count = total_eps;
+    } else {
+        assert(out_qp_indices != NULL);
+        ep_count = num_qps;
+        total_eps = n_pes * num_qps;
+        qps_to_create = num_qps;
+
+        /* Reallocate ep array for additional QPs */
+        int new_total_eps = ib_state->ep_count + total_eps;
+        nvshmemt_ib_common_ep_ptr_t *new_ep_array = (nvshmemt_ib_common_ep_ptr_t *)realloc(
+            ib_state->ep, new_total_eps * sizeof(nvshmemt_ib_common_ep_ptr_t));
+        if (!new_ep_array) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                               "Failed to reallocate ep array\n");
+        }
+        ib_state->ep = new_ep_array;
+        ib_state->ep_count = new_total_eps;
+    }
+
+    /* Allocate handles */
+    local_ep_handles = (struct nvshmemt_ib_common_ep_handle *)calloc(
+        total_eps, sizeof(struct nvshmemt_ib_common_ep_handle));
+    NVSHMEMI_NULL_ERROR_JMP(local_ep_handles, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "failed allocating space for local ep handles \n");
+
+    ep_handles = (struct nvshmemt_ib_common_ep_handle *)calloc(
+        total_eps, sizeof(struct nvshmemt_ib_common_ep_handle));
+    NVSHMEMI_NULL_ERROR_JMP(ep_handles, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "failed allocating space for ep handles \n");
+
+    /* Create endpoints */
+    first_ep_idx = ib_state->next_qp_index / n_pes;
+    for (int i = first_ep_idx; i < first_ep_idx + qps_to_create; i++) {
+        for (int j = 0; j < n_pes; j++) {
+            int ep_idx = i * n_pes + j;
+            int handle_idx = j * qps_to_create + (i - first_ep_idx);
+
+            status = ib_state->ib_transport_ftable->ep_create(&ib_state->ep[ep_idx],
+                                                              ib_state->selected_dev_id, t);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "transport create ep failed \n");
+            status = ib_state->ib_transport_ftable->ep_get_handle(&local_ep_handles[handle_idx],
+                                                                  ib_state->ep[ep_idx]);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "transport get ep handle failed \n");
+        }
+    }
+
+    /* Exchange handles */
+    status = t->boot_handle->alltoall((void *)local_ep_handles, (void *)ep_handles,
+                                      sizeof(struct nvshmemt_ib_common_ep_handle) * qps_to_create,
+                                      t->boot_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "allgather of ep handles failed \n");
+
+    /* Connect endpoints */
+    for (int i = first_ep_idx; i < first_ep_idx + qps_to_create; i++) {
+        for (int j = 0; j < n_pes; j++) {
+            int ep_idx = i * n_pes + j;
+            int handle_idx = j * qps_to_create + (i - first_ep_idx);
+
+            status = ib_state->ib_transport_ftable->ep_connect(ib_state->ep[ep_idx],
+                                                               &ep_handles[handle_idx]);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "transport create connect failed \n");
+        }
+    }
+
+    /* Populate out_qp_indices array with QP numbers */
+    if (out_qp_indices != NULL) {
+        for (int i = 0; i < qps_to_create; i++) {
+            out_qp_indices[i] = ib_state->next_qp_index;
+            ib_state->next_qp_index += n_pes;
+        }
+    } else {
+        ib_state->next_qp_index += qps_to_create * n_pes;
+    }
+
+out:
+    if (status) {
+        if (is_initial_call) {
+            ib_state->selected_dev_id = -1;
+            if (ib_state->ep) {
+                free(ib_state->ep);
+                ib_state->ep = NULL;
+            }
+        }
+        if (local_ep_handles) free(local_ep_handles);
+        if (ep_handles) free(ep_handles);
+    }
+    return status;
+}
+
+nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,
+                                                                    int qp_index, int pe_index) {
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
+
+    if (qp_index == NVSHMEMX_QP_HOST) {
+        return ib_state->ep[ib_state->host_ep_index + pe_index];
+    } else if (qp_index == NVSHMEMX_QP_DEFAULT) {
+        /* Round robin over default QPs */
+        int default_qp_count = ib_state->options->IB_NUM_RC_PER_DEVICE;
+        int selected_qp = ib_state->cur_default_qp_index % (default_qp_count + 1);
+        assert(ib_state->cur_default_qp_index != NVSHMEMX_QP_HOST);
+        int next_qp_index = (ib_state->cur_default_qp_index + 1) % (default_qp_count + 1);
+        if (next_qp_index == NVSHMEMX_QP_HOST) {
+            next_qp_index = NVSHMEMX_QP_DEFAULT;
+        }
+        ib_state->cur_default_qp_index = next_qp_index;
+        return ib_state->ep[selected_qp * t->n_pes + pe_index];
+    } else if (qp_index == NVSHMEMX_QP_ANY) {
+        /* Round robin over all QPs except host */
+        /* QP indices are strided by the total number of PEs so we need to take that into account.
+         */
+        int total_qps = ib_state->next_qp_index / t->n_pes;
+        int selected_qp = ib_state->cur_any_qp_index % total_qps;
+        assert(ib_state->cur_any_qp_index != NVSHMEMX_QP_HOST);
+        ib_state->cur_any_qp_index = (ib_state->cur_any_qp_index + 1) % total_qps;
+        if (ib_state->cur_any_qp_index == NVSHMEMX_QP_HOST) {
+            ib_state->cur_any_qp_index = NVSHMEMX_QP_DEFAULT;
+        }
+        return ib_state->ep[selected_qp * t->n_pes + pe_index];
+    } else if (qp_index > NVSHMEMX_QP_DEFAULT && qp_index < ib_state->next_qp_index) {
+        /* qp indices greater than the default qp index are strided by the total number of pes */
+        return ib_state->ep[qp_index + pe_index];
+    }
+
+    return NULL;
 }
 
 int nvshmemt_ib_iface_get_mlx_path(ibv_device *dev, ibv_context *ctx, char **path,

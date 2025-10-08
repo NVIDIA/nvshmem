@@ -15,22 +15,6 @@ import nvshmem.core
 import os
 from cuda.core.experimental import Device, system
 
-###
-#  Helper code from https://github.com/NVIDIA/cuda-python/blob/main/cuda_core/examples/pytorch_example.py
-#  Used to extract PyTorch Stream into a cuda.core.Stream for NVSHMEM APIs
-###
-
-# Create a wrapper class that implements __cuda_stream__
-# Example of using https://nvidia.github.io/cuda-python/cuda-core/latest/interoperability.html#cuda-stream-protocol
-class PyTorchStreamWrapper:
-    def __init__(self, pt_stream):
-        self.pt_stream = pt_stream
-        self.handle = pt_stream.cuda_stream
-
-    def __cuda_stream__(self):
-        stream_id = self.pt_stream.cuda_stream
-        return (0, stream_id)  # Return format required by CUDA Python
-
 def torchrun_uid_init():
     """
     Initialize NVSHMEM using UniqueID with `torchrun` as the launcher
@@ -46,8 +30,7 @@ def torchrun_uid_init():
     dev.set_current()
     global stream
     # Get PyTorch's current stream
-    pt_stream = torch.cuda.current_stream()
-    stream = PyTorchStreamWrapper(pt_stream)
+    stream = nvshmem.core.NvshmemStream(torch.cuda.current_stream())
 
     # Initialize torch.distributed process group
     world_size = torch.cuda.device_count()

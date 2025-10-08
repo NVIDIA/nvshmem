@@ -17,7 +17,8 @@
 #include <getopt.h>
 #include "utils.h"
 
-__global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter) {
+__global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+                         int iter) {
     int i, peer;
     unsigned int counter;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
@@ -54,9 +55,109 @@ __global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, in
         }
         while (*(counter_d + 1) != i + 1)
             ;
+        nvshmem_quiet();
     }
     __syncthreads();
 }
+
+__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+                        int iter) {
+    int i, peer;
+    unsigned int counter;
+    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    int bid = blockIdx.x;
+    int nblocks = gridDim.x;
+    int nwarps_per_block = blockDim.x * blockDim.y * blockDim.z / warpSize;
+    int warpid = tid / warpSize;
+    size_t put_size_per_block = len / nblocks;
+    size_t put_size_per_warp = put_size_per_block / nwarps_per_block;
+
+    peer = !pe;
+    for (i = 0; i < iter; i++) {
+        nvshmemx_double_put_nbi_warp(
+            data_d + (bid * put_size_per_block + warpid * put_size_per_warp),
+            data_d + (bid * put_size_per_block + warpid * put_size_per_warp), put_size_per_warp,
+            peer);
+
+        // synchronizing across blocks
+        __syncthreads();
+        if (!tid) {
+            __threadfence();
+            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+            if (counter == (gridDim.x * (i + 1) - 1)) {
+                *(counter_d + 1) += 1;
+            }
+            while (*(counter_d + 1) != i + 1)
+                ;
+        }
+        __syncthreads();
+    }
+
+    // synchronize and call nvshme_quiet
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * (i + 1) - 1)) {
+            nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != i + 1)
+            ;
+        nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
+__global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+                          int iter) {
+    int i, peer;
+    unsigned int counter;
+    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    int bid = blockIdx.x;
+    int nblocks = gridDim.x;
+    int nthreads_per_block = blockDim.x * blockDim.y * blockDim.z;
+    size_t put_size_per_block = len / nblocks;
+    size_t put_size_per_thread = put_size_per_block / nthreads_per_block;
+
+    peer = !pe;
+    for (i = 0; i < iter; i++) {
+        nvshmem_double_put_nbi(data_d + (bid * put_size_per_block + tid * put_size_per_thread),
+                               data_d + (bid * put_size_per_block + tid * put_size_per_thread),
+                               put_size_per_thread, peer);
+
+        // synchronizing across blocks
+        __syncthreads();
+        if (!tid) {
+            __threadfence();
+            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+            if (counter == (gridDim.x * (i + 1) - 1)) {
+                *(counter_d + 1) += 1;
+            }
+            while (*(counter_d + 1) != i + 1)
+                ;
+        }
+        __syncthreads();
+    }
+
+    // synchronize and call nvshme_quiet
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * (i + 1) - 1)) {
+            nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != i + 1)
+            ;
+        nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
+typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+                        int iter);
 
 int main(int argc, char *argv[]) {
     int mype, npes;
@@ -72,6 +173,7 @@ int main(int argc, char *argv[]) {
     double *h_bw = NULL, *h_bw_total = NULL;
     double *d_bw = NULL, *d_bw_sum = NULL;
 
+    bw_fn_t bw_fn = bw_block;
     int iter = iters;
     int skip = warmup_iters;
 
@@ -89,6 +191,25 @@ int main(int argc, char *argv[]) {
     if (npes != 2) {
         fprintf(stderr, "This test requires exactly two processes \n");
         goto finalize;
+    }
+
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            bw_fn = bw_thread;
+            DEBUG_PRINT("Using thread-scope put\n");
+            break;
+        case NVSHMEM_WARP:
+            bw_fn = bw_warp;
+            DEBUG_PRINT("Using warp-scope put\n");
+            break;
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            bw_fn = bw_block;
+            DEBUG_PRINT("Using block-scope put\n");
+            break;
+        default:
+            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
+            goto finalize;
     }
 
     array_size = max_size_log;
@@ -129,13 +250,15 @@ int main(int argc, char *argv[]) {
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
             h_size_arr[i] = size;
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-            bw<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype, skip);
+            bw_fn<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype,
+                                               skip);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
 
             cudaEventRecord(start);
-            bw<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype, iter);
+            bw_fn<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype,
+                                               iter);
             cudaEventRecord(stop);
 
             CUDA_CHECK(cudaGetLastError());

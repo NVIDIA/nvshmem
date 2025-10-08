@@ -91,3 +91,7 @@ nvshmem4py/*.cmake
 nvshmem4py/nvshmem/bindings/*.cpp
 nvshmem4py/nvshmem/bindings/_internal/*.cpp
 nvshmem4py/*.egg-info
+nvshmem4py/pyproject.toml
+
+# Filesystem objects
+.DS_STORE
