@@ -84,7 +84,7 @@ struct nvshmemt_ib_common_ftable {
                          nvshmemt_ib_common_ep_ptr_t ep);
     int (*ep_connect)(nvshmemt_ib_common_ep_ptr_t ep,
                       struct nvshmemt_ib_common_ep_handle *ep_handle);
-    int (*progress)(nvshmem_transport_t tcurr, int is_proxy);
+    int (*progress)(nvshmem_transport_t tcurr);
     int (*progress_recv)(nvshmem_transport_t tcurr, nvshmemt_ib_wait_predicate_t wait_predicate);
 };
 

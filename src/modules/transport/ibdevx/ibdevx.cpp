@@ -976,7 +976,7 @@ out:
     return status;
 }
 
-int nvshmemt_ibdevx_progress(nvshmem_transport_t t, int is_proxy) {
+int nvshmemt_ibdevx_progress(nvshmem_transport_t t) {
     int status = 0;
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)t->state;
 

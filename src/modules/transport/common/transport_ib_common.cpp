@@ -205,7 +205,7 @@ int nvshmemt_ib_common_check_poll_avail(nvshmem_transport_t tcurr, nvshmemt_ib_c
     /* poll until space becomes available in local send qp */
     while (((common_ep->head_op_id - common_ep->tail_op_id) > outstanding_count)) {
         /* *second argument is a noop for now. */
-        status = ib_state->ib_transport_ftable->progress(tcurr, true);
+        status = ib_state->ib_transport_ftable->progress(tcurr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "progress_send failed, outstanding_count: %d\n", outstanding_count);
     }

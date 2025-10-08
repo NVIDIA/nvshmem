@@ -53,7 +53,7 @@ static uint64_t nvshmemt_g_bogus_bounce_buffer = 0;
 static bool use_gdrcopy = 0;
 static bool use_local_atomics = 0;
 
-int nvshmemt_ucx_progress(nvshmem_transport_t transport, int is_proxy);
+int nvshmemt_ucx_progress(nvshmem_transport_t transport);
 
 static nvshmemt_ucx_mem_handle_info_t *get_mem_handle_info(nvshmem_transport_t transport,
                                                            transport_ucx_state_t *ucx_state,
@@ -1033,11 +1033,11 @@ int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
     if (use_gdrcopy) {
         if (qp_index != NVSHMEMX_QP_HOST) {
             while (nvshmemt_ucx_submitted_proxy_atomics > nvshmemt_ucx_completed_proxy_atomics) {
-                nvshmemt_ucx_progress(tcurr, true);
+                nvshmemt_ucx_progress(tcurr);
             }
         } else {
             while (nvshmemt_ucx_submitted_host_atomics > nvshmemt_ucx_completed_host_atomics) {
-                nvshmemt_ucx_progress(tcurr, false);
+                nvshmemt_ucx_progress(tcurr);
             }
         }
     }
@@ -1065,7 +1065,7 @@ int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
     return 0;
 }
 
-int nvshmemt_ucx_progress(nvshmem_transport_t transport, int is_proxy) {
+int nvshmemt_ucx_progress(nvshmem_transport_t transport) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
 
     ucp_worker_progress(ucx_state->worker_context);
