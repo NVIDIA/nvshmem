@@ -183,8 +183,7 @@ int main(int argc, char **argv) {
                 abort();
         }
     }
-    size_t min_ints = min_size / sizeof(int);
-    assert(min_ints % num_blocks == 0);
+    assert((min_size / sizeof(int)) % num_blocks == 0);
 
     nvshmem_init();
 
