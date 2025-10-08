@@ -46,7 +46,7 @@ typedef const char *nvshmemi_env_string;
 #define NVSHFMT_long(_v) _v
 #define NVSHFMT_size(_v) _v
 #define NVSHFMT_bool(_v) (_v) ? "true" : "false"
-#define NVSHFMT_string(_v) _v
+#define NVSHFMT_string(_v) ((_v) ? (_v) : "")
 
 struct nvshmemi_options_s {
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC) nvshmemi_env_##KIND NAME;

@@ -37,8 +37,8 @@ static struct nvshmemi_options_s env_attr;
                 desc_wrapped = bootstrap_util_wrap_string(SHORT_DESC, 80, "\t", 1);                \
                 printf("  NVSHMEM_%-20s " BOOTPRI_##KIND " (type: %s, default: " BOOTPRI_##KIND    \
                        ")\n\t%s\n",                                                                \
-                       #NAME, NVSHFMT_##KIND(env_attr.NAME), #KIND, NVSHFMT_##KIND(DEFAULT),       \
-                       desc_wrapped);                                                              \
+                       #NAME, NVSHFMT_##KIND(env_attr.NAME) ? NVSHFMT_##KIND(env_attr.NAME) : "",  \
+                       #KIND, NVSHFMT_##KIND(DEFAULT), desc_wrapped);                              \
                 free(desc_wrapped);                                                                \
                 break;                                                                             \
             case BOOTSTRAP_OPTIONS_STYLE_RST:                                                      \
