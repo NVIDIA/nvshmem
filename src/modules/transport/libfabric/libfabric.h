@@ -184,6 +184,7 @@ typedef struct {
     nvshmemt_libfabric_endpoint_seq_counter_t put_signal_seq_counter;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
         *proxy_put_signal_comp_map;
+    int qp_index;
 } nvshmemt_libfabric_endpoint_t;
 
 typedef enum {
