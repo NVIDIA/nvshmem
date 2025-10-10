@@ -1440,46 +1440,6 @@ out:
     return status;
 }
 
-int nvshmemt_ibdevx_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
-    nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)tcurr->state;
-    struct ibdevx_ep *ep = (struct ibdevx_ep *)ibdevx_state->cst_ep;
-    struct ibdevx_rw_wqe *wqe;
-
-    int status = 0;
-
-    uintptr_t wqe_bb_idx_64 = ep->wqe_bb_idx;
-    uint32_t wqe_bb_idx_32 = ep->wqe_bb_idx;
-    size_t wqe_size;
-
-    wqe = (struct ibdevx_rw_wqe *)((char *)ep->wq_buf +
-                                   ((wqe_bb_idx_64 % get_ibdevx_qp_depth(ibdevx_state))
-                                    << NVSHMEMT_IBDEVX_WQE_BB_SHIFT));
-    wqe_size = sizeof(struct ibdevx_rw_wqe);
-    memset(wqe, 0, sizeof(struct ibdevx_rw_wqe));
-
-    wqe->ctrl.fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
-    wqe->ctrl.qpn_ds =
-        htobe32((uint32_t)(wqe_size / NVSHMEMT_IBDEVX_MLX5_SEND_WQE_DS) | ep->qpid << 8);
-    wqe->ctrl.opmod_idx_opcode = htobe32(MLX5_OPCODE_RDMA_READ | (wqe_bb_idx_32 << 8));
-
-    wqe->raddr.raddr = htobe64((uintptr_t)local_dummy_mr.mr->addr);
-    wqe->raddr.rkey = htobe32(local_dummy_mr.rkey);
-
-    wqe->data.data_seg.byte_count = htobe32((uint32_t)4);
-    wqe->data.data_seg.lkey = htobe32(local_dummy_mr.lkey);
-    wqe->data.data_seg.addr = htobe64((uintptr_t)local_dummy_mr.mr->addr);
-
-    assert(wqe_size <= MLX5_SEND_WQE_BB);
-    ep->wqe_bb_idx++;
-    nvshmemt_ibdevx_post_send(ep, (void *)wqe, 1);
-
-    status = nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");
-
-out:
-    return status;
-}
-
 // Using common fence and quiet functions from transport_ib_common
 
 int nvshmemt_ibdevx_ep_create(struct ibdevx_ep **ep, int devid, nvshmem_transport_t t,
@@ -1932,7 +1892,6 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.finalize = nvshmemt_ibdevx_finalize;
     transport->host_ops.show_info = nvshmemt_ibdevx_show_info;
     transport->host_ops.progress = nvshmemt_ibdevx_progress;
-    transport->host_ops.enforce_cst = nvshmemt_ibdevx_enforce_cst_at_target;
     transport->host_ops.put_signal = nvshmemt_put_signal;
 
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;

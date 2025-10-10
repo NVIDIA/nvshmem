@@ -148,7 +148,6 @@ struct nvshmem_transport_host_ops {
     fence_handle fence;
     quiet_handle quiet;
     put_signal_handle put_signal;
-    int (*enforce_cst)(struct nvshmem_transport *transport);
     int (*enforce_cst_at_target)(struct nvshmem_transport *transport);
     int (*add_device_remote_mem_handles)(struct nvshmem_transport *transport, int transport_stride,
                                          nvshmem_mem_handle_t *mem_handles, uint64_t heap_offset,

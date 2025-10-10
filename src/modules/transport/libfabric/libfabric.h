@@ -278,11 +278,6 @@ typedef struct {
     struct fid_domain *domain;
     struct fid_av *addresses[NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS];
     nvshmemt_libfabric_endpoint_t *eps;
-    /* local_mr is used only for consistency ops. */
-    struct fid_mr *local_mr[2];
-    uint64_t local_mr_key[2];
-    void *local_mr_desc[2];
-    void *local_mem_ptr;
     nvshmemt_libfabric_domain_name_t *domain_names;
     int num_domains;
     nvshmemt_libfabric_provider provider;

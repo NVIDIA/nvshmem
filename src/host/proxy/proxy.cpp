@@ -686,51 +686,23 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
 }
 
 void enforce_cst(proxy_state_t *proxy_state) {
-#if defined(NVSHMEM_X86_64)
-    nvshmemi_state_t *state = proxy_state->nvshmemi_state;
-#endif
-
     int status = 0;
 
     if (nvshmemi_options.BYPASS_FLUSH) return;
 
-    if (proxy_state->is_consistency_api_supported) {
-        if (CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER > proxy_state->gdr_device_native_ordering &&
-            CUPFN(nvshmemi_cuda_syms, cuFlushGPUDirectRDMAWrites)) {
-            status =
-                CUPFN(nvshmemi_cuda_syms,
-                      cuFlushGPUDirectRDMAWrites(CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TARGET_CURRENT_CTX,
-                                                 CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER));
-            /** We would want to use cudaFlushGPUDirectRDMAWritesToAllDevices when we enable
-                consistent access of data on any GPU (and not just self GPU) with
-               wait_until, quiet, barrier, etc. **/
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_EXIT("cuFlushGPUDirectRDMAWrites() failed in the proxy thread \n");
-            }
-        }
-        return;
-    }
-#if defined(NVSHMEM_PPC64LE)
-    status = cudaEventRecord(proxy_state->cuev, proxy_state->stream);
-    if (unlikely(status != CUDA_SUCCESS)) {
-        NVSHMEMI_ERROR_EXIT("cuEventRecord() failed in the proxy thread \n");
-    }
-#elif defined(NVSHMEM_X86_64)
-    for (int i = 0; i < state->num_initialized_transports; i++) {
-        if (!((state->transport_bitmap) & (1 << i))) continue;
-        struct nvshmem_transport *tcurr = state->transports[i];
-        if (!tcurr->host_ops.enforce_cst) continue;
-
-        // assuming the transport is connected - IB RC
-        if (tcurr->attr & NVSHMEM_TRANSPORT_ATTR_CONNECTED) {
-            status = tcurr->host_ops.enforce_cst(tcurr);
-            if (status) {
-                NVSHMEMI_ERROR_PRINT("aborting due to error in progress_cst \n");
-                exit(-1);
-            }
+    if (CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER > proxy_state->gdr_device_native_ordering &&
+        CUPFN(nvshmemi_cuda_syms, cuFlushGPUDirectRDMAWrites)) {
+        status =
+            CUPFN(nvshmemi_cuda_syms,
+                  cuFlushGPUDirectRDMAWrites(CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TARGET_CURRENT_CTX,
+                                             CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER));
+        /** We would want to use cudaFlushGPUDirectRDMAWritesToAllDevices when we enable
+            consistent access of data on any GPU (and not just self GPU) with
+           wait_until, quiet, barrier, etc. **/
+        if (status != CUDA_SUCCESS) {
+            NVSHMEMI_ERROR_EXIT("cuFlushGPUDirectRDMAWrites() failed in the proxy thread \n");
         }
     }
-#endif
 }
 
 inline void quiet_ack_channels(proxy_state_t *proxy_state) {
