@@ -608,7 +608,7 @@ out:
     return NVSHMEMX_SUCCESS;
 }
 
-int nvshmemt_ibgda_progress(nvshmem_transport_t t, int is_proxy) {
+int nvshmemt_ibgda_progress(nvshmem_transport_t t) {
     int status = 0;
     status = ibgda_dci_progress(t);
     if (status) return status;

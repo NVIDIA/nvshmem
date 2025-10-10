@@ -1425,7 +1425,7 @@ void progress_transports(proxy_state_t *proxy_state) {
 
         if (tcurr->host_ops.progress == NULL) continue;
 
-        status = tcurr->host_ops.progress(tcurr, 1);
+        status = tcurr->host_ops.progress(tcurr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "transport %d progress failed \n", i);
     }
