@@ -1075,8 +1075,6 @@ static int nvshmemt_libfabric_enforce_cst(struct nvshmem_transport *tcurr) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     uint64_t num_retries = 0;
     int status;
-    int target_ep;
-    int mype = tcurr->my_pe;
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gdrcopy) {
@@ -1098,7 +1096,6 @@ static int nvshmemt_libfabric_enforce_cst(struct nvshmem_transport *tcurr) {
 skip:
 #endif
 
-    target_ep = mype * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
     do {
         struct fi_msg_rma msg;
         struct iovec l_iov;
@@ -1132,7 +1129,7 @@ skip:
         /* This try_again makes an assumption that enforce_cst is only for proxy threaded ops*/
     } while (try_again(tcurr, &status, &num_retries, 1));
 
-    libfabric_state->eps[target_ep].submitted_ops++;
+    libfabric_state->eps[NVSHMEMT_LIBFABRIC_PROXY_EP_IDX].submitted_ops++;
     return status;
 }
 
