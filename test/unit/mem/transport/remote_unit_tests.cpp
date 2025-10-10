@@ -258,7 +258,6 @@ nvshmem_transport_host_ops initialize_nvshmem_transport_host_ops() {
         .fence = NULL,
         .quiet = NULL,
         .put_signal = NULL,
-        .enforce_cst = NULL,
         .enforce_cst_at_target = NULL,
         .add_device_remote_mem_handles = &add_device_remote_mem_handles};
 
