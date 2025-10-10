@@ -1071,71 +1071,6 @@ out:
     return status;
 }
 
-static int nvshmemt_libfabric_enforce_cst(struct nvshmem_transport *tcurr) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
-    uint64_t num_retries = 0;
-    int status;
-    int target_ep;
-    int mype = tcurr->my_pe;
-
-#ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
-        if (libfabric_state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_SLINGSHOT) {
-            int temp;
-            nvshmemt_libfabric_memhandle_info_t *mem_handle_info;
-
-            mem_handle_info =
-                (nvshmemt_libfabric_memhandle_info_t *)nvshmemt_mem_handle_cache_get_by_idx(
-                    libfabric_state->cache, 0);
-            if (!mem_handle_info) {
-                goto skip;
-            }
-            gdrcopy_ftable.copy_from_mapping(mem_handle_info->mh, &temp, mem_handle_info->cpu_ptr,
-                                             sizeof(int));
-        }
-    }
-
-skip:
-#endif
-
-    target_ep = mype * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    do {
-        struct fi_msg_rma msg;
-        struct iovec l_iov;
-        struct fi_rma_iov r_iov;
-        void *desc = libfabric_state->local_mr_desc[NVSHMEMT_LIBFABRIC_PROXY_EP_IDX];
-        uint64_t flags = 0;
-
-        memset(&msg, 0, sizeof(struct fi_msg_rma));
-        memset(&l_iov, 0, sizeof(struct iovec));
-        memset(&r_iov, 0, sizeof(struct fi_rma_iov));
-
-        l_iov.iov_base = libfabric_state->local_mem_ptr;
-        l_iov.iov_len = 8;
-
-        r_iov.addr = 0;  // Zero offset
-        r_iov.len = 8;
-        r_iov.key = libfabric_state->local_mr_key[NVSHMEMT_LIBFABRIC_PROXY_EP_IDX];
-
-        msg.msg_iov = &l_iov;
-        msg.desc = &desc;
-        msg.iov_count = 1;
-        msg.rma_iov = &r_iov;
-        msg.rma_iov_count = 1;
-        msg.context = NULL;
-        msg.data = 0;
-
-        if (libfabric_state->prov_info->caps & FI_FENCE) flags |= FI_FENCE;
-
-        status =
-            fi_readmsg(libfabric_state->eps[NVSHMEMT_LIBFABRIC_PROXY_EP_IDX].endpoint, &msg, flags);
-        /* This try_again makes an assumption that enforce_cst is only for proxy threaded ops*/
-    } while (try_again(tcurr, &status, &num_retries, 1));
-
-    libfabric_state->eps[target_ep].submitted_ops++;
-    return status;
-}
-
 static int nvshmemt_libfabric_release_mem_handle(nvshmem_mem_handle_t *mem_handle,
                                                  nvshmem_transport_t t) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)t->state;
@@ -1177,9 +1112,6 @@ static int nvshmemt_libfabric_release_mem_handle(nvshmem_mem_handle_t *mem_handl
         max_reg = 1;
 
     for (int i = 0; i < max_reg; i++) {
-        if (libfabric_state->local_mr[i] == fabric_handle->hdls[i].mr)
-            libfabric_state->local_mr[i] = NULL;
-
         int status = fi_close(&fabric_handle->hdls[i].mr->fid);
         if (status) {
             NVSHMEMI_WARN_PRINT("Error releasing mem handle idx %d (%d): %s\n", i, status,
@@ -1357,15 +1289,6 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
                                   "Unable to add key to mem handle info cache");
             curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
         } while (curr_ptr < (char *)buf + length);
-    }
-
-    if (libfabric_state->local_mr[0] == NULL && !local_only) {
-        for (int i = 0; i < NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS; i++) {
-            libfabric_state->local_mr[i] = fabric_handle->hdls[i].mr;
-            libfabric_state->local_mr_key[i] = fabric_handle->hdls[i].key;
-            libfabric_state->local_mr_desc[i] = fabric_handle->hdls[i].local_desc;
-        }
-        libfabric_state->local_mem_ptr = buf;
     }
 
 out:
@@ -2100,8 +2023,6 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.finalize = nvshmemt_libfabric_finalize;
     transport->host_ops.show_info = nvshmemt_libfabric_show_info;
     transport->host_ops.progress = nvshmemt_libfabric_progress;
-    transport->host_ops.enforce_cst = nvshmemt_libfabric_enforce_cst;
-
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
     transport->is_successfully_initialized = true;
 

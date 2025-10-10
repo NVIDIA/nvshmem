@@ -1179,67 +1179,6 @@ int nvshmemt_ucx_finalize(nvshmem_transport_t transport) {
     return 0;
 }
 
-int nvshmemt_ucx_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
-    transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)tcurr->state;
-    nvshmemt_ucx_mem_handle_info_t *mem_handle_info;
-
-    mem_handle_info =
-        (nvshmemt_ucx_mem_handle_info_t *)nvshmemt_mem_handle_cache_get_by_idx(ucx_state->cache, 0);
-
-    if (!mem_handle_info) return 0;
-#ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
-        int temp;
-        gdrcopy_ftable.copy_from_mapping(mem_handle_info->mh, &temp, mem_handle_info->cpu_ptr,
-                                         sizeof(int));
-        return 0;
-    }
-#endif
-    int mype = tcurr->my_pe;
-    int ep_index = (ucx_state->ep_count * mype + ucx_state->proxy_ep_idx);
-    ucp_ep_h ep = ucx_state->endpoints[ep_index];
-    ucp_request_param_t param;
-    ucs_status_ptr_t ucs_ptr_rc = NULL;
-    ucs_status_t ucs_rc;
-    nvshmemt_ucx_mem_handle_t *mem_handle;
-    ucp_rkey_h rkey;
-    int local_int;
-
-    mem_handle = mem_handle_info->mem_handle;
-    if (unlikely(mem_handle->ep_rkey_host == NULL)) {
-        ucs_rc = ucp_ep_rkey_unpack(ep, mem_handle->rkey_packed_buf, &mem_handle->ep_rkey_host);
-        if (ucs_rc != UCS_OK) {
-            NVSHMEMI_ERROR_EXIT("Unable to unpack rkey in UCS transport! Exiting.\n");
-        }
-    }
-    rkey = mem_handle->ep_rkey_host;
-
-    param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
-    param.cb.send = nvshmemt_ucx_send_request_cb;
-
-    ucs_ptr_rc =
-        ucp_get_nbx(ep, &local_int, sizeof(int), (uint64_t)mem_handle_info->ptr, rkey, &param);
-
-    /* Wait for completion of get. */
-    if (ucs_ptr_rc != NULL) {
-        if (UCS_PTR_IS_ERR(ucs_ptr_rc)) {
-            NVSHMEMI_ERROR_PRINT("UCX CST request completed with error.\n");
-            return NVSHMEMX_ERROR_INTERNAL;
-        } else {
-            do {
-                ucs_rc = ucp_request_check_status(ucs_ptr_rc);
-                ucp_worker_progress(ucx_state->worker_context);
-            } while (ucs_rc == UCS_INPROGRESS);
-            if (ucs_rc != UCS_OK) {
-                NVSHMEMI_ERROR_PRINT("UCX CST request completed with error.\n");
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-        }
-    }
-
-    return 0;
-}
-
 int nvshmemt_ucx_show_info(struct nvshmem_transport *transport, int style) {
     NVSHMEMI_ERROR_PRINT("UCX show info not implemented");
     return 0;
@@ -1445,7 +1384,6 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.finalize = nvshmemt_ucx_finalize;
     transport->host_ops.show_info = nvshmemt_ucx_show_info;
     transport->host_ops.progress = nvshmemt_ucx_progress;
-    transport->host_ops.enforce_cst = nvshmemt_ucx_enforce_cst_at_target;
     transport->host_ops.enforce_cst_at_target = NULL;
     transport->host_ops.put_signal = nvshmemt_put_signal;
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
