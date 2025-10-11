@@ -139,9 +139,10 @@ macro(nvshmem_library_set_base_config LIBNAME)
 
   target_compile_options(${LIBNAME}
     INTERFACE $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${NVSHMEM_VERBOSE}>>:-Xptxas -v>
-    PRIVATE $<IF:$<CONFIG:Debug>,-O0;-g;,-O3>
+    PRIVATE $<IF:$<CONFIG:debug>,-O0;-g,-O3>
     $<$<AND:$<BOOL:${NVSHMEM_VERBOSE}>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -v>
-    $<IF:$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>,-O0;-g;-G;,-O3>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:debug>>:-O0;-g;-G>
+    $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:release>>:-O3>
     $<IF:$<STREQUAL:${CMAKE_HOST_SYSTEM_PROCESSOR},"x86_64">,-msse,>
     $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${NVCC_THREADS}>>:-t4>
   )
