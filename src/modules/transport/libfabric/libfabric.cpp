@@ -1440,9 +1440,10 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     int n_pes = t->n_pes;
 
     if (state->eps) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out_already_connected,
-                           "Device already selected. libfabric only supports"
-                           " one NIC per PE.\n");
+        NVSHMEMI_WARN_PRINT(
+            "Device already selected. libfabric only supports one NIC per PE and doesn't support "
+            "additional QPs.\n");
+        goto out_already_connected;
     }
 
     state->eps = (nvshmemt_libfabric_endpoint_t *)calloc(NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS,

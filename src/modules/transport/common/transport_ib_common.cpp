@@ -239,7 +239,7 @@ int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_ind
         /* Loop over all default QPs for this PE */
         int default_qp_count = ib_state->options->IB_NUM_RC_PER_DEVICE;
         for (int qp = 0; qp < default_qp_count; qp++) {
-            ep = nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp, pe);
+            ep = ib_state->ep[(qp + 1) * n_pes + pe];
             if (ep) {
                 status =
                     nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
@@ -248,9 +248,9 @@ int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_ind
         }
     } else if (qp_index == NVSHMEMX_QP_ANY || qp_index == NVSHMEMX_QP_ALL) {
         /* Loop over all QPs for this PE */
-        int total_qps = ib_state->next_qp_index;
-        for (int qp = 0; qp < total_qps; qp++) {
-            ep = nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp, pe);
+        int total_qps = ib_state->next_qp_index / n_pes;
+        for (int qp = 1; qp < total_qps; qp++) {
+            ep = ib_state->ep[qp * n_pes + pe];
             if (ep) {
                 status =
                     nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
@@ -451,7 +451,6 @@ out:
 nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,
                                                                     int qp_index, int pe_index) {
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
-
     if (qp_index == NVSHMEMX_QP_HOST) {
         return ib_state->ep[ib_state->host_ep_index + pe_index];
     } else if (qp_index == NVSHMEMX_QP_DEFAULT) {

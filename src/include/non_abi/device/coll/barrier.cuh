@@ -235,7 +235,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_barrier_threadgroup(nvshm
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     nvshmemi_threadgroup_sync<SCOPE>();
     if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
-        nvshmemi_transfer_quiet<SCOPE>(true);
+        nvshmemi_transfer_quiet<SCOPE>(true, NVSHMEMX_PE_ANY, NULL, NVSHMEMX_QP_ALL);
     } else if (!myIdx) {
         __threadfence_system();
     }

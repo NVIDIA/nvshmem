@@ -438,9 +438,10 @@ int nvshmemt_ucx_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
     ucx_state->proxy_ep_idx = MAX_TRANSPORT_EP_COUNT;
 
     if (ucx_state->endpoints != NULL) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out_already_connected,
-                           "Device already selected. ucx only supports"
-                           " one NIC per PE.\n");
+        NVSHMEMI_WARN_PRINT(
+            "Device already selected. ucx only supports one NIC per PE and doesn't support "
+            "additional QPs.\n");
+        goto out_already_connected;
     }
 
     ucx_state->endpoints = (ucp_ep_h *)calloc(n_pes * ep_count, sizeof(ucp_ep_h));

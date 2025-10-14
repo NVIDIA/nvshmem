@@ -814,7 +814,7 @@ inline void progress_quiet(proxy_state_t *proxy_state) {
 
             tcurr = proxy_state->transport[i];
             if (tcurr == NULL) continue;
-            status = tcurr->host_ops.quiet(tcurr, i, NVSHMEMX_QP_DEFAULT);
+            status = tcurr->host_ops.quiet(tcurr, i, NVSHMEMX_QP_ALL);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in progress_quiet \n");
                 exit(-1);
