@@ -1,7 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENSE.txt for license information
+ * See License.txt for license information
  ************************************************************************/
 
 #ifndef NVSHMEM_CUDAWRAP_H

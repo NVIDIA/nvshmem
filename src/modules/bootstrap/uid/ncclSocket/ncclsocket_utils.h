@@ -1,7 +1,7 @@
 /*************************************************************************
  * Copyright (c) 2016-2025, NVIDIA CORPORATION. All rights reserved.
  *
- * See LICENSE.txt for license information
+ * See License.txt for license information
  ************************************************************************/
 
 #ifndef NCCL_SOCKET_UTILS_H_

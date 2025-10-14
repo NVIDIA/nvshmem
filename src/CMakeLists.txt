@@ -826,7 +826,7 @@ if(NVSHMEM_BUILD_PACKAGES AND NVSHMEM_BUILD_HYDRA_LAUNCHER)
                                ${CMAKE_CURRENT_BINARY_DIR}/bin/nvshmrun
                                ${CMAKE_CURRENT_BINARY_DIR}/bin/nvshmrun.hydra
                   )
-  add_dependencies(nvshmem git_commit hydra)
+  add_dependencies(nvshmem_host git_commit hydra)
 endif()
 add_dependencies(nvshmem_host nvshmem_device_project-build)
 
