@@ -32,7 +32,8 @@ endif()
 # addNumbast target is only executed in build_source_pkg instance. In subsequent
 # steps, we exclude addNumbast from source file. The following step skips
 # addNumbast target for all subsequent steps.
-if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+# Skip bindings if they are already generated
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py")
     include(cmake/addNumbast.cmake)
     AddNumbast(
         GIT_TAG "v0.5.2"

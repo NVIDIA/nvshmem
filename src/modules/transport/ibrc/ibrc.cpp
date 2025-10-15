@@ -1449,10 +1449,12 @@ int nvshmemt_ibrc_ep_connect_wrapper(nvshmemt_ib_common_ep_ptr_t ep,
     return nvshmemt_ibrc_ep_connect((struct ibrc_ep *)ep, ep_handle);
 }
 
+#ifdef NVSHMEM_USE_GDRCOPY
 int progress_recv_wrapper(nvshmem_transport_t tcurr, nvshmemt_ib_wait_predicate_t wait_predicate) {
     nvshmemt_ib_common_state_t ibrc_state = (nvshmemt_ib_common_state_t)tcurr->state;
     return progress_recv(tcurr, ibrc_state, wait_predicate);
 }
+#endif
 
 int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, int api_version) {
     int status = 0;
