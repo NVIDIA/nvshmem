@@ -95,3 +95,4 @@ nvshmem4py/pyproject.toml
 
 # Filesystem objects
 .DS_STORE
+.nfs*
