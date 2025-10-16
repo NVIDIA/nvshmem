@@ -6,7 +6,7 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
-# See COPYRIGHT.txt for license information
+# See License.txt for license information
 
 __all__ = [ "atomic_inc", "atomic_fetch_inc", "atomic_fetch", "atomic_set", "atomic_add", "atomic_fetch_add", "atomic_and", "atomic_fetch_and", "atomic_or", "atomic_fetch_or", "atomic_xor", "atomic_fetch_xor", "atomic_swap", "atomic_compare_swap" ]
 

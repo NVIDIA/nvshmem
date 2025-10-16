@@ -30,6 +30,9 @@ cdef extern from "<dlfcn.h>" nogil:
 
     const void* RTLD_DEFAULT 'RTLD_DEFAULT'
 
+cdef extern from "<limits.h>":
+    cdef int INT16_MAX
+
 
 ###############################################################################
 # Wrapper init
@@ -37,6 +40,8 @@ cdef extern from "<dlfcn.h>" nogil:
 
 cdef bint __py_nvshmem_init = False
 
+cdef void* __nvshmem_barrier = NULL
+cdef void* __nvshmem_barrier_all = NULL
 cdef void* __nvshmemx_init_status = NULL
 cdef void* __nvshmem_my_pe = NULL
 cdef void* __nvshmem_n_pes = NULL
@@ -50,8 +55,13 @@ cdef void* __nvshmem_ptr = NULL
 cdef void* __nvshmemx_mc_ptr = NULL
 cdef void* __nvshmem_team_my_pe = NULL
 cdef void* __nvshmem_team_n_pes = NULL
-cdef void* __nvshmem_barrier = NULL
-cdef void* __nvshmem_barrier_all = NULL
+cdef void* __nvshmem_team_get_config = NULL
+cdef void* __nvshmem_team_translate_pe = NULL
+cdef void* __nvshmem_team_split_strided = NULL
+cdef void* __nvshmemx_team_get_uniqueid = NULL
+cdef void* __nvshmemx_team_init = NULL
+cdef void* __nvshmem_team_split_2d = NULL
+cdef void* __nvshmem_team_destroy = NULL
 cdef void* __nvshmemx_bfloat16_alltoall_on_stream = NULL
 cdef void* __nvshmemx_half_alltoall_on_stream = NULL
 cdef void* __nvshmemx_float_alltoall_on_stream = NULL
@@ -72,7 +82,9 @@ cdef void* __nvshmemx_uint32_alltoall_on_stream = NULL
 cdef void* __nvshmemx_uint64_alltoall_on_stream = NULL
 cdef void* __nvshmemx_size_alltoall_on_stream = NULL
 cdef void* __nvshmemx_barrier_on_stream = NULL
+cdef void* __nvshmemx_barrier_all_on_stream = NULL
 cdef void* __nvshmemx_team_sync_on_stream = NULL
+cdef void* __nvshmemx_sync_all_on_stream = NULL
 cdef void* __nvshmemx_bfloat16_broadcast_on_stream = NULL
 cdef void* __nvshmemx_half_broadcast_on_stream = NULL
 cdef void* __nvshmemx_float_broadcast_on_stream = NULL
@@ -232,10 +244,15 @@ cdef void* __nvshmemx_set_attr_mpi_comm_args = NULL
 cdef void* __nvshmemx_get_uniqueid = NULL
 cdef void* __nvshmemx_cumodule_init = NULL
 cdef void* __nvshmemx_cumodule_finalize = NULL
+cdef void* __nvshmemx_buffer_register_symmetric = NULL
+cdef void* __nvshmemx_buffer_unregister_symmetric = NULL
+cdef void* __nvshmemx_culibrary_init = NULL
+cdef void* __nvshmemx_culibrary_finalize = NULL
 cdef void* __nvshmemx_putmem_on_stream = NULL
 cdef void* __nvshmemx_putmem_signal_on_stream = NULL
 cdef void* __nvshmemx_getmem_on_stream = NULL
 cdef void* __nvshmemx_quiet_on_stream = NULL
+cdef void* __nvshmemx_signal_op_on_stream = NULL
 cdef void* __nvshmemx_signal_wait_until_on_stream = NULL
 
 
@@ -256,6 +273,20 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
 
     # Load function
     cdef void* handle = NULL
+    global __nvshmem_barrier
+    __nvshmem_barrier = dlsym(RTLD_DEFAULT, 'nvshmem_barrier')
+    if __nvshmem_barrier == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_barrier = dlsym(handle, 'nvshmem_barrier')
+
+    global __nvshmem_barrier_all
+    __nvshmem_barrier_all = dlsym(RTLD_DEFAULT, 'nvshmem_barrier_all')
+    if __nvshmem_barrier_all == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_barrier_all = dlsym(handle, 'nvshmem_barrier_all')
+
     global __nvshmemx_init_status
     __nvshmemx_init_status = dlsym(RTLD_DEFAULT, 'nvshmemx_init_status')
     if __nvshmemx_init_status == NULL:
@@ -347,19 +378,54 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmem_team_n_pes = dlsym(handle, 'nvshmem_team_n_pes')
 
-    global __nvshmem_barrier
-    __nvshmem_barrier = dlsym(RTLD_DEFAULT, 'nvshmem_barrier')
-    if __nvshmem_barrier == NULL:
+    global __nvshmem_team_get_config
+    __nvshmem_team_get_config = dlsym(RTLD_DEFAULT, 'nvshmem_team_get_config')
+    if __nvshmem_team_get_config == NULL:
         if handle == NULL:
             handle = load_library()
-        __nvshmem_barrier = dlsym(handle, 'nvshmem_barrier')
+        __nvshmem_team_get_config = dlsym(handle, 'nvshmem_team_get_config')
 
-    global __nvshmem_barrier_all
-    __nvshmem_barrier_all = dlsym(RTLD_DEFAULT, 'nvshmem_barrier_all')
-    if __nvshmem_barrier_all == NULL:
+    global __nvshmem_team_translate_pe
+    __nvshmem_team_translate_pe = dlsym(RTLD_DEFAULT, 'nvshmem_team_translate_pe')
+    if __nvshmem_team_translate_pe == NULL:
         if handle == NULL:
             handle = load_library()
-        __nvshmem_barrier_all = dlsym(handle, 'nvshmem_barrier_all')
+        __nvshmem_team_translate_pe = dlsym(handle, 'nvshmem_team_translate_pe')
+
+    global __nvshmem_team_split_strided
+    __nvshmem_team_split_strided = dlsym(RTLD_DEFAULT, 'nvshmem_team_split_strided')
+    if __nvshmem_team_split_strided == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_team_split_strided = dlsym(handle, 'nvshmem_team_split_strided')
+
+    global __nvshmemx_team_get_uniqueid
+    __nvshmemx_team_get_uniqueid = dlsym(RTLD_DEFAULT, 'nvshmemx_team_get_uniqueid')
+    if __nvshmemx_team_get_uniqueid == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_team_get_uniqueid = dlsym(handle, 'nvshmemx_team_get_uniqueid')
+
+    global __nvshmemx_team_init
+    __nvshmemx_team_init = dlsym(RTLD_DEFAULT, 'nvshmemx_team_init')
+    if __nvshmemx_team_init == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_team_init = dlsym(handle, 'nvshmemx_team_init')
+
+    global __nvshmem_team_split_2d
+    __nvshmem_team_split_2d = dlsym(RTLD_DEFAULT, 'nvshmem_team_split_2d')
+    if __nvshmem_team_split_2d == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_team_split_2d = dlsym(handle, 'nvshmem_team_split_2d')
+
+    global __nvshmem_team_destroy
+    __nvshmem_team_destroy = dlsym(RTLD_DEFAULT, 'nvshmem_team_destroy')
+    if __nvshmem_team_destroy == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_team_destroy = dlsym(handle, 'nvshmem_team_destroy')
 
     global __nvshmemx_bfloat16_alltoall_on_stream
     __nvshmemx_bfloat16_alltoall_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_bfloat16_alltoall_on_stream')
@@ -501,12 +567,26 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_barrier_on_stream = dlsym(handle, 'nvshmemx_barrier_on_stream')
 
+    global __nvshmemx_barrier_all_on_stream
+    __nvshmemx_barrier_all_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_barrier_all_on_stream')
+    if __nvshmemx_barrier_all_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_barrier_all_on_stream = dlsym(handle, 'nvshmemx_barrier_all_on_stream')
+
     global __nvshmemx_team_sync_on_stream
     __nvshmemx_team_sync_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_team_sync_on_stream')
     if __nvshmemx_team_sync_on_stream == NULL:
         if handle == NULL:
             handle = load_library()
         __nvshmemx_team_sync_on_stream = dlsym(handle, 'nvshmemx_team_sync_on_stream')
+
+    global __nvshmemx_sync_all_on_stream
+    __nvshmemx_sync_all_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_sync_all_on_stream')
+    if __nvshmemx_sync_all_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_sync_all_on_stream = dlsym(handle, 'nvshmemx_sync_all_on_stream')
 
     global __nvshmemx_bfloat16_broadcast_on_stream
     __nvshmemx_bfloat16_broadcast_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_bfloat16_broadcast_on_stream')
@@ -1621,6 +1701,34 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_cumodule_finalize = dlsym(handle, 'nvshmemx_cumodule_finalize')
 
+    global __nvshmemx_buffer_register_symmetric
+    __nvshmemx_buffer_register_symmetric = dlsym(RTLD_DEFAULT, 'nvshmemx_buffer_register_symmetric')
+    if __nvshmemx_buffer_register_symmetric == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_buffer_register_symmetric = dlsym(handle, 'nvshmemx_buffer_register_symmetric')
+
+    global __nvshmemx_buffer_unregister_symmetric
+    __nvshmemx_buffer_unregister_symmetric = dlsym(RTLD_DEFAULT, 'nvshmemx_buffer_unregister_symmetric')
+    if __nvshmemx_buffer_unregister_symmetric == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_buffer_unregister_symmetric = dlsym(handle, 'nvshmemx_buffer_unregister_symmetric')
+
+    global __nvshmemx_culibrary_init
+    __nvshmemx_culibrary_init = dlsym(RTLD_DEFAULT, 'nvshmemx_culibrary_init')
+    if __nvshmemx_culibrary_init == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_culibrary_init = dlsym(handle, 'nvshmemx_culibrary_init')
+
+    global __nvshmemx_culibrary_finalize
+    __nvshmemx_culibrary_finalize = dlsym(RTLD_DEFAULT, 'nvshmemx_culibrary_finalize')
+    if __nvshmemx_culibrary_finalize == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_culibrary_finalize = dlsym(handle, 'nvshmemx_culibrary_finalize')
+
     global __nvshmemx_putmem_on_stream
     __nvshmemx_putmem_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_putmem_on_stream')
     if __nvshmemx_putmem_on_stream == NULL:
@@ -1649,6 +1757,13 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_quiet_on_stream = dlsym(handle, 'nvshmemx_quiet_on_stream')
 
+    global __nvshmemx_signal_op_on_stream
+    __nvshmemx_signal_op_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_signal_op_on_stream')
+    if __nvshmemx_signal_op_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_signal_op_on_stream = dlsym(handle, 'nvshmemx_signal_op_on_stream')
+
     global __nvshmemx_signal_wait_until_on_stream
     __nvshmemx_signal_wait_until_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_signal_wait_until_on_stream')
     if __nvshmemx_signal_wait_until_on_stream == NULL:
@@ -1670,6 +1785,12 @@ cpdef dict _inspect_function_pointers():
 
     _check_or_init_nvshmem()
     cdef dict data = {}
+
+    global __nvshmem_barrier
+    data["__nvshmem_barrier"] = <intptr_t>__nvshmem_barrier
+
+    global __nvshmem_barrier_all
+    data["__nvshmem_barrier_all"] = <intptr_t>__nvshmem_barrier_all
 
     global __nvshmemx_init_status
     data["__nvshmemx_init_status"] = <intptr_t>__nvshmemx_init_status
@@ -1710,11 +1831,26 @@ cpdef dict _inspect_function_pointers():
     global __nvshmem_team_n_pes
     data["__nvshmem_team_n_pes"] = <intptr_t>__nvshmem_team_n_pes
 
-    global __nvshmem_barrier
-    data["__nvshmem_barrier"] = <intptr_t>__nvshmem_barrier
+    global __nvshmem_team_get_config
+    data["__nvshmem_team_get_config"] = <intptr_t>__nvshmem_team_get_config
 
-    global __nvshmem_barrier_all
-    data["__nvshmem_barrier_all"] = <intptr_t>__nvshmem_barrier_all
+    global __nvshmem_team_translate_pe
+    data["__nvshmem_team_translate_pe"] = <intptr_t>__nvshmem_team_translate_pe
+
+    global __nvshmem_team_split_strided
+    data["__nvshmem_team_split_strided"] = <intptr_t>__nvshmem_team_split_strided
+
+    global __nvshmemx_team_get_uniqueid
+    data["__nvshmemx_team_get_uniqueid"] = <intptr_t>__nvshmemx_team_get_uniqueid
+
+    global __nvshmemx_team_init
+    data["__nvshmemx_team_init"] = <intptr_t>__nvshmemx_team_init
+
+    global __nvshmem_team_split_2d
+    data["__nvshmem_team_split_2d"] = <intptr_t>__nvshmem_team_split_2d
+
+    global __nvshmem_team_destroy
+    data["__nvshmem_team_destroy"] = <intptr_t>__nvshmem_team_destroy
 
     global __nvshmemx_bfloat16_alltoall_on_stream
     data["__nvshmemx_bfloat16_alltoall_on_stream"] = <intptr_t>__nvshmemx_bfloat16_alltoall_on_stream
@@ -1776,8 +1912,14 @@ cpdef dict _inspect_function_pointers():
     global __nvshmemx_barrier_on_stream
     data["__nvshmemx_barrier_on_stream"] = <intptr_t>__nvshmemx_barrier_on_stream
 
+    global __nvshmemx_barrier_all_on_stream
+    data["__nvshmemx_barrier_all_on_stream"] = <intptr_t>__nvshmemx_barrier_all_on_stream
+
     global __nvshmemx_team_sync_on_stream
     data["__nvshmemx_team_sync_on_stream"] = <intptr_t>__nvshmemx_team_sync_on_stream
+
+    global __nvshmemx_sync_all_on_stream
+    data["__nvshmemx_sync_all_on_stream"] = <intptr_t>__nvshmemx_sync_all_on_stream
 
     global __nvshmemx_bfloat16_broadcast_on_stream
     data["__nvshmemx_bfloat16_broadcast_on_stream"] = <intptr_t>__nvshmemx_bfloat16_broadcast_on_stream
@@ -2256,6 +2398,18 @@ cpdef dict _inspect_function_pointers():
     global __nvshmemx_cumodule_finalize
     data["__nvshmemx_cumodule_finalize"] = <intptr_t>__nvshmemx_cumodule_finalize
 
+    global __nvshmemx_buffer_register_symmetric
+    data["__nvshmemx_buffer_register_symmetric"] = <intptr_t>__nvshmemx_buffer_register_symmetric
+
+    global __nvshmemx_buffer_unregister_symmetric
+    data["__nvshmemx_buffer_unregister_symmetric"] = <intptr_t>__nvshmemx_buffer_unregister_symmetric
+
+    global __nvshmemx_culibrary_init
+    data["__nvshmemx_culibrary_init"] = <intptr_t>__nvshmemx_culibrary_init
+
+    global __nvshmemx_culibrary_finalize
+    data["__nvshmemx_culibrary_finalize"] = <intptr_t>__nvshmemx_culibrary_finalize
+
     global __nvshmemx_putmem_on_stream
     data["__nvshmemx_putmem_on_stream"] = <intptr_t>__nvshmemx_putmem_on_stream
 
@@ -2267,6 +2421,9 @@ cpdef dict _inspect_function_pointers():
 
     global __nvshmemx_quiet_on_stream
     data["__nvshmemx_quiet_on_stream"] = <intptr_t>__nvshmemx_quiet_on_stream
+
+    global __nvshmemx_signal_op_on_stream
+    data["__nvshmemx_signal_op_on_stream"] = <intptr_t>__nvshmemx_signal_op_on_stream
 
     global __nvshmemx_signal_wait_until_on_stream
     data["__nvshmemx_signal_wait_until_on_stream"] = <intptr_t>__nvshmemx_signal_wait_until_on_stream
@@ -2285,6 +2442,26 @@ cpdef _inspect_function_pointer(str name):
 ###############################################################################
 # Wrapper functions
 ###############################################################################
+
+cdef int _nvshmem_barrier(nvshmem_team_t team) except* nogil:
+    global __nvshmem_barrier
+    _check_or_init_nvshmem()
+    if __nvshmem_barrier == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_barrier is not found")
+    return (<int (*)(nvshmem_team_t) nogil>__nvshmem_barrier)(
+        team)
+
+
+cdef void _nvshmem_barrier_all() except* nogil:
+    global __nvshmem_barrier_all
+    _check_or_init_nvshmem()
+    if __nvshmem_barrier_all == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_barrier_all is not found")
+    (<void (*)() nogil>__nvshmem_barrier_all)(
+        )
+
 
 cdef int _nvshmemx_init_status() except* nogil:
     global __nvshmemx_init_status
@@ -2416,24 +2593,74 @@ cdef int _nvshmem_team_n_pes(nvshmem_team_t team) except* nogil:
         team)
 
 
-cdef int _nvshmem_barrier(nvshmem_team_t team) except* nogil:
-    global __nvshmem_barrier
+cdef void _nvshmem_team_get_config(nvshmem_team_t team, nvshmem_team_config_t* config) except* nogil:
+    global __nvshmem_team_get_config
     _check_or_init_nvshmem()
-    if __nvshmem_barrier == NULL:
+    if __nvshmem_team_get_config == NULL:
         with gil:
-            raise FunctionNotFoundError("function nvshmem_barrier is not found")
-    return (<int (*)(nvshmem_team_t) nogil>__nvshmem_barrier)(
+            raise FunctionNotFoundError("function nvshmem_team_get_config is not found")
+    (<void (*)(nvshmem_team_t, nvshmem_team_config_t*) nogil>__nvshmem_team_get_config)(
+        team, config)
+
+
+cdef int _nvshmem_team_translate_pe(nvshmem_team_t src_team, int src_pe, nvshmem_team_t dest_team) except* nogil:
+    global __nvshmem_team_translate_pe
+    _check_or_init_nvshmem()
+    if __nvshmem_team_translate_pe == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_team_translate_pe is not found")
+    return (<int (*)(nvshmem_team_t, int, nvshmem_team_t) nogil>__nvshmem_team_translate_pe)(
+        src_team, src_pe, dest_team)
+
+
+cdef int _nvshmem_team_split_strided(nvshmem_team_t parent_team, int PE_start, int PE_stride, int PE_size, const nvshmem_team_config_t* config, long config_mask, nvshmem_team_t* new_team) except* nogil:
+    global __nvshmem_team_split_strided
+    _check_or_init_nvshmem()
+    if __nvshmem_team_split_strided == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_team_split_strided is not found")
+    return (<int (*)(nvshmem_team_t, int, int, int, const nvshmem_team_config_t*, long, nvshmem_team_t*) nogil>__nvshmem_team_split_strided)(
+        parent_team, PE_start, PE_stride, PE_size, config, config_mask, new_team)
+
+
+cdef int _nvshmemx_team_get_uniqueid(nvshmemx_team_uniqueid_t* uniqueid) except* nogil:
+    global __nvshmemx_team_get_uniqueid
+    _check_or_init_nvshmem()
+    if __nvshmemx_team_get_uniqueid == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_team_get_uniqueid is not found")
+    return (<int (*)(nvshmemx_team_uniqueid_t*) nogil>__nvshmemx_team_get_uniqueid)(
+        uniqueid)
+
+
+cdef int _nvshmemx_team_init(nvshmem_team_t* team, nvshmem_team_config_t* config, long config_mask, int npes, int pe_idx_in_team) except* nogil:
+    global __nvshmemx_team_init
+    _check_or_init_nvshmem()
+    if __nvshmemx_team_init == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_team_init is not found")
+    return (<int (*)(nvshmem_team_t*, nvshmem_team_config_t*, long, int, int) nogil>__nvshmemx_team_init)(
+        team, config, config_mask, npes, pe_idx_in_team)
+
+
+cdef int _nvshmem_team_split_2d(nvshmem_team_t parent_team, int xrange, const nvshmem_team_config_t* xaxis_config, long xaxis_mask, nvshmem_team_t* xaxis_team, const nvshmem_team_config_t* yaxis_config, long yaxis_mask, nvshmem_team_t* yaxis_team) except* nogil:
+    global __nvshmem_team_split_2d
+    _check_or_init_nvshmem()
+    if __nvshmem_team_split_2d == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_team_split_2d is not found")
+    return (<int (*)(nvshmem_team_t, int, const nvshmem_team_config_t*, long, nvshmem_team_t*, const nvshmem_team_config_t*, long, nvshmem_team_t*) nogil>__nvshmem_team_split_2d)(
+        parent_team, xrange, xaxis_config, xaxis_mask, xaxis_team, yaxis_config, yaxis_mask, yaxis_team)
+
+
+cdef void _nvshmem_team_destroy(nvshmem_team_t team) except* nogil:
+    global __nvshmem_team_destroy
+    _check_or_init_nvshmem()
+    if __nvshmem_team_destroy == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_team_destroy is not found")
+    (<void (*)(nvshmem_team_t) nogil>__nvshmem_team_destroy)(
         team)
-
-
-cdef void _nvshmem_barrier_all() except* nogil:
-    global __nvshmem_barrier_all
-    _check_or_init_nvshmem()
-    if __nvshmem_barrier_all == NULL:
-        with gil:
-            raise FunctionNotFoundError("function nvshmem_barrier_all is not found")
-    (<void (*)() nogil>__nvshmem_barrier_all)(
-        )
 
 
 cdef int _nvshmemx_bfloat16_alltoall_on_stream(nvshmem_team_t team, __nv_bfloat16* dest, const __nv_bfloat16* src, size_t nelem, cudaStream_t stream) except* nogil:
@@ -2636,6 +2863,16 @@ cdef int _nvshmemx_barrier_on_stream(nvshmem_team_t team, cudaStream_t stream) e
         team, stream)
 
 
+cdef void _nvshmemx_barrier_all_on_stream(cudaStream_t stream) except* nogil:
+    global __nvshmemx_barrier_all_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_barrier_all_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_barrier_all_on_stream is not found")
+    (<void (*)(cudaStream_t) nogil>__nvshmemx_barrier_all_on_stream)(
+        stream)
+
+
 cdef int _nvshmemx_team_sync_on_stream(nvshmem_team_t team, cudaStream_t stream) except* nogil:
     global __nvshmemx_team_sync_on_stream
     _check_or_init_nvshmem()
@@ -2644,6 +2881,16 @@ cdef int _nvshmemx_team_sync_on_stream(nvshmem_team_t team, cudaStream_t stream)
             raise FunctionNotFoundError("function nvshmemx_team_sync_on_stream is not found")
     return (<int (*)(nvshmem_team_t, cudaStream_t) nogil>__nvshmemx_team_sync_on_stream)(
         team, stream)
+
+
+cdef void _nvshmemx_sync_all_on_stream(cudaStream_t stream) except* nogil:
+    global __nvshmemx_sync_all_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_sync_all_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_sync_all_on_stream is not found")
+    (<void (*)(cudaStream_t) nogil>__nvshmemx_sync_all_on_stream)(
+        stream)
 
 
 cdef int _nvshmemx_bfloat16_broadcast_on_stream(nvshmem_team_t team, __nv_bfloat16* dest, const __nv_bfloat16* src, size_t nelem, int PE_root, cudaStream_t stream) except* nogil:
@@ -4236,6 +4483,46 @@ cdef int _nvshmemx_cumodule_finalize(CUmodule module) except* nogil:
         module)
 
 
+cdef void* _nvshmemx_buffer_register_symmetric(void* buf_ptr, size_t size, int flags) except* nogil:
+    global __nvshmemx_buffer_register_symmetric
+    _check_or_init_nvshmem()
+    if __nvshmemx_buffer_register_symmetric == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_buffer_register_symmetric is not found")
+    return (<void* (*)(void*, size_t, int) nogil>__nvshmemx_buffer_register_symmetric)(
+        buf_ptr, size, flags)
+
+
+cdef int _nvshmemx_buffer_unregister_symmetric(void* mmap_ptr, size_t size) except* nogil:
+    global __nvshmemx_buffer_unregister_symmetric
+    _check_or_init_nvshmem()
+    if __nvshmemx_buffer_unregister_symmetric == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_buffer_unregister_symmetric is not found")
+    return (<int (*)(void*, size_t) nogil>__nvshmemx_buffer_unregister_symmetric)(
+        mmap_ptr, size)
+
+
+cdef int _nvshmemx_culibrary_init(CUlibrary library) except* nogil:
+    global __nvshmemx_culibrary_init
+    _check_or_init_nvshmem()
+    if __nvshmemx_culibrary_init == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_culibrary_init is not found")
+    return (<int (*)(CUlibrary) nogil>__nvshmemx_culibrary_init)(
+        library)
+
+
+cdef int _nvshmemx_culibrary_finalize(CUlibrary library) except* nogil:
+    global __nvshmemx_culibrary_finalize
+    _check_or_init_nvshmem()
+    if __nvshmemx_culibrary_finalize == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_culibrary_finalize is not found")
+    return (<int (*)(CUlibrary) nogil>__nvshmemx_culibrary_finalize)(
+        library)
+
+
 cdef void _nvshmemx_putmem_on_stream(void* dest, const void* source, size_t bytes, int pe, cudaStream_t cstrm) except* nogil:
     global __nvshmemx_putmem_on_stream
     _check_or_init_nvshmem()
@@ -4274,6 +4561,16 @@ cdef void _nvshmemx_quiet_on_stream(cudaStream_t cstrm) except* nogil:
             raise FunctionNotFoundError("function nvshmemx_quiet_on_stream is not found")
     (<void (*)(cudaStream_t) nogil>__nvshmemx_quiet_on_stream)(
         cstrm)
+
+
+cdef void _nvshmemx_signal_op_on_stream(uint64_t* sig_addr, uint64_t signal, int sig_op, int pe, cudaStream_t cstrm) except* nogil:
+    global __nvshmemx_signal_op_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_signal_op_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_signal_op_on_stream is not found")
+    (<void (*)(uint64_t*, uint64_t, int, int, cudaStream_t) nogil>__nvshmemx_signal_op_on_stream)(
+        sig_addr, signal, sig_op, pe, cstrm)
 
 
 cdef void _nvshmemx_signal_wait_until_on_stream(uint64_t* sig_addr, int cmp, uint64_t cmp_value, cudaStream_t cstream) except* nogil:

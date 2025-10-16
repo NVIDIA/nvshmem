@@ -23,11 +23,12 @@ from .cynvshmem cimport *
 
 ctypedef nvshmemx_uniqueid_args_v1 uniqueid_args
 ctypedef nvshmem_team_config_v2 team_config
-ctypedef nvshmemx_init_args_v1 init_args
-ctypedef nvshmemx_init_attr_v1 init_attr
+ctypedef nvshmemx_init_args_v2 init_args
+ctypedef nvshmemx_init_attr_v2 init_attr
 
 ctypedef cudaStream_t Stream
 ctypedef CUmodule Module
+ctypedef CUlibrary Library
 
 
 
@@ -37,7 +38,11 @@ ctypedef CUmodule Module
 
 ctypedef nvshmemx_signal_op_t _Signal_op
 ctypedef nvshmemx_cmp_type_t _Cmp_type
+ctypedef nvshmemx_thread_support_t _Thread_support
+ctypedef nvshmemx_proxy_status_t _Proxy_status
 ctypedef nvshmemx_init_status_t _Init_status
+ctypedef nvshmemx_qp_handle_index_t _Qp_handle_index
+ctypedef nvshmem_pe_index_t _Pe_index
 ctypedef nvshmem_team_id_t _Team_id
 ctypedef nvshmemx_status _Status
 ctypedef flags _Flags
@@ -47,6 +52,8 @@ ctypedef flags _Flags
 # Functions
 ###############################################################################
 
+cpdef barrier(int32_t team)
+cpdef void barrier_all() except*
 cpdef int init_status() except? 0
 cpdef int my_pe() except? -1
 cpdef int n_pes() except? -1
@@ -60,8 +67,13 @@ cpdef intptr_t ptr(intptr_t dest, int pe) except? 0
 cpdef intptr_t mc_ptr(int32_t team, intptr_t ptr) except? 0
 cpdef int team_my_pe(int32_t team) except? -1
 cpdef int team_n_pes(int32_t team) except? -1
-cpdef barrier(int32_t team)
-cpdef void barrier_all() except*
+cpdef void team_get_config(int32_t team, intptr_t config) except*
+cpdef team_translate_pe(int32_t src_team, int src_pe, int32_t dest_team)
+cpdef team_split_strided(int32_t parent_team, int pe_start, int pe_stride, int pe_size, intptr_t config, long config_mask, intptr_t new_team)
+cpdef team_get_uniqueid(intptr_t uniqueid)
+cpdef team_init(intptr_t team, intptr_t config, long config_mask, int npes, int pe_idx_in_team)
+cpdef team_split_2d(int32_t parent_team, int xrange, intptr_t xaxis_config, long xaxis_mask, intptr_t xaxis_team, intptr_t yaxis_config, long yaxis_mask, intptr_t yaxis_team)
+cpdef void team_destroy(int32_t team) except*
 cpdef bfloat16_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, intptr_t stream)
 cpdef half_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, intptr_t stream)
 cpdef float_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, intptr_t stream)
@@ -82,7 +94,9 @@ cpdef uint32_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_
 cpdef uint64_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, intptr_t stream)
 cpdef size_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, intptr_t stream)
 cpdef barrier_on_stream(int32_t team, intptr_t stream)
+cpdef void barrier_all_on_stream(intptr_t stream) except*
 cpdef int team_sync_on_stream(int32_t team, intptr_t stream) except? 0
+cpdef void sync_all_on_stream(intptr_t stream) except*
 cpdef bfloat16_broadcast_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, int pe_root, intptr_t stream)
 cpdef half_broadcast_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, int pe_root, intptr_t stream)
 cpdef float_broadcast_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, int pe_root, intptr_t stream)
@@ -240,10 +254,15 @@ cpdef void hostlib_finalize() except*
 cpdef set_attr_uniqueid_args(int myrank, int nranks, intptr_t uniqueid, intptr_t attr)
 cpdef set_attr_mpi_comm_args(intptr_t mpi_comm, intptr_t nvshmem_attr)
 cpdef get_uniqueid(intptr_t uniqueid)
-cpdef int cumodule_init(intptr_t module) except? 0
-cpdef int cumodule_finalize(intptr_t module) except? 0
+cpdef int cumodule_init(intptr_t module) except? -1
+cpdef int cumodule_finalize(intptr_t module) except? -1
+cpdef intptr_t buffer_register_symmetric(intptr_t buf_ptr, size_t size, int flags) except? 0
+cpdef int buffer_unregister_symmetric(intptr_t mmap_ptr, size_t size) except? 0
+cpdef int culibrary_init(intptr_t library) except? -1
+cpdef int culibrary_finalize(intptr_t library) except? -1
 cpdef void putmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*
 cpdef void putmem_signal_on_stream(intptr_t dest, intptr_t source, size_t bytes, intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*
 cpdef void getmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*
 cpdef void quiet_on_stream(intptr_t cstrm) except*
+cpdef void signal_op_on_stream(intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*
 cpdef void signal_wait_until_on_stream(intptr_t sig_addr, int cmp, uint64_t cmp_value, intptr_t cstream) except*

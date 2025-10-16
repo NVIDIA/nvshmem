@@ -22,7 +22,6 @@ from libc.stdint cimport (
     intptr_t, uintptr_t
 )
 
-
 from enum import IntEnum as _IntEnum
 
 import numpy as _numpy
@@ -157,6 +156,43 @@ cdef class uniqueid:
 
 cdef class UniqueId(uniqueid): pass
 
+# Simple wrapper for nvshmemx_team_uniqueid_t typedef
+# This is required because Cybind doesn't generate wrappers for classes that are raw typedefs.
+cdef class team_uniqueid:
+    """Simple wrapper for nvshmemx_team_uniqueid_t (typedef uint64_t)."""
+    
+    cdef:
+        readonly object _data
+    
+    def __init__(self, value: int = 0):
+        """Initialize with an optional value."""
+        arr = _numpy.empty(1, dtype=_numpy.uint64)
+        self._data = arr.view(_numpy.recarray)
+        self._data[0] = value
+    
+    @property
+    def ptr(self):
+        """Get the pointer address to the data as Python :py:`int`."""
+        return self._data.ctypes.data
+    
+    @property
+    def value(self) -> int:
+        """Get the value as Python int."""
+        return int(self._data[0])
+    
+    @value.setter
+    def value(self, val: int):
+        """Set the value."""
+        self._data[0] = val
+    
+    def __str__(self) -> str:
+        return f"team_uniqueid({self.value})"
+    
+    def __repr__(self) -> str:
+        return f"team_uniqueid(value={self.value})"
+
+cdef class TeamUniqueId(team_uniqueid): pass
+
 # POD wrapper for nvshmemx_init_attr_t. cybind can't generate this automatically
 # because it doesn't fully support nested structs (https://gitlab-master.nvidia.com/leof/cybind/-/issues/67).
 # The nested structure is made opaque.
@@ -204,6 +240,63 @@ cdef class InitAttr:
         self._data.mpi_comm = val
 
 
+# POD wrapper for nvshmem_team_config_t. cybind can't generate this automatically
+# because it doesn't fully support nested structs (https://gitlab-master.nvidia.com/leof/cybind/-/issues/67).
+# The nested structure is made opaque.
+# TODO: remove this once cybind supports nested structs.
+
+team_config_dtype = _numpy.dtype([
+    ("version", _numpy.int32, ),
+    ("num_contexts", _numpy.int32, ),
+    ("uniqueid", _numpy.uint64, ),
+    ("padding", _numpy.int8, (48,)),  # TEAM_CONFIG_V2_PADDING = 48
+    ], align=True)
+
+
+cdef class TeamConfig:
+
+    cdef:
+        readonly object _data
+
+    def __init__(self):
+        arr = _numpy.empty(1, dtype=team_config_dtype)
+        self._data = arr.view(_numpy.recarray)
+        assert self._data.itemsize == sizeof(nvshmem_team_config_t), \
+            f"itemsize {self._data.itemsize} mismatches struct size {sizeof(nvshmem_team_config_t)}"
+
+    @property
+    def ptr(self):
+        """Get the pointer address to the data as Python :py:`int`."""
+        return self._data.ctypes.data
+
+    @property
+    def version(self):
+        """version (~_numpy.int32): """
+        return int(self._data.version[0])
+
+    @version.setter
+    def version(self, val):
+        self._data.version = val
+
+    @property
+    def num_contexts(self):
+        """num_contexts (~_numpy.int32): """
+        return int(self._data.num_contexts[0])
+
+    @num_contexts.setter
+    def num_contexts(self, val):
+        self._data.num_contexts = val
+
+    @property
+    def uniqueid(self):
+        """uniqueid (~_numpy.uint64): """
+        return int(self._data.uniqueid[0])
+
+    @uniqueid.setter
+    def uniqueid(self, val):
+        self._data.uniqueid = val
+
+
 ###############################################################################
 # Enum
 ###############################################################################
@@ -223,6 +316,22 @@ class Cmp_type(_IntEnum):
     CMP_GE = NVSHMEM_CMP_GE
     CMP_SENTINEL = NVSHMEM_CMP_SENTINEL
 
+class Thread_support(_IntEnum):
+    """See `nvshmemx_thread_support_t`."""
+    THREAD_SINGLE = NVSHMEM_THREAD_SINGLE
+    THREAD_FUNNELED = NVSHMEM_THREAD_FUNNELED
+    THREAD_SERIALIZED = NVSHMEM_THREAD_SERIALIZED
+    THREAD_MULTIPLE = NVSHMEM_THREAD_MULTIPLE
+    THREAD_TYPE_SENTINEL = NVSHMEM_THREAD_TYPE_SENTINEL
+
+class Proxy_status(_IntEnum):
+    """See `nvshmemx_proxy_status_t`."""
+    _PROXY_GLOBAL_EXIT_NOT_REQUESTED = PROXY_GLOBAL_EXIT_NOT_REQUESTED
+    _PROXY_GLOBAL_EXIT_INIT = PROXY_GLOBAL_EXIT_INIT
+    _PROXY_GLOBAL_EXIT_REQUESTED = PROXY_GLOBAL_EXIT_REQUESTED
+    _PROXY_GLOBAL_EXIT_FINISHED = PROXY_GLOBAL_EXIT_FINISHED
+    _PROXY_GLOBAL_EXIT_MAX_STATE = PROXY_GLOBAL_EXIT_MAX_STATE
+
 class Init_status(_IntEnum):
     """See `nvshmemx_init_status_t`."""
     STATUS_NOT_INITIALIZED = NVSHMEM_STATUS_NOT_INITIALIZED
@@ -231,6 +340,19 @@ class Init_status(_IntEnum):
     STATUS_LIMITED_MPG = NVSHMEM_STATUS_LIMITED_MPG
     STATUS_FULL_MPG = NVSHMEM_STATUS_FULL_MPG
     STATUS_INVALID = NVSHMEM_STATUS_INVALID
+
+class Qp_handle_index(_IntEnum):
+    """See `nvshmemx_qp_handle_index_t`."""
+    QP_HOST = NVSHMEMX_QP_HOST
+    QP_DEFAULT = NVSHMEMX_QP_DEFAULT
+    QP_ANY = NVSHMEMX_QP_ANY
+    QP_ALL = NVSHMEMX_QP_ALL
+
+class Pe_index(_IntEnum):
+    """See `nvshmem_pe_index_t`."""
+    PE_INVALID = NVSHMEM_PE_INVALID
+    PE_ANY = NVSHMEMX_PE_ANY
+    PE_ALL = NVSHMEMX_PE_ALL
 
 class Team_id(_IntEnum):
     """See `nvshmem_team_id_t`."""
@@ -296,6 +418,16 @@ cpdef inline check_status(int status):
 # Wrapper functions
 ###############################################################################
 
+cpdef barrier(int32_t team):
+    with nogil:
+        status = nvshmem_barrier(<nvshmem_team_t>team)
+    check_status(status)
+
+
+cpdef void barrier_all() except*:
+    nvshmem_barrier_all()
+
+
 cpdef int init_status() except? 0:
     return nvshmemx_init_status()
 
@@ -348,14 +480,42 @@ cpdef int team_n_pes(int32_t team) except? -1:
     return nvshmem_team_n_pes(<nvshmem_team_t>team)
 
 
-cpdef barrier(int32_t team):
+cpdef void team_get_config(int32_t team, intptr_t config) except*:
+    nvshmem_team_get_config(<nvshmem_team_t>team, <nvshmem_team_config_t*>config)
+
+
+cpdef team_translate_pe(int32_t src_team, int src_pe, int32_t dest_team):
     with nogil:
-        status = nvshmem_barrier(<nvshmem_team_t>team)
+        status = nvshmem_team_translate_pe(<nvshmem_team_t>src_team, src_pe, <nvshmem_team_t>dest_team)
     check_status(status)
 
 
-cpdef void barrier_all() except*:
-    nvshmem_barrier_all()
+cpdef team_split_strided(int32_t parent_team, int pe_start, int pe_stride, int pe_size, intptr_t config, long config_mask, intptr_t new_team):
+    with nogil:
+        status = nvshmem_team_split_strided(<nvshmem_team_t>parent_team, pe_start, pe_stride, pe_size, <const nvshmem_team_config_t*>config, config_mask, <nvshmem_team_t*>new_team)
+    check_status(status)
+
+
+cpdef team_get_uniqueid(intptr_t uniqueid):
+    with nogil:
+        status = nvshmemx_team_get_uniqueid(<nvshmemx_team_uniqueid_t*>uniqueid)
+    check_status(status)
+
+
+cpdef team_init(intptr_t team, intptr_t config, long config_mask, int npes, int pe_idx_in_team):
+    with nogil:
+        status = nvshmemx_team_init(<nvshmem_team_t*>team, <nvshmem_team_config_t*>config, config_mask, npes, pe_idx_in_team)
+    check_status(status)
+
+
+cpdef team_split_2d(int32_t parent_team, int xrange, intptr_t xaxis_config, long xaxis_mask, intptr_t xaxis_team, intptr_t yaxis_config, long yaxis_mask, intptr_t yaxis_team):
+    with nogil:
+        status = nvshmem_team_split_2d(<nvshmem_team_t>parent_team, xrange, <const nvshmem_team_config_t*>xaxis_config, xaxis_mask, <nvshmem_team_t*>xaxis_team, <const nvshmem_team_config_t*>yaxis_config, yaxis_mask, <nvshmem_team_t*>yaxis_team)
+    check_status(status)
+
+
+cpdef void team_destroy(int32_t team) except*:
+    nvshmem_team_destroy(<nvshmem_team_t>team)
 
 
 cpdef bfloat16_alltoall_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, intptr_t stream):
@@ -478,8 +638,16 @@ cpdef barrier_on_stream(int32_t team, intptr_t stream):
     check_status(status)
 
 
+cpdef void barrier_all_on_stream(intptr_t stream) except*:
+    nvshmemx_barrier_all_on_stream(<Stream>stream)
+
+
 cpdef int team_sync_on_stream(int32_t team, intptr_t stream) except? 0:
     return nvshmemx_team_sync_on_stream(<nvshmem_team_t>team, <Stream>stream)
+
+
+cpdef void sync_all_on_stream(intptr_t stream) except*:
+    nvshmemx_sync_all_on_stream(<Stream>stream)
 
 
 cpdef bfloat16_broadcast_on_stream(int32_t team, intptr_t dest, intptr_t src, size_t nelem, int pe_root, intptr_t stream):
@@ -1422,12 +1590,28 @@ cpdef get_uniqueid(intptr_t uniqueid):
     check_status(status)
 
 
-cpdef int cumodule_init(intptr_t module) except? 0:
+cpdef int cumodule_init(intptr_t module) except? -1:
     return nvshmemx_cumodule_init(<void*>module)
 
 
-cpdef int cumodule_finalize(intptr_t module) except? 0:
+cpdef int cumodule_finalize(intptr_t module) except? -1:
     return nvshmemx_cumodule_finalize(<void*>module)
+
+
+cpdef intptr_t buffer_register_symmetric(intptr_t buf_ptr, size_t size, int flags) except? 0:
+    return <intptr_t>nvshmemx_buffer_register_symmetric(<void*>buf_ptr, size, flags)
+
+
+cpdef int buffer_unregister_symmetric(intptr_t mmap_ptr, size_t size) except? 0:
+    return nvshmemx_buffer_unregister_symmetric(<void*>mmap_ptr, size)
+
+
+cpdef int culibrary_init(intptr_t library) except? -1:
+    return nvshmemx_culibrary_init(<void*>library)
+
+
+cpdef int culibrary_finalize(intptr_t library) except? -1:
+    return nvshmemx_culibrary_finalize(<void*>library)
 
 
 cpdef void putmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*:
@@ -1444,6 +1628,10 @@ cpdef void getmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe
 
 cpdef void quiet_on_stream(intptr_t cstrm) except*:
     nvshmemx_quiet_on_stream(<Stream>cstrm)
+
+
+cpdef void signal_op_on_stream(intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*:
+    nvshmemx_signal_op_on_stream(<uint64_t*>sig_addr, signal, sig_op, pe, <Stream>cstrm)
 
 
 cpdef void signal_wait_until_on_stream(intptr_t sig_addr, int cmp, uint64_t cmp_value, intptr_t cstream) except*:

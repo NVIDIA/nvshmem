@@ -12,6 +12,8 @@ from ..cynvshmem cimport *
 # Wrapper functions
 ###############################################################################
 
+cdef int _nvshmem_barrier(nvshmem_team_t team) except* nogil
+cdef void _nvshmem_barrier_all() except* nogil
 cdef int _nvshmemx_init_status() except* nogil
 cdef int _nvshmem_my_pe() except* nogil
 cdef int _nvshmem_n_pes() except* nogil
@@ -25,8 +27,13 @@ cdef void* _nvshmem_ptr(const void* dest, int pe) except* nogil
 cdef void* _nvshmemx_mc_ptr(nvshmem_team_t team, const void* ptr) except* nogil
 cdef int _nvshmem_team_my_pe(nvshmem_team_t team) except* nogil
 cdef int _nvshmem_team_n_pes(nvshmem_team_t team) except* nogil
-cdef int _nvshmem_barrier(nvshmem_team_t team) except* nogil
-cdef void _nvshmem_barrier_all() except* nogil
+cdef void _nvshmem_team_get_config(nvshmem_team_t team, nvshmem_team_config_t* config) except* nogil
+cdef int _nvshmem_team_translate_pe(nvshmem_team_t src_team, int src_pe, nvshmem_team_t dest_team) except* nogil
+cdef int _nvshmem_team_split_strided(nvshmem_team_t parent_team, int PE_start, int PE_stride, int PE_size, const nvshmem_team_config_t* config, long config_mask, nvshmem_team_t* new_team) except* nogil
+cdef int _nvshmemx_team_get_uniqueid(nvshmemx_team_uniqueid_t* uniqueid) except* nogil
+cdef int _nvshmemx_team_init(nvshmem_team_t* team, nvshmem_team_config_t* config, long config_mask, int npes, int pe_idx_in_team) except* nogil
+cdef int _nvshmem_team_split_2d(nvshmem_team_t parent_team, int xrange, const nvshmem_team_config_t* xaxis_config, long xaxis_mask, nvshmem_team_t* xaxis_team, const nvshmem_team_config_t* yaxis_config, long yaxis_mask, nvshmem_team_t* yaxis_team) except* nogil
+cdef void _nvshmem_team_destroy(nvshmem_team_t team) except* nogil
 cdef int _nvshmemx_bfloat16_alltoall_on_stream(nvshmem_team_t team, __nv_bfloat16* dest, const __nv_bfloat16* src, size_t nelem, cudaStream_t stream) except* nogil
 cdef int _nvshmemx_half_alltoall_on_stream(nvshmem_team_t team, half* dest, const half* src, size_t nelem, cudaStream_t stream) except* nogil
 cdef int _nvshmemx_float_alltoall_on_stream(nvshmem_team_t team, float* dest, const float* src, size_t nelem, cudaStream_t stream) except* nogil
@@ -47,7 +54,9 @@ cdef int _nvshmemx_uint32_alltoall_on_stream(nvshmem_team_t team, uint32_t* dest
 cdef int _nvshmemx_uint64_alltoall_on_stream(nvshmem_team_t team, uint64_t* dest, const uint64_t* src, size_t nelem, cudaStream_t stream) except* nogil
 cdef int _nvshmemx_size_alltoall_on_stream(nvshmem_team_t team, size_t* dest, const size_t* src, size_t nelem, cudaStream_t stream) except* nogil
 cdef int _nvshmemx_barrier_on_stream(nvshmem_team_t team, cudaStream_t stream) except* nogil
+cdef void _nvshmemx_barrier_all_on_stream(cudaStream_t stream) except* nogil
 cdef int _nvshmemx_team_sync_on_stream(nvshmem_team_t team, cudaStream_t stream) except* nogil
+cdef void _nvshmemx_sync_all_on_stream(cudaStream_t stream) except* nogil
 cdef int _nvshmemx_bfloat16_broadcast_on_stream(nvshmem_team_t team, __nv_bfloat16* dest, const __nv_bfloat16* src, size_t nelem, int PE_root, cudaStream_t stream) except* nogil
 cdef int _nvshmemx_half_broadcast_on_stream(nvshmem_team_t team, half* dest, const half* src, size_t nelem, int PE_root, cudaStream_t stream) except* nogil
 cdef int _nvshmemx_float_broadcast_on_stream(nvshmem_team_t team, float* dest, const float* src, size_t nelem, int PE_root, cudaStream_t stream) except* nogil
@@ -207,8 +216,13 @@ cdef int _nvshmemx_set_attr_mpi_comm_args(void* mpi_comm, nvshmemx_init_attr_t* 
 cdef int _nvshmemx_get_uniqueid(nvshmemx_uniqueid_t* uniqueid) except* nogil
 cdef int _nvshmemx_cumodule_init(CUmodule module) except* nogil
 cdef int _nvshmemx_cumodule_finalize(CUmodule module) except* nogil
+cdef void* _nvshmemx_buffer_register_symmetric(void* buf_ptr, size_t size, int flags) except* nogil
+cdef int _nvshmemx_buffer_unregister_symmetric(void* mmap_ptr, size_t size) except* nogil
+cdef int _nvshmemx_culibrary_init(CUlibrary library) except* nogil
+cdef int _nvshmemx_culibrary_finalize(CUlibrary library) except* nogil
 cdef void _nvshmemx_putmem_on_stream(void* dest, const void* source, size_t bytes, int pe, cudaStream_t cstrm) except* nogil
 cdef void _nvshmemx_putmem_signal_on_stream(void* dest, const void* source, size_t bytes, uint64_t* sig_addr, uint64_t signal, int sig_op, int pe, cudaStream_t cstrm) except* nogil
 cdef void _nvshmemx_getmem_on_stream(void* dest, const void* source, size_t bytes, int pe, cudaStream_t cstrm) except* nogil
 cdef void _nvshmemx_quiet_on_stream(cudaStream_t cstrm) except* nogil
+cdef void _nvshmemx_signal_op_on_stream(uint64_t* sig_addr, uint64_t signal, int sig_op, int pe, cudaStream_t cstrm) except* nogil
 cdef void _nvshmemx_signal_wait_until_on_stream(uint64_t* sig_addr, int cmp, uint64_t cmp_value, cudaStream_t cstream) except* nogil
