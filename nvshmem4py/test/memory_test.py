@@ -20,7 +20,7 @@ import argparse
 import os
 import gc
 
-from cuda.core.experimental._memory import VirtualMemoryResource, VirtualMemoryResourceOptions
+from cuda.core.experimental._memory import VirtualMemoryResource
 
 import nvshmem.core
 
@@ -49,17 +49,17 @@ def test_peer_buffer():
         try:
             peer_buf = nvshmem.core.get_peer_buffer(buf, ((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()))
         except Exception as e:
+            raise e
             peer_buf = None
             # If >1 node (NVL domain) exists, this is an error condition. TODO enhance this to differentiate
             print("peer_buf failed to create. Check to make sure it failed because of >1 node")
             peer_buf = None
-        else:
-            print(peer_buf, peer_buf.handle, buf, buf.handle)
+        print(peer_buf, peer_buf.handle, buf, buf.handle)
         if peer_buf:
             print(peer_buf, peer_buf.handle)
-            # Don't need to call free on a peer buf.
-            # However, it is safe to do so. nvshmem.core.free knows to skip nvshmem_free()
-            nvshmem.core.free(peer_buf)
+        # Don't need to call free on a peer buf.
+        # However, it is safe to do so. nvshmem.core.free knows to skip nvshmem_free()
+        nvshmem.core.free(peer_buf)
 
     nvshmem.core.free(buf)
     print("End peer buffer test")
@@ -67,9 +67,8 @@ def test_peer_buffer():
 def test_mc_buffer():
     print("Testing Multicast buffer")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
-    if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
+    dev = Device(local_rank_per_node)
+    if not dev.properties.multicast_supported:
         print("Skipping MC memory test because Multicast memory is not supported on this platform")
         return
    
@@ -87,13 +86,12 @@ def test_mc_buffer():
 
 def test_mc_tensor():
     print("Testing Multicast Torch Tensor")
-    dev = Device()
-    local_rank_per_node = dev.device_id
+    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     if not _torch_enabled:
         print("WARNING: Torch not found. Not running Torch Interop test")
         return
     dev = Device(local_rank_per_node)
-    if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
+    if not dev.properties.multicast_supported:
         print("Skipping MC memory test because Multicast memory is not supported on this platform")
         return
     tensor = nvshmem.core.tensor(1024)
@@ -111,9 +109,8 @@ def test_mc_tensor():
 def test_mc_array():
     print("Testing Multicast Torch array")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
-    if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
+    dev = Device(local_rank_per_node)
+    if not dev.properties.multicast_supported:
         print("Skipping MC memory test because Multicast memory is not supported on this platform")
         return
     
@@ -182,8 +179,7 @@ def test_peer_array():
             peer_arr = None
             # If >1 node (NVL domain) exists, this is an error condition. TODO enhance this to differentiate
             print("peer_buf array failed to create. Check to make sure it failed because of >1 node")
-        else:
-            print(peer_arr, arr)
+        print(peer_arr, arr)
         # Don't need to call free on a peer buf.
         # However, it is safe to do so. nvshmem.core.free knows to skip nvshmem_free()
         #nvshmem.core.free(peer_buf)
@@ -216,21 +212,14 @@ def test_del_buffer():
     print("Testing buffer scope")
     # Test that when we call del on a buffer, it doesn't actually go away
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
+    dev = Device(local_rank_per_node)
     buf = nvshmem.core.buffer(1024)
-    print("Created buffer")
     ptr = buf.handle
-    print(buf, buf.handle, ptr)
-    print(_mr_references)
     try:
         del buf
     except:
         print("Caught early-warning about explicit free")
-    print("Deleted buffer. Printing pointer")
-    print(ptr)
-    print("Printing reference count")
-    print(_mr_references)
+
     print(_mr_references[local_rank_per_node]._mem_references[ptr])
     assert _mr_references[local_rank_per_node]._mem_references[ptr]["ref_count"] > 0
     # This is technically a user error. They can't free the buf if they del it.
@@ -245,8 +234,7 @@ def test_release_del_buffer():
     # Test that when we call del on a buffer, it doesn't actually go away
     # And we get the error raised immediately as an Exception
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
+    dev = Device(local_rank_per_node)
     buf = nvshmem.core.buffer(1024, release=True)
     ptr = buf.handle
     try:
@@ -264,8 +252,6 @@ def test_release_del_buffer():
 def test_buffer_scope_release_gc():
     print("Testing buffer scope var 2")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
     buf = nvshmem.core.buffer(8, release=True)
     ptr = buf.handle
     array = cupy.from_dlpack(buf)
@@ -284,8 +270,6 @@ def test_buffer_scope_release_gc_free():
     print("Testing buffer scope var 3")
     # All of this should complete without errors of any kind
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
     buf = nvshmem.core.buffer(8, release=True)
     ptr = buf.handle
     array = cupy.from_dlpack(buf)
@@ -320,10 +304,6 @@ def test_buffer_scope_release_gc_free_reuse():
 
 def test_get_peer_memory_scope():
     print("Testing child peer buffer scope")
-
-    if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
-        print("Skipping test because team_npes is 1")
-        return
     import random
     for _ in range(10):
         shape = (16, 1024)
@@ -376,84 +356,16 @@ def test_fortran_morder_alloc_cupy():
     nvshmem.core.free_array(array)
     print("Done tsting allocating Fortran-ordered memory Cupy")
 
-import cuda.bindings.driver as driver
-import warnings
-
-CUDA_COH_FULL = "CUDA_COH_FULL"
-CUDA_COH_CDMM = "CUDA_COH_CDMM"
-CUDA_COH_MIGRATION = "CUDA_COH_MIGRATION"
-CUDA_COH_NONE = "CUDA_COH_NONE"
-
-def detect_cuda_coherence_model(device_ordinal: int = 0) -> str:
-	err, = driver.cuInit(0)
-	if err != driver.CUresult.CUDA_SUCCESS:
-		raise RuntimeError(f"cuInit failed: {err}")
-
-	err, dev = driver.cuDeviceGet(device_ordinal)
-	if err != driver.CUresult.CUDA_SUCCESS:
-		raise RuntimeError(f"cuDeviceGet({device_ordinal}) failed: {err}")
-
-	attr1 = 0
-	if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES"):
-		err, val = driver.cuDeviceGetAttribute(
-			driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES, dev
-		)
-		if err != driver.CUresult.CUDA_SUCCESS:
-			raise RuntimeError(f"cuDeviceGetAttribute(HOST_PAGE_TABLES) failed: {err}")
-		attr1 = int(val != 0)
-	else:
-		warnings.warn(
-			"CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES is not defined, "
-			"assuming non-coherent platform"
-		)
-
-	attr2 = 0
-	if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST"):
-		err, val = driver.cuDeviceGetAttribute(
-			driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST, dev
-		)
-		if err != driver.CUresult.CUDA_SUCCESS:
-			raise RuntimeError(f"cuDeviceGetAttribute(DIRECT_MANAGED_MEM_ACCESS_FROM_HOST) failed: {err}")
-		attr2 = int(val != 0)
-	else:
-		warnings.warn(
-			"CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST is not defined, "
-			"assuming no migration support"
-		)
-
-	if attr1 and attr2:
-		return CUDA_COH_FULL       # CDMM off
-	elif attr1:
-		return CUDA_COH_CDMM       # CDMM on
-	elif attr2:
-		return CUDA_COH_MIGRATION  # Pascal+ migration
-	else:
-		return CUDA_COH_NONE       # Maxwell and older
-
 def test_external_buffer():
     print("Testing external buffer")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    dev = Device()
-    local_rank_per_node = dev.device_id
     print("Rank:", local_rank_per_node)
+    dev = Device(local_rank_per_node)
     
     # Use cuda-bindings CuMemCreate binding to allocate a VMM buffer and wrap it for external registration.
     # We implement a new MemoryResource for VMM buffers.
     print("Creating VMMResource")
-
-    # For coherent platforms, always use fabric handles to support MNNVL.
-    # For non-coherent platforms, use the default handle type (posix_fd).
-    coherence_model = detect_cuda_coherence_model(dev.device_id)
-    print("Coherence model:", coherence_model)
-    if coherence_model == CUDA_COH_FULL:
-        options = VirtualMemoryResourceOptions(handle_type="fabric")
-    else:
-        options = VirtualMemoryResourceOptions()
-
-    if coherence_model != CUDA_COH_FULL and coherence_model != CUDA_COH_MIGRATION:
-        print("NOTICE: Non-coherent platform detected or CDMM mode detected. Using posix_fd handle type.")
-    
-    resource = VirtualMemoryResource(dev, config=options)
+    resource = VirtualMemoryResource(dev)
     print("Allocating Buffer using VMM APIs via VMMResource")
     buffer1 = resource.allocate(536870912)
     buffer2 = resource.allocate(536870912)
