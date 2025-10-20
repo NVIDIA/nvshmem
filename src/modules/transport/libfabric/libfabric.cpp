@@ -546,10 +546,9 @@ out:
 static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     nvshmemt_libfabric_endpoint_t *ep;
-    int is_proxy = qp_index != NVSHMEMX_QP_HOST;
     int status = 0;
 
-    if (is_proxy) {
+    if (qp_index) {
         ep = &libfabric_state->eps[NVSHMEMT_LIBFABRIC_PROXY_EP_IDX];
     } else {
         ep = &libfabric_state->eps[NVSHMEMT_LIBFABRIC_HOST_EP_IDX];
@@ -604,7 +603,7 @@ static int nvshmemt_libfabric_show_info(struct nvshmem_transport *transport, int
 
 static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                        rma_memdesc_t *remote, rma_memdesc_t *local,
-                                       rma_bytesdesc_t bytesdesc, int is_proxy,
+                                       rma_bytesdesc_t bytesdesc, int qp_index,
                                        uint32_t *imm_data) {
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle;
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
@@ -623,12 +622,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
     memset(&p_op_msg, 0, sizeof(struct fi_msg_rma));
     memset(&p_op_r_iov, 0, sizeof(struct fi_rma_iov));
 
-    if (is_proxy) {
-        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    } else {
-        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
-    }
-
+    ep_idx = qp_index ? NVSHMEMT_LIBFABRIC_PROXY_EP_IDX : NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
     ep = &libfabric_state->eps[ep_idx];
     target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
 
@@ -731,13 +725,13 @@ out:
 
 static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                   rma_memdesc_t *remote, rma_memdesc_t *local,
-                                  rma_bytesdesc_t bytesdesc, int is_proxy) {
-    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, is_proxy, NULL);
+                                  rma_bytesdesc_t bytesdesc, int qp_index) {
+    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index, NULL);
 }
 
 static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
                                       amo_verb_t verb, amo_memdesc_t *remote,
-                                      amo_bytesdesc_t bytesdesc, int is_proxy) {
+                                      amo_bytesdesc_t bytesdesc, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_endpoint_t *ep;
     nvshmemt_libfabric_gdr_op_ctx_t *amo;
@@ -745,12 +739,7 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
     int target_ep, ep_idx;
     int status = 0;
 
-    if (is_proxy) {
-        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    } else {
-        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
-    }
-
+    ep_idx = qp_index ? NVSHMEMT_LIBFABRIC_PROXY_EP_IDX : NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
     ep = &libfabric_state->eps[ep_idx];
     target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
 
@@ -793,7 +782,7 @@ out:
 
 static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
                                   amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
-                                  int is_proxy) {
+                                  int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle = NULL, *local_handle = NULL;
     nvshmemt_libfabric_endpoint_t *ep;
@@ -815,12 +804,7 @@ static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, v
     memset(&fi_ret_iov, 0, sizeof(struct fi_ioc));
     memset(&fi_remote_iov, 0, sizeof(struct fi_rma_ioc));
 
-    if (is_proxy) {
-        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    } else {
-        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
-    }
-
+    ep_idx = qp_index ? NVSHMEMT_LIBFABRIC_PROXY_EP_IDX : NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
     ep = &libfabric_state->eps[ep_idx];
     target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
 
@@ -945,7 +929,7 @@ out:
 
 static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,
                                          void *curetptr, amo_verb_t verb, amo_memdesc_t *remote,
-                                         amo_bytesdesc_t bytesdesc, int is_proxy,
+                                         amo_bytesdesc_t bytesdesc, int qp_index,
                                          uint32_t sequence_count, uint16_t num_writes) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_endpoint_t *ep;
@@ -955,12 +939,7 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
     int target_ep, ep_idx;
     int status = 0;
 
-    if (is_proxy) {
-        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    } else {
-        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
-    }
-
+    ep_idx = qp_index ? NVSHMEMT_LIBFABRIC_PROXY_EP_IDX : NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
     ep = &libfabric_state->eps[ep_idx];
     target_ep = pe * NVSHMEMT_LIBFABRIC_DEFAULT_NUM_EPS + ep_idx;
 
@@ -1006,18 +985,11 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
                                   std::vector<rma_memdesc_t> &write_local,
                                   std::vector<rma_bytesdesc_t> &write_bytes_desc,
                                   amo_verb_t sig_verb, amo_memdesc_t *sig_target,
-                                  amo_bytesdesc_t sig_bytes_desc, int is_proxy) {
+                                  amo_bytesdesc_t sig_bytes_desc, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     int status;
     uint32_t sequence_count = 0;
-    int ep_idx;
-
-    if (is_proxy) {
-        ep_idx = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
-    } else {
-        ep_idx = NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
-    }
-
+    int ep_idx = qp_index ? NVSHMEMT_LIBFABRIC_PROXY_EP_IDX : NVSHMEMT_LIBFABRIC_HOST_EP_IDX;
     nvshmemt_libfabric_endpoint_t &ep = libfabric_state->eps[ep_idx];
 
     /* Get sequence number for this put-signal, with retry */
@@ -1042,7 +1014,7 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
     for (size_t i = 0; i < write_remote.size(); i++) {
         status =
             nvshmemt_libfabric_rma_impl(tcurr, pe, write_verb, &write_remote[i], &write_local[i],
-                                        write_bytes_desc[i], is_proxy, &sequence_count);
+                                        write_bytes_desc[i], qp_index, &sequence_count);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT(
                 "Error in nvshmemt_put_signal_unordered, could not submit write #%lu\n", i);
@@ -1052,7 +1024,7 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
 
     assert(use_staged_atomics == true);
     status = nvshmemt_libfabric_gdr_signal(tcurr, pe, NULL, sig_verb, sig_target, sig_bytes_desc,
-                                           is_proxy, sequence_count, (uint16_t)write_remote.size());
+                                           qp_index, sequence_count, (uint16_t)write_remote.size());
 out:
     if (status) {
         NVSHMEMI_ERROR_PRINT(
