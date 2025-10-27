@@ -121,8 +121,10 @@ function configure_matrix_env() {
     export NVSHMEM_BOOTSTRAP_PMI="PMIX"
     export NVSHMEM_TEST_SRUN_FLAGS="--mpi=pmix -n2 --ntasks-per-node=1"
 
+    export MATRIX_SLURM_PARTITION="l40s-cicd"
     export MATRIX_SLURM_NODE_COUNT=2
     export MATRIX_SLURM_GPUS_PER_NODE_COUNT=1
+
     export MATRIX_SKIPPED_VARIANTS="host_pt-to-pt_get:-a"
 }
 

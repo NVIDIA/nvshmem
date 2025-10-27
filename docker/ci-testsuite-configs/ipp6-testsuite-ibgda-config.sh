@@ -19,7 +19,6 @@ MATRIX_TESTS_TO_FAIL=(
     "apps/interop/nccl_nvshmem_interop"
     "device/pt-to-pt/iget"
     "device/pt-to-pt/iput"
-    "device/pt-to-pt/qp_specific_apis" # segfault
     "host/coll/barrier"
     "host/coll/barrier_all"
     "host/init/global_exit"

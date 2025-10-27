@@ -61,7 +61,6 @@ MATRIX_TESTS_TO_SKIP=(
     "device/pt-to-pt/iput"
     "device/pt-to-pt/put_signal"
     "device/pt-to-pt/put_signal_nbi"
-    "device/pt-to-pt/qp_specific_apis"
     "device/pt-to-pt/set"
     "device/pt-to-pt/swap"
     "device/sync/test_some"
