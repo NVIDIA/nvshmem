@@ -133,6 +133,10 @@ struct nvshmemt_ib_common_mem_handle {
     bool local_only;
 };
 
+struct nvshmemt_ib_traffic_class_info {
+    int global_tclass;
+};
+
 struct nvshmemt_ibv_function_table {
     int (*fork_init)(void);
     struct ibv_ah *(*create_ah)(struct ibv_pd *pd, struct ibv_ah_attr *ah_attr);
@@ -218,6 +222,9 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_de
 /* Helper function to get ep from qp index */
 nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,
                                                                     int qp_index, int pe_index);
+
+int nvshmemt_ib_get_tclass(const char *ib_device_name, int port_number, int log_level,
+                           struct nvshmemi_options_s *options);
 
 /* The following code is for dynamic GID detection for RoCE platforms.
    It has been adapted from NCCL: https://gitlab-master.nvidia.com/nccl/nccl/-/merge_requests/359 */

@@ -50,7 +50,7 @@ NVSHMEMI_ENV_DEF(DISABLE_DATA_DIRECT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
 NVSHMEMI_ENV_DEF(IB_DISABLE_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable use of DMABUF in IBRC/IBDEVX/IBGDA Transports")
 NVSHMEMI_ENV_DEF(IB_GID_INDEX, int, -1, NVSHMEMI_ENV_CAT_TRANSPORT, "Source GID Index for ROCE")
-NVSHMEMI_ENV_DEF(IB_TRAFFIC_CLASS, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT, "Traffic calss for ROCE")
+NVSHMEMI_ENV_DEF(IB_TRAFFIC_CLASS, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT, "Traffic class for ROCE")
 NVSHMEMI_ENV_DEF(IB_ADDR_FAMILY, string, "AF_INET", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "IP address family associated to IB GID "
                  "dynamically selected by NVSHMEM when NVSHMEM_IB_GID_INDEX is left unset")
@@ -69,6 +69,9 @@ NVSHMEMI_ENV_DEF(IB_NUM_RC_PER_DEVICE, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of RC qpairs to create per device in the IB proxy-based transports."
                  "A device is each enumerated IB device, either a full HCA or a single port of a "
                  "multi-port HCA.")
+NVSHMEMI_ENV_DEF(IBGDA_ENABLE_SYSTEM_TRAFFIC_CLASS, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "When true, read and use global traffic class from sysfs (/sys/class/infiniband/.../traffic_class) "
+                 "if available. System-level traffic class takes precedence over NVSHMEM_IB_TRAFFIC_CLASS.")
 
 NVSHMEMI_ENV_DEF(HCA_PREFIX, string, "mlx5", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Prefix of HCA interface names. Example, mlx5, ibp.")
