@@ -1258,7 +1258,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_atomic
     ibgda_ctrl_seg_t ctrl_seg;
     struct mlx5_wqe_raddr_seg raddr_seg;
     struct mlx5_wqe_atomic_seg atomic_seg_1;
-    struct mlx5_wqe_atomic_seg atomic_seg_2;
+    struct mlx5_wqe_atomic_seg atomic_seg_2 = {0};
     struct mlx5_wqe_data_seg data_seg;
 
     ibgda_ctrl_seg_t *ctrl_seg_ptr = (ibgda_ctrl_seg_t *)out_wqes[0];
@@ -3114,6 +3114,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
             base_wqe_idx = ibgda_reserve_wqe_slots(qp, num_wqes, is_qp_shared_among_ctas);
         }
 
+        if (can_coalesce_warp) {
+            base_wqe_idx = __shfl_sync(IBGDA_FULL_WARP, base_wqe_idx, 0);
+        }
         my_wqe_idx = base_wqe_idx + (my_tid * num_wqes_per_cmd);
 
         void *wqe_ptrs[4];

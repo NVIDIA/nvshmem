@@ -37,6 +37,7 @@ function configure_matrix_env() {
     export NVSHMEM_DISABLE_NCCL=1
 
     export MATRIX_SLURM_PARTITION="a100x8-cicd"
+#    export MATRIX_SLURM_PARTITION="h100x8-cicd"
     export MATRIX_SLURM_NODE_COUNT=1
     export MATRIX_SLURM_GPUS_PER_NODE_COUNT=2
 

@@ -2,11 +2,8 @@
 # nvshmem4py is aware of and interoperable with them
 # but doesn't depend on them
 mpi4py
---index-url https://download.pytorch.org/whl/cu130
---extra-index-url https://pypi.org/simple
-torch==2.9.0
---index-url https://pypi.org/simple
+--find-links https://download.pytorch.org/whl/cu130/torch_stable.html
+torch==2.9.0+cu130
 ml-dtypes
-# These are cu13 packages
-nvidia-cuda-nvcc
-nvidia-nvjitlink
+nvidia-cuda-nvcc-cu13
+nvidia-nvjitlink-cu13
