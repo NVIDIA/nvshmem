@@ -4099,7 +4099,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
             // \n"); For now, don't exit early. We need to free all the devices and zero out the
             // pointers for reinitalization.
             if (status) {
-                NVSHMEMI_WARN_PRINT("ibv_dealloc_pd failed for device %d.\n", i);
+                NVSHMEMI_WARN_PRINT("ibv_dealloc_pd failed for device %d Err: %d:%s.\n", i, errno, strerror(errno));
             }
         }
 
@@ -4110,7 +4110,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
             // For now, don't exit early. We need to free all the devices and zero out the pointers
             // for reinitalization.
             if (status) {
-                NVSHMEMI_WARN_PRINT("ibv_close_device failed for device %d.\n", i);
+                NVSHMEMI_WARN_PRINT("ibv_close_device failed for device %d Err: %d:%s.\n", i, errno, strerror(errno));
             }
         }
         status = 0;
