@@ -38,7 +38,6 @@ MATRIX_TESTS_TO_FAIL=(
 function configure_matrix_env() {
     export LD_LIBRARY_PATH="${NVSHMEM_HOME}/lib:build/src/lib:$LD_LIBRARY_PATH"
 
-
     export NVSHMEM_DEBUG="INFO"
     export NVSHMEM_DEBUG_SUBSYS="ALL"
 

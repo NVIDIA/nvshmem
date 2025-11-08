@@ -52,7 +52,7 @@ include-package-data = true
 write_to = "nvshmem/version.py"
 # TODO: setuptools_scm is meant to use a git tag for the version
 # Once we have releases, we should move to that system
-fallback_version = "0.2.0"
+fallback_version = "0.1.3"
 version_scheme = "guess-next-dev"
 
 [project.optional-dependencies]
