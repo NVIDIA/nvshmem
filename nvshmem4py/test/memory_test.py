@@ -20,7 +20,7 @@ import argparse
 import os
 import gc
 
-from cuda.core.experimental._memory import VirtualMemoryResource
+from cuda.core.experimental._memory import VirtualMemoryResource, VirtualMemoryResourceOptions
 
 import nvshmem.core
 
@@ -376,6 +376,60 @@ def test_fortran_morder_alloc_cupy():
     nvshmem.core.free_array(array)
     print("Done tsting allocating Fortran-ordered memory Cupy")
 
+from cuda import cuda
+import warnings
+
+CUDA_COH_FULL = "CUDA_COH_FULL"
+CUDA_COH_CDMM = "CUDA_COH_CDMM"
+CUDA_COH_MIGRATION = "CUDA_COH_MIGRATION"
+CUDA_COH_NONE = "CUDA_COH_NONE"
+
+def detect_cuda_coherence_model(device_ordinal: int = 0) -> str:
+	err, = cuda.cuInit(0)
+	if err != cuda.CUresult.CUDA_SUCCESS:
+		raise RuntimeError(f"cuInit failed: {err}")
+
+	err, dev = cuda.cuDeviceGet(device_ordinal)
+	if err != cuda.CUresult.CUDA_SUCCESS:
+		raise RuntimeError(f"cuDeviceGet({device_ordinal}) failed: {err}")
+
+	attr1 = 0
+	if hasattr(cuda.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES"):
+		err, val = cuda.cuDeviceGetAttribute(
+			cuda.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES, dev
+		)
+		if err != cuda.CUresult.CUDA_SUCCESS:
+			raise RuntimeError(f"cuDeviceGetAttribute(HOST_PAGE_TABLES) failed: {err}")
+		attr1 = int(val != 0)
+	else:
+		warnings.warn(
+			"CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES is not defined, "
+			"assuming non-coherent platform"
+		)
+
+	attr2 = 0
+	if hasattr(cuda.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST"):
+		err, val = cuda.cuDeviceGetAttribute(
+			cuda.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST, dev
+		)
+		if err != cuda.CUresult.CUDA_SUCCESS:
+			raise RuntimeError(f"cuDeviceGetAttribute(DIRECT_MANAGED_MEM_ACCESS_FROM_HOST) failed: {err}")
+		attr2 = int(val != 0)
+	else:
+		warnings.warn(
+			"CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST is not defined, "
+			"assuming no migration support"
+		)
+
+	if attr1 and attr2:
+		return CUDA_COH_FULL       # CDMM off
+	elif attr1:
+		return CUDA_COH_CDMM       # CDMM on
+	elif attr2:
+		return CUDA_COH_MIGRATION  # Pascal+ migration
+	else:
+		return CUDA_COH_NONE       # Maxwell and older
+
 def test_external_buffer():
     print("Testing external buffer")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
@@ -386,7 +440,19 @@ def test_external_buffer():
     # Use cuda-bindings CuMemCreate binding to allocate a VMM buffer and wrap it for external registration.
     # We implement a new MemoryResource for VMM buffers.
     print("Creating VMMResource")
-    resource = VirtualMemoryResource(dev)
+
+    # For coherent platforms, always use fabric handles to support MNNVL.
+    # For non-coherent platforms, use the default handle type (posix_fd).
+    coherence_model = detect_cuda_coherence_model(dev.device_id)
+    if coherence_model == CUDA_COH_FULL:
+        options = VirtualMemoryResourceOptions(handle_type="fabric")
+    else:
+        options = VirtualMemoryResourceOptions()
+
+    if coherence_model != CUDA_COH_FULL and coherence_model != CUDA_COH_MIGRATION:
+        print("NOTICE: Non-coherent platform detected or CDMM mode detected. Using posix_fd handle type.")
+    
+    resource = VirtualMemoryResource(dev, config=options)
     print("Allocating Buffer using VMM APIs via VMMResource")
     buffer1 = resource.allocate(536870912)
     buffer2 = resource.allocate(536870912)
