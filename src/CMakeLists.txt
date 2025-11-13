@@ -1059,6 +1059,6 @@ add_custom_target(package_src_target
     COMMAND "${CMAKE_COMMAND}" --build . --target package_source
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Package Build"
-    DEPENDS build_bindings_cybind # build_bindings_numbast
+    DEPENDS build_bindings_cybind build_bindings_numbast
     VERBATIM
 )
