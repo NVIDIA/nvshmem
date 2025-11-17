@@ -21,6 +21,76 @@
 #include "non_abi/nvshmem_build_options.h"     // for NVSHMEM_USE_MLX5DV
 #include "transport_common.h"                  // for LOAD_SYM, INFO, MAXPAT...
 
+static void nvshmemt_ib_read_traffic_class_from_sysfs(const char *sysfs_path,
+                                                      struct nvshmemt_ib_traffic_class_info *tclass_info) {
+    FILE *fp = fopen(sysfs_path, "r");
+    if (!fp) return;
+
+    char line[MAXPATHSIZE];
+    while (fgets(line, sizeof(line), fp)) {
+        int traffic_class_value;
+        if (sscanf(line, "Global tclass=%d", &traffic_class_value) == 1) {
+            tclass_info->global_tclass = traffic_class_value;
+        }
+    }
+    fclose(fp);
+}
+
+static int nvshmemt_ib_query_device_traffic_class(const char *ib_device_name,
+                                                  int port_number,
+                                                  struct nvshmemt_ib_traffic_class_info *tclass_info,
+                                                  int log_level) {
+    int status;
+    char tclass_sysfs_path[MAXPATHSIZE];
+
+    status = snprintf(tclass_sysfs_path, MAXPATHSIZE,
+                      "/sys/class/infiniband/%s/tc/%d/traffic_class",
+                      ib_device_name, port_number);
+    if (status < 0 || status >= MAXPATHSIZE) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "Unable to construct traffic class sysfs path for device %s port %d.\n",
+                           ib_device_name, port_number);
+    }
+
+    if (access(tclass_sysfs_path, F_OK) == 0) {
+        nvshmemt_ib_read_traffic_class_from_sysfs(tclass_sysfs_path, tclass_info);
+    } else {
+        NVSHMEMI_WARN_PRINT("Traffic class sysfs file not found: %s", tclass_sysfs_path);
+    }
+
+    status = NVSHMEMX_SUCCESS;
+out:
+    return status;
+}
+
+int nvshmemt_ib_get_tclass(const char *ib_device_name, int port_number, int log_level,
+                           struct nvshmemi_options_s *options) {
+    int user_traffic_class = options ? options->IB_TRAFFIC_CLASS : 0;
+
+    if (!options || !options->IB_ENABLE_SYSTEM_TRAFFIC_CLASS) {
+        return user_traffic_class;
+    }
+
+    struct nvshmemt_ib_traffic_class_info tclass_info;
+
+    memset(&tclass_info, -1, sizeof(struct nvshmemt_ib_traffic_class_info));
+
+    int status = nvshmemt_ib_query_device_traffic_class(ib_device_name, port_number,
+                                                        &tclass_info, log_level);
+
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_WARN_PRINT("Failed to query traffic class for device %s port %d\n", ib_device_name, port_number);
+        return user_traffic_class;
+    }
+
+    // If system traffic class is set (>0), use it; otherwise use user-specified value
+    if (tclass_info.global_tclass > 0) {
+        return tclass_info.global_tclass;
+    }
+
+    return user_traffic_class;
+}
+
 int nvshmemt_ib_common_nv_peer_mem_available() {
     if (access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == 0) {
         return NVSHMEMX_SUCCESS;

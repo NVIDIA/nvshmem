@@ -275,6 +275,7 @@ struct ibgda_device {
     bool may_skip_cst;
     ibgda_nic_handler_t nic_handler;
     bool data_direct;
+    int tclass_val;
 };
 
 struct nvshmemt_ibgda_device_state_cache {
@@ -1650,7 +1651,7 @@ out:
  * ============================================================================= */
 
 static int ibgda_dci_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
-                              const struct ibgda_device *device, int portid) {
+                              const struct ibgda_device *device, int portid, int traffic_class) {
     int status = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(init2rtr_qp_in)] = {
@@ -1676,9 +1677,9 @@ static int ibgda_dci_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
         DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->options->IB_SL);
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        DEVX_SET(qpc, qpc, primary_address_path.tclass, ibgda_state->options->IB_TRAFFIC_CLASS);
+        DEVX_SET(qpc, qpc, primary_address_path.tclass, traffic_class);
         DEVX_SET(qpc, qpc, primary_address_path.eth_prio, ibgda_state->options->IB_SL);
-        DEVX_SET(qpc, qpc, primary_address_path.dscp, ibgda_state->options->IB_TRAFFIC_CLASS >> 2);
+        DEVX_SET(qpc, qpc, primary_address_path.dscp, traffic_class >> 2);
     }
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
@@ -1692,7 +1693,7 @@ out:
 
 static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
                              const struct ibgda_device *device, int portid,
-                             struct ibgda_rc_handle *peer_ep_handle) {
+                             struct ibgda_rc_handle *peer_ep_handle, int traffic_class) {
     int status = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(init2rtr_qp_in)] = {
@@ -1753,7 +1754,7 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
         ah_attr.grh.dgid.global.subnet_prefix = peer_ep_handle->spn;
         ah_attr.grh.dgid.global.interface_id = peer_ep_handle->iid;
         ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
-        ah_attr.grh.traffic_class = ibgda_state->options->IB_TRAFFIC_CLASS;
+        ah_attr.grh.traffic_class = traffic_class;
         ah_attr.sl = ibgda_state->options->IB_SL;
         ah_attr.src_path_bits = 0;
 
@@ -1775,7 +1776,7 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
                  device->common_device.gid_info[portid - 1].local_gid_index);
         DEVX_SET(qpc, qpc, primary_address_path.eth_prio, ibgda_state->options->IB_SL);
         DEVX_SET(qpc, qpc, primary_address_path.udp_sport, ah_attr.dlid);
-        DEVX_SET(qpc, qpc, primary_address_path.dscp, ibgda_state->options->IB_TRAFFIC_CLASS >> 2);
+        DEVX_SET(qpc, qpc, primary_address_path.dscp, traffic_class >> 2);
 
         memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rgid_rip), &dah.av->rgid,
                sizeof(dah.av->rgid));
@@ -2320,7 +2321,7 @@ out:
 }
 
 static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
-                                           struct ibgda_device *device, int portid) {
+                                           struct ibgda_device *device, int portid, int traffic_class) {
     int status = 0;
 
     const struct ibv_port_attr *port_attr = device->common_device.port_attr + (portid - 1);
@@ -2400,7 +2401,7 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
             device->common_device.gid_info[portid - 1].local_gid.global.interface_id;
         ah_attr.grh.flow_label = 0;
         ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
-        ah_attr.grh.traffic_class = ibgda_state->options->IB_TRAFFIC_CLASS;
+        ah_attr.grh.traffic_class = traffic_class;
         ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
         support_half_av_seg = false;
     } else {
@@ -2833,7 +2834,7 @@ static int ibgda_setup_dci_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "ibgda_qp_rst2init failed on DCI #%d.", i);
 
-        status = ibgda_dci_init2rtr(ibgda_state, device->dci.eps[i], device, portid);
+        status = ibgda_dci_init2rtr(ibgda_state, device->dci.eps[i], device, portid, device->tclass_val);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "ibgda_dci_init2rtr failed on DCI #%d.", i);
 
@@ -3143,7 +3144,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
                                   "ibgda_qp_rst2init failed on RC #%d.", ep_index);
 
             status = ibgda_rc_init2rtr(ibgda_state, device->rc.eps[ep_index], device, portid,
-                                       &peer_ep_handles[peer_handle_index]);
+                                       &peer_ep_handles[peer_handle_index], device->tclass_val);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_rc_init2rtr failed on RC #%d.", ep_index);
 
@@ -3834,7 +3835,7 @@ static int ibgda_connect_device_resources(nvshmemt_ibgda_state_t *ibgda_state,
     status = ibgda_create_qp_shared_objects(ibgda_state, device);
     if (status) return status;
 
-    status = ibgda_create_dct_shared_objects(ibgda_state, device, portid);
+    status = ibgda_create_dct_shared_objects(ibgda_state, device, portid, device->tclass_val);
     if (status) return status;
 
     status = ibgda_create_dci_shared_objects(ibgda_state, device);
@@ -4791,6 +4792,10 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                                   "ibv_close_device or ibv_dealloc_pd failed \n");
             continue;
         }
+
+        device->tclass_val = nvshmemt_ib_get_tclass(name, ibgda_state->port_ids[i],
+                                                    ibgda_state->log_level, ibgda_state->options);
+        INFO(ibgda_state->log_level, "traffic class value for %s is %d.", name, device->tclass_val);
 
         /* Report whether we need to do atomic endianness conversions on 8 byte operands. */
         status = nvshmemt_ib_common_query_endianness_conversion_size(&atomic_host_endian_size,
