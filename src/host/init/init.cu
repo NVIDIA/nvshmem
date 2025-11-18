@@ -1243,7 +1243,9 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
 
     if (nvshmemi_is_version_compatible(nvshmemi_host_lib_version, nvshmem_device_lib_version) !=
         0) {
-        printf("NVSHMEM device library version does not match with NVSHMEM host library version\n");
+        printf("NVSHMEM device library version (%d.%d.%d) does not match with NVSHMEM host library version (%d.%d.%d)\n",
+               nvshmem_device_lib_version.major, nvshmem_device_lib_version.minor, nvshmem_device_lib_version.patch,
+               nvshmemi_host_lib_version.major, nvshmemi_host_lib_version.minor, nvshmemi_host_lib_version.patch);
         return 1;
     }
 
@@ -1827,8 +1829,10 @@ static int nvshmemi_cuobject_init_common(CUdeviceptr lib_dptr, size_t lib_size,
 
     if (nvshmemi_is_version_compatible(nvshmemi_host_lib_version, module_nvshmem_version) != 0) {
         printf(
-            "NVSHMEM version in CUmodule or CUlibrary does not match with NVSHMEM host library "
-            "version\n");
+            "NVSHMEM version in CUmodule or CUlibrary (%d.%d.%d) does not match with NVSHMEM host library "
+            "version (%d.%d.%d)\n",
+            module_nvshmem_version.major, module_nvshmem_version.minor, module_nvshmem_version.patch,
+            nvshmemi_host_lib_version.major, nvshmemi_host_lib_version.minor, nvshmemi_host_lib_version.patch);
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
