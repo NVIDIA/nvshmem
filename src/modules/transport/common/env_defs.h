@@ -98,6 +98,9 @@ NVSHMEMI_ENV_DEF(DISABLE_LOCAL_ONLY_PROXY, bool, false, NVSHMEMI_ENV_CAT_TRANSPO
 NVSHMEMI_ENV_DEF(LIBFABRIC_PROVIDER, string, "cxi", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set the feature set provider for the libfabric transport: cxi, efa, verbs")
 
+NVSHMEMI_ENV_DEF(DISABLE_LIBFABRIC_EFA_DIRECT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Disable EFA direct fabric and use efa instead")
+
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_ENV_ALL)
 /** GPU-initiated communication **/
 NVSHMEMI_ENV_DEF(IBGDA_ENABLE_MULTI_PORT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
