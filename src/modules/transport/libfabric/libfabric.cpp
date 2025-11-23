@@ -606,7 +606,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                                        rma_memdesc_t *remote, rma_memdesc_t *local,
                                        rma_bytesdesc_t bytesdesc, int is_proxy,
                                        uint32_t *imm_data) {
-    nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle;
+    nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle = NULL;
+    void *local_mr_desc = NULL;
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     struct iovec p_op_l_iov;
     struct fi_msg_rma p_op_msg;
@@ -641,10 +642,15 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
         NVSHMEMI_NULL_ERROR_JMP(gdr_ctx, status, NVSHMEMX_ERROR_INTERNAL, out,
                                 "Unable to get context buffer for put request.\n");
         context = &gdr_ctx->ofi_context;
+
+        /* local->handle may be NULL for small operations (P ops) sent by value/inline */
+        if (likely(local->handle != NULL)) {
+            local_handle = &((nvshmemt_libfabric_mem_handle_t *)local->handle)->hdls[ep_idx];
+            local_mr_desc = local_handle->local_desc;
+        }
     }
 
     remote_handle = &((nvshmemt_libfabric_mem_handle_t *)remote->handle)->hdls[ep_idx];
-    local_handle = &((nvshmemt_libfabric_mem_handle_t *)local->handle)->hdls[ep_idx];
     op_size = bytesdesc.elembytes * bytesdesc.nelems;
 
     if (verb.desc == NVSHMEMI_OP_P) {
@@ -690,14 +696,14 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
             remote_addr = (uintptr_t)remote->ptr;
         else
             remote_addr = (uintptr_t)remote->offset;
-
         do {
-            if (imm_data)
+            if (imm_data) {
                 status =
-                    fi_writedata(ep->endpoint, local->ptr, op_size, local_handle->local_desc,
+                    fi_writedata(ep->endpoint, local->ptr, op_size, local_mr_desc,
                                  *imm_data, target_ep, remote_addr, remote_handle->key, context);
+            }
             else
-                status = fi_write(ep->endpoint, local->ptr, op_size, local_handle->local_desc,
+                status = fi_write(ep->endpoint, local->ptr, op_size, local_mr_desc,
                                   target_ep, remote_addr, remote_handle->key, context);
         } while (try_again(tcurr, &status, &num_retries));
     } else if (verb.desc == NVSHMEMI_OP_G || verb.desc == NVSHMEMI_OP_GET) {
@@ -710,7 +716,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
             remote_addr = (uintptr_t)remote->offset;
 
         do {
-            status = fi_read(ep->endpoint, local->ptr, op_size, local_handle->local_desc, target_ep,
+            status = fi_read(ep->endpoint, local->ptr, op_size, local_mr_desc, target_ep,
                              remote_addr, remote_handle->key, context);
         } while (try_again(tcurr, &status, &num_retries));
     } else {
