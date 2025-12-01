@@ -717,6 +717,8 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
             }
             if (ep->recv_bufs)
                 free(ep->recv_bufs);
+            if (ep->req)
+                free(ep->req);
         }
         free(state->ep);
     }
@@ -732,6 +734,8 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
         }
         if (ep->recv_bufs)
             free(ep->recv_bufs);
+        if (ep->req)
+            free(ep->req);
         free(state->cst_ep);
         state->cst_ep = NULL;
     }
