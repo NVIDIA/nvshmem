@@ -47,8 +47,6 @@
 #endif
 // IWYU pragma: no_include <xmmintrin.h>
 
-#define IBRC_MAX_INLINE_SIZE 128
-
 // Helper functions to access qp_depth and srq_depth from state
 static inline int get_ibrc_qp_depth(nvshmemt_ib_common_state_t state) { return state->qp_depth; }
 
@@ -57,6 +55,8 @@ static inline int get_ibrc_srq_depth(nvshmemt_ib_common_state_t state) { return 
 #define IBRC_SRQ_MASK(state) (get_ibrc_srq_depth(state) - 1)
 #define IBRC_REQUEST_QUEUE_MASK(state) (get_ibrc_qp_depth(state) - 1)
 #define IBRC_BUF_SIZE 64
+
+#define IBRC_MAX_INLINE_SIZE IBRC_BUF_SIZE
 
 #if defined(NVSHMEM_X86_64)
 #define IBRC_CACHELINE 64
