@@ -52,6 +52,7 @@ static std::set<nvshmemx_device_lib_init_cb> registered_device_state_cb;
 
 static void nvshmemi_init_debug(void);
 static void nvshmemi_init_msg(void);
+int set_job_connectivity(nvshmemi_state_t*);
 
 struct nvshmemi_cuda_fn_table *nvshmemi_cuda_syms;
 nvshmemi_state_t *nvshmemi_state;
@@ -1184,6 +1185,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
         cudaMemcpy(heap_base_array_dptr, (const void *)state->heap_obj->get_local_pe_base(),
                    sizeof(void *) * state->npes, cudaMemcpyHostToDevice),
         status, out);
+    // Reset job_connectivity.
+    status = set_job_connectivity(state);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "set_job_connectivity failed \n");
 
     nvshmemi_update_device_state();
     nvshmemi_is_device_state_ready = 1;

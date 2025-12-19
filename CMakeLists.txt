@@ -48,7 +48,7 @@ endif()
 project(
   NVSHMEM
   LANGUAGES CUDA CXX C
-  VERSION 3.5.9.0
+  VERSION 3.5.19.0
 )
 
 if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang") OR
@@ -151,6 +151,11 @@ set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags")
 
 cmake_policy(SET CMP0105 NEW)
 set(CMAKE_CUDA_DEVICE_COMPILER_WRAPPER_FLAG "")
+
+# Set CMP0177 for path normalization in install() (CMake 3.31+)
+if(POLICY CMP0177)
+  cmake_policy(SET CMP0177 NEW)
+endif()
 
 configure_file(License.txt License.txt COPYONLY)
 

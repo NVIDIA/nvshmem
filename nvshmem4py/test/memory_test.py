@@ -376,7 +376,7 @@ def test_fortran_morder_alloc_cupy():
     nvshmem.core.free_array(array)
     print("Done tsting allocating Fortran-ordered memory Cupy")
 
-from cuda import cuda
+import cuda.bindings.driver as driver
 import warnings
 
 CUDA_COH_FULL = "CUDA_COH_FULL"
@@ -385,20 +385,20 @@ CUDA_COH_MIGRATION = "CUDA_COH_MIGRATION"
 CUDA_COH_NONE = "CUDA_COH_NONE"
 
 def detect_cuda_coherence_model(device_ordinal: int = 0) -> str:
-	err, = cuda.cuInit(0)
-	if err != cuda.CUresult.CUDA_SUCCESS:
+	err, = driver.cuInit(0)
+	if err != driver.CUresult.CUDA_SUCCESS:
 		raise RuntimeError(f"cuInit failed: {err}")
 
-	err, dev = cuda.cuDeviceGet(device_ordinal)
-	if err != cuda.CUresult.CUDA_SUCCESS:
+	err, dev = driver.cuDeviceGet(device_ordinal)
+	if err != driver.CUresult.CUDA_SUCCESS:
 		raise RuntimeError(f"cuDeviceGet({device_ordinal}) failed: {err}")
 
 	attr1 = 0
-	if hasattr(cuda.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES"):
-		err, val = cuda.cuDeviceGetAttribute(
-			cuda.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES, dev
+	if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES"):
+		err, val = driver.cuDeviceGetAttribute(
+			driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES, dev
 		)
-		if err != cuda.CUresult.CUDA_SUCCESS:
+		if err != driver.CUresult.CUDA_SUCCESS:
 			raise RuntimeError(f"cuDeviceGetAttribute(HOST_PAGE_TABLES) failed: {err}")
 		attr1 = int(val != 0)
 	else:
@@ -408,11 +408,11 @@ def detect_cuda_coherence_model(device_ordinal: int = 0) -> str:
 		)
 
 	attr2 = 0
-	if hasattr(cuda.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST"):
-		err, val = cuda.cuDeviceGetAttribute(
-			cuda.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST, dev
+	if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST"):
+		err, val = driver.cuDeviceGetAttribute(
+			driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST, dev
 		)
-		if err != cuda.CUresult.CUDA_SUCCESS:
+		if err != driver.CUresult.CUDA_SUCCESS:
 			raise RuntimeError(f"cuDeviceGetAttribute(DIRECT_MANAGED_MEM_ACCESS_FROM_HOST) failed: {err}")
 		attr2 = int(val != 0)
 	else:
@@ -444,6 +444,7 @@ def test_external_buffer():
     # For coherent platforms, always use fabric handles to support MNNVL.
     # For non-coherent platforms, use the default handle type (posix_fd).
     coherence_model = detect_cuda_coherence_model(dev.device_id)
+    print("Coherence model:", coherence_model)
     if coherence_model == CUDA_COH_FULL:
         options = VirtualMemoryResourceOptions(handle_type="fabric")
     else:

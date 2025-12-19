@@ -48,13 +48,13 @@
 #define unlikely(x) (__builtin_expect(!!(x), 0))
 #endif
 
-#define NVSHMEMI_DEBUG_PRINT(...)                                                 \
-    do {                                                                          \
-        if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {                           \
-            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__);                       \
-            fprintf(stderr, __VA_ARGS__);                                         \
-            fprintf(stderr, "\n");                                                \
-        }                                                                         \
+#define NVSHMEMI_DEBUG_PRINT(...)                           \
+    do {                                                    \
+        if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {     \
+            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__); \
+            fprintf(stderr, __VA_ARGS__);                   \
+            fprintf(stderr, "\n");                          \
+        }                                                   \
     } while (0)
 
 #define NZ_DEBUG_JMP(status, err, label, ...)                                               \
@@ -173,6 +173,14 @@
 #define NVSHMEMU_UNMAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                      \
     toPtr = (void *)((char *)(nvshmemi_device_state.peer_heap_base_remote[peer]) + \
                      ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
+
+#define NVSHMEMU_PE_TRANSLATE(peer)                                                 \
+    do {                                                                            \
+        if (nvshmemi_device_state.enable_rail_opt) {                                \
+            peer = (peer / nvshmemi_state->npes_node) * nvshmemi_state->npes_node + \
+                   nvshmemi_state->mype_node;                                       \
+        }                                                                           \
+    } while (0)
 
 void nvshmemu_thread_cs_init();
 void nvshmemu_thread_cs_finalize();
