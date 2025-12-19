@@ -40,7 +40,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
                                                                           int pe) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr && nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST) {
+    if (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST) {
         volatile T *dest_actual =
             (volatile T *)((char *)(peer_base_addr) +
                            ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
