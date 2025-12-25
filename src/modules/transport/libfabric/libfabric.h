@@ -6,6 +6,7 @@
 
 #include <assert.h>
 #include <stdint.h>  // IWYU pragma: keep
+#include <stdio.h>
 #include <stddef.h>
 #include <string.h>
 #include <deque>

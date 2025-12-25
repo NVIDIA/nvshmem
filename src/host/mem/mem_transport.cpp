@@ -257,7 +257,7 @@ out:
        This is to avoid a case where some PEs on some node are P2P reachable and some PEs on some
        node are not, causing asymmetry
     */
-    peer_error_status = (bool *)std::calloc(sizeof(bool), npes);
+    peer_error_status = (bool *)std::calloc(npes, sizeof(*peer_error_status));
     nvshmemi_boot_handle.allgather((void *)(&errored_on_initialization_), peer_error_status,
                                    sizeof(bool), &nvshmemi_boot_handle);
     NVSHMEMU_FOR_EACH(i, npes) {
