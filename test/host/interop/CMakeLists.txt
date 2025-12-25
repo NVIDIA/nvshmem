@@ -39,6 +39,17 @@ target_link_libraries(simplelib2 PRIVATE nvshmem_test_helper)
 target_link_libraries(app PRIVATE simplelib1 simplelib2 nvshmem_test_helper)
 target_link_libraries(app_multi_init PRIVATE simplelib1 simplelib2 nvshmem_test_helper)
 
+#
+# Some toolchains/distros enable PIE by default for executables. NVCC-produced objects for these
+# CUDA test apps may not be compiled with -fPIE, which then fails to link with:
+#   relocation R_X86_64_32 ... can not be used when making a PIE object
+# Disable PIE for these interop test executables to keep the build portable.
+#
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(app PRIVATE -no-pie)
+    target_link_options(app_multi_init PRIVATE -no-pie)
+endif()
+
 install(TARGETS simplelib1 LIBRARY DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/host/interop")
 install(TARGETS simplelib2 LIBRARY DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/host/interop")
 install(TARGETS app RUNTIME DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/host/interop")

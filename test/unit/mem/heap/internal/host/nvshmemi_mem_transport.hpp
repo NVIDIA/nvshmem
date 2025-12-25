@@ -59,21 +59,27 @@ class nvshmemi_mem_p2p_transport {
 
     void set_heap_size_(nvshmemi_symmetric_heap &heap, size_t size) { heap.heap_size_ = size; }
     void set_heap_base_(nvshmemi_symmetric_heap &heap) {
-        int heap_base = 1;
-        void *heap_base_ptr = &heap_base;
-        heap.heap_base_ = heap_base_ptr;
+        auto &storage = heap_base_storage_[&heap];
+        if (!storage) storage = std::make_unique<int>(1);
+        heap.heap_base_ = storage.get();
     }
 
     void set_peer_heap_base_p2p_(nvshmemi_symmetric_heap &heap) {
-        int value = 1;
-        void *ptr = &value;
-        heap.peer_heap_base_p2p_ = (void **)std::calloc(1, sizeof(void *));
+        auto &storage = peer_heap_base_p2p_storage_[&heap];
+        if (!storage) storage = std::make_unique<int>(1);
+        void *ptr = storage.get();
+
+        if (heap.peer_heap_base_p2p_ == nullptr) {
+            heap.peer_heap_base_p2p_ = (void **)std::calloc(1, sizeof(void *));
+        }
         heap.peer_heap_base_p2p_[0] = ptr;
     }
 
    private:
     static nvml_function_table nvml_ftable_;
     static void *nvml_handle_;
+    std::map<nvshmemi_symmetric_heap *, std::unique_ptr<int>> heap_base_storage_;
+    std::map<nvshmemi_symmetric_heap *, std::unique_ptr<int>> peer_heap_base_p2p_storage_;
     explicit nvshmemi_mem_p2p_transport(int mype, int npes){};
     static nvshmemi_mem_p2p_transport *p2p_objref_;  // singleton instance
 };
