@@ -29,6 +29,7 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
                                 -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
                                 -DCUTLASS_HOME=${CUTLASS_HOME}
+                                -DCUDA_HOME=${CUDAToolkit_Root}
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                                 -DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}

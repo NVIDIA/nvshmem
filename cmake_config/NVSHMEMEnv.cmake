@@ -125,14 +125,7 @@ message( "______________________________________________________________________
 
 
 ### HIDDEN ###
-if (DEFINED ENV{NVSHMEM_DEVICELIB_CUDA_HOME})
-  set(NVSHMEM_DEVICELIB_CUDA_HOME_DEFAULT $ENV{NVSHMEM_DEVICELIB_CUDA_HOME})
-elseif(DEFINED ENV{CUDA_HOME})
-  set(NVSHMEM_DEVICELIB_CUDA_HOME_DEFAULT $ENV{CUDA_HOME})
-else()
-  set(NVSHMEM_DEVICELIB_CUDA_HOME_DEFAULT "/usr/local/cuda")
-endif()
-set(NVSHMEM_DEVICELIB_CUDA_HOME ${NVSHMEM_DEVICELIB_CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
+nvshmem_add_default_environment_path(NVSHMEM_DEVICELIB_CUDA_HOME "" "path to CUDA installation")
 
 option(NVSHMEM_INSTALL_FUNCTIONAL_TESTS "Install functional tests" $ENV{NVSHMEM_INSTALL_FUNCTIONAL_TESTS})
 option(NVSHMEM_TEST_STATIC_LIB "Force tests to link only against the combined nvshmem.a binary" $ENV{NVSHMEM_TEST_STATIC_LIB})
