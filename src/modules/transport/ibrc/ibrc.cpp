@@ -732,33 +732,39 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
                 status = ftable.dereg_mr(((struct ibrc_device *)state->devices)[dev_id].bpool_mr);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "ibv_dereg_mr failed \n");
+                ((struct ibrc_device *)state->devices)[dev_id].bpool_mr = NULL;
             }
             if (((struct ibrc_device *)state->devices)[dev_id].send_cq) {
                 status = ftable.destroy_cq(((struct ibrc_device *)state->devices)[dev_id].send_cq);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "ibv_destroy_cq failed \n");
+                ((struct ibrc_device *)state->devices)[dev_id].send_cq = NULL;
             }
             if (((struct ibrc_device *)state->devices)[dev_id].recv_cq) {
                 status = ftable.destroy_cq(((struct ibrc_device *)state->devices)[dev_id].recv_cq);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "ibv_destroy_cq failed \n");
+                ((struct ibrc_device *)state->devices)[dev_id].recv_cq = NULL;
             }
             if (((struct ibrc_device *)state->devices)[dev_id].srq) {
                 status = ftable.destroy_srq(((struct ibrc_device *)state->devices)[dev_id].srq);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "ibv_destroy_srq failed \n");
+                ((struct ibrc_device *)state->devices)[dev_id].srq = NULL;
             }
             if (((struct ibrc_device *)state->devices)[dev_id].common_device.pd) {
                 status = ftable.dealloc_pd(
                     ((struct ibrc_device *)state->devices)[dev_id].common_device.pd);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "ibv_dealloc_pd failed \n");
+                ((struct ibrc_device *)state->devices)[dev_id].pd = NULL;
             }
             if (((struct ibrc_device *)state->devices)[dev_id].common_device.context) {
                 status = ftable.close_device(
                     ((struct ibrc_device *)state->devices)[dev_id].common_device.context);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "ibv_close_device failed \n");
+                ((struct ibrc_device *)state->devices)[dev_id].context = NULL;
             }
         }
         free(state->devices);
