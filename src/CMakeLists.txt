@@ -52,18 +52,6 @@ set_property(TARGET nvshmem_device PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BI
 
 ## Start bitcode library configurations
 
-if(CUDAToolkit_VERSION_MAJOR LESS 13)
-  set(LIB_CXX_STANDARD 11)
-else()
-  set(LIB_CXX_STANDARD 17)
-endif()
-
-# CUTLASS needs C++ 17
-if(NVSHMEM_BUILD_WITH_CUTLASS)
-  message(WARNING "Setting CXX standard to C++ 17 for building with CUTLASS")
-  set(LIB_CXX_STANDARD 17)
-endif()
-
 # GPUNetIO include flags for device code custom commands (bitcode, LTO-IR)
 if(NVSHMEM_GPUNETIO_SUPPORT)
   set(DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS -I ${GPUNETIO_INCLUDE})
@@ -81,11 +69,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     set(BITCODE_LIB_ARCH "sm_90")
   endif()
 
-  if(CUDAToolkit_VERSION_MAJOR LESS 13)
-    set(BITCODE_CXX_STD "c++11")
-  else()
-    set(BITCODE_CXX_STD "c++17")
-  endif()
+  set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
 
   # Note - today we do optimization to avoid having a too large bitcode file. There are, as of clang 18, some existing
   # limitations around compiling device libraries which make optimizing this library fine. Once these issues are fixed
@@ -151,12 +135,6 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     # CUDA >= 12.0, so we can build LTOIR
     set(LTOIR_LIB_ARCH sm_80)
 
-  if(CUDAToolkit_VERSION_MAJOR LESS 13)
-    set(LTOIR_CXX_STD "c++11")
-  else()
-    set(LTOIR_CXX_STD "c++17")
-  endif()
-
   # ––– paths –––
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 
@@ -164,7 +142,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
     # Generate LTO IR with all inline functions included
-    COMMAND nvcc -std=${LTOIR_CXX_STD} -arch=${LTOIR_LIB_ARCH} -dlto --ltoir
+    COMMAND nvcc -std=${BITCODE_CXX_STD} -arch=${LTOIR_LIB_ARCH} -dlto --ltoir
             -I ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
             -DNVSHMEM_BUILD_LTOIR_LIBRARY
@@ -352,9 +330,7 @@ endif()
 add_library(nvshmem_bootstrap_uid SHARED)
 set(ACTIVE_BOOTSTRAPS ${ACTIVE_BOOTSTRAPS} nvshmem_bootstrap_uid)
 set_target_properties(nvshmem_bootstrap_uid
-                      PROPERTIES C_STANDARD 11
-                      CXX_STANDARD_REQUIRED ON
-                      CXX_STANDARD 11)
+                      PROPERTIES C_STANDARD 11)
 target_sources(nvshmem_bootstrap_uid PRIVATE modules/bootstrap/common/bootstrap_util.cpp
                                              modules/bootstrap/uid/ncclSocket/ncclsocket_socket.cpp
 					                                   modules/bootstrap/uid/bootstrap_uid.cpp)
@@ -384,10 +360,6 @@ add_library(
 ## Start generic variable configuration
 set_target_properties(nvshmem_host
                       PROPERTIES POSITION_INDEPENDENT_CODE ON
-                      CXX_STANDARD_REQUIRED ON
-                      CUDA_STANDARD_REQUIRED ON
-                      CXX_STANDARD "${LIB_CXX_STANDARD}"
-                      CUDA_STANDARD "${LIB_CXX_STANDARD}"
                       CUDA_SEPARABLE_COMPILATION ON
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
                       ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
@@ -774,8 +746,6 @@ endif()
 
 set_target_properties(${ACTIVE_TRANSPORTS}
                       PROPERTIES PREFIX ""
-                      CXX_STANDARD_REQUIRED ON
-                      CXX_STANDARD 11
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
                       VERSION ${TRANSPORT_VERSION_MAJOR}.${TRANSPORT_VERSION_MINOR}.${TRANSPORT_VERSION_PATCH}
                       SOVERSION ${TRANSPORT_VERSION_MAJOR})
@@ -835,7 +805,7 @@ target_sources(nvshmem_host PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURC
 # Start nvshmem-info definitions.
 add_executable(nvshmem-info)
 target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp host/util/env_vars.cpp host/util/util.cpp host/init/init_nvtx.cpp)
-set_target_properties(nvshmem-info PROPERTIES CXX_STANDARD_REQUIRED ON CXX_STANDARD ${LIB_CXX_STANDARD} RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
+set_target_properties(nvshmem-info PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem_host nvshmem_device)
 target_include_directories(nvshmem-info PRIVATE include include/host/env)
 target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)

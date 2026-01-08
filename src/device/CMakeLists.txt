@@ -1,6 +1,18 @@
 # Allow users to set the CUDA toolkit through the env.
 cmake_minimum_required(VERSION 3.19)
 
+project(
+  NVSHMEM_DEVICE
+  LANGUAGES CUDA CXX
+  VERSION ${PROJECT_VERSION}
+)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED On)
+
 include(CMakePackageConfigHelpers)
 
 set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/../.." CACHE PATH "..." FORCE)
@@ -34,11 +46,6 @@ if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
   set(CMAKE_CUDA_COMPILER "${NVSHMEM_DEVICELIB_CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
 endif()
 
-project(
-  NVSHMEM_DEVICE
-  LANGUAGES CUDA CXX C
-  VERSION ${PROJECT_VERSION}
-)
 
 find_package(CUDAToolkit)
 find_package(CCCL PATHS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl)
@@ -69,17 +76,6 @@ message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 message(STATUS "CMAKE_CUDA_COMPILER: ${CMAKE_CUDA_COMPILER}")
 message(STATUS "NVSHMEM_PREFIX: ${NVSHMEM_PREFIX}")
 message(STATUS "NVSHMEM_DEBUG: ${NVSHMEM_DEBUG}")
-
-if(CUDAToolkit_VERSION_MAJOR LESS 13)
-  set(LIB_CXX_STANDARD 11)
-else()
-  set(LIB_CXX_STANDARD 17)
-endif()
-
-# CUTLASS needs C++ 17
-if(NVSHMEM_BUILD_WITH_CUTLASS)
-  set(LIB_CXX_STANDARD 17)
-endif()
 
 install(
   EXPORT NVSHMEMDeviceTargets
@@ -120,10 +116,6 @@ endif()
 
 set_target_properties(nvshmem_device
                       PROPERTIES POSITION_INDEPENDENT_CODE ON
-                      CXX_STANDARD_REQUIRED ON
-                      CUDA_STANDARD_REQUIRED ON
-                      CXX_STANDARD "${LIB_CXX_STANDARD}"
-                      CUDA_STANDARD "${LIB_CXX_STANDARD}"
                       CUDA_SEPARABLE_COMPILATION ON
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../lib"
                       ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/../lib"

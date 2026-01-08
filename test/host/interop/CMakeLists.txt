@@ -9,26 +9,6 @@ set_target_properties(app simplelib1 simplelib2 PROPERTIES INSTALL_RPATH "$ORIGI
 target_link_options(simplelib1 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/simplelib1.sym")
 target_link_options(simplelib2 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/simplelib2.sym")
 
-# Tile-granular APIs need C++ 17
-set(TEST_CXX_STANDARD 17)
-set(TEST_CXX_ARG c++17)
-set_target_properties(simplelib1 PROPERTIES
-CXX_STANDARD "${TEST_CXX_STANDARD}"
-CUDA_STANDARD "${TEST_CXX_STANDARD}"
-)
-set_target_properties(simplelib2 PROPERTIES
-CXX_STANDARD "${TEST_CXX_STANDARD}"
-CUDA_STANDARD "${TEST_CXX_STANDARD}"
-)
-set_target_properties(app PROPERTIES
-CXX_STANDARD "${TEST_CXX_STANDARD}"
-CUDA_STANDARD "${TEST_CXX_STANDARD}"
-)
-set_target_properties(app_multi_init PROPERTIES
-CXX_STANDARD "${TEST_CXX_STANDARD}"
-CUDA_STANDARD "${TEST_CXX_STANDARD}"
-)
-
 target_include_directories(simplelib1 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(simplelib2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

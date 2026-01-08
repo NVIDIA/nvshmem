@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.19)
 
+project(
+  NVSHMEM
+  LANGUAGES CXX C
+  VERSION 3.6.21.0
+)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS On)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
 
 include(NVSHMEMEnv)
@@ -34,11 +44,9 @@ if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
   set(CMAKE_CUDA_COMPILER "${CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
 endif()
 
-# Save value of CMAKE_CUDA_ARCHITECTURES before calling project()
-# This is to solve a chicken-egg problem. It seems FIND_CUDA doesn't
-# work without project(), but project() overwrites CMAKE_CUDA_ARCHITECTURES.
-# We need to know the version of the CUDA Toolkit before we can set the project
-# defaults. So this lets us know beforehand if the user has specified a preference.
+# Save value of CMAKE_CUDA_ARCHITECTURES before enabling the CUDA language.
+# enable_language(CUDA) would otherwise overwrite it with a CMake default, but we
+# want to pick a default based on the CUDA Toolkit version (see below).
 if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
 endif()
@@ -47,11 +55,11 @@ if (NOT DEFINED CUDA_ARCHITECTURES)
   set(CUDA_ARCHITECTURES_UNDEFINED 1)
 endif()
 
-project(
-  NVSHMEM
-  LANGUAGES CUDA CXX C
-  VERSION 3.6.20.0
-)
+# All CUDA prerequisites are now in place: enable the CUDA language.
+enable_language(CUDA)
+
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED On)
 
 if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang") OR
    NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))

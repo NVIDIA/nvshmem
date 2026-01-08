@@ -48,7 +48,7 @@ int main() {
     cuda_include_arg.append("/include");
     nvshmem_include_arg.append("/include");
 
-    const char *compile_opts[] = {"-std=c++11", "-default-device",
+    const char *compile_opts[] = {"-std=c++17", "-default-device",
                                   "-arch",      "compute_70",
                                   "-rdc",       "true",
                                   "-I",         cuda_include_arg.c_str(),

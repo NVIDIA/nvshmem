@@ -79,7 +79,7 @@ int main() {
     cuda_include_arg.append("/include");
     nvshmem_include_arg.append("/include");
 
-    const char *compile_opts_header_only[] = {"-std=c++11",
+    const char *compile_opts_header_only[] = {"-std=c++17",
                                               "-default-device",
                                               "-arch",
                                               "sm_70",
@@ -92,7 +92,7 @@ int main() {
                                               nvshmem_include_arg.c_str()};
 
     const char *compile_opts[] = {
-        "-std=c++11", "-default-device",       "-rdc", "true", "-arch", "sm_70", "-dlto",
+        "-std=c++17", "-default-device",       "-rdc", "true", "-arch", "sm_70", "-dlto",
         "-I",         cuda_include_arg.c_str()};
 
     /**

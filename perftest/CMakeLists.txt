@@ -18,6 +18,38 @@ endif()
 get_directory_property(SubBuild PARENT_DIRECTORY)
 
 if(NOT SubBuild)
+  if (DEFINED ENV{CUDA_HOME})
+    set(CUDA_HOME_DEFAULT $ENV{CUDA_HOME})
+  else()
+    set(CUDA_HOME_DEFAULT "/usr/local/cuda")
+  endif()
+  set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
+
+  # Allow users to set the CUDA toolkit through the env.
+  if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
+    message(STATUS "CUDA_HOME: ${CUDA_HOME}")
+    set(CUDAToolkit_Root ${CUDA_HOME} CACHE PATH "Root of Cuda Toolkit." FORCE)
+    set(CMAKE_CUDA_COMPILER "${CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
+  endif()
+
+  if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
+  endif()
+
+  if (NOT DEFINED CUDA_ARCHITECTURES)
+    set(CUDA_ARCHITECTURES_UNDEFINED 1)
+  endif()
+
+  project(NVSHMEMPerftest VERSION 1.0.0
+          LANGUAGES CUDA CXX)
+
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED On)
+  set(CMAKE_CXX_EXTENSIONS On)
+
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED On)
+
   if (DEFINED ENV{NVSHMEM_PREFIX})
     set(NVSHMEM_PREFIX_DEFAULT $ENV{NVSHMEM_PREFIX})
   else()
@@ -36,12 +68,6 @@ if(NOT SubBuild)
     set(MPI_HOME_DEFAULT "/usr/local/ompi")
   endif()
 
-  if (DEFINED ENV{CUDA_HOME})
-    set(CUDA_HOME_DEFAULT $ENV{CUDA_HOME})
-  else()
-    set(CUDA_HOME_DEFAULT "/usr/local/cuda")
-  endif()
-
   option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library and tests" $ENV{NVSHMEM_BUILD_BITCODE_LIBRARY})
   option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library and tests" $ENV{NVSHMEM_BUILD_LTOIR_LIBRARY})
   set(NVSHMEM_CLANG_DIR $ENV{NVSHMEM_CLANG_DIR} CACHE PATH "path to force cmake to look for clang when compiling the bitcode library.")
@@ -51,28 +77,9 @@ if(NOT SubBuild)
   option(NVSHMEM_MPI_SUPPORT "Enable compilation of the MPI bootstrap and MPI-specific code" ${NVSHMEM_MPI_SUPPORT_DEFAULT})
   option(NVSHMEM_SHMEM_SUPPORT "Enable Compilation of the SHMEM bootstrap and SHMEM specific code" $ENV{NVSHMEM_SHMEM_SUPPORT})
   option(NVSHMEM_VERBOSE "Enable the ptxas verbose compilation option" $ENV{NVSHMEM_VERBOSE})
-  set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
   set(MPI_HOME ${MPI_HOME_DEFAULT} CACHE PATH "path to MPI installation")
   set(NVSHMEM_PREFIX ${NVSHMEM_PREFIX_DEFAULT} CACHE PATH "path to NVSHMEM install directory.")
   set(SHMEM_HOME ${MPI_HOME} CACHE PATH "path to SHMEM installation")
-
-  # Allow users to set the CUDA toolkit through the env.
-  if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
-  message(STATUS "CUDA_HOME: ${CUDA_HOME}")
-  set(CUDAToolkit_Root ${CUDA_HOME} CACHE PATH "Root of Cuda Toolkit." FORCE)
-  set(CMAKE_CUDA_COMPILER "${CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
-  endif()
-
-  if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
-  endif()
-
-  if (NOT DEFINED CUDA_ARCHITECTURES)
-    set(CUDA_ARCHITECTURES_UNDEFINED 1)
-  endif()
-
-  PROJECT(NVSHMEMPerftest VERSION 1.0.0
-          LANGUAGES CUDA CXX)
 
   find_package(CUDAToolkit)
 
@@ -131,15 +138,6 @@ if(NOT SubBuild)
   endif()
 endif()
 
-if(CUDAToolkit_VERSION_MAJOR LESS 13)
-  set(PERFTEST_CXX_STANDARD 11)
-else()
-  set(PERFTEST_CXX_STANDARD 17)
-endif()
-
-# Tile-granular API examples need C++ 17
-set(PERFTEST_CXX_STANDARD 17)
-
 add_subdirectory(common)
 
 if(CUDAToolkit_VERSION_MAJOR LESS 12)
@@ -150,13 +148,8 @@ else()
   set(NVSHMEM_PTX_ARCH "ptx82")
 endif()
 
-if(CUDAToolkit_VERSION_MAJOR LESS 13)
-  set(BITCODE_CXX_STD "c++11")
-  set(CUBIN_CXX_STD "c++11")
-else()
-  set(BITCODE_CXX_STD "c++17")
-  set(CUBIN_CXX_STD "c++17")
-endif()
+set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
+set(CUBIN_CXX_STD "c++${CMAKE_CXX_STANDARD}")
 
 if (NOT SubBuild)
   configure_file(${NVSHMEM_PERFTEST_TLD}/../src/include/non_abi/device/pt-to-pt/transfer_device.cuh.in
@@ -173,10 +166,6 @@ macro(nvshmem_add_perftest_prefix SOURCE PREFIX)
   set_target_properties(${NAME} PROPERTIES OUTPUT_NAME "${NAME_}" INSTALL_RPATH "$ORIGIN/../../../../lib" BUILD_WITH_INSTALL_RPATH TRUE)
   set_target_properties(${NAME} PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD_REQUIRED ON
-  CXX_STANDARD ${PERFTEST_CXX_STANDARD}
-  CUDA_STANDARD ${PERFTEST_CXX_STANDARD}
   CUDA_SEPARABLE_COMPILATION ON
   )
 

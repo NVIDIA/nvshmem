@@ -18,6 +18,38 @@ endif()
 get_directory_property(SubBuild PARENT_DIRECTORY)
 
 if(NOT SubBuild)
+  if (DEFINED ENV{CUDA_HOME})
+    set(CUDA_HOME_DEFAULT $ENV{CUDA_HOME})
+  else()
+    set(CUDA_HOME_DEFAULT "/usr/local/cuda")
+  endif()
+  set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
+
+  # Allow users to set the CUDA toolkit through the env.
+  if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
+    message(STATUS "CUDA_HOME: ${CUDA_HOME}")
+    set(CUDAToolkit_Root ${CUDA_HOME} CACHE PATH "Root of Cuda Toolkit." FORCE)
+    set(CMAKE_CUDA_COMPILER "${CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
+  endif()
+
+  if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
+  endif()
+
+  if (NOT DEFINED CUDA_ARCHITECTURES)
+    set(CUDA_ARCHITECTURES_UNDEFINED 1)
+  endif()
+
+  project(NVSHMEMTest VERSION 1.0.0
+          LANGUAGES CUDA CXX)
+
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED On)
+  set(CMAKE_CXX_EXTENSIONS On)
+
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED On)
+
   if (DEFINED ENV{NVSHMEM_PREFIX})
     set(NVSHMEM_PREFIX_DEFAULT $ENV{NVSHMEM_PREFIX})
   else()
@@ -36,12 +68,6 @@ if(NOT SubBuild)
     set(MPI_HOME_DEFAULT "/usr/local/ompi")
   endif()
 
-  if (DEFINED ENV{CUDA_HOME})
-    set(CUDA_HOME_DEFAULT $ENV{CUDA_HOME})
-  else()
-    set(CUDA_HOME_DEFAULT "/usr/local/cuda")
-  endif()
-
   option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library and tests" $ENV{NVSHMEM_BUILD_BITCODE_LIBRARY})
   set(NVSHMEM_CLANG_DIR $ENV{NVSHMEM_CLANG_DIR} CACHE PATH "path to force cmake to look for clang when compiling the bitcode library.")
   set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA "$ENV{NVSHMEM_CLANG_CXX_FLAGS_EXTRA}" CACHE STRING "Extra C++ flags passed to clang for bitcode/cubin compilation")
@@ -50,28 +76,9 @@ if(NOT SubBuild)
   option(NVSHMEM_MPI_SUPPORT "Enable compilation of the MPI bootstrap and MPI-specific code" ${NVSHMEM_MPI_SUPPORT_DEFAULT})
   option(NVSHMEM_SHMEM_SUPPORT "Enable Compilation of the SHMEM bootstrap and SHMEM specific code" $ENV{NVSHMEM_SHMEM_SUPPORT})
   option(NVSHMEM_VERBOSE "Enable the ptxas verbose compilation option" $ENV{NVSHMEM_VERBOSE})
-  set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
   set(MPI_HOME ${MPI_HOME_DEFAULT} CACHE PATH "path to MPI installation")
   set(NVSHMEM_PREFIX ${NVSHMEM_PREFIX_DEFAULT} CACHE PATH "path to NVSHMEM install directory.")
   set(SHMEM_HOME ${MPI_HOME} CACHE PATH "path to SHMEM installation")
-
-  # Allow users to set the CUDA toolkit through the env.
-  if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
-  message(STATUS "CUDA_HOME: ${CUDA_HOME}")
-  set(CUDAToolkit_Root ${CUDA_HOME} CACHE PATH "Root of Cuda Toolkit." FORCE)
-  set(CMAKE_CUDA_COMPILER "${CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
-  endif()
-
-  if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
-  endif()
-
-  if (NOT DEFINED CUDA_ARCHITECTURES)
-    set(CUDA_ARCHITECTURES_UNDEFINED 1)
-  endif()
-
-  PROJECT(NVSHMEMTest VERSION 1.0.0
-          LANGUAGES CUDA CXX)
 
   find_package(CUDAToolkit)
 
@@ -130,17 +137,7 @@ if(NOT SubBuild)
   else()
 endif()
 
-  if(CUDAToolkit_VERSION_MAJOR LESS 13)
-    set(TEST_CXX_STANDARD 11)
-    set(TEST_CXX_ARG c++11)
-  else()
-    set(TEST_CXX_STANDARD 17)
-    set(TEST_CXX_ARG c++17)
-  endif()
-
-  # Tile-granular APIs need C++ 17
-  set(TEST_CXX_STANDARD 17)
-  set(TEST_CXX_ARG c++17)
+set(TEST_CXX_ARG "c++${CMAKE_CXX_STANDARD}")
 
 foreach(ARCH ${CMAKE_CUDA_ARCHITECTURES})
   string(REGEX REPLACE "-(real|virtual)" "" CLEANED_ARCH "${ARCH}")
@@ -183,10 +180,6 @@ macro(nvshmem_add_test_prefix SOURCE PREFIX LINK_DEVICE)
 
   set_target_properties(${NAME} PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD_REQUIRED ON
-  CXX_STANDARD "${TEST_CXX_STANDARD}"
-  CUDA_STANDARD "${TEST_CXX_STANDARD}"
   CUDA_SEPARABLE_COMPILATION ON
   )
 
@@ -330,10 +323,6 @@ macro(nvshmem_add_unit_test_prefix SOURCE PREFIX)
 
   set_target_properties(${NAME} PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD_REQUIRED ON
-  CXX_STANDARD "${TEST_CXX_STANDARD}"
-  CUDA_STANDARD "${TEST_CXX_STANDARD}"
   CUDA_SEPARABLE_COMPILATION ON
   )
 
@@ -391,10 +380,6 @@ macro(nvshmem_add_gtest_unit_test_prefix SOURCE PREFIX FILE)
 
   set_target_properties(${NAME} PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD_REQUIRED ON
-  CXX_STANDARD "${TEST_CXX_STANDARD}"
-  CUDA_STANDARD "${TEST_CXX_STANDARD}"
   CUDA_SEPARABLE_COMPILATION ON
   )
   
