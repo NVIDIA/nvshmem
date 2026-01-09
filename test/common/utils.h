@@ -365,6 +365,7 @@ struct nvml_function_table {
                                            nvmlGpuP2PCapsIndex_enum caps,
                                            nvmlGpuP2PStatus_t *p2pStatus);
     nvmlReturn_t (*nvmlDeviceGetGpuFabricInfoV)(nvmlDevice_t device, nvmlGpuFabricInfoV_t *info);
+    nvmlReturn_t (*nvmlDeviceGetFieldValues)(nvmlDevice_t device, unsigned int count, nvmlFieldValue_t *values);
 };
 
 int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nvml_handle);
