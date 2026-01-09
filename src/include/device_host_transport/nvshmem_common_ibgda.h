@@ -343,7 +343,13 @@ typedef nvshmemi_ibgda_device_state_v2 nvshmemi_ibgda_device_state_t;
 #if defined(__CUDACC_RDC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
 #define EXTERN_CONSTANT extern __constant__
 #elif defined(__clang__)
-#define EXTERN_CONSTANT extern __constant__ __attribute__((address_space(4)))
+#ifdef __CUDACC__
+// Clang CUDA mode: use __constant__ only (avoid address_space to fix LLVM21)
+#define EXTERN_CONSTANT extern __constant__
+#else
+// Plain Clang-to-NVPTX bitcode: use address_space(4) only
+#define EXTERN_CONSTANT extern __attribute__((address_space(4)))
+#endif
 #else
 #define EXTERN_CONSTANT
 #endif

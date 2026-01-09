@@ -23,8 +23,8 @@
 
 #include <algorithm>
 
-//#define NVSHMEM_IBGDA_DEBUG
-//#define NVSHMEM_TIMEOUT_DEVICE_POLLING
+// #define NVSHMEM_IBGDA_DEBUG
+// #define NVSHMEM_TIMEOUT_DEVICE_POLLING
 
 #define NVSHMEMI_MIN(x, y) ((x) < (y) ? (x) : (y))
 #define NVSHMEMI_MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -66,9 +66,11 @@
 #endif
 #endif
 
-#ifdef __clang_llvm_bitcode_lib__
+#if defined(__clang_llvm_bitcode_lib__) && !defined(__CUDACC__)
+// Plain Clang-to-NVPTX bitcode: use address_space(4) for pointer types
 #define CONSTANT_ADDRESS_SPACE __attribute__((address_space(4)))
 #else
+// CUDA mode or nvcc: __constant__ handles memory space, no explicit AS needed
 #define CONSTANT_ADDRESS_SPACE
 #endif
 
@@ -200,9 +202,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t ibgda_query_gl
 }
 #endif /* NVSHMEM_TIMEOUT_DEVICE_POLLING */
 
-__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE CONSTANT_ADDRESS_SPACE
-    nvshmemi_ibgda_device_state_t *
-    ibgda_get_state() {
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE
+    CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *ibgda_get_state() {
     return &nvshmemi_ibgda_device_state_d;
 }
 
@@ -399,8 +400,7 @@ ibgda_cal_transfer_size(size_t req_size, size_t lchunk_size, size_t rchunk_size)
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_lock_acquire(int *lock) {
     if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0)
-        while (atomicCAS(lock, 0, 1) == 1)
-            ;  // Wait until we get the lock.
+        while (atomicCAS(lock, 0, 1) == 1);  // Wait until we get the lock.
 
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD)
         IBGDA_MFENCE();  // Prevent reordering before lock is acquired.
@@ -533,8 +533,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE int ibgda_poll_cq(
     // If idx is a lot greater than cons_idx, we might get incorrect result due
     // to wqe_counter wraparound. We need to check prod_idx to be sure that idx
     // has already been submitted.
-    while (unlikely(ibgda_atomic_read(cq->prod_idx) < idx))
-        ;
+    while (unlikely(ibgda_atomic_read(cq->prod_idx) < idx));
     IBGDA_MFENCE();
 
     do {
@@ -1535,7 +1534,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_atomic
             }
             break;
         }
-        default: { assert(0); }
+        default: {
+            assert(0);
+        }
     }
 
     ctrl_seg.qpn_ds = HTOBE32((qp->qpn << 8) | ds);
@@ -1675,16 +1676,14 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_submit_reque
         // We must push them out first because a different CTA might post-send for us.
         IBGDA_MEMBAR_NO_OPTIMIZATION();
         while (atomicCAS(ready_idx, (unsigned long long int)base_wqe_idx,
-                         (unsigned long long int)new_wqe_idx) != base_wqe_idx)
-            ;
+                         (unsigned long long int)new_wqe_idx) != base_wqe_idx);
         IBGDA_MFENCE();
     } else {
         // It is ok for those wqes to not be visible to the GPU scope yet.
         // ibgda_post_send will take care of that (if we choose to call it).
         IBGDA_MFENCE();
         while (atomicCAS_block(ready_idx, (unsigned long long int)base_wqe_idx,
-                               (unsigned long long int)new_wqe_idx) != base_wqe_idx)
-            ;
+                               (unsigned long long int)new_wqe_idx) != base_wqe_idx);
         IBGDA_MFENCE();
     }
 
@@ -1981,8 +1980,7 @@ ibgda_reserve_ibuf_slots(nvshmemi_ibgda_device_qp_t *qp, unsigned long long int 
     uint64_t idx = base_idx + num_slots;
 
     // Wait until the slots become available.
-    while (idx - ibgda_atomic_read(&mvars->ibuf.tail) > nslots)
-        ;
+    while (idx - ibgda_atomic_read(&mvars->ibuf.tail) > nslots);
 
     // Prevent the reordering of the above wait loop.
     IBGDA_MFENCE();
@@ -1998,8 +1996,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_release_ibuf
     IBGDA_MFENCE();
     // Wait here.
     while (atomicCAS((unsigned long long int *)&mvars->ibuf.tail, (unsigned long long int)base_idx,
-                     new_idx) != base_idx)
-        ;
+                     new_idx) != base_idx);
     IBGDA_MFENCE();
 }
 

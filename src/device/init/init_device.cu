@@ -24,31 +24,47 @@
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"
-#ifdef __clang_llvm_bitcode_lib__
-__constant__ __attribute__((address_space(4), used))
-nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d = {};
+#if defined(__clang_llvm_bitcode_lib__)
+#if defined(__CUDACC__)
+// Clang CUDA mode: use __constant__ only (no address_space to avoid LLVM21 conflict)
+__constant__ __attribute__((used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d = {};
 #else
+// Plain Clang-to-NVPTX bitcode: use address_space(4) only (no __constant__)
+__attribute__((address_space(4),
+               used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d = {};
+#endif
+#else
+// Normal CUDA/nvcc build
 __constant__ __attribute__((used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;
 #endif
 #endif
 
 nvshmemi_device_state_t nvshmemi_device_only_state;
 
-#ifdef __clang_llvm_bitcode_lib__
-__constant__ __attribute__((address_space(4), used))
-nvshmemi_device_host_state_t nvshmemi_device_state_d = {};
-const nvshmemi_version_t nvshmemi_device_lib_version = {
-    NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
-__constant__ __attribute__((address_space(4), used))
-nvshmemi_version_t nvshmemi_device_lib_version_d = {
+#if defined(__clang_llvm_bitcode_lib__)
+#if defined(__CUDACC__)
+// Clang CUDA mode: use __constant__ only (no address_space to avoid LLVM21 conflict)
+__constant__ __attribute__((used)) nvshmemi_device_host_state_t nvshmemi_device_state_d = {};
+
+__constant__ __attribute__((used)) nvshmemi_version_t nvshmemi_device_lib_version_d = {
     NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
 #else
-__constant__ nvshmemi_device_host_state_t nvshmemi_device_state_d;
-const nvshmemi_version_t nvshmemi_device_lib_version = {
+// Plain Clang-to-NVPTX bitcode: use address_space(4) only (no __constant__)
+__attribute__((address_space(4), used)) nvshmemi_device_host_state_t nvshmemi_device_state_d = {};
+
+__attribute__((address_space(4), used)) nvshmemi_version_t nvshmemi_device_lib_version_d = {
     NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
+#endif
+#else
+// Normal CUDA/nvcc build
+__constant__ nvshmemi_device_host_state_t nvshmemi_device_state_d;
+
 __constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {
     NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
 #endif
+
+const nvshmemi_version_t nvshmemi_device_lib_version = {
+    NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
 
 #ifdef __CUDA_ARCH__
 #ifdef __cplusplus
@@ -114,7 +130,7 @@ int nvshmemi_check_state_and_init_d() {
             return NVSHMEMI_CUDA_GET_DEVICE_FAILED;
         }
 
-        nvshmemid_hostlib_finalize(NULL, NULL); // for refcounting
+        nvshmemid_hostlib_finalize(NULL, NULL);  // for refcounting
     }
 
     if (!nvshmemi_device_only_state.is_initialized) {
@@ -157,9 +173,9 @@ int nvshmemi_init_thread(int requested_thread_support, int *provided_thread_supp
 #ifdef _NVSHMEM_DEBUG
     printf("  %-28s %d\n", "DEVICE CUDA API", CUDART_VERSION);
 #endif
-    status = nvshmemid_hostlib_init_attr(requested_thread_support, provided_thread_support,
-                                         bootstrap_flags, bootstrap_attr,
-                                         nvshmemi_device_lib_version, &nvshmemi_get_device_state_ptrs);
+    status = nvshmemid_hostlib_init_attr(
+        requested_thread_support, provided_thread_support, bootstrap_flags, bootstrap_attr,
+        nvshmemi_device_lib_version, &nvshmemi_get_device_state_ptrs);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmem_internal_init_thread failed \n");
 
