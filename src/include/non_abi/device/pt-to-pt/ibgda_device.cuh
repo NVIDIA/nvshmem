@@ -3467,9 +3467,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_qp_quiet(
         nrcs = NVSHMEMI_MIN(num_qps, state->num_rc_per_pe * state->num_devices_initialized);
     }
 
-    scope_size =
-        scope_size > IBGDA_MAX_THREADS_PER_QUIET ? IBGDA_MAX_THREADS_PER_QUIET : scope_size;
-
     // Match this up with the new qp addition APIs.
     if (index_in_scope < scope_size) {
         for (uint32_t i = index_in_scope; i < nrcs * npes; i += scope_size) {
