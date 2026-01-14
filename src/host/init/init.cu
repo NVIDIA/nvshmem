@@ -1727,6 +1727,7 @@ out:
 int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     int status = CUDA_SUCCESS;
     int warp_size = 0;
+    unsigned long long *test_wait_any_start_idx_ptr = NULL;
 
     CUDA_RUNTIME_CHECK_GOTO(
         cudaDeviceGetAttribute(&warp_size, cudaDevAttrWarpSize, state->device_id), status, out);
@@ -1795,7 +1796,6 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);
 
-    unsigned long long *test_wait_any_start_idx_ptr;
     CUDA_RUNTIME_CHECK(
         cudaMalloc((void **)&test_wait_any_start_idx_ptr, sizeof(unsigned long long)));
     CUDA_RUNTIME_CHECK(
@@ -1966,6 +1966,8 @@ int nvshmemx_qp_create(int num_qps, nvshmemx_qp_handle_t **out_qp_array) {
     nvshmemx_quiet_on_stream(
         nvshmemi_state->my_stream); /* wait for signal ops from barrier to complete */
     status = cudaDeviceSynchronize();
+    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                          "cudaDeviceSynchronize failed\n");
 
     for (int i = 0; i < nvshmemi_state->num_initialized_transports; i++) {
         nvshmem_transport_t transport = (nvshmem_transport_t)nvshmemi_state->transports[i];
