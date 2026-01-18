@@ -10,6 +10,9 @@
 #include <driver_types.h>  // for cudaMemcpyHos...
 #include <limits.h>        // for CHAR_BIT
 #include <random>
+#include <sstream>
+#include <vector>
+#include <algorithm>
 #include <stdint.h>                                      // for uint64_t
 #include <stdio.h>                                       // for snprintf, printf
 #include <stdlib.h>                                      // for free, malloc
@@ -947,7 +950,6 @@ int nvshmemi_team_init(void) {
     uint64_t *hostHash = NULL;
     uint64_t myHostHash = 0;
     nvshmem_transport_pe_info_t *pe_info;
-    int i;
 
     /* Initialize NVSHMEM_TEAM_WORLD */
     if (nvshmemi_team_allocate_team(&nvshmemi_team_world, &nvshmemi_device_team_world,
@@ -975,19 +977,23 @@ int nvshmemi_team_init(void) {
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_world);
 
     /* Collect list of p2p connected PEs */
-    int *p2p_pe_list = (int *)malloc(nvshmemi_team_world->size * sizeof(int));
-    int n_p2p_pes = 0;
+    std::vector<int> p2p_pe_list;
+    p2p_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
+
     int my_idx_in_p2p_list = 0;
     for (int i = 0; i < nvshmemi_team_world->size; i++) {
         if (nvshmemi_state->heap_obj->get_local_pe_base()[i]) {
-            if (i == nvshmemi_team_world->my_pe) my_idx_in_p2p_list = n_p2p_pes;
-            p2p_pe_list[n_p2p_pes++] = i;
+            if (i == nvshmemi_team_world->my_pe) {
+                my_idx_in_p2p_list = p2p_pe_list.size();
+            }
+            p2p_pe_list.push_back(i);
         }
     }
+    const int n_p2p_pes = p2p_pe_list.size();
 
     std::ostringstream ss;
-    for (int i = 0; i < n_p2p_pes; i++) {
-        ss << p2p_pe_list[i] << " ";
+    for (const auto &pe : p2p_pe_list) {
+        ss << pe << " ";
     }
     INFO(NVSHMEM_INIT, "P2P list: %s", ss.str().c_str());
 
@@ -999,32 +1005,45 @@ int nvshmemi_team_init(void) {
     nvshmemi_team_shared->team_idx = NVSHMEM_TEAM_SHARED_INDEX;
     NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_shared, NVSHMEM_TEAM_SHARED_INDEX);
 
-    /* Make sure that n_p2p_pes is same for all PEs to form TEAM_SHARED */
-    int *n_p2p_pes_all = (int *)malloc(nvshmemi_team_world->size * sizeof(int));
-    int *p2p_pe_list_all = (int *)malloc(sizeof(int) * n_p2p_pes * nvshmemi_team_world->size);
-
-    nvshmemi_boot_handle.allgather((void *)&n_p2p_pes, (void *)n_p2p_pes_all, sizeof(int),
+    /* Exchange n_p2p_pes for all PEs */
+    std::vector<int> n_p2p_pes_all(nvshmemi_team_world->size);
+    nvshmemi_boot_handle.allgather(&n_p2p_pes, n_p2p_pes_all.data(), sizeof(int),
                                    &nvshmemi_boot_handle);
 
-    for (i = 0; i < nvshmemi_team_world->size; i++) {
-        if (n_p2p_pes_all[i] != n_p2p_pes) {
+    int max_num_p2p_pes = *std::max_element(n_p2p_pes_all.begin(), n_p2p_pes_all.end());
+
+    /* Pad p2p PE local list with -1 for allgather to max_num_p2p_pes */
+    p2p_pe_list.resize(max_num_p2p_pes, -1);
+
+    /* Gather p2p lists of all PEs */
+    std::vector<int> p2p_pe_list_all(max_num_p2p_pes * nvshmemi_team_world->size);
+    nvshmemi_boot_handle.allgather(p2p_pe_list.data(), p2p_pe_list_all.data(),
+                                   sizeof(int) * max_num_p2p_pes, &nvshmemi_boot_handle);
+
+    /* Shrink back local list to original size */
+    p2p_pe_list.resize(n_p2p_pes);
+
+    /* Check for each p2p-connected remote PE that
+      (1) it has the same number of p2p-connected PEs, and
+      (2) the list of p2p-connected PEs is the same.
+      This verifies that the p2p-connected PE lists are symmetric for P2P-connected PE partitions.
+    */
+    for (const auto &peer_pe : p2p_pe_list) {
+        if (n_p2p_pes_all[peer_pe] != n_p2p_pes) {
             INFO(NVSHMEM_INIT,
-                 "n_p2p_pes is not equal across PEs, setting NVSHMEM_TEAM_SHARED to self");
+                 "n_p2p_pes is not equal across P2P PEs, setting NVSHMEM_TEAM_SHARED to self");
             goto team_shared_single_pe;
         }
-    }
 
-    /* Gather p2p lists of all PEs and ensure they are the same */
-    nvshmemi_boot_handle.allgather((void *)p2p_pe_list, (void *)p2p_pe_list_all,
-                                   sizeof(int) * n_p2p_pes, &nvshmemi_boot_handle);
-    for (i = 0; i < n_p2p_pes; i++) {
-        if (memcmp((void *)p2p_pe_list, (void *)&p2p_pe_list_all[p2p_pe_list[i] * n_p2p_pes],
-                   sizeof(int) * n_p2p_pes) != 0) {
+        /* Check for equivalence of p2p-connected PE lists */
+        auto peer_list_start = p2p_pe_list_all.begin() + peer_pe * max_num_p2p_pes;
+        if (!std::equal(p2p_pe_list.begin(), p2p_pe_list.end(), peer_list_start)) {
             INFO(NVSHMEM_INIT, "P2P lists are not symmetric, setting NVSHMEM_TEAM_SHARED to self");
             goto team_shared_single_pe;
         }
     }
 
+    /* Check if p2p-connected PE list is of the form (start, stride, size) */
     for (int i = 2; i < n_p2p_pes; i++) {
         if (p2p_pe_list[i] - p2p_pe_list[i - 1] != p2p_pe_list[i - 1] - p2p_pe_list[i - 2]) {
             INFO(NVSHMEM_INIT,
@@ -1052,10 +1071,6 @@ team_shared_single_pe:
     nvshmemi_team_shared->is_team_same_mype_node = true;
 
 team_shared_setup:
-    free(n_p2p_pes_all);
-    free(p2p_pe_list_all);
-    free(p2p_pe_list);
-
     nvshmemi_team_shared->rdxn_count = 0;
     nvshmemi_team_shared->config_mask = 0;
 
