@@ -73,23 +73,22 @@ nvshmemi_mem_p2p_transport *nvshmemi_mem_p2p_transport::p2p_objref_;
 
 int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind) {
     int status = NVSHMEMX_SUCCESS;
-    nvshmemi_symmetric_heap_sysmem_static_shm *nvshmemi_sysmem_shm = nullptr;
-    nvshmemi_symmetric_heap_vidmem_dynamic_vmm *nvshmemi_vidmem_vmm = nullptr;
-    nvshmemi_symmetric_heap_vidmem_static_pinned *nvshmemi_vidmem_static = nullptr;
 
     if (state->heap_obj != nullptr) {
         return status;
     }
 
-    if (nvshmemi_vidmem_vmm == nullptr && is_vmm) {
-        nvshmemi_vidmem_vmm = new nvshmemi_symmetric_heap_vidmem_dynamic_vmm(state);
-        state->heap_obj = dynamic_cast<nvshmemi_symmetric_heap *>(nvshmemi_vidmem_vmm);
-    } else if (nvshmemi_sysmem_shm == nullptr && heap_kind == NVSHMEMI_HEAP_KIND_SYSMEM) {
-        nvshmemi_sysmem_shm = new nvshmemi_symmetric_heap_sysmem_static_shm(state);
-        state->heap_obj = dynamic_cast<nvshmemi_symmetric_heap *>(nvshmemi_sysmem_shm);
-    } else if (nvshmemi_vidmem_static == nullptr && heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
-        nvshmemi_vidmem_static = new nvshmemi_symmetric_heap_vidmem_static_pinned(state);
-        state->heap_obj = dynamic_cast<nvshmemi_symmetric_heap *>(nvshmemi_vidmem_static);
+    // Initialize vmm_heap to nullptr - will be set only for VMM heap type
+    state->vmm_heap = nullptr;
+
+    if (is_vmm) {
+        auto *vmm = new nvshmemi_symmetric_heap_vidmem_dynamic_vmm(state);
+        state->heap_obj = vmm;
+        state->vmm_heap = vmm;  // Store concrete pointer for NVLS/mmap operations
+    } else if (heap_kind == NVSHMEMI_HEAP_KIND_SYSMEM) {
+        state->heap_obj = new nvshmemi_symmetric_heap_sysmem_static_shm(state);
+    } else if (heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
+        state->heap_obj = new nvshmemi_symmetric_heap_vidmem_static_pinned(state);
     }
 
     if (state->heap_obj == nullptr) {
@@ -100,22 +99,10 @@ int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_
 }
 
 void nvshmemi_fini_symmetric_heap(nvshmemi_state_t *state) {
-    if (dynamic_cast<nvshmemi_symmetric_heap_vidmem_dynamic_vmm *>(state->heap_obj) != nullptr) {
-        auto *vmm_obj = dynamic_cast<nvshmemi_symmetric_heap_vidmem_dynamic_vmm *>(state->heap_obj);
-        NVSHMEMU_HOST_PTR_DELETE(vmm_obj);
-    } else if (dynamic_cast<nvshmemi_symmetric_heap_sysmem_static_shm *>(state->heap_obj) !=
-               nullptr) {
-        auto *sysmem_obj =
-            dynamic_cast<nvshmemi_symmetric_heap_sysmem_static_shm *>(state->heap_obj);
-        NVSHMEMU_HOST_PTR_DELETE(sysmem_obj);
-    } else if (dynamic_cast<nvshmemi_symmetric_heap_vidmem_static_pinned *>(state->heap_obj) !=
-               nullptr) {
-        auto *vidmem_obj =
-            dynamic_cast<nvshmemi_symmetric_heap_vidmem_static_pinned *>(state->heap_obj);
-        NVSHMEMU_HOST_PTR_DELETE(vidmem_obj);
-    }
-
+    // Virtual destructor handles proper cleanup for all heap types
+    NVSHMEMU_HOST_PTR_DELETE(state->heap_obj);
     state->heap_obj = nullptr;
+    state->vmm_heap = nullptr;
 }
 
 /**
@@ -125,24 +112,20 @@ template <typename T>
 int nvshmemi_symmetric_heap::is_symmetric(T value) {
     int status = 0;
     nvshmemi_state_t *state = get_state();
-    T *scratch;
     /* TODO: need to handle multi-threaded scenarios */
     if (!nvshmemi_options.ENABLE_ERROR_CHECKS) return 0;
 
-    scratch = (T *)std::calloc(state->npes, sizeof(T));
-    NVSHMEMI_NULL_ERROR_JMP(scratch, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Failed to allocate scratch space for heap symmetry check \n");
-    status = nvshmemi_boot_handle.allgather((void *)&value, (void *)scratch, sizeof(T),
-                                            &nvshmemi_boot_handle);
+    std::vector<T> scratch(state->npes);
+    status =
+        nvshmemi_boot_handle.allgather(&value, scratch.data(), sizeof(T), &nvshmemi_boot_handle);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather in symmetry check failed \n");
 
-    for (int i = 0; i < state->npes; i++) {
-        status = (*((T *)scratch + i) == value) ? 0 : 1;
+    for (const auto &t : scratch) {
+        status = (t == value);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_SYMMETRY, out, "symmetry check failed \n");
     }
 
-    NVSHMEMU_HOST_PTR_FREE(scratch);
 out:
     return status;
 }
@@ -1828,7 +1811,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_symmetric_memory(size
     ptr = allocate_virtual_memory_from_mspace(size, count, alignment, type);
     if ((size > 0) && (ptr == NULL)) {
         if (type == NVSHMEMX_CALLOC) {
-            status = allocate_physical_memory_to_heap((count*size) + alignment);
+            status = allocate_physical_memory_to_heap((count * size) + alignment);
         } else {
             status = allocate_physical_memory_to_heap(size + alignment);
         }
@@ -2111,10 +2094,12 @@ out:
 int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr) {
     int status = 0;
     nvshmemi_state_t *state = get_state();
-    int *scratch = nullptr;
+
     int buf_loc_id, loc_id;
     CUdevice gpu_dev;
     if (!nvshmemi_options.ENABLE_ERROR_CHECKS) return 0;
+
+    std::vector<int> scratch(state->npes);
 
     if (onGPU) {  // check for MPG case
         buf_loc_id = state->device_id;
@@ -2129,17 +2114,14 @@ int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr)
                               "cuDeviceGetAttribute failed\n");
     }
 
-    scratch = (int *)std::calloc(state->npes, sizeof(int));
-    NVSHMEMI_NULL_ERROR_JMP(scratch, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Failed to allocate scratch space for heap symmetry check \n");
-    status = nvshmemi_boot_handle.allgather((void *)&buf_loc_id, (void *)scratch, sizeof(int),
+    status = nvshmemi_boot_handle.allgather(&buf_loc_id, scratch.data(), sizeof(int),
                                             &nvshmemi_boot_handle);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather in check_buffers_on_same_device failed \n");
 
     loc_id = scratch[0];
     for (int i = 1; i < state->npes_node; i++) {
-        status = (*((int *)scratch + i) == loc_id) ? 1 : 0;
+        status = (scratch[i] == loc_id) ? 1 : 0;
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "Memory buffers allocated are on same device, disable NVLS "
                               "(NVSHMEM_DISABLE_NVLS=1) if user buffer %p on GPU or "
@@ -2148,7 +2130,6 @@ int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr)
     }
 
 out:
-    NVSHMEMU_HOST_PTR_FREE(scratch);
     return status;
 }
 
@@ -2166,7 +2147,8 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_SYMMETRY, return_out, "size argument is zero\n");
 
     status = is_symmetric(size);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_SYMMETRY, return_out, "symmetry check for size failed\n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_SYMMETRY, return_out,
+                          "symmetry check for size failed\n");
 
     status = size % mem_granularity_;
     NVSHMEMI_NZ_ERROR_JMP(
@@ -2239,9 +2221,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
 out:
     cuMemRelease_status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(userAllocHandle));
     if (!status) {
-       status = cuMemRelease_status;
-       NVSHMEMI_NE_ERROR_JMP(cuMemRelease_status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, return_out,
-                          "cuMemRelease failed \n");
+        status = cuMemRelease_status;
+        NVSHMEMI_NE_ERROR_JMP(cuMemRelease_status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                              return_out, "cuMemRelease failed \n");
     }
 return_out:
     return status;
@@ -2339,7 +2321,7 @@ void *nvshmem_calloc(size_t count, size_t size) {
         goto exit_and_return;
     }
 
-    if (NVSHMEMI_IS_NO_ACTION_BY_SIZE(count*size)) {
+    if (NVSHMEMI_IS_NO_ACTION_BY_SIZE(count * size)) {
         goto exit_and_return;
     }
 
@@ -2443,7 +2425,12 @@ void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags) 
         goto exit_and_return;
     }
 
-    ptr = nvshmemi_state->heap_obj->mmap_mem(buf_ptr, size, flags);
+    if (nvshmemi_state->vmm_heap == nullptr) {
+        NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
+        goto exit_and_return;
+    }
+
+    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, flags);
 
     nvshmemi_barrier_all();
 
@@ -2460,9 +2447,14 @@ int nvshmemx_buffer_unregister_symmetric(void *ptr, size_t size) {
     NVSHMEMU_THREAD_CS_ENTER();
     NVSHMEMI_CHECK_INIT_STATUS();
 
+    if (nvshmemi_state->vmm_heap == nullptr) {
+        NVSHMEMU_THREAD_CS_EXIT();
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+
     nvshmemi_barrier_all();
 
-    status = nvshmemi_state->heap_obj->unmap_mem(ptr, size);
+    status = nvshmemi_state->vmm_heap->unmap_mem(ptr, size);
 
     NVSHMEMU_THREAD_CS_EXIT();
 
