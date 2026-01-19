@@ -20,6 +20,7 @@
 #include "internal/host/util.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/cudawrap.h"
+#include "non_abi/nvshmemx_error.h"
 
 /// Forward declarations for future friends
 class nvshmemi_mem_p2p_transport;
@@ -103,33 +104,12 @@ class nvshmemi_symmetric_heap {
     virtual void *heap_align(size_t size, size_t alignment);
     virtual void heap_deallocate(void *ptr);
 
-    /* Functions to map and unmap user buffers
-     * memory registered using nvshmemx_buffer_register_symmetric call
-     * is refered to as external allocation
-     * while memory allocated using nvshmem_malloc is referred to as internal
-     * allocation in the code
-     */
-    virtual void *mmap_mem(void *ptr, size_t size, int flags) = 0;
-    virtual int unmap_mem(void *ptr, size_t size) = 0;
     virtual size_t get_mmap_allocated_range() { return 0; }
     std::unordered_map<void *, void *> *get_alias_va_map() { return &alias_va_map_; }
     std::unordered_map<void *, size_t> *get_egm_map() { return &egm_map_; }
 
     /* check if passed address in within heap range*/
     virtual bool is_egm(void *addr) { return false; }
-
-    /**
-     * NVLS specific member functions - only concretized in dynamic heaps
-     */
-    virtual int nvls_create_heap_memory_by_team(nvshmemi_team_t *team) = 0;
-    virtual int nvls_bind_heap_memory_by_team(nvshmemi_team_t *team) = 0;
-    virtual int nvls_map_heap_memory_by_team(nvshmemi_team_t *team) = 0;
-    virtual int nvls_unmap_heap_memory_by_size(nvshmemi_team_t *team, off_t mc_offset,
-                                               uint64_t size) = 0;
-    virtual void nvls_unmap_heap_memory_by_team(nvshmemi_team_t *team) = 0;
-    virtual int nvls_unmap_heap_memory(off_t mc_offset, uint64_t size) = 0;
-    virtual void nvls_unbind_heap_memory_by_team(nvshmemi_team_t *team) = 0;
-    virtual int nvls_unbind_heap_memory_by_size(off_t mc_offset, size_t size) = 0;
 
    private:
     /**
@@ -349,60 +329,6 @@ class nvshmemi_symmetric_heap_static : public nvshmemi_symmetric_heap {
     virtual int setup_mspace();
 
     /**
-     * Stubbed functions that are not supported by static heaps
-     */
-    int nvls_create_heap_memory_by_team(nvshmemi_team_t *team) {
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-    int nvls_bind_heap_memory_by_team(nvshmemi_team_t *team) {
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-
-    int nvls_map_heap_memory_by_team(nvshmemi_team_t *team) {
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-
-    int nvls_unmap_heap_memory(off_t mc_offset, uint64_t size) {
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-
-    int nvls_unmap_heap_memory_by_size(nvshmemi_team_t *team, off_t mc_offset, uint64_t size) {
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-
-    void nvls_unmap_heap_memory_by_team(nvshmemi_team_t *team) {
-        assert(0);
-        return;
-    }
-
-    void nvls_unbind_heap_memory_by_team(nvshmemi_team_t *team) {
-        assert(0);
-        return;
-    }
-
-    int nvls_unbind_heap_memory_by_size(off_t mc_offset, size_t size) {
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-
-    void *mmap_mem(void *ptr, size_t size, int flags) {
-        // Feature not yet supported
-        assert(0);
-        return NULL;
-    }
-
-    int unmap_mem(void *ptr, size_t size) {
-        // Feature not yet supported
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-
-    /**
      * Given a buf, length, export the buffer range to target mem handle
      */
     virtual int export_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t length) = 0;
@@ -433,41 +359,12 @@ class nvshmemi_symmetric_heap_dynamic : public nvshmemi_symmetric_heap {
     virtual int map_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size);
     virtual int register_heap_chunk_by_size(void *buf, size_t size, bool ext_allocation = false);
     virtual int setup_mspace();
-
-    virtual void *mmap_mem(void *ptr, size_t size, int flags) {
-        // Feature not yet supported
-        assert(0);
-        return NULL;
-    }
-
-    virtual int unmap_mem(void *ptr, size_t size) {
-        // Feature not yet supported
-        assert(0);
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-    virtual size_t get_mmap_allocated_range() { return 0; }
-
-    virtual std::map<void *, size_t> *get_mmapped_buf() {
-        // Feature not yet supported
-        assert(0);
-        return NULL;
-    }
-
-   private:
 };
 
-class nvshmemi_symmetric_heap_vidmem_static : public nvshmemi_symmetric_heap_static {
-   public:
-    explicit nvshmemi_symmetric_heap_vidmem_static(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_static(state) {}
-    virtual ~nvshmemi_symmetric_heap_vidmem_static() = default;
-};
-
-class nvshmemi_symmetric_heap_vidmem_static_pinned final
-    : public nvshmemi_symmetric_heap_vidmem_static {
+class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symmetric_heap_static {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_static_pinned(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_vidmem_static(state) {}
+        : nvshmemi_symmetric_heap_static(state) {}
     ~nvshmemi_symmetric_heap_vidmem_static_pinned() = default;
 
    protected:
@@ -483,18 +380,10 @@ class nvshmemi_symmetric_heap_vidmem_static_pinned final
     int release_memory(void *buf, size_t size = 0);
 };
 
-class nvshmemi_symmetric_heap_vidmem_dynamic : public nvshmemi_symmetric_heap_dynamic {
-   public:
-    explicit nvshmemi_symmetric_heap_vidmem_dynamic(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_dynamic(state) {}
-    virtual ~nvshmemi_symmetric_heap_vidmem_dynamic() = default;
-};
-
-class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final
-    : public nvshmemi_symmetric_heap_vidmem_dynamic {
+class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetric_heap_dynamic {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_dynamic_vmm(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_vidmem_dynamic(state) {}
+        : nvshmemi_symmetric_heap_dynamic(state) {}
     ~nvshmemi_symmetric_heap_vidmem_dynamic_vmm() = default;
     int reserve_heap(void);
     int setup_symmetric_heap(void);
@@ -564,18 +453,10 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final
         cumem_handles_;
 };
 
-class nvshmemi_symmetric_heap_sysmem_static : public nvshmemi_symmetric_heap_static {
-   public:
-    explicit nvshmemi_symmetric_heap_sysmem_static(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_static(state) {}
-    virtual ~nvshmemi_symmetric_heap_sysmem_static() = default;
-};
-
-class nvshmemi_symmetric_heap_sysmem_static_shm final
-    : public nvshmemi_symmetric_heap_sysmem_static {
+class nvshmemi_symmetric_heap_sysmem_static_shm final : public nvshmemi_symmetric_heap_static {
    public:
     explicit nvshmemi_symmetric_heap_sysmem_static_shm(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_sysmem_static(state) {}
+        : nvshmemi_symmetric_heap_static(state) {}
     ~nvshmemi_symmetric_heap_sysmem_static_shm() = default;
     static void atexit_heap_handler(void) {
         // Iterate over all objects and close any stale fd
