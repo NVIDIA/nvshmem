@@ -91,7 +91,7 @@ CALL_RDXN_OPS_ALL_TG(int64, int64_t)
 #define SET_SIZE_ARR(TYPE, ELEM_COMP)                                                          \
     do {                                                                                       \
         j = 0;                                                                                 \
-        for (size_t num_elems = min_elems; num_elems <= max_elems; num_elems *= step_factor) { \
+        for (num_elems = min_elems; num_elems <= max_elems; num_elems *= step_factor) {        \
             if (num_elems < ELEM_COMP) {                                                       \
                 size_arr[j] =                                                                  \
                     calculate_collective_size("reducescatter", num_elems, sizeof(TYPE), npes); \
@@ -114,7 +114,7 @@ CALL_RDXN_OPS_ALL_TG(int64, int64_t)
                                                                                                  \
         nvshmem_barrier_all();                                                                   \
         j = 0;                                                                                   \
-        for (size_t num_elems = min_elems; num_elems < ELEM_COMP; num_elems *= step_factor) {    \
+        for (num_elems = min_elems; num_elems < ELEM_COMP; num_elems *= step_factor) {           \
             CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb, skip_arg_list, \
                              stream)                                                             \
             CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
