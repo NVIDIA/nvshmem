@@ -758,6 +758,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_fence_qp(
     // making it a no-op as it is a no-op for IB RC, the only transport
     uint64_t idx, tail_idx, *req;
     int size = CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES;
+    uint16_t pe_u16 = pe;
 
     idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
     tail_idx = idx + (size - 1);
@@ -788,8 +789,8 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_fence_qp(
                            (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1)));
         curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
         *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_handle[i]) << 32) |
-                                                 (static_cast<uint64_t>(op) << 16) |
-                                                 (static_cast<uint64_t>(pe) << 8) | curr_flag);
+                                                 (static_cast<uint64_t>(pe_u16) << 16) |
+                                                 (static_cast<uint64_t>(op) << 8) | curr_flag);
     }
     return;
 }
