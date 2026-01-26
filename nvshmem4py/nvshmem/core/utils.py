@@ -192,7 +192,7 @@ def dtype_nbytes(dtype: str) -> int:
         "ulonglong": 8,
         "ptrdiff": 8,
         "fp16": 2,
-        "bf16": 2,
+        "bfloat16": 2,
         "int": 4,
         "int64": 8,
         "char": 1,
