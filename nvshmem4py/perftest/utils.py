@@ -280,7 +280,7 @@ def build_parser():
         "-d", "--datatype",
         choices=[
             "int", "int32", "uint32", "int64", "uint64", "long", "longlong",
-            "ulonglong", "size", "ptrdiff", "float", "double", "fp16", "bf16"
+            "ulonglong", "size", "ptrdiff", "float", "double", "fp16", "bfloat16"
         ],
         default="float",
         help="Datatype to use"
