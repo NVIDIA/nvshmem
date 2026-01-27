@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <atomic>
 #include <array>
 #include <deque>
 #include <vector>
@@ -22,6 +23,7 @@
 
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host_transport/nvshmem_common_transport.h"
+#include "internal/host_transport/nvshmemi_transport_defines.h"
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "gdrapi.h"
@@ -33,12 +35,6 @@
 #define NVSHMEMT_LIBFABRIC_DOMAIN_LEN 32
 #define NVSHMEMT_LIBFABRIC_PROVIDER_LEN 32
 #define NVSHMEMT_LIBFABRIC_EP_LEN 128
-
-/* one EP for all proxy ops, one for host ops */
-#define NVSHMEMT_LIBFABRIC_PROXY_EP_IDX 1
-#define NVSHMEMT_LIBFABRIC_HOST_EP_IDX 0
-/* one domain per EP */
-#define NVSHMEMT_LIBFABRIC_DEFAULT_NUM_DOMAINS 2
 
 #define NVSHMEMT_LIBFABRIC_QUIET_TIMEOUT_MS 20
 
@@ -200,6 +196,7 @@ typedef struct {
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
         *proxy_put_signal_comp_map;
     int domain_index;
+    int ep_index;
 } nvshmemt_libfabric_endpoint_t;
 
 typedef struct nvshmemt_libfabric_gdr_send_p_op {
@@ -414,9 +411,12 @@ typedef struct {
     struct nvshmemi_cuda_fn_table *table;
     struct transport_mem_handle_info_cache *cache;
 
-    /* Required for multi-domains */
+    /* Required for multi-rail */
     int num_host_domains;
     int num_proxy_domains;
+    int num_selected_devs;
+    int max_nic_per_pe;
+    std::atomic<size_t> proxy_ep_cntr;
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;
@@ -444,10 +444,26 @@ typedef struct {
 #endif
 } nvshmemt_libfabric_memhandle_info_t;
 
-typedef struct {
+struct nvshmemt_libfabric_mem_handle_base_t {
     void *buf;
-    std::array<nvshmemt_libfabric_mem_handle_ep_t, NVSHMEMT_LIBFABRIC_DEFAULT_NUM_DOMAINS> hdls;
-} nvshmemt_libfabric_mem_handle_t;
+};
+
+struct nvshmemt_libfabric_mem_handle_t : nvshmemt_libfabric_mem_handle_base_t {
+    static constexpr size_t MAX_SIZE = sizeof(nvshmem_mem_handle_t);
+    static constexpr size_t BASE_SIZE = sizeof(nvshmemt_libfabric_mem_handle_base_t);
+    static constexpr size_t NUM_HDLS =
+        (MAX_SIZE - BASE_SIZE) / sizeof(nvshmemt_libfabric_mem_handle_ep_t);
+
+    /* Each domain needs 1 handle */
+    std::array<nvshmemt_libfabric_mem_handle_ep_t, NUM_HDLS> hdls;
+
+    /* Constrained by the size of nvshmem_mem_handle_t */
+};
+
+#define NVSHMEMT_LIBFABRIC_MAX_DOMAINS_PER_PE nvshmemt_libfabric_mem_handle_t::NUM_HDLS
+
+typedef struct nvshmemt_libfabric_mem_handle_t nvshmemt_libfabric_mem_handle_t;
+static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_handle_t::MAX_SIZE);
 
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
