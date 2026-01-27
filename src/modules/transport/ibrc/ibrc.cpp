@@ -1194,8 +1194,6 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void *curetptr, a
     struct ibv_send_wr *sr, **bad_sr;
     struct ibv_sge *sge;
     int op_id;
-    struct ibrc_atomic_op op;
-
     ep = (struct ibrc_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
 
     status = nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ANY);
@@ -1236,6 +1234,8 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void *curetptr, a
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
+    struct ibrc_atomic_op op;
+
     /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
     is_egm = check_egm(remote->remote_memdesc.ptr, tcurr->egm_map);
     if (is_egm) {

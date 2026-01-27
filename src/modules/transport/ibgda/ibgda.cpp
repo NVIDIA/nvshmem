@@ -1032,9 +1032,6 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
     void *aligned_ptr;
     size_t bufsize = size;
 
-    void *cpu_ptr_base = NULL;
-    void *cpu_ptr = NULL;
-
     struct ibgda_mem_object *mobject =
         (struct ibgda_mem_object *)calloc(1, sizeof(struct ibgda_mem_object));
     NVSHMEMI_NULL_ERROR_JMP(mobject, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -1066,6 +1063,9 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
     if (host_mapping) {
 #ifdef NVSHMEM_USE_GDRCOPY
         if (use_gdrcopy) {
+            void *cpu_ptr_base = NULL;
+            void *cpu_ptr = NULL;
+
             status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)aligned_ptr,
                                                IBGDA_ROUND_UP(size, IBGDA_GPAGE_SIZE), 0, 0,
                                                &mobject->mh);
