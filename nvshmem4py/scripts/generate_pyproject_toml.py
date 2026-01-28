@@ -62,7 +62,7 @@ dev = [
     "black",
     "isort",
     # TODO: update before release
-    "numba-cuda[cu12]==0.20.0",
+    "numba-cuda[cu12]>=0.23.0,<0.24.0",
 ]
 
 [tool.black]

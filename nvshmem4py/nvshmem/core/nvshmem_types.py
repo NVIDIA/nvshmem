@@ -19,6 +19,7 @@ from enum import Enum, IntEnum
 from cuda.core.experimental._memory import MemoryResource, Buffer
 from cuda.core.experimental import Device, system, ObjectCode
 from cuda.core.experimental._stream import Stream
+from cuda.bindings.utils import get_cuda_native_handle
 import cuda.bindings.driver
 
 from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id, buffer_register_symmetric, buffer_unregister_symmetric
@@ -141,7 +142,7 @@ class NvshmemKernelObject:
         """
         Create a NvshmemKernelObject from a ObjectCode
         """
-        return NvshmemKernelObject._init(handle=int(obj.handle))
+        return NvshmemKernelObject._init(handle=get_cuda_native_handle(obj.handle))
     
     @staticmethod
     def from_obj_bytes(obj_bytes: bytes):
@@ -149,7 +150,7 @@ class NvshmemKernelObject:
         Create a NvshmemKernelObject from a bytes-string of the assembled CUDA object.
         """
         obj =  ObjectCode.from_cubin(obj_bytes)
-        return NvshmemKernelObject._init(handle=int(obj.handle))
+        return NvshmemKernelObject._init(handle=get_cuda_native_handle(obj.handle))
 
     @staticmethod
     def from_triton(triton_kernel: "JITFunction"):
@@ -164,7 +165,7 @@ class NvshmemKernelObject:
         """
         Create a NvshmemKernelObject from a CUDA kernel
         """
-        return NvshmemKernelObject._init(handle=int(cuda_kernel.handle))
+        return NvshmemKernelObject._init(handle=get_cuda_native_handle(cuda_kernel))
 
 """
 Version class

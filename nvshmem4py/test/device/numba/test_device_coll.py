@@ -1,4 +1,3 @@
-from cuda.core.experimental import Device, Stream
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba 
@@ -8,6 +7,17 @@ import pytest
 
 coll_dtypes  = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
 coll_scopes = ["", "_block", "_warp"]
+
+
+class _NumbaStreamAdapter:
+    """Adapt a Numba CUDA stream to the CUDA Python stream protocol."""
+
+    def __init__(self, nb_stream):
+        self._nb_stream = nb_stream
+
+    def __cuda_stream__(self):
+        return (0, self._nb_stream.handle.value)
+
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])
@@ -23,8 +33,7 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
     src [:] = nvshmem.core.my_pe() + 1
     dest = nvshmem.core.array((nelems,), dtype=dtype)
     dest [:] = 0
-    dev = Device()
-    dev.sync()
+    cuda.synchronize()
 
     print(f"Src after init: {src}")
     print(f"Dest after init: {dest}")
@@ -36,13 +45,14 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
         
     
     nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    nvshmem_stream = _NumbaStreamAdapter(nb_stream)
 
     test_reduce[nblocks, nthreads, nb_stream](team, dest, src)
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=nvshmem_stream)
+    nb_stream.synchronize()
+    cuda.synchronize()
+    del nb_stream
     print(f"Dest after reduce: {dest}")
     if op == "sum":
         expected  = sum(range(1, nvshmem.core.n_pes() + 1))
@@ -71,8 +81,7 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
     src [:] = nvshmem.core.my_pe() + 1
     dest = nvshmem.core.array((nelems,), dtype=dtype)
     dest [:] = 0 
-    dev = Device()
-    dev.sync()
+    cuda.synchronize()
 
 
     print(f"From PE {nvshmem.core.my_pe()}")
@@ -84,13 +93,14 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
         nvshmem.core.device.numba.reducescatter(team, dest, src, op)
         
     nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    nvshmem_stream = _NumbaStreamAdapter(nb_stream)
 
     test_reducescatter[nblocks, nthreads, nb_stream](team, dest, src)
 
-    cu_stream_ref.sync()
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    dev.sync()
+    nb_stream.synchronize()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=nvshmem_stream)
+    cuda.synchronize()
+    del nb_stream
     print(f"Dest after reducescatter: {dest}")
     if op == "sum":
         expected  = sum(range(1, nvshmem.core.n_pes() + 1))
@@ -115,8 +125,7 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
     dest = nvshmem.core.array((nelems * team_n,), dtype=dtype)
     src[:] = nvshmem.core.my_pe() + 1
     dest[:] = 0
-    dev = Device()
-    dev.sync()
+    cuda.synchronize()
 
     print(f"Src after init: {src}")
     print(f"Dest after init: {dest}")
@@ -126,11 +135,12 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
         nvshmem.core.device.numba.fcollect(team, dest, src)
 
     nb_stream = cuda.stream()
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    nvshmem_stream = _NumbaStreamAdapter(nb_stream)
     k[1, 128, nb_stream](team, dest, src)
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=nvshmem_stream)
+    nb_stream.synchronize()
+    cuda.synchronize()
+    del nb_stream
     expected = []
     for pe in range(nvshmem.core.n_pes()):
         expected.extend([pe + 1] * nelems)
@@ -151,8 +161,7 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
     src [:] = nvshmem.core.my_pe() + 1
     dest = nvshmem.core.array((nelems), dtype=dtype)
     dest [:] = 0 
-    dev = Device()
-    dev.sync()
+    cuda.synchronize()
 
 
     print(f"From PE {nvshmem.core.my_pe()}")
@@ -164,12 +173,13 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
         nvshmem.core.device.numba.alltoall(team, dest, src)
     
     nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    nvshmem_stream = _NumbaStreamAdapter(nb_stream)
     test_alltoall[nblocks, nthreads, nb_stream](dest, src, team)
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=nvshmem_stream)
+    nb_stream.synchronize()
+    cuda.synchronize()
+    del nb_stream
     expected  = []
     for i in range(1, nvshmem.core.n_pes() + 1):
         expected.extend([i] * (nelems//nvshmem.core.n_pes()))
@@ -194,8 +204,7 @@ def test_device_broadcast(nvshmem_init_fini, team, dtype):
     src [:] = nvshmem.core.my_pe() + 1
     dest = nvshmem.core.array((nelems), dtype=dtype)
     dest [:] = 0 
-    dev = Device()
-    dev.sync()
+    cuda.synchronize()
 
     print(f"From PE {nvshmem.core.my_pe()}")
     print(f"Src after init: {src}")
@@ -206,12 +215,13 @@ def test_device_broadcast(nvshmem_init_fini, team, dtype):
         
     
     nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    nvshmem_stream = _NumbaStreamAdapter(nb_stream)
     test_broadcast[nblocks, nthreads, nb_stream](dest, src, team)
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=nvshmem_stream)
+    nb_stream.synchronize()
+    cuda.synchronize()
+    del nb_stream
     # Expect 1 (sent by PE 0) on all PEs
     print(f"Dest: {dest}")
     assert (dest == 1).all()
