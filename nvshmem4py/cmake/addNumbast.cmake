@@ -1,4 +1,4 @@
-function(AddNumbast GIT_TAG)
+function(AddNumbast VERSION)
     
     # Locate Git
     find_package(Git REQUIRED)
@@ -13,10 +13,10 @@ function(AddNumbast GIT_TAG)
     set(VENV_DIR "${CMAKE_SOURCE_DIR}/build/externals/venv")
     set(VENV_PYTHON_EXECUTABLE "${VENV_DIR}/bin/python3")
 
-    cmake_parse_arguments(PARSE_ARGV 0 ADDNUMBAST "" "GIT_TAG" "")
+    cmake_parse_arguments(PARSE_ARGV 0 ADDNUMBAST "" "VERSION" "")
 
-    if(NOT DEFINED GIT_TAG)
-        message(FATAL_ERROR "GIT_TAG not provided to AddNumbast")
+    if(NOT DEFINED VERSION)
+        message(FATAL_ERROR "VERSION not provided to AddNumbast")
     endif()
 
     
@@ -58,39 +58,16 @@ function(AddNumbast GIT_TAG)
     file(MAKE_DIRECTORY "${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}")
 
 
-# Step 0: Clean the numbast working directory
-    # When addCybind.cmake is excluded from source packages, get_cybind_output does not exist.
-    # Only add that dependency when the target exists (i.e. when addCybind was included).
-    if(TARGET get_cybind_output)
-        add_custom_target(
-            clean_${PACKAGE_NAME}
-            COMMAND rm -rvf ${WORKDIR}
-            COMMAND mkdir -p ${OUTPUT_DIR}
-            COMMAND touch ${OUTPUT_DIR}/clean.txt
-            COMMENT "Cleaning Numbast repository"
-            DEPENDS get_cybind_output
-        )
-    else()
-        add_custom_target(
-            clean_${PACKAGE_NAME}
-            COMMAND rm -rvf ${WORKDIR}
-            COMMAND mkdir -p ${OUTPUT_DIR}
-            COMMAND touch ${OUTPUT_DIR}/clean.txt
-            COMMENT "Cleaning Numbast repository"
-        )
-    endif()
-    
-    # Step 1: Clone the Numbast repository
+    # Step 0: Clean the the numbast working directory
     add_custom_target(
-        clone_${PACKAGE_NAME}
-        COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/build/externals
-        COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch ${ADDNUMBAST_GIT_TAG} https://github.com/NVIDIA/numbast.git ${BINDGEN_TOOL_REPO}
-        COMMAND touch ${OUTPUT_DIR}/git_clone.txt
-        RESULT_VARIABLE clone_result
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/build/externals
-        # DEPENDS install_llvm
-        DEPENDS clean_${PACKAGE_NAME}
-        COMMENT "Cloning Numbast repository at tag ${ADDNUMBAST_GIT_TAG}"
+        clean_${PACKAGE_NAME}
+        COMMAND rm -rvf ${WORKDIR}
+
+        COMMAND mkdir -p ${WORKDIR}
+        COMMAND mkdir -p ${OUTPUT_DIR}
+        COMMAND touch ${OUTPUT_DIR}/clean.txt
+        COMMENT "Cleaning and recreate Numbast repository"
+        # DEPENDS get_cybind_output
     )
 
     # Step 2: install numbast from source
@@ -101,16 +78,13 @@ function(AddNumbast GIT_TAG)
         COMMAND ${Python3_EXECUTABLE} -m venv ${VENV_DIR}
         COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip
         COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install numba-cuda==0.20.0 --no-deps
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install cuda-bindings
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install cuda-core
-	COMMAND env PYTHON_EXECUTABLE=${VENV_PYTHON_EXECUTABLE} ASTCANOPY_INSTALL_PATH=${ASTCANOPY_CMAKE_INSTALL_PREFIX} ${BINDGEN_TOOL_REPO}/ast_canopy/build.sh
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install -e ${BINDGEN_TOOL_REPO}/numbast/
+
+        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install numbast==${ADDNUMBAST_VERSION}
         WORKING_DIRECTORY ${WORKDIR}
         USES_TERMINAL
-        DEPENDS clone_${PACKAGE_NAME}
+        DEPENDS clean_${PACKAGE_NAME}
         COMMAND touch ${OUTPUT_DIR}/install_from_source.txt
-        COMMENT "Installing Numbast from source..."
+        COMMENT "Installing Build Environment and Numbast"
     )
 
     # Step 3: Copy binding generation assets into build directory

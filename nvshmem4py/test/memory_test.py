@@ -446,9 +446,9 @@ def test_external_buffer():
     coherence_model = detect_cuda_coherence_model(dev.device_id)
     print("Coherence model:", coherence_model)
     if coherence_model == CUDA_COH_FULL:
-        options = VirtualMemoryResourceOptions(handle_type="fabric")
+        options = VirtualMemoryResourceOptions(handle_type="fabric", gpu_direct_rdma=True)
     else:
-        options = VirtualMemoryResourceOptions()
+        options = VirtualMemoryResourceOptions(gpu_direct_rdma=True)
 
     if coherence_model != CUDA_COH_FULL and coherence_model != CUDA_COH_MIGRATION:
         print("NOTICE: Non-coherent platform detected or CDMM mode detected. Using posix_fd handle type.")

@@ -35,11 +35,11 @@ API Prefix Removal:
     - "nvshmemx_"
 
 Additional Import:
-  - "nvshmem.bindings"
+  - "nvshmem.core"
 
 Module Callbacks:
-  setup: "lambda x: nvshmem.bindings.cumodule_init(int(x))"
-  teardown: "lambda x: nvshmem.bindings.cumodule_finalize(int(x))"
+  setup: "lambda x: nvshmem.core.library_init(nvshmem.core.NvshmemKernelObject.from_obj(x))"
+  teardown: "lambda x: nvshmem.core.library_finalize(nvshmem.core.NvshmemKernelObject.from_obj(x))"
 
 Shim Include Override: "\"entry_point.h\""
 

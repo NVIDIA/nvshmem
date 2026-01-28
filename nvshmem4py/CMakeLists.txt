@@ -36,7 +36,7 @@ endif()
 if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py")
     include(cmake/addNumbast.cmake)
     AddNumbast(
-        GIT_TAG "v0.5.4"
+        VERSION "0.6.0"
     )
 endif()
 
