@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "helpers.h"
+#include "utils.h"
 
 /**
  * This tests is used to exercice many ways of doing an all-to-all with NVSHMEM.
@@ -46,16 +47,6 @@
  *                              |------->       dst_pe
  *                              dst_idx
  */
-
-#define CUDA_CHECK(stmt)                                                          \
-    do {                                                                          \
-        cudaError_t result = (stmt);                                              \
-        if (cudaSuccess != result) {                                              \
-            fprintf(stderr, "[%s:%d] CUDA failed with %s \n", __FILE__, __LINE__, \
-                    cudaGetErrorString(result));                                  \
-            exit(1);                                                              \
-        }                                                                         \
-    } while (0)
 
 #define MPI_CHECK(stmt)                                                  \
     do {                                                                 \
@@ -583,7 +574,8 @@ struct test {
  */
 
 int main(int argc, char* argv[]) {
-    nvshmem_init();
+    init_wrapper(&argc, &argv);
+
     nvshmem_info_t info;
     if (info.print) {
         printf_date("NVSHMEM initialized on all PEs at ");
@@ -609,10 +601,6 @@ int main(int argc, char* argv[]) {
                A2A_opt.has_value() ? params_t::to_string(A2A_opt.value()) : "not_specified",
                graph_opt.has_value() ? (graph_opt.value() ? "yes" : "no") : "not_specified");
     }
-
-    int n_devices = 0;
-    CUDA_CHECK(cudaGetDeviceCount(&n_devices));
-    CUDA_CHECK(cudaSetDevice(info.rank % n_devices));
 
     nvshmem_sync_all();
     if (info.print) {
@@ -701,7 +689,7 @@ int main(int argc, char* argv[]) {
     int error = (errors != 0 ? 1 : 0);
     error = allreduce_int_max(error);
 
-    nvshmem_finalize();
+    finalize_wrapper();
 
     if (error != 0) {
         printf("FAILED\n");
