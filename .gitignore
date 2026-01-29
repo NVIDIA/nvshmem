@@ -51,7 +51,7 @@
 src/device/comm/transfer_device.cu
 src/include/non_abi/nvshmem_build_options.h
 src/include/non_abi/nvshmem_version.h
-test/common/include/non_abi/device/pt-to-pt/transfer_device.cuh
+src/include/non_abi/device/pt-to-pt/transfer_device.cuh
 
 # gtest artifacts
 _deps
