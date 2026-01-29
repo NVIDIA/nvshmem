@@ -1031,9 +1031,10 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
     void *ptr = 0;
     void *aligned_ptr;
     size_t bufsize = size;
-
+#ifdef NVSHMEM_USE_GDRCOPY
     void *cpu_ptr_base = NULL;
     void *cpu_ptr = NULL;
+#endif
 
     struct ibgda_mem_object *mobject =
         (struct ibgda_mem_object *)calloc(1, sizeof(struct ibgda_mem_object));
