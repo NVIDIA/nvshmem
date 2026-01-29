@@ -10,7 +10,7 @@
 
 #ifdef __CUDA_ARCH__
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib_
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
 extern "C" {
 #endif
 
