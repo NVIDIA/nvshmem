@@ -1112,6 +1112,7 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_memory(nvshmem_mem_handle_t *
     char *buf_start = (char *)buf;
     int status = 0;
     void *mmap_alloc;
+    size_t pref_mmap_void_size = 0;
     nvshmemi_state_t *state = get_state();
     size_t adjusted_max_handle_len =
         mem_granularity_ * (NVSHMEMI_MAX_HANDLE_LENGTH / mem_granularity_);
@@ -1134,16 +1135,32 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_memory(nvshmem_mem_handle_t *
         if (buf < ((char *)mmap_base_ - get_mmap_allocated_range())) {
             // increase capacity and range of mmap_mspace
             mmap_mspace_->add_new_chunk((char *)buf, size);
-            mmap_alloc = mmap_mspace_->allocate(size);
+
+            // it is possible that to accomodate preferred offset, there is a void between
+            // mmap_base_ - get_mmap_allocated_range() and buf+size. Need to add it to free
+            // chunks. This check MUST BE DONE BEFORE allocate() call
+            char* buf_end = (char*)buf_start + size;
+            char* mmap_base_offset = (char*)(mmap_base_) - get_mmap_allocated_range();
+            if (buf_end < mmap_base_offset) {
+                pref_mmap_void_size = mmap_base_offset - buf_end;
+            }
+            mmap_alloc = mmap_mspace_->allocate_at_preferred_addr(buf, size);
             status = (mmap_alloc == NULL);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "mmap mspace alloc failed\n");
             // mmap_mspace add_new_chunk should not merge free chunk added
             // and should return the same ptr on allocate call
-            // TODO is this guaranteed ? or necessary always ?
             status = (mmap_alloc != buf);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "mmap mspace alloc returning different address\n");
+
+            // Add new chunk for mmap_base_ - get_mmap_allocated_range() <--> buf+size
+            if (pref_mmap_void_size) {
+                INFO(NVSHMEM_MEM, "[%d] %p %lu adding free chunk for void due to preferred mmap at %p, %lu\n ", state->mype,
+                        buf, size, ((char *)buf + size),
+                        pref_mmap_void_size);
+                mmap_mspace_->add_new_chunk(buf_end, pref_mmap_void_size);
+            }
         }
     } else {
         heap_mspace_->add_new_chunk((char *)heap_base_ + physical_internal_heap_size_, size);
@@ -1828,7 +1845,8 @@ out:
     return (ptr);
 }
 
-void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t size, int flags) {
+void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t size,
+                                                           void *pref_addr, int flags) {
     void *ptr = NULL;
     int status = 0;
 
@@ -1845,6 +1863,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     unsigned int ptr_mem_type;
     unsigned long long access_flags;
     bool is_egm = false;
+    size_t pref_off = 0;
     size_t adjusted_max_handle_len =
         mem_granularity_ * (NVSHMEMI_MAX_HANDLE_LENGTH / mem_granularity_);
     off_t mmap_offset =
@@ -1890,21 +1909,66 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     NVSHMEMI_NE_ERROR_JMP(flags, 0, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Non-zero flags not supported\n");
 
-    // check if there is a mmap_mspace free chunk to accomodate the request
-    ptr = mmap_mspace_->allocate(size);
+    // pref_off cannot be between heap_base_ and heap_base_ + physical_internal_heap_size_
+    // as this region is used for internal alloc (nvshmem_malloc)
+
+    // check if pref_off is already a hole with sufficient size
+    // i.e. between (mmap_base_ - mmap_allocated_range()) till end
+    if (pref_addr != NULL) {
+        if ((pref_addr >= heap_base_) && (pref_addr < ((char*)heap_base_ + heap_size_))) {
+            pref_off = (char *)pref_addr - (char *)heap_base_;
+            INFO(NVSHMEM_MEM, "type: %s mmap with preferred addr: %p",
+                    typeid(decltype(this)).name(), pref_addr);
+            ptr = mmap_mspace_->allocate_at_preferred_addr(((char *)heap_base_ + pref_off), size);
+        } else {
+            WARN("Preferred mmap address %p not within heap range: %p : %p",
+                  pref_addr, heap_base_, (char*)heap_base_+heap_size_);
+        }
+    }
     if (ptr != NULL) {
-        buf_start = (char *)ptr;
-        INFO(NVSHMEM_MEM, "Found hole in mmap_mspace buf start: %p for %zu bytes", buf_start, size);
-    } else {
-        // check to ensure external alloc (mmap) doesn't cross over to internal alloc
-        // (nvshmem_malloc) Not enough space for mapping user buffer
-        status = ((physical_internal_heap_size_ + get_mmap_allocated_range() + size) >= heap_size_);
+        assert(pref_off >= (mmap_base_ - get_mmap_allocated_range()));
+        buf_start = (char*)ptr;
+        status = (buf_start != ((char *)heap_base_ + pref_off));
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Not enough space for mmaping buffer %p size %zu\n", buf_ptr, size);
-        buf_start = (char *)mmap_base_ - get_mmap_allocated_range() - size;
+                              "Preferred allocate returned %p but expected %p\n", buf_start, (char *)heap_base_ + pref_off);
+
+        INFO(NVSHMEM_MEM, "Found hole at preferred offset buf start: %p  off: %lu for %zu bytes",
+             buf_start, pref_off, size);
+    } else if ((pref_addr) && (pref_off > physical_internal_heap_size_) &&
+               ((pref_off + size) <= (heap_size_ - get_mmap_allocated_range()))) {
+        // check if pref_off is between internal alloc (physical_internal_heap_size_) and
+        // start of mmaped region (mmap_base_ - get_mmap_allocated_range())
+        buf_start = (char *)heap_base_ + pref_off;
         ptr = (void *)buf_start;
-        INFO(NVSHMEM_MEM, "type: %s Need to extend mmap space. start ptr: %p for %zu bytes",
-             typeid(decltype(this)).name(), buf_start, size);
+        INFO(NVSHMEM_MEM,
+             "Found preferred offset buf start: %p  off: %lu for %zu bytes by extending mmap "
+             "allocated range",
+             buf_start, pref_off, size);
+
+    } else {
+        if (pref_addr != NULL) {
+            INFO(NVSHMEM_MEM,
+                    "Could not register user buffer at preferred address: %p", pref_addr);
+        }
+        // check if there is a mmap_mspace free chunk to accomodate the request
+        ptr = mmap_mspace_->allocate(size);
+        if (ptr != NULL) {
+            buf_start = (char *)ptr;
+            INFO(NVSHMEM_MEM, "Found hole in mmap_mspace buf start: %p for %zu bytes", buf_start,
+                 size);
+        } else {
+            // check to ensure external alloc (mmap) doesn't cross over to internal alloc
+            // (nvshmem_malloc) Not enough space for mapping user buffer
+            status =
+                ((physical_internal_heap_size_ + get_mmap_allocated_range() + size) >= heap_size_);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "Not enough space for mmaping buffer %p size %zu\n", buf_ptr,
+                                  size);
+            buf_start = (char *)mmap_base_ - get_mmap_allocated_range() - size;
+            ptr = (void *)buf_start;
+            INFO(NVSHMEM_MEM, "Need to extend mmap space. start ptr: %p for %zu bytes",
+                 buf_start, size);
+        }
     }
 
     // Tracking mmaped user buffer alias, needed for ibv_reg_mr_iova(), gdr_pin_buffer()
@@ -2429,8 +2493,33 @@ void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags) 
         NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
         goto exit_and_return;
     }
+    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, NULL, flags);
 
-    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, flags);
+    nvshmemi_barrier_all();
+
+exit_and_return:
+    NVSHMEMU_THREAD_CS_EXIT();
+    return ptr;
+}
+
+void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, size_t size,
+                                                              void *preferred_addr, int flags) {
+    void *ptr = NULL;
+
+    NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
+
+    NVSHMEMU_THREAD_CS_ENTER();
+    int ret = nvshmemi_check_state_and_init();
+    if (ret) {
+        nvshmem_error = 1;
+        goto exit_and_return;
+    }
+
+    if (nvshmemi_state->vmm_heap == nullptr) {
+        NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
+        goto exit_and_return;
+    }
+    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, preferred_addr, flags);
 
     nvshmemi_barrier_all();
 

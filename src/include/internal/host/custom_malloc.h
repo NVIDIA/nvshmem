@@ -44,6 +44,7 @@ class mspace {
         }
         return inuse_chunks.begin()->first;
     }
+    void *allocate_at_preferred_addr(void *ptr, size_t size);
     std::map<void *, size_t> *get_inuse_chunks() { return &inuse_chunks; }
 };
 

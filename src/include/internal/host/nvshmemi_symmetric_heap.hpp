@@ -401,7 +401,14 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     size_t get_mmap_allocated_range();
     bool is_egm(void *addr);
     std::map<void *, size_t> *get_mmapped_buf();
-    void *mmap_mem(void *ptr, size_t size, int flags);
+
+    /* Functions to map and unmap user buffers
+     * memory registered using nvshmemx_buffer_register_symmetric call
+     * is refered to as external allocation
+     * while memory allocated using nvshmem_malloc is referred to as internal
+     * allocation in the code
+     */
+    void *mmap_mem(void *ptr, size_t size, void *pref_addr, int flags);
     int unmap_mem(void *ptr, size_t size);
 
    protected:

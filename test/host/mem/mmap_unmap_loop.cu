@@ -24,7 +24,6 @@
 
 #define DATATYPE_T int
 #define DATATYPE_NAME int
-
 #define DO_REDUCE_TEST(TYPENAME, TYPE, OP)                                                       \
     do {                                                                                         \
         init_##TYPENAME##_##OP##_reduce_data_kernel<<<1, 1, 0, stream>>>(team, (TYPE *)source,   \
@@ -77,6 +76,27 @@ void releaseUserBuf(void *ptr, size_t size) {
     CU_CHECK(cuMemUnmap((CUdeviceptr)ptr, size));
     CU_CHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
     CU_CHECK(cuMemRelease(memHandle));
+}
+
+int test_allocation_at_preferred_address(void *user_buf, size_t size, void *mmaped_addr, bool should_match_preferred_addr) {
+    void *mmaped_buf_pref;
+    // register with preferred address
+    mmaped_buf_pref = (void *)nvshmemx_buffer_register_symmetric_at_preferred_address(
+        user_buf, size, mmaped_addr, 0);
+    if (!mmaped_buf_pref) {
+        ERROR_PRINT("shmem_mmap of user buffer at preferred address failed \n");
+        return -1;
+    }
+    // this should allocate at preferred address
+    if (should_match_preferred_addr && (mmaped_buf_pref != mmaped_addr)) {
+        ERROR_PRINT("Could not allocate at preferred address %p %p\n", mmaped_buf_pref, mmaped_addr);
+        return -1;
+    }
+    if (nvshmemx_buffer_unregister_symmetric(mmaped_buf_pref, size)) {
+        ERROR_PRINT("nvshmemx_buffer_unregister_symmetric failed \n");
+        return -1;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -179,6 +199,17 @@ int main(int argc, char **argv) {
         }
     }
 
+    // test allocation when preferred address is unavailable
+    // allocation should succeed but should not be at preferred address
+    if (iter > 2) {
+        status = test_allocation_at_preferred_address(buffer[0], bufSize[buffer[0]], mmaped_buf[buffer[1]],
+                                                      false);
+        if (status) {
+            ERROR_PRINT("test_allocation_at_preferred_address failed \n");
+            goto out;
+        }
+    }
+
     for (size_t r = 0; r < _repeat; r++) {
         free_start_idx = 0;
         free_end_idx = iter - 1;
@@ -192,7 +223,7 @@ int main(int argc, char **argv) {
         } else {
             nelems = COLL_NELEMS;
         }
-        nelems = nelems / 2;  // split the buffer intop source and dest
+        nelems = nelems / 2;  // split the buffer into source and dest
 
         source = (dtype_t *)mmaped_buf[buffer[bufId]];
         dest = (dtype_t *)(mmaped_buf[buffer[bufId]]) + nelems;
@@ -203,6 +234,35 @@ int main(int argc, char **argv) {
         fflush(stdout);
         nvshmem_barrier_all();
 
+        // check if preferred allocation within unmapped region works
+        if (iter > 2) {
+            // create a hole by unmapping buf id =0,1
+            for (int i = 0; i < 2; i++) {
+                status =
+                    nvshmemx_buffer_unregister_symmetric(mmaped_buf[buffer[i]], bufSize[buffer[i]]);
+                if (status) {
+                    ERROR_PRINT("nvshmemx_buffer_unregister_symmetric failed \n");
+                    goto out;
+                }
+            }
+
+            // register with buf id 1 as preferred offset
+            status = test_allocation_at_preferred_address(buffer[1], bufSize[buffer[1]], mmaped_buf[buffer[1]], true);
+            if (status) {
+                ERROR_PRINT("test_allocation_at_preferred_address within unmapped region failed \n");
+                goto out;
+            }
+
+            // restore buf 0,1
+            for (int i = 0; i < 2; i++) {
+                mmaped_buf[buffer[i]] =
+                    (void *)nvshmemx_buffer_register_symmetric(buffer[i], bufSize[buffer[i]], 0);
+                if (!mmaped_buf[buffer[i]]) {
+                    ERROR_PRINT("shmem_mmap failed \n");
+                    goto out;
+                }
+            }
+        }
         if (!mype)
             DEBUG_PRINT("freeing buffers with index %d to %d \n", free_start_idx, free_end_idx);
         for (int i = free_start_idx; i <= free_end_idx; i++) {
@@ -212,7 +272,16 @@ int main(int argc, char **argv) {
                 ERROR_PRINT("nvshmemx_buffer_unregister_symmetric failed \n");
                 goto out;
             }
-            mmaped_buf.erase(buffer[i]);
+        }
+
+        // check if preferred allocation in empty heap region
+        if (iter > 2) {
+            status =
+                test_allocation_at_preferred_address(buffer[1], bufSize[buffer[1]], mmaped_buf[buffer[1]], true);
+            if (status) {
+                ERROR_PRINT("test_allocation_at_preferred_address failed \n");
+                goto out;
+            }
         }
 
         if (!mype)
