@@ -154,6 +154,50 @@ void *mspace::allocate(size_t bytes) {
     return NULL;
 }
 
+void *mspace::allocate_at_preferred_addr(void *ptr, size_t size) {
+    INFO(NVSHMEM_MEM, "mspace_allocate_preferred called with %p, %zu bytes", ptr, size);
+    if (size == 0) return NULL;
+    size = align_request(size);
+    for (auto it = free_chunks_start.begin();
+         it != free_chunks_start.end(); it++) {
+        // check if there is free chunk large to cover ptr <---> ptr+size
+        if ((it->first <= ptr) && (((char*)it->first + it->second) >= ((char*)ptr + size))) {
+            INFO(NVSHMEM_MEM, "free chunk at %p for %p with size = %zu bytes found", it->first,
+                 ptr, it->second);
+
+            // there could be void before and after
+            /* |...<it->first>---<ptr>---<ptr+size>---<it->first+it->second>...|
+             *  free void:   |<->|                |<->|
+             */
+
+            void *orig_void_start = (char *)it->first;
+            size_t orig_void_size = it->second;
+            size_t rsize = (char*)ptr - (char*)orig_void_start;
+
+            // handle void between "it->first" and "ptr"
+            if (rsize > 0) {
+                free_chunks_start[orig_void_start] = rsize;
+                free_chunks_end[ptr] = rsize;
+            } else {
+                free_chunks_start.erase(orig_void_start);
+            }
+
+            // handle void between "it->first + it->second" and "ptr + size"
+            rsize = ((char*)orig_void_start + orig_void_size) - ((char*)ptr + size);
+            if (rsize > 0) {
+                free_chunks_start[(char*)ptr + size] = rsize;
+                free_chunks_end[(char*)orig_void_start + orig_void_size] = rsize;
+            } else {
+                free_chunks_end.erase((char*)orig_void_start + orig_void_size);
+            }
+            inuse_chunks[ptr] = size;
+            ASSERT_CORRECTNESS
+            return ptr;
+        }
+    }
+    return NULL;
+}
+
 void mspace::deallocate(void *mem) {
     INFO(NVSHMEM_MEM, "mspace_free called on %p", mem);
     if (inuse_chunks.find(mem) == inuse_chunks.end()) {
