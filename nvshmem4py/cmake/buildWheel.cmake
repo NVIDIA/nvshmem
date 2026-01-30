@@ -11,10 +11,10 @@ endif()
 function(BuildWheel WHEEL_TARGET PY_VER PYTHON_EXECUTABLE CUDA_VER)
 
     set(PYPROJECT_TOML "${CMAKE_SOURCE_DIR}/nvshmem4py/pyproject.toml")
-    set(BUILD_DIR "${CMAKE_SOURCE_DIR}/build/dist")
+    set(BUILD_DIR "${CMAKE_BINARY_DIR}/dist")
 
 
-    set(VENV_DIR "${CMAKE_SOURCE_DIR}/build/externals/venv_${PY_VER}")
+    set(VENV_DIR "${CMAKE_BINARY_DIR}/externals/venv_${PY_VER}")
     set(VENV_PYTHON_EXECUTABLE "${VENV_DIR}/bin/python3")
 
     if(NOT TARGET make_venv_${PY_VER})
@@ -45,6 +45,7 @@ function(BuildWheel WHEEL_TARGET PY_VER PYTHON_EXECUTABLE CUDA_VER)
         COMMAND sed -i -e "s/^name = \"nvshmem4py\"/name = \"${WHEEL_NAME}\"/" ${PYPROJECT_PATH}
         COMMAND sed -i -e "s|requirements.txt|requirements_cuda${CUDA_VER}.txt|" ${SETUP_PATH}
         COMMAND mkdir -p ${BUILD_DIR}
+        COMMAND bash -c "if [ ! -x ${VENV_PYTHON_EXECUTABLE} ]; then ${PYTHON_EXECUTABLE} -m venv ${VENV_DIR}; fi; if ! ${VENV_PYTHON_EXECUTABLE} -c 'import build, setuptools.build_meta' >/dev/null 2>&1; then ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip; ${VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt; ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade wheel setuptools; fi"
         COMMAND echo "Building whl and tgz for packages ${CUDA_VER}"
         COMMAND ${CMAKE_COMMAND} -E env "CPPFLAGS=-I${CUDA_HOME}/include/" "PACKAGE_NAME=${WHEEL_NAME}" ${VENV_PYTHON_EXECUTABLE} -m build --outdir ${BUILD_DIR} --no-isolation
         COMMAND bash -c "export PATH=${VENV_DIR}/bin:$PATH; ls ${BUILD_DIR}/${WHEEL_STR}*.whl | xargs ${VENV_PYTHON_EXECUTABLE} -m auditwheel repair --plat manylinux_2_34_${ARCH_NAME} -w ${BUILD_DIR}/"
@@ -66,6 +67,11 @@ function(BuildWheel WHEEL_TARGET PY_VER PYTHON_EXECUTABLE CUDA_VER)
     if(TARGET build_bindings_numbast)
         add_dependencies(${WHEEL_TARGET} build_bindings_numbast)
     endif()
+
+    if(TARGET build_bindings_cute)
+        add_dependencies(${WHEEL_TARGET} build_bindings_cute)
+    endif()
+
 
     if(NOT EXISTS ${VENV_PYTHON_EXECUTABLE})
         add_dependencies(${WHEEL_TARGET} make_venv_${PY_VER})

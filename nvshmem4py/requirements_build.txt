@@ -1,7 +1,7 @@
 # These are the build-time python/pip requirements for nvshmem4py
 # They are mostly required to run Cybind and build wheels
 networkx
-numpy
+numpy<=2.3
 pycparser
 build
 Cython>=0.29.24
@@ -13,3 +13,4 @@ auditwheel
 patchelf
 # The following are Numbast requirements for header search
 cuda-toolkit[cudart,nvcc,curand,cccl,nvvm]==13.*
+

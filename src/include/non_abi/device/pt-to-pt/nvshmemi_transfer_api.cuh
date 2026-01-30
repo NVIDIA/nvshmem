@@ -8,6 +8,14 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host_transport/nvshmem_constants.h"
 
+#ifndef NVSHMEMI_NOINLINE
+#if defined(__clang_llvm_bitcode_lib__)
+#define NVSHMEMI_NOINLINE __attribute__((__noinline__))
+#else
+#define NVSHMEMI_NOINLINE __noinline__
+#endif
+#endif
+
 #ifndef _NVSHMEMI_TRANSFER_H_
 #define _NVSHMEMI_TRANSFER_H_
 
@@ -21,7 +29,7 @@
 #define NVSHMEMI_TRANSFER_INLINE inline
 #define NVSHMEMI_TRANSFER_STATIC static
 #else
-#define NVSHMEMI_TRANSFER_INLINE __noinline__
+#define NVSHMEMI_TRANSFER_INLINE NVSHMEMI_NOINLINE
 #define NVSHMEMI_TRANSFER_STATIC
 #endif
 
