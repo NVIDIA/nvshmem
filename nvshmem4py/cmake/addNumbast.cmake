@@ -10,7 +10,7 @@ function(AddNumbast VERSION)
         message(STATUS "Git found: ${GIT_EXECUTABLE}")
     endif()
 
-    set(VENV_DIR "${CMAKE_SOURCE_DIR}/build/externals/venv")
+    set(VENV_DIR "${CMAKE_BINARY_DIR}/externals/venv")
     set(VENV_PYTHON_EXECUTABLE "${VENV_DIR}/bin/python3")
 
     cmake_parse_arguments(PARSE_ARGV 0 ADDNUMBAST "" "VERSION" "")
@@ -20,13 +20,13 @@ function(AddNumbast VERSION)
     endif()
 
     
-    file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/build/externals")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/externals")
     
     set(NUMBAST_CONFIG_VERSION "0.1.0")
     
     set(PACKAGE_NAME "numbast")
     # WORKDIR is the directory where Numbast binding generation happens
-    set(WORKDIR "${CMAKE_SOURCE_DIR}/build/externals/${PACKAGE_NAME}")
+    set(WORKDIR "${CMAKE_BINARY_DIR}/externals/${PACKAGE_NAME}")
     # BINDGEN_TOOL_REPO is the directory where Numbast binding generation tool is cloned
     set(BINDGEN_TOOL_REPO "${WORKDIR}/${PACKAGE_NAME}")
     # ASSET_DIR is the directory where `build_assets/numbast/` is cloned
@@ -46,11 +46,11 @@ function(AddNumbast VERSION)
     set(HIGH_LEVEL_BINDINGS_OUTPUT_DIR ${NUMBAST_OUTPUT_DIR}/high_level/)
 
     # OUTPUT_DIR is the place to store each steps output file for cmake to validate step
-    set(OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build/externals/output")
+    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/externals/output")
 
     file(REMOVE_RECURSE "${WORKDIR}")
     # Ensure directories are created at configure time
-    file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/build/externals")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/externals")
     file(MAKE_DIRECTORY "${WORKDIR}")
     file(MAKE_DIRECTORY "${ASSET_DIR}")
     file(MAKE_DIRECTORY "${OUTPUT_DIR}")

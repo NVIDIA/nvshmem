@@ -85,6 +85,13 @@ NVSHMEM*.cmake
 *CTest*.cmake
 cmake_install.cmake
 
+# Generated files
+src/device/install_manifest.txt
+src/include/non_abi/device/pt-to-pt/transfer_device.cuh
+src/lib/
+src/nvshmem_device_project-build/
+src/share/
+
 # nvshmem4py objects
 nvshmem4py/CMakeFiles/
 nvshmem4py/*.cmake
@@ -92,6 +99,10 @@ nvshmem4py/nvshmem/bindings/*.cpp
 nvshmem4py/nvshmem/bindings/_internal/*.cpp
 nvshmem4py/*.egg-info
 nvshmem4py/pyproject.toml
+nvshmem4py/build_assets/cute/_cuteast.py
+nvshmem4py/build_assets/cute/config_nvshmem.yml
+nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py
+nvshmem4py/nvshmem/bindings/device/cute/entry_point.h
 
 # Filesystem objects
 .DS_STORE

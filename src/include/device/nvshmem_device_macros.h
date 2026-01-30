@@ -3,6 +3,14 @@
 
 #include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
 
+#ifndef NVSHMEMI_NOINLINE
+#if defined(__clang_llvm_bitcode_lib__)
+#define NVSHMEMI_NOINLINE __attribute__((__noinline__))
+#else
+#define NVSHMEMI_NOINLINE __noinline__
+#endif
+#endif
+
 /*
  * These macros represent various inlining requirements based on configuration rules.
  * All functions are force inlined in the bitcode library.
@@ -20,7 +28,7 @@
 #define NVSHMEMI_STATIC static
 #define NVSHMEMI_DEVICE_INLINE inline
 #else
-#define NVSHMEMI_DEVICE_INLINE __noinline__
+#define NVSHMEMI_DEVICE_INLINE NVSHMEMI_NOINLINE
 #define NVSHMEMI_STATIC static
 #endif
 #else
@@ -30,7 +38,7 @@
 #if defined NVSHMEM_ENABLE_ALL_DEVICE_INLINING
 #define NVSHMEMI_DEVICE_INLINE __attribute__((always_inline))
 #else
-#define NVSHMEMI_DEVICE_INLINE __noinline__
+#define NVSHMEMI_DEVICE_INLINE NVSHMEMI_NOINLINE
 #endif
 #define NVSHMEMI_DEVICE_ALWAYS_INLINE __attribute__((always_inline))
 #define NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __attribute__((always_inline))

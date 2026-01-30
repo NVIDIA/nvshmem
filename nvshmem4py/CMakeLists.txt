@@ -40,6 +40,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BU
     )
 endif()
 
+# Generate CuTe Bindings. Follows the same requirements as the Numba bindings
+# Separate build step because users may want one but not the other
+if (EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py")
+    include(cmake/generateCuteBindings.cmake)
+    generateCuteBindings()
+endif()
+
 
 # Find all the Python versions
 # Use bash to find all Python versions >= 3.9
@@ -82,6 +89,10 @@ foreach(LINE IN LISTS PYTHON_LINE_LIST)
             add_dependencies(${WHEEL_TARGET} build_bindings_numbast)
         endif()
 
+        if(TARGET build_bindings_cute AND TARGET build_bindings_numbast AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+            add_dependencies(${WHEEL_TARGET} build_bindings_cute)
+        endif()
+
         set(PREV_WHEEL_TARGET ${WHEEL_TARGET})
         list(APPEND ALL_WHEEL_TARGETS ${WHEEL_TARGET})
     endforeach()
@@ -94,6 +105,6 @@ add_custom_target(build_nvshmem4py_wheels ALL
 
 # Install step to add to tarball
 install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/build/dist"
-    DESTINATION lib/python/
+    DIRECTORY "${CMAKE_BINARY_DIR}/dist"
+    DESTINATION "lib/python/"
 )
