@@ -1926,7 +1926,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
         }
     }
     if (ptr != NULL) {
-        assert(pref_off >= (mmap_base_ - get_mmap_allocated_range()));
+        assert(ptr >= ((char*)mmap_base_ - get_mmap_allocated_range()));
         buf_start = (char*)ptr;
         status = (buf_start != ((char *)heap_base_ + pref_off));
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
