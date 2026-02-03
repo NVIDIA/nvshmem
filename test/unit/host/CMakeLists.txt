@@ -4,3 +4,4 @@ macro(nvshmem_add_unit_test SOURCE)
 endmacro()
 
 add_subdirectory(bootstrap)
+add_subdirectory(env)
