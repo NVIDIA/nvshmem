@@ -24,3 +24,25 @@ Please see the following public links for information on building and working wi
 [Devzone Topic Page](https://forums.developer.nvidia.com/tag/nvshmem)
 
 The maintainers of the NVSHMEM project can also be contacted by e-mail at nvshmem@nvidia.com
+
+Configuration file
+******************
+
+NVSHMEM options can be provided via a simple config file using `KEY=VALUE` syntax.
+
+Config files are loaded in the following order (later files override earlier files):
+
+- `/etc/nvshmem.conf`
+- `~/.nvshmem.conf`
+- The file pointed to by `NVSHMEM_CONF_FILE`
+
+If a key is present in any loaded config file, its value **overrides the corresponding environment
+variable**.
+
+Example:
+
+```
+# Example /etc/nvshmem.conf file
+NVSHMEM_DEBUG=WARN
+# NVSHMEM_SOME_FLAG=1 # This line is a comment and would be ignored.
+```
