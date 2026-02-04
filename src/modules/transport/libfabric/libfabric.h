@@ -224,7 +224,7 @@ typedef struct nvshmemt_libfabric_gdr_ret_amo_op {
 
 struct nvshmemt_libfabric_gdr_op_ctx {
     nvshmemt_libfabric_recv_t type;
-    nvshmemt_libfabric_endpoint_t *ep;
+    int ep_index;
     union {
         nvshmemt_libfabric_gdr_send_p_op_t p_op;
         nvshmemt_libfabric_gdr_send_amo_op_t send_amo;

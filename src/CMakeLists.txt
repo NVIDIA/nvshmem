@@ -397,7 +397,7 @@ nvshmem_library_set_base_config(nvshmem_host)
 ## End generic variable configuration
 
 ## Start transports
-set(TRANSPORT_VERSION_MAJOR 4)
+set(TRANSPORT_VERSION_MAJOR 5)
 set(TRANSPORT_VERSION_MINOR 0)
 set(TRANSPORT_VERSION_PATCH 0)
 
