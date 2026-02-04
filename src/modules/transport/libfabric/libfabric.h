@@ -460,7 +460,8 @@ struct nvshmemt_libfabric_mem_handle_t : nvshmemt_libfabric_mem_handle_base_t {
     /* Constrained by the size of nvshmem_mem_handle_t */
 };
 
-#define NVSHMEMT_LIBFABRIC_MAX_DOMAINS_PER_PE nvshmemt_libfabric_mem_handle_t::NUM_HDLS
+static constexpr size_t NVSHMEMT_LIBFABRIC_MAX_DOMAINS_PER_PE =
+    nvshmemt_libfabric_mem_handle_t::NUM_HDLS;
 
 typedef struct nvshmemt_libfabric_mem_handle_t nvshmemt_libfabric_mem_handle_t;
 static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_handle_t::MAX_SIZE);
