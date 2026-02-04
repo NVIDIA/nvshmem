@@ -416,7 +416,7 @@ typedef struct {
     int num_proxy_domains;
     int num_selected_devs;
     int max_nic_per_pe;
-    std::atomic<size_t> proxy_ep_cntr;
+    std::atomic<uint32_t> proxy_ep_cntr;
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;
