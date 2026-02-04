@@ -95,15 +95,11 @@ int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
                                              struct fi_cq_data_entry *entry, fi_addr_t *addr);
 
 static inline int get_next_ep(nvshmemt_libfabric_state_t *state, int qp_index) {
-    int ep_idx;
-
     if (qp_index == NVSHMEMX_QP_HOST) {
-        ep_idx = 0; /* Currently only 1 EP defined for the host */
+        return 0; /* Currently only 1 EP defined for the host */
     } else {
-        ep_idx = ((state->proxy_ep_cntr++) % state->num_proxy_domains) + state->num_host_domains;
+        return ((state->proxy_ep_cntr++) % state->num_proxy_domains) + state->num_host_domains;
     }
-
-    return ep_idx;
 }
 
 static nvshmemt_libfabric_imm_cq_data_hdr_t nvshmemt_get_write_with_imm_hdr(uint64_t imm_data) {
