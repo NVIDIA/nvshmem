@@ -69,6 +69,7 @@ nvshmem_add_default_off_option(NVSHMEM_DEFAULT_UCX "Sets UCX as the default remo
 nvshmem_add_default_off_option(NVSHMEM_IBGDA_SUPPORT "Enable compilation of the IBGDA remote transport")
 nvshmem_add_default_off_option(NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY "Force the IBGDA remote transport to only use GPUMEM.")
 nvshmem_add_default_off_option(NVSHMEM_IBDEVX_SUPPORT "Enable compilation of the IBDevX remote transport")
+nvshmem_add_default_off_option(NVSHMEM_GPUNETIO_SUPPORT "Enable compilation of the DOCA GPUNetIO remote transport")
 nvshmem_add_default_off_option(NVSHMEM_LIBFABRIC_SUPPORT "Enable compilation of the libfabric remote transport")
 nvshmem_add_default_off_option(NVSHMEM_UCX_SUPPORT "Enable compilation of the UCX remote transport")
 
@@ -99,6 +100,7 @@ nvshmem_add_default_environment_path(NCCL_HOME "/usr/local/nccl" "path to NCCL i
 nvshmem_add_default_environment_path(NVSHMEM_PREFIX "/usr/local/nvshmem" "path to NVSHMEM install directory.")
 nvshmem_add_default_environment_path(PMIX_HOME "/usr" "path to PMIX installation")
 nvshmem_add_default_environment_path(SHMEM_HOME "${MPI_HOME}" "path to SHMEM installation")
+nvshmem_add_default_environment_path(GPUNETIO_HOME "/usr/local/gpunetio" "path to DOCA GPUNETIO installation")
 nvshmem_add_default_environment_path(UCX_HOME "/usr/local/ucx" "path to UCX installation")
 nvshmem_add_default_environment_path(CUTLASS_HOME "" "path to CUTLASS directory")
 message( "___________________________________________________________________________________________________\n\n")
@@ -120,6 +122,7 @@ nvshmem_add_default_off_option(NVSHMEM_BUILD_PACKAGES "Build package dependencie
 nvshmem_add_default_off_option(NVSHMEM_BUILD_RPM_PACKAGE "Build RPM package")
 nvshmem_add_default_off_option(NVSHMEM_BUILD_DEB_PACKAGE "Build DEB package")
 nvshmem_add_default_off_option(NVSHMEM_BUILD_TGZ_PACKAGE "Build TGZ package")
+nvshmem_add_default_off_option(NVSHMEM_BUILD_GPUNETIO_LIBRARY "Enable internal build of DOCA GPUNetIO library")
 if (NOT NVSHMEM_BUILD_PACKAGES)
   nvshmem_add_default_off_option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library")
   nvshmem_add_default_off_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
@@ -163,6 +166,7 @@ NVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING} \
 NVSHMEM_GPU_COLL_USE_LDST=${NVSHMEM_GPU_COLL_USE_LDST} \
 NVSHMEM_IBGDA_SUPPORT=${NVSHMEM_IBGDA_SUPPORT} \
 NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY=${NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY} \
+NVSHMEM_GPUNETIO_SUPPORT=${NVSHMEM_GPUNETIO_SUPPORT} \
 NVSHMEM_IBDEVX_SUPPORT=${NVSHMEM_IBDEVX_SUPPORT} \
 NVSHMEM_IBRC_SUPPORT=${NVSHMEM_IBRC_SUPPORT} \
 NVSHMEM_LIBFABRIC_SUPPORT=${NVSHMEM_LIBFABRIC_SUPPORT} \

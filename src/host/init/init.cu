@@ -93,9 +93,12 @@ nvshmemi_device_host_state_t nvshmemi_device_state;
 
 void nvshmemi_get_device_state(void **state) { *state = &nvshmemi_device_state; }
 
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
+static std::map<void *, int> registered_transport_device_states;
+#endif
+
 #ifdef NVSHMEM_IBGDA_SUPPORT
 nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state;
-static std::map<void *, int> registered_transport_device_states;
 void nvshmemi_ibgda_get_device_state(void **state) { *state = &nvshmemi_ibgda_device_state; }
 #endif
 
@@ -123,7 +126,7 @@ static int register_state_ptr(void *common, void *transport) {
         registered_device_states.emplace(common, 1);
     }
 
-#ifdef NVSHMEM_IBGDA_SUPPORT
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
     if (transport != NULL) {
         if (registered_transport_device_states.find(transport) !=
             registered_transport_device_states.end()) {
@@ -140,9 +143,10 @@ static int register_state_ptr(void *common, void *transport) {
         return 0;
     }
 #endif
-#ifdef NVSHMEM_IBGDA_SUPPORT
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
     }
 #endif
+
     return 0;
 }
 
@@ -1668,11 +1672,12 @@ int set_job_connectivity(nvshmemi_state_t *state) {
                            (NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST | NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD)) {
                     peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_LDST);
                 }
-#ifdef NVSHMEM_IBGDA_SUPPORT
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
                 else if (state->transports[j]->cap[i] &
                          (NVSHMEM_TRANSPORT_CAP_GPU_WRITE | NVSHMEM_TRANSPORT_CAP_GPU_READ |
                           NVSHMEM_TRANSPORT_CAP_GPU_ATOMICS)) {
-                    if (state->transports[j]->type == NVSHMEM_TRANSPORT_LIB_CODE_IBGDA) {
+                    if (state->transports[j]->type == NVSHMEM_TRANSPORT_LIB_CODE_IBGDA ||
+                        state->transports[j]->type == NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO) {
                         enforce_cst = true;
                     }
                     peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_PROXY);
@@ -1685,7 +1690,7 @@ int set_job_connectivity(nvshmemi_state_t *state) {
 #endif
                 else {
                     peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_PROXY);
-                    enforce_cst = state->transports[j]->host_ops.enforce_cst_at_target == NULL ? false : true;
+                    enforce_cst = (state->transports[j]->host_ops.enforce_cst_at_target != nullptr);
                 }
             }
         }

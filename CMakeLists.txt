@@ -4,6 +4,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
 
 include(NVSHMEMEnv)
 include(CMakePackageConfigHelpers)
+include(CheckSourceCompiles)
+include(ExternalProject)
 
 enable_testing()
 
@@ -135,6 +137,103 @@ if(NVSHMEM_SHMEM_SUPPORT)
     target_compile_definitions(shmem INTERFACE ${MPI_C_COMPILE_DEFINITIONS})
     target_compile_options(shmem INTERFACE ${MPI_C_COMPILE_OPTIONS})
   endif()
+endif()
+
+if(NVSHMEM_GPUNETIO_SUPPORT)
+  if (NVSHMEM_BUILD_GPUNETIO_LIBRARY)
+    set(NVSHMEM_GPUNETIO_SOURCES "" CACHE PATH "Path to local GPUNetIO source directory")
+    # Build from source
+    if (NVSHMEM_GPUNETIO_SOURCES)
+      set(GPUNETIO_SOURCE_ARGS SOURCE_DIR ${NVSHMEM_GPUNETIO_SOURCES})
+    else()
+      set(GPUNETIO_SOURCE_ARGS
+        GIT_REPOSITORY https://github.com/NVIDIA-DOCA/gpunetio.git
+        GIT_TAG c8a7c9827dbf9af14647d80809a969a82994bfca)
+    endif()
+    # Extract CUDA_HOME from CMake CUDAToolkit package to pass it to GPUNetIO Makefile
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDAToolkit_BIN_DIR}" DIRECTORY)
+
+    # Check if we need to build GPUNetIO with wrapper
+    check_source_compiles(C
+      "#include <infiniband/mlx5dv.h>
+      int main(void) {
+        int a = MLX5DV_UAR_ALLOC_TYPE_BF;
+        int b = MLX5DV_UAR_ALLOC_TYPE_NC;
+        return 0;
+      }"
+      HAVE_MLX5DV_UAR_ALLOC_TYPES
+    )
+
+    set(GPUNETIO_MAKE_ARGS USE_CUDA_WRAPPER=1)
+    if(NOT HAVE_MLX5DV_UAR_ALLOC_TYPES)
+      message(STATUS "Enabling GPUNetIO USE_NET_WRAPPER")
+      list(APPEND GPUNETIO_MAKE_ARGS USE_NET_WRAPPER=1)
+    endif()
+
+    ExternalProject_Add(gpunetio_build
+      ${GPUNETIO_SOURCE_ARGS}
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+      INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/gpunetio
+      CONFIGURE_COMMAND ""
+      BUILD_IN_SOURCE TRUE
+      BUILD_COMMAND ${CMAKE_COMMAND} -E env
+        "CUDA_HOME=${CUDA_TOOLKIT_ROOT_DIR}"
+        make lib ${GPUNETIO_MAKE_ARGS}
+      USES_TERMINAL_BUILD TRUE
+      INSTALL_COMMAND make install PREFIX=<INSTALL_DIR> ${GPUNETIO_MAKE_ARGS}
+      USES_TERMINAL_INSTALL TRUE
+      UPDATE_DISCONNECTED TRUE
+      )
+
+    set(GPUNETIO_LIB ${CMAKE_CURRENT_BINARY_DIR}/gpunetio/lib/libdoca_gpunetio_host.so)
+    set(GPUNETIO_INCLUDE_ORIG ${CMAKE_CURRENT_BINARY_DIR}/gpunetio/include)
+    set(GPUNETIO_HOME ${CMAKE_CURRENT_BINARY_DIR}/gpunetio)
+    file(MAKE_DIRECTORY ${GPUNETIO_INCLUDE_ORIG})
+
+    # Install GPUNetIO host library to the NVSHMEM install directory after it was built
+    get_filename_component(GPUNETIO_LIB_DIR "${GPUNETIO_LIB}" DIRECTORY)
+    install(DIRECTORY ${GPUNETIO_LIB_DIR}/
+            DESTINATION lib/gpunetio/
+            FILES_MATCHING PATTERN "libdoca_gpunetio_host.so*"
+    )
+
+    # Install GPUNetIO headers into the gpunetio subdirectory
+    install(DIRECTORY ${GPUNETIO_INCLUDE_ORIG}/
+            DESTINATION include/gpunetio
+            FILES_MATCHING
+              PATTERN "*.h"
+              PATTERN "*.cuh"
+    )
+  else()
+    find_library(
+      GPUNETIO_LIB
+      NAMES doca_gpunetio_host
+      HINTS ${GPUNETIO_HOME}
+      PATH_SUFFIXES lib
+    )
+    find_path(GPUNETIO_INCLUDE_ORIG NAME doca_gpunetio_config.h HINTS ${GPUNETIO_HOME}
+              PATH_SUFFIXES include
+    )
+    if (GPUNETIO_LIB AND GPUNETIO_INCLUDE_ORIG)
+      message(STATUS "Found GPUNetIO library: ${GPUNETIO_LIB}")
+      message(STATUS "Found GPUNetIO headers: ${GPUNETIO_INCLUDE_ORIG}")
+    else()
+      message(FATAL_ERROR "GPUNETIO library and headers not found. Set NVSHMEM_BUILD_GPUNETIO_LIBRARY=1 and optionally GPUNETIO_SOURCES to build the library from source")
+    endif()
+  endif()
+
+  # We include GPUNetIO headers using #include "gpunetio/...", so we create a wrapper directory
+  # which we symlink to the GPUNetIO include directory (the installed one).
+  set(GPUNETIO_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/gpunetio_inc)
+  file(MAKE_DIRECTORY ${GPUNETIO_INCLUDE})
+  if(IS_SYMLINK ${GPUNETIO_INCLUDE}/gpunetio)
+    file(REMOVE ${GPUNETIO_INCLUDE}/gpunetio)
+  endif()
+  file(CREATE_LINK ${GPUNETIO_INCLUDE_ORIG} ${GPUNETIO_INCLUDE}/gpunetio SYMBOLIC)
+
+  add_library(gpunetio IMPORTED INTERFACE)
+  target_link_libraries(gpunetio INTERFACE ${GPUNETIO_LIB})
+  target_include_directories(gpunetio INTERFACE ${GPUNETIO_INCLUDE})
 endif()
 
 ## Find Packages End

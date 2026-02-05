@@ -63,6 +63,7 @@ enum {
 typedef enum {
     NVSHMEM_TRANSPORT_LIB_CODE_NONE = 0,
     NVSHMEM_TRANSPORT_LIB_CODE_IBGDA = 1,
+    NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO = 2,
     NVSHMEM_TRANSPORT_LIB_CODE_MAX = INT_MAX,
 } nvshmem_transport_inline_lib_code_type_t;
 

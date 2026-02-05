@@ -251,6 +251,7 @@ typedef enum {
 typedef enum {
     NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY = 0,
     NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA = 1, // IBGDA transport
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI = 2, // DOCA GPUNetIO GDAKI
     NVSHMEMI_DEVICE_TRANSPORT_TYPE_MAX = INT_MAX
 } nvshmemi_selected_device_transport_t;
 static_assert(sizeof(nvshmemi_selected_device_transport_t) == 4,
