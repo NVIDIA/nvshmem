@@ -170,7 +170,6 @@ def test_interop_cupy():
 
 def test_peer_array():
     print("Testing peer array")
-    # TODO: TEAM_NODE not showing up because of anonymous enum
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     arr = nvshmem.core.array((256, 1), dtype="float32")
 
