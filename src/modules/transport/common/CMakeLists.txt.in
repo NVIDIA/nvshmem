@@ -31,10 +31,10 @@ if(NVSHMEM_USE_GDRCOPY)
   target_include_directories(nvshmem_transport_gdr_common PUBLIC ${GDRCOPY_INCLUDE})
 endif()
 
-if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BUILD_IBRC_TRANSPORT)
+if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BUILD_IBRC_TRANSPORT OR NVSHMEM_BUILD_GPUNETIO_TRANSPORT)
   add_helper_library(nvshmem_transport_ib_common ON transport_ib_common.cpp)
 
-  if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT)
+  if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BUILD_GPUNETIO_TRANSPORT)
     add_helper_library(nvshmem_transport_mlx5_common OFF transport_mlx5_common.cpp)
     target_link_libraries(nvshmem_transport_mlx5_common PRIVATE MLX5_lib)
   endif()

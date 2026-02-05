@@ -22,6 +22,12 @@ else()
   set(CUDA_HOME_DEFAULT "/usr/local/cuda")
 endif()
 
+if (DEFINED ENV{GPUNETIO_HOME})
+  set(GPUNETIO_HOME_DEFAULT $ENV{GPUNETIO_HOME})
+else()
+  set(GPUNETIO_HOME_DEFAULT "/usr/local/gpunetio")
+endif()
+
 if (DEFINED ENV{NVSHMEM_USE_GDRCOPY})
   set(NVSHMEM_USE_GDRCOPY_DEFAULT $ENV{NVSHMEM_USE_GDRCOPY})
 else()
@@ -38,12 +44,14 @@ option(NVSHMEM_USE_GDRCOPY "Enable compilation of GDRCopy offload paths for atom
 option(NVSHMEM_USE_MLX5DV "Enable directNIC support" ${NVSHMEM_USE_MLX5DV_DEFAULT})
 option(NVSHMEM_BUILD_IBDEVX_TRANSPORT "Enable compilation of the ibdevx transport" OFF)
 option(NVSHMEM_BUILD_IBGDA_TRANSPORT "Enable compilation of the ibgda transport" OFF)
+option(NVSHMEM_BUILD_GPUNETIO_TRANSPORT "Enable compilation of the gpunetio transport" ON)
 option(NVSHMEM_BUILD_IBRC_TRANSPORT "Enable compilation of the ibrc transport" OFF)
 option(NVSHMEM_BUILD_LIBFABRIC_TRANSPORT "Enable compilation of the libfabric transport" OFF)
 option(NVSHMEM_BUILD_UCX_TRANSPORT "Enable compilation of the UCX transport" OFF)
 
 set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
 set(GDRCOPY_HOME ${GDRCOPY_HOME_DEFAULT} CACHE PATH "path to GDRCOPY installation")
+set(GPUNETIO_HOME ${GPUNETIO_HOME_DEFAULT} CACHE PATH "path to GPUNetIO installation")
 set(LIBFABRIC_HOME ${LIBFABRIC_HOME_DEFAULT} CACHE PATH "path to libfabric installation")
 set(UCX_HOME ${UCX_HOME_DEFAULT} CACHE PATH "path to UCX installation")
 
@@ -62,7 +70,7 @@ project(
 
 find_package(CUDAToolkit)
 
-if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT)
+if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BUILD_GPUNETIO_TRANSPORT)
   find_library(MLX5_lib NAMES mlx5)
 endif()
 
@@ -148,6 +156,32 @@ endif()
 
 if(NVSHMEM_BUILD_IBGDA_TRANSPORT)
   add_subdirectory(ibgda)
+endif()
+
+if(NVSHMEM_BUILD_GPUNETIO_TRANSPORT)
+  find_library(
+    GPUNETIO_LIB
+    NAMES doca_gpunetio_host
+    HINTS ${GPUNETIO_HOME}
+    PATH_SUFFIXES lib
+  )
+  find_path(GPUNETIO_INCLUDE_ORIG NAME doca_gpunetio_config.h HINTS ${GPUNETIO_HOME}
+            PATH_SUFFIXES include
+  )
+  if (GPUNETIO_LIB AND GPUNETIO_INCLUDE_ORIG)
+    message(STATUS "Found GPUNetIO library: ${GPUNETIO_LIB}")
+    message(STATUS "Found GPUNetIO headers: ${GPUNETIO_INCLUDE_ORIG}")
+  else()
+    message(FATAL_ERROR "GPUNetIO library and headers not found. Set GPUNETIO_HOME to the GPUNetIO installation prefix.")
+  endif()
+
+  set(GPUNETIO_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/gpunetio_inc)
+  file(MAKE_DIRECTORY ${GPUNETIO_INCLUDE})
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+      ${GPUNETIO_INCLUDE_ORIG} ${GPUNETIO_INCLUDE}/gpunetio)
+
+  add_subdirectory(gpunetio)
 endif()
 
 if(NVSHMEM_BUILD_IBRC_TRANSPORT)

@@ -50,6 +50,8 @@
 // TODO: @wangm to look into ibgda code and see what we should to do support compiling
 // the library with nvrtc.
 #undef NVSHMEM_IBGDA_SUPPORT
+// TODO DOCA: Check for DOCA support
+#undef NVSHMEM_GPUNETIO_SUPPORT
 #endif
 
 

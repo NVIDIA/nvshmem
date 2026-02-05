@@ -156,4 +156,11 @@ NVSHMEMI_ENV_DEF(IB_ENABLE_IBGDA, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set to enable GPU-initiated communication transport.")
 #endif
 
+#if defined(NVSHMEM_GPUNETIO_SUPPORT) || defined(NVSHMEM_ENV_ALL)
+/** GPU-initiated communication **/
+// TODO: Add env variables for DOCA
+NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_GDAKI, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Set to enable GPU-initiated communication transport via GPUNetIO.")
+#endif
+
 #endif

@@ -28,6 +28,8 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
                                 -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
+                                -DNVSHMEM_GPUNETIO_SUPPORT=${NVSHMEM_GPUNETIO_SUPPORT}
+                                -DGPUNETIO_INCLUDE=${GPUNETIO_INCLUDE}
                                 -DCUTLASS_HOME=${CUTLASS_HOME}
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -39,6 +41,11 @@ ExternalProject_Add(nvshmem_device_project
                     BUILD_ALWAYS TRUE
                     BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a
                     )
+
+# Wait for gpunetio_build to complete before configuring nvshmem_device
+if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
+  ExternalProject_Add_StepDependencies(nvshmem_device_project configure gpunetio_build)
+endif()
 
 add_library(nvshmem_device STATIC IMPORTED)
 set_property(TARGET nvshmem_device PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a)
@@ -55,6 +62,13 @@ endif()
 if(NVSHMEM_BUILD_WITH_CUTLASS)
   message(WARNING "Setting CXX standard to C++ 17 for building with CUTLASS")
   set(LIB_CXX_STANDARD 17)
+endif()
+
+# GPUNetIO include flags for device code custom commands (bitcode, LTO-IR)
+if(NVSHMEM_GPUNETIO_SUPPORT)
+  set(DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS -I ${GPUNETIO_INCLUDE})
+else()
+  set(DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS "")
 endif()
 
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
@@ -104,6 +118,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
                     COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                     --cuda-gpu-arch=${BITCODE_LIB_ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                     -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
+                    ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
                     -D__clang_llvm_bitcode_lib__ ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu -o libnvshmem_device.bc.unoptimized
                     COMMAND ${BITCODE_OPT_COMMAND}
                     COMMAND llvm-dis libnvshmem_device.bc
@@ -114,6 +129,9 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
                     DEPENDS device/init/init_device.cu)
 
   add_custom_target(libnvshmem_device_bitcode ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc)
+  if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
+    add_dependencies(libnvshmem_device_bitcode gpunetio_build)
+  endif()
   install(
           FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
           DESTINATION lib/
@@ -148,6 +166,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     # Generate LTO IR with all inline functions included
     COMMAND nvcc -std=${LTOIR_CXX_STD} -arch=${LTOIR_LIB_ARCH} -dlto --ltoir
             -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
             -DNVSHMEM_BUILD_LTOIR_LIBRARY
             -o ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
             ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu
@@ -157,6 +176,9 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
 
   add_custom_target(libnvshmem_device_ltoir ALL
                     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir)
+  if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
+    add_dependencies(libnvshmem_device_ltoir gpunetio_build)
+  endif()
 
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
           DESTINATION lib/
@@ -165,8 +187,6 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   endif()
   endif()
 ## End ltoir library configurations
-
-
 
 
 
@@ -437,6 +457,18 @@ target_include_directories(
             $<INSTALL_INTERFACE:include>
 )
 
+if (NVSHMEM_GPUNETIO_SUPPORT)
+  target_include_directories(nvshmem_host PRIVATE ${GPUNETIO_INCLUDE})
+  target_include_directories(nvshmem_host INTERFACE
+    $<BUILD_INTERFACE:${GPUNETIO_INCLUDE}>
+  )
+  if (NOT NVSHMEM_BUILD_GPUNETIO_LIBRARY)
+    target_include_directories(nvshmem_host INTERFACE
+      $<INSTALL_INTERFACE:include>
+    )
+  endif()
+endif()
+
 if (NVSHMEM_BUILD_WITH_CUTLASS)
     target_compile_definitions(nvshmem_host PUBLIC CUTLASS_ENABLED)
     target_compile_definitions(nvshmem_device INTERFACE CUTLASS_ENABLED)
@@ -528,7 +560,7 @@ if(NVSHMEM_IBRC_SUPPORT)
   set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_ibrc)
 endif()
 
-if(NVSHMEM_IBDEVX_SUPPORT OR NVSHMEM_IBGDA_SUPPORT)
+if(NVSHMEM_IBDEVX_SUPPORT OR NVSHMEM_IBGDA_SUPPORT OR NVSHMEM_GPUNETIO_SUPPORT)
   find_library(MLX5_lib NAMES mlx5)
 endif()
 
@@ -599,6 +631,58 @@ if(NVSHMEM_IBGDA_SUPPORT)
     target_compile_definitions(nvshmem_transport_ibgda PRIVATE HAVE_IBV_ACCESS_RELAXED_ORDERING=${HAVE_IBV_ACCESS_RELAXED_ORDERING})
   endif()
   set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_ibgda)
+endif()
+
+if(NVSHMEM_GPUNETIO_SUPPORT)
+  check_source_compiles(C
+    "#include <infiniband/mlx5dv.h>
+    int main(void) { int x = MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED; return 1; }"
+    HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED
+  )
+  check_source_compiles(C
+    "#include <infiniband/mlx5dv.h>
+    int main(void) { int x = MLX5DV_UMEM_MASK_DMABUF; return 1; }"
+    HAVE_MLX5DV_UMEM_MASK_DMABUF
+  )
+  add_library(
+    nvshmem_transport_gpunetio SHARED
+  )
+  nvshmem_library_set_base_config(nvshmem_transport_gpunetio)
+  target_sources(nvshmem_transport_gpunetio PRIVATE
+                 modules/transport/gpunetio/gpunetio.cpp
+                 modules/transport/common/transport_common.cpp
+                 modules/transport/common/transport_ib_common.cpp
+                 modules/transport/common/transport_mlx5_common.cpp
+  )
+  target_link_options(nvshmem_transport_gpunetio PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../nvshmem_transport.sym")
+  target_include_directories(nvshmem_transport_gpunetio
+                             PRIVATE include
+                             modules/transport/common
+
+  )
+  target_link_libraries(nvshmem_transport_gpunetio PRIVATE ${MLX5_lib} CUDA::cudart_static)
+  target_link_libraries(nvshmem_transport_gpunetio PUBLIC gpunetio)
+  if (NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
+    add_dependencies(nvshmem_transport_gpunetio gpunetio_build)
+    # GPUNetIO library (when built from source) is installed in own subdirectory in lib, so we add it to RPATH
+    set_target_properties(nvshmem_transport_gpunetio PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/gpunetio")
+  endif()
+  if(NVSHMEM_USE_GDRCOPY)
+    target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GDRCOPY_INCLUDE})
+    target_sources(nvshmem_transport_gpunetio PRIVATE
+                   modules/transport/common/transport_gdr_common.cpp
+    )
+  endif()
+  if(HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED)
+    target_compile_definitions(nvshmem_transport_gpunetio PRIVATE HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED=${HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED})
+  endif()
+  if(HAVE_MLX5DV_UMEM_MASK_DMABUF)
+      target_compile_definitions(nvshmem_transport_gpunetio PRIVATE HAVE_MLX5DV_UMEM_MASK_DMABUF=${HAVE_MLX5DV_UMEM_MASK_DMABUF})
+  endif()
+  if(HAVE_IBV_ACCESS_RELAXED_ORDERING)
+    target_compile_definitions(nvshmem_transport_gpunetio PRIVATE HAVE_IBV_ACCESS_RELAXED_ORDERING=${HAVE_IBV_ACCESS_RELAXED_ORDERING})
+  endif()
+  set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_gpunetio)
 endif()
 
 if(NVSHMEM_LIBFABRIC_SUPPORT)
@@ -845,6 +929,7 @@ set(TRANSPORT_EXPORTS
     common/transport_mlx5_common.h
     ibdevx/ibdevx.cpp
     ibdevx/ibdevx.h
+    gpunetio/gpunetio.cpp
     ibgda/ibgda.cpp
     ibrc/ibrc.cpp
     libfabric/libfabric.cpp
@@ -860,6 +945,7 @@ endforeach(SHARE ${TRANSPORT_EXPORTS})
 set(TRANSPORT_CMAKE_EXPORTS
     CMakeLists.txt
     common/CMakeLists.txt
+    gpunetio/CMakeLists.txt
     libfabric/CMakeLists.txt
     ibdevx/CMakeLists.txt
     ibgda/CMakeLists.txt

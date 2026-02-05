@@ -1428,7 +1428,8 @@ void progress_transports(proxy_state_t *proxy_state) {
         struct nvshmem_transport *tcurr = state->transports[i];
 
         if (!((proxy_state->transport_bitmap) & (1 << i)) &&
-            (tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_IBGDA))
+            (tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_IBGDA &&
+             tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO))
             continue;
 
         if (tcurr->host_ops.progress == NULL) continue;

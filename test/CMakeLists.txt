@@ -421,10 +421,15 @@ macro(nvshmem_add_gtest_unit_test_prefix SOURCE PREFIX FILE)
 endmacro()
 endif()
 
+set(KERNEL_NVSHMEM_EXTRA_INCLUDES)
+if(NVSHMEM_GPUNETIO_SUPPORT)
+  set(KERNEL_NVSHMEM_EXTRA_INCLUDES -I${GPUNETIO_INCLUDE})
+endif()
+
 if(NOT SubBuild)
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin
                    COMMAND ${CMAKE_CUDA_COMPILER}
-                   -I${NVSHMEM_PREFIX}/include -I${CUDA_HOME}/include ${NVCC_GENCODE} ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem.cu
+                   -I${NVSHMEM_PREFIX}/include -I${CUDA_HOME}/include ${KERNEL_NVSHMEM_EXTRA_INCLUDES} ${NVCC_GENCODE} ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem.cu
                    -c --fatbin -Xcompiler -fPIC -rdc=true --std=${TEST_CXX_ARG} -o ${CMAKE_CURRENT_BINARY_DIR}/host/init/tmp.fatbin
                    COMMAND ${CMAKE_CUDA_COMPILER} ${NVCC_GENCODE} ${CMAKE_CURRENT_BINARY_DIR}/host/init/tmp.fatbin -c --fatbin -dlink -o ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin -L${NVSHMEM_PREFIX}/lib -lnvshmem_device
                    MAIN_DEPENDENCY ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem.cu
@@ -433,7 +438,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.f
 else()
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin
                    COMMAND ${CMAKE_CUDA_COMPILER}
-                   -I${CMAKE_SOURCE_DIR}/src/include -I${CUDA_HOME}/include ${NVCC_GENCODE} ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem.cu
+                   -I${CMAKE_SOURCE_DIR}/src/include -I${CUDA_HOME}/include ${KERNEL_NVSHMEM_EXTRA_INCLUDES} ${NVCC_GENCODE} ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem.cu
                    -c --fatbin -Xcompiler -fPIC -rdc=true --std=${TEST_CXX_ARG} -o ${CMAKE_CURRENT_BINARY_DIR}/host/init/tmp.fatbin
                    COMMAND ${CMAKE_CUDA_COMPILER} ${NVCC_GENCODE} ${CMAKE_CURRENT_BINARY_DIR}/host/init/tmp.fatbin -c --fatbin -dlink -o ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin -L${CMAKE_BINARY_DIR}/src/lib -lnvshmem_device
                    MAIN_DEPENDENCY ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem.cu

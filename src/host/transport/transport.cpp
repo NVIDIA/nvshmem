@@ -37,6 +37,9 @@ static void *transport_lib = NULL;
 #ifdef NVSHMEM_IBGDA_SUPPORT
 static void *transport_lib_IBGDA = NULL;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+static void *transport_lib_GPUNETIO = NULL;
+#endif
 
 int nvshmemi_transport_show_info(nvshmemi_state_t *state) {
     int status = 0;
@@ -291,6 +294,68 @@ transport_fail:
     }
 #endif
 
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
+        status = snprintf(transport_object_file, transport_object_file_len,
+                          "nvshmem_transport_gpunetio.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
+        if (status < 0 || status > transport_object_file_len) {
+            WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
+            goto out;
+        }
+        transport_lib_GPUNETIO = dlopen(transport_object_file, RTLD_NOW);
+        if (transport_lib_GPUNETIO == NULL) {
+            WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
+            goto out;
+        }
+
+        init_fn = (nvshmemi_transport_init_fn)dlsym(transport_lib_GPUNETIO, "nvshmemt_init");
+        if (!init_fn) {
+            dlclose(transport_lib_GPUNETIO);
+            transport_lib_GPUNETIO = NULL;
+            WARN("Unable to get info from %s transport.\n", transport_object_file);
+            goto out;
+        }
+
+        status = nvshmemi_local_mem_cache_init(&tmp_cache_ptr);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMI_INTERNAL_ERROR, out,
+                              "Unable to allocate transport mem cache.\n");
+
+        status =
+            init_fn(&transports[index], nvshmemi_cuda_syms, NVSHMEM_TRANSPORT_INTERFACE_VERSION);
+        if (!status) {
+            assert(NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(transports[index]->api_version) <=
+                   NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(NVSHMEM_TRANSPORT_INTERFACE_VERSION));
+            transports[index]->boot_handle = &nvshmemi_boot_handle;
+            if (nvshmemi_device_state.enable_rail_opt == 1) {
+                transports[index]->heap_base = nvshmemi_state->heap_obj->get_global_base();
+            } else {
+                transports[index]->heap_base = state->heap_obj->get_base();
+            }
+            transports[index]->log2_cumem_granularity =
+                nvshmemi_state->heap_obj->get_log2_cumem_granularity();
+            transports[index]->cap = (int *)calloc(state->npes, sizeof(int));
+            transports[index]->index = index;
+            transports[index]->my_pe = nvshmemi_state->mype;
+            transports[index]->n_pes = nvshmemi_state->npes;
+            transports[index]->cache_handle = (void *)tmp_cache_ptr;
+            transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
+            transports[index]->egm_map = state->heap_obj->get_egm_map();
+
+            if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
+            state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
+            index++;
+        } else {
+            NVSHMEMI_ERROR_PRINT("init failed for transport: GPUNetIO");
+            nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
+            dlclose(transport_lib_GPUNETIO);
+            transport_lib_GPUNETIO = NULL;
+            status = 0;
+        }
+    } else {
+        INFO(NVSHMEM_INIT, "GPUNetIO Disabled by the environment.");
+    }
+#endif
+
     if (index == 0) {
         NVSHMEMI_ERROR_PRINT("Unable to initialize any transports. returning error.");
         status = NVSHMEMX_ERROR_INTERNAL;
@@ -311,6 +376,15 @@ out:
         if (transport_lib_IBGDA) {
             INFO(NVSHMEM_INIT,
                  "Successfully initialized the transport: IBGDA. It will be used for device-side "
+                 "APIs over IB.",
+                 nvshmemi_options.REMOTE_TRANSPORT);
+        }
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        if (transport_lib_GPUNETIO) {
+            INFO(NVSHMEM_INIT,
+                 "Successfully initialized the transport: GPUNetIO. It will be used for GDAKI "
+                 "device-side "
                  "APIs over IB.",
                  nvshmemi_options.REMOTE_TRANSPORT);
         }
@@ -364,6 +438,13 @@ int nvshmemi_transport_finalize(nvshmemi_state_t *state) {
     if (transport_lib_IBGDA) {
         dlclose(transport_lib_IBGDA);
         transport_lib_IBGDA = NULL;
+    }
+#endif
+
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (transport_lib_GPUNETIO) {
+        dlclose(transport_lib_GPUNETIO);
+        transport_lib_GPUNETIO = NULL;
     }
 #endif
 
