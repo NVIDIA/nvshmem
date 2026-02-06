@@ -810,6 +810,7 @@ set(INC_EXPORTS
     non_abi/device/coll/utils.cuh
     non_abi/device/wait/nvshmemi_wait_until_apis.cuh
     non_abi/device/pt-to-pt/ibgda_device.cuh
+    non_abi/device/pt-to-pt/gdaki_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh
     non_abi/device/pt-to-pt/utils_device.h
     non_abi/device/pt-to-pt/tile.cuh
@@ -817,6 +818,7 @@ set(INC_EXPORTS
     device_host/nvshmem_common.cuh
     device_host/nvshmem_tensor.h
     device_host_transport/nvshmem_common_ibgda.h
+    device_host_transport/nvshmem_common_gpunetio.h
     device_host_transport/nvshmem_constants.h
     non_abi/device/team/nvshmemi_team_defines.cuh
     host/nvshmem_api.h
@@ -900,6 +902,7 @@ configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
 set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
     device_host_transport/nvshmem_common_ibgda.h
+    device_host_transport/nvshmem_common_gpunetio.h
     device_host_transport/nvshmem_common_transport.h
     device_host_transport/nvshmem_constants.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h

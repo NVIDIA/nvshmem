@@ -34,6 +34,10 @@
 #include "device_host_transport/nvshmem_common_ibgda.h"
 #endif
 
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+#include "device_host_transport/nvshmem_common_gpunetio.h"
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include "topo.h"
@@ -102,6 +106,11 @@ nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state;
 void nvshmemi_ibgda_get_device_state(void **state) { *state = &nvshmemi_ibgda_device_state; }
 #endif
 
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+nvshmemi_gpunetio_device_state_t nvshmemi_gpunetio_device_state;
+void nvshmemi_gpunetio_get_device_state(void **state) { *state = &nvshmemi_gpunetio_device_state; }
+#endif
+
 static inline bool nvshmemi_is_version_compatible(const nvshmemi_version_t version_host,
                                                   const nvshmemi_version_t version_device) {
     if (version_host.major != version_device.major) {
@@ -138,8 +147,8 @@ static int register_state_ptr(void *common, void *transport) {
 #else
     if (transport != NULL) {
         NVSHMEMI_ERROR_PRINT(
-            "IBGDA not enabled by host lib, but passed "
-            "in by device. Host ignoring IBGDA state.\n");
+            "IBGDA / GDAKI not enabled by host lib, but passed "
+            "in by device. Host ignoring IBGDA / GDAKI state.\n");
         return 0;
     }
 #endif
@@ -149,6 +158,29 @@ static int register_state_ptr(void *common, void *transport) {
 
     return 0;
 }
+
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
+// GetGlobalFn can be cuLibraryGetGlobal or cuModuleGetGlobal
+// Handle can be CUlibrary or CUmodule
+template <typename GetGlobalFn, typename Handle>
+static CUdeviceptr get_transport_device_global(GetGlobalFn get_global_fn, Handle handle) {
+    CUdeviceptr dptr = 0;
+    size_t size = 0;
+    CUresult err = CUDA_SUCCESS;
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        err = get_global_fn(&dptr, &size, handle, "nvshmemi_ibgda_device_state_d");
+    } else if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI) {
+        err = get_global_fn(&dptr, &size, handle, "nvshmemi_gpunetio_device_state_d");
+    }
+    // Clear error and continue (CUCHECKIGNORE_NO_PRINT equivalent)
+    if (err != CUDA_SUCCESS) {
+        const char *errStr;
+        CUPFN(nvshmemi_cuda_syms, cuGetErrorString(err, &errStr));
+    }
+
+    return dptr;
+}
+#endif
 
 int nvshmemi_update_device_state() {
     int status = NVSHMEMI_SUCCESS;
@@ -189,6 +221,19 @@ int nvshmemi_update_device_state() {
         num_initialized_device_states = iter;
     }
 
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI) {
+        nvshmemi_gpunetio_device_state_t *gpunetio_device_state;
+        nvshmemi_gpunetio_get_device_state((void **)&gpunetio_device_state);
+        for (auto it = registered_transport_device_states.cbegin();
+             it != registered_transport_device_states.cend(); ++it) {
+            status = cudaMemcpy((it->first), (void *)gpunetio_device_state,
+                                sizeof(nvshmemi_gpunetio_device_state_t), cudaMemcpyHostToDevice);
+            if (status) break;
+        }
+    }
+#endif
+
 #ifdef NVSHMEM_IBGDA_SUPPORT
     if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
         nvshmemi_ibgda_device_state_t *ibgda_device_state;
@@ -224,10 +269,11 @@ static int unregister_state_ptr(void *common, void *transport) {
         }
     }
 
-#ifdef NVSHMEM_IBGDA_SUPPORT
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
     bool transport_state_found = false;
     if (transport != NULL &&
-        nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA ||
+         nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI)) {
         for (auto it = registered_transport_device_states.cbegin();
              it != registered_transport_device_states.cend();) {
             auto tmp = registered_transport_device_states.find(it->first);
@@ -245,12 +291,13 @@ static int unregister_state_ptr(void *common, void *transport) {
         }
         if (!transport_state_found && device_state_found) {
             NVSHMEMI_ERROR_PRINT(
-                "Invalid IBGDA handle, but valid device state passed for "
+                "Invalid IBGDA / GDAKI handle, but valid device state passed for "
                 "removal. This is not a fatal error, but indicates something "
                 "unexpected is happening. Standard device state removed.\n");
         }
     }
 #endif
+
     if (device_state_found) {
         return NVSHMEMX_SUCCESS;
     }
@@ -1086,6 +1133,11 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
         INFO(NVSHMEM_INIT, "CUDA 64-bit stream memops support is not available");
     }
 
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (nvshmemi_options.GPUNETIO_ENABLE_GDAKI == 1) {
+        nvshmem_selected_device_transport = NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI;
+    }
+#endif
 #ifdef NVSHMEM_IBGDA_SUPPORT
     if (nvshmemi_options.IB_ENABLE_IBGDA == 1) {
         nvshmem_selected_device_transport = NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA;
@@ -1271,6 +1323,11 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
 
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
         nvshmemi_device_state = NVSHMEMI_DEVICE_HOST_STATE_INITIALIZER;
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI) {
+            nvshmemi_init_gpunetio_device_state(nvshmemi_gpunetio_device_state);
+        }
+#endif
 #ifdef NVSHMEM_IBGDA_SUPPORT
         if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
             nvshmemi_init_ibgda_device_state(nvshmemi_ibgda_device_state);
@@ -1885,12 +1942,9 @@ int nvshmemx_culibrary_init(CUlibrary library) {
                 cuLibraryGetGlobal(&state_dptr, &state_size, library, "nvshmemi_device_state_d"),
                 status, out);
 
-#ifdef NVSHMEM_IBGDA_SUPPORT
-    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
-        CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms,
-                               cuLibraryGetGlobal(&transport_dptr, &transport_size, library,
-                                                  "nvshmemi_ibgda_device_state_d"));
-    }
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
+    transport_dptr =
+        get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuLibraryGetGlobal), library);
 #endif
 
     status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, transport_dptr);
@@ -1912,12 +1966,9 @@ int nvshmemx_cumodule_init(CUmodule module) {
                 cuModuleGetGlobal(&state_dptr, &state_size, module, "nvshmemi_device_state_d"),
                 status, out);
 
-#ifdef NVSHMEM_IBGDA_SUPPORT
-    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
-        CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms,
-                               cuModuleGetGlobal(&transport_dptr, &transport_size, module,
-                                                 "nvshmemi_ibgda_device_state_d"));
-    }
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
+    transport_dptr =
+        get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuModuleGetGlobal), module);
 #endif
 
     status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, transport_dptr);
@@ -1934,13 +1985,12 @@ int nvshmemx_cumodule_finalize(CUmodule module) {
 
     CUCHECKGOTO(nvshmemi_cuda_syms,
                 cuModuleGetGlobal(&dptr, &size, module, "nvshmemi_device_state_d"), status, out);
-#ifdef NVSHMEM_IBGDA_SUPPORT
-    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
-        CUCHECKIGNORE_NO_PRINT(
-            nvshmemi_cuda_syms,
-            cuModuleGetGlobal(&transport_dptr, &size, module, "nvshmemi_ibgda_device_state_d"));
-    }
+
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
+    transport_dptr =
+        get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuModuleGetGlobal), module);
 #endif
+
     status = unregister_state_ptr((void *)dptr, (void *)transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to unregister cumodule/culibrary state pointer. failed\n");
@@ -1957,13 +2007,11 @@ int nvshmemx_culibrary_finalize(CUlibrary library) {
     CUCHECKGOTO(nvshmemi_cuda_syms,
                 cuLibraryGetGlobal(&dptr, &size, library, "nvshmemi_device_state_d"), status, out);
 
-#ifdef NVSHMEM_IBGDA_SUPPORT
-    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
-        CUCHECKIGNORE_NO_PRINT(
-            nvshmemi_cuda_syms,
-            cuLibraryGetGlobal(&transport_dptr, &size, library, "nvshmemi_ibgda_device_state_d"));
-    }
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
+    transport_dptr =
+        get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuLibraryGetGlobal), library);
 #endif
+
     status = unregister_state_ptr((void *)dptr, (void *)transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to unregister cumodule/culibrary state pointer. failed\n");
@@ -1976,11 +2024,15 @@ int nvshmemx_qp_create(int num_qps, nvshmemx_qp_handle_t **out_qp_array) {
     nvshmemx_qp_handle_t *out_qp_array_local = NULL;
     nvshmem_transport_inline_lib_code_type_t transport_type = NVSHMEM_TRANSPORT_LIB_CODE_NONE;
 
-#ifdef NVSHMEM_IBGDA_SUPPORT
+#if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
     nvshmemi_device_host_state_t *device_state;
     nvshmemi_get_device_state((void **)&device_state);
-    if (device_state->ibgda_is_initialized) {
+
+    if (device_state->selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
         transport_type = NVSHMEM_TRANSPORT_LIB_CODE_IBGDA;
+    } else if (device_state->selected_device_transport ==
+               NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI) {
+        transport_type = NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO;
     }
 #endif
 

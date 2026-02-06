@@ -103,6 +103,7 @@
 #endif
 
 #ifdef NVSHMEM_IBGDA_DEBUG
+#ifndef RTE_PMD_MLX5_PRM_H_
 struct mlx5_err_cqe_ex {
     uint8_t rsvd0[32];
     __be32 srqn;
@@ -116,6 +117,7 @@ struct mlx5_err_cqe_ex {
     uint8_t signature;
     uint8_t op_own;
 };
+#endif
 typedef struct mlx5_err_cqe_ex ibgda_mlx5_err_cqe_t;
 #else
 typedef struct mlx5_err_cqe ibgda_mlx5_err_cqe_t;

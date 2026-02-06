@@ -28,20 +28,43 @@
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"
+#endif
+
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+#include "device_host_transport/nvshmem_common_gpunetio.h"
+#endif
+
 #if defined(__clang_llvm_bitcode_lib__)
 #if defined(__CUDACC__)
 // Clang CUDA mode: use __constant__ only (no address_space to avoid LLVM21 conflict)
+#ifdef NVSHMEM_IBGDA_SUPPORT
 __constant__ __attribute__((used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d = {};
-#else
+#endif  // NVSHMEM_IBGDA_SUPPORT
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+__constant__
+    __attribute__((used)) nvshmemi_gpunetio_device_state_t nvshmemi_gpunetio_device_state_d = {};
+#endif  // NVSHMEM_GPUNETIO_SUPPORT
+#else   // __CUDACC__
 // Plain Clang-to-NVPTX bitcode: use address_space(4) only (no __constant__)
+#ifdef NVSHMEM_IBGDA_SUPPORT
 __attribute__((address_space(4),
                used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d = {};
-#endif
-#else
+#endif  // NVSHMEM_IBGDA_SUPPORT
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+__attribute__((address_space(4),
+               used)) nvshmemi_gpunetio_device_state_t nvshmemi_gpunetio_device_state_d = {};
+#endif  // NVSHMEM_GPUNETIO_SUPPORT
+#endif  // __CUDACC__
+#else   // __clang_llvm_bitcode_lib__
 // Normal CUDA/nvcc build
+#ifdef NVSHMEM_IBGDA_SUPPORT
 __constant__ __attribute__((used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;
-#endif
-#endif
+#endif  // NVSHMEM_IBGDA_SUPPORT
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+__constant__
+    __attribute__((used)) nvshmemi_gpunetio_device_state_t nvshmemi_gpunetio_device_state_d;
+#endif  // NVSHMEM_GPUNETIO_SUPPORT
+#endif  // __clang_llvm_bitcode_lib__
 
 nvshmemi_device_state_t nvshmemi_device_only_state;
 
@@ -172,6 +195,16 @@ int nvshmemi_get_device_state_ptrs(void **dev_state_ptr, void **transport_dev_st
             }
             break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            status = cudaGetSymbolAddress(transport_dev_state_ptr, nvshmemi_gpunetio_device_state_d);
+            if (status) {
+                NVSHMEMI_ERROR_PRINT("Unable to access gpunetio device state. %d\n", status);
+                *transport_dev_state_ptr = NULL;
+                status = NVSHMEMX_ERROR_INTERNAL;
+            }
+            break;
+#endif
         default:
             *transport_dev_state_ptr = NULL;
             break;
@@ -223,16 +256,32 @@ void nvshmemi_finalize() {
         nvshmemid_hostlib_finalize(NULL, NULL);
         return;
     }
+
+    switch (nvshmem_selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
-        status = cudaGetSymbolAddress(&transport_dev_state_ptr, nvshmemi_ibgda_device_state_d);
-        if (status) {
-            NVSHMEMI_ERROR_PRINT("Unable to properly unregister device state.\n");
-            nvshmemid_hostlib_finalize(NULL, NULL);
-            return;
-        }
-    }
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
+            status = cudaGetSymbolAddress(&transport_dev_state_ptr, nvshmemi_ibgda_device_state_d);
+            if (status) {
+                NVSHMEMI_ERROR_PRINT("Unable to properly unregister device state.\n");
+                nvshmemid_hostlib_finalize(NULL, NULL);
+                return;
+            }
+            break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            status = cudaGetSymbolAddress(&transport_dev_state_ptr, nvshmemi_gpunetio_device_state_d);
+            if (status) {
+                NVSHMEMI_ERROR_PRINT("Unable to properly unregister device state.\n");
+                nvshmemid_hostlib_finalize(NULL, NULL);
+                return;
+            }
+            break;
+#endif
+        default:
+            break;
+    }
+
     nvshmemid_hostlib_finalize(dev_state_ptr, transport_dev_state_ptr);
 }
 #ifdef __cplusplus

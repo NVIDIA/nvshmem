@@ -44,6 +44,10 @@ find_package(CUDAToolkit)
 find_package(CCCL PATHS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl)
 message(STATUS "CUDAToolkit_LIBRARY_DIR: ${CUDAToolkit_LIBRARY_DIR}")
 
+if(NVSHMEM_GPUNETIO_SUPPORT AND NOT GPUNETIO_INCLUDE)
+  message(FATAL_ERROR "GPUNETIO_INCLUDE must be set when NVSHMEM_GPUNETIO_SUPPORT is ON")
+endif()
+
 if(DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
   if(NOT DEFINED CUDA_ARCHITECTURES_UNDEFINED)
     set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHITECTURES} CACHE STRING "CUDA ARCHITECTURES" FORCE)
@@ -186,6 +190,10 @@ endif()
 target_link_libraries(nvshmem_device PRIVATE CUDA::cudart_static)
 if (CCCL_FOUND AND CUDAToolkit_VERSION_MAJOR GREATER 12)
   target_link_libraries(nvshmem_device PUBLIC CCCL::CCCL)
+endif()
+
+if(NVSHMEM_GPUNETIO_SUPPORT)
+  target_include_directories(nvshmem_device PRIVATE ${GPUNETIO_INCLUDE})
 endif()
 
 if(NVSHMEM_USE_NCCL)
