@@ -44,7 +44,7 @@ option(NVSHMEM_USE_GDRCOPY "Enable compilation of GDRCopy offload paths for atom
 option(NVSHMEM_USE_MLX5DV "Enable directNIC support" ${NVSHMEM_USE_MLX5DV_DEFAULT})
 option(NVSHMEM_BUILD_IBDEVX_TRANSPORT "Enable compilation of the ibdevx transport" OFF)
 option(NVSHMEM_BUILD_IBGDA_TRANSPORT "Enable compilation of the ibgda transport" OFF)
-option(NVSHMEM_BUILD_GPUNETIO_TRANSPORT "Enable compilation of the gpunetio transport" ON)
+option(NVSHMEM_BUILD_GPUNETIO_TRANSPORT "Enable compilation of the gpunetio transport" OFF)
 option(NVSHMEM_BUILD_IBRC_TRANSPORT "Enable compilation of the ibrc transport" OFF)
 option(NVSHMEM_BUILD_LIBFABRIC_TRANSPORT "Enable compilation of the libfabric transport" OFF)
 option(NVSHMEM_BUILD_UCX_TRANSPORT "Enable compilation of the UCX transport" OFF)

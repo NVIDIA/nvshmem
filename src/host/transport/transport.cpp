@@ -230,6 +230,16 @@ transport_init:
         status = 0;
     }
 transport_fail:
+
+#if defined(NVSHMEM_IBGDA_SUPPORT) && defined(NVSHMEM_GPUNETIO_SUPPORT)
+    if (nvshmemi_options.IB_ENABLE_IBGDA && nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
+        NVSHMEMI_ERROR_PRINT(
+            "IBGDA and GPUNetIO GDAKI cannot be enabled at the same time on the device side.\n");
+        status = NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+#endif
+
 #ifdef NVSHMEM_IBGDA_SUPPORT
     if (nvshmemi_options.IB_ENABLE_IBGDA) {
         status = snprintf(transport_object_file, transport_object_file_len,
@@ -296,8 +306,9 @@ transport_fail:
 
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
     if (nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
-        status = snprintf(transport_object_file, transport_object_file_len,
-                          "nvshmem_transport_gpunetio.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
+        status =
+            snprintf(transport_object_file, transport_object_file_len,
+                     "nvshmem_transport_gpunetio.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
         if (status < 0 || status > transport_object_file_len) {
             WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
             goto out;
@@ -340,9 +351,11 @@ transport_fail:
             transports[index]->cache_handle = (void *)tmp_cache_ptr;
             transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
             transports[index]->egm_map = state->heap_obj->get_egm_map();
-
+            nvshmemi_gpunetio_get_device_state(&transports[index]->type_specific_shared_state);
             if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
+            nvshmemi_device_state.selected_device_transport =
+                NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI;
             index++;
         } else {
             NVSHMEMI_ERROR_PRINT("init failed for transport: GPUNetIO");
@@ -376,17 +389,14 @@ out:
         if (transport_lib_IBGDA) {
             INFO(NVSHMEM_INIT,
                  "Successfully initialized the transport: IBGDA. It will be used for device-side "
-                 "APIs over IB.",
-                 nvshmemi_options.REMOTE_TRANSPORT);
+                 "APIs over IB.");
         }
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
         if (transport_lib_GPUNETIO) {
             INFO(NVSHMEM_INIT,
                  "Successfully initialized the transport: GPUNetIO. It will be used for GDAKI "
-                 "device-side "
-                 "APIs over IB.",
-                 nvshmemi_options.REMOTE_TRANSPORT);
+                 "device-side APIs over IB.");
         }
 #endif
     }
@@ -521,7 +531,7 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
         if (barrier_stat != NVSHMEMX_SUCCESS) {
             NVSHMEMI_ERROR_PRINT("barrier failed\n");
 
-	    if (current_status == NVSHMEMX_SUCCESS) {
+            if (current_status == NVSHMEMX_SUCCESS) {
                 current_status = barrier_stat;
             }
         }

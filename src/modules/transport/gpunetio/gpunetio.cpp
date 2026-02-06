@@ -5,10 +5,7 @@
  */
 
 #include "transport_common.h"
-#include "gpunetio/host/doca_gpunetio.h"
-#include "gpunetio/host/doca_verbs.h"
-#include "gpunetio/host/doca_gpunetio_high_level.h"
-#include "gpunetio/common/doca_gpunetio_verbs_dev.h"
+#include "gpunetio/doca_gpunetio_host.h"
 
 #include <cassert>
 #include <string>

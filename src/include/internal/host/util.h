@@ -221,6 +221,7 @@ int nvshmemi_options_init(void);
 void nvshmemi_options_print(int style);
 int nvshmemi_check_state_and_init();
 void nvshmemi_ibgda_get_device_state(void **state);
+void nvshmemi_gpunetio_get_device_state(void **state);
 
 #define NVSHMEMU_FOR_EACH(__index, count) \
     for (uint64_t __index = 0; __index < (uint64_t)(count); __index++)

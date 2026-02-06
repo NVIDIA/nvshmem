@@ -15,6 +15,10 @@
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
 
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+#include "non_abi/device/pt-to-pt/gdaki_device.cuh"
+#endif
+
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "non_abi/device/pt-to-pt/ibgda_device.cuh"
 #endif
@@ -89,6 +93,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
             nvshmemi_ibgda_rma_p<T>(rptr, value, pe, qp_index);
             break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_rma_p<T>(rptr, value, pe, qp_index);
+            break;
+#endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default:
             nvshmemi_proxy_rma_p<T>(rptr, value, pe, qp_index);
@@ -111,6 +120,11 @@ nvshmemi_transfer_rma_g(void *rptr, int pe, nvshmemx_qp_handle_t qp_index) {
             return nvshmemi_ibgda_rma_g<T>(rptr, pe, qp_index);
             break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            return nvshmemi_gdaki_rma_g<T>(rptr, pe, qp_index);
+            break;
+#endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default:
             return nvshmemi_proxy_rma_g<T>(rptr, pe, qp_index);
@@ -131,6 +145,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
             nvshmemi_ibgda_rma<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index);
+            break;
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_rma<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index);
             break;
 #endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
@@ -164,6 +183,12 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
             nvshmemi_ibgda_put_signal<SCOPE>(rptr, lptr, bytes, sig_addr, signal, sig_op, pe,
+                                             is_nbi, qp_index);
+            break;
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_put_signal<SCOPE>(rptr, lptr, bytes, sig_addr, signal, sig_op, pe,
                                              is_nbi, qp_index);
             break;
 #endif
@@ -202,6 +227,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
             nvshmemi_ibgda_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index);
             break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index);
+            break;
+#endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default: {
             int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -226,6 +256,10 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ T nvshmemi_transfer
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
             return nvshmemi_ibgda_amo_fetch<T>(rptr, value, compare, pe, op, qp_index);
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            return nvshmemi_gdaki_amo_fetch<T>(rptr, value, compare, pe, op, qp_index);
 #endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default: {
@@ -253,6 +287,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
             nvshmemi_ibgda_amo_nonfetch<T>(rptr, value, pe, op, qp_index);
             break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_amo_nonfetch<T>(rptr, value, pe, op, qp_index);
+            break;
+#endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default:
             nvshmemi_proxy_amo_nonfetch<T>(rptr, value, pe, op, qp_index);
@@ -277,6 +316,16 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
             nvshmemi_ibgda_qp_quiet<SCOPE>(true, pe_hint, qp_handle, num_qps);
+            if (use_membar) {
+                if (!myIdx) {
+                    __threadfence_system();
+                }
+            }
+            break;
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_qp_quiet<SCOPE>(true, pe_hint, qp_handle, num_qps);
             if (use_membar) {
                 if (!myIdx) {
                     __threadfence_system();
@@ -313,6 +362,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
             nvshmemi_ibgda_qp_fence<SCOPE>(pe_hint, qp_handle, num_qps);
             break;
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_qp_fence<SCOPE>(pe_hint, qp_handle, num_qps);
+            break;
+#endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default:
             if ((nvshmemi_device_state_d.proxy == NVSHMEMI_PROXY_FULL) &&
@@ -340,6 +394,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
             nvshmemi_ibgda_enforce_consistency_at_target(use_membar);
+            break;
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_enforce_consistency_at_target(use_membar);
             break;
 #endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
