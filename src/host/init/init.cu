@@ -76,6 +76,8 @@ int nvshmemi_is_vmm_supported = false;
 int bootstrap_mode;
 FILE *nvshmem_debug_file = stdout;
 static char shm_name[100];
+nvshmemi_selected_device_transport_t nvshmem_selected_device_transport =
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY;
 nvshmemi_version_t nvshmemi_host_lib_version = {
     NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
 
@@ -184,7 +186,7 @@ int nvshmemi_update_device_state() {
     }
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    if (nvshmemi_options.IB_ENABLE_IBGDA) {
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
         nvshmemi_ibgda_device_state_t *ibgda_device_state;
         nvshmemi_ibgda_get_device_state((void **)&ibgda_device_state);
         for (auto it = registered_transport_device_states.cbegin();
@@ -220,7 +222,8 @@ static int unregister_state_ptr(void *common, void *transport) {
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
     bool transport_state_found = false;
-    if (transport != NULL) {
+    if (transport != NULL &&
+        nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
         for (auto it = registered_transport_device_states.cbegin();
              it != registered_transport_device_states.cend();) {
             auto tmp = registered_transport_device_states.find(it->first);
@@ -1079,6 +1082,12 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
         INFO(NVSHMEM_INIT, "CUDA 64-bit stream memops support is not available");
     }
 
+#ifdef NVSHMEM_IBGDA_SUPPORT
+    if (nvshmemi_options.IB_ENABLE_IBGDA == 1) {
+        nvshmem_selected_device_transport = NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA;
+    }
+#endif
+
     /* Context needs to be retrieved and memops flag need to be applied before heap is initialized
      */
     nvshmemi_init_symmetric_heap(state, nvshmemi_use_cuda_vmm,
@@ -1259,7 +1268,9 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
         nvshmemi_device_state = NVSHMEMI_DEVICE_HOST_STATE_INITIALIZER;
 #ifdef NVSHMEM_IBGDA_SUPPORT
-        nvshmemi_init_ibgda_device_state(nvshmemi_ibgda_device_state);
+        if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+            nvshmemi_init_ibgda_device_state(nvshmemi_ibgda_device_state);
+        }
 #endif
     }
 
@@ -1873,9 +1884,11 @@ int nvshmemx_culibrary_init(CUlibrary library) {
                 status, out);
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms,
-                           cuLibraryGetGlobal(&transport_dptr, &transport_size, library,
-                                              "nvshmemi_ibgda_device_state_d"));
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms,
+                               cuLibraryGetGlobal(&transport_dptr, &transport_size, library,
+                                                  "nvshmemi_ibgda_device_state_d"));
+    }
 #endif
 
     status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, transport_dptr);
@@ -1898,9 +1911,11 @@ int nvshmemx_cumodule_init(CUmodule module) {
                 status, out);
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms,
-                           cuModuleGetGlobal(&transport_dptr, &transport_size, module,
-                                             "nvshmemi_ibgda_device_state_d"));
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms,
+                               cuModuleGetGlobal(&transport_dptr, &transport_size, module,
+                                                 "nvshmemi_ibgda_device_state_d"));
+    }
 #endif
 
     status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, transport_dptr);
@@ -1918,8 +1933,11 @@ int nvshmemx_cumodule_finalize(CUmodule module) {
     CUCHECKGOTO(nvshmemi_cuda_syms,
                 cuModuleGetGlobal(&dptr, &size, module, "nvshmemi_device_state_d"), status, out);
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms, cuModuleGetGlobal(&transport_dptr, &size, module,
-                                                                 "nvshmemi_ibgda_device_state_d"));
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        CUCHECKIGNORE_NO_PRINT(
+            nvshmemi_cuda_syms,
+            cuModuleGetGlobal(&transport_dptr, &size, module, "nvshmemi_ibgda_device_state_d"));
+    }
 #endif
     status = unregister_state_ptr((void *)dptr, (void *)transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1938,8 +1956,11 @@ int nvshmemx_culibrary_finalize(CUlibrary library) {
                 cuLibraryGetGlobal(&dptr, &size, library, "nvshmemi_device_state_d"), status, out);
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    CUCHECKIGNORE_NO_PRINT(nvshmemi_cuda_syms, cuLibraryGetGlobal(&transport_dptr, &size, library,
-                                                                  "nvshmemi_ibgda_device_state_d"));
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        CUCHECKIGNORE_NO_PRINT(
+            nvshmemi_cuda_syms,
+            cuLibraryGetGlobal(&transport_dptr, &size, library, "nvshmemi_ibgda_device_state_d"));
+    }
 #endif
     status = unregister_state_ptr((void *)dptr, (void *)transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
