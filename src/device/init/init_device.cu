@@ -70,6 +70,8 @@ __constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {
 const nvshmemi_version_t nvshmemi_device_lib_version = {
     NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
 
+extern nvshmemi_selected_device_transport_t nvshmem_selected_device_transport;
+
 #ifdef __CUDA_ARCH__
 #ifdef __cplusplus
 extern "C" {
@@ -157,14 +159,24 @@ int nvshmemi_get_device_state_ptrs(void **dev_state_ptr, void **transport_dev_st
         status = NVSHMEMX_ERROR_INTERNAL;
         goto out;
     }
+
+    // Get transport device pointer (if required)
+    switch (nvshmem_selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    status = cudaGetSymbolAddress(transport_dev_state_ptr, nvshmemi_ibgda_device_state_d);
-    if (status) {
-        NVSHMEMI_ERROR_PRINT("Unable to access ibgda device state. %d\n", status);
-        *transport_dev_state_ptr = NULL;
-        status = NVSHMEMX_ERROR_INTERNAL;
-    }
+        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
+            status = cudaGetSymbolAddress(transport_dev_state_ptr, nvshmemi_ibgda_device_state_d);
+            if (status) {
+                NVSHMEMI_ERROR_PRINT("Unable to access ibgda device state. %d\n", status);
+                *transport_dev_state_ptr = NULL;
+                status = NVSHMEMX_ERROR_INTERNAL;
+            }
+            break;
 #endif
+        default:
+            *transport_dev_state_ptr = NULL;
+            break;
+    }
+
 out:
     return status;
 }
@@ -212,11 +224,13 @@ void nvshmemi_finalize() {
         return;
     }
 #ifdef NVSHMEM_IBGDA_SUPPORT
-    status = cudaGetSymbolAddress(&transport_dev_state_ptr, nvshmemi_ibgda_device_state_d);
-    if (status) {
-        NVSHMEMI_ERROR_PRINT("Unable to properly unregister device state.\n");
-        nvshmemid_hostlib_finalize(NULL, NULL);
-        return;
+    if (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA) {
+        status = cudaGetSymbolAddress(&transport_dev_state_ptr, nvshmemi_ibgda_device_state_d);
+        if (status) {
+            NVSHMEMI_ERROR_PRINT("Unable to properly unregister device state.\n");
+            nvshmemid_hostlib_finalize(NULL, NULL);
+            return;
+        }
     }
 #endif
     nvshmemid_hostlib_finalize(dev_state_ptr, transport_dev_state_ptr);

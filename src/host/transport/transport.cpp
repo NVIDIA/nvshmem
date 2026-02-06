@@ -277,6 +277,7 @@ transport_fail:
             if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
             nvshmemi_device_state.ibgda_is_initialized = true;
+            nvshmemi_device_state.selected_device_transport = NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA;
             index++;
         } else {
             NVSHMEMI_ERROR_PRINT("init failed for transport: IBGDA");

@@ -227,7 +227,8 @@
             NULL,                                         /* global_exit_code */                  \
             false,                                        /* ibgda_is_initialized */              \
             false,                                        /* nvshmemi_is_nvshmem_initialized */   \
-            false                                         /* nvshmemi_is_nvshmem_bootstrapped */  \
+            false,                                        /* nvshmemi_is_nvshmem_bootstrapped */  \
+            NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY          /* selected_device_transport */         \
     }
 #else
 #include <cuda/std/cstddef>
@@ -246,6 +247,14 @@ typedef enum {
     NVSHMEMI_PE_DIST_MISC,
     NVSHMEMI_PE_DIST_MAX = INT_MAX
 } nvshmemi_pe_dist_t;
+
+typedef enum {
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY = 0,
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA = 1, // IBGDA transport
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_MAX = INT_MAX
+} nvshmemi_selected_device_transport_t;
+static_assert(sizeof(nvshmemi_selected_device_transport_t) == 4,
+              "selected_device_transport enum type must be 4 bytes.");
 
 typedef struct {
     int version;
@@ -530,6 +539,7 @@ typedef struct {
     bool ibgda_is_initialized;
     bool nvshmemi_is_nvshmem_initialized;
     bool nvshmemi_is_nvshmem_bootstrapped;
+    nvshmemi_selected_device_transport_t selected_device_transport;
 } nvshmemi_device_host_state_v1;
 static_assert(sizeof(nvshmemi_device_host_state_v1) == 776,
               "device_host_state_v1 must be 776 bytes.");
