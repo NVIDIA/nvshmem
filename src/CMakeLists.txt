@@ -76,14 +76,31 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   # Note - today we do optimization to avoid having a too large bitcode file. There are, as of clang 18, some existing
   # limitations around compiling device libraries which make optimizing this library fine. Once these issues are fixed
   # we will have to remove optimizations to enable more flexible builds.
+
+  # Set bitcode build flags based on build type
+  string(TOUPPER "${CMAKE_BUILD_TYPE}" _BITCODE_BUILD_TYPE_UPPER)
+  if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+    set(BITCODE_OPT_LEVEL "-O0")
+    set(BITCODE_OPT_COMMAND cp libnvshmem_device.bc.unoptimized libnvshmem_device.bc)
+  else()
+    set(BITCODE_OPT_LEVEL "-O1")
+    set(BITCODE_OPT_COMMAND opt --passes='internalize,inline,globaldce'
+        -internalize-public-api-list='nvshmem_*,nvshmemx_*,nvshmemi_device_lib_version_d,nvshmemi_device_state_d'
+        libnvshmem_device.bc.unoptimized -o libnvshmem_device.bc)
+  endif()
+  if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG" OR _BITCODE_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
+    set(BITCODE_DEBUG_FLAGS "-g")
+  else()
+    set(BITCODE_DEBUG_FLAGS "")
+  endif()
+  set(BITCODE_CLANG_FLAGS ${BITCODE_DEBUG_FLAGS} ${BITCODE_OPT_LEVEL})
+
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
-                    COMMAND clang -c -emit-llvm -O1 -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                    COMMAND clang -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                     --cuda-gpu-arch=${BITCODE_LIB_ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                     -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
                     -D__clang_llvm_bitcode_lib__ ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu -o libnvshmem_device.bc.unoptimized
-                    COMMAND opt --passes='internalize,inline,globaldce'
-                    -internalize-public-api-list='nvshmem_*,nvshmemx_*,nvshmemi_device_lib_version_d,nvshmemi_device_state_d'
-                    libnvshmem_device.bc.unoptimized -o libnvshmem_device.bc
+                    COMMAND ${BITCODE_OPT_COMMAND}
                     COMMAND llvm-dis libnvshmem_device.bc
                     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/bitcode_lib_cleanup.sh ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device.ll ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device.ll.new
                     COMMAND llvm-as libnvshmem_device.ll.new -o ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
@@ -103,7 +120,7 @@ endif()
 ## End bitcode library configurations
 
 if(NVSHMEM_BUILD_EXAMPLES)
-set(NVSHMEM_EXAMPLES_RELEASE_PREFIX "bin/examples")
+  set(NVSHMEM_EXAMPLES_RELEASE_PREFIX "bin/examples")
   add_subdirectory(${CMAKE_SOURCE_DIR}/examples ${CMAKE_BINARY_DIR}/examples)
 endif()
 if(NVSHMEM_BUILD_TESTS)
