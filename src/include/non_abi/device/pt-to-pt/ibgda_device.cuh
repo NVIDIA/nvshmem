@@ -1695,9 +1695,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_submit_reque
                                                         // reaches the threshold.
 
     if (do_post_send) {
-        if (!state->use_async_postsend)
+        if (!state->use_async_postsend) {
             ibgda_post_send<need_strong_flush>(qp, new_wqe_idx);
-        else {
+        } else {
             ibgda_proxy_post_send<need_strong_flush>(qp, new_wqe_idx);
         }
     }
@@ -1913,11 +1913,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_get_raddr_rk
     // nvshmemi_device_state_d.npes to become 0 in this function.
     // WAR: Force reload of nvshmemi_device_state_d.npes. We may reload from L1
     // most of the time, so the performance hit is minimal.
-#if defined __clang_llvm_bitcode_lib__
-    asm volatile("ld.const.b32 %0, [%1];" : "=r"(npes) : "l"(&nvshmemi_device_state_d.npes));
-#else
     asm volatile("ld.b32 %0, [%1];" : "=r"(npes) : "l"(&nvshmemi_device_state_d.npes));
-#endif
 
     uint64_t idx =
         ((roffset >> state->log2_cumem_granularity) * npes * state->num_devices_initialized) +
