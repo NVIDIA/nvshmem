@@ -204,33 +204,42 @@ macro(nvshmem_add_cubin_perftest_prefix SOURCE PREFIX)
   set(CUBIN_UNLINKED_NAME "${NAME_}_UNLINKED.cubin")
   set(CUBIN_NAME "${NAME_}.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_PERFTEST_TLD}/common" "-I${NVSHMEM_PERFTEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include" "-I${CUDA_HOME}/include/cccl")
+
+  # Set cubin build flags based on build type
+  string(TOUPPER "${CMAKE_BUILD_TYPE}" _CUBIN_BUILD_TYPE_UPPER)
+  if(_CUBIN_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+    set(CUBIN_OPT_LEVEL "-O0")
+  else()
+    set(CUBIN_OPT_LEVEL "-O3")
+  endif()
+  if(_CUBIN_BUILD_TYPE_UPPER STREQUAL "DEBUG" OR _CUBIN_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
+    set(CUBIN_DEBUG_FLAGS "-g")
+  else()
+    set(CUBIN_DEBUG_FLAGS "")
+  endif()
+
+  set(CUBIN_CLEANUP rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked ${NAME_}.bc ${NAME_}.ptx ${CUBIN_UNLINKED_NAME})
+  #set(CUBIN_CLEANUP ${CMAKE_COMMAND} -E true)
+
   if (NOT SubBuild)
     set(BITCODE_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device.bc)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND clang -c -emit-llvm -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                              --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
-                      COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
-                      COMMAND opt -O3 ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
-                      COMMAND llc -O3 --disable-tail-calls -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
-                      COMMAND ${CUDA_HOME}/bin/ptxas -c -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_UNLINKED_NAME}
-                      COMMAND ${CUDA_HOME}/bin/nvlink -arch=${NVSHMEM_CLANG_ARCH} ${CUBIN_UNLINKED_NAME} -o ${CUBIN_NAME}
-                      COMMAND rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked  ${NAME_}.bc ${NAME_}.ptx ${CUBIN_UNLINKED_NAME}
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_perftest_helper ${BITCODE_LIB_PATH})
+    set(CUBIN_EXTRA_DEPENDS nvshmem_perftest_helper ${BITCODE_LIB_PATH})
   else()
     set(BITCODE_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device.bc)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND clang -c -emit-llvm -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                              --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
-                      COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
-                      COMMAND opt -O3 ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
-                      COMMAND llc -O3 --disable-tail-calls -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
-                      COMMAND ${CUDA_HOME}/bin/ptxas -c -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_UNLINKED_NAME}
-                      COMMAND ${CUDA_HOME}/bin/nvlink -arch=${NVSHMEM_CLANG_ARCH} ${CUBIN_UNLINKED_NAME} -o ${CUBIN_NAME}
-                      COMMAND rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked  ${NAME_}.bc ${NAME_}.ptx ${CUBIN_UNLINKED_NAME}
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_perftest_helper libnvshmem_device_bitcode)
+    set(CUBIN_EXTRA_DEPENDS nvshmem_perftest_helper libnvshmem_device_bitcode)
   endif()
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+                    COMMAND clang -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                            --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
+                    COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
+                    COMMAND opt ${CUBIN_OPT_LEVEL} ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
+                    COMMAND llc ${CUBIN_OPT_LEVEL} --disable-tail-calls -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
+                    COMMAND ${CUDA_HOME}/bin/ptxas ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -c -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_UNLINKED_NAME}
+                    COMMAND ${CUDA_HOME}/bin/nvlink -arch=${NVSHMEM_CLANG_ARCH} ${CUBIN_UNLINKED_NAME} -o ${CUBIN_NAME}
+                    COMMAND ${CUBIN_CLEANUP}
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    DEPENDS ${CUBIN_EXTRA_DEPENDS})
 
   add_custom_target(${NAME_}_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
 
