@@ -289,6 +289,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_relaxed(uint8_t *ptr, 
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
     uint16_t _val = val;
     asm volatile("st.relaxed.gpu.global.L1::no_allocate.b8 [%0], %1;" : : "l"(ptr), "h"(_val));
+#elif defined(__clang_llvm_bitcode_lib__)
+    // Use asm volatile to prevent LLVM DSE from eliminating WQE stores.
+    // WRITE_ONCE loses volatile after inlining in the bitcode path.
+    uint16_t _val = val;
+    asm volatile("st.b8 [%0], %1;" : : "l"(ptr), "h"(_val));
 #else
     WRITE_ONCE(*ptr, val);
 #endif
@@ -298,6 +303,8 @@ template <>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_relaxed(uint16_t *ptr, uint16_t val) {
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
     asm volatile("st.relaxed.gpu.global.L1::no_allocate.b16 [%0], %1;" : : "l"(ptr), "h"(val));
+#elif defined(__clang_llvm_bitcode_lib__)
+    asm volatile("st.b16 [%0], %1;" : : "l"(ptr), "h"(val));
 #else
     WRITE_ONCE(*ptr, val);
 #endif
@@ -307,6 +314,8 @@ template <>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_relaxed(uint32_t *ptr, uint32_t val) {
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
     asm volatile("st.relaxed.gpu.global.L1::no_allocate.b32 [%0], %1;" : : "l"(ptr), "r"(val));
+#elif defined(__clang_llvm_bitcode_lib__)
+    asm volatile("st.b32 [%0], %1;" : : "l"(ptr), "r"(val));
 #else
     WRITE_ONCE(*ptr, val);
 #endif
@@ -316,6 +325,8 @@ template <>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_relaxed(uint64_t *ptr, uint64_t val) {
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
     asm volatile("st.relaxed.gpu.global.L1::no_allocate.b64 [%0], %1;" : : "l"(ptr), "l"(val));
+#elif defined(__clang_llvm_bitcode_lib__)
+    asm volatile("st.b64 [%0], %1;" : : "l"(ptr), "l"(val));
 #else
     WRITE_ONCE(*ptr, val);
 #endif
@@ -325,6 +336,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_releas
                                                                                   uint32_t val) {
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
     asm volatile("st.release.gpu.global.L1::no_allocate.b32 [%0], %1;" : : "l"(ptr), "r"(val));
+#elif defined(__clang_llvm_bitcode_lib__)
+    asm volatile("st.b32 [%0], %1;" : : "l"(ptr), "r"(val));
 #else
     WRITE_ONCE(*ptr, val);
 #endif
@@ -334,6 +347,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_releas
                                                                                   uint64_t val) {
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
     asm volatile("st.release.gpu.global.L1::no_allocate.b64 [%0], %1;" : : "l"(ptr), "l"(val));
+#elif defined(__clang_llvm_bitcode_lib__)
+    asm volatile("st.b64 [%0], %1;" : : "l"(ptr), "l"(val));
 #else
     WRITE_ONCE(*ptr, val);
 #endif
