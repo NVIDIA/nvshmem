@@ -97,6 +97,18 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     constexpr static uint32_t num_index_bits = (num_sequence_bits - num_category_bits);
 
     constexpr static uint32_t index_mask = ((1U << num_index_bits) - 1);
+
+    /**
+     * Frequency at which we send an ack for puts (without signal). For puts-only,
+     * we don't need the ack for every message for semantic reasons. We only need
+     * an occasional ack to handle sequence number overflow correctly.
+     */
+    constexpr static uint32_t put_ack_freq = 64;
+
+    /* Assert that index_mask is large enough to simplify some ranged ack return
+       logic. */
+    static_assert((index_mask + 1) >= (2 * put_ack_freq),
+                  "Number of indexes should be >= 2 * put_ack_freq");
     constexpr static uint32_t category_mask = (1U << num_index_bits);
 
     constexpr static uint32_t sequence_mask = NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
@@ -119,6 +131,14 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
 
     uint32_t sequence_counter;
     std::array<uint32_t, num_categories> pending_acks;
+    uint32_t put_count;
+
+    /**
+     * Default constructor - initializes counter to zero
+     */
+    nvshmemt_libfabric_endpoint_seq_counter_t() {
+        reset();
+    }
 
     /**
      * Reset counter and pending acks to zero
@@ -126,6 +146,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     void reset() {
         sequence_counter = 0;
         pending_acks.fill(0);
+        put_count = 0;
     }
 
     /**
@@ -173,6 +194,54 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
         assert(pending_acks[category] > 0);
         --pending_acks[category];
     }
+
+    /**
+     * Mark a range of sequence numbers as complete, resulting from reciving a
+     * put ack. The sequence range ends with end_seq.
+     *
+     * We send an ack for every put_ack_freq puts. Therefore, a put ack for
+     * <end_seq> is an acknowledgement sequence numbers (end_seq - put_ack_freq + 1)
+     * to end_seq, inclusive. The wraparound case is also handled.
+     *
+     * This code assumes the sequence range spans at most two categories. This
+     * will be true as long as the index space is sufficiently larger than the
+     * put ack frequency, as static asserted above.
+     */
+    void return_acked_seq_num_range_for_put(uint32_t end_seq) {
+        assert(end_seq != NVSHMEM_STAGED_AMO_SEQ_NUM);
+
+        uint32_t start_seq = (end_seq - put_ack_freq + 1) & sequence_mask;
+
+        /* Note: in the wraparound case, the (start_seq, end_seq) range will
+           include NVSHMEM_STAGED_AMO_SEQ_NUM, which is not used. The logic
+           below handles this correctly, as long as `start_category` is correct
+           (which is true as long as the index space is sufficiently large that
+           we can only span two categories, as static-asserted above.) */
+
+        uint32_t start_category = get_category(start_seq);
+        uint32_t end_category = get_category(end_seq);
+
+        uint32_t num_indexes;
+        if (end_seq >= start_seq) {
+            num_indexes = end_seq - start_seq + 1;
+        } else {
+            num_indexes = (NVSHMEM_STAGED_AMO_SEQ_NUM - start_seq + 1) + (end_seq + 1);
+        }
+
+        if (start_category == end_category) {
+            assert(pending_acks[start_category] >= num_indexes);
+            pending_acks[start_category] -= num_indexes;
+        } else {
+            uint32_t count_in_start_cat = (index_mask + 1) - get_index(start_seq);
+            uint32_t count_in_end_cat = get_index(end_seq) + 1;
+
+            assert(pending_acks[start_category] >= count_in_start_cat);
+            assert(pending_acks[end_category] >= count_in_end_cat);
+
+            pending_acks[start_category] -= count_in_start_cat;
+            pending_acks[end_category] -= count_in_end_cat;
+        }
+    }
 };
 
 typedef enum {
@@ -192,13 +261,49 @@ typedef struct {
     struct fid_cntr *counter;
     uint64_t submitted_ops;
     uint64_t completed_staged_atomics;
-    nvshmemt_libfabric_endpoint_seq_counter_t put_signal_seq_counter;
-    std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
-        *proxy_put_signal_comp_map;
     int domain_index;
     int ep_index;
     int qp_index;
 } nvshmemt_libfabric_endpoint_t;
+
+// Entry types for completion map
+enum nvshmemt_libfabric_comp_entry_type {
+    NVSHMEMT_LIBFABRIC_COMP_ENTRY_SIGNAL,
+    NVSHMEMT_LIBFABRIC_COMP_ENTRY_PUT_ACK
+};
+
+// Entry for signal operations (put-signal, atomic)
+struct nvshmemt_libfabric_signal_comp_entry {
+    nvshmemt_libfabric_gdr_op_ctx_t *op;
+    int progress_count;
+};
+
+// Entry for puts that need acknowledgment
+struct nvshmemt_libfabric_put_ack_entry {
+    fi_addr_t src_addr;
+    int ep_index;
+};
+
+// Tagged union for completion entries
+struct nvshmemt_libfabric_comp_entry_t {
+    nvshmemt_libfabric_comp_entry_type type;
+    union {
+        nvshmemt_libfabric_signal_comp_entry signal_entry;
+        nvshmemt_libfabric_put_ack_entry ack_entry;
+    };
+};
+
+struct nvshmemt_libfabric_signal_state_t {
+    std::unordered_map<int, nvshmemt_libfabric_endpoint_seq_counter_t> put_signal_seq_counter;
+    std::unordered_map<uint64_t, nvshmemt_libfabric_comp_entry_t> proxy_put_signal_comp_map;
+    std::unordered_map<int, uint32_t> next_expected_seq;
+
+    void clear() {
+        put_signal_seq_counter.clear();
+        proxy_put_signal_comp_map.clear();
+        next_expected_seq.clear();
+    }
+};
 
 typedef struct nvshmemt_libfabric_gdr_send_p_op {
     uint64_t value;
@@ -250,6 +355,9 @@ typedef enum {
 typedef enum {
     NVSHMEMT_LIBFABRIC_IMM_PUT_SIGNAL_SEQ = 0,
     NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK,
+    NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT,
+    NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ,
+    NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_ACK,
 } nvshmemt_libfabric_imm_cq_data_hdr_t;
 
 class threadSafeOpQueue {
@@ -434,6 +542,10 @@ struct nvshmemt_libfabric_state_t {
     std::vector<uintptr_t> peer_amo_ack_addrs;
     /* Peer staged-amo ack rkeys — n_pes * domains.size() (non-owning). */
     std::vector<uint64_t> peer_amo_ack_rkeys;
+
+    /* Signal ordering state */
+    nvshmemt_libfabric_signal_state_t host_signal_state;
+    nvshmemt_libfabric_signal_state_t proxy_signal_state;
 
     /* Misc state management */
     bool use_staged_atomics = false;
