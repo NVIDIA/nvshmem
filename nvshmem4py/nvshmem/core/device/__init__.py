@@ -8,4 +8,4 @@
 #
 # See License.txt for license information
 
-__all__ = ["numba"]
+__all__ = ["numba", "cute"]

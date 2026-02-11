@@ -65,5 +65,5 @@ setup(
     packages=find_packages(include=["nvshmem", "nvshmem.*"]),
     include_package_data=True,
     options={"build_ext": {"inplace": True}},
-    install_requires=open(f"{os.path.dirname(__file__)}/requirements_cuda13.txt").read().splitlines()
+    install_requires=open(f"{os.path.dirname(__file__)}/requirements.txt").read().splitlines()
 )

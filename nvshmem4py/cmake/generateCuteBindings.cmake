@@ -103,11 +103,11 @@ function(generateCuteBindings)
         DEPENDS run_numbast_cute
     )
 
-    # Step 4: Generate CuteDSL bindings
+    # Step 4: Generate CuTe high level bindings
     add_custom_target(
         generate_high_level_bindings_cute
         COMMAND mkdir -p ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
-        COMMAND echo "This is where you put the high level binding generation"
+        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_rma.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND touch ${OUTPUT_DIR}/generate_cute_high_level_bindings.txt
         COMMENT "Generating High Level Bindings..."
         DEPENDS get_numbast_output_cute
@@ -116,9 +116,10 @@ function(generateCuteBindings)
     # Step 5: Copy generated high level bindings into nvshmem4py
     add_custom_target(
         get_high_level_bindings_cute
-        COMMAND echo "This is where you copy the high level binding generation"
+        COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/core/device/cute
+        COMMAND cp -rvf ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}/* ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/core/device/cute/
         COMMENT "Copying High Level Bindings into nvshmem4py"
-        DEPENDS get_numbast_output_cute
+        DEPENDS generate_high_level_bindings_cute
     )
 
     # Final target to trigger everything
