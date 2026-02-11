@@ -217,10 +217,7 @@ def quiet(stream: NvshmemStreamsType=None) -> None:
     """
     Ensures completion of all previously issued NVSHMEM operations on the given stream.
 
-    This is equivalent to a device-side ``shmem_quiet`` for host-initiated NVSHMEM operations.
-
-    Note that this function will return when local (the PE this is called from) operations are completed.
-    Remote operations may not yet be. Other synchronizations are required
+    This is equivalent to a device-side ``nvshmem_quiet`` for host-initiated NVSHMEM operations.
 
     Args:
         - stream (``Stream``): CUDA stream to synchronize.
