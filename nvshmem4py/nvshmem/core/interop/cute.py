@@ -26,9 +26,9 @@ from nvshmem.core._internal_tracking import _mr_references
 from nvshmem.core.nvshmem_types import *
 from nvshmem import bindings
 
-from cuda.core.experimental._memory import Buffer
-from cuda.core.experimental import Device
-from cuda.core.experimental._stream import Stream
+from cuda.core import Buffer
+from cuda.core import Device
+from cuda.core import Stream
 
 from typing import Tuple, Union
 
@@ -81,7 +81,7 @@ if _cute_enabled:
 
 # DLPack helpers for contiguous layout
 try:
-    import cuda.core.experimental._dlpack as _cuda_dlpack
+    import cuda.core._dlpack as _cuda_dlpack
     _dlpack_available = True
 except Exception:
     _cuda_dlpack = None
@@ -167,7 +167,7 @@ class _DLPackTensorWrapper:
 
 def _make_dlpack_capsule(buf, shape, dtype, contiguous=True):
     if not _dlpack_available:
-        raise NvshmemInvalid("cuda.core.experimental._dlpack is unavailable")
+        raise NvshmemInvalid("cuda.core._dlpack is unavailable")
     if dtype not in _CUTE_DLPACK_DTYPE:
         raise NvshmemInvalid(f"Unsupported CuTe dtype for DLPack: {dtype}")
     # device info

@@ -18,7 +18,7 @@ import nvshmem.core
 import nvshmem.core.device.numba as shmem_dev
 from nvshmem.core import SignalOp, ComparisonType
 from nvshmem.core.device.numba import my_pe, n_pes
-from cuda.core.experimental import Device, system, Stream
+from cuda.core import Device, system, Stream
 from mpi4py import MPI
 
 # Constants for the MoE pattern

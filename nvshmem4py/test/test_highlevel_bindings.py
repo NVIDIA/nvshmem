@@ -1,7 +1,7 @@
 import cffi
 import argparse
 
-from cuda.core.experimental import Device
+from cuda.core import Device
 
 from numba import cuda, int32
 from numba.types import float32, Array

@@ -3,7 +3,7 @@ import nvshmem.core
 from nvshmem.bindings.device.numba import my_pe, n_pes, put_signal_nbi, signal_wait_until
 from nvshmem.core import SignalOp, ComparisonType
 import cuda.core
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 from mpi4py import MPI
 
 signal_op = SignalOp.ADD

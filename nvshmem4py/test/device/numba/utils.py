@@ -9,7 +9,7 @@ import numpy as np
 
 import nvshmem.core
 
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 import os
 

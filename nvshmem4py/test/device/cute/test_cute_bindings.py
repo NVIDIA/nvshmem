@@ -22,7 +22,7 @@ from cutlass.cute.typing import Pointer, Boolean, Int32, Int, Int64, Constexpr
 from cutlass.cutlass_dsl import T, dsl_user_op
 from cutlass.cute.arch.nvvm_wrappers import FULL_MASK, WARP_SIZE
 import cutlass
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 from nvshmem.bindings.device.cute import int_p as cute_int_p
 from nvshmem.bindings.device.cute import my_pe as cute_my_pe

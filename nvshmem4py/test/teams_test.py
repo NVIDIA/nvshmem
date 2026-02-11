@@ -5,7 +5,7 @@ Unit tests for team management functionality in nvshmem.core
 from utils import uid_init, mpi_init
 import argparse
 
-from cuda.core.experimental import Device
+from cuda.core import Device
 import nvshmem.core
 from nvshmem.core import TeamConfig, TeamUniqueId, get_team_unique_id, Teams
 

@@ -8,9 +8,9 @@ import numpy as np
 import nvshmem.core
 from nvshmem.core.nvshmem_types import *
 
-from cuda.core.experimental import Device, system
-from cuda.core.experimental._stream import Stream
-from cuda.core.experimental._memory import MemoryResource, Buffer
+from cuda.core import Device, system
+from cuda.core import Stream
+from cuda.core import MemoryResource, Buffer
 import cuda.bindings.driver as driver
 import ctypes
 

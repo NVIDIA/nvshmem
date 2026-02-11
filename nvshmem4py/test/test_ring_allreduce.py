@@ -1,6 +1,6 @@
 import cffi
 from mpi4py import MPI
-from cuda.core.experimental import Device, system, Stream
+from cuda.core import Device, system, Stream
 
 from numba import cuda, uint64
 

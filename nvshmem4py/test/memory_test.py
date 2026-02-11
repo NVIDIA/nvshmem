@@ -20,14 +20,14 @@ import argparse
 import os
 import gc
 
-from cuda.core.experimental._memory import VirtualMemoryResource, VirtualMemoryResourceOptions
+from cuda.core import VirtualMemoryResource, VirtualMemoryResourceOptions
 
 import nvshmem.core
 
 # HACK! Do not do this!
 from nvshmem.core._internal_tracking import _mr_references
 
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 from mpi4py import MPI
 

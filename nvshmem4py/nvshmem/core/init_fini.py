@@ -22,9 +22,9 @@ from nvshmem import __version__
 from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus
 
 from cuda.pathfinder import load_nvidia_dynamic_lib
-from cuda.core.experimental._memory import Buffer, MemoryResource
-from cuda.core.experimental import Device, system
-from cuda.core.experimental._module import ObjectCode
+from cuda.core import Buffer, MemoryResource
+from cuda.core import Device, system
+from cuda.core import ObjectCode
 
 import numpy as np
 

@@ -18,8 +18,8 @@ import nvshmem.bindings as bindings
 from nvshmem.core._internal_tracking import _mr_references, _cached_device, _is_initialized, InternalInitStatus
 from nvshmem.core.utils import _get_device
 
-from cuda.core.experimental import Device, system
-from cuda.core.experimental._memory import Buffer
+from cuda.core import Device, system
+from cuda.core import Buffer
 
 __all__ = ['buffer', 'free', 'get_peer_buffer', 'get_multicast_buffer', 'register_external_buffer', 'unregister_external_buffer']
 

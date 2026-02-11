@@ -14,7 +14,7 @@ This file shows a minimal example of using NVSHMEM4Py to run a collective operat
 
 import cupy
 import nvshmem.core
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 from numba import cuda
 
 @cuda.jit

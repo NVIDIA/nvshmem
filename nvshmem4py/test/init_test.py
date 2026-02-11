@@ -17,7 +17,7 @@ import platform
 
 import numpy as np
 from mpi4py import MPI
-from cuda.core.experimental import Device, system, Program, ProgramOptions, LinkerOptions, ObjectCode, Linker
+from cuda.core import Device, system, Program, ProgramOptions, LinkerOptions, ObjectCode, Linker
 
 # User should not import this - it's here so we can print stuff
 import nvshmem.bindings

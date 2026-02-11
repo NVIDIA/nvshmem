@@ -3,7 +3,7 @@ This file contains examples of initialization and finalization of NVSHMEM throug
 """
 import numpy as np
 import nvshmem.core
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 import os
 
 from mpi4py import MPI
