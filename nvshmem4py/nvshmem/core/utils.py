@@ -24,8 +24,8 @@ import numpy as np
 import nvshmem.bindings as bindings
 from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode
 
-from cuda.core.experimental import Device, system
-from cuda.core.experimental._memory import Buffer
+from cuda.core import Device, system
+from cuda.core import Buffer
 
 try:
     import torch

@@ -5,8 +5,8 @@ The options are identical, although CUDA graph-based kernel launches are not yet
 """
 import argparse
 
-from cuda.core.experimental._event import Event
-from cuda.core.experimental import Device, system
+from cuda.core import Event
+from cuda.core import Device, system
 import cuda.core
 
 import nvshmem.core

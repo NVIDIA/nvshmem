@@ -13,7 +13,7 @@ This file implements `examples/on-stream.cu` in Python
 """
 import cupy
 from numba import cuda
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 import nvshmem.core
 

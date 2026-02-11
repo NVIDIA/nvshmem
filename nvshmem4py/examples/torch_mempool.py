@@ -45,7 +45,7 @@ from torch.utils import cpp_extension
 
 
 import nvshmem.core
-from cuda.core.experimental import Device
+from cuda.core import Device
 
 # Allocate memory with CUDA VMM APIs
 vmm_allocator_source = """

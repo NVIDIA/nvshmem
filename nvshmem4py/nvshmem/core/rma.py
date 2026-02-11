@@ -12,8 +12,8 @@
 These functions are NVSHMEM4Py APIs that expose host-initiated remote memory accesses (RMA)
 """
 
-from cuda.core.experimental._stream import Stream
-from cuda.core.experimental._memory import Buffer
+from cuda.core import Stream
+from cuda.core import Buffer
 
 from nvshmem.core.interop.cupy import _is_array, array_get_buffer
 from nvshmem.core.interop.torch import _is_tensor, tensor_get_buffer

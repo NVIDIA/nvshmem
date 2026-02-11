@@ -13,7 +13,7 @@ import triton
 import triton.language as tl
 import nvshmem.core
 import os
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 def torchrun_uid_init():
     """

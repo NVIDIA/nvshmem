@@ -12,9 +12,9 @@
 The following are NVSHMEM4Py APIs that expose host-initiated collective communication
 """
 
-from cuda.core.experimental._stream import Stream
-from cuda.core.experimental._memory import Buffer
-from cuda.core.experimental import Device
+from cuda.core import Stream
+from cuda.core import Buffer
+from cuda.core import Device
 
 from nvshmem.core.utils import _get_device, dtype_nbytes
 from nvshmem.core.interop.torch import _is_tensor, tensor_get_buffer

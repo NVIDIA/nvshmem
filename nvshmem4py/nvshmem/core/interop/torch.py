@@ -19,9 +19,9 @@ from nvshmem.core._internal_tracking import _mr_references
 from nvshmem.core.nvshmem_types import *
 from nvshmem import bindings
 
-from cuda.core.experimental._memory import Buffer
-from cuda.core.experimental import Device
-from cuda.core.experimental._stream import Stream
+from cuda.core import Buffer
+from cuda.core import Device
+from cuda.core import Stream
 
 from typing import Tuple, Union
 

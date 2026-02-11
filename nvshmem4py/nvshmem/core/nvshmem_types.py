@@ -16,9 +16,9 @@ import logging
 from typing import Union
 from enum import Enum, IntEnum
 
-from cuda.core.experimental._memory import MemoryResource, Buffer
-from cuda.core.experimental import Device, system, ObjectCode
-from cuda.core.experimental._stream import Stream
+from cuda.core import MemoryResource, Buffer
+from cuda.core import Device, system, ObjectCode
+from cuda.core import Stream
 from cuda.bindings.utils import get_cuda_native_handle
 import cuda.bindings.driver
 
@@ -262,7 +262,7 @@ class NvshmemResource(MemoryResource):
             "ref_count": <int>,
             # An object of type NvshmemResource
             "device": <int>,
-            # An object of type cuda.core.experimental._memory.Buffer()
+            # An object of type cuda.core.Buffer
             "buffer": <Buffer>,
             # Different buffers (peer, mc) have different needs
             "type": Enum,

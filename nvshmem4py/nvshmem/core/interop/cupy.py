@@ -19,8 +19,8 @@ from nvshmem.core._internal_tracking import _mr_references
 import logging
 from typing import Tuple, Union
 
-from cuda.core.experimental._memory import Buffer
-from cuda.core.experimental import Device
+from cuda.core import Buffer
+from cuda.core import Device
 
 __all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array", "register_external_array", "unregister_external_array"]
 

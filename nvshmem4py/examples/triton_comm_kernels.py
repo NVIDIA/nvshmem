@@ -25,7 +25,7 @@ import triton
 import triton.language as tl
 import nvshmem.core as nvshmem
 from mpi4py import MPI
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 """
 The functions load_v4_u32 and multimem_st_b64 are adapted from the Triton-Distributed project to show a practical example of custom communication kernels on NVSHMEM symmetric heap memory.

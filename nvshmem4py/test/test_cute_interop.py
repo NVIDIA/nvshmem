@@ -13,14 +13,14 @@ import os
 import gc
 import struct
 
-from cuda.core.experimental._memory import VirtualMemoryResource, VirtualMemoryResourceOptions
+from cuda.core import VirtualMemoryResource, VirtualMemoryResourceOptions
 
 import nvshmem.core
 import nvshmem.core.interop.cute as cute_interop
 import cuda.bindings.driver as cudrv
 
 
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 from mpi4py import MPI
 

@@ -1,4 +1,4 @@
-from cuda.core.experimental import Device, Stream
+from cuda.core import Device, Stream
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba 

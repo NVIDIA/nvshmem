@@ -10,7 +10,7 @@ from nvshmem.core.utils import dtype_nbytes
 
 from mpi4py import MPI
 import numpy as np
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 def run_coll_benchmark(args, coll):
     """
