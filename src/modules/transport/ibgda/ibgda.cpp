@@ -3456,16 +3456,21 @@ out:
     return status;
 }
 
-static int ibgda_destroy_ep(struct ibgda_ep *ep) {
+static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_state) {
     int status = 0;
 
     if (!ep) return status;
+
     if (ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCT) {
         if (ep->ib_qp) {
             int status = ftable.destroy_qp(ep->ib_qp);
             if (status) NVSHMEMI_ERROR_PRINT("ibv_destroy_qp failed.\n");
         }
     } else {
+        if (ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC) {
+            ibgda_destroy_internal_buffer(&ep->qp_ctrl.internal_buf, ibgda_state);
+        }
+
         if (ep->devx_qp) {
             mlx5dv_devx_obj_destroy(ep->devx_qp);
         }
@@ -4065,11 +4070,11 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
         device = ((struct ibgda_device *)ibgda_state->devices + dev_id);
 
         for (int i = 0; i < device->dci.num_eps; ++i) {
-            status = ibgda_destroy_ep(device->dci.eps[i]);
+            status = ibgda_destroy_ep(device->dci.eps[i], ibgda_state);
         }
 
         for (int i = 0; i < device->dct.num_eps; ++i) {
-            status = ibgda_destroy_ep(device->dct.eps[i]);
+            status = ibgda_destroy_ep(device->dct.eps[i], ibgda_state);
         }
 
         num_rc_eps = device->rc.num_eps_per_pe * n_pes;
@@ -4078,7 +4083,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
             if (i % n_pes == mype) {
                 continue;
             }
-            status = ibgda_destroy_ep(device->rc.eps[i]);
+            status = ibgda_destroy_ep(device->rc.eps[i], ibgda_state);
         }
 
         status = ibgda_destroy_qp_shared_objects(ibgda_state, device);
