@@ -97,6 +97,8 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   else()
     find_package(Clang CONFIG REQUIRED)
   endif()
+  set(NVSHMEM_CLANG_EXECUTABLE "${LLVM_TOOLS_BINARY_DIR}/clang${CMAKE_EXECUTABLE_SUFFIX}" CACHE PATH "Clang executable used for bitcode library, tests, and perftests")
+  message(STATUS "NVSHMEM_CLANG_EXECUTABLE: ${NVSHMEM_CLANG_EXECUTABLE}")
 endif()
 
 if(NVSHMEM_MPI_SUPPORT)

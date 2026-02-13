@@ -99,6 +99,10 @@ if(NOT SubBuild)
     else()
       find_package(Clang CONFIG REQUIRED)
     endif()
+    # Reuse top-level NVSHMEM_CLANG_EXECUTABLE when built as subdirectory; set when standalone.
+    if(NOT NVSHMEM_CLANG_EXECUTABLE)
+      set(NVSHMEM_CLANG_EXECUTABLE "${LLVM_TOOLS_BINARY_DIR}/clang${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
   endif()
 
   include(CheckCompilerFlag)
@@ -230,7 +234,7 @@ macro(nvshmem_add_cubin_perftest_prefix SOURCE PREFIX)
   endif()
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                    COMMAND clang -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                    COMMAND ${NVSHMEM_CLANG_EXECUTABLE} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                             --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
                     COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
                     COMMAND opt ${CUBIN_OPT_LEVEL} ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
