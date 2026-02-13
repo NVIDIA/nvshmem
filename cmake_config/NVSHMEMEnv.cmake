@@ -102,6 +102,16 @@ nvshmem_add_default_environment_path(UCX_HOME "/usr/local/ucx" "path to UCX inst
 nvshmem_add_default_environment_path(CUTLASS_HOME "" "path to CUTLASS directory")
 message( "___________________________________________________________________________________________________\n\n")
 
+message( "Clang compilation options")
+message( "___________________________________________________________________________________________________")
+if(DEFINED ENV{NVSHMEM_CLANG_CXX_FLAGS_EXTRA})
+  set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA_DEFAULT $ENV{NVSHMEM_CLANG_CXX_FLAGS_EXTRA})
+else()
+  set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA_DEFAULT "")
+endif()
+set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_DEFAULT} CACHE STRING "Extra C++ flags passed to clang for bitcode/cubin compilation")
+message( "NVSHMEM_CLANG_CXX_FLAGS_EXTRA: ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA}")
+message( "___________________________________________________________________________________________________\n\n")
 
 message( "Packaging specific options set to OFF by default")
 message( "___________________________________________________________________________________________________")
