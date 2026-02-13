@@ -222,31 +222,33 @@ macro(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
   string(REPLACE ${SOURCE} "" DIR ${DIR})
   set(CUBIN_NAME "${NAME_}.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_TEST_TLD}/common" "-I${NVSHMEM_TEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include"  "-I${CUDA_HOME}/include/cccl")
+
+  # Add debug flags for Debug and RelWithDebInfo builds
+  string(TOUPPER "${CMAKE_BUILD_TYPE}" _CUBIN_BUILD_TYPE_UPPER)
+  if(_CUBIN_BUILD_TYPE_UPPER STREQUAL "DEBUG" OR _CUBIN_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
+    set(CUBIN_DEBUG_FLAGS "-g")
+  else()
+    set(CUBIN_DEBUG_FLAGS "")
+  endif()
+
   if (NOT SubBuild)
     set(BITCODE_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device.bc)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND clang -c -emit-llvm -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                              --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
-                      COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
-                      COMMAND opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
-                      COMMAND llc -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
-                      COMMAND ${CUDA_HOME}/bin/ptxas -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_NAME}
-                      COMMAND rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked  ${NAME_}.bc ${NAME_}.ptx
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_test_helper ${BITCODE_LIB_PATH})
+    set(CUBIN_EXTRA_DEPENDS nvshmem_test_helper ${BITCODE_LIB_PATH})
   else()
     set(BITCODE_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device.bc)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND clang -c -emit-llvm -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                              --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
-                      COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
-                      COMMAND opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
-                      COMMAND llc -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
-                      COMMAND ${CUDA_HOME}/bin/ptxas -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_NAME}
-                      COMMAND rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked  ${NAME_}.bc ${NAME_}.ptx
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_test_helper libnvshmem_device_bitcode)
+    set(CUBIN_EXTRA_DEPENDS nvshmem_test_helper libnvshmem_device_bitcode)
   endif()
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+                    COMMAND clang -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                            --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
+                    COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
+                    COMMAND opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
+                    COMMAND llc -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
+                    COMMAND ${CUDA_HOME}/bin/ptxas ${CUBIN_DEBUG_FLAGS} -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_NAME}
+                    COMMAND rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked ${NAME_}.bc ${NAME_}.ptx
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    DEPENDS ${CUBIN_EXTRA_DEPENDS})
 
   add_custom_target(${NAME_}_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
 
