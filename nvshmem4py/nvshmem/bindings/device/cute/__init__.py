@@ -10,7 +10,8 @@
 
 from cuda.pathfinder import find_nvidia_header_directory
 
-from cutlass.cute import compile 
+from cutlass import cute
+from cutlass.cute import compile
 
 import os
 import warnings
@@ -19,6 +20,7 @@ from nvshmem.core.nvshmem_types import NvshmemWarning
 
 if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cuteast.py")):
     from ._cuteast import *
+    from nvshmem.core.nvshmem_types import Teams
 
     INCLUDE_PATH = find_nvidia_header_directory("nvshmem")
     if not os.path.isdir(INCLUDE_PATH): 
@@ -38,7 +40,7 @@ if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cut
     this_folder = os.path.dirname(os.path.abspath(__file__))
     if not os.path.exists(os.path.join(this_folder, "entry_point.h")):
         raise RuntimeError("entry_point.h not found, package may not be properly installed")
-
+        
 else:
     warnings.warn("CuTe DSL device bindings are not enabled", NvshmemWarning)
     _cuteast = None
