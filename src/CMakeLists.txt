@@ -101,7 +101,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   endif()
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
-                    COMMAND ${NVSHMEM_CLANG_EXECUTABLE} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                    COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                     --cuda-gpu-arch=${BITCODE_LIB_ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                     -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
                     -D__clang_llvm_bitcode_lib__ ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu -o libnvshmem_device.bc.unoptimized

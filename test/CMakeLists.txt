@@ -44,6 +44,7 @@ if(NOT SubBuild)
 
   option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library and tests" $ENV{NVSHMEM_BUILD_BITCODE_LIBRARY})
   set(NVSHMEM_CLANG_DIR $ENV{NVSHMEM_CLANG_DIR} CACHE PATH "path to force cmake to look for clang when compiling the bitcode library.")
+  set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA "$ENV{NVSHMEM_CLANG_CXX_FLAGS_EXTRA}" CACHE STRING "Extra C++ flags passed to clang for bitcode/cubin compilation")
   option(NVSHMEM_DEBUG "Toggles NVSHMEM debug compilation settings" $ENV{NVSHMEM_DEBUG})
   option(NVSHMEM_DEVEL "Toggles NVSHMEM devel compilation settings" $ENV{NVSHMEM_DEVEL})
   option(NVSHMEM_MPI_SUPPORT "Enable compilation of the MPI bootstrap and MPI-specific code" ${NVSHMEM_MPI_SUPPORT_DEFAULT})
@@ -101,6 +102,13 @@ if(NOT SubBuild)
     # Reuse top-level NVSHMEM_CLANG_EXECUTABLE when built as subdirectory; set when standalone.
     if(NOT NVSHMEM_CLANG_EXECUTABLE)
       set(NVSHMEM_CLANG_EXECUTABLE "${LLVM_TOOLS_BINARY_DIR}/clang${CMAKE_EXECUTABLE_SUFFIX}")
+    endif()
+    if(NOT DEFINED NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST)
+      if(NVSHMEM_CLANG_CXX_FLAGS_EXTRA)
+        separate_arguments(NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST NATIVE_COMMAND "${NVSHMEM_CLANG_CXX_FLAGS_EXTRA}")
+      else()
+        set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST "")
+      endif()
     endif()
   endif()
 
@@ -244,7 +252,7 @@ macro(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
   endif()
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                             --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
                     COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
                     COMMAND opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
