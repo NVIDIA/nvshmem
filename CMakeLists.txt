@@ -110,6 +110,16 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND LLVM_VERSION_MAJOR LESS 22)
     message(FATAL_ERROR "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR} requires Clang >= 22 for bitcode/cubin builds, but found LLVM ${LLVM_PACKAGE_VERSION} (${NVSHMEM_CLANG_EXECUTABLE}).")
   endif()
+
+  # CUDA 13.2+ headers need _NV_RSQRT_SPECIFIER defined when using Clang (workaround for
+  # crt/math_functions.hpp vs __clang_cuda_runtime_wrapper.h). The noexcept specifier has
+  # no effect on bitcode generation, so defining it as empty is safe.
+  # TODO: Remove this workaround if LLVM fixed it upstream.
+  if(CUDAToolkit_VERSION_MAJOR GREATER 13 OR
+     (CUDAToolkit_VERSION_MAJOR EQUAL 13 AND NOT CUDAToolkit_VERSION_MINOR LESS 2))
+    list(APPEND NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST "-D_NV_RSQRT_SPECIFIER=")
+    message(STATUS "Adding -D_NV_RSQRT_SPECIFIER= workaround (CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}, LLVM ${LLVM_VERSION_MAJOR})")
+  endif()
 endif()
 
 if(NVSHMEM_MPI_SUPPORT)
