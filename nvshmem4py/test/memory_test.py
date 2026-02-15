@@ -486,6 +486,54 @@ def test_external_buffer():
 
     print("Done testing external buffer")
 
+
+def test_peer_buffer_reuse_updates_size():
+    print("Testing peer buffer cleanup on free")
+    if nvshmem.core.n_pes() < 3:
+        print("Skipping test because n_pes < 3")
+        return
+
+    rank = nvshmem.core.my_pe()
+    peers = [1, 2] if rank == 0 else []
+
+    buf = nvshmem.core.buffer(1024)
+    peer_bufs = []
+    mr = buf.memory_resource
+    try:
+        if rank == 0:
+            for pe in peers:
+                peer_bufs.append(nvshmem.core.get_peer_buffer(buf, pe))
+
+        if rank == 0:
+            parent_ptr = int(buf.handle)
+            child_ptrs_before = [
+                ptr for ptr, entry in mr._mem_references.items()
+                if entry.get("parent") == parent_ptr
+                and entry.get("type") is not None
+                and entry.get("type").name in ("PEER", "MULTIMEM")
+            ]
+            if len(child_ptrs_before) < len(peers):
+                raise Exception(
+                    f"Expected at least {len(peers)} child entries before free, found {len(child_ptrs_before)}"
+                )
+
+        nvshmem.core.free(buf)
+
+        if rank == 0:
+            for child_ptr in child_ptrs_before:
+                entry = mr._mem_references.get(child_ptr)
+                if entry is None:
+                    # Entry was removed, which is acceptable as long as it isn't stale.
+                    continue
+                if not entry.get("freed"):
+                    raise Exception("Child entry not marked freed after parent free")
+                if "buffer" in entry:
+                    raise Exception("Child entry buffer not cleared after parent free")
+    finally:
+        if rank == 0:
+            for peer_buf in peer_bufs:
+                nvshmem.core.free(peer_buf)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid"], default="uid")
@@ -508,10 +556,11 @@ if __name__ == '__main__':
     test_release_del_buffer()
     test_buffer_scope_release_gc()
     test_buffer_scope_release_gc_free()
-    test_get_peer_memory_scope()
     test_buffer_scope_release_gc_free_reuse()
     test_fortran_morder_alloc_torch()
     test_fortran_morder_alloc_cupy()
     test_external_buffer()
+    test_get_peer_memory_scope()
+    test_peer_buffer_reuse_updates_size()
 
     nvshmem.core.finalize()

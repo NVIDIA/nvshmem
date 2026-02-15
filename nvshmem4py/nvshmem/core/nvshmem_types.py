@@ -307,7 +307,7 @@ class NvshmemResource(MemoryResource):
         else:
             # If we're not holding references, create our own shadow-buffer
             buf_ref = Buffer.from_handle(ptr=r_buf.handle, size=r_buf.size, mr=self)
-        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False, "released": release, "except_on_del": except_on_del}
+        self._mem_references[ptr] = {"ref_count": 1, "resource": self, "buffer": buf_ref, "type": BufferTypes.NORMAL, "freed": False, "released": release, "except_on_del": except_on_del, "child": set()}
 
         return r_buf
 
@@ -370,16 +370,19 @@ class NvshmemResource(MemoryResource):
             # NVShmem handles these internally.
             if self._mem_references[ptr]["type"] == BufferTypes.NORMAL:
                 free(ptr)
-                # If the buffer has a child (peer) buffer, free it now
-                child_ptr = self._mem_references[ptr].get("child", None)
-                if child_ptr is not None:
-                    # Child is a pointer which may still be tracked.
-                    child_entry = self._mem_references[child_ptr]
-                    child_buffer = child_entry.get("buffer", None) 
+                # Free any peer/multicast children tracked for this parent.
+                child_ptrs = self._mem_references[ptr]["child"]
+                for child_ptr in child_ptrs:
+                    child_entry = self._mem_references.get(child_ptr)
+                    if child_entry is None:
+                        continue
+                    if child_entry.get("type") not in (BufferTypes.PEER, BufferTypes.MULTIMEM):
+                        continue
+                    child_buffer = child_entry.get("buffer", None)
                     if child_buffer is not None:
                         self._mem_references[child_ptr]["freed"] = True
                         del self._mem_references[child_ptr]["buffer"]
-                        del self._mem_references[ptr]["child"]
+                self._mem_references[ptr]["child"].clear()
                 logger.debug(f"Freed buffer at address {ptr}")
             else:
                 logger.debug("free() requested on a peer buffer. Not calling free()")
@@ -413,7 +416,8 @@ class NvshmemResource(MemoryResource):
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
 
         self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.PEER, "freed": False, "parent": parent_ptr, "released": False, "except_on_del": False}
-        self._mem_references[parent_ptr]["child"] = result
+        parent_entry = self._mem_references[parent_ptr]
+        parent_entry["child"].add(result)
         return r_buf
 
 
@@ -439,7 +443,8 @@ class NvshmemResource(MemoryResource):
         # This Buffer doesn't need to go through any .allocate() calls, since we know the pointer is valid
         r_buf = Buffer.from_handle(ptr=result, size=buffer.size, mr=self)
         self._mem_references[result] = {"ref_count": 1, "resource": self, "buffer": r_buf, "type": BufferTypes.MULTIMEM , "freed": False, "parent": parent_ptr, "released": False, "except_on_del": False}
-        self._mem_references[parent_ptr]["child"] = result
+        parent_entry = self._mem_references[parent_ptr]
+        parent_entry["child"].add(result)
         return r_buf
 
     def set_freed(self, buffer: Buffer) -> None:
