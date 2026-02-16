@@ -21,7 +21,8 @@ function(generateCuteBindings)
     
     set(PACKAGE_NAME "numbast")
     # WORKDIR is the directory where Numbast binding generation happens
-    set(WORKDIR "${CMAKE_BINARY_DIR}/externals/${PACKAGE_NAME}")
+    # Use a separate directory for CuTe to avoid conflicts with Numbast bindings
+    set(WORKDIR "${CMAKE_BINARY_DIR}/externals/${PACKAGE_NAME}_cute")
     # BINDGEN_TOOL_REPO is the directory where Numbast binding generation tool is cloned
     set(BINDGEN_TOOL_REPO "${WORKDIR}/${PACKAGE_NAME}_cute")
     # ASSET_DIR is the directory where `build_assets/numbast/` is cloned
@@ -108,6 +109,8 @@ function(generateCuteBindings)
         generate_high_level_bindings_cute
         COMMAND mkdir -p ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_rma.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
+        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_collective.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
+        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_amo.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
         COMMAND touch ${OUTPUT_DIR}/generate_cute_high_level_bindings.txt
         COMMENT "Generating High Level Bindings..."
         DEPENDS get_numbast_output_cute
@@ -123,6 +126,11 @@ function(generateCuteBindings)
     )
 
     # Final target to trigger everything
-    add_custom_target(build_bindings_cute DEPENDS build_bindings_numbast get_high_level_bindings_cute)
+    # Note: build_bindings_numbast may not exist if Numbast bindings weren't generated
+    if(TARGET build_bindings_numbast)
+        add_custom_target(build_bindings_cute DEPENDS build_bindings_numbast get_high_level_bindings_cute)
+    else()
+        add_custom_target(build_bindings_cute DEPENDS get_high_level_bindings_cute)
+    endif()
 
 endfunction()

@@ -76,6 +76,10 @@ if _cute_enabled:
         cute.Int16: 2,
         cute.Int32: 4,
         cute.Int64: 8,
+        cute.Uint8: 1,
+        cute.Uint16: 2,
+        cute.Uint32: 4,
+        cute.Uint64: 8,
         cute.Boolean: 1,
     }
 
@@ -143,6 +147,10 @@ _CUTE_DLPACK_DTYPE = {
     cute.Int16: (_DLPackTypeCode.INT, 16),
     cute.Int32: (_DLPackTypeCode.INT, 32),
     cute.Int64: (_DLPackTypeCode.INT, 64),
+    cute.Uint8: (_DLPackTypeCode.UINT, 8),
+    cute.Uint16: (_DLPackTypeCode.UINT, 16),
+    cute.Uint32: (_DLPackTypeCode.UINT, 32),
+    cute.Uint64: (_DLPackTypeCode.UINT, 64),
     cute.Boolean: (_DLPackTypeCode.BOOL, 1),
 }
 
@@ -258,6 +266,7 @@ def _register_tensor_buffer(tensor, buf, dtype=None, shape=None, strides=None):
     _CUTE_TENSOR_BUFFERS[id(tensor)] = {
         "buffer": buf,
         "dtype": dtype,
+        "element_type": dtype,  # Alias for consistency with tensor_get_buffer
         "shape": shape,
         "strides": strides,
     }

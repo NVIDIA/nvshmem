@@ -1,8 +1,8 @@
 import pytest
 
 from utils import uid_init, mpi_init, get_local_rank_per_node
-from nvshmem.core import finalize
-from cuda.core.experimental import Device
+from nvshmem.core import finalize, barrier, Teams
+from cuda.core import Device
 from test_device_rma import _finalize_kernels
 
 
@@ -19,9 +19,10 @@ def nvshmem_init_fini(request):
         mpi_init()
 
     yield
-
-    # Ensure the correct device context is current before finalize.
     local_rank = get_local_rank_per_node()
-    Device(local_rank).set_current()
+    dev = Device(local_rank)
+    dev.set_current()
+    barrier(Teams.TEAM_WORLD, stream=dev.create_stream())
+    dev.sync()
     _finalize_kernels()
     finalize()
