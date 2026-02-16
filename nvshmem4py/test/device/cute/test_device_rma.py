@@ -2,7 +2,7 @@ import os
 
 import pytest
 import torch
-from cuda.core.experimental import Device, Stream, system
+from cuda.core import Device, Stream, system
 import numpy as np
 import cutlass.cute as cute
 import cuda.bindings.driver as cudrv
@@ -100,6 +100,10 @@ def _fill_cute_tensor(tensor, dtype_name, value):
     host = np.full(tuple(tensor.shape), np_dtype(value), dtype=np_dtype)
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     cudrv.cuMemcpyHtoD(buf.handle, host, host.nbytes)
+    local_rank = nvshmem.core.my_pe() % system.num_devices
+    dev = Device(local_rank)
+    dev.set_current()
+    dev.sync()
 
 
 def _read_cute_tensor(tensor, dtype_name):
@@ -107,6 +111,10 @@ def _read_cute_tensor(tensor, dtype_name):
     host = np.empty(tuple(tensor.shape), dtype=np_dtype)
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     cudrv.cuMemcpyDtoH(host, buf.handle, host.nbytes)
+    local_rank = nvshmem.core.my_pe() % system.num_devices
+    dev = Device(local_rank)
+    dev.set_current()
+    dev.sync()
     return host
 
 

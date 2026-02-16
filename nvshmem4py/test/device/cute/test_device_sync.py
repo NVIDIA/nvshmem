@@ -19,7 +19,7 @@ from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 import nvshmem.core
 import nvshmem.core.device.cute as nvshmem_cute
 
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 from test_device_rma import (
     _compile_kernel,

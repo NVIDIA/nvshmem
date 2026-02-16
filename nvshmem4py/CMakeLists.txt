@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 
+set(NVSHMEM_FORCE_REBUILD_PYTHON_LIB OFF CACHE INTERNAL "Force rebuild Python bindings")
+
 
 # Include the custom module
 include(cmake/buildWheel.cmake)
@@ -33,7 +35,7 @@ endif()
 # steps, we exclude addNumbast from source file. The following step skips
 # addNumbast target for all subsequent steps.
 # Skip bindings if they are already generated
-if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py")
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py"))
     include(cmake/addNumbast.cmake)
     AddNumbast(
         VERSION "0.6.0"
@@ -42,11 +44,15 @@ endif()
 
 # Generate CuTe Bindings. Follows the same requirements as the Numba bindings
 # Separate build step because users may want one but not the other
-if (EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py")
+if (EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py"))
     include(cmake/generateCuteBindings.cmake)
     generateCuteBindings()
 endif()
 
+
+if (NVSHMEM_FORCE_REBUILD_PYTHON_LIB AND EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/force-rebuild-python-lib.cmake")
+    include(cmake/force-rebuild-python-lib.cmake)
+endif()
 
 # Find all the Python versions
 # Use bash to find all Python versions >= 3.9

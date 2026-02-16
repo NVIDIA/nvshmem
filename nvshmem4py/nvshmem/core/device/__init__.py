@@ -9,3 +9,18 @@
 # See License.txt for license information
 
 __all__ = ["numba", "cute"]
+
+from . import numba
+
+# Lazy import for cute - only import when accessed
+_cute_module = None
+
+def __getattr__(name):
+    """Lazy import of cute module."""
+    if name == "cute":
+        global _cute_module
+        if _cute_module is None:
+            from . import cute
+            _cute_module = cute
+        return _cute_module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

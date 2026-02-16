@@ -1,7 +1,8 @@
 import pytest
 
-from utils import uid_init, mpi_init
-from nvshmem.core import finalize
+from utils import uid_init, mpi_init, get_local_rank_per_node
+from nvshmem.core import finalize, barrier, Teams
+from cuda.core import Device
 
 def pytest_addoption(parser):
     parser.addoption("--init-type", action="store", default="uid", help="Method to initialize NVSHMEM", choices=["uid", "mpi"])
@@ -15,6 +16,10 @@ def nvshmem_init_fini(request):
         mpi_init()
     
     yield
-    
-    finalize()
 
+    local_rank = get_local_rank_per_node()
+    dev = Device(local_rank)
+    dev.set_current()
+    barrier(Teams.TEAM_WORLD, stream=dev.create_stream())
+    dev.sync()  # Ensure all kernels are complete on this device before finalization
+    finalize()

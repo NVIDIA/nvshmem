@@ -176,7 +176,6 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         It hasn't been done yet 
         """
         # Step 1: Detect MPI_Comm size
-
         if not _mpi4py_enabled or (not isinstance(mpi_comm, mpi.Comm) and mpi_comm is not None):
             raise NvshmemInvalid("Invalid MPI communicator passed in")
 
