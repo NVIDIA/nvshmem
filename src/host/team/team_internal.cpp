@@ -739,17 +739,17 @@ static void nvshmemi_team_destroy_nvls(nvshmemi_team_t *team) {
          * bound and mapped to MC heap */
         if (nvls_obj->is_owner(team)) {
             // Transfer ownership to one of the dup teams
-            NVSHMEMU_FOR_EACH_IF(
-                i, nvshmemi_max_teams,
-                nvshmemi_team_pool[i] != NULL && nvshmemi_team_support_nvls(nvshmemi_team_pool[i]),
-                {
+            for (long i = 0; i < nvshmemi_max_teams; i++) {
+                if (nvshmemi_team_pool[i] != NULL &&
+                    nvshmemi_team_support_nvls(nvshmemi_team_pool[i])) {
                     // Find first duplicate team that shares the nvls rsc and make it the owner
                     if (nvshmemi_team_pool[i]->nvls_rsc == team->nvls_rsc) {
                         nvls_obj->release_owner();
                         nvls_obj->assign_owner(nvshmemi_team_pool[i]);
                         break;
                     }
-                });
+                }
+            }
         }
     }
 }
@@ -915,11 +915,11 @@ void nvshmemi_duplicate_team(nvshmem_team_t team, nvshmemi_team_t *my_team) {
                      NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT));
     }
     if (my_team->team_dups[1] == NVSHMEM_TEAM_INVALID) {
-        NVSHMEMU_FOR_EACH(i, max_required_duplicate_teams - 1) {
+        for (int i = 0; i < max_required_duplicate_teams - 1; i++) {
             nvshmemi_team_split_strided(nvshmemi_team_pool[team], 0, 1, nvshmem_team_n_pes(team),
                                         NULL, 0, &(my_team->team_dups[i + 1]), true);
             INFO(NVSHMEM_TEAM,
-                 "Duplicate team ID: %d of parent team: %d; duplicate team: %zu / %d\n",
+                 "Duplicate team ID: %d of parent team: %d; duplicate team: %d / %d\n",
                  my_team->team_dups[i + 1], my_team->team_idx, i, max_required_duplicate_teams);
             if (my_team->team_dups[i + 1] == NVSHMEM_TEAM_INVALID) {
                 NVSHMEMI_ERROR_EXIT(
@@ -1469,9 +1469,8 @@ static int finalize_team_init() {
 #endif /* NVSHMEM_USE_NCCL */
 
     /* Setup NVLS resources for all internal p2p connected teams */
-    NVSHMEMU_FOR_EACH_IF(
-        i, nvshmemi_max_teams,
-        nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_p2p_connected, {
+    for (long i = 0; i < nvshmemi_max_teams; i++) {
+        if (nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_p2p_connected) {
             int status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
             if (status != 0) {
                 NVSHMEMI_ERROR_PRINT("NVLS resource setup failed for team ID: %d\n",
@@ -1482,7 +1481,8 @@ static int finalize_team_init() {
                 INFO(NVSHMEM_TEAM, "Successful NVLS resource setup for team ID: %d\n",
                      nvshmemi_team_pool[i]->team_idx);
             }
-        });
+        }
+    }
 
     nvshmemi_boot_handle.barrier(
         &nvshmemi_boot_handle); /* To ensure neccessary setup has been done all PEs */
