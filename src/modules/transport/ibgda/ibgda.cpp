@@ -4500,6 +4500,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibgda_state->log_level = nvshmemt_common_get_log_level(options);
     ibgda_state->options = options;
     ibgda_state->device_state_cache = device_state_cache;
+    ibgda_state->skip_cst = true;
 
     if (nvshmemt_ibv_ftable_init(&ibv_handle, &ftable, ibgda_state->log_level)) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
