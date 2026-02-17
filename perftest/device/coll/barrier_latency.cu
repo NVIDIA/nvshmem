@@ -205,7 +205,7 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
     nvshmem_barrier_all();
 
     cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(_block, num_blocks, nvshm_test_num_tpb, barrier_all_args_1, stream, _all_)
+    CALL_BARRIER_KERNEL(_block, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream, _all_)
 
     cudaEventRecord(stop, stream);
     CUDA_CHECK(cudaStreamSynchronize(stream));
