@@ -4001,14 +4001,14 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
         init_dev_cnt++;
     }
 
-    // Phase 5: GPU setup (only once)
-    status = ibgda_setup_gpu_state(t);
-    if (status) return status;
-
     // Multiple devices break our CST optimizations
     if (init_dev_cnt > 1) {
         ibgda_state->skip_cst = false;
     }
+
+    // Phase 5: GPU setup (only once)
+    status = ibgda_setup_gpu_state(t);
+    if (status) return status;
 
     // Set all device support_half_av_seg and need_cst together
     for (int i = 0; i < init_dev_cnt; i++) {
