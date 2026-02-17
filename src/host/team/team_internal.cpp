@@ -1098,18 +1098,17 @@ static int init_team_shared(void) {
 }
 
 static int init_team_node() {
-    int status = 0;
     int start = -1, stride = -1, size = 0;
 
     /* Search for on-node peer PEs while checking for a consistent stride */
     uint64_t myHostHash = nvshmemu_getHostHash();
-    uint64_t *hostHash = (uint64_t *)malloc(sizeof(uint64_t) * nvshmemi_state->npes);
-    NVSHMEMI_NULL_ERROR_JMP(hostHash, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "hostHash allocation failed \n");
-    status = nvshmemi_boot_handle.allgather((void *)&myHostHash, (void *)hostHash, sizeof(uint64_t),
-                                            &nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
-                          "allgather of host hashes failed\n");
+    std::vector<uint64_t> hostHash(nvshmemi_state->npes);
+    int status = nvshmemi_boot_handle.allgather(&myHostHash, hostHash.data(),
+                                                sizeof(uint64_t), &nvshmemi_boot_handle);
+    if (status != 0) {
+        NVSHMEMI_ERROR_PRINT("allgather of host hashes failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
     for (int pe = 0; pe < nvshmemi_state->npes; pe++) {
         if (hostHash[pe] != myHostHash) continue;
@@ -1127,8 +1126,7 @@ static int init_team_node() {
     /* Initialize NVSHMEMX_TEAM_NODE */
     if (nvshmemi_team_allocate_team(&nvshmemi_team_node, &nvshmemi_device_team_node, size) !=
         NVSHMEMX_SUCCESS) {
-        status = NVSHMEMX_ERROR_OUT_OF_MEMORY;
-        goto cleanup;
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_node->team_idx = NVSHMEM_TEAM_NODE_INDEX;
     NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_node, NVSHMEM_TEAM_NODE_INDEX);
@@ -1161,9 +1159,7 @@ static int init_team_node() {
     INFO(NVSHMEM_INIT, "NVSHMEMX_TEAM_NODE: start=%d, stride=%d, size=%d",
          nvshmemi_team_node->start, nvshmemi_team_node->stride, nvshmemi_team_node->size);
 
-cleanup:
-    free(hostHash);
-    return status;
+    return 0;
 }
 
 static int init_team_same_mype_node() {
@@ -1255,20 +1251,15 @@ static int init_team_same_gpu() {
 }
 
 static int init_team_gpu_leaders() {
-    int status = 0;
-    int *scratch = NULL;
-
     /* Initialize team NVSHMEMI_TEAM_GPU_LEADERS */
-    scratch = (int *)malloc(sizeof(int) * nvshmemi_state->npes);
-    NVSHMEMI_NULL_ERROR_JMP(scratch, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "Unable to allocate host memory for team creation.\n");
+    std::vector<int> scratch(nvshmemi_state->npes);
+
     if (nvshmemi_team_same_gpu->start ==
         nvshmemi_state->mype) { /* Only GPU leaders are part of this team */
         if (nvshmemi_team_allocate_team(
                 &nvshmemi_team_gpu_leaders, &nvshmemi_device_team_gpu_leaders,
                 nvshmemi_state->npes / nvshmemi_team_same_gpu->size) != NVSHMEMX_SUCCESS) {
-            status = NVSHMEMX_ERROR_OUT_OF_MEMORY;
-            goto cleanup;
+            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
         }
         nvshmemi_team_gpu_leaders->team_idx = NVSHMEM_TEAM_GPU_LEADERS_INDEX;
         NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_gpu_leaders, NVSHMEM_TEAM_GPU_LEADERS_INDEX);
@@ -1292,11 +1283,13 @@ static int init_team_gpu_leaders() {
         nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_gpu_leaders);
         nvshmemi_team_set_p2p_connectivity(nvshmemi_team_gpu_leaders);
         nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_gpu_leaders);
-        status =
-            nvshmemi_boot_handle.allgather((void *)&(nvshmemi_team_gpu_leaders->my_pe),
-                                           (void *)scratch, sizeof(int), &nvshmemi_boot_handle);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
-                              "allgather of gpu leaders failed\n");
+        int status =
+            nvshmemi_boot_handle.allgather(&nvshmemi_team_gpu_leaders->my_pe,
+                                           scratch.data(), sizeof(int), &nvshmemi_boot_handle);
+        if (status != 0) {
+            NVSHMEMI_ERROR_PRINT("allgather of gpu leaders failed\n");
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
         /* Check whether a valid TEAM_GPU_LEADERS was formed */
         int last_mype = -1;
         for (int i = 0; i < nvshmemi_state->npes; i++) {
@@ -1321,36 +1314,37 @@ static int init_team_gpu_leaders() {
     } else {
         int my_pe = -1;
         nvshmemi_team_gpu_leaders = NULL;
-        status = nvshmemi_boot_handle.allgather((void *)&my_pe, (void *)scratch, sizeof(int),
-                                                &nvshmemi_boot_handle);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
-                              "allgather of gpu leaders failed\n");
+        int status = nvshmemi_boot_handle.allgather(&my_pe, scratch.data(),
+                                                    sizeof(int), &nvshmemi_boot_handle);
+        if (status != 0) {
+            NVSHMEMI_ERROR_PRINT("allgather of gpu leaders failed\n");
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
     }
 
-cleanup:
-    free(scratch);
-    return status;
+    return 0;
 }
 
 static int init_team_pool_and_psync() {
-    int status = 0;
-    long psync_len;
-
     if (nvshmemi_max_teams < NVSHMEM_TEAMS_MIN) nvshmemi_max_teams = NVSHMEM_TEAMS_MIN;
 
     if (nvshmemi_max_teams > N_PSYNC_BYTES * CHAR_BIT) {
         NVSHMEMI_ERROR_EXIT("Requested %ld teams, but only %ld are supported\n", nvshmemi_max_teams,
                             N_PSYNC_BYTES * CHAR_BIT);
-        goto cleanup;
+        return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
-    status = nvshmemi_init_team_creation_psync();
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                          "Failed to reset team creation psync\n");
+    int status = nvshmemi_init_team_creation_psync();
+    if (status != 0) {
+        NVSHMEMI_ERROR_PRINT("Failed to reset team creation psync\n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
 
     nvshmemi_team_pool = (nvshmemi_team_t **)calloc(nvshmemi_max_teams, sizeof(nvshmemi_team_t *));
-    NVSHMEMI_NULL_ERROR_JMP(nvshmemi_team_pool, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "nvshmemi_team_pool allocation failed \n");
+    if (!nvshmemi_team_pool) {
+        NVSHMEMI_ERROR_PRINT("nvshmemi_team_pool allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
     CUDA_RUNTIME_CHECK(cudaMalloc((void **)&nvshmemi_device_team_pool,
                                   nvshmemi_max_teams * sizeof(nvshmemi_team_t *)));
     nvshmemi_device_state.team_pool = nvshmemi_device_team_pool;
@@ -1380,18 +1374,22 @@ static int init_team_pool_and_psync() {
      *  <--- (bcast, collect, reduce, etc.) --->|<------ (barriers and syncs) ---------->
      * */
 
-    psync_len = nvshmemi_max_teams * get_psync_len_per_team();
+    long psync_len = nvshmemi_max_teams * get_psync_len_per_team();
     nvshmemi_psync_pool = (long *)nvshmemi_malloc(sizeof(long) * psync_len);
-    NVSHMEMI_NULL_ERROR_JMP(nvshmemi_psync_pool, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "nvshmemi_psync_pool allocation failed \n");
+    if (!nvshmemi_psync_pool) {
+        NVSHMEMI_ERROR_PRINT("nvshmemi_psync_pool allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
 
     nvshmemi_device_state.psync_pool = nvshmemi_psync_pool;
 
     nvshmemi_call_init_array_kernel<long>(nvshmemi_psync_pool, psync_len, NVSHMEMI_SYNC_VALUE);
 
     nvshmemi_sync_counter = (long *)nvshmemi_malloc(2 * nvshmemi_max_teams * sizeof(long));
-    NVSHMEMI_NULL_ERROR_JMP(nvshmemi_sync_counter, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "nvshmemi_sync_counter allocation failed \n");
+    if (!nvshmemi_sync_counter) {
+        NVSHMEMI_ERROR_PRINT("nvshmemi_sync_counter allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
 
     nvshmemi_device_state.sync_counter = nvshmemi_sync_counter;
     nvshmemi_update_device_state();
@@ -1400,13 +1398,17 @@ static int init_team_pool_and_psync() {
 
     /* Convenience pointer to the group-3 pSync array (for barriers and syncs): */
     psync_pool_avail = (unsigned char *)malloc(2 * N_PSYNC_BYTES);
-    NVSHMEMI_NULL_ERROR_JMP(psync_pool_avail, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "psync_pool_avail allocation failed \n");
+    if (!psync_pool_avail) {
+        NVSHMEMI_ERROR_PRINT("psync_pool_avail allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
     psync_pool_avail_reduced = &psync_pool_avail[N_PSYNC_BYTES];
 
     device_psync_pool_avail = (unsigned char *)nvshmemi_malloc(2 * N_PSYNC_BYTES);
-    NVSHMEMI_NULL_ERROR_JMP(device_psync_pool_avail, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "device_psync_pool_avail allocation failed \n");
+    if (!device_psync_pool_avail) {
+        NVSHMEMI_ERROR_PRINT("device_psync_pool_avail allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
     device_psync_pool_avail_reduced = &device_psync_pool_avail[N_PSYNC_BYTES];
     /* Initialize the psync bits to 1, making all slots available: */
     memset(psync_pool_avail, 0, 2 * N_PSYNC_BYTES);
@@ -1424,22 +1426,23 @@ static int init_team_pool_and_psync() {
 
     /* Initialize an integer used to agree on an equal return value across PEs in team creation: */
     team_ret_val = (int *)malloc(sizeof(int) * 2);
-    NVSHMEMI_NULL_ERROR_JMP(team_ret_val, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "team_ret_val allocation failed \n");
+    if (!team_ret_val) {
+        NVSHMEMI_ERROR_PRINT("team_ret_val allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
     team_ret_val_reduced = &team_ret_val[1];
 
     device_team_ret_val = (int *)nvshmemi_malloc(sizeof(int) * 2);
-    NVSHMEMI_NULL_ERROR_JMP(team_ret_val, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, cleanup,
-                            "device_team_ret_val allocation failed \n");
+    if (!device_team_ret_val) {
+        NVSHMEMI_ERROR_PRINT("device_team_ret_val allocation failed \n");
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
     device_team_ret_val_reduced = &device_team_ret_val[1];
 
-cleanup:
-    return status;
+    return 0;
 }
 
 static int finalize_team_init() {
-    int status = 0;
-
     nvshmemi_boot_handle.barrier(
         &nvshmemi_boot_handle); /* To ensure neccessary setup has been done all PEs */
 
@@ -1469,10 +1472,12 @@ static int finalize_team_init() {
     NVSHMEMU_FOR_EACH_IF(
         i, nvshmemi_max_teams,
         nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_p2p_connected, {
-            status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
-                                  "NVLS resource setup failed for team ID: %d\n",
-                                  nvshmemi_team_pool[i]->team_idx);
+            int status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
+            if (status != 0) {
+                NVSHMEMI_ERROR_PRINT("NVLS resource setup failed for team ID: %d\n",
+                                     nvshmemi_team_pool[i]->team_idx);
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
             if (nvshmemi_team_pool[i]->nvls_rsc) {
                 INFO(NVSHMEM_TEAM, "Successful NVLS resource setup for team ID: %d\n",
                      nvshmemi_team_pool[i]->team_idx);
@@ -1518,8 +1523,7 @@ static int finalize_team_init() {
         nvshmemi_duplicate_team(NVSHMEM_TEAM_GPU_LEADERS_INDEX, nvshmemi_team_gpu_leaders);
     }
 
-cleanup:
-    return status;
+    return 0;
 }
 
 int nvshmemi_team_init(void) {
@@ -1544,15 +1548,11 @@ int nvshmemi_team_init(void) {
     if (status) return status;
 
     status = init_team_pool_and_psync();
-    if (status) goto cleanup;
+    if (!status) {
+        status = finalize_team_init();
+    }
 
-    status = finalize_team_init();
-    if (status) goto cleanup;
-
-    return status;
-
-cleanup:
-    if (status != NVSHMEMX_SUCCESS) {
+    if (status) {
         if (nvshmemi_team_pool) {
             free(nvshmemi_team_pool);
             nvshmemi_team_pool = NULL;
