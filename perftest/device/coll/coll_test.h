@@ -34,7 +34,6 @@ using namespace std;
 #define MAX_SKIP 10
 #define BARRIER_MAX_ITERS 1000
 #define BARRIER_MAX_SKIP 10
-#define MAX_NPES 128
 #define TEST_NUM_TPB_BLOCK 256
 
 typedef struct run_opt {

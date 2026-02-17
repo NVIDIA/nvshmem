@@ -47,7 +47,6 @@ int main(int argc, char **argv) {
 
     mype = nvshmem_my_pe();
     npes = nvshmem_n_pes();
-    assert(npes <= MAX_NPES);
     CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
 
     alloc_size = max_size * 2;
