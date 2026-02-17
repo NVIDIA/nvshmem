@@ -272,7 +272,6 @@ struct ibgda_device {
     bool support_nic_buf_on_gpumem;
     bool support_nic_buf_on_hostmem;
     bool support_half_av_seg;
-    bool may_skip_cst;
     ibgda_nic_handler_t nic_handler;
     bool data_direct;
 };
@@ -3416,7 +3415,7 @@ static int ibgda_post_gpu_device_state(
     nvshmemi_ibgda_device_cq_t *cq_d, uint8_t *qp_group_switches_d, int num_qp_groups,
     int num_shared_dci_handles, int num_dci_handles, int num_dct_handles, int num_rc_handles,
     int n_devs_selected, nvshmemi_ibgda_device_qp_map_type_t dc_map_type,
-    nvshmemi_ibgda_device_qp_map_type_t rc_map_type, bool support_half_av_seg, bool skip_cst) {
+    nvshmemi_ibgda_device_qp_map_type_t rc_map_type, bool support_half_av_seg) {
     int status = 0;
     int n_pes = t->n_pes;
 
@@ -3441,7 +3440,7 @@ static int ibgda_post_gpu_device_state(
     ibgda_device_state_h->rc_map_type = rc_map_type;
     ibgda_device_state_h->num_requests_in_batch = ibgda_num_requests_in_batch;
     ibgda_device_state_h->support_half_av_seg = support_half_av_seg;
-    ibgda_device_state_h->may_skip_cst = skip_cst;
+    ibgda_device_state_h->may_skip_cst = ibgda_state->skip_cst;
     ibgda_device_state_h->use_async_postsend = (ibgda_nic_handler != IBGDA_NIC_HANDLER_GPU);
     ibgda_device_state_h->num_devices_initialized = n_devs_selected;
     ibgda_device_state_h->num_default_rc_per_pe = ibgda_state->options->IBGDA_NUM_RC_PER_PE;
@@ -3605,7 +3604,6 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     int num_dci_handles = 0;
     int num_shared_dci_handles = 0;
     int status = 0;
-    bool skip_cst = true;
     bool support_half_av_seg = true;
 
     assert(ibgda_device_state_h != 0);
@@ -3672,7 +3670,6 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
         struct ibgda_device *device = (struct ibgda_device *)ibgda_state->devices + dev_idx;
         dc_map_type = device->dci.map_by;
         rc_map_type = device->rc.map_by;
-        skip_cst &= device->may_skip_cst;
         support_half_av_seg &= device->support_half_av_seg;
     }
     /* Calculate remaining constants end */
@@ -3729,7 +3726,7 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     status = ibgda_post_gpu_device_state(
         ibgda_state, t, ibgda_device_state_h, dci_d, rc_d, dct_d, cq_d, qp_group_switches_d,
         num_qp_groups, num_shared_dci_handles, num_dci_handles, num_dct_handles, num_rc_handles,
-        n_devs_selected, dc_map_type, rc_map_type, support_half_av_seg, skip_cst);
+        n_devs_selected, dc_map_type, rc_map_type, support_half_av_seg);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "ibgda_post_gpu_device_state failed.");
     /* Post device state end */
@@ -3882,7 +3879,6 @@ static int ibgda_connect_device_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
 
     // Set device flags
     device->support_half_av_seg = ibgda_state->support_half_av_seg;
-    device->may_skip_cst = ibgda_state->skip_cst;
 
     return status;
 }
@@ -4010,12 +4006,11 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     status = ibgda_setup_gpu_state(t);
     if (status) return status;
 
-    // Set all device support_half_av_seg and need_cst together
+    // Set all device support_half_av_seg
     for (int i = 0; i < init_dev_cnt; i++) {
         int curr_dev_id = ibgda_state->selected_dev_ids[i];
         struct ibgda_device *device = (struct ibgda_device *)ibgda_state->devices + curr_dev_id;
         device->support_half_av_seg = ibgda_state->support_half_av_seg;
-        device->may_skip_cst = ibgda_state->skip_cst;
     }
 
     if (init_dev_cnt < num_selected_devs) {
