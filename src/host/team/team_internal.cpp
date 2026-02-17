@@ -49,24 +49,26 @@ using namespace nvls;
 #define NVSHMEMI_DIAG_STRLEN 1024
 #define NVSHMEMI_SYNC_VALUE 0
 #define NVSHMEMI_REDUCE_MAX_CTA_COUNT 64
-#define NVSHMEMI_DEVICE_TEAM_PE_LOCATION(team) ((int *)(team + 1))
+static int *nvshmemi_device_team_pe_location(nvshmemi_team_t *team) { return (int *)(team + 1); }
 
 /* 0th entry in team duplicate resources is same team as the encapsulating team. This allows
  * for reuse of the same business logic for nCTA == 1 and nCTA > 1 and minimizes if/else
  */
-#define NVSHMEMI_TEAM_DUP_INITIALIZER(teami, team_idx) \
-    (teami)->team_dups[0] = (team_idx);                \
-    for (int i = 1; i < 128; ++i) {                    \
-        (teami)->team_dups[i] = NVSHMEM_TEAM_INVALID;  \
+static void nvshmemi_team_init_dups(nvshmemi_team_t *teami, int team_idx) {
+    teami->team_dups[0] = team_idx;
+    for (int i = 1; i < 128; ++i) {
+        teami->team_dups[i] = NVSHMEM_TEAM_INVALID;
     }
+}
 
-#define NVSHMEMI_TEAM_PE_MAPPING_INITIALIZER(team, team_npes)     \
-    for (int i = 0; i < nvshmemi_state->npes; ++i) {              \
-        (team)->pe_mapping[i + team_npes] = NVSHMEM_TEAM_INVALID; \
-    }                                                             \
-    for (int i = 0; i < team_npes; ++i) {                         \
-        (team)->pe_mapping[i] = NVSHMEM_TEAM_INVALID;             \
+static void nvshmemi_team_init_pe_mapping(nvshmemi_team_t *team, int team_npes) {
+    for (int i = 0; i < nvshmemi_state->npes; ++i) {
+        team->pe_mapping[i + team_npes] = NVSHMEM_TEAM_INVALID;
     }
+    for (int i = 0; i < team_npes; ++i) {
+        team->pe_mapping[i] = NVSHMEM_TEAM_INVALID;
+    }
+}
 
 static long *nvshmemi_team_get_sync_counter(nvshmemi_team_t *team);
 
@@ -201,7 +203,7 @@ static int nvshmemi_team_allocate_team(nvshmemi_team_t **host_ptr, nvshmemi_team
     // Set the pe_mapping pointer to point to the memory right after the struct
     (*host_ptr)->pe_mapping = (int *)((*host_ptr) + 1);
 
-    NVSHMEMI_TEAM_PE_MAPPING_INITIALIZER(*host_ptr, npes);
+    nvshmemi_team_init_pe_mapping(*host_ptr, npes);
     nvshmemi_team_copy_pe_mapping(*host_ptr, *device_ptr, npes);
     return NVSHMEMX_SUCCESS;
 }
@@ -949,7 +951,7 @@ static int init_team_world() {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_world->team_idx = NVSHMEM_TEAM_WORLD_INDEX;
-    NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_world, NVSHMEM_TEAM_WORLD_INDEX);
+    nvshmemi_team_init_dups(nvshmemi_team_world, NVSHMEM_TEAM_WORLD_INDEX);
     nvshmemi_team_world->start = 0;
     nvshmemi_team_world->stride = 1;
     nvshmemi_team_world->size = nvshmemi_state->npes;
@@ -975,8 +977,8 @@ static int init_team_world() {
  * Returns true if the lists can form a valid NVSHMEM_TEAM_SHARED, false otherwise. */
 static bool validate_p2p_pe_lists(const std::vector<int> &p2p_pe_list,
                                   const std::vector<int> &n_p2p_pes_all,
-                                  const std::vector<int> &p2p_pe_list_all,
-                                  int n_p2p_pes, int max_num_p2p_pes) {
+                                  const std::vector<int> &p2p_pe_list_all, int n_p2p_pes,
+                                  int max_num_p2p_pes) {
     /* Check for each p2p-connected remote PE that
       (1) it has the same number of p2p-connected PEs, and
       (2) the list of p2p-connected PEs is the same.
@@ -1038,7 +1040,7 @@ static int init_team_shared(void) {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_shared->team_idx = NVSHMEM_TEAM_SHARED_INDEX;
-    NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_shared, NVSHMEM_TEAM_SHARED_INDEX);
+    nvshmemi_team_init_dups(nvshmemi_team_shared, NVSHMEM_TEAM_SHARED_INDEX);
 
     /* Exchange n_p2p_pes for all PEs */
     std::vector<int> n_p2p_pes_all(nvshmemi_team_world->size);
@@ -1058,8 +1060,8 @@ static int init_team_shared(void) {
     /* Shrink back local list to original size */
     p2p_pe_list.resize(n_p2p_pes);
 
-    if (validate_p2p_pe_lists(p2p_pe_list, n_p2p_pes_all, p2p_pe_list_all,
-                              n_p2p_pes, max_num_p2p_pes)) {
+    if (validate_p2p_pe_lists(p2p_pe_list, n_p2p_pes_all, p2p_pe_list_all, n_p2p_pes,
+                              max_num_p2p_pes)) {
         /* Initialize NVSHMEM_TEAM_SHARED from P2P list */
         nvshmemi_team_shared->my_pe = my_idx_in_p2p_list;
         nvshmemi_team_shared->start = p2p_pe_list[0];
@@ -1103,8 +1105,8 @@ static int init_team_node() {
     /* Search for on-node peer PEs while checking for a consistent stride */
     uint64_t myHostHash = nvshmemu_getHostHash();
     std::vector<uint64_t> hostHash(nvshmemi_state->npes);
-    int status = nvshmemi_boot_handle.allgather(&myHostHash, hostHash.data(),
-                                                sizeof(uint64_t), &nvshmemi_boot_handle);
+    int status = nvshmemi_boot_handle.allgather(&myHostHash, hostHash.data(), sizeof(uint64_t),
+                                                &nvshmemi_boot_handle);
     if (status != 0) {
         NVSHMEMI_ERROR_PRINT("allgather of host hashes failed\n");
         return NVSHMEMX_ERROR_INTERNAL;
@@ -1129,7 +1131,7 @@ static int init_team_node() {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_node->team_idx = NVSHMEM_TEAM_NODE_INDEX;
-    NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_node, NVSHMEM_TEAM_NODE_INDEX);
+    nvshmemi_team_init_dups(nvshmemi_team_node, NVSHMEM_TEAM_NODE_INDEX);
     nvshmemi_team_world->team_node = nvshmemi_team_node->team_idx;
     nvshmemi_team_node->my_pe = nvshmemi_state->mype_node;
     nvshmemi_team_node->rdxn_count = 0;
@@ -1170,7 +1172,7 @@ static int init_team_same_mype_node() {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_same_mype_node->team_idx = NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX;
-    NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_same_mype_node, NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX);
+    nvshmemi_team_init_dups(nvshmemi_team_same_mype_node, NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX);
     nvshmemi_team_world->team_same_mype_node = nvshmemi_team_same_mype_node->team_idx;
     nvshmemi_team_same_mype_node->my_pe = nvshmemi_state->mype / nvshmemi_state->npes_node;
     nvshmemi_team_same_mype_node->rdxn_count = 0;
@@ -1223,7 +1225,7 @@ static int init_team_same_gpu() {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_same_gpu->team_idx = NVSHMEM_TEAM_SAME_GPU_INDEX;
-    NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_same_gpu, NVSHMEM_TEAM_SAME_GPU_INDEX);
+    nvshmemi_team_init_dups(nvshmemi_team_same_gpu, NVSHMEM_TEAM_SAME_GPU_INDEX);
     nvshmemi_team_same_gpu->rdxn_count = 0;
     nvshmemi_team_same_gpu->ll_flag = 1;
     nvshmemi_team_same_gpu->alltoall_count = 0;
@@ -1262,7 +1264,7 @@ static int init_team_gpu_leaders() {
             return NVSHMEMX_ERROR_OUT_OF_MEMORY;
         }
         nvshmemi_team_gpu_leaders->team_idx = NVSHMEM_TEAM_GPU_LEADERS_INDEX;
-        NVSHMEMI_TEAM_DUP_INITIALIZER(nvshmemi_team_gpu_leaders, NVSHMEM_TEAM_GPU_LEADERS_INDEX);
+        nvshmemi_team_init_dups(nvshmemi_team_gpu_leaders, NVSHMEM_TEAM_GPU_LEADERS_INDEX);
         nvshmemi_team_gpu_leaders->config_mask = 0;
 
         nvshmemi_team_gpu_leaders->start = 0;
@@ -1283,9 +1285,8 @@ static int init_team_gpu_leaders() {
         nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_gpu_leaders);
         nvshmemi_team_set_p2p_connectivity(nvshmemi_team_gpu_leaders);
         nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_gpu_leaders);
-        int status =
-            nvshmemi_boot_handle.allgather(&nvshmemi_team_gpu_leaders->my_pe,
-                                           scratch.data(), sizeof(int), &nvshmemi_boot_handle);
+        int status = nvshmemi_boot_handle.allgather(
+            &nvshmemi_team_gpu_leaders->my_pe, scratch.data(), sizeof(int), &nvshmemi_boot_handle);
         if (status != 0) {
             NVSHMEMI_ERROR_PRINT("allgather of gpu leaders failed\n");
             return NVSHMEMX_ERROR_INTERNAL;
@@ -1314,8 +1315,8 @@ static int init_team_gpu_leaders() {
     } else {
         int my_pe = -1;
         nvshmemi_team_gpu_leaders = NULL;
-        int status = nvshmemi_boot_handle.allgather(&my_pe, scratch.data(),
-                                                    sizeof(int), &nvshmemi_boot_handle);
+        int status = nvshmemi_boot_handle.allgather(&my_pe, scratch.data(), sizeof(int),
+                                                    &nvshmemi_boot_handle);
         if (status != 0) {
             NVSHMEMI_ERROR_PRINT("allgather of gpu leaders failed\n");
             return NVSHMEMX_ERROR_INTERNAL;
@@ -1724,7 +1725,7 @@ int nvshmemi_team_set_team_idx_v1(nvshmemi_team_t *myteam, nvshmemi_team_t *myde
         /* Set the selected psync bit to 0, reserving that slot */
         myteam->team_idx = team_idx;
         nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, myteam->team_idx);
-        NVSHMEMI_TEAM_DUP_INITIALIZER(myteam, myteam->team_idx);
+        nvshmemi_team_init_dups(myteam, myteam->team_idx);
         nvshmemi_team_pool[myteam->team_idx] = myteam;
         copy_team_to_device(myteam, mydeviceteam);
         CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
@@ -1783,7 +1784,7 @@ static int nvshmemi_team_populate_from_uid(nvshmemi_team_t *myteam, nvshmemi_tea
                           "Failed to copy internal team pe info\n");
 
     nvshmemi_call_team_mapping_kernel(team_uniqueid, npes,
-                                      NVSHMEMI_DEVICE_TEAM_PE_LOCATION(mydeviceteam),
+                                      nvshmemi_device_team_pe_location(mydeviceteam),
                                       nvshmemi_team_creation_psync);
 
     copy_team_pe_mapping_to_host(mydeviceteam, myteam);
@@ -1826,7 +1827,7 @@ int nvshmemi_team_set_team_idx_v2(nvshmemi_team_t *myteam, nvshmemi_team_t *myde
     /* Set the selected psync bit to 0, reserving that slot */
     myteam->team_idx = team_idx;
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, myteam->team_idx);
-    NVSHMEMI_TEAM_DUP_INITIALIZER(myteam, myteam->team_idx);
+    nvshmemi_team_init_dups(myteam, myteam->team_idx);
     nvshmemi_team_pool[myteam->team_idx] = myteam;
     copy_team_to_device(myteam, mydeviceteam);
     nvshmemi_barrier(myteam->team_idx);
