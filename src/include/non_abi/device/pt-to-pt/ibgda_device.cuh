@@ -47,8 +47,8 @@
  */
 #define IBGDA_MAX_THREADS_PER_QUIET 32
 
-// MLX5 accepts up to 2 GiB per command
-#define IBGDA_MAX_TRANSFER_SIZE 2147483648LLU
+// MLX5 accepts up to 1 GiB per command
+#define IBGDA_MAX_TRANSFER_SIZE 1073741824LLU
 
 #ifndef likely
 #define likely(x) (__builtin_expect(!!(x), 1))
