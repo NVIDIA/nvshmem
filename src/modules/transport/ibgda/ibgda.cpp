@@ -4002,16 +4002,16 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
         ibgda_state->skip_cst = false;
     }
 
-    // Phase 5: GPU setup (only once)
-    status = ibgda_setup_gpu_state(t);
-    if (status) return status;
-
     // Set all device support_half_av_seg
     for (int i = 0; i < init_dev_cnt; i++) {
         int curr_dev_id = ibgda_state->selected_dev_ids[i];
         struct ibgda_device *device = (struct ibgda_device *)ibgda_state->devices + curr_dev_id;
         device->support_half_av_seg = ibgda_state->support_half_av_seg;
     }
+
+    // Phase 5: GPU setup (only once)
+    status = ibgda_setup_gpu_state(t);
+    if (status) return status;
 
     if (init_dev_cnt < num_selected_devs) {
         NVSHMEMI_WARN_PRINT("Failed to initialize all selected devices. Perf may be limited.");
@@ -4496,6 +4496,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibgda_state->options = options;
     ibgda_state->device_state_cache = device_state_cache;
     ibgda_state->skip_cst = true;
+    ibgda_state->support_half_av_seg = true;
 
     if (nvshmemt_ibv_ftable_init(&ibv_handle, &ftable, ibgda_state->log_level)) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
