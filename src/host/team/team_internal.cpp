@@ -56,15 +56,15 @@ using namespace nvls;
  */
 #define NVSHMEMI_TEAM_DUP_INITIALIZER(teami, team_idx) \
     (teami)->team_dups[0] = (team_idx);                \
-    for (int i = 1; i < 128; i++) {                    \
+    for (int i = 1; i < 128; ++i) {                    \
         (teami)->team_dups[i] = NVSHMEM_TEAM_INVALID;  \
     }
 
 #define NVSHMEMI_TEAM_PE_MAPPING_INITIALIZER(team, team_npes)     \
-    for (int i = 0; i < nvshmemi_state->npes; i++) {              \
+    for (int i = 0; i < nvshmemi_state->npes; ++i) {              \
         (team)->pe_mapping[i + team_npes] = NVSHMEM_TEAM_INVALID; \
     }                                                             \
-    for (int i = 0; i < team_npes; i++) {                         \
+    for (int i = 0; i < team_npes; ++i) {                         \
         (team)->pe_mapping[i] = NVSHMEM_TEAM_INVALID;             \
     }
 
@@ -131,7 +131,7 @@ static bool nvshmemi_team_is_identical(nvshmemi_team_t *t1, nvshmemi_team_t *t2)
         return true;
     }
 
-    for (int i = 0; i < t1->size; i++) {
+    for (int i = 0; i < t1->size; ++i) {
         if (t1->pe_mapping[i] != t2->pe_mapping[i]) {
             return false;
         }
@@ -150,7 +150,7 @@ static bool nvshmemi_team_is_subset(nvshmemi_team_t *subset, nvshmemi_team_t *su
         return false;
     }
 
-    for (i = 0; i < subset->size; i++) {
+    for (i = 0; i < subset->size; ++i) {
         subset_pe_global_idx = subset->pe_mapping[i];
         for (j = 0; j < superset->size; j++) {
             superset_pe_global_idx = superset->pe_mapping[j];
@@ -224,7 +224,7 @@ static void nvshmemi_reset_team_creation_psync() {
     nvshmemi_call_init_array_kernel<nvshmemi_team_uniqueid_t>(
         &nvshmemi_team_creation_psync->uniqueid, 1, TEAM_ULSCALAR_INVALID);
 
-    for (int i = 0; i < nvshmemi_state->npes; i++) {
+    for (int i = 0; i < nvshmemi_state->npes; ++i) {
         info.team_index_array = nvshmemi_get_pe_info_array_ptr(nvshmemi_team_creation_psync, i);
         nvshmemi_call_init_array_kernel<nvshmemi_team_creation_pe_info_t>(
             (nvshmemi_team_creation_pe_info_t *)&nvshmemi_team_creation_psync->pe_info[i], 1, info);
@@ -321,7 +321,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
     step2_nbrs = (int **)malloc(sizeof(int *) * step2_nphases);
     assert(step2_nbrs);
 
-    for (int i = 0; i < step2_nphases; i++) {
+    for (int i = 0; i < step2_nphases; ++i) {
         step2_nbrs[i] = (int *)malloc(sizeof(int) * (k - 1));
         assert(step2_nbrs[i]);
         for (int j = 0; j < k - 1; j++) {
@@ -353,7 +353,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
             if (step1_sendto > T - 1) step1_sendto = T;
             newpe = -1; /* tag this PE as non-participating */
         } else {        /* participating PE */
-            for (i = 0; i < k - 1; i++) {
+            for (i = 0; i < k - 1; ++i) {
                 step1_recvfrom[i] = my_pe - i - 1;
             }
             step1_nrecvs = k - 1;
@@ -383,7 +383,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
         int phase = 0, cbit, cnt, nbr, power;
 
         /* calculate the digits in base k representation of newpe */
-        for (i = 0; i < log_p_of_k; i++) digit[i] = 0;
+        for (i = 0; i < log_p_of_k; ++i) digit[i] = 0;
 
         int remainder, i_digit = 0;
         while (temppe != 0) {
@@ -396,7 +396,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
             cbit =
                 digit[phase]; /* phase_th digit changes in this phase, obtain its original value */
             cnt = 0;
-            for (i = 0; i < k; i++) { /* there are k-1 neighbors */
+            for (i = 0; i < k; ++i) { /* there are k-1 neighbors */
                 if (i != cbit) {      /* do not generate yourself as your nieighbor */
                     digit[phase] = i; /* this gets us the base k representation of the neighbor */
 
@@ -421,8 +421,8 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
     }
     // Update with global PE numbers
     if (step1_sendto != -1) step1_sendto = teami->pe_mapping[step1_sendto];
-    for (int i = 0; i < step1_nrecvs; i++) step1_recvfrom[i] = teami->pe_mapping[step1_recvfrom[i]];
-    for (int i = 0; i < step2_nphases; i++) {
+    for (int i = 0; i < step1_nrecvs; ++i) step1_recvfrom[i] = teami->pe_mapping[step1_recvfrom[i]];
+    for (int i = 0; i < step2_nphases; ++i) {
         for (int j = 0; j < k - 1; j++) {
             if (step2_nbrs[i][j] != TEAM_SCALAR_INVALID) {
                 step2_nbrs[i][j] = teami->pe_mapping[step2_nbrs[i][j]];
@@ -437,7 +437,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
         sizeof(int *) * (step2_nphases + 1))); /* + 1 to make it non-zero otherwise cuMemAlloc
                                                   returns error when step2_nphases is 0 */
 
-    for (int i = 0; i < step2_nphases; i++) {
+    for (int i = 0; i < step2_nphases; ++i) {
         void *dev_ptr;
         CUDA_RUNTIME_CHECK(cudaMalloc(&dev_ptr, sizeof(int) * (k - 1)));
         CUDA_RUNTIME_CHECK(cudaMemcpy((int **)step2_nbrs_device + i, &dev_ptr, sizeof(int *),
@@ -447,7 +447,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
                                   cudaMemcpyHostToDevice));
     void *dev_ptr, *dev_ptr_2;
     dev_ptr = step2_nbrs_device;
-    for (int i = 0; i < step2_nphases; i++) {
+    for (int i = 0; i < step2_nphases; ++i) {
         CUDA_RUNTIME_CHECK(
             cudaMemcpy(&dev_ptr_2, (int **)dev_ptr + i, sizeof(int *), cudaMemcpyDeviceToHost));
         CUDA_RUNTIME_CHECK(
@@ -460,7 +460,7 @@ static void nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_t *teami) {
     teami->reduce_recexch.step2_nbrs = step2_nbrs_device;
 
     free(step1_recvfrom);
-    for (int i = 0; i < step2_nphases; i++) {
+    for (int i = 0; i < step2_nphases; ++i) {
         if (step2_nbrs[i]) {
             free(step2_nbrs[i]);
         }
@@ -474,7 +474,7 @@ static void nvshmemi_recexchalgo_free_mem(nvshmemi_team_t *teami) {
     }
     if (teami->reduce_recexch.step2_nbrs != NULL) {
         if (teami->reduce_recexch.step2_nphases != RED_REC_INVALID_SCALAR) {
-            for (int i = 0; i < teami->reduce_recexch.step2_nphases; i++) {
+            for (int i = 0; i < teami->reduce_recexch.step2_nphases; ++i) {
                 void *dev_ptr;
                 CUDA_RUNTIME_CHECK(cudaMemcpy(&dev_ptr, teami->reduce_recexch.step2_nbrs + i,
                                               sizeof(int *), cudaMemcpyDeviceToHost));
@@ -515,7 +515,7 @@ static inline void nvshmemi_bit_to_string(char *str, size_t str_size, unsigned c
                                           size_t ptr_size) {
     size_t off = 0;
 
-    for (size_t i = 0; i < ptr_size; i++) {
+    for (size_t i = 0; i < ptr_size; ++i) {
         for (size_t j = 0; j < CHAR_BIT; j++) {
             off += snprintf(str + off, str_size - off, "%s",
                             (ptr[i] & (1 << (CHAR_BIT - 1 - j))) ? "1" : "0");
@@ -534,7 +534,7 @@ static inline void nvshmemi_bit_to_string(char *str, size_t str_size, unsigned c
  */
 static inline int nvshmemi_team_get_stride(nvshmemi_team_t *team) {
     int stride = team->pe_mapping[1] - team->pe_mapping[0];
-    for (int i = 2; i < team->size; i++) {
+    for (int i = 2; i < team->size; ++i) {
         if (team->pe_mapping[i] - team->pe_mapping[i - 1] != stride) {
             return TEAM_SCALAR_INVALID;
         }
@@ -668,7 +668,7 @@ void nvshmemi_team_init_nccl_comm(nvshmemi_team_t *teami) {
         NCCL_CHECK(nccl_ftable.GetUniqueId(&Id));
         CUDA_RUNTIME_CHECK(cudaMemcpy(pWrk, &Id, sizeof(ncclUniqueId), cudaMemcpyHostToDevice));
         CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
-        for (int i = 0; i < size; i++) {
+        for (int i = 0; i < size; ++i) {
             nvshmemx_char_put_nbi_on_stream((char *)pWrk, (const char *)pWrk, sizeof(ncclUniqueId),
                                             teami->pe_mapping[i], (cudaStream_t)0);
         }
@@ -707,7 +707,7 @@ nvshmemi_team_t *nvshmemi_team_get_same_existing_nvls_team(nvshmemi_team_t *team
     if (nvshmemi_options.DISABLE_NVLS_SHARING) {
         return nullptr;
     }
-    for (int i = 0; i < team->team_idx; i++) {
+    for (int i = 0; i < team->team_idx; ++i) {
         if (nvshmemi_team_is_identical(team, nvshmemi_team_pool[i])) {
             if (nvshmemi_team_support_nvls(nvshmemi_team_pool[i])) {
                 return nvshmemi_team_pool[i];
@@ -739,7 +739,7 @@ static void nvshmemi_team_destroy_nvls(nvshmemi_team_t *team) {
          * bound and mapped to MC heap */
         if (nvls_obj->is_owner(team)) {
             // Transfer ownership to one of the dup teams
-            for (long i = 0; i < nvshmemi_max_teams; i++) {
+            for (long i = 0; i < nvshmemi_max_teams; ++i) {
                 if (nvshmemi_team_pool[i] != NULL &&
                     nvshmemi_team_support_nvls(nvshmemi_team_pool[i])) {
                     // Find first duplicate team that shares the nvls rsc and make it the owner
@@ -876,14 +876,14 @@ int nvshmemi_set_max_teams(void) {
 }
 
 static void nvshmemi_team_populate_from_world_pe_mapping(nvshmemi_team_t *team) {
-    for (int i = 0; i < team->size; i++) {
+    for (int i = 0; i < team->size; ++i) {
         int global_pe_index = team->pe_mapping[i];
         team->pe_mapping[global_pe_index + team->size] = nvshmemi_team_world->pe_mapping[i];
     }
 }
 
 static void nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_t *team) {
-    for (int i = 0; i < team->size; i++) {
+    for (int i = 0; i < team->size; ++i) {
         int global_pe_index = team->start + i * team->stride;
         team->pe_mapping[i] = global_pe_index;
     }
@@ -915,7 +915,7 @@ void nvshmemi_duplicate_team(nvshmem_team_t team, nvshmemi_team_t *my_team) {
                      NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT));
     }
     if (my_team->team_dups[1] == NVSHMEM_TEAM_INVALID) {
-        for (int i = 0; i < max_required_duplicate_teams - 1; i++) {
+        for (int i = 0; i < max_required_duplicate_teams - 1; ++i) {
             nvshmemi_team_split_strided(nvshmemi_team_pool[team], 0, 1, nvshmem_team_n_pes(team),
                                         NULL, 0, &(my_team->team_dups[i + 1]), true);
             INFO(NVSHMEM_TEAM,
@@ -998,7 +998,7 @@ static bool validate_p2p_pe_lists(const std::vector<int> &p2p_pe_list,
     }
 
     /* Check if p2p-connected PE list is of the form (start, stride, size) */
-    for (int i = 2; i < n_p2p_pes; i++) {
+    for (int i = 2; i < n_p2p_pes; ++i) {
         if (p2p_pe_list[i] - p2p_pe_list[i - 1] != p2p_pe_list[i - 1] - p2p_pe_list[i - 2]) {
             INFO(NVSHMEM_INIT,
                  "P2P list is not of the form (start, stride, size). Cannot form "
@@ -1016,7 +1016,7 @@ static int init_team_shared(void) {
     p2p_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
 
     int my_idx_in_p2p_list = 0;
-    for (int i = 0; i < nvshmemi_team_world->size; i++) {
+    for (int i = 0; i < nvshmemi_team_world->size; ++i) {
         if (nvshmemi_state->heap_obj->get_local_pe_base()[i]) {
             if (i == nvshmemi_team_world->my_pe) {
                 my_idx_in_p2p_list = p2p_pe_list.size();
@@ -1292,7 +1292,7 @@ static int init_team_gpu_leaders() {
         }
         /* Check whether a valid TEAM_GPU_LEADERS was formed */
         int last_mype = -1;
-        for (int i = 0; i < nvshmemi_state->npes; i++) {
+        for (int i = 0; i < nvshmemi_state->npes; ++i) {
             if (scratch[i] != -1) {
                 if (scratch[i] != last_mype + 1) {
                     WARN(
@@ -1349,7 +1349,7 @@ static int init_team_pool_and_psync() {
                                   nvshmemi_max_teams * sizeof(nvshmemi_team_t *)));
     nvshmemi_device_state.team_pool = nvshmemi_device_team_pool;
 
-    for (long i = 0; i < nvshmemi_max_teams; i++) {
+    for (long i = 0; i < nvshmemi_max_teams; ++i) {
         nvshmemi_team_pool[i] = NULL;
     }
 
@@ -1412,7 +1412,7 @@ static int init_team_pool_and_psync() {
     device_psync_pool_avail_reduced = &device_psync_pool_avail[N_PSYNC_BYTES];
     /* Initialize the psync bits to 1, making all slots available: */
     memset(psync_pool_avail, 0, 2 * N_PSYNC_BYTES);
-    for (size_t i = 0; i < (size_t)nvshmemi_max_teams; i++) {
+    for (size_t i = 0; i < (size_t)nvshmemi_max_teams; ++i) {
         nvshmemi_bit_set(psync_pool_avail, N_PSYNC_BYTES, i);
     }
 
@@ -1469,7 +1469,7 @@ static int finalize_team_init() {
 #endif /* NVSHMEM_USE_NCCL */
 
     /* Setup NVLS resources for all internal p2p connected teams */
-    for (long i = 0; i < nvshmemi_max_teams; i++) {
+    for (long i = 0; i < nvshmemi_max_teams; ++i) {
         if (nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_p2p_connected) {
             int status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
             if (status != 0) {
@@ -1586,7 +1586,7 @@ int nvshmemi_team_init(void) {
 
 int nvshmemi_team_finalize(void) {
     /* Destroy all undestroyed teams */
-    for (long i = 0; i < nvshmemi_max_teams; i++) {
+    for (long i = 0; i < nvshmemi_max_teams; ++i) {
         if (nvshmemi_team_pool[i] != NULL) nvshmemi_team_destroy(nvshmemi_team_pool[i]);
     }
 
@@ -2048,7 +2048,7 @@ int nvshmemi_team_split_same_mype_node(nvshmemi_team_t *parent_team, nvshmem_tea
 
     myteam->is_team_same_mype_node = true;
 
-    for (int i = 0; i < nvshmemi_state->npes_node; i++) {
+    for (int i = 0; i < nvshmemi_state->npes_node; ++i) {
         if (nvshmemi_state->mype_node == i) {
             myteam->config.uniqueid = parent_team->config.uniqueid + nvshmemi_state->mype_node;
             if (nvshmemi_team_allocate_resources(myteam, mydeviceteam, parent_team, NULL, 0) != 0) {
@@ -2095,7 +2095,7 @@ int nvshmemi_team_split_node(nvshmemi_team_t *parent_team, nvshmem_team_t *new_t
     myteam->is_team_node = true;
 
     /* Do node creation in sequence to avoid race condition */
-    for (int i = 0; i < nvshmemi_state->npes / nvshmemi_state->npes_node; i++) {
+    for (int i = 0; i < nvshmemi_state->npes / nvshmemi_state->npes_node; ++i) {
         uint64_t my_node_idx = nvshmemi_state->mype / nvshmemi_state->npes_node;
         myteam->config.uniqueid = parent_team->config.uniqueid + (my_node_idx << 32);
         if (nvshmemi_state->mype / nvshmemi_state->npes_node == i) {
@@ -2211,7 +2211,7 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
         goto out;
     }
 
-    for (int i = PE_start; i < PE_start + PE_size; i++) {
+    for (int i = PE_start; i < PE_start + PE_size; ++i) {
         int parent_team_index = PE_start + i * PE_stride;
         int team_world_index = parent_team->pe_mapping[parent_team_index];
 
@@ -2343,7 +2343,7 @@ int nvshmemi_team_split_strided(nvshmemi_team_t *parent_team, int PE_start, int 
             myteam->config.num_contexts = TEAM_CONFIG_SCALAR_INVALID;
         }
 
-        for (int i = 0; i < PE_size; i++) {
+        for (int i = 0; i < PE_size; ++i) {
             int pe = global_PE_start + i * global_PE_stride;
             myteam->pe_mapping[i] = pe;
             myteam->pe_mapping[pe + myteam->size] = i;
@@ -2405,7 +2405,7 @@ int nvshmemi_team_split_2d(nvshmemi_team_t *parent_team, int xrange,
     int start = 0;
     int ret = 0;
 
-    for (int i = 0; i < num_xteams; i++) {
+    for (int i = 0; i < num_xteams; ++i) {
         nvshmem_team_t my_xteam;
         int xsize = (i == num_xteams - 1 && parent_size % xrange) ? parent_size % xrange : xrange;
         ret = nvshmemi_team_split_strided(parent_team, start, 1, xsize, xaxis_config, xaxis_mask,
@@ -2423,7 +2423,7 @@ int nvshmemi_team_split_2d(nvshmemi_team_t *parent_team, int xrange,
 
     start = 0;
 
-    for (int i = 0; i < num_yteams; i++) {
+    for (int i = 0; i < num_yteams; ++i) {
         nvshmem_team_t my_yteam;
         int remainder = parent_size % xrange;
         int yrange = parent_size / xrange;
@@ -2469,7 +2469,7 @@ void nvshmemi_team_destroy(nvshmemi_team_t *team) {
             NVSHMEMI_ERROR_PRINT("Destroying team at index[%d] without an active pSync\n", idx);
         }
 
-        for (int i = 0; i < nvshmemi_max_teams; i++) {
+        for (int i = 0; i < nvshmemi_max_teams; ++i) {
             if (nvshmemi_team_pool[i] == team && i != idx) {
                 NVSHMEMI_ERROR_PRINT(
                     "the team at index[%d] is already in use at another index[%d].\n", idx, i);
