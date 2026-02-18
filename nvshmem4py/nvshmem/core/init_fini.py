@@ -11,6 +11,7 @@
 import logging
 import os
 import ctypes
+from pathlib import Path
 from typing import Union
 
 import nvshmem.core
@@ -21,22 +22,37 @@ import nvshmem.core.memory as memory
 from nvshmem import __version__
 from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus
 
-from cuda.pathfinder import load_nvidia_dynamic_lib
+from cuda.pathfinder import load_nvidia_dynamic_lib, find_nvidia_header_directory
 from cuda.core import Buffer, MemoryResource
 from cuda.core import Device, system
 from cuda.core import ObjectCode
 
 import numpy as np
 
-try:
-    import mpi4py.MPI as mpi
-    from mpi4py.MPI import Comm
-    _mpi4py_enabled = True
-except (ImportError, RuntimeError):
-    Comm = None
-    _mpi4py_enabled = False
+Comm = None
+mpi = None
+_mpi4py_enabled = False
 
-__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init', 'library_finalize', 'UniqueID']
+def _import_mpi():
+    global mpi, Comm, _mpi4py_enabled
+    if _mpi4py_enabled:
+        return
+    try:
+        import mpi4py.MPI as mpi_module
+        from mpi4py.MPI import Comm
+        mpi = mpi_module
+        Comm = Comm
+        _mpi4py_enabled = True
+        import sys
+        print(f"MPI4Py enabled: {_mpi4py_enabled}", file=sys.stderr, flush=True)
+        logger.info(f"MPI4Py enabled: {_mpi4py_enabled}")
+    except (ImportError, RuntimeError) as e:
+        import sys
+        print(f"MPI4Py not enabled: {e}", file=sys.stderr, flush=True)
+        logger.warning(f"MPI4Py not enabled: {e}")
+        _mpi4py_enabled = False
+
+__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init', 'library_finalize', 'UniqueID', 'find_device_bitcode_library']
 
 logger = logging.getLogger("nvshmem")
 
@@ -175,9 +191,17 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         The user requested MPI bootstrap. This means we internally use MPI to perform our bootstrap.
         It hasn't been done yet 
         """
+        import sys
+        print("Importing MPI", file=sys.stderr, flush=True)
+        logger.debug("Importing MPI")
+        _import_mpi()
+        print(f"MPI4Py enabled: {_mpi4py_enabled}", file=sys.stderr, flush=True)
+        logger.info(f"MPI4Py enabled after import: {_mpi4py_enabled}")
         # Step 1: Detect MPI_Comm size
-        if not _mpi4py_enabled or (not isinstance(mpi_comm, mpi.Comm) and mpi_comm is not None):
-            raise NvshmemInvalid("Invalid MPI communicator passed in")
+        if not _mpi4py_enabled:
+            raise NvshmemInvalid("MPI/MPI4Py not enabled")
+        if mpi_comm is not None and not isinstance(mpi_comm, mpi.Comm):
+            raise NvshmemInvalid("Invalid MPI communicator passed")
 
         # This has the effect of detecting the MPI distro
         # OMPI uses void *, MPICH family uses int
@@ -236,8 +260,9 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
 
         This is useful for times when you don't want to recompile NVSHMEM for your MPI distro du-jour.
         """
+        _import_mpi()
         if not _mpi4py_enabled:
-            raise NvshmemInvalid("MPI4Py Required for managed_uid init")
+            raise NvshmemInvalid("MPI4Py Required for emulated_mpi init")
         if mpi_comm is None:
             # If None, assume user wants COMM_WORLD
             mpi_comm = mpi.COMM_WORLD
@@ -398,4 +423,26 @@ def library_finalize(lib: NvshmemKernelObject) -> None:
     status = bindings.culibrary_finalize(int(lib.handle))
     if status is not None and status != 0:
         raise NvshmemError("Failed to finalize CULibrary for NVSHMEM")
+
+
+def find_device_bitcode_library() -> str:
+    """
+    Find the path to the libnvshmem_device.bc library.
+
+    Searches for the library in ../lib/ relative to the NVSHMEM header directory.
+
+    Returns:
+        The path to the libnvshmem_device.bc library. (a string)
+    """
+    header_path = find_nvidia_header_directory("nvshmem")
+    if not header_path:
+        raise NvshmemInvalid("NVSHMEM headers not found. Cannot find the device bitcode library.")
     
+    # Search in ../lib/ relative to the header path
+    # TODO: Switch to cuda.pathfinder when it supports bitcode libraries (https://github.com/NVIDIA/cuda-python/issues/1421)
+    header_path_obj = Path(header_path)
+    lib_path = header_path_obj.parent / "lib" / "libnvshmem_device.bc"
+    
+    if not lib_path.exists():
+        raise NvshmemInvalid(f"NVSHMEM device bitcode not found at {lib_path}")
+    return str(lib_path)

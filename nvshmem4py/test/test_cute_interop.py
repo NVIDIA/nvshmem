@@ -14,11 +14,16 @@ import gc
 import struct
 
 from cuda.core import VirtualMemoryResource, VirtualMemoryResourceOptions
-
+from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 import nvshmem.core
 import nvshmem.core.interop.cute as cute_interop
 import cuda.bindings.driver as cudrv
+import torch
+from cutlass.cute.runtime import from_dlpack
 
+from nvshmem.bindings.device.cute import int_p as cute_int_p
+from nvshmem.bindings.device.cute import my_pe as cute_my_pe
+from nvshmem.bindings.device.cute import n_pes as cute_n_pes
 
 from cuda.core import Device, system
 
@@ -117,6 +122,57 @@ def test_fortran_morder_alloc_cute():
     cute_interop.free_tensor(tensor)
     print("Done tsting allocating Fortran-ordered memory Cute DSL")
 
+
+@cute.kernel
+def simple_shift_kernel(
+    destTensor: cute.Tensor
+):
+    tidx, _, _ = cute.arch.thread_idx()
+
+    mype = cute_my_pe()
+    npes = cute_n_pes()
+    peer = (mype + 1) % npes
+
+    if tidx == 0:
+        cute.printf("mype: %d, peer: %d, npes: %d, value: %d", mype, peer, npes, mype+1)
+        cute.printf("tidx: %d", tidx)
+        cute_int_p(destTensor.iterator, mype+1, peer)
+
+@cute.jit
+def simple_shift(
+    destTensor: cute.Tensor):
+    simple_shift_kernel(
+        destTensor,
+    ).launch(
+        grid=[1, 1, 1],
+        block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
+    )
+
+def test_cute_compile_helper():
+    print("Testing cute_compile_helper function")
+    if not _cute_enabled:
+        print("WARNING: Cute DSL not found. Not running cute_compile_helper test")
+        return
+
+    tensor = nvshmem.core.tensor(8, dtype=torch.int32)
+
+    tensor_dlpack = from_dlpack(tensor).mark_layout_dynamic()
+    # cute_compile_helper needs the @cute.jit launcher function and example arguments
+    compiled_kernel, nvshmem_kernel = cute_interop.cute_compile_helper(
+        simple_shift,
+        tensor_dlpack,
+    )
+    print("cute_compile_helper compiled kernel:", compiled_kernel)
+    compiled_kernel(tensor_dlpack)
+    assert compiled_kernel is not None
+    assert nvshmem_kernel is not None
+    # Clean up: finalize the library
+    nvshmem.core.library_finalize(nvshmem_kernel)
+    nvshmem.core.free_tensor(tensor)
+    print("cute_compile_helper test complete")
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid"], default="uid")
@@ -130,6 +186,7 @@ if __name__ == '__main__':
     test_mc_tensor()
     test_peer_tensor()
     test_fortran_morder_alloc_cute()
+    test_cute_compile_helper()
     print("All tests passed")
     cute_interop.cleanup_cute()
     nvshmem.core.finalize()
