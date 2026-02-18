@@ -402,7 +402,6 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
     assert(op);
     assert(addr);
     op->src_addr = *addr;
-    op->ep_index = -1;
 
     if (entry->flags & FI_SEND) {
         libfabric_state->op_queue[domain_idx]->putToSend(op);
