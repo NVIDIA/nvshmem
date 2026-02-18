@@ -32,7 +32,7 @@ from cuda.core import Stream
 
 from typing import Tuple, Union
 
-__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor", "register_external_tensor", "unregister_external_tensor", "cleanup_cute"]
+__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor", "register_external_tensor", "unregister_external_tensor", "cleanup_cute", "cute_compile_helper"]
 
 try:
     from cutlass import cute
@@ -278,8 +278,8 @@ def _lookup_tensor_buffer(tensor):
         return entry
     if isinstance(tensor, Tensor):
         return {
-            "buffer": Buffer.from_handle(int(tensor.iterator), _size_in_bytes(tensor.shape, tensor.dtype)),
-            "dtype": tensor.dtype,
+            "buffer": Buffer.from_handle(int(tensor.iterator), _size_in_bytes(tensor.shape, tensor.element_type)),
+            "dtype": tensor.element_type,
             "shape": tensor.shape,
             "strides": tensor.stride,
         }
@@ -316,7 +316,7 @@ def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
         raise NvshmemInvalid("Tried to retrieve buffer from Tensor not tracked by nvshmem")
     assert isinstance(tensor, Tensor), "Tried to register an external tensor that is not a CuTe DSL tensor"
     buf = entry.get("buffer")
-    dtype = entry.get("dtype") or _safe_get_attr(tensor, "dtype") or _safe_get_attr(tensor, "element_type")
+    dtype = _safe_get_attr(tensor, "element_type")
     shape = entry.get("shape") or _safe_get_attr(tensor, "shape")
     size = _size_in_bytes(tuple(shape), dtype) if dtype is not None and shape is not None else buf.size
     return buf, size, dtype
@@ -367,7 +367,7 @@ def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
         return
     buf, _, _ = tensor_get_buffer(tensor)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
-    return _make_tensor_from_buffer(peer_buf, tensor.shape, tensor.stride, tensor.dtype)
+    return _make_tensor_from_buffer(peer_buf, tensor.shape, tensor.stride, tensor.element_type)
 
 def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
     """
@@ -377,7 +377,7 @@ def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
         return
     buf, _, _ = tensor_get_buffer(tensor)
     mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
-    return _make_tensor_from_buffer(mc_buf, tensor.shape, tensor.stride, tensor.dtype)
+    return _make_tensor_from_buffer(mc_buf, tensor.shape, tensor.stride, tensor.element_type)
 
 def register_external_tensor(tensor: Tensor) -> Tensor:
     """
@@ -387,7 +387,7 @@ def register_external_tensor(tensor: Tensor) -> Tensor:
         return
     buf, _, _ = tensor_get_buffer(tensor)
     registered_buf = nvshmem.core.register_external_buffer(buf)
-    return _make_tensor_from_buffer(registered_buf, tensor.shape, tensor.stride, tensor.dtype)
+    return _make_tensor_from_buffer(registered_buf, tensor.shape, tensor.stride, tensor.element_type)
 
 def unregister_external_tensor(tensor: Tensor) -> None:
     """
@@ -437,3 +437,73 @@ def free_tensor(tensor: Tensor) -> None:
     # Convert array to Buffer
     buf, sz, dtype = tensor_get_buffer(tensor)
     nvshmem.core.free(buf)
+
+def cute_compile_helper(kernel_fn, *args, **kwargs):
+    """
+    Helper function to compile a CuTe DSL kernel function.
+
+    Finds the libnvshmem_device.bc library and compiles the kernel function with it.
+
+    Runs nvshmem.core.library_init with the compiled kernel.
+
+    Args:
+        kernel_fn: A CuTe kernel function decorated with @cute.jit that contains a launcher.
+                   The launcher should call a @cute.kernel with .launch().
+        *args: Example arguments for compilation (tensors, etc.)
+        **kwargs: Additional arguments passed to cute.compile()
+
+    Returns:
+        A tuple containing:
+        - The compiled kernel function. (a callable object)
+        - The nvshmem kernel object. (a NvshmemKernelObject) - the user should run ``nvshmem.core.library_finalize`` 
+                  on this object after the kernel is executed.
+
+    NOTE: This function assumes that the device being used as the NVSHMEM PE is already set current.
+    """
+    nvshmem_device_bc = nvshmem.core.find_device_bitcode_library()
+    # Important: If _CUTE_MLIR_MODULE exists (from tensor creation via _make_tensor_from_buffer),
+    # its context is active. cute.compile() checks "if ir.Context.current is None" and if not,
+    # tries to access "ir.InsertionPoint.current" which raises an error if no insertion point is active.
+    # 
+    # Solution: Temporarily exit our context and location if they're active, so cute.compile()
+    # can create its own context. Then re-enter them after compilation.
+    context_exited = False
+    location_exited = False
+    
+    if _CUTE_MLIR_CONTEXT is not None:
+        # Check if our context is currently active
+        try:
+            current_ctx = ir.Context.current
+            if current_ctx is not None:
+                # Our context might be active - exit it temporarily
+                # We need to exit location first, then context
+                if _CUTE_MLIR_LOCATION is not None:
+                    _CUTE_MLIR_LOCATION.__exit__(None, None, None)
+                    location_exited = True
+                _CUTE_MLIR_CONTEXT.__exit__(None, None, None)
+                context_exited = True
+        except Exception:
+            # If we can't check, assume context is not active
+            pass
+    
+    try:
+        # Build compile_kwargs with options and any user-provided kwargs
+        compile_kwargs = {"options": f" --link-libraries={nvshmem_device_bc}"}
+        if kwargs:
+            compile_kwargs.update(kwargs)
+        
+        # Call cute.compile() - it will create its own context if needed
+        compilerd_func = cute.compile(kernel_fn, *args, **compile_kwargs)
+    finally:
+        # Re-enter our context and location if we exited them
+        if context_exited and _CUTE_MLIR_CONTEXT is not None:
+            _CUTE_MLIR_CONTEXT.__enter__()
+        if location_exited and _CUTE_MLIR_LOCATION is not None:
+            _CUTE_MLIR_LOCATION.__enter__()
+    # NOTE! assumes that device is already set current.
+    dev = Device()
+    compilerd_func = compilerd_func.to(dev.device_id)
+    cuda_library = compilerd_func.jit_module.cuda_library
+    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
+    nvshmem.core.library_init(nvshmem_kernel)
+    return compilerd_func, nvshmem_kernel

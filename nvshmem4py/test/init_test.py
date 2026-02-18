@@ -38,7 +38,7 @@ def test_multi_init():
     local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
     dev = Device(local_rank_per_node)
     dev.set_current()
-    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
+    nvshmem.core.init(device=dev,
                       mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
     print("called init1")
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
@@ -161,6 +161,34 @@ def test_module_init():
     print("Module init test passed")
 
 
+def test_find_device_bitcode_library():
+    """
+    Test for find_device_bitcode_library utility function.
+    It should find the library containing device bitcode,
+    typically needed for LTO or device linking.
+    """
+    print("Starting test for find_device_bitcode_library")
+    # Attempt to import the function under test
+    try:
+        from nvshmem.core import find_device_bitcode_library
+    except ImportError:
+        print("Could not import find_device_bitcode_library; skipping test.")
+        return
+    try:
+        lib_path = find_device_bitcode_library()
+    except Exception as e:
+        print(f"Exception raised calling find_device_bitcode_library: {e}")
+        assert False, "Exception in find_device_bitcode_library"
+
+    # Check the returned path
+    assert lib_path is not None, "Library path should not be None"
+    assert lib_path.endswith("libnvshmem_device.bc"), f"Unexpected library found: {lib_path}"
+    print(f"find_device_bitcode_library returned: {lib_path}")
+    print("find_device_bitcode_library test passed")
+
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid", "emulated_mpi"], default="uid")
@@ -171,6 +199,7 @@ if __name__ == '__main__':
         test_mpi_comm_init()
         test_none_device_init()
         test_module_init()
+        test_find_device_bitcode_library()
     elif args.init_type == "uid":
         test_uid_init()
     elif args.init_type == "emulated_mpi":

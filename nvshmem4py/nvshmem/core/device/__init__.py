@@ -10,13 +10,18 @@
 
 __all__ = ["numba", "cute"]
 
-from . import numba
-
-# Lazy import for cute - only import when accessed
+# Lazy import for numba and cute - only import when accessed
+_numba_module = None
 _cute_module = None
 
 def __getattr__(name):
-    """Lazy import of cute module."""
+    """Lazy import of numba and cute modules."""
+    if name == "numba":
+        global _numba_module
+        if _numba_module is None:
+            from . import numba
+            _numba_module = numba
+        return _numba_module
     if name == "cute":
         global _cute_module
         if _cute_module is None:
