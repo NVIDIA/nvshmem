@@ -31,6 +31,7 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
+#include "non_abi/device/coll/barrier.cuh"
 
 #ifdef __CUDA_ARCH__
 template <typename T, threadgroup_t SCOPE>

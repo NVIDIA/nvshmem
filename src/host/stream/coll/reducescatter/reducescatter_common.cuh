@@ -12,9 +12,29 @@
 #include <typeinfo>
 
 #include "internal/host/util.h"
-#include "internal/non_abi/nvshmemi_h_to_d_coll_defs.cuh"
+#include "non_abi/device/coll/reducescatter.cuh"
 #include "host/nvshmem_api.h"
 #include "device_host/nvshmem_common.cuh"
+
+template <typename TYPE, rdxn_ops_t OP>
+__global__ void reducescatter_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,
+                                               size_t nreduce, int in_cuda_graph) {
+#ifdef __CUDA_ARCH__
+    nvshmem_team_t myteam = nvshmemi_device_state_d.team_pool[team]->team_dups[blockIdx.x];
+    int nreduce_remain = (nreduce % gridDim.x);
+    int nreduce_per_block = (nreduce / gridDim.x);
+    int my_nreduce = nreduce_per_block;
+    if (blockIdx.x == gridDim.x - 1) {
+        my_nreduce = nreduce_per_block + nreduce_remain;
+    }
+
+    if (my_nreduce > 0) {
+        nvshmemi_reducescatter_threadgroup<TYPE, OP, NVSHMEMI_THREADGROUP_BLOCK>(
+            myteam, dest + nreduce_per_block * blockIdx.x, source,
+            nreduce_per_block * blockIdx.x + nvshmemi_team_my_pe(myteam) * nreduce, my_nreduce);
+    }
+#endif
+}
 
 #define NVSHMEMI_REDUCESCATTER_CTA_THRESHOLD 1048576
 

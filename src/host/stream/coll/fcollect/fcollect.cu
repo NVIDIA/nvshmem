@@ -10,8 +10,27 @@
 #include <string>
 #include <typeinfo>
 #include "internal/host/util.h"
-#include "internal/non_abi/nvshmemi_h_to_d_coll_defs.cuh"
+#include "non_abi/device/coll/fcollect.cuh"
 #include "host/nvshmem_api.h"
+
+template <typename TYPE>
+__global__ void fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,
+                                          size_t nelems, int in_cuda_graph) {
+#ifdef __CUDA_ARCH__
+    nvshmem_team_t myteam = nvshmemi_device_state_d.team_pool[team]->team_dups[blockIdx.x];
+    int nelems_remain = (nelems % gridDim.x);
+    int nelems_per_block = (nelems / gridDim.x);
+    int my_nelems = nelems_per_block;
+    if (blockIdx.x == gridDim.x - 1) {
+        my_nelems = nelems_per_block + nelems_remain;
+    }
+
+    if (my_nelems > 0)
+        nvshmemi_fcollect_threadgroup<TYPE, NVSHMEMI_THREADGROUP_BLOCK>(
+            myteam, dest, source + nelems_per_block * blockIdx.x,
+            nelems_per_block * blockIdx.x + nvshmemi_team_my_pe(myteam) * nelems, my_nelems);
+#endif
+}
 
 #define NVSHMEMI_FCOLLECT_CTA_THRESHOLD 1048576
 

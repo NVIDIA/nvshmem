@@ -5,7 +5,6 @@
  */
 
 #include "reduce_common.cuh"
-#include "internal/non_abi/nvshmemi_h_to_d_coll_defs.cuh"
 
 /* This is a special kernel that is launched only with
 one thread and is used during team creation in nvshmemi_team_plit_strided fn */

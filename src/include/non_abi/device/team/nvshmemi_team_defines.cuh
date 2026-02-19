@@ -2,6 +2,8 @@
 #define _NVSHMEMI_TEAM_DEFINES_CUH_
 
 #include "device_host/nvshmem_common.cuh"
+#include "device/nvshmem_device_macros.h"
+#include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include <cuda_runtime.h>
 #if !defined __CUDACC_RTC__
 #include <assert.h>

@@ -8,7 +8,37 @@
 #include <cuda_runtime.h>
 #include "internal/host/util.h"
 #include "internal/host/debug.h"
-#include "internal/non_abi/nvshmemi_h_to_d_coll_defs.cuh"
+#include "non_abi/device/coll/barrier.cuh"
+
+template <threadgroup_t SCOPE>
+__global__ void barrier_on_stream_kernel_threadgroup(nvshmem_team_t team, int in_cuda_graph) {
+#ifdef __CUDA_ARCH__
+    int myidx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+
+    if (nvshmemi_device_state_d.job_connectivity >= NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS) {
+        nvshmemi_transfer_quiet<SCOPE>(false, NVSHMEMX_PE_ANY, NULL, NVSHMEMX_QP_ALL);
+    }
+    if (in_cuda_graph) {
+        nvshmemi_threadgroup_sync<SCOPE>();
+        if (!myidx) __threadfence_system();
+        nvshmemi_threadgroup_sync<SCOPE>();
+    }
+
+    nvshmemi_sync_algo_threadgroup<SCOPE>(team);
+
+    if (!myidx) {
+        if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY)
+            nvshmemi_transfer_enforce_consistency_at_target(false);
+    }
+#endif
+}
+
+template <threadgroup_t SCOPE>
+__global__ void sync_on_stream_kernel_threadgroup(nvshmem_team_t team, int in_cuda_graph) {
+#ifdef __CUDA_ARCH__
+    nvshmemi_sync_algo_threadgroup<SCOPE>(team);
+#endif
+}
 
 int nvshmemi_call_barrier_on_stream_kernel(nvshmem_team_t team, cudaStream_t stream) {
     int num_blocks = 1;

@@ -25,6 +25,7 @@
 #endif
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
 #include "utils.cuh"
+#include "barrier.cuh"
 #include "fcollect.cuh"
 #include "broadcast.cuh"
 

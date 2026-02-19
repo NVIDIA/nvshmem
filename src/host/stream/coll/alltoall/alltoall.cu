@@ -11,7 +11,17 @@
 #include <typeinfo>
 
 #include "internal/host/util.h"
-#include "internal/non_abi/nvshmemi_h_to_d_coll_defs.cuh"
+#include "non_abi/device/coll/alltoall.cuh"
+
+template <typename TYPE>
+__global__ void alltoall_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,
+                                          size_t nelems, int in_cuda_graph) {
+#ifdef __CUDA_ARCH__
+    if (!blockIdx.x) {
+        nvshmemi_alltoall_threadgroup<TYPE, NVSHMEMI_THREADGROUP_BLOCK>(team, dest, source, nelems);
+    }
+#endif
+}
 
 std::map<std::string, size_t> nvshmemi_alltoall_maxblocksize;
 

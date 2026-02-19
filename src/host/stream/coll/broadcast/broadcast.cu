@@ -10,7 +10,17 @@
 #include <typeinfo>
 
 #include "internal/host/util.h"
-#include "internal/non_abi/nvshmemi_h_to_d_coll_defs.cuh"
+#include "non_abi/device/coll/broadcast.cuh"
+
+template <typename T>
+__global__ void broadcast_on_stream_kernel(nvshmem_team_t team, T *dest, const T *source,
+                                           size_t nelems, int PE_root, int in_cuda_graph) {
+#ifdef __CUDA_ARCH__
+    if (!blockIdx.x)
+        nvshmemi_broadcast_threadgroup<T, NVSHMEMI_THREADGROUP_BLOCK>(team, dest, source, nelems,
+                                                                      PE_root);
+#endif
+}
 
 std::map<std::string, size_t> nvshmemi_broadcast_maxblocksize;
 
