@@ -2364,6 +2364,9 @@ void *nvshmem_malloc(size_t size) {
     }
 
     ptr = nvshmemi_state->heap_obj->heap_malloc(size);
+    if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
+        goto exit_and_return;
+    }
 
     nvshmemi_barrier_all();
 
@@ -2390,6 +2393,9 @@ void *nvshmem_calloc(size_t count, size_t size) {
     }
 
     ptr = nvshmemi_state->heap_obj->heap_calloc(size, count);
+    if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
+        goto exit_and_return;
+    }
 
     nvshmemi_barrier_all();
 
@@ -2416,7 +2422,9 @@ void *nvshmem_align(size_t alignment, size_t size) {
     }
 
     ptr = nvshmemi_state->heap_obj->heap_align(size, alignment);
-
+    if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
+        goto exit_and_return;
+    }
     nvshmemi_barrier_all();
 
 exit_and_return:
@@ -2494,7 +2502,9 @@ void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags) 
         goto exit_and_return;
     }
     ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, NULL, flags);
-
+    if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
+        goto exit_and_return;
+    }
     nvshmemi_barrier_all();
 
 exit_and_return:
@@ -2520,7 +2530,9 @@ void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, siz
         goto exit_and_return;
     }
     ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, preferred_addr, flags);
-
+    if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
+        goto exit_and_return;
+    }
     nvshmemi_barrier_all();
 
 exit_and_return:
