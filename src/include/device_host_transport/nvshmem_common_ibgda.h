@@ -340,7 +340,7 @@ static_assert(sizeof(nvshmemi_ibgda_device_state_v2) == 8384,
 
 typedef nvshmemi_ibgda_device_state_v2 nvshmemi_ibgda_device_state_t;
 
-#if defined(__CUDACC_RDC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
+#if defined(__CUDACC_RDC__) || defined(__CUDACC_RTC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
 #define EXTERN_CONSTANT extern __constant__
 #elif defined(__clang__)
 #ifdef __CUDACC__
@@ -350,11 +350,11 @@ typedef nvshmemi_ibgda_device_state_v2 nvshmemi_ibgda_device_state_t;
 // Plain Clang-to-NVPTX bitcode: use address_space(4) only
 #define EXTERN_CONSTANT extern __attribute__((address_space(4)))
 #endif
-#else
-#define EXTERN_CONSTANT
 #endif
 
+#ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;
 #undef EXTERN_CONSTANT
+#endif
 
 #endif /* _NVSHMEMI_IBGDA_COMMON_H_ */
