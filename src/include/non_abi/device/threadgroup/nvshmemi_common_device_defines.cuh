@@ -8,21 +8,22 @@
 #include <cuda_runtime.h>
 #include "device_host/nvshmem_common.cuh"
 
-#if defined(__CUDACC_RDC__) && !defined(__NVSHMEM_NUMBA_SUPPORT__)
+#if defined(__CUDACC_RTC__) && defined(__NVSHMEM_NUMBA_SUPPORT__)
+// NVRTC + Numba: local definition for host to write device state at runtime
+#define EXTERN_CONSTANT __constant__
+#elif defined(__CUDACC_RDC__) || defined(__CUDACC_RTC__) || \
+    (defined(__clang__) && defined(__CUDACC__))
+// RDC, NVRTC, or Clang CUDA: resolved by device linker
 #define EXTERN_CONSTANT extern __constant__
 #elif defined(__clang__)
-#ifdef __CUDACC__
-// Clang CUDA mode: use __constant__ only (avoid address_space to fix LLVM21)
-#define EXTERN_CONSTANT extern __constant__
-#else
 // Plain Clang-to-NVPTX bitcode: use address_space(4) only
 #define EXTERN_CONSTANT extern __attribute__((address_space(4)))
 #endif
-#else
-#define EXTERN_CONSTANT static __constant__
-#endif
+
+#ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_device_host_state_t nvshmemi_device_state_d;
 #undef EXTERN_CONSTANT
+#endif
 
 #ifdef __NVSHMEM_NUMBA_SUPPORT__
 /* disable device-side asserts for Numba builds */
