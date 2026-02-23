@@ -61,8 +61,9 @@ dev = [
     "pytest-mpi",
     "black",
     "isort",
-    # TODO: update before release
-    "numba-cuda[cu12]>=0.23.0,<0.24.0",
+]
+numba = [
+    "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.25.0,<0.28.0",
 ]
 
 [tool.black]
@@ -92,6 +93,8 @@ def update_pyproject(cuda_ver, nvshmem4py_path):
 
     if count == 0:
         new_content = content + "\n" + dep_block
+
+    new_content = new_content.replace("<NUMBA_CUDA_VERSION_PLACEHOLDER>", f"cu{cuda_ver}")
 
     print(new_content)
 
