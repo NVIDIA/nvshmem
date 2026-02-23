@@ -1244,18 +1244,31 @@ void *allocate_mmap_buffer(size_t size, int mem_fabric_handle_type, bool use_egm
     if (!mype) DEBUG_PRINT("padding buffer size to %lu\n", size);
     void *bufAddr, *mmapedAddr;
 
-    CUmemAccessDesc accessDescriptor;
-    accessDescriptor.location.id = prop.location.id;
-    accessDescriptor.location.type = prop.location.type;
-    accessDescriptor.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    CUmemAccessDesc accessDescriptor[2];
+    accessDescriptor[0].location.id = prop.location.id;
+    accessDescriptor[0].location.type = prop.location.type;
+    accessDescriptor[0].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+
+    if (use_egm) {
+        // accessDescriptor[0] contains host permissions
+        accessDescriptor[1].location.id = dev_id;
+        accessDescriptor[1].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        accessDescriptor[1].flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    }
 
     CUmemGenericAllocationHandle userAllocHandle;
 
     CU_CHECK(cuMemCreate(&userAllocHandle, size, (const CUmemAllocationProp *)&prop, 0));
     CU_CHECK(cuMemAddressReserve((CUdeviceptr *)&bufAddr, size, 0, (CUdeviceptr)NULL, 0));
     CU_CHECK(cuMemMap((CUdeviceptr)bufAddr, size, 0, userAllocHandle, 0));
-    CU_CHECK(
-        cuMemSetAccess((CUdeviceptr)bufAddr, size, (const CUmemAccessDesc *)&accessDescriptor, 1));
+
+    if (use_egm) {
+        CU_CHECK(
+                cuMemSetAccess((CUdeviceptr)bufAddr, size, &accessDescriptor[0], 2));
+    } else {
+        CU_CHECK(
+                cuMemSetAccess((CUdeviceptr)bufAddr, size, &accessDescriptor[0], 1));
+    }
 
     mmapedAddr = (void *)nvshmemx_buffer_register_symmetric(bufAddr, size, 0);
     mmaped_buffers[mmapedAddr] = std::make_tuple(bufAddr, size, userAllocHandle);
