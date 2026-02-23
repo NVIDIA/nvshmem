@@ -1852,7 +1852,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
 
     CUmemGenericAllocationHandle userAllocHandle;
     CUmemAllocationProp prop = {};
-    CUmemAccessDesc access;
+    CUmemAccessDesc access[2];
     int numa_id;
     CUdevice my_dev;
     char *buf_start;
@@ -1877,12 +1877,12 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     // Get Access attributes from user buffer
     // Memory type can be device (VMM) or host (for EGM)
     if (ptr_mem_type == CU_MEMORYTYPE_DEVICE) {
-        access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-        access.location.id = state->device_id;
+        access[0].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        access[0].location.id = state->device_id;
     } else if (ptr_mem_type == CU_MEMORYTYPE_HOST) {
         // EGM memory
         is_egm = true;
-        access.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
+        access[0].location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&my_dev, state->device_id));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "cuDeviceGet failed\n");
@@ -1890,14 +1890,18 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
                        cuDeviceGetAttribute(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, my_dev));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "cuDeviceGetAttribute NUMA ID failed\n");
-        access.location.id = numa_id;
+        access[0].location.id = numa_id;
+
+        access[1].location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        access[1].location.id = state->device_id;
     }
     status = CUPFN(nvshmemi_cuda_syms,
-                   cuMemGetAccess(&access_flags, &access.location, (CUdeviceptr)buf_ptr));
+                   cuMemGetAccess(&access_flags, &access[0].location, (CUdeviceptr)buf_ptr));
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "cuMemGetAccess failed\n");
 
-    access.flags = (CUmemAccess_flags_enum)access_flags;
+    access[0].flags = (CUmemAccess_flags_enum)access_flags;
+    access[1].flags = (CUmemAccess_flags_enum)access_flags;
     INFO(NVSHMEM_MEM, "type: %s Setting access permissions for mmap buffer: %llu",
          typeid(decltype(this)).name(), access_flags);
 
@@ -2016,9 +2020,13 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
                    cuMemMap((CUdeviceptr)buf_start, size, mmap_offset, userAllocHandle, 0));
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemMap user buffer failed \n");
-
-    status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
-                                                      (const CUmemAccessDesc *)&access, 1));
+    if (is_egm) {
+        status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
+                    &access[0], 2));
+    } else {
+        status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
+                    &access[0], 1));
+    }
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemSetAccess failed \n");
 
