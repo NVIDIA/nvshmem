@@ -158,9 +158,27 @@ NVSHMEMI_ENV_DEF(IB_ENABLE_IBGDA, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
 
 #if defined(NVSHMEM_GPUNETIO_SUPPORT) || defined(NVSHMEM_ENV_ALL)
 /** GPU-initiated communication **/
-// TODO: Add env variables for DOCA
 NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_GDAKI, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set to enable GPU-initiated communication transport via GPUNetIO.")
+NVSHMEMI_ENV_DEF(GPUNETIO_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Specifies the processor used for ringing NIC's DB. "
+                 "Choices are: auto, gpu, cpu, cpu_host_memory.\n\n"
+                 "- auto: use GPU SMs and fallback to CPU if it is not supported (default).\n"
+                 "- gpu: use GPU SMs, regular DB.\n"
+                 "- gpu_sm_bf: use GPU SMs, BlueFlame DB.\n"
+                 "- cpu: use CPU.")
+NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of RC QPs per peer PE used in GPU-initiated communication transport. "
+                 "(default 2). ")
+NVSHMEMI_ENV_DEF(GPUNETIO_NUM_REQUESTS_IN_BATCH, int, 32, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of requests to be batched before submitting to the NIC. "
+                 "It will be rounded up to the nearest power of 2. "
+                 "Set to 1 for aggressive submission.")
+NVSHMEMI_ENV_DEF(GPUNETIO_NUM_FETCH_SLOTS_PER_RC, int, 1024, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of internal buffer slots for fetch operations for each RC QP. "
+                 "It will be rounded up to the nearest power of 2.")
+NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_ORDERING_SEMANTIC, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Set to enable ordering semantic for DDP (Direct Data Placement) mode for GPUNetIO.")
 #endif
 
 #endif

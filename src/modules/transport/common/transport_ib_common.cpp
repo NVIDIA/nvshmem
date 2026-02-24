@@ -526,8 +526,8 @@ out:
 
 int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_table *ftable,
                              int log_level) {
-    *ibv_handle = dlopen("libibverbs.so.1", RTLD_LAZY);
-    if (*ibv_handle == nullptr) {
+    *ibv_handle = dlopen("libibverbs.so.1", RTLD_LAZY | RTLD_NODELETE);
+    if (*ibv_handle == NULL) {
         INFO(log_level, "libibverbs not found on the system.");
         return -1;
     }
@@ -561,9 +561,9 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
 
 int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_function_table *ftable,
                                 int log_level) {
-    *mlx5dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
-    if (*mlx5dv_handle == nullptr) {
-        *mlx5dv_handle = dlopen("libmlx5.so.1", RTLD_LAZY);
+    *mlx5dv_handle = dlopen("libmlx5.so", RTLD_LAZY | RTLD_NODELETE);
+    if (*mlx5dv_handle == NULL) {
+        *mlx5dv_handle = dlopen("libmlx5.so.1", RTLD_LAZY | RTLD_NODELETE);
     }
     if (*mlx5dv_handle == nullptr) {
         INFO(log_level, "Failed to open libmlx5.so[.1]");

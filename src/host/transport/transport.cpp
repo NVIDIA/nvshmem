@@ -313,7 +313,7 @@ transport_fail:
             WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
             goto out;
         }
-        transport_lib_GPUNETIO = dlopen(transport_object_file, RTLD_NOW);
+        transport_lib_GPUNETIO = dlopen(transport_object_file, RTLD_NOW | RTLD_NODELETE);
         if (transport_lib_GPUNETIO == NULL) {
             WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
             goto out;
