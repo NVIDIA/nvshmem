@@ -35,7 +35,7 @@ int npes = 0;
 int use_mpi = 0;
 int use_shmem = 0;
 int use_uid = 0;
-bool use_cubin = false;
+int use_cubin = 0;
 
 CUmodule mymodule = NULL;
 
@@ -47,12 +47,48 @@ void init_cumodule(const char *str) {
     exe_path[count] = '\0';
 
     char *exe_dir = dirname(exe_path);
-    char cubin_path[1000];
-    strcpy(cubin_path, exe_dir);
-    strcat(cubin_path, "/");
-    strcat(cubin_path, str);
-    printf("CUBIN Selected: %s\n", cubin_path);
-    CU_CHECK(cuModuleLoad(&mymodule, cubin_path));
+    char cubin_default_path[1000];
+    strcpy(cubin_default_path, exe_dir);
+    strcat(cubin_default_path, "/");
+    strcat(cubin_default_path, str);
+
+    // base name of the test without the extension (e.g. shmem_put_latency)
+    char base_name[512];
+    strncpy(base_name, str, sizeof(base_name));
+    base_name[sizeof(base_name) - 1] = '\0';
+    char *dot = strrchr(base_name, '.');
+    if (dot && strcmp(dot, ".cubin") == 0) {
+        *dot = '\0';
+    }
+    char cubin_bc_path[1000];
+    snprintf(cubin_bc_path, sizeof(cubin_bc_path), "%s/%s_bc.cubin", exe_dir, base_name);         // produces: path/to/shmem_put_latency_bc.cubin
+
+    char cubin_ltoir_path[1000];
+    snprintf(cubin_ltoir_path, sizeof(cubin_ltoir_path), "%s/%s_ltoir.cubin", exe_dir, base_name);    // produces: path/to/shmem_put_latency_ltoir.cubin
+
+    char* selected_path;
+
+    if (use_cubin == NVSHMEM_CUBIN_BC) {
+        selected_path = cubin_bc_path;
+    } else if (use_cubin == NVSHMEM_CUBIN_LTOIR) {
+        selected_path = cubin_ltoir_path;
+    }
+
+    // check if that specific .cubin with a suffix exists
+    if (use_cubin == NVSHMEM_CUBIN_BC || use_cubin == NVSHMEM_CUBIN_LTOIR) {
+        if (access(selected_path, R_OK) != 0) {
+            fprintf(stderr,
+                    "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, 2=libnvshmem_device.ltoir] but cubin not found: %s\n",
+                    use_cubin, selected_path);
+            exit(-1);
+        }
+    } else {
+        fprintf(stderr, "Invalid NVSHMEM_TEST_CUBIN_LIBRARY value: %d. Expected 1 or 2.\n", use_cubin);
+        exit(-1);
+    }
+
+    printf("CUBIN Selected: %s\n", selected_path);
+    CU_CHECK(cuModuleLoad(&mymodule, selected_path));
     init_error = nvshmemx_cumodule_init(mymodule);
     if (init_error) {
         ERROR_PRINT("cumodule_init failed \n");
@@ -230,8 +266,10 @@ static void check_for_cumodule_tests() {
     if (test_mode) {
         use_cubin = atoi(test_mode);
     }
-    if (use_cubin) {
-        printf("Bitcode Library Testing Method Chosen.\n");
+    if (use_cubin == 1) {
+        printf("LLVM-IR Bitcode Library Testing Method Chosen.\n");
+    } else if (use_cubin == 2) {
+        printf("LTOIR Library Testing Method Chosen.\n");
     }
 }
 

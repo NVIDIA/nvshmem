@@ -230,6 +230,12 @@ enum PUTGET_ISSUE_T { ON_STREAM = 0, HOST };
 
 enum DIR_T { WRITE = 0, READ };
 
+enum NVSHMEM_CUBIN_LIBRARY_T {
+    NVSHMEM_CUBIN_NONE = 0,
+    NVSHMEM_CUBIN_BC = 1,
+    NVSHMEM_CUBIN_LTOIR = 2
+};
+
 extern size_t min_size;
 extern size_t max_size;
 extern size_t num_blocks;
@@ -285,7 +291,7 @@ extern bool use_graph;
 extern bool use_mmap;
 extern bool use_egm;
 
-extern bool use_cubin;
+extern int use_cubin;
 
 void init_cumodule(const char *str);
 void init_wrapper(int *c, char ***v);

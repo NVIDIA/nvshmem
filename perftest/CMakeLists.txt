@@ -43,6 +43,7 @@ if(NOT SubBuild)
   endif()
 
   option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library and tests" $ENV{NVSHMEM_BUILD_BITCODE_LIBRARY})
+  option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library and tests" $ENV{NVSHMEM_BUILD_LTOIR_LIBRARY})
   set(NVSHMEM_CLANG_DIR $ENV{NVSHMEM_CLANG_DIR} CACHE PATH "path to force cmake to look for clang when compiling the bitcode library.")
   set(NVSHMEM_CLANG_CXX_FLAGS_EXTRA "$ENV{NVSHMEM_CLANG_CXX_FLAGS_EXTRA}" CACHE STRING "Extra C++ flags passed to clang for bitcode/cubin compilation")
   option(NVSHMEM_DEBUG "Toggles NVSHMEM debug compilation settings" $ENV{NVSHMEM_DEBUG})
@@ -166,8 +167,10 @@ endif()
 
 if(CUDAToolkit_VERSION_MAJOR LESS 13)
   set(BITCODE_CXX_STD "c++11")
+  set(CUBIN_CXX_STD "c++11")
 else()
   set(BITCODE_CXX_STD "c++17")
+  set(CUBIN_CXX_STD "c++17")
 endif()
 
 if (NOT SubBuild)
@@ -214,7 +217,7 @@ macro(nvshmem_add_cubin_perftest_prefix SOURCE PREFIX)
   string(REPLACE ${NVSHMEM_PERFTEST_TLD} "" DIR ${DIR_})
   string(REPLACE ${SOURCE} "" DIR ${DIR})
   set(CUBIN_UNLINKED_NAME "${NAME_}_UNLINKED.cubin")
-  set(CUBIN_NAME "${NAME_}.cubin")
+  set(CUBIN_NAME "${NAME_}_bc.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_PERFTEST_TLD}/common" "-I${NVSHMEM_PERFTEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include" "-I${CUDA_HOME}/include/cccl")
 
   # Set cubin build flags based on build type
@@ -268,6 +271,56 @@ macro(nvshmem_add_cubin_perftest_prefix SOURCE PREFIX)
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                         GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   )
+  endif()
+endmacro()
+
+## LTOIR perftest cubins
+macro(nvshmem_add_ltoir_cubin_perftest_prefix SOURCE PREFIX)
+  # --ltoir requires CUDA 12.0 or later
+  if(CUDAToolkit_VERSION_MAJOR LESS 12)
+    message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.0 or later, but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Skipping LTOIR cubin perftest.")
+  else()
+  get_filename_component(NAME_ ${SOURCE} NAME_WE)
+  get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
+  string(REPLACE ${NVSHMEM_PERFTEST_TLD} "" DIR ${DIR_})
+  string(REPLACE ${SOURCE} "" DIR ${DIR})
+  set(CUBIN_NAME "${NAME_}_ltoir.cubin")
+  set(INCLUDE_DIRECTORIES "-I${NVSHMEM_PERFTEST_TLD}/common" "-I${NVSHMEM_PERFTEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include")
+
+  if (NOT SubBuild)
+    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device.ltoir)
+    set(LTOIR_INCLUDE_PREFIX "")
+    set(LTOIR_EXTRA_DEPENDS nvshmem_perftest_helper ${LTOIR_LIB_PATH})
+  else()
+    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device.ltoir)
+    set(LTOIR_INCLUDE_PREFIX "-I${CMAKE_SOURCE_DIR}/perftest/common" "-I${CMAKE_SOURCE_DIR}/src/include")
+    set(LTOIR_EXTRA_DEPENDS nvshmem_perftest_helper libnvshmem_device_ltoir)
+  endif()
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+                    COMMAND ${CMAKE_CUDA_COMPILER} -std=${BITCODE_CXX_STD} -x cu -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
+                            ${LTOIR_INCLUDE_PREFIX} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
+                    COMMAND ${CUDA_HOME}/bin/nvlink -nvvmpath=${CUDA_HOME}/nvvm -arch=${NVSHMEM_CLANG_ARCH} -dlto -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
+                    COMMAND rm ${NAME_}.ltoir
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    DEPENDS ${LTOIR_EXTRA_DEPENDS})
+
+  add_custom_target(${NAME_}_ltoir_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
+
+  install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+    DESTINATION "${NVSHMEM_PERFTEST_INSTALL_PREFIX}/${DIR}"
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  )
+  if (NVSHMEM_PERFTEST_RELEASE_PREFIX)
+    install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+            DESTINATION "${NVSHMEM_PERFTEST_RELEASE_PREFIX}/${DIR}"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  )
+  endif()
   endif()
 endmacro()
 

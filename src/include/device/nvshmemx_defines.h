@@ -21,7 +21,7 @@
 #include "device/nvshmemx_collective_launch_apis.h"
 
 #ifdef __CUDA_ARCH__
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {
 #endif
 
@@ -55,8 +55,7 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemx_mc_ptr(nvshm
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFINE_NVSHMEM_TYPE_PUT_THREADGROUP)
 #undef DEFINE_NVSHMEM_TYPE_PUT_THREADGROUP
-
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 }
 #endif
 
@@ -102,7 +101,7 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(NVSHMEMI_TYPENAME_PUT_SIGNAL_SC
                                                  x)
 #undef NVSHMEMI_TYPENAME_PUT_SIGNAL_SCOPE
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {
 #endif
 
@@ -650,7 +649,7 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_qp_fence_bloc
 
 /* end qpair specific APIs*/
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 }
 #endif
 

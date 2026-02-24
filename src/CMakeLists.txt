@@ -123,6 +123,52 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
 endif()
 
 ## End bitcode library configurations
+## Start ltoir library configurations
+if(NVSHMEM_BUILD_LTOIR_LIBRARY)
+  # --ltoir requires CUDA 12.0 or later
+  if(CUDAToolkit_VERSION_MAJOR LESS 12)
+    message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.0 or later, but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Disabling LTOIR library build.")
+    set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "Build the nvshmem_device LTOIR library and tests" FORCE)
+  else()
+    # CUDA >= 12.0, so we can build LTOIR
+    set(LTOIR_LIB_ARCH sm_80)
+
+  if(CUDAToolkit_VERSION_MAJOR LESS 13)
+    set(LTOIR_CXX_STD "c++11")
+  else()
+    set(LTOIR_CXX_STD "c++17")
+  endif()
+
+  # ––– paths –––
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+
+  # ––– compile device object that retains LTO IR –––
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
+    # Generate LTO IR with all inline functions included
+    COMMAND nvcc -std=${LTOIR_CXX_STD} -arch=${LTOIR_LIB_ARCH} -dlto --ltoir
+            -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+            -DNVSHMEM_BUILD_LTOIR_LIBRARY
+            -o ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
+            ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu
+    DEPENDS device/init/init_device.cu
+    VERBATIM
+  )
+
+  add_custom_target(libnvshmem_device_ltoir ALL
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir)
+
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
+          DESTINATION lib/
+          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                      GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+  endif()
+  endif()
+## End ltoir library configurations
+
+
+
+
 
 if(NVSHMEM_BUILD_EXAMPLES)
   set(NVSHMEM_EXAMPLES_RELEASE_PREFIX "bin/examples")

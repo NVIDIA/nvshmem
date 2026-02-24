@@ -20,7 +20,10 @@
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host/nvshmem_tensor.h"
-#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__)
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
+// transfer APIs.
+#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -41,7 +44,7 @@ typedef enum { LL8 = 0, LL128 } ll_version_t;
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_nvls_ll_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__)
+#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     const size_t fcollect_ll_threshold =
         nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold;
@@ -319,7 +322,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_p2p_allpush_thre
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_nvls_allpush_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__)
+#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     nvshmemi_threadgroup_sync<SCOPE>();
     T *dst_ptr = (T *)nvshmemi_mc_ptr(teami, (void *)(dest + dest_offset));

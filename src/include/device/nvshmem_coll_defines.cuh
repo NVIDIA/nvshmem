@@ -10,7 +10,7 @@
 
 #ifdef __CUDA_ARCH__
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib_ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {
 #endif
 
@@ -139,7 +139,7 @@ DEFN_NVSHMEM_REDUCESCATTER();
 #undef DEFN_NVSHMEM_TYPENAME_OP_REDUCESCATTER
 #undef DEFN_NVSHMEM_REDUCESCATTER
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib_ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 }
 #endif
 #endif /* __CUDA_ARCH__ */

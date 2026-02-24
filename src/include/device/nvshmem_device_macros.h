@@ -20,7 +20,7 @@
  * NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE - like above, but uses NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE
  */
 
-#if !defined __clang_llvm_bitcode_lib__
+#if !defined __clang_llvm_bitcode_lib__ && !defined NVSHMEM_BUILD_LTOIR_LIBRARY
 #define NVSHMEMI_DEVICE_ALWAYS_INLINE inline
 #define NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __forceinline__
 #define NVSHMEM_ALWAYS_STATIC static
@@ -52,7 +52,8 @@
 #undef NVSHMEM_IBGDA_SUPPORT
 #endif
 
-#if defined __NVSHMEM_NUMBA_SUPPORT__
+
+#if defined __NVSHMEM_NUMBA_SUPPORT__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 #undef NVSHMEMI_DEVICE_INLINE
 #undef NVSHMEMI_DEVICE_ALWAYS_INLINE
 #undef NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE

@@ -15,7 +15,10 @@
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
 #include "device_host/nvshmem_tensor.h"
 #include "non_abi/nvshmem_build_options.h"
-#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__)
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
+// transfer APIs.
+#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -1476,7 +1479,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
 template <typename TYPE, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__)
+#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int my_idx_in_active_set = teami->my_pe;
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -1507,7 +1510,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_t
 template <typename TYPE, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__)
+#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     /* Assign nreduce for all PEs. It may lead to duplicate reduction, but avoid AG stage to
      * communicate partial results as compared to two-shot */
