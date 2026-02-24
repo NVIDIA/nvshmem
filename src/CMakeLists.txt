@@ -810,6 +810,7 @@ set(INC_EXPORTS
     non_abi/device/coll/reducescatter.cuh
     non_abi/device/coll/utils.cuh
     non_abi/device/wait/nvshmemi_wait_until_apis.cuh
+    non_abi/device/pt-to-pt/transport_device_common.cuh
     non_abi/device/pt-to-pt/ibgda_device.cuh
     non_abi/device/pt-to-pt/gdaki_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh

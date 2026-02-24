@@ -20,6 +20,7 @@
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/nvshmem_build_options.h"
 #include "utils_device.h"
+#include "transport_device_common.cuh"
 
 #include <algorithm>
 
@@ -247,28 +248,6 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void IBGDA_MEMBAR() {
 #endif /* NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY */
 
 #endif /* NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE */
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_thread_id_in_warp() {
-    int myIdx;
-    asm volatile("mov.u32  %0,  %%laneid;" : "=r"(myIdx));
-    return myIdx;
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_warp_size() {
-    return ((blockDim.x * blockDim.y * blockDim.z) < warpSize)
-               ? (blockDim.x * blockDim.y * blockDim.z)
-               : warpSize;
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_warp_sync() { __syncwarp(); }
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_thread_id_in_block() {
-    return (threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y);
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_block_size() {
-    return (blockDim.x * blockDim.y * blockDim.z);
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint32_t ibgda_get_smid() {
