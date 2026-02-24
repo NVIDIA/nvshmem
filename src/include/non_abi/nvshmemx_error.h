@@ -154,6 +154,48 @@ enum nvshmemx_status {
         }                                                                                      \
     } while (0)
 
+#define NVSHMEMI_ERROR_RET(status, err, ...)                                      \
+    do {                                                                          \
+        fprintf(stderr, "%s:%d: non-zero status: %d ", __FILE__, __LINE__, err);  \
+        fprintf(stderr, __VA_ARGS__);                                             \
+        fprintf(stderr, "\n");                                                    \
+        status = err;                                                             \
+        return status;                                                            \
+    } while (0)
+
+#define NVSHMEMI_NULL_ERROR_RET(var, status, err, ...)                  \
+    do {                                                               \
+        if (nvshmemxi_error_unlikely(var == NULL)) {                   \
+            fprintf(stderr, "%s:%d: NULL value ", __FILE__, __LINE__); \
+            fprintf(stderr, __VA_ARGS__);                              \
+            fprintf(stderr, "\n");                                     \
+            status = err;                                              \
+            return status;                                             \
+        }                                                              \
+    } while (0)
+
+#define NVSHMEMI_NZ_ERROR_RET(status, err, ...)                                         \
+    do {                                                                                \
+        if (nvshmemxi_error_unlikely(status != 0)) {                                    \
+            fprintf(stderr, "%s:%d: non-zero status: %d ", __FILE__, __LINE__, status); \
+            fprintf(stderr, __VA_ARGS__);                                               \
+            fprintf(stderr, "\n");                                                      \
+            status = err;                                                               \
+            return status;                                                              \
+        }                                                                               \
+    } while (0)
+
+#define NVSHMEMI_NE_ERROR_RET(status, expected, err, ...)                                \
+    do {                                                                                \
+        if (nvshmemxi_error_unlikely(status != expected)) {                             \
+            fprintf(stderr, "%s:%d: non-zero status: %d ", __FILE__, __LINE__, status); \
+            fprintf(stderr, __VA_ARGS__);                                               \
+            fprintf(stderr, "\n");                                                      \
+            status = err;                                                               \
+            return status;                                                              \
+        }                                                                               \
+    } while (0)
+
 #if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 }
 #endif

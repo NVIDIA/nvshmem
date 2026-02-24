@@ -50,7 +50,7 @@ endif()
 project(
   NVSHMEM
   LANGUAGES CUDA CXX C
-  VERSION 3.6.13.0
+  VERSION 3.6.14.0
 )
 
 if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang") OR
@@ -148,7 +148,7 @@ if(NVSHMEM_GPUNETIO_SUPPORT)
     else()
       set(GPUNETIO_SOURCE_ARGS
         GIT_REPOSITORY https://github.com/NVIDIA-DOCA/gpunetio.git
-        GIT_TAG v2.0.0)
+        GIT_TAG R3.0)
     endif()
     # Extract CUDA_HOME from CMake CUDAToolkit package to pass it to GPUNetIO Makefile
     get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDAToolkit_BIN_DIR}" DIRECTORY)
