@@ -66,14 +66,14 @@ def _nvshmem_device_bc():
 
 
 def _nvshmem_stream():
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     return dev.create_stream()
 
 
 def _compile_kernel(kernel, *example_args):
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     nvshmem_device_bc = _nvshmem_device_bc()
@@ -100,7 +100,7 @@ def _fill_cute_tensor(tensor, dtype_name, value):
     host = np.full(tuple(tensor.shape), np_dtype(value), dtype=np_dtype)
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     cudrv.cuMemcpyHtoD(buf.handle, host, host.nbytes)
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     dev.sync()
@@ -111,7 +111,7 @@ def _read_cute_tensor(tensor, dtype_name):
     host = np.empty(tuple(tensor.shape), dtype=np_dtype)
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     cudrv.cuMemcpyDtoH(host, buf.handle, host.nbytes)
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     dev.sync()

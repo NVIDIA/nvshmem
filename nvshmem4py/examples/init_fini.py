@@ -17,7 +17,7 @@ def mpi_uid_init():
     rank = comm.Get_rank()
     nranks = comm.Get_size()
 
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
 
@@ -128,7 +128,7 @@ def torchrun_uid_init_bcast_object():
 
 def mpi_init():
     # This uses the MPI communicator to perform initialization of NVSHMEM
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
@@ -139,7 +139,7 @@ def mpi_init():
 def emulated_mpi_init():
     # This uses the MPI communicator to perform initialization of NVSHMEM
     # Internally, NVSHMEM4Py performs an MPI4Py broadcast and UID init
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,

@@ -24,7 +24,7 @@ import nvshmem.bindings
 
 def test_mpi_comm_init():
     # Test device init and bootstrap
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
@@ -35,7 +35,7 @@ def test_mpi_comm_init():
 
 def test_multi_init():
     # Test multiple calls to init with overlapping sessions
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev,
@@ -56,7 +56,7 @@ def test_uid_init():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     nranks = comm.Get_size()
-    local_rank_per_node = rank % system.num_devices
+    local_rank_per_node = rank % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
 
@@ -76,7 +76,7 @@ def test_uid_init():
 
 def test_emulated_mpi_init():
     # Test device init and bootstrap
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
@@ -86,7 +86,7 @@ def test_emulated_mpi_init():
 
 def test_none_device_init():
     # Test init with None device and allocate with device set
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     
     nvshmem.core.init(device=None, uid=None, rank=None, nranks=None,
                       mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
@@ -125,7 +125,7 @@ lib_code = """
 def test_module_init():
     # Test host lib + device state init with None device and allocate with device set
     print("Starting module init test")
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     # compile a simple A+B kernel using NVRTC and emit cubin to be loaded as ObjectCode

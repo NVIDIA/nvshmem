@@ -44,7 +44,7 @@ def correct_accumulate(input, partial_sum, full_sum):
 	numba.cuda.atomic.add(partial_sum, 0, input[index])
 
 # Initialize NVSHMEM Using an MPI communicator
-local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
 dev = Device(local_rank_per_node)
 dev.set_current()
 nvshmem.core.init(device=dev, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")

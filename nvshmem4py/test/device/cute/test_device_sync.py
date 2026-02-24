@@ -30,7 +30,7 @@ from test_device_rma import (
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 def test_device_sync(nvshmem_init_fini, team):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     @cute.kernel
@@ -56,7 +56,7 @@ def test_device_sync(nvshmem_init_fini, team):
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])
 def test_device_barrier(nvshmem_init_fini, team):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     @cute.kernel
