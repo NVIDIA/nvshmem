@@ -3,13 +3,17 @@
  *
  * See License.txt for license information
  */
+#ifndef _NVSHMEM_INIT_DEVICE_CUH_
+#define _NVSHMEM_INIT_DEVICE_CUH_
 
 #include <stdio.h>
 #include <algorithm>
 #include <cuda_runtime.h>
 
-#ifdef __clang_llvm_bitcode_lib__
+#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+#if !defined(assert)
 #define assert(...)
+#endif
 #include "nvshmem.h"
 #endif
 
@@ -41,7 +45,7 @@ __constant__ __attribute__((used)) nvshmemi_ibgda_device_state_t nvshmemi_ibgda_
 
 nvshmemi_device_state_t nvshmemi_device_only_state;
 
-#if defined(__clang_llvm_bitcode_lib__)
+#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #if defined(__CUDACC__)
 // Clang CUDA mode: use __constant__ only (no address_space to avoid LLVM21 conflict)
 __constant__ __attribute__((used)) nvshmemi_device_host_state_t nvshmemi_device_state_d = {};
@@ -219,4 +223,5 @@ void nvshmemi_finalize() {
 }
 #ifdef __cplusplus
 }
+#endif
 #endif

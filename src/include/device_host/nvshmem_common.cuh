@@ -35,7 +35,7 @@
 #include "device_host/nvshmem_types.h"
 #include "device_host_transport/nvshmem_constants.h"
 
-#ifdef __clang_llvm_bitcode_lib__
+#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #define NVSHMEMI_DEVICE_PREFIX __device__
 extern "C" {
 __device__ unsigned int __attribute__((noreturn)) __nvvm_reflect(const char *s);

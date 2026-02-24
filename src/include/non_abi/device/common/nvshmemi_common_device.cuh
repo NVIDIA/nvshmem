@@ -21,7 +21,10 @@
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__)
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
+// transfer APIs.
+#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -262,7 +265,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
     if ((uintptr_t)dst % 16 == 0 && (uintptr_t)src % 16 == 0) {
         const size_t nelems = len / 16;
 
-#ifdef __clang_llvm_bitcode_lib__
+#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
         uint32_t *__restrict__ dst_p = (uint32_t *)dst;
         const uint32_t *__restrict__ src_p = (const uint32_t *)src;
         for (size_t i = myIdx * 4; i < nelems * 4; i += groupSize * 4) {
@@ -279,7 +282,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
 
         if (0 == len) return;
 
-#ifdef __clang_llvm_bitcode_lib__
+#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
         dst = (void *)(dst_p + nelems * 4);
         src = (void *)(src_p + nelems * 4);
 #else

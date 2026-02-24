@@ -121,6 +121,7 @@ nvshmem_add_default_off_option(NVSHMEM_BUILD_DEB_PACKAGE "Build DEB package")
 nvshmem_add_default_off_option(NVSHMEM_BUILD_TGZ_PACKAGE "Build TGZ package")
 if (NOT NVSHMEM_BUILD_PACKAGES)
   nvshmem_add_default_off_option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library")
+  nvshmem_add_default_off_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
 endif()
 message( "___________________________________________________________________________________________________\n\n")
 
@@ -130,6 +131,8 @@ nvshmem_add_default_on_option(NVSHMEM_BUILD_HYDRA_LAUNCHER "Enables Building the
 nvshmem_add_default_on_option(NVSHMEM_BUILD_TXZ_PACKAGE "Build TXZ package")
 if (NVSHMEM_BUILD_PACKAGES)
   nvshmem_add_default_on_option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library")
+  # TODO: Flip to default-ON when no longer experimental
+  nvshmem_add_default_off_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
 endif()
 message( "___________________________________________________________________________________________________\n\n")
 

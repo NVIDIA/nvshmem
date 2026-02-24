@@ -227,12 +227,64 @@ macro(nvshmem_add_test_prefix SOURCE PREFIX LINK_DEVICE)
   endif()
 endmacro()
 
+
+macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
+  # --ltoir requires CUDA 12.0 or later
+  if(CUDAToolkit_VERSION_MAJOR LESS 12)
+    message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.0 or later, but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Skipping LTOIR cubin test.")
+  else()
+  get_filename_component(NAME_ ${SOURCE} NAME_WE)
+  get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
+  string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
+  string(REPLACE ${SOURCE} "" DIR ${DIR})
+  set(CUBIN_NAME "${NAME_}_ltoir.cubin")
+  set(INCLUDE_DIRECTORIES "-I${NVSHMEM_TEST_TLD}/common" "-I${NVSHMEM_TEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include")
+  if (NOT SubBuild)
+    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device.ltoir)
+    # Note: The -DNVSHMEM_HOSTLIB_ONLY macro name is a misnomer: it's used in the testing framework so the unmangled symbols will appear in the LTOIR cubin (just adds "extern c" to all the tests).
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+                      COMMAND ${CMAKE_CUDA_COMPILER} -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
+                              ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
+                      COMMAND ${CUDA_HOME}/bin/nvlink -nvvmpath=${CUDA_HOME}/nvvm -arch=${NVSHMEM_CLANG_ARCH} -dlto -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
+                      COMMAND rm ${NAME_}.ltoir
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      DEPENDS nvshmem_test_helper ${LTOIR_LIB_PATH})
+  else()
+    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device.ltoir)
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+                      COMMAND ${CMAKE_CUDA_COMPILER} -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
+                              ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
+                      COMMAND ${CUDA_HOME}/bin/nvlink -nvvmpath=${CUDA_HOME}/nvvm -arch=${NVSHMEM_CLANG_ARCH} -dlto -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
+                      COMMAND rm ${NAME_}.ltoir
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
+  endif()
+
+  add_custom_target(${NAME_}_ltoir_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
+
+  install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+    DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/${DIR}"
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  )
+
+  if (NVSHMEM_TEST_RELEASE_PREFIX)
+    install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+            DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/${DIR}"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+  endif()
+  endif()
+endmacro()
+
 macro(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
   get_filename_component(NAME_ ${SOURCE} NAME_WE)
   get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
   string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
   string(REPLACE ${SOURCE} "" DIR ${DIR})
-  set(CUBIN_NAME "${NAME_}.cubin")
+  set(CUBIN_NAME "${NAME_}_bc.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_TEST_TLD}/common" "-I${NVSHMEM_TEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include"  "-I${CUDA_HOME}/include/cccl")
 
   # Add debug flags for Debug and RelWithDebInfo builds

@@ -13,7 +13,10 @@
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 #include "non_abi/nvshmem_build_options.h"
-#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__)
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
+// transfer APIs.
+#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -91,7 +94,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpush_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, int source_offset, size_t nreduce) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__)
+#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     TYPE *src_ptr = (TYPE *)nvshmemi_mc_ptr(teami, (void *)(source + source_offset));
     nvshmemi_threadgroup_sync<SCOPE>();

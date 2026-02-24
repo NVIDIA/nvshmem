@@ -23,7 +23,10 @@
 #include "device/nvshmem_device_macros.h"
 #include "device_host/nvshmem_common.cuh"
 #include "non_abi/nvshmem_build_options.h"
-#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__)
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
+// transfer APIs.
+#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -33,7 +36,7 @@
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {
 #endif
 
@@ -1241,7 +1244,7 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmem_ptr(const voi
 
 #endif /* __CUDA_ARCH__ */
 
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 }
 #endif
 #endif /* _NVSHMEM_DEFINES_H_ */

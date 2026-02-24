@@ -96,6 +96,12 @@ static __device__ bool printed_error = false;
 #include "cutlass/bfloat16.h"
 #endif
 
+enum NVSHMEM_CUBIN_LIBRARY_T {
+    NVSHMEM_CUBIN_NONE = 0,
+    NVSHMEM_CUBIN_BC = 1,
+    NVSHMEM_CUBIN_LTOIR = 2
+};
+
 enum NVSHMEM_THREADGROUP_SCOPE_T {
     NVSHMEM_THREAD = 0,
     NVSHMEM_WARP,
@@ -251,7 +257,7 @@ void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);
 
 extern int mype, mype_node;
 extern int npes, npes_node;
-extern bool use_cubin;
+extern int use_cubin;
 extern size_t _min_size;
 extern size_t _max_size;
 extern size_t _min_iters;
