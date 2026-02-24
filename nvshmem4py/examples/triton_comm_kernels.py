@@ -111,7 +111,7 @@ def broadcast_naive_block(src_ptr, nbytes, rank, root_rank, remote_mc_ptr):
 # ----- Runtime Setup -----
 
 # Select a GPU device for the current MPI rank (one GPU per process)
-local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
 dev = Device(local_rank_per_node)
 dev.set_current()
 

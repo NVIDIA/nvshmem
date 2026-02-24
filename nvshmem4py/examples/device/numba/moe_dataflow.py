@@ -219,7 +219,7 @@ def prefix_expert_offsets(expert_counts, expert_offsets, n_experts):
 
 def main():
     # Set device based on local rank
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")

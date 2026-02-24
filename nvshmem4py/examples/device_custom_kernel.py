@@ -82,7 +82,7 @@ if __name__ == "__main__":
     chunk_size = args.chunk_size
 
     rank = MPI.COMM_WORLD.Get_rank()
-    dev = cuda.Device(rank % system.num_devices)
+    dev = cuda.Device(rank % system.get_num_devices())
     dev.set_current()
     stream = dev.create_stream()
     nvshmem.core.init(device=dev, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")

@@ -22,7 +22,7 @@ def simple_shift(arr, dst_pe):
     arr[0] = dst_pe
 
 # Initialize NVSHMEM Using an MPI communicator
-local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
 dev = Device(local_rank_per_node)
 dev.set_current()
 stream = dev.create_stream()

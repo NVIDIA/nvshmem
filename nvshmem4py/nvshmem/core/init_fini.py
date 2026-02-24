@@ -268,7 +268,7 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
             mpi_comm = mpi.COMM_WORLD
         rank = mpi_comm.Get_rank()
         nranks = mpi_comm.Get_size()
-        local_rank_per_node = rank % system.num_devices
+        local_rank_per_node = rank % system.get_num_devices()
  
         # Create an empty uniqueid for all ranks
         uniqueid = get_unique_id(empty=True)

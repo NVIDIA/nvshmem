@@ -121,7 +121,7 @@ def uid_init():
     rank = comm.Get_rank()
     nranks = comm.Get_size()
 
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
 
@@ -166,7 +166,7 @@ def parse_size(size_str):
     return int(number * multiplier)
 
 def mpi_init():
-    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.num_devices
+    local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,

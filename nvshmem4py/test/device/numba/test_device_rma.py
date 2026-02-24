@@ -37,6 +37,7 @@ def test_put_on_array(nvshmem_init_fini, dtype):
 
     assert (buf_dst == ((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()) + 1).all()
 
+    del nb_stream
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
     print("Done testing put on Array")
@@ -70,6 +71,7 @@ def test_get_on_array(nvshmem_init_fini, dtype):
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
     assert (buf_dst == nvshmem.core.my_pe() + 1).all()
+    del nb_stream
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
@@ -111,6 +113,7 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
+    del nb_stream
     print("Done testing put signal on Array")
 
 @pytest.mark.mpi
@@ -148,6 +151,7 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     if nvshmem.core.my_pe() == 1:
         assert (buf_dst == nvshmem.core.my_pe() + 1).all()
 
+    del nb_stream
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
     print("Done testing put signal with wait on Array")
@@ -174,7 +178,7 @@ def test_signal_op_signal_wait():
     
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
-
+    del nb_stream
     print("Done testing Signal Op and Signal Wait on Array")
 
 @pytest.mark.mpi
@@ -204,7 +208,7 @@ def test_p(dtype):
     
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
-
+    del nb_stream
     print("Done testing shmem_p")
 
 @pytest.mark.mpi
@@ -229,7 +233,7 @@ def test_g(dtype):
     test_g[1, 1, nb_stream](dest, var, nvshmem.core.my_pe())
     print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}, dest={dest}")
     assert (dest == 1).all()
-    
+    del nb_stream
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
 

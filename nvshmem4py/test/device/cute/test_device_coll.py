@@ -58,7 +58,7 @@ def _assert_tensor_equals(tensor, dtype, expected):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 @pytest.mark.parametrize("op", ["sum", "min", "max"])
 def test_device_reduce(nvshmem_init_fini, team, dtype, op):
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
@@ -106,7 +106,7 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
 @pytest.mark.parametrize("op", ["sum", "min", "max"])
 def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
@@ -153,7 +153,7 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_fcollect(nvshmem_init_fini, team, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
@@ -197,7 +197,7 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_alltoall(nvshmem_init_fini, team, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
@@ -241,7 +241,7 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_broadcast(nvshmem_init_fini, team, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)

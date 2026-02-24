@@ -10,7 +10,7 @@ import nvshmem.core
 import nvshmem.core.device.cute.mem as nvshmem_cute_mem
 import nvshmem.core.interop.cute as cute_interop
 
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 
 from test_device_rma import (
     _compile_kernel,
@@ -27,7 +27,7 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
         pytest.skip("Need at least 2 PEs for peer access")
 
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     Device(local_rank).set_current()
     buf = cute_interop.tensor((4,), dtype=cute.Int32)
     _fill_cute_tensor(buf, "int32", nvshmem.core.my_pe())
@@ -64,7 +64,7 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
 @pytest.mark.mpi
 def test_device_get_multicast_tensor(nvshmem_init_fini):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.num_devices
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     Device(local_rank).set_current()
     if not Device().properties.multicast_supported:
         pytest.skip("Multicast not supported on this platform")

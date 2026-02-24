@@ -57,7 +57,7 @@ def simple_shift(
 
 def run():
     my_rank = MPI.COMM_WORLD.Get_rank()
-    local_rank = my_rank % system.num_devices
+    local_rank = my_rank % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
     nvshmem.core.init(mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
