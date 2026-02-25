@@ -2072,69 +2072,49 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
 }
 
 static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabric_state_t *state) {
-    struct fi_info hints;
-    struct fi_tx_attr tx_attr;
-    struct fi_rx_attr rx_attr;
-    struct fi_ep_attr ep_attr;
-    struct fi_domain_attr domain_attr;
-    struct fi_fabric_attr fabric_attr;
-    struct fid_nic nic;
-    struct fi_av_attr av_attr;
     struct fi_info *all_infos, *current_info;
     size_t num_fabrics_returned = 0;
     int num_devices = 0;
     int status = 0;
 
-    memset(&ep_attr, 0, sizeof(struct fi_ep_attr));
-    memset(&av_attr, 0, sizeof(struct fi_av_attr));
-    memset(&hints, 0, sizeof(struct fi_info));
-    memset(&tx_attr, 0, sizeof(struct fi_tx_attr));
-    memset(&rx_attr, 0, sizeof(struct fi_rx_attr));
-    memset(&domain_attr, 0, sizeof(struct fi_domain_attr));
-    memset(&fabric_attr, 0, sizeof(struct fi_fabric_attr));
-    memset(&nic, 0, sizeof(struct fid_nic));
+    auto deleter = [](fi_info* p){ fi_freeinfo(p); };
+    std::unique_ptr<fi_info, decltype(deleter)> hints{ fi_allocinfo(), deleter };
+    NVSHMEMI_NULL_ERROR_JMP(hints, status, NVSHMEMX_ERROR_INTERNAL, out,
+                            "Unable to allocate memory for libfabric info hint.");
 
-    hints.tx_attr = &tx_attr;
-    hints.rx_attr = &rx_attr;
-    hints.ep_attr = &ep_attr;
-    hints.domain_attr = &domain_attr;
-    hints.fabric_attr = &fabric_attr;
-    hints.nic = &nic;
-
-    hints.addr_format = FI_FORMAT_UNSPEC;
-    hints.caps = FI_RMA | FI_HMEM;
+    hints->addr_format = FI_FORMAT_UNSPEC;
+    hints->caps = FI_RMA | FI_HMEM;
+    hints->domain_attr->mr_mode = FI_MR_ALLOCATED | FI_MR_PROV_KEY;
 
     if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_VERBS) {
-        hints.caps |= FI_ATOMIC;
-        domain_attr.mr_mode = FI_MR_VIRT_ADDR | FI_MR_ALLOCATED | FI_MR_PROV_KEY;
+        hints->caps |= FI_ATOMIC;
+        hints->domain_attr->mr_mode |= FI_MR_VIRT_ADDR;
     } else if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_SLINGSHOT) {
         /* TODO: Use FI_FENCE to optimize put_with_signal */
-        hints.caps |= FI_FENCE | FI_ATOMIC;
-        domain_attr.mr_mode = FI_MR_ENDPOINT | FI_MR_ALLOCATED | FI_MR_PROV_KEY;
+        hints->caps |= FI_FENCE | FI_ATOMIC;
+        hints->domain_attr->mr_mode |= FI_MR_ENDPOINT;
     } else if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
-        domain_attr.mr_mode =
-            FI_MR_LOCAL | FI_MR_VIRT_ADDR | FI_MR_ALLOCATED | FI_MR_PROV_KEY | FI_MR_HMEM;
-        hints.caps |= FI_MSG;
-        hints.caps |= FI_SOURCE;
+        hints->caps |= FI_MSG | FI_SOURCE;
+        hints->domain_attr->mr_mode |= FI_MR_LOCAL | FI_MR_VIRT_ADDR | FI_MR_HMEM;
     }
 
     if (use_staged_atomics) {
-        hints.mode |= FI_CONTEXT2;
+        hints->mode |= FI_CONTEXT2;
     }
 
     /* Ensure manual progress mode until auto progress is implemented */
-    domain_attr.data_progress = FI_PROGRESS_MANUAL;
+    hints->domain_attr->data_progress = FI_PROGRESS_MANUAL;
 
     /* Be thread safe at the level of the endpoint completion context. */
-    domain_attr.threading = FI_THREAD_SAFE;
+    hints->domain_attr->threading = FI_THREAD_SAFE;
 
     /* Require completion RMA completion at target for correctness of quiet */
-    hints.tx_attr->op_flags = FI_DELIVERY_COMPLETE;
+    hints->tx_attr->op_flags = FI_DELIVERY_COMPLETE;
 
-    ep_attr.type = FI_EP_RDM;  // Reliable datagrams
+    hints->ep_attr->type = FI_EP_RDM;  // Reliable datagrams
 
     status = fi_getinfo(FI_VERSION(NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER), NULL,
-                        NULL, 0, &hints, &all_infos);
+                        NULL, 0, hints.get(), &all_infos);
 
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "No providers matched fi_getinfo query: %d: %s\n", status,
@@ -2213,8 +2193,6 @@ out:
     if (status) {
         nvshmemt_libfabric_finalize(t);
     }
-
-    free(hints.fabric_attr->name);
 
     return status;
 }
