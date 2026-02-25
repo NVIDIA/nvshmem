@@ -9,6 +9,7 @@
 #include <cuda.h>                                    // for CUDA_SUCCESS
 #include <cuda_runtime.h>                            // for cudaDevice...
 #include <driver_types.h>                            // for cudaDevice...
+#include <dirent.h>                                  // for opendir, readdir
 #include <limits.h>                                  // for PATH_MAX
 #include <stdio.h>                                   // for NULL, fclose
 #include <stdlib.h>                                  // for free, calloc
@@ -48,6 +49,8 @@ enum pci_distance {
 };
 static const int pci_distance_perf[PATH_COUNT] = {4, 4, 3, 2, 1};
 static const char *pci_distance_string[PATH_COUNT] = {"PIX", "PXB", "PHB", "NODE", "SYS"};
+
+#define NVIDIA_DRIVER_PATH "/sys/bus/pci/drivers/nvidia"
 
 static int get_cuda_bus_id(int cuda_dev, char *bus_id) {
     int status = NVSHMEMX_SUCCESS;
@@ -106,6 +109,71 @@ out:
     return status;
 }
 
+static int is_pci_addr(const char *name) {
+    // Match XXXX:XX:XX.X pattern
+    return strlen(name) == 12 && name[4] == ':' && name[7] == ':' && name[10] == '.';
+}
+
+int get_nvidia_gpu_count(void) {
+    DIR *dir = opendir(NVIDIA_DRIVER_PATH);
+    if (!dir) return 0;
+    int count = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (is_pci_addr(ent->d_name)) count++;
+    }
+    closedir(dir);
+    return count;
+}
+
+static int get_gpu_paths_and_index(int cuda_device_id, char **cuda_device_paths,
+                                   int *out_mygpu_index) {
+    int status = NVSHMEMX_SUCCESS;
+    char my_bus_id[MAX_BUSID_SIZE];
+    DIR *nvidia_dir = NULL;
+
+    status = get_cuda_bus_id(cuda_device_id, my_bus_id);
+    if (status != NVSHMEMX_SUCCESS) return status;
+    for (int k = 0; k < MAX_BUSID_SIZE; k++)
+        my_bus_id[k] = tolower(my_bus_id[k]);
+
+    nvidia_dir = opendir(NVIDIA_DRIVER_PATH);
+    if (!nvidia_dir) {
+        NVSHMEMI_ERROR_PRINT("Failed to open " NVIDIA_DRIVER_PATH "\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    int gpu_id = 0;
+    *out_mygpu_index = -1;
+    struct dirent *ent;
+    while ((ent = readdir(nvidia_dir)) != NULL) {
+        if (!is_pci_addr(ent->d_name)) continue;
+        char bus_id[MAX_BUSID_SIZE];
+        strncpy(bus_id, ent->d_name, MAX_BUSID_SIZE - 1);
+        bus_id[MAX_BUSID_SIZE - 1] = '\0';
+
+        status = get_device_path(bus_id, &cuda_device_paths[gpu_id]);
+        if (status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT("get cuda path failed\n");
+            closedir(nvidia_dir);
+            return status;
+        }
+
+        if (strncmp(my_bus_id, bus_id, MAX_BUSID_SIZE) == 0)
+            *out_mygpu_index = gpu_id;
+
+        gpu_id++;
+    }
+    closedir(nvidia_dir);
+
+    if (*out_mygpu_index < 0) {
+        NVSHMEMI_ERROR_PRINT("Could not find current GPU in sysfs\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
 static enum pci_distance get_pci_distance(char *cuda_path, char *mlx_path) {
     int score = 0;
     int depth = 0;
@@ -130,7 +198,7 @@ static enum pci_distance get_pci_distance(char *cuda_path, char *mlx_path) {
 }
 
 typedef struct nvshmemi_path_pair_info {
-    int pe_idx;
+    int gpu_idx;
     int dev_idx;
     enum pci_distance pcie_distance;
 } nvshmemi_path_pair_info_t;
@@ -146,35 +214,30 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
         char gpu_bus_id[MAX_BUSID_SIZE];
     } gpu_info, *gpu_info_all = NULL;
 
-    std::list<nvshmemi_path_pair_info_t> pe_dev_pairs;
+    std::list<nvshmemi_path_pair_info_t> gpu_dev_pairs;
     std::list<nvshmemi_path_pair_info_t>::iterator pairs_iter;
 
     int ndev = tcurr->n_devices;
     int mype = nvshmemi_state->mype;
     int n_pes = nvshmemi_state->npes;
     int n_pes_node = nvshmemi_state->npes_node;
-    CUdevice gpu_device_id;
 
     char **cuda_device_paths = NULL;
-    int *pe_selected_devices = NULL;
-    enum pci_distance *pe_device_distance = NULL;
+    int *gpu_selected_devices = NULL;
+    enum pci_distance *gpu_device_distance = NULL;
     int *used_devs = NULL;
+    int n_gpus_node = 0;
 
-    int mype_array_index = -1, mydev_index = -1;
-    int i, dev_id, pe_id, pe_pair_index;
+    int mygpu_index = -1, mydev_index = -1;
+    int i, dev_id, gpu_id, gpu_pair_index;
     int devices_assigned = 0;
-    int mype_device_count = 0;
+    int mygpu_device_count = 0;
     int status = NVSHMEMX_ERROR_INTERNAL;
+    int mygpu_array_index;
 
     if (ndev <= 0) {
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "transport devices (setup_connections) failed \n");
-    }
-
-    status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
-    if (status != CUDA_SUCCESS) {
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
     }
 
     /* Allocate data structures start */
@@ -188,66 +251,45 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     NVSHMEMI_NULL_ERROR_JMP(gpu_info_all, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "gpu_info_all allocation failed \n");
 
-    /* array linking each GPU on our node with it's pcie path */
-    cuda_device_paths = (char **)calloc(n_pes_node, sizeof(char *));
-    NVSHMEMI_NULL_ERROR_JMP(cuda_device_paths, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for PE/NIC Mapping.\n");
-
-    /* Array of size n_pes_node * max_dev_per_pe storing the accepted mappings of PE to Dev(s) */
-    pe_selected_devices = (int *)calloc(n_pes_node * max_dev_per_pe, sizeof(int));
-    NVSHMEMI_NULL_ERROR_JMP(pe_selected_devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for PE/NIC Mapping.\n");
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
-        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            pe_selected_devices[pe_id * max_dev_per_pe + dev_id] = -1;
-        }
-    }
-
-    pe_device_distance =
-        (enum pci_distance *)calloc(n_pes_node * max_dev_per_pe, sizeof(enum pci_distance));
-    NVSHMEMI_NULL_ERROR_JMP(pe_device_distance, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for PE/NIC Mapping.\n");
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
-        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            pe_device_distance[pe_id * max_dev_per_pe + dev_id] = PATH_SYS;
-        }
-    }
-
     used_devs = (int *)calloc(ndev, sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(used_devs, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate memory for PE/NIC Mapping.\n");
     /* Allocate data structures end */
 
     /* Gather GPU and NIC paths start */
-    status = get_cuda_bus_id(gpu_device_id, gpu_info.gpu_bus_id);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get cuda busid failed \n");
+    n_gpus_node = get_nvidia_gpu_count();
+    if (n_gpus_node <= 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "No NVIDIA GPUs found in " NVIDIA_DRIVER_PATH "\n");
+    }
 
-    status = nvshmemi_boot_handle.allgather((void *)&gpu_info, (void *)gpu_info_all,
-                                            sizeof(struct gpu_info), &nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "allgather of gpu_info failed \n");
+    cuda_device_paths = (char **)calloc(n_gpus_node, sizeof(char *));
+    NVSHMEMI_NULL_ERROR_JMP(cuda_device_paths, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for GPU/NIC Mapping.\n");
 
-    pe_id = 0;
-    for (i = 0; i < n_pes; i++) {
-        if (nvshmemi_state->pe_info[i].hostHash != nvshmemi_state->pe_info[mype].hostHash) {
-            continue;
-        }
+    status = get_gpu_paths_and_index(nvshmemi_state->device_id, cuda_device_paths, &mygpu_index);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "get_gpu_paths_and_index failed\n");
+    mygpu_array_index = mygpu_index * max_dev_per_pe;
 
-        status = get_device_path(gpu_info_all[i].gpu_bus_id, &cuda_device_paths[pe_id]);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get cuda path failed \n");
-        /* to get back to our PE after the algorithm finishes. */
-        if (i == mype) {
-            mype_array_index = pe_id * max_dev_per_pe;
-        }
-
-        pe_id++;
-        if (pe_id == n_pes_node) {
-            break;
+    /* Allocate GPU-based arrays */
+    gpu_selected_devices = (int *)calloc(n_gpus_node * max_dev_per_pe, sizeof(int));
+    NVSHMEMI_NULL_ERROR_JMP(gpu_selected_devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for GPU/NIC Mapping.\n");
+    for (gpu_id = 0; gpu_id < n_gpus_node; gpu_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
+            gpu_selected_devices[gpu_id * max_dev_per_pe + dev_id] = -1;
         }
     }
 
-    if (pe_id != n_pes_node || mype_array_index == -1) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                           "Number of PEs found doesn't match the PE node count.\n");
+    gpu_device_distance =
+        (enum pci_distance *)calloc(n_gpus_node * max_dev_per_pe, sizeof(enum pci_distance));
+    NVSHMEMI_NULL_ERROR_JMP(gpu_device_distance, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for GPU/NIC Mapping.\n");
+    for (gpu_id = 0; gpu_id < n_gpus_node; gpu_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
+            gpu_device_distance[gpu_id * max_dev_per_pe + dev_id] = PATH_SYS;
+        }
     }
 
     for (i = 0; i < ndev; i++) {
@@ -257,37 +299,37 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     /* Gather GPU and NIC paths end */
 
     /* Get path distances start */
-    /* construct a n_pes_node * ndev array of distance measurements */
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
+    /* construct a n_gpus_node * ndev array of distance measurements */
+    for (gpu_id = 0; gpu_id < n_gpus_node; gpu_id++) {
         for (dev_id = 0; dev_id < ndev; dev_id++) {
             enum pci_distance distance_compare;
             distance_compare =
-                get_pci_distance(cuda_device_paths[pe_id], dev_info_all[dev_id].dev_path);
-            if (unlikely(pe_dev_pairs.empty())) {
-                pe_dev_pairs.push_front({pe_id, dev_id, distance_compare});
+                get_pci_distance(cuda_device_paths[gpu_id], dev_info_all[dev_id].dev_path);
+            if (unlikely(gpu_dev_pairs.empty())) {
+                gpu_dev_pairs.push_front({gpu_id, dev_id, distance_compare});
             } else {
-                for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end();
+                for (pairs_iter = gpu_dev_pairs.begin(); pairs_iter != gpu_dev_pairs.end();
                      pairs_iter++) {
                     if (distance_compare < (*pairs_iter).pcie_distance) {
                         break;
                     }
                 }
-                INFO(NVSHMEM_TOPO, "PE %d: %s dev %d: %s distance: %d\n", pe_id,
-                     cuda_device_paths[pe_id], dev_id, dev_info_all[dev_id].dev_path,
+                INFO(NVSHMEM_TOPO, "GPU %d: %s dev %d: %s distance: %d\n", gpu_id,
+                     cuda_device_paths[gpu_id], dev_id, dev_info_all[dev_id].dev_path,
                      distance_compare);
-                pe_dev_pairs.insert(pairs_iter, {pe_id, dev_id, distance_compare});
+                gpu_dev_pairs.insert(pairs_iter, {gpu_id, dev_id, distance_compare});
             }
         }
     }
     /* Get path distances end */
 
     /* loop one, do initial assignments of NIC(s) to each GPU */
-    for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end(); pairs_iter++) {
+    for (pairs_iter = gpu_dev_pairs.begin(); pairs_iter != gpu_dev_pairs.end(); pairs_iter++) {
         bool need_more_assignments = 0;
-        int pe_base_index = (*pairs_iter).pe_idx * max_dev_per_pe;
+        int gpu_base_index = (*pairs_iter).gpu_idx * max_dev_per_pe;
         /* skip pairs where the GPU already has a partner in the first loop */
-        for (pe_pair_index = 0; pe_pair_index < max_dev_per_pe; pe_pair_index++)
-            if (pe_selected_devices[pe_base_index + pe_pair_index] == PE_DEVICE_NOT_ASSIGNED) {
+        for (gpu_pair_index = 0; gpu_pair_index < max_dev_per_pe; gpu_pair_index++)
+            if (gpu_selected_devices[gpu_base_index + gpu_pair_index] == PE_DEVICE_NOT_ASSIGNED) {
                 need_more_assignments = 1;
                 break;
             }
@@ -297,13 +339,13 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
         }
 
         if (pci_distance_perf[(*pairs_iter).pcie_distance] <
-            pci_distance_perf[pe_device_distance[pe_base_index]]) {
+            pci_distance_perf[gpu_device_distance[gpu_base_index]]) {
             /* This NIC and all subsequent ones are less optimal than the already selected NICs
              * They can be safely ignored and we assign -2 to indicate that there are no more
              * optimal NICs for this GPU.
              */
-            for (; pe_pair_index < max_dev_per_pe; pe_pair_index++) {
-                pe_selected_devices[pe_base_index + pe_pair_index] =
+            for (; gpu_pair_index < max_dev_per_pe; gpu_pair_index++) {
+                gpu_selected_devices[gpu_base_index + gpu_pair_index] =
                     PE_DEVICE_NO_OPTIMAL_ASSIGNMENT;
                 /* While not technically assigned, we need to account for these NICs to make
                  * forward progress.
@@ -312,61 +354,61 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
             }
         } else {
             /* This NIC is optimal for this GPU. */
-            INFO(NVSHMEM_TOPO, "Pairing PE %d with device %d at distance %d\n",
-                 (*pairs_iter).pe_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
-            pe_selected_devices[pe_base_index + pe_pair_index] = (*pairs_iter).dev_idx;
-            pe_device_distance[pe_base_index + pe_pair_index] = (*pairs_iter).pcie_distance;
+            INFO(NVSHMEM_TOPO, "Pairing GPU %d with device %d at distance %d\n",
+                 (*pairs_iter).gpu_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
+            gpu_selected_devices[gpu_base_index + gpu_pair_index] = (*pairs_iter).dev_idx;
+            gpu_device_distance[gpu_base_index + gpu_pair_index] = (*pairs_iter).pcie_distance;
             used_devs[(*pairs_iter).dev_idx]++;
             devices_assigned++;
         }
 
-        if (devices_assigned == n_pes_node * max_dev_per_pe) {
+        if (devices_assigned == n_gpus_node * max_dev_per_pe) {
             break;
         }
     }
 
     /* loop two, load balance the NICs. */
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
+    for (gpu_id = 0; gpu_id < n_gpus_node; gpu_id++) {
         for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            int pe_pair_idx = pe_id * max_dev_per_pe + dev_id;
+            int gpu_pair_idx = gpu_id * max_dev_per_pe + dev_id;
             int nic_density;
-            if (pe_selected_devices[pe_pair_idx] < 0) {
+            if (gpu_selected_devices[gpu_pair_idx] < 0) {
                 continue;
             }
-            nic_density = used_devs[pe_selected_devices[pe_pair_idx]];
+            nic_density = used_devs[gpu_selected_devices[gpu_pair_idx]];
 
             /* Can't find a less populated NIC if ours is only assigned to 1 gpu. */
             if (nic_density < 2) {
                 continue;
             }
 
-            /* Calculate PE Index from nic_id. Each PE gets max_dev_per_pe assigned to them.
-             * If there are 8 NIC's and 4 PE's, the nic -> PE mapping looks like
+            /* Calculate GPU Index from nic_id. Each GPU gets max_dev_per_pe assigned to them.
+             * If there are 8 NIC's and 4 GPU's, the nic -> GPU mapping looks like
              * nic_id:  0   1   2   3   4   5   6   7
-             * pe_idx:  0   0   1   1   2   2   3   3
+             * gpu_idx:  0   0   1   1   2   2   3   3
              */
-            int pe_idx = (pe_pair_idx - (pe_pair_idx % max_dev_per_pe)) / max_dev_per_pe;
-            for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end();
+            int gpu_idx = (gpu_pair_idx - (gpu_pair_idx % max_dev_per_pe)) / max_dev_per_pe;
+            for (pairs_iter = gpu_dev_pairs.begin(); pairs_iter != gpu_dev_pairs.end();
                  pairs_iter++) {
                 /* Never change for a less optimal NIC. */
 
-                if ((*pairs_iter).pe_idx != pe_idx) {
+                if ((*pairs_iter).gpu_idx != gpu_idx) {
                     continue;
                 }
 
                 if (pci_distance_perf[(*pairs_iter).pcie_distance] <
-                    pci_distance_perf[pe_device_distance[pe_pair_idx]]) {
+                    pci_distance_perf[gpu_device_distance[gpu_pair_idx]]) {
                     break;
                 }
 
                 if ((nic_density - used_devs[(*pairs_iter).dev_idx]) >= 2) {
-                    INFO(NVSHMEM_TOPO, "Re-Pairing PE %d with device %d at distance %d\n",
-                         (*pairs_iter).pe_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
-                    used_devs[pe_selected_devices[pe_pair_idx]]--;
+                    INFO(NVSHMEM_TOPO, "Re-Pairing GPU %d with device %d at distance %d\n",
+                         (*pairs_iter).gpu_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
+                    used_devs[gpu_selected_devices[gpu_pair_idx]]--;
                     used_devs[(*pairs_iter).dev_idx]++;
                     nic_density = used_devs[(*pairs_iter).dev_idx];
-                    pe_selected_devices[pe_pair_idx] = (*pairs_iter).dev_idx;
-                    pe_device_distance[pe_pair_idx] = (*pairs_iter).pcie_distance;
+                    gpu_selected_devices[gpu_pair_idx] = (*pairs_iter).dev_idx;
+                    gpu_device_distance[gpu_pair_idx] = (*pairs_iter).pcie_distance;
                     if (nic_density < 2) {
                         break;
                     }
@@ -374,31 +416,33 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
             }
         }
 
-        for (pe_pair_index = 0; pe_pair_index < max_dev_per_pe; pe_pair_index++) {
-            if (pe_selected_devices[mype_array_index + pe_pair_index] >= 0) {
-                mydev_index = pe_selected_devices[mype_array_index + pe_pair_index];
-                device_arr[pe_pair_index] = mydev_index;
-                mype_device_count++;
-                INFO(NVSHMEM_TOPO, "Our PE is sharing its NIC at index %d with %d other PEs.\n",
-                     used_devs[mydev_index], mype_device_count);
+        for (gpu_pair_index = 0; gpu_pair_index < max_dev_per_pe; gpu_pair_index++) {
+            if (gpu_selected_devices[mygpu_array_index + gpu_pair_index] >= 0) {
+                mydev_index = gpu_selected_devices[mygpu_array_index + gpu_pair_index];
+                device_arr[gpu_pair_index] = mydev_index;
+                mygpu_device_count++;
+                INFO(NVSHMEM_TOPO, "Our GPU is sharing its NIC at index %d with %d other GPUs.\n",
+                     used_devs[mydev_index], mygpu_device_count);
             }
         }
 
-        if (mype_device_count == 0) {
+        if (mygpu_device_count == 0) {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                               "No NICs were assigned to our PE.\n");
+                               "No NICs were assigned to our GPU.\n");
         }
 
         /* No need to report this in a loop - All Devices will have the same perf characteristics.
          */
-        if (pci_distance_perf[pe_device_distance[mype_array_index]] < pci_distance_perf[PATH_PIX]) {
+        if (pci_distance_perf[gpu_device_distance[mygpu_array_index]] < pci_distance_perf[PATH_PIX]) {
             nvshmemi_state->are_nics_ll128_compliant = false;
             INFO(NVSHMEM_TOPO,
-                 "Our PE is connected to a NIC with pci distance %s."
+                 "Our GPU is connected to a NIC with pci distance %s."
                  "this will provide less than optimal performance.\n",
-                 pci_distance_string[pe_device_distance[mype_array_index]]);
+                 pci_distance_string[gpu_device_distance[mygpu_array_index]]);
         }
     }
+
+    status = NVSHMEMX_SUCCESS;
 
 out:
     if (dev_info_all) {
@@ -410,7 +454,7 @@ out:
     }
 
     if (cuda_device_paths) {
-        for (i = 0; i < n_pes_node; i++) {
+        for (i = 0; i < n_gpus_node; i++) {
             if (cuda_device_paths[i]) {
                 free(cuda_device_paths[i]);
             }
@@ -418,18 +462,18 @@ out:
         free(cuda_device_paths);
     }
 
-    pe_dev_pairs.clear();
+    gpu_dev_pairs.clear();
 
-    if (pe_selected_devices) {
-        free(pe_selected_devices);
+    if (gpu_selected_devices) {
+        free(gpu_selected_devices);
     }
 
     if (used_devs) {
         free(used_devs);
     }
 
-    if (pe_device_distance) {
-        free(pe_device_distance);
+    if (gpu_device_distance) {
+        free(gpu_device_distance);
     }
 
     return status;
