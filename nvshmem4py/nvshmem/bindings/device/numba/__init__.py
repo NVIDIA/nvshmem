@@ -10,7 +10,7 @@
 
 from cuda.pathfinder import find_nvidia_header_directory
 
-from numba import cuda 
+from numba import cuda
 
 import os
 import warnings
@@ -25,12 +25,14 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
         raise RuntimeError("nvshmem.h not found, package may not be properly installed")
 
     if not os.path.exists(INCLUDE_PATH):
-        raise RuntimeError(f"NVSHMEM headers not found at {INCLUDE_PATH}. Please confirm that nvshmem is installed correctly.")
+        raise RuntimeError(
+            f"NVSHMEM headers not found at {INCLUDE_PATH}. Please confirm that nvshmem is installed correctly.")
 
     CCCL_INCLUDE_PATH = find_nvidia_header_directory("cccl")
 
     if not os.path.exists(CCCL_INCLUDE_PATH):
-        raise RuntimeError(f"CCCL headers not found at {CCCL_INCLUDE_PATH}. Please confirm that cccl is installed correctly.")
+        raise RuntimeError(
+            f"CCCL headers not found at {CCCL_INCLUDE_PATH}. Please confirm that cccl is installed correctly.")
 
     # Path to this folder to look for entry point file
     this_folder = os.path.dirname(os.path.abspath(__file__))

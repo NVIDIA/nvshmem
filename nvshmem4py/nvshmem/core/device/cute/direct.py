@@ -11,10 +11,7 @@
 import nvshmem.bindings.device.cute as bindings
 from nvshmem.core import Teams
 
-
-
 __all__ = ["my_pe", "team_my_pe", "team_n_pes", "n_pes", "barrier_all", "sync_all", "signal_op", "signal_wait"]
-
 
 from cutlass import cute
 import cutlass
@@ -71,9 +68,3 @@ def signal_wait(signal_var, signal_op, signal_val):
     signal_var_ptr = _resolve_ptr(signal_var)
     signal_val = cute_cast(signal_val, cutlass.Uint64)
     return bindings.signal_wait_until(signal_var_ptr, signal_op, signal_val)
-
-
-
-
-
-

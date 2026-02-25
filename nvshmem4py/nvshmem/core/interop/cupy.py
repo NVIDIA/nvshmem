@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 The following are interoperability helpers for NVSHMEM4Py memory used in CuPy
 """
@@ -22,7 +21,10 @@ from typing import Tuple, Union
 from cuda.core import Buffer
 from cuda.core import Device
 
-__all__ = ["bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array", "register_external_array", "unregister_external_array"]
+__all__ = [
+    "bytearray", "array", "free_array", "array_get_buffer", "get_peer_array", "get_multicast_array",
+    "register_external_array", "unregister_external_array"
+]
 
 logger = logging.getLogger("nvshmem")
 
@@ -36,6 +38,7 @@ except:
 
 import numpy as np
 
+
 def _is_array(array: Union[ndarray, object]) -> bool:
     """
     Helper function to check if an object is a CuPy array
@@ -45,6 +48,7 @@ def _is_array(array: Union[ndarray, object]) -> bool:
     if not _cupy_enabled:
         return False
     return isinstance(array, ndarray)
+
 
 def array_get_buffer(array: ndarray) -> Tuple[Buffer, int, str]:
     """
@@ -62,7 +66,7 @@ def array_get_buffer(array: ndarray) -> Tuple[Buffer, int, str]:
     return buf, get_size(array.shape, array.dtype), str(array.dtype)
 
 
-def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C", except_on_del=True) -> ndarray:
+def array(shape: Tuple[int], dtype: str = "float32", release=False, morder="C", except_on_del=True) -> ndarray:
     """
     Create a CuPy array view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -98,7 +102,13 @@ def array(shape: Tuple[int], dtype: str="float32", release=False, morder="C", ex
     view = cupy_array.view(dtype).reshape(shape, order=morder)
     return view
 
-def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id: int=None, morder="C", except_on_del=True) -> ndarray:
+
+def bytearray(shape: Tuple[int],
+              dtype: str = "float32",
+              release=False,
+              device_id: int = None,
+              morder="C",
+              except_on_del=True) -> ndarray:
     """
     Create a raw CuPy byte array from NVSHMEM-allocated memory.
 
@@ -126,9 +136,10 @@ def bytearray(shape: Tuple[int], dtype: str="float32", release=False, device_id:
     """
     if not _cupy_enabled:
         return
-    return array(shape, dtype="int8", release=release, morder=morder, except_on_del=except_on_del) 
+    return array(shape, dtype="int8", release=release, morder=morder, except_on_del=except_on_del)
 
-def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
+
+def get_peer_array(array: ndarray, peer_pe: int = None) -> ndarray:
     """
     Return a Buffer based on the peer_buffer (wrapper of nvshmem_ptr) API
     """
@@ -137,6 +148,7 @@ def get_peer_array(array: ndarray, peer_pe: int=None) -> ndarray:
     buf, size, dtype = array_get_buffer(array)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
     return cupy.from_dlpack(peer_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
 
 def get_multicast_array(team: Teams, array: ndarray) -> ndarray:
     """
@@ -170,9 +182,10 @@ def get_multicast_array(team: Teams, array: ndarray) -> ndarray:
     if not _cupy_enabled:
         return
 
-    buf, size, dtype  = array_get_buffer(array)
+    buf, size, dtype = array_get_buffer(array)
     mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
     return cupy.from_dlpack(mc_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
+
 
 def register_external_array(array: ndarray) -> ndarray:
     """
@@ -184,6 +197,7 @@ def register_external_array(array: ndarray) -> ndarray:
     registered_buf = nvshmem.core.register_external_buffer(buf)
     return cupy.from_dlpack(registered_buf, copy=False).view(array.dtype).reshape(cupy.shape(array))
 
+
 def unregister_external_array(array: ndarray) -> None:
     """
     Unregister an external array with NVSHMEM.
@@ -192,6 +206,7 @@ def unregister_external_array(array: ndarray) -> None:
         return
     buf, size, dtype = array_get_buffer(array)
     nvshmem.core.unregister_external_buffer(buf)
+
 
 def free_array(array: ndarray) -> None:
     """

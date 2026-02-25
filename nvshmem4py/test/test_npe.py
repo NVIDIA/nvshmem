@@ -6,6 +6,7 @@ from utils import uid_init, mpi_init
 
 from nvshmem.bindings.device.numba import n_pes, sync_all
 
+
 def test_npe():
 
     @cuda.jit()

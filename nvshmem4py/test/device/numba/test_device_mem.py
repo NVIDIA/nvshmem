@@ -2,9 +2,10 @@ import cupy as cp
 from cuda.core import Device, Stream
 import numba.cuda as cuda
 import nvshmem.core
-import nvshmem.core.device.numba 
+import nvshmem.core.device.numba
 
 import pytest
+
 
 @pytest.mark.mpi
 def test_device_get_peer_array(nvshmem_init_fini):
@@ -17,15 +18,14 @@ def test_device_get_peer_array(nvshmem_init_fini):
 
     nblocks = 1
     nthreads = 1
-    
+
     dev = Device()
     dev.sync()
 
     # CuPy array allocated with NVSHMEM backend
-    arr = nvshmem.core.array((4,), dtype="int32")
+    arr = nvshmem.core.array((4, ), dtype="int32")
     arr[:] = nvshmem.core.my_pe()
-    
-        
+
     @cuda.jit
     def peer_fetch_kernel(in_arr, pe):
         peer_arr = nvshmem.core.device.numba.get_peer_array(in_arr, pe)
@@ -36,15 +36,15 @@ def test_device_get_peer_array(nvshmem_init_fini):
     my_pe = nvshmem.core.my_pe()
     peer_pe = (my_pe + 1) % nvshmem.core.n_pes()
 
-
     nb_stream = cuda.stream()
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
-    
+
     peer_fetch_kernel[nblocks, nthreads, nb_stream](arr, peer_pe)
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
     dev.sync()
     assert (arr == peer_pe).all(), f"Result {arr} did not match expected {peer_pe}"
+
 
 @pytest.mark.mpi
 def test_device_get_multicast_array(nvshmem_init_fini):
@@ -63,10 +63,9 @@ def test_device_get_multicast_array(nvshmem_init_fini):
         pytest.skip("Skipping MC memory test because Multicast memory is not supported on this platform")
 
     # CuPy array allocated with NVSHMEM backend
-    arr = nvshmem.core.array((4,), dtype="float32")
+    arr = nvshmem.core.array((4, ), dtype="float32")
     arr[:] = nvshmem.core.my_pe()
-    
-    
+
     @cuda.jit
     def multicast_fetch_kernel(team, in_arr):
         mc_arr = nvshmem.core.device.numba.get_multicast_array(team, in_arr)

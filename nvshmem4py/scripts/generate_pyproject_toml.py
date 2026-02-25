@@ -75,6 +75,7 @@ profile = "black"
 line_length = 100
 """
 
+
 def update_pyproject(cuda_ver, nvshmem4py_path):
     req_file = f"{nvshmem4py_path}/requirements_cuda{cuda_ver}.txt"
 

@@ -24,7 +24,7 @@ def test_ring(dev: Device):
 
         int_p(ptr, mype, peer)
 
-    dest = nvshmem.core.array((1,), dtype="int32")
+    dest = nvshmem.core.array((1, ), dtype="int32")
 
     app_kernel[1, 1, 0](dest)
 

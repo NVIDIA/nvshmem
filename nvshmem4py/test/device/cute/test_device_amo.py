@@ -46,7 +46,7 @@ def _assert_tensor_equals(tensor, dtype, expected):
 def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    buf = cute_interop.tensor((1,), dtype=cute_dtype)
+    buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
 
     @cute.kernel
@@ -77,8 +77,8 @@ def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    buf = cute_interop.tensor((1,), dtype=cute_dtype)
-    out = cute_interop.tensor((1,), dtype=cute_dtype)
+    buf = cute_interop.tensor((1, ), dtype=cute_dtype)
+    out = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
     _fill_cute_tensor(out, dtype, 0)
 
@@ -114,8 +114,8 @@ def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    buf = cute_interop.tensor((1,), dtype=cute_dtype)
-    out = cute_interop.tensor((1,), dtype=cute_dtype)
+    buf = cute_interop.tensor((1, ), dtype=cute_dtype)
+    out = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 4.5)
     _fill_cute_tensor(out, dtype, 0)
 
@@ -150,7 +150,7 @@ def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    buf = cute_interop.tensor((1,), dtype=cute_dtype)
+    buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
 
     @cute.kernel
@@ -181,8 +181,8 @@ def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_swap_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    buf = cute_interop.tensor((1,), dtype=cute_dtype)
-    out = cute_interop.tensor((1,), dtype=cute_dtype)
+    buf = cute_interop.tensor((1, ), dtype=cute_dtype)
+    out = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 1.25)
     _fill_cute_tensor(out, dtype, 0)
 

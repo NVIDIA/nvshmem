@@ -15,9 +15,7 @@ import nvshmem.core.device.cute as nvshmem_cute
 import nvshmem.core.interop.cute as cute_interop
 import nvshmem.core.device.cute.rma as nvshmem_cute_rma
 
-
 _KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
-
 
 rma_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
 
@@ -208,7 +206,7 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
     _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
     buf_dst = cute_interop.tensor((4, 4), dtype=cute_dtype)
     _fill_cute_tensor(buf_dst, dtype, 0)
-    signal_var = cute_interop.tensor((1,), dtype=cute.Int64)
+    signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
     _fill_cute_tensor(signal_var, "int64", 0)
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
@@ -218,13 +216,15 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
     signal_cute = signal_var
 
     @cute.kernel
-    def test_put_signal(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32, signal_op: Int32, pe: Int32):
+    def test_put_signal(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32,
+                        signal_op: Int32, pe: Int32):
         tidx, _, _ = cute.arch.thread_idx()
         if tidx == 0:
             nvshmem_cute.put_signal(dst, src, signal_var, signal_val, signal_op, pe)
 
     @cute.jit
-    def test_put_signal_launcher(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32, signal_op: Int32, pe: Int32):
+    def test_put_signal_launcher(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32,
+                                 signal_op: Int32, pe: Int32):
         test_put_signal(dst, src, signal_var, signal_val, signal_op, pe).launch(
             grid=[1, 1, 1],
             block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
@@ -253,7 +253,7 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
     buf_dst = cute_interop.tensor((4, 4), dtype=cute_dtype)
     _fill_cute_tensor(buf_dst, dtype, 0)
-    signal_var = cute_interop.tensor((1,), dtype=cute.Int64)
+    signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
     _fill_cute_tensor(signal_var, "int64", 0)
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
@@ -263,14 +263,16 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     signal_cute = signal_var
 
     @cute.kernel
-    def test_put_signal_with_wait(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32, signal_op: Int32, pe: Int32):
+    def test_put_signal_with_wait(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32,
+                                  signal_op: Int32, pe: Int32):
         tidx, _, _ = cute.arch.thread_idx()
         if tidx == 0:
             nvshmem_cute.put_signal(dst, src, signal_var, signal_val, signal_op, pe)
             nvshmem_cute.signal_wait(signal_var, nvshmem.core.ComparisonType.CMP_GE, signal_val)
 
     @cute.jit
-    def test_put_signal_with_wait_launcher(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32, signal_op: Int32, pe: Int32):
+    def test_put_signal_with_wait_launcher(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor,
+                                           signal_val: Int32, signal_op: Int32, pe: Int32):
         test_put_signal_with_wait(dst, src, signal_var, signal_val, signal_op, pe).launch(
             grid=[1, 1, 1],
             block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
@@ -283,7 +285,9 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     torch.cuda.synchronize()
 
     if nvshmem.core.my_pe() == 1:
-        expected_host = np.full((4, 4), _NUMPY_DTYPE_MAP[dtype](nvshmem.core.my_pe() + 1), dtype=_NUMPY_DTYPE_MAP[dtype])
+        expected_host = np.full((4, 4),
+                                _NUMPY_DTYPE_MAP[dtype](nvshmem.core.my_pe() + 1),
+                                dtype=_NUMPY_DTYPE_MAP[dtype])
         assert (_read_cute_tensor(buf_dst, dtype) == expected_host).all()
 
     cute_interop.free_tensor(buf_dst)
@@ -294,7 +298,7 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.mpi
 def test_signal_op_signal_wait(nvshmem_init_fini):
     stream = _nvshmem_stream()
-    signal_var = cute_interop.tensor((1,), dtype=cute.Int64)
+    signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
     _fill_cute_tensor(signal_var, "int64", 0)
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
@@ -329,7 +333,7 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
 def test_p(dtype, nvshmem_init_fini):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    var = cute_interop.tensor((1,), dtype=cute_dtype)
+    var = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(var, dtype, 0)
     val = 1
 
@@ -354,7 +358,7 @@ def test_p(dtype, nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
-    expected_host = np.full((1,), _NUMPY_DTYPE_MAP[dtype](1), dtype=_NUMPY_DTYPE_MAP[dtype])
+    expected_host = np.full((1, ), _NUMPY_DTYPE_MAP[dtype](1), dtype=_NUMPY_DTYPE_MAP[dtype])
     assert (_read_cute_tensor(var, dtype) == expected_host).all()
 
     cute_interop.free_tensor(var)
@@ -365,9 +369,9 @@ def test_p(dtype, nvshmem_init_fini):
 def test_g(dtype, nvshmem_init_fini):
     stream = _nvshmem_stream()
     cute_dtype = _cute_dtype(dtype)
-    var = cute_interop.tensor((1,), dtype=cute_dtype)
+    var = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(var, dtype, 1)
-    dest = cute_interop.tensor((1,), dtype=cute_dtype)
+    dest = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(dest, dtype, 0)
 
     var_cute = var
@@ -393,9 +397,8 @@ def test_g(dtype, nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
-    expected_host = np.full((1,), _NUMPY_DTYPE_MAP[dtype](1), dtype=_NUMPY_DTYPE_MAP[dtype])
+    expected_host = np.full((1, ), _NUMPY_DTYPE_MAP[dtype](1), dtype=_NUMPY_DTYPE_MAP[dtype])
     assert (_read_cute_tensor(dest, dtype) == expected_host).all()
 
     cute_interop.free_tensor(dest)
     cute_interop.free_tensor(var)
-

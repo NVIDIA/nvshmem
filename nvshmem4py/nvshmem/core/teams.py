@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 The following are NVSHMEM functions used for team management
 """
@@ -23,9 +22,13 @@ import logging
 
 logger = logging.getLogger("nvshmem")
 
-__all__ = ["team_split_strided", "team_split_2d", "team_destroy", "team_init", "team_translate_pe", "TeamConfig", "TeamUniqueId", "get_team_unique_id"]
+__all__ = [
+    "team_split_strided", "team_split_2d", "team_destroy", "team_init", "team_translate_pe", "TeamConfig",
+    "TeamUniqueId", "get_team_unique_id"
+]
 
 TeamUniqueId = bindings.team_uniqueid
+
 
 def get_team_unique_id() -> TeamUniqueId:
     """Get a new team unique ID.
@@ -43,7 +46,14 @@ def get_team_unique_id() -> TeamUniqueId:
     bindings.team_get_uniqueid(unique_id.ptr)
     return unique_id
 
-def team_split_strided(parent_team: Teams, start: int, stride: int, size: int, config: TeamConfig, config_mask: int, new_team_name=None) -> Teams:
+
+def team_split_strided(parent_team: Teams,
+                       start: int,
+                       stride: int,
+                       size: int,
+                       config: TeamConfig,
+                       config_mask: int,
+                       new_team_name=None) -> Teams:
     """Split a parent team into a new team using strided distribution.
     
     This function creates a new team by selecting a subset of processes from the parent team
@@ -93,11 +103,12 @@ def team_split_strided(parent_team: Teams, start: int, stride: int, size: int, c
 
     new_team_handle = ctypes.c_int()
 
-    bindings.team_split_strided(parent_team, start, stride, size, config.ptr, config_mask, ctypes.addressof(new_team_handle))
+    bindings.team_split_strided(parent_team, start, stride, size, config.ptr, config_mask,
+                                ctypes.addressof(new_team_handle))
 
     if new_team_name is None:
         new_team_name = f"TEAM_{new_team_handle.value}"
-    
+
     # team_split_strided behaves like team_split_2d for non-participating PEs
     # Therefore it's not an error to get a -1 handle. The return code of the binding is the error condition. However, we want to print a debug log.
     if new_team_handle.value == -1:
@@ -107,7 +118,14 @@ def team_split_strided(parent_team: Teams, start: int, stride: int, size: int, c
     Teams.add(new_team_name, new_team_handle.value)
     return Teams[new_team_name]
 
-def team_split_2d(parent_team: Teams, xrange: int, xaxis_config: TeamConfig, xaxis_mask: int, yaxis_config: TeamConfig, yaxis_mask: int, new_team_name=None) -> tuple[Teams, Teams]:
+
+def team_split_2d(parent_team: Teams,
+                  xrange: int,
+                  xaxis_config: TeamConfig,
+                  xaxis_mask: int,
+                  yaxis_config: TeamConfig,
+                  yaxis_mask: int,
+                  new_team_name=None) -> tuple[Teams, Teams]:
     """Split a parent team into two 2D teams.
     
     This function creates two new teams from a parent team, organizing processes in a 2D grid.
@@ -152,7 +170,8 @@ def team_split_2d(parent_team: Teams, xrange: int, xaxis_config: TeamConfig, xax
     xaxis_team_handle = ctypes.c_int()
     yaxis_team_handle = ctypes.c_int()
 
-    bindings.team_split_2d(parent_team, xrange, xaxis_config.ptr, xaxis_mask, yaxis_config.ptr, yaxis_mask, ctypes.addressof(xaxis_team_handle), ctypes.addressof(yaxis_team_handle))
+    bindings.team_split_2d(parent_team, xrange, xaxis_config.ptr, xaxis_mask, yaxis_config.ptr, yaxis_mask,
+                           ctypes.addressof(xaxis_team_handle), ctypes.addressof(yaxis_team_handle))
 
     if new_team_name is None:
         xaxis_team_name = f"TEAM_X_{xaxis_team_handle.value}"
@@ -164,7 +183,9 @@ def team_split_2d(parent_team: Teams, xrange: int, xaxis_config: TeamConfig, xax
     # This will happen for PEs that are not part of the team
     # Therefore it's not an error. The return code of the binding is the error condition. However, we want to print a debug log.
     if xaxis_team_handle.value == -1 or yaxis_team_handle.value == -1:
-        logger.debug(f"Got -1 back as team handle for team {xaxis_team_name} or {yaxis_team_name}. This PE is not part of one of the two teams")
+        logger.debug(
+            f"Got -1 back as team handle for team {xaxis_team_name} or {yaxis_team_name}. This PE is not part of one of the two teams"
+        )
 
     if xaxis_team_handle.value == -1:
         logger.debug(f"Got -1 back as team handle for team {xaxis_team_name}. This PE is not part of the x-axis team")
@@ -178,8 +199,9 @@ def team_split_2d(parent_team: Teams, xrange: int, xaxis_config: TeamConfig, xax
     else:
         Teams.add(yaxis_team_name, yaxis_team_handle.value)
         yaxis_team = Teams[yaxis_team_name]
-    
+
     return xaxis_team, yaxis_team
+
 
 def team_destroy(team: Union[int, str]):
     """Destroy a team and remove it from the team registry.
@@ -209,6 +231,7 @@ def team_destroy(team: Union[int, str]):
     bindings.team_destroy(Teams[team_name])
     Teams.remove(team_name)
 
+
 def team_init(team_config: TeamConfig, config_mask: int, npes: int, pe_idx_in_team: int, new_team_name=None) -> Teams:
     """Initialize a new team with the specified configuration.
     
@@ -237,7 +260,7 @@ def team_init(team_config: TeamConfig, config_mask: int, npes: int, pe_idx_in_te
     bindings.team_init(ctypes.addressof(new_team_handle), team_config.ptr, config_mask, npes, pe_idx_in_team)
     if new_team_name is None:
         new_team_name = f"TEAM_{new_team_handle.value}"
-    
+
     # For team_init, only PEs who are part of the team call this function
     # So this will always be an error
     if new_team_handle.value == -1:
@@ -246,6 +269,7 @@ def team_init(team_config: TeamConfig, config_mask: int, npes: int, pe_idx_in_te
     Teams.add(new_team_name, new_team_handle.value)
 
     return Teams[new_team_name]
+
 
 def team_translate_pe(src_team: Teams, src_pe: int, dest_team: Teams) -> int:
     """Translate a process index from one team to another.

@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 This file implements a program representative of an MoE (mixture of experts) application using only Numba-CUDA and NVSHMEM4Py.
 """
@@ -37,6 +36,7 @@ NUM_ROWS = NUM_SRC_ROWS * TOP_K
 signal_op = SignalOp.SIGNAL_ADD
 comparison_type = ComparisonType.CMP_GE
 
+
 @cuda.jit
 def dispatch_inputs(inputs, expert_inputs, expert_signals, batch_size, nfeatures):
     """
@@ -57,11 +57,12 @@ def dispatch_inputs(inputs, expert_inputs, expert_signals, batch_size, nfeatures
             shmem_dev.put_signal_nbi(
                 expert_inputs[dst_offset:dst_offset + batch_size * nfeatures],
                 inputs[src_offset:src_offset + batch_size * nfeatures],
-                expert_signals[mype:mype+1],
+                expert_signals[mype:mype + 1],
                 np.uint64(1),
                 signal_op,
                 mype,
             )
+
 
 @cuda.jit
 def expert_kernel(expert_inputs, expert_outputs, expert_signals, batch_size, nfeatures):
@@ -73,7 +74,7 @@ def expert_kernel(expert_inputs, expert_outputs, expert_signals, batch_size, nfe
 
     # Wait until all batches have arrived (one from each PE)
     if tid == 0:
-        shmem_dev.signal_wait(expert_signals[mype:mype+1], comparison_type, np.uint64(n_pes()))
+        shmem_dev.signal_wait(expert_signals[mype:mype + 1], comparison_type, np.uint64(n_pes()))
     cuda.syncthreads()
 
     # Simple expert computation: sum along features
@@ -82,6 +83,7 @@ def expert_kernel(expert_inputs, expert_outputs, expert_signals, batch_size, nfe
         for j in range(nfeatures):
             acc += expert_inputs[mype * batch_size * nfeatures + i * nfeatures + j]
         expert_outputs[mype * batch_size + i] = acc
+
 
 @cuda.jit
 def combine_outputs(expert_outputs, combined_outputs, root_signals, batch_size):
@@ -110,18 +112,19 @@ def combine_outputs(expert_outputs, combined_outputs, root_signals, batch_size):
             for pe in range(npes):
                 if pe == root:
                     continue
-                shmem_dev.signal_wait(root_signals[pe:pe+1], comparison_type, 1)
+                shmem_dev.signal_wait(root_signals[pe:pe + 1], comparison_type, 1)
     else:
         # Non-root sends its slice to root and signals
         if tid == 0:
             shmem_dev.put_signal_nbi(
                 combined_outputs[start:end],
                 expert_outputs[start:end],
-                root_signals[mype:mype+1],
+                root_signals[mype:mype + 1],
                 1,
                 signal_op,
                 root,
             )
+
 
 @cuda.jit
 def exchange_offsets(expert_counts, expert_pos_out, num_experts):
@@ -136,17 +139,15 @@ def exchange_offsets(expert_counts, expert_pos_out, num_experts):
         for e in range(num_experts):
             prev = 0
             for r in range(npes):
-                val = shmem_dev.g(expert_counts[e:e+1], r)
+                val = shmem_dev.g(expert_counts[e:e + 1], r)
                 prev += val
                 expert_pos_out[r + e * npes] = prev
     cuda.syncthreads()
 
+
 @cuda.jit
-def token_shuffle_two_step_allpush(send_data, recv_data,
-                                   expanded_src_row, expert_for_expanded_src_row,
-                                   expert_offsets,
-                                   k, num_rows, nfeatures,
-                                   expert_pos_out, num_experts):
+def token_shuffle_two_step_allpush(send_data, recv_data, expanded_src_row, expert_for_expanded_src_row, expert_offsets,
+                                   k, num_rows, nfeatures, expert_pos_out, num_experts):
     """
     Shuffle tokens to experts across ranks using CTA-level puts.
     Mirrors moe_shuffle.cu two-step allpush at a high level using arrays.
@@ -190,6 +191,7 @@ def token_shuffle_two_step_allpush(send_data, recv_data,
         rounded_block_offset = true_block_offset % num_rows
         block_offset += num_blocks
 
+
 @cuda.jit
 def build_routing(expanded_src_row, expert_for_expanded_src_row, num_src_rows, top_k, n_experts):
     idx = cuda.grid(1)
@@ -202,12 +204,14 @@ def build_routing(expanded_src_row, expert_for_expanded_src_row, num_src_rows, t
     expanded_src_row[idx] = i
     expert_for_expanded_src_row[idx] = expert
 
+
 @cuda.jit
 def count_experts(expert_for_expanded_src_row, expert_counts, n_rows):
     idx = cuda.grid(1)
     if idx < n_rows:
         exp = expert_for_expanded_src_row[idx]
         cuda.atomic.add(expert_counts, exp, 1)
+
 
 @cuda.jit
 def prefix_expert_offsets(expert_counts, expert_offsets, n_experts):
@@ -216,6 +220,7 @@ def prefix_expert_offsets(expert_counts, expert_offsets, n_experts):
         for e in range(n_experts):
             total += expert_counts[e]
             expert_offsets[e] = total
+
 
 def main():
     # Set device based on local rank
@@ -230,20 +235,20 @@ def main():
     # Allocate input and output arrays
     inputs = nvshmem.core.array((N_INPUTS, N_FEATURES), dtype="float32")
     expert_inputs = nvshmem.core.array((N_EXPERTS * BATCH_SIZE, N_FEATURES), dtype="float32")
-    expert_outputs = nvshmem.core.array((N_EXPERTS * BATCH_SIZE,), dtype="float32")
-    expert_signals = nvshmem.core.array((N_EXPERTS,), dtype="uint64")
-    combined_outputs = nvshmem.core.array((N_EXPERTS * BATCH_SIZE,), dtype="float32")
-    root_signals = nvshmem.core.array((nvshmem.core.n_pes(),), dtype="uint64")
+    expert_outputs = nvshmem.core.array((N_EXPERTS * BATCH_SIZE, ), dtype="float32")
+    expert_signals = nvshmem.core.array((N_EXPERTS, ), dtype="uint64")
+    combined_outputs = nvshmem.core.array((N_EXPERTS * BATCH_SIZE, ), dtype="float32")
+    root_signals = nvshmem.core.array((nvshmem.core.n_pes(), ), dtype="uint64")
 
     # Buffers for moe_shuffle-like path
     # Source rows and expert mapping for top-k routing
     send_data = nvshmem.core.array((NUM_SRC_ROWS, N_FEATURES), dtype="float32")
     recv_data = nvshmem.core.array((NUM_ROWS, N_FEATURES), dtype="float32")
-    expanded_src_row = nvshmem.core.array((NUM_ROWS,), dtype="int32")
-    expert_for_expanded_src_row = nvshmem.core.array((NUM_ROWS,), dtype="int32")
-    expert_counts = nvshmem.core.array((N_EXPERTS,), dtype="int64")
-    expert_offsets = nvshmem.core.array((N_EXPERTS,), dtype="int64")
-    expert_pos_out = nvshmem.core.array((nvshmem.core.n_pes() * N_EXPERTS,), dtype="int64")
+    expanded_src_row = nvshmem.core.array((NUM_ROWS, ), dtype="int32")
+    expert_for_expanded_src_row = nvshmem.core.array((NUM_ROWS, ), dtype="int32")
+    expert_counts = nvshmem.core.array((N_EXPERTS, ), dtype="int64")
+    expert_offsets = nvshmem.core.array((N_EXPERTS, ), dtype="int64")
+    expert_pos_out = nvshmem.core.array((nvshmem.core.n_pes() * N_EXPERTS, ), dtype="int64")
 
     # Initialize input data (each PE initializes its own batch)
     if mype == 0:
@@ -272,23 +277,13 @@ def main():
 
     # Launch dispatch kernel: each PE sends its batch to all experts
     threads_per_block = 32
-    dispatch_inputs[1, threads_per_block, nb_stream](
-        inputs.reshape(-1),
-        expert_inputs.reshape(-1),
-        expert_signals,
-        BATCH_SIZE,
-        N_FEATURES
-    )
+    dispatch_inputs[1, threads_per_block, nb_stream](inputs.reshape(-1), expert_inputs.reshape(-1), expert_signals,
+                                                     BATCH_SIZE, N_FEATURES)
     nvshmem.core.barrier_all(stream=cu_stream)
 
     # Launch expert kernel: each expert processes its batch
-    expert_kernel[1, threads_per_block, nb_stream](
-        expert_inputs.reshape(-1),
-        expert_outputs,
-        expert_signals,
-        BATCH_SIZE,
-        N_FEATURES
-    )
+    expert_kernel[1, threads_per_block, nb_stream](expert_inputs.reshape(-1), expert_outputs, expert_signals,
+                                                   BATCH_SIZE, N_FEATURES)
     nvshmem.core.barrier_all(stream=cu_stream)
 
     # Build routing and expert counts/offsets on device
@@ -366,6 +361,7 @@ def main():
     nvshmem.core.free_array(expert_offsets)
     nvshmem.core.free_array(expert_pos_out)
     nvshmem.core.finalize()
+
 
 if __name__ == "__main__":
     main()

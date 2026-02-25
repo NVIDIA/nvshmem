@@ -13,9 +13,8 @@ import Cython
 # Set package name dynamically
 PACKAGE_NAME = os.environ.get("PACKAGE_NAME")
 
-ext_modules = [
-    "nvshmem.bindings.nvshmem"
-]
+ext_modules = ["nvshmem.bindings.nvshmem"]
+
 
 def calculate_modules(module):
     module = module.split(".")
@@ -55,15 +54,14 @@ def calculate_modules(module):
 # Note: the extension attributes are overwritten in build_extension()
 ext_modules = [e for ext in ext_modules for e in calculate_modules(ext)]
 
-
 compiler_directives = {"embedsignature": True, "show_performance_hints": False}
 
-setup(
-    name=PACKAGE_NAME,
-    ext_modules=cythonize(ext_modules, verbose=True, language_level=3, compiler_directives=compiler_directives),
-    zip_safe=False,
-    packages=find_packages(include=["nvshmem", "nvshmem.*"]),
-    include_package_data=True,
-    options={"build_ext": {"inplace": True}},
-    install_requires=open(f"{os.path.dirname(__file__)}/requirements.txt").read().splitlines()
-)
+setup(name=PACKAGE_NAME,
+      ext_modules=cythonize(ext_modules, verbose=True, language_level=3, compiler_directives=compiler_directives),
+      zip_safe=False,
+      packages=find_packages(include=["nvshmem", "nvshmem.*"]),
+      include_package_data=True,
+      options={"build_ext": {
+          "inplace": True
+      }},
+      install_requires=open(f"{os.path.dirname(__file__)}/requirements.txt").read().splitlines())

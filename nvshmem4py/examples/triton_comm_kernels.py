@@ -26,44 +26,42 @@ import triton.language as tl
 import nvshmem.core as nvshmem
 from mpi4py import MPI
 from cuda.core import Device, system
-
 """
 The functions load_v4_u32 and multimem_st_b64 are adapted from the Triton-Distributed project to show a practical example of custom communication kernels on NVSHMEM symmetric heap memory.
 Source: https://github.com/ByteDance-Seed/Triton-distributed/blob/main/python/triton_dist/kernels/nvidia/low_latency_allgather.py
 """
+
 
 @triton.jit
 def load_v4_u32(ptr):
     """
         Perform a vectorized load of 4x4B integers
     """
-    return tl.inline_asm_elementwise(
-        asm="""
+    return tl.inline_asm_elementwise(asm="""
         ld.volatile.global.v4.u32 {$0,$1,$2,$3}, [$4];
         """,
-        constraints=("=r,=r,=r,=r,l"),
-        args=[ptr],
-        dtype=(tl.int32, tl.int32, tl.int32, tl.int32),
-        is_pure=False,
-        pack=1
-        )
+                                     constraints=("=r,=r,=r,=r,l"),
+                                     args=[ptr],
+                                     dtype=(tl.int32, tl.int32, tl.int32, tl.int32),
+                                     is_pure=False,
+                                     pack=1)
+
 
 @triton.jit
 def multimem_st_b64(ptr, val0):
     """
         Perform a multicast store of 1x8B integer
     """
-    return tl.inline_asm_elementwise(
-        asm="""
+    return tl.inline_asm_elementwise(asm="""
         multimem.st.global.b64 [$1], $2;
         mov.u32 $0, 0;
         """,
-        constraints=("=r,l,l"),
-        args=[ptr, val0],
-        dtype=tl.int32,
-        is_pure=False,
-        pack=1
-    )
+                                     constraints=("=r,l,l"),
+                                     args=[ptr, val0],
+                                     dtype=tl.int32,
+                                     is_pure=False,
+                                     pack=1)
+
 
 @triton.jit
 def broadcast_naive_block(src_ptr, nbytes, rank, root_rank, remote_mc_ptr):
@@ -85,10 +83,10 @@ def broadcast_naive_block(src_ptr, nbytes, rank, root_rank, remote_mc_ptr):
     """
     remote_mc_ptr = tl.cast(remote_mc_ptr, tl.pointer_type(tl.float32))  # Cast remote pointer
     if rank == root_rank:
-        thread_idx = tl.program_id(axis=0)         # Unique thread index
-        block_dim = tl.num_programs(axis=0)        # Total number of threads (programs)
+        thread_idx = tl.program_id(axis=0)  # Unique thread index
+        block_dim = tl.num_programs(axis=0)  # Total number of threads (programs)
         src_ptr = tl.cast(src_ptr, tl.pointer_type(tl.float32))
-        num_int4 = nbytes // 16                  # Convert total byte count to int4 element count
+        num_int4 = nbytes // 16  # Convert total byte count to int4 element count
         for n in range(thread_idx, num_int4, block_dim):
             # Load 4 consecutive 32-bit unsigned integers (4 floats) from source buffer at offset 4*n
             val0, val1, val2, val3 = load_v4_u32(src_ptr + 4 * n)
@@ -127,7 +125,7 @@ mype_node = nvshmem.team_my_pe(nvshmem.Teams.TEAM_NODE)
 
 input_nelems = 512
 stream = dev.create_stream()
-tensor = nvshmem.tensor((input_nelems,), dtype=torch.float32)  # Shared tensor allocated by NVSHMEM
+tensor = nvshmem.tensor((input_nelems, ), dtype=torch.float32)  # Shared tensor allocated by NVSHMEM
 
 # Initialize root PE's data for broadcast
 if mype == 0:
@@ -138,14 +136,13 @@ buf_sz = tensor.numel() * tensor.element_size()  # Size in bytes
 # Obtain a remote multicast-compatible pointer (usable only from device code)
 remote_mc_tensor = nvshmem.get_multicast_tensor(nvshmem.Teams.TEAM_WORLD, tensor)
 
-
 print(f"[PE {mype}] Tensor before broadcast:", tensor)
 
 # ----- Launch Broadcast Kernel -----
 
 # Triton launch syntax: kernel_name[grid](args...)
 # grid = (input_nelems,) launches one thread per element (or per float pair)
-broadcast_naive_block[(input_nelems,)](tensor, buf_sz, mype, 0, remote_mc_ptr)
+broadcast_naive_block[(input_nelems, )](tensor, buf_sz, mype, 0, remote_mc_ptr)
 
 # Synchronize across PEs and the CUDA stream
 nvshmem.barrier(nvshmem.Teams.TEAM_WORLD, stream=stream)

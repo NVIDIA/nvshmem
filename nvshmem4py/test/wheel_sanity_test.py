@@ -2,6 +2,7 @@ import nvshmem
 
 import os
 
+
 def test_import_modules():
     print("Testing import modules")
     # Import modules
@@ -21,6 +22,7 @@ def test_import_modules():
 
     # Get version info
     print(nvshmem.core.get_version())
+
 
 if __name__ == '__main__':
     test_import_modules()

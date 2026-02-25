@@ -28,10 +28,9 @@ from nvshmem.bindings.device.cute import int_p as cute_int_p
 from nvshmem.bindings.device.cute import my_pe as cute_my_pe
 from nvshmem.bindings.device.cute import n_pes as cute_n_pes
 
+
 @cute.kernel
-def simple_shift_kernel(
-    destTensor: cute.Tensor,
-):
+def simple_shift_kernel(destTensor: cute.Tensor, ):
     tidx, _, _ = cute.arch.thread_idx()
 
     mype = cute_my_pe()
@@ -39,21 +38,18 @@ def simple_shift_kernel(
     peer = (mype + 1) % npes
 
     if tidx == 0:
-        cute.printf("mype: %d, peer: %d, npes: %d, value: %d", mype, peer, npes, mype+1)
+        cute.printf("mype: %d, peer: %d, npes: %d, value: %d", mype, peer, npes, mype + 1)
         cute.printf("tidx: %d", tidx)
-        cute_int_p(destTensor.iterator, mype+1, peer)
+        cute_int_p(destTensor.iterator, mype + 1, peer)
 
 
 @cute.jit
-def simple_shift(
-    destTensor: cute.Tensor,
-):
-    simple_shift_kernel(
-        destTensor,
-    ).launch(
+def simple_shift(destTensor: cute.Tensor, ):
+    simple_shift_kernel(destTensor, ).launch(
         grid=[1, 1, 1],
         block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
     )
+
 
 def run():
     my_rank = MPI.COMM_WORLD.Get_rank()
@@ -69,13 +65,12 @@ def run():
     print(tensor_dlpack)
 
     nvshmem_device_bc = f"{os.environ['NVSHMEM_HOME']}/src/lib/libnvshmem_device.bc"
-    
+
     compilerd_func = cute.compile(
         simple_shift,
         tensor_dlpack,
         options=f" --link-libraries={nvshmem_device_bc}",
-    )   
-
+    )
 
     compilerd_func = compilerd_func.to(my_pe)
     cuda_library = compilerd_func.jit_module.cuda_library

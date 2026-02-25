@@ -28,7 +28,6 @@ from test_device_rma import (
     _cute_dtype,
 )
 
-
 coll_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
 
 _NUMPY_DTYPE_MAP = {
@@ -63,8 +62,8 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
-    src = cute_interop.tensor((nelems,), dtype=cute_dtype)
-    dest = cute_interop.tensor((nelems,), dtype=cute_dtype)
+    src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
+    dest = cute_interop.tensor((nelems, ), dtype=cute_dtype)
     _fill_cute_tensor(src, dtype, nvshmem.core.my_pe() + 1)
     _fill_cute_tensor(dest, dtype, 0)
     dev.sync()  # Sync after filling tensors, before kernel launch
@@ -82,6 +81,7 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
             block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
             cooperative=True,
         )
+
     compiled = _compile_kernel(test_reduce_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
@@ -111,8 +111,8 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
-    src = cute_interop.tensor((nelems * nvshmem.core.n_pes(),), dtype=cute_dtype)
-    dest = cute_interop.tensor((nelems,), dtype=cute_dtype)
+    src = cute_interop.tensor((nelems * nvshmem.core.n_pes(), ), dtype=cute_dtype)
+    dest = cute_interop.tensor((nelems, ), dtype=cute_dtype)
     _fill_cute_tensor(src, dtype, nvshmem.core.my_pe() + 1)
     _fill_cute_tensor(dest, dtype, 0)
     dev.sync()  # Sync after filling tensors, before kernel launch
@@ -158,9 +158,9 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
-    src = cute_interop.tensor((nelems,), dtype=cute_dtype)
+    src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
     team_n = nvshmem.core.team_n_pes(team)
-    dest = cute_interop.tensor((nelems * team_n,), dtype=cute_dtype)
+    dest = cute_interop.tensor((nelems * team_n, ), dtype=cute_dtype)
     _fill_cute_tensor(src, dtype, nvshmem.core.my_pe() + 1)
     _fill_cute_tensor(dest, dtype, 0)
     dev.sync()  # Sync after filling tensors, before kernel launch
@@ -184,9 +184,7 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     dev.sync()  # Full device sync after barrier
-    expected = np.concatenate(
-        [np.full(nelems, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(team_n)]
-    )
+    expected = np.concatenate([np.full(nelems, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(team_n)])
     _assert_tensor_equals(dest, dtype, expected)
     cute_interop.free_tensor(src)
     cute_interop.free_tensor(dest)
@@ -202,8 +200,8 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
-    src = cute_interop.tensor((nelems,), dtype=cute_dtype)
-    dest = cute_interop.tensor((nelems,), dtype=cute_dtype)
+    src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
+    dest = cute_interop.tensor((nelems, ), dtype=cute_dtype)
     _fill_cute_tensor(src, dtype, nvshmem.core.my_pe() + 1)
     _fill_cute_tensor(dest, dtype, 0)
     dev.sync()  # Sync after filling tensors, before kernel launch
@@ -229,8 +227,7 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
     dev.sync()  # Full device sync after barrier
     chunk = nelems // nvshmem.core.n_pes()
     expected = np.concatenate(
-        [np.full(chunk, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(nvshmem.core.n_pes())]
-    )
+        [np.full(chunk, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(nvshmem.core.n_pes())])
     _assert_tensor_equals(dest, dtype, expected)
     cute_interop.free_tensor(src)
     cute_interop.free_tensor(dest)
@@ -246,8 +243,8 @@ def test_device_broadcast(nvshmem_init_fini, team, dtype):
     dev.set_current()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
-    src = cute_interop.tensor((nelems,), dtype=cute_dtype)
-    dest = cute_interop.tensor((nelems,), dtype=cute_dtype)
+    src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
+    dest = cute_interop.tensor((nelems, ), dtype=cute_dtype)
     _fill_cute_tensor(src, dtype, nvshmem.core.my_pe() + 1)
     _fill_cute_tensor(dest, dtype, 0)
     dev.sync()  # Sync after filling tensors, before kernel launch

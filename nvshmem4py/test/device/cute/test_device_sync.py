@@ -26,6 +26,7 @@ from test_device_rma import (
     _nvshmem_stream,
 )
 
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 def test_device_sync(nvshmem_init_fini, team):
@@ -33,6 +34,7 @@ def test_device_sync(nvshmem_init_fini, team):
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
+
     @cute.kernel
     def test_sync_kernel(team: Int32):
         nvshmem_cute.sync(team)
@@ -44,6 +46,7 @@ def test_device_sync(nvshmem_init_fini, team):
             block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
             cooperative=True,
         )
+
     nvshmem.core.barrier(team, stream=stream)
     print(f"Before sync from {nvshmem.core.my_pe()}")
     compiled = _compile_kernel(test_sync_launcher, team)
@@ -52,6 +55,7 @@ def test_device_sync(nvshmem_init_fini, team):
     dev.sync()
     nvshmem.core.barrier(team, stream=stream)
 
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])
 def test_device_barrier(nvshmem_init_fini, team):
@@ -59,6 +63,7 @@ def test_device_barrier(nvshmem_init_fini, team):
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device(local_rank)
     dev.set_current()
+
     @cute.kernel
     def test_barrier_kernel(team: Int32):
         nvshmem_cute.barrier(team)
@@ -70,6 +75,7 @@ def test_device_barrier(nvshmem_init_fini, team):
             block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
             cooperative=True,
         )
+
     nvshmem.core.barrier(team, stream=stream)
     dev.sync()
     compiled = _compile_kernel(test_barrier_launcher, team)
@@ -77,5 +83,3 @@ def test_device_barrier(nvshmem_init_fini, team):
     dev.sync()
     print(f"After barrier from {nvshmem.core.my_pe()}")
     nvshmem.core.barrier(team, stream=stream)
-
-

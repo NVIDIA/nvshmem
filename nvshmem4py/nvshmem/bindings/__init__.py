@@ -8,7 +8,6 @@
 #
 # See License.txt for license information
 
-
 from .nvshmem import *
 
 # Define what gets exposed when users do `import nvshmem.bindings`

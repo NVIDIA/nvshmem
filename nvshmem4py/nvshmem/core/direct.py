@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 The following are nvshmem.core APIs that can be used as-is
 from their bindings
@@ -16,31 +15,27 @@ from their bindings
 import nvshmem.bindings as bindings
 
 __all__ = ["ComparisonType", "SignalOp", "InitStatus", "my_pe", "team_my_pe", "team_n_pes", "n_pes", "init_status"]
-
 """
 IntEnum which matches 1:1 with ``nvshmemx_cmp_type_t``
 """
 ComparisonType = bindings.Cmp_type
-
 """
 IntEnum which matches 1:1 with the ``nvshmem_signal_op_t``
 """
 SignalOp = bindings.Signal_op
-
 """
 IntEnum which matches 1:1 with ``nvshmemx_cmp_type_t``
 """
 ComparisonType = bindings.Cmp_type
-
 """
 IntEnum which matches 1:1 with the ``nvshmem_signal_op_t``
 """
 SignalOp = bindings.Signal_op
-
 """
 IntEnum which matches 1:1 with ``nvshmem_init_status_t``
 """
 InitStatus = bindings.Init_status
+
 
 def my_pe() -> int:
     """Get the current Processing Element (PE) ID of this process.
@@ -82,6 +77,7 @@ def team_n_pes(team) -> int:
         int: The total number of PEs in the specified team.
     """
     return bindings.team_n_pes(team)
+
 
 def init_status() -> InitStatus:
     """Get the current initialization status

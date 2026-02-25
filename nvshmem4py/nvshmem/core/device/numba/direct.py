@@ -24,60 +24,108 @@ __all__ = ["my_pe", "team_my_pe", "team_n_pes", "n_pes", "barrier_all", "sync_al
 # TODO: create a global ffi object for other high level bindings to use
 ffi = cffi.FFI()
 
-def my_pe(): pass
+
+def my_pe():
+    pass
+
+
 @overload(my_pe)
 def my_pe_ol():
+
     def impl():
         return bindings.my_pe()
+
     return impl
 
-def team_my_pe(): pass
+
+def team_my_pe():
+    pass
+
+
 @overload(team_my_pe)
 def team_my_pe_ol(team):
+
     def impl(team):
-        return bindings.team_my_pe(team) 
+        return bindings.team_my_pe(team)
+
     return impl
 
-def team_n_pes(): pass
+
+def team_n_pes():
+    pass
+
+
 @overload(team_n_pes)
 def team_n_pes_ol(team):
+
     def impl(team):
         return bindings.team_n_pes(team)
+
     return impl
 
-def n_pes(): pass
+
+def n_pes():
+    pass
+
+
 @overload(n_pes)
 def n_pes_ol():
+
     def impl():
         return bindings.n_pes()
+
     return impl
 
-def barrier_all(): pass
+
+def barrier_all():
+    pass
+
+
 @overload(barrier_all)
 def barrier_all_ol():
+
     def impl():
         return bindings.barrier_all()
+
     return impl
 
-def sync_all(): pass
+
+def sync_all():
+    pass
+
+
 @overload(sync_all)
 def sync_all_ol():
+
     def impl():
         return bindings.sync_all()
+
     return impl
 
-def signal_op(): pass
+
+def signal_op():
+    pass
+
+
 @overload(signal_op)
 def signal_op_ol(signal_var, signal_val, signal_op, pe):
+
     def impl(signal_var, signal_val, signal_op, pe):
         signal_varptr = ffi.from_buffer(signal_var)
         bindings.signal_op(signal_varptr, signal_val, signal_op, pe)
+
     return impl
 
-def signal_wait(): pass
+
+def signal_wait():
+    pass
+
+
 @overload(signal_wait)
 def signal_wait_ol(signal_var, signal_op, signal_val):
+
     def impl(signal_var, signal_op, signal_val):
         signal_varptr = ffi.from_buffer(signal_var)
         return bindings.signal_wait_until(signal_varptr, signal_op, signal_val)
+
     return impl

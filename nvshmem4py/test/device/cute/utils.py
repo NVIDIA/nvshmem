@@ -1,7 +1,6 @@
 import importlib.util
 from pathlib import Path
 
-
 _UTILS_PATH = Path(__file__).resolve().parents[2] / "utils.py"
 _spec = importlib.util.spec_from_file_location("_nvshmem_test_utils", _UTILS_PATH)
 _utils = importlib.util.module_from_spec(_spec)
