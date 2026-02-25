@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 __init__.py for nvshmem Python package
 """

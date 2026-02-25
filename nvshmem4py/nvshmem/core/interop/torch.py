@@ -7,8 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
-
 """
 The following are interoperability helpers for NVSHMEM4Py memory used in Torch
 """
@@ -25,7 +23,10 @@ from cuda.core import Stream
 
 from typing import Tuple, Union
 
-__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor", "register_external_tensor", "unregister_external_tensor"]
+__all__ = [
+    "bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor",
+    "register_external_tensor", "unregister_external_tensor"
+]
 
 try:
     import torch
@@ -42,6 +43,7 @@ except:
     uint8 = None
     _torch_enabled = False
 
+
 def _is_tensor(tensor: Union[Tensor, object]) -> bool:
     """
     Helper function to check if an object is a Torch tensor
@@ -51,6 +53,7 @@ def _is_tensor(tensor: Union[Tensor, object]) -> bool:
     if not _torch_enabled:
         return False
     return isinstance(tensor, Tensor)
+
 
 def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
     """
@@ -67,7 +70,8 @@ def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
         raise NvshmemInvalid("Tried to retrieve buffer from Tensor not tracked by nvshmem")
     return buf, (torch.numel(tensor) * tensor.element_size()), str(tensor.dtype)
 
-def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C", except_on_del=True) -> Tensor:
+
+def tensor(shape: Tuple[int], dtype: dtype = float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a PyTorch tensor view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -95,7 +99,7 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C", 
         raise NvshmemInvalid("Tensor with invalid memory format requested")
 
     if dtype is None:
-        dtype = torch.get_default_dtype() 
+        dtype = torch.get_default_dtype()
     buf = buffer(get_size(shape, dtype), release=release, except_on_del=except_on_del)
     tensor = torch.utils.dlpack.from_dlpack(buf)
     view = tensor.view(dtype).view(shape)
@@ -107,7 +111,8 @@ def tensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C", 
         view = view.as_strided(size=shape, stride=strides)
     return view
 
-def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="C", except_on_del=True) -> Tensor:
+
+def bytetensor(shape: Tuple[int], dtype: dtype = float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a PyTorch tensor from NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -134,15 +139,17 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=float32, release=False, morder="
         dtype = torch.get_default_dtype()
     return tensor(shape, dtype=uint8, release=release, morder=morder, except_on_del=except_on_del)
 
-def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
+
+def get_peer_tensor(tensor: Tensor, peer_pe: int = None) -> Tensor:
     """
     Return a Buffer based on the ``peer_buffer`` (wrapper of nvshmem_ptr) API
     """
     if not _torch_enabled:
         return
-    buf, size, dtype  = tensor_get_buffer(tensor)
+    buf, size, dtype = tensor_get_buffer(tensor)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
     return torch.utils.dlpack.from_dlpack(peer_buf).view(tensor.dtype).view(tensor.shape)
+
 
 def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
     """
@@ -175,9 +182,10 @@ def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
     """
     if not _torch_enabled:
         return
-    buf, size, dtype  = tensor_get_buffer(tensor)
+    buf, size, dtype = tensor_get_buffer(tensor)
     mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
     return torch.utils.dlpack.from_dlpack(mc_buf).view(tensor.dtype).view(tensor.shape)
+
 
 def register_external_tensor(tensor: Tensor) -> Tensor:
     """
@@ -189,6 +197,7 @@ def register_external_tensor(tensor: Tensor) -> Tensor:
     registered_buf = nvshmem.core.register_external_buffer(buf)
     return torch.utils.dlpack.from_dlpack(registered_buf).view(tensor.dtype).view(tensor.shape)
 
+
 def unregister_external_tensor(tensor: Tensor) -> None:
     """
     Unregister an external tensor with NVSHMEM.
@@ -197,6 +206,7 @@ def unregister_external_tensor(tensor: Tensor) -> None:
         return
     buf, size, dtype = tensor_get_buffer(tensor)
     nvshmem.core.unregister_external_buffer(buf)
+
 
 def free_tensor(tensor: Tensor) -> None:
     """

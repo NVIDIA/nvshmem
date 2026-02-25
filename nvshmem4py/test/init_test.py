@@ -22,13 +22,13 @@ from cuda.core import Device, system, Program, ProgramOptions, LinkerOptions, Ob
 # User should not import this - it's here so we can print stuff
 import nvshmem.bindings
 
+
 def test_mpi_comm_init():
     # Test device init and bootstrap
     local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
-    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
-                      mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
+    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
     nvshmem.core.finalize()
     print("Init/Fini with MPI passed with cuda.core init/fini as well")
 
@@ -38,11 +38,9 @@ def test_multi_init():
     local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
-    nvshmem.core.init(device=dev,
-                      mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
+    nvshmem.core.init(device=dev, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
     print("called init1")
-    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
-                      mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
+    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
     print("called init2")
     print(f"Hello from PE {nvshmem.bindings.my_pe()} npes {nvshmem.bindings.n_pes()}")
     nvshmem.core.finalize()
@@ -50,6 +48,7 @@ def test_multi_init():
     nvshmem.core.finalize()
     print("called fini2")
     print("Init/Fini multi-init with MPI passed")
+
 
 def test_uid_init():
     # This will use mpi4py to perform a UID based init with bcast.
@@ -69,27 +68,31 @@ def test_uid_init():
     # Broadcast UID to all ranks
     comm.Bcast(uniqueid._data.view(np.int8), root=0)
 
-    nvshmem.core.init(device=dev, uid=uniqueid, rank=rank, nranks=nranks,
-                      mpi_comm=None, initializer_method="uid")
+    nvshmem.core.init(device=dev, uid=uniqueid, rank=rank, nranks=nranks, mpi_comm=None, initializer_method="uid")
     nvshmem.core.finalize()
     print("Init/Fini with UID passed")
+
 
 def test_emulated_mpi_init():
     # Test device init and bootstrap
     local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
-    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
-                      mpi_comm=MPI.COMM_WORLD, initializer_method="emulated_mpi")
+    nvshmem.core.init(device=dev,
+                      uid=None,
+                      rank=None,
+                      nranks=None,
+                      mpi_comm=MPI.COMM_WORLD,
+                      initializer_method="emulated_mpi")
     nvshmem.core.finalize()
     print("Init/Fini with emulated MPI passed with cuda.core init/fini as well")
+
 
 def test_none_device_init():
     # Test init with None device and allocate with device set
     local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
-    
-    nvshmem.core.init(device=None, uid=None, rank=None, nranks=None,
-                      mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
+
+    nvshmem.core.init(device=None, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
     dev = Device(local_rank_per_node)
     dev.set_current()
     buf = nvshmem.core.buffer(1024)
@@ -98,6 +101,7 @@ def test_none_device_init():
     nvshmem.core.finalize()
     print("Init/Fini with MPI passed with cuda.core init/fini as well")
     print("2 stage init with None device passed")
+
 
 # simple put/quiet kernel
 
@@ -122,6 +126,7 @@ lib_code = """
 #include<nvshmemx.h>
 """
 
+
 def test_module_init():
     # Test host lib + device state init with None device and allocate with device set
     print("Starting module init test")
@@ -135,15 +140,21 @@ def test_module_init():
         nvshmem_include_path = os.environ["NVSHMEM_HOME"] + "/include"
         rdma_core_include_path = os.environ["RDMA_CORE_HOME"] + "/include"
     except KeyError:
-        print("NVSHMEM_HOME or RDMA_CORE_HOME not set. This test requires NVSHMEM_HOME and RDMA_CORE_HOME env vars to be set")
+        print(
+            "NVSHMEM_HOME or RDMA_CORE_HOME not set. This test requires NVSHMEM_HOME and RDMA_CORE_HOME env vars to be set"
+        )
         print("Skipping the module init test")
         return
     cpu_arch = platform.machine()
-    program_options = ProgramOptions(std="c++11", arch=f"sm_{arch}", include_path=["/usr/local/cuda/include/",
-    nvshmem_include_path, rdma_core_include_path], relocatable_device_code=True, link_time_optimization=True)
+    program_options = ProgramOptions(
+        std="c++11",
+        arch=f"sm_{arch}",
+        include_path=["/usr/local/cuda/include/", nvshmem_include_path, rdma_core_include_path],
+        relocatable_device_code=True,
+        link_time_optimization=True)
     prog = Program(code, code_type="c++", options=program_options)
     mod = prog.compile("ltoir")
-    
+
     # Get a library object using LTOIR with NVRTC
     prog_lib = Program(lib_code, code_type="c++", options=program_options)
     lib = prog_lib.compile("ltoir")
@@ -187,11 +198,14 @@ def test_find_device_bitcode_library():
     print("find_device_bitcode_library test passed")
 
 
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid", "emulated_mpi"], default="uid")
+    parser.add_argument("--init-type",
+                        "-i",
+                        type=str,
+                        help="Init type to use",
+                        choices=["mpi", "uid", "emulated_mpi"],
+                        default="uid")
     args = parser.parse_args()
 
     if args.init_type == "mpi":

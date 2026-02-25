@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 The following are utility functions for NVSHMEM4Py
 """
@@ -30,21 +29,22 @@ from cuda.core import Buffer
 try:
     import torch
     torch_to_numpy = {
-            torch.float16: np.float16,
-            torch.bfloat16: np.float16,  # Note: bfloat16 isn't supported by default in NumPy
-            torch.float32: np.float32,
-            torch.float64: np.float64,
-            torch.int8: np.int8,
-            torch.uint8: np.uint8,
-            torch.int16: np.int16,
-            torch.int32: np.int32,
-            torch.int64: np.int64,
-            torch.bool: np.bool_,
-        }
+        torch.float16: np.float16,
+        torch.bfloat16: np.float16,  # Note: bfloat16 isn't supported by default in NumPy
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.int8: np.int8,
+        torch.uint8: np.uint8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.int64,
+        torch.bool: np.bool_,
+    }
     _torch_enabled = True
 except:
     torch_to_numpy = None
     _torch_enabled = False
+
 
 def _get_device() -> Device:
     """
@@ -71,7 +71,7 @@ def _get_device() -> Device:
 
     if not _debug_mode and _cached_device["device"] is not None:
         return _cached_device["device"], None
-        
+
     # If the device is None here, we want to do the second half of the two-stage init.
     if _cached_device["device"] is None:
         _cached_device["device"] = Device()
@@ -80,6 +80,7 @@ def _get_device() -> Device:
         _cached_device["device"].set_current()
 
     return _cached_device["device"], old_device
+
 
 def _configure_logging(level="WARNING", logfile=None, mype=None):
     """
@@ -106,7 +107,7 @@ def _configure_logging(level="WARNING", logfile=None, mype=None):
     if not isinstance(numeric_level, int):
         raise ValueError(f"Invalid log level: {level}")
 
-    # C NVSHMEM Log Format: host:pid:tid [PE] NVSHMEM <log_level> 
+    # C NVSHMEM Log Format: host:pid:tid [PE] NVSHMEM <log_level>
     host = socket.getfqdn().split(".")[0]
     pid = os.getpid()
     tid = threading.get_native_id()
@@ -127,6 +128,7 @@ def _configure_logging(level="WARNING", logfile=None, mype=None):
         file_handler = logging.FileHandler(logfile)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+
 
 def get_size(shape, dtype):
     """
@@ -155,6 +157,7 @@ def get_size(shape, dtype):
 
     num_elements = np.prod(shape)
     return int(num_elements * dtype.itemsize)
+
 
 def dtype_nbytes(dtype: str) -> int:
     """Return the size in bytes of a single element of the given NVSHMEM dtype.

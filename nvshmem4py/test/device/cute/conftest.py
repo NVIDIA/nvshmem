@@ -7,7 +7,11 @@ from test_device_rma import _finalize_kernels
 
 
 def pytest_addoption(parser):
-    parser.addoption("--init-type", action="store", default="uid", help="Method to initialize NVSHMEM", choices=["uid", "mpi"])
+    parser.addoption("--init-type",
+                     action="store",
+                     default="uid",
+                     help="Method to initialize NVSHMEM",
+                     choices=["uid", "mpi"])
 
 
 @pytest.fixture(scope="function", autouse=True)

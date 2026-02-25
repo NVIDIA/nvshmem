@@ -17,10 +17,8 @@ def test_highlevel_bindings(dev: Device):
 
     ffi = cffi.FFI()
 
-
     def p():
         pass
-
 
     @overload(p)
     def p_ol(arr, mype, peer):
@@ -39,7 +37,6 @@ def test_highlevel_bindings(dev: Device):
 
             return impl
 
-
     @cuda.jit(lto=True)
     def app_kernel(dest):
         mype = my_pe()
@@ -48,7 +45,7 @@ def test_highlevel_bindings(dev: Device):
 
         p(dest, mype, peer)
 
-    dest = nvshmem.core.array((1,), dtype="float32")
+    dest = nvshmem.core.array((1, ), dtype="float32")
 
     app_kernel[1, 1, 0](dest)
 

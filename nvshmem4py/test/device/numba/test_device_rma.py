@@ -1,7 +1,7 @@
 from cuda.core import Device, Stream
 import numba.cuda as cuda
 import nvshmem.core
-import nvshmem.core.device.numba 
+import nvshmem.core.device.numba
 
 import pytest
 
@@ -14,18 +14,18 @@ def test_put_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf_src = nvshmem.core.array((4,4), dtype=dtype)
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.array((4,4), dtype=dtype)
-    buf_dst [:] = 0
+    buf_src = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_dst[:] = 0
 
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst={buf_dst}, src={buf_src}")
 
     @cuda.jit
     def test_put(dst, src, pe):
         nvshmem.core.device.numba.put(dst, src, pe)
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
     test_put[1, 1, nb_stream](buf_dst, buf_src, (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes())
@@ -49,18 +49,18 @@ def test_get_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf_src = nvshmem.core.array((4,4), dtype=dtype)
-    buf_src [:] = 0
-    buf_dst = nvshmem.core.array((4,4), dtype=dtype)
-    buf_dst [:] = nvshmem.core.my_pe() + 1
+    buf_src = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_src[:] = 0
+    buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_dst[:] = nvshmem.core.my_pe() + 1
 
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst={buf_dst}, src={buf_src}")
 
     @cuda.jit
     def test_get(dst, src, pe):
         nvshmem.core.device.numba.get(dst, src, pe)
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
     test_get[1, 1, nb_stream](buf_src, buf_dst, nvshmem.core.my_pe())
@@ -84,12 +84,12 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf_src = nvshmem.core.array((4,4), dtype=dtype)
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.array((4,4), dtype=dtype)
-    buf_dst [:] = 0
-    signal_var = nvshmem.core.array((1,), dtype="uint64")
-    signal_var [:] = 0
+    buf_src = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_dst[:] = 0
+    signal_var = nvshmem.core.array((1, ), dtype="uint64")
+    signal_var[:] = 0
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
@@ -98,12 +98,12 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
     @cuda.jit
     def test_put_signal(dst, src, signal_var, signal_val, signal_op, pe):
         nvshmem.core.device.numba.put_signal(dst, src, signal_var, signal_val, signal_op, pe)
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
     test_put_signal[1, 1, nb_stream](buf_dst, buf_src, signal_var, signal_val, signal_op, nvshmem.core.my_pe())
-    
+
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
 
@@ -116,18 +116,19 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
     del nb_stream
     print("Done testing put signal on Array")
 
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf_src = nvshmem.core.array((4,4), dtype=dtype)
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.array((4,4), dtype=dtype)
-    buf_dst [:] = 0
-    signal_var = nvshmem.core.array((1,), dtype="uint64")
-    signal_var [:] = 0
+    buf_src = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
+    buf_dst[:] = 0
+    signal_var = nvshmem.core.array((1, ), dtype="uint64")
+    signal_var[:] = 0
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
@@ -137,12 +138,13 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     def test_put_signal_with_wait(dst, src, signal_var, signal_val, signal_op, pe):
         nvshmem.core.device.numba.put_signal(dst, src, signal_var, 1, signal_op, pe)
         nvshmem.core.device.numba.signal_wait(signal_var, nvshmem.core.ComparisonType.CMP_GE, signal_val)
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
-    test_put_signal_with_wait[1, 1, nb_stream](buf_dst, buf_src, signal_var, signal_val, signal_op, nvshmem.core.my_pe())
-    
+    test_put_signal_with_wait[1, 1, nb_stream](buf_dst, buf_src, signal_var, signal_val, signal_op,
+                                               nvshmem.core.my_pe())
+
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
 
@@ -156,13 +158,14 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     nvshmem.core.free_array(buf_src)
     print("Done testing put signal with wait on Array")
 
+
 @pytest.mark.mpi
 def test_signal_op_signal_wait():
     print("Testing Signal Op and Signal Wait on Array")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    signal_var = nvshmem.core.array((1,), dtype="uint64")
-    signal_var [:] = 0
+    signal_var = nvshmem.core.array((1, ), dtype="uint64")
+    signal_var[:] = 0
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
@@ -170,16 +173,17 @@ def test_signal_op_signal_wait():
     def test_signal_op_signal_wait(signal_var, signal_val, signal_op, pe):
         nvshmem.core.device.numba.signal_op(signal_var, 1, signal_op, pe)
         nvshmem.core.device.numba.signal_wait(signal_var, nvshmem.core.ComparisonType.CMP_GE, signal_val)
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
     test_signal_op_signal_wait[1, 1, nb_stream](signal_var, signal_val, signal_op, nvshmem.core.my_pe())
-    
+
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
     del nb_stream
     print("Done testing Signal Op and Signal Wait on Array")
+
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", rma_dtypes)
@@ -187,29 +191,30 @@ def test_p(dtype):
     print("Testing shmem_p")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    var = nvshmem.core.array((1,), dtype=dtype)
-    var [:] = 0
+    var = nvshmem.core.array((1, ), dtype=dtype)
+    var[:] = 0
     val = 1
 
     @cuda.jit
     def test_p(var, val, pe):
         nvshmem.core.device.numba.p(var, val, pe)
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
     test_p[1, 1, nb_stream](var, val, nvshmem.core.my_pe())
-    
+
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}")
     assert (var == 1).all()
-    
+
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
     cu_stream_ref.sync()
     del nb_stream
     print("Done testing shmem_p")
+
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", rma_dtypes)
@@ -217,17 +222,17 @@ def test_g(dtype):
     print("Testing shmem_g")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    var = nvshmem.core.array((1,), dtype=dtype)
-    var [:] = 1
-    dest = nvshmem.core.array((1,), dtype=dtype)
-    dest [:] = 0
+    var = nvshmem.core.array((1, ), dtype=dtype)
+    var[:] = 1
+    dest = nvshmem.core.array((1, ), dtype=dtype)
+    dest[:] = 0
 
     @cuda.jit
     def test_g(dest, var, pe):
         local = nvshmem.core.device.numba.g(var, pe)
-        dest [:]= local
-    
-    nb_stream = cuda.stream() # WAR: Numba-CUDA takes numba stream object or int
+        dest[:] = local
+
+    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
 
     test_g[1, 1, nb_stream](dest, var, nvshmem.core.my_pe())
@@ -238,6 +243,3 @@ def test_g(dtype):
     cu_stream_ref.sync()
 
     print("Done testing shmem_g")
-
-
-

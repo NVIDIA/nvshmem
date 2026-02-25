@@ -40,6 +40,7 @@ def _fill_tensor(tensor, value, device_id=None):
     count = size // 4
     cudrv.cuMemsetD32(buf.handle, value_u32, count)
 
+
 def test_mc_tensor():
     print("Testing Multicast Cute DSL Tensor")
     dev = Device()
@@ -71,8 +72,8 @@ def test_interop_cute():
     # Get a buffer
     local_rank_per_node = Device().device_id
     print("Rank:", local_rank_per_node)
-    # For the Cute DSL test, we 
-    tensor = cute_interop.tensor((1,2,3,4,5), dtype=cute.Float32)
+    # For the Cute DSL test, we
+    tensor = cute_interop.tensor((1, 2, 3, 4, 5), dtype=cute.Float32)
     print(tensor)
     # Set to my_pe + 1 so that it doesn't ever show 0.
     _fill_tensor(tensor, float(nvshmem.core.my_pe() + 1), device_id=local_rank_per_node)
@@ -80,6 +81,7 @@ def test_interop_cute():
     # Free Buffer
     cute_interop.free_tensor(tensor)
     print("Ending test Cute DSL interop buffer")
+
 
 def test_peer_tensor():
     print("Testing peer tensor")
@@ -112,8 +114,8 @@ def test_fortran_morder_alloc_cute():
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     print("Rank:", local_rank_per_node)
     dev = Device(local_rank_per_node)
-    # For the Cute DSL test, we 
-    tensor = cute_interop.tensor((1,2,3,4,5), dtype=cute.Float32, morder="F")
+    # For the Cute DSL test, we
+    tensor = cute_interop.tensor((1, 2, 3, 4, 5), dtype=cute.Float32, morder="F")
     print(tensor)
     # Set to my_pe + 1 so that it doesn't ever show 0.
     _fill_tensor(tensor, float(nvshmem.core.my_pe() + 1), device_id=local_rank_per_node)
@@ -124,9 +126,7 @@ def test_fortran_morder_alloc_cute():
 
 
 @cute.kernel
-def simple_shift_kernel(
-    destTensor: cute.Tensor
-):
+def simple_shift_kernel(destTensor: cute.Tensor):
     tidx, _, _ = cute.arch.thread_idx()
 
     mype = cute_my_pe()
@@ -134,19 +134,18 @@ def simple_shift_kernel(
     peer = (mype + 1) % npes
 
     if tidx == 0:
-        cute.printf("mype: %d, peer: %d, npes: %d, value: %d", mype, peer, npes, mype+1)
+        cute.printf("mype: %d, peer: %d, npes: %d, value: %d", mype, peer, npes, mype + 1)
         cute.printf("tidx: %d", tidx)
-        cute_int_p(destTensor.iterator, mype+1, peer)
+        cute_int_p(destTensor.iterator, mype + 1, peer)
+
 
 @cute.jit
-def simple_shift(
-    destTensor: cute.Tensor):
-    simple_shift_kernel(
-        destTensor,
-    ).launch(
+def simple_shift(destTensor: cute.Tensor):
+    simple_shift_kernel(destTensor, ).launch(
         grid=[1, 1, 1],
         block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
     )
+
 
 def test_cute_compile_helper():
     print("Testing cute_compile_helper function")
@@ -170,7 +169,6 @@ def test_cute_compile_helper():
     nvshmem.core.library_finalize(nvshmem_kernel)
     nvshmem.core.free_tensor(tensor)
     print("cute_compile_helper test complete")
-
 
 
 if __name__ == '__main__':

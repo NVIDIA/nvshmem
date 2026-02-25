@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 The following functions relate to management of NVSHMEM symmetric memory in Python
 """
@@ -21,11 +20,15 @@ from nvshmem.core.utils import _get_device
 from cuda.core import Device, system
 from cuda.core import Buffer
 
-__all__ = ['buffer', 'free', 'get_peer_buffer', 'get_multicast_buffer', 'register_external_buffer', 'unregister_external_buffer']
+__all__ = [
+    'buffer', 'free', 'get_peer_buffer', 'get_multicast_buffer', 'register_external_buffer',
+    'unregister_external_buffer'
+]
 
 logger = logging.getLogger("nvshmem")
 
-def _free_all_buffers() -> None: 
+
+def _free_all_buffers() -> None:
     """
     Frees all allocated NVSHMEM buffers currently being tracked.
 
@@ -44,7 +47,8 @@ def _free_all_buffers() -> None:
             if mr._mem_references[ptr]["type"] != BufferTypes.NORMAL or mr._mem_references[ptr]["freed"]:
                 continue
             found_leak = True
-            logger.info(f"Found object open at pointer {ptr} and ref count {mr._mem_references[ptr]['ref_count']}. Freeing it.")
+            logger.info(
+                f"Found object open at pointer {ptr} and ref count {mr._mem_references[ptr]['ref_count']}. Freeing it.")
             # We already printed the warning message so we can safely suppress the message
             mr._mem_references[ptr]["freed"] = True
             mr._mem_references[ptr]["released"] = True
@@ -52,7 +56,10 @@ def _free_all_buffers() -> None:
             mr._mem_references[ptr]["ref_count"] = 0
             mr.deallocate(ptr, 0)
     if found_leak:
-        logger.error("Some NVSHMEM Symmetric memory was not freed explicitly (you may have forgotten to clean up before finalizing, or an unrelated exception crashed the program before it was freed)")
+        logger.error(
+            "Some NVSHMEM Symmetric memory was not freed explicitly (you may have forgotten to clean up before finalizing, or an unrelated exception crashed the program before it was freed)"
+        )
+
 
 def buffer(size, release=False, except_on_del=True) -> Buffer:
     """
@@ -94,6 +101,7 @@ def buffer(size, release=False, except_on_del=True) -> Buffer:
         other_dev.set_current()
     return buf
 
+
 def free(buffer: Buffer) -> None:
     """
     Frees an NVSHMEM buffer that was previously allocated.
@@ -125,6 +133,7 @@ def free(buffer: Buffer) -> None:
     buffer.close()
     if other_dev is not None:
         other_dev.set_current()
+
 
 def get_peer_buffer(buffer: Buffer, pe: int):
     """
@@ -160,12 +169,13 @@ def get_peer_buffer(buffer: Buffer, pe: int):
 
     if not isinstance(buffer, Buffer) or not hasattr(buffer, "handle"):
         raise NvshmemInvalid("Tried to use a buffer not from NVSHmem")
-    
+
     mr = buffer.memory_resource
     peer_buffer = mr.get_peer_buffer(buffer, pe)
     if other_dev is not None:
         other_dev.set_current()
     return peer_buffer
+
 
 def register_external_buffer(buffer: Buffer) -> Buffer:
     """
@@ -186,7 +196,7 @@ def register_external_buffer(buffer: Buffer) -> Buffer:
     """
     if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
         raise NvshmemInvalid("NVSHMEM Library is not initialized")
-    
+
     # _get_device() excepts if no device is current
     user_nvshmem_dev, other_dev = _get_device()
 
@@ -199,6 +209,7 @@ def register_external_buffer(buffer: Buffer) -> Buffer:
         other_dev.set_current()
     if registered_buffer is not None:
         return registered_buffer
+
 
 def unregister_external_buffer(buffer: Buffer) -> None:
     """
@@ -214,19 +225,20 @@ def unregister_external_buffer(buffer: Buffer) -> None:
     """
     if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
         raise NvshmemInvalid("NVSHMEM Library is not initialized")
-    
+
     # _get_device() excepts if no device is current
     user_nvshmem_dev, other_dev = _get_device()
 
     if not isinstance(buffer, Buffer) or not hasattr(buffer, "handle"):
         raise NvshmemInvalid("Tried to use a buffer not from NVSHmem")
-    
+
     mr = _mr_references.get(user_nvshmem_dev.device_id)
     if mr is None:
         raise NvshmemInvalid("Tried to unregister an external buffer on a device that is not initialized with NVSHMEM")
     mr.unregister_external_buffer(buffer)
     if other_dev is not None:
         other_dev.set_current()
+
 
 def get_multicast_buffer(team: Teams, buffer: Buffer) -> Buffer:
     """
@@ -268,11 +280,9 @@ def get_multicast_buffer(team: Teams, buffer: Buffer) -> Buffer:
 
     if not isinstance(buffer, Buffer) or not hasattr(buffer, "handle"):
         raise NvshmemInvalid("Tried to use a buffer not from NVSHmem")
-    
+
     mr = buffer.memory_resource
     peer_buffer = mr.get_mc_buffer(team, buffer)
     if other_dev is not None:
         other_dev.set_current()
     return peer_buffer
- 
- 

@@ -15,7 +15,6 @@ try:
 except:
     _cupy_enabled = False
 
-
 from utils import uid_init, mpi_init
 import argparse
 import os
@@ -25,6 +24,7 @@ import nvshmem.core
 from cuda.core import Device, system
 
 from mpi4py import MPI
+
 
 def test_rma_on_buffer():
     print("Testing RMA on buffer")
@@ -36,11 +36,12 @@ def test_rma_on_buffer():
     buf_dst = nvshmem.core.buffer(1024)
     stream = dev.create_stream()
 
-    nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()) , stream=stream)
+    nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()), stream=stream)
 
     nvshmem.core.free(buf_src)
     nvshmem.core.free(buf_dst)
     print("Done testing RMA on buffer")
+
 
 def test_rma_on_array():
     print("Testing RMA on Array")
@@ -48,15 +49,15 @@ def test_rma_on_array():
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     dev = Device()
     local_rank_per_node = dev.device_id
-    buf_src = nvshmem.core.array((4,4), dtype="float32")
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.array((4,4), dtype="float32")
-    buf_dst [:] = 0
+    buf_src = nvshmem.core.array((4, 4), dtype="float32")
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.array((4, 4), dtype="float32")
+    buf_dst[:] = 0
     stream = dev.create_stream()
 
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst 1={buf_dst}, src={buf_src}")
-    
-    nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()) , stream=stream)
+
+    nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()), stream=stream)
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
@@ -68,20 +69,21 @@ def test_rma_on_array():
     nvshmem.core.free_array(buf_src)
     print("Done testing RMA on Array")
 
+
 def test_rma_on_tensor():
     print("Testing RMA on tensor")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     dev = Device()
     local_rank_per_node = dev.device_id
-    buf_src = nvshmem.core.tensor((4,4), dtype=torch.float32)
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.tensor((4,4), dtype=torch.float32)
-    buf_dst [:] = 0
+    buf_src = nvshmem.core.tensor((4, 4), dtype=torch.float32)
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.tensor((4, 4), dtype=torch.float32)
+    buf_dst[:] = 0
     stream = dev.create_stream()
 
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst 1={buf_dst}, src={buf_src}")
-    
+
     nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()), stream=stream)
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
@@ -105,6 +107,7 @@ def test_quiet():
     nvshmem.core.quiet(stream=stream)
     print("Done testing quiet quiet")
 
+
 def test_signal_wait_array():
     print("Testing put/signal on Array")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
@@ -112,18 +115,24 @@ def test_signal_wait_array():
     local_rank_per_node = dev.device_id
     stream = dev.create_stream()
 
-    buf_src = nvshmem.core.array((4,4), dtype="float32")
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.array((4,4), dtype="float32")
-    buf_dst [:] = 0
+    buf_src = nvshmem.core.array((4, 4), dtype="float32")
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.array((4, 4), dtype="float32")
+    buf_dst[:] = 0
 
-    signal = nvshmem.core.array((1,), dtype="uint64")
-    signal [:] = 0
+    signal = nvshmem.core.array((1, ), dtype="uint64")
+    signal[:] = 0
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     if nvshmem.core.my_pe() == 0:
         # TODO: Expose signal ops as an enum
-        nvshmem.core.put_signal(buf_dst, buf_src, buf_sig, 1, nvshmem.core.SignalOp.SIGNAL_SET, remote_pe=1, stream=stream)
+        nvshmem.core.put_signal(buf_dst,
+                                buf_src,
+                                buf_sig,
+                                1,
+                                nvshmem.core.SignalOp.SIGNAL_SET,
+                                remote_pe=1,
+                                stream=stream)
         print(f"From PE {nvshmem.core.my_pe()} sent buf to remote PE 1 and set signal")
 
     if nvshmem.core.my_pe() == 1:
@@ -138,6 +147,7 @@ def test_signal_wait_array():
     nvshmem.core.free_array(signal)
     print("Done testing put/signal on Array")
 
+
 def test_signal_wait_array_non_one():
     print("Testing put/signal on Array (with non-default signal_op)")
 
@@ -151,7 +161,7 @@ def test_signal_wait_array_non_one():
     buf_dst = nvshmem.core.array((4, 4), dtype="float32")
     buf_dst[:] = 0
 
-    signal = nvshmem.core.array((1,), dtype="uint64")
+    signal = nvshmem.core.array((1, ), dtype="uint64")
     signal[:] = 0  # Start below threshold
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
@@ -164,8 +174,7 @@ def test_signal_wait_array_non_one():
             5,  # <-- Set signal to 5
             nvshmem.core.SignalOp.SIGNAL_SET,
             remote_pe=1,
-            stream=stream
-        )
+            stream=stream)
         print(f"From PE {nvshmem.core.my_pe()} sent buf and set signal to 5")
 
     if nvshmem.core.my_pe() == 1:
@@ -174,8 +183,7 @@ def test_signal_wait_array_non_one():
             buf_sig,
             4,  # <-- Wait for signal to be >= 4
             nvshmem.core.ComparisonType.CMP_GE,
-            stream=stream
-        )
+            stream=stream)
         print(f"From PE {nvshmem.core.my_pe()} passed wait for signal >= 4")
 
     stream.sync()
@@ -195,19 +203,25 @@ def test_signal_wait_tensor():
     local_rank_per_node = dev.device_id
     stream = dev.create_stream()
 
-    buf_src = nvshmem.core.tensor((4,4), dtype=torch.float32)
-    buf_src [:] = nvshmem.core.my_pe() + 1
-    buf_dst = nvshmem.core.tensor((4,4), dtype=torch.float32)
-    buf_dst [:] = 0
+    buf_src = nvshmem.core.tensor((4, 4), dtype=torch.float32)
+    buf_src[:] = nvshmem.core.my_pe() + 1
+    buf_dst = nvshmem.core.tensor((4, 4), dtype=torch.float32)
+    buf_dst[:] = 0
 
     # Torch doesn't have uint64_t so we need to use CuPy
-    signal = nvshmem.core.array((1,), dtype="uint64")
-    signal [:] = 0
+    signal = nvshmem.core.array((1, ), dtype="uint64")
+    signal[:] = 0
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     if nvshmem.core.my_pe() == 0:
         # TODO: Expose signal ops as an enum
-        nvshmem.core.put_signal(buf_dst, buf_src, buf_sig, 1, nvshmem.core.SignalOp.SIGNAL_SET, remote_pe=1, stream=stream)
+        nvshmem.core.put_signal(buf_dst,
+                                buf_src,
+                                buf_sig,
+                                1,
+                                nvshmem.core.SignalOp.SIGNAL_SET,
+                                remote_pe=1,
+                                stream=stream)
         print(f"From PE {nvshmem.core.my_pe()} sent buf to remote PE 1 and set signal")
 
     if nvshmem.core.my_pe() == 1:
@@ -222,14 +236,15 @@ def test_signal_wait_tensor():
     nvshmem.core.free_array(signal)
     print("Done testing put/signal on tensor")
 
+
 def test_signalop_wait():
     print("Testing signal_op")
     dev = Device()
     local_rank_per_node = dev.device_id
     stream = dev.create_stream()
 
-    signal = nvshmem.core.array((1,), dtype="uint64")
-    signal [:] = 0
+    signal = nvshmem.core.array((1, ), dtype="uint64")
+    signal[:] = 0
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     if nvshmem.core.my_pe() == 0:
@@ -245,6 +260,7 @@ def test_signalop_wait():
 
     nvshmem.core.free_array(signal)
     print("Done testing signal_op")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

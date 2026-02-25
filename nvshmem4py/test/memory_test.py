@@ -31,6 +31,7 @@ from cuda.core import Device, system
 
 from mpi4py import MPI
 
+
 def test_buffer():
     print("Testing basic buffer")
 
@@ -38,6 +39,7 @@ def test_buffer():
     buf = nvshmem.core.buffer(1024)
     nvshmem.core.free(buf)
     print("End basic buffer test")
+
 
 def test_peer_buffer():
     print("Testing peer buffer")
@@ -64,6 +66,7 @@ def test_peer_buffer():
     nvshmem.core.free(buf)
     print("End peer buffer test")
 
+
 def test_mc_buffer():
     print("Testing Multicast buffer")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
@@ -72,7 +75,7 @@ def test_mc_buffer():
     if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
         print("Skipping MC memory test because Multicast memory is not supported on this platform")
         return
-   
+
     buf = nvshmem.core.buffer(1024)
 
     # PE0 calls get_peer_buffer on the Buffer
@@ -84,6 +87,7 @@ def test_mc_buffer():
 
     nvshmem.core.free(buf)
     print("End MC buffer test")
+
 
 def test_mc_tensor():
     print("Testing Multicast Torch Tensor")
@@ -108,6 +112,7 @@ def test_mc_tensor():
     nvshmem.core.free_tensor(tensor)
     print("End MC tensor test")
 
+
 def test_mc_array():
     print("Testing Multicast Torch array")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
@@ -116,7 +121,7 @@ def test_mc_array():
     if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
         print("Skipping MC memory test because Multicast memory is not supported on this platform")
         return
-    
+
     if not _cupy_enabled:
         print("WARNING: CuPy not found. Not running CuPy Interop test")
         return
@@ -132,6 +137,7 @@ def test_mc_array():
     nvshmem.core.free_array(array)
     print("End MC array test")
 
+
 def test_interop_torch():
     print("Testing Torch interop buffer")
     if not _torch_enabled:
@@ -141,8 +147,8 @@ def test_interop_torch():
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     print("Rank:", local_rank_per_node)
     dev = Device(local_rank_per_node)
-    # For the Torch test, we 
-    tensor = nvshmem.core.tensor((1,2,3,4,5), dtype=float32)
+    # For the Torch test, we
+    tensor = nvshmem.core.tensor((1, 2, 3, 4, 5), dtype=float32)
     print(tensor)
     # Set to my_pe + 1 so that it doesn't ever show 0.
     tensor[:] = nvshmem.core.my_pe() + 1
@@ -150,6 +156,7 @@ def test_interop_torch():
     # Free Buffer
     nvshmem.core.free_tensor(tensor)
     print("Ending test Torch interop buffer")
+
 
 def test_interop_cupy():
     print("Testing CuPy interop mem")
@@ -159,7 +166,7 @@ def test_interop_cupy():
     # Get a buffer
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     dev = Device(local_rank_per_node)
-    array = nvshmem.core.array((1,2,3,4), dtype="float32")
+    array = nvshmem.core.array((1, 2, 3, 4), dtype="float32")
     print(array)
     # Set to my_pe + 1 so that it doesn't ever show 0.
     array[:] = nvshmem.core.my_pe() + 1
@@ -167,6 +174,7 @@ def test_interop_cupy():
     # Free Buffer
     nvshmem.core.free_array(array)
     print("Done testing CuPy Interop mem")
+
 
 def test_peer_array():
     print("Testing peer array")
@@ -190,6 +198,7 @@ def test_peer_array():
     nvshmem.core.free_array(arr)
     print("End peer array test")
 
+
 def test_peer_tensor():
     print("Testing peer tensor")
     # TODO: TEAM_NODE not showing up because of anonymous enum
@@ -210,6 +219,7 @@ def test_peer_tensor():
         #nvshmem.core.free(peer_buf)
     nvshmem.core.free_tensor(tensor)
     print("End peer tensor test")
+
 
 def test_del_buffer():
     print("Testing buffer scope")
@@ -239,6 +249,7 @@ def test_del_buffer():
     _mr_references[local_rank_per_node]._mem_references[ptr]["buffer"].close()
     print("done testing buffer scope")
 
+
 def test_release_del_buffer():
     print("Testing buffer scope")
     # Test that when we call del on a buffer, it doesn't actually go away
@@ -260,6 +271,7 @@ def test_release_del_buffer():
     _mr_references[local_rank_per_node]._mem_references[ptr]["ref_count"] = 0
     print("done testing buffer scope")
 
+
 def test_buffer_scope_release_gc():
     print("Testing buffer scope var 2")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
@@ -279,6 +291,7 @@ def test_buffer_scope_release_gc():
     _mr_references[local_rank_per_node]._mem_references[ptr]["ref_count"] = 0
     print("done testing buffer scope var 2")
 
+
 def test_buffer_scope_release_gc_free():
     print("Testing buffer scope var 3")
     # All of this should complete without errors of any kind
@@ -296,6 +309,7 @@ def test_buffer_scope_release_gc_free():
     # This keeps an error from being raised at fini time
     _mr_references[local_rank_per_node]._mem_references[ptr]["freed"] = True
     print("Done testing buffer scope var 3")
+
 
 def test_buffer_scope_release_gc_free_reuse():
     print("Testing buffer scope var 4")
@@ -316,6 +330,7 @@ def test_buffer_scope_release_gc_free_reuse():
     nvshmem.core.free(buf2)
     nvshmem.core.free(buf3)
     print("Done testing buffer scope var 4")
+
 
 def test_get_peer_memory_scope():
     print("Testing child peer buffer scope")
@@ -345,8 +360,8 @@ def test_fortran_morder_alloc_torch():
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     print("Rank:", local_rank_per_node)
     dev = Device(local_rank_per_node)
-    # For the Torch test, we 
-    tensor = nvshmem.core.tensor((1,2,3,4,5), dtype=float32, morder="F")
+    # For the Torch test, we
+    tensor = nvshmem.core.tensor((1, 2, 3, 4, 5), dtype=float32, morder="F")
     print(tensor)
     # Set to my_pe + 1 so that it doesn't ever show 0.
     tensor[:] = nvshmem.core.my_pe() + 1
@@ -354,6 +369,7 @@ def test_fortran_morder_alloc_torch():
     # Free Buffer
     nvshmem.core.free_tensor(tensor)
     print("Done tsting allocating Fortran-ordered memory Torch")
+
 
 def test_fortran_morder_alloc_cupy():
     print("Testing allocating Fortran-ordered memory Cupy")
@@ -363,8 +379,8 @@ def test_fortran_morder_alloc_cupy():
     # Get a buffer
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     print("Rank:", local_rank_per_node)
-    # For the Torch test, we 
-    array = nvshmem.core.array((1,2,3,4,5), dtype="float32", morder="F")
+    # For the Torch test, we
+    array = nvshmem.core.array((1, 2, 3, 4, 5), dtype="float32", morder="F")
     print(array)
     # Set to my_pe + 1 so that it doesn't ever show 0.
     array[:] = nvshmem.core.my_pe() + 1
@@ -375,6 +391,7 @@ def test_fortran_morder_alloc_cupy():
     nvshmem.core.free_array(array)
     print("Done tsting allocating Fortran-ordered memory Cupy")
 
+
 import cuda.bindings.driver as driver
 import warnings
 
@@ -383,51 +400,47 @@ CUDA_COH_CDMM = "CUDA_COH_CDMM"
 CUDA_COH_MIGRATION = "CUDA_COH_MIGRATION"
 CUDA_COH_NONE = "CUDA_COH_NONE"
 
+
 def detect_cuda_coherence_model(device_ordinal: int = 0) -> str:
-	err, = driver.cuInit(0)
-	if err != driver.CUresult.CUDA_SUCCESS:
-		raise RuntimeError(f"cuInit failed: {err}")
+    err, = driver.cuInit(0)
+    if err != driver.CUresult.CUDA_SUCCESS:
+        raise RuntimeError(f"cuInit failed: {err}")
 
-	err, dev = driver.cuDeviceGet(device_ordinal)
-	if err != driver.CUresult.CUDA_SUCCESS:
-		raise RuntimeError(f"cuDeviceGet({device_ordinal}) failed: {err}")
+    err, dev = driver.cuDeviceGet(device_ordinal)
+    if err != driver.CUresult.CUDA_SUCCESS:
+        raise RuntimeError(f"cuDeviceGet({device_ordinal}) failed: {err}")
 
-	attr1 = 0
-	if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES"):
-		err, val = driver.cuDeviceGetAttribute(
-			driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES, dev
-		)
-		if err != driver.CUresult.CUDA_SUCCESS:
-			raise RuntimeError(f"cuDeviceGetAttribute(HOST_PAGE_TABLES) failed: {err}")
-		attr1 = int(val != 0)
-	else:
-		warnings.warn(
-			"CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES is not defined, "
-			"assuming non-coherent platform"
-		)
+    attr1 = 0
+    if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES"):
+        err, val = driver.cuDeviceGetAttribute(
+            driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES, dev)
+        if err != driver.CUresult.CUDA_SUCCESS:
+            raise RuntimeError(f"cuDeviceGetAttribute(HOST_PAGE_TABLES) failed: {err}")
+        attr1 = int(val != 0)
+    else:
+        warnings.warn("CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES is not defined, "
+                      "assuming non-coherent platform")
 
-	attr2 = 0
-	if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST"):
-		err, val = driver.cuDeviceGetAttribute(
-			driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST, dev
-		)
-		if err != driver.CUresult.CUDA_SUCCESS:
-			raise RuntimeError(f"cuDeviceGetAttribute(DIRECT_MANAGED_MEM_ACCESS_FROM_HOST) failed: {err}")
-		attr2 = int(val != 0)
-	else:
-		warnings.warn(
-			"CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST is not defined, "
-			"assuming no migration support"
-		)
+    attr2 = 0
+    if hasattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST"):
+        err, val = driver.cuDeviceGetAttribute(
+            driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST, dev)
+        if err != driver.CUresult.CUDA_SUCCESS:
+            raise RuntimeError(f"cuDeviceGetAttribute(DIRECT_MANAGED_MEM_ACCESS_FROM_HOST) failed: {err}")
+        attr2 = int(val != 0)
+    else:
+        warnings.warn("CU_DEVICE_ATTRIBUTE_DIRECT_MANAGED_MEM_ACCESS_FROM_HOST is not defined, "
+                      "assuming no migration support")
 
-	if attr1 and attr2:
-		return CUDA_COH_FULL       # CDMM off
-	elif attr1:
-		return CUDA_COH_CDMM       # CDMM on
-	elif attr2:
-		return CUDA_COH_MIGRATION  # Pascal+ migration
-	else:
-		return CUDA_COH_NONE       # Maxwell and older
+    if attr1 and attr2:
+        return CUDA_COH_FULL  # CDMM off
+    elif attr1:
+        return CUDA_COH_CDMM  # CDMM on
+    elif attr2:
+        return CUDA_COH_MIGRATION  # Pascal+ migration
+    else:
+        return CUDA_COH_NONE  # Maxwell and older
+
 
 def test_external_buffer():
     print("Testing external buffer")
@@ -435,7 +448,7 @@ def test_external_buffer():
     dev = Device()
     local_rank_per_node = dev.device_id
     print("Rank:", local_rank_per_node)
-    
+
     # Use cuda-bindings CuMemCreate binding to allocate a VMM buffer and wrap it for external registration.
     # We implement a new MemoryResource for VMM buffers.
     print("Creating VMMResource")
@@ -451,7 +464,7 @@ def test_external_buffer():
 
     if coherence_model != CUDA_COH_FULL and coherence_model != CUDA_COH_MIGRATION:
         print("NOTICE: Non-coherent platform detected or CDMM mode detected. Using posix_fd handle type.")
-    
+
     resource = VirtualMemoryResource(dev, config=options)
     print("Allocating Buffer using VMM APIs via VMMResource")
     buffer1 = resource.allocate(536870912)
@@ -471,7 +484,11 @@ def test_external_buffer():
     print("tensor_src before reduce:", tensor_src)
     print("tensor_dst before reduce:", tensor_dst)
 
-    nvshmem.core.reduce(nvshmem.core.Teams.TEAM_WORLD, tensor_dst_reg, tensor_src_reg, op="sum", stream=dev.create_stream())
+    nvshmem.core.reduce(nvshmem.core.Teams.TEAM_WORLD,
+                        tensor_dst_reg,
+                        tensor_src_reg,
+                        op="sum",
+                        stream=dev.create_stream())
     dev.sync()
     print("tensor_dst after reduce:", tensor_dst)
 
@@ -507,14 +524,12 @@ def test_peer_buffer_reuse_updates_size():
             parent_ptr = int(buf.handle)
             child_ptrs_before = [
                 ptr for ptr, entry in mr._mem_references.items()
-                if entry.get("parent") == parent_ptr
-                and entry.get("type") is not None
-                and entry.get("type").name in ("PEER", "MULTIMEM")
+                if entry.get("parent") == parent_ptr and entry.get("type") is not None and entry.get("type").name in (
+                    "PEER", "MULTIMEM")
             ]
             if len(child_ptrs_before) < len(peers):
                 raise Exception(
-                    f"Expected at least {len(peers)} child entries before free, found {len(child_ptrs_before)}"
-                )
+                    f"Expected at least {len(peers)} child entries before free, found {len(child_ptrs_before)}")
 
         nvshmem.core.free(buf)
 
@@ -532,6 +547,7 @@ def test_peer_buffer_reuse_updates_size():
         if rank == 0:
             for peer_buf in peer_bufs:
                 nvshmem.core.free(peer_buf)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

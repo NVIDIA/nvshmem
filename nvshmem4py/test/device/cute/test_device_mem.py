@@ -29,7 +29,7 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     Device(local_rank).set_current()
-    buf = cute_interop.tensor((4,), dtype=cute.Int32)
+    buf = cute_interop.tensor((4, ), dtype=cute.Int32)
     _fill_cute_tensor(buf, "int32", nvshmem.core.my_pe())
 
     @cute.kernel
@@ -54,7 +54,7 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
-    expected = np.full((4,), peer_pe, dtype=np.int32)
+    expected = np.full((4, ), peer_pe, dtype=np.int32)
     host = _read_cute_tensor(buf, "int32")
     assert (host == expected).all()
 
@@ -71,7 +71,7 @@ def test_device_get_multicast_tensor(nvshmem_init_fini):
     if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
         pytest.skip("Need >1 PE for multicast test")
 
-    buf = cute_interop.tensor((4,), dtype=cute.Float32)
+    buf = cute_interop.tensor((4, ), dtype=cute.Float32)
     _fill_cute_tensor(buf, "float32", 0)
 
     @cute.kernel
@@ -95,7 +95,7 @@ def test_device_get_multicast_tensor(nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
-    expected = np.full((4,), 1.0, dtype=np.float32)
+    expected = np.full((4, ), 1.0, dtype=np.float32)
     host = _read_cute_tensor(buf, "float32")
     assert (host == expected).all()
 

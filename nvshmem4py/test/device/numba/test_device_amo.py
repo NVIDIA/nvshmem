@@ -1,7 +1,7 @@
 from cuda.core import Device, Stream
 import numba.cuda as cuda
 import nvshmem.core
-import nvshmem.core.device.numba 
+import nvshmem.core.device.numba
 
 import pytest
 
@@ -16,7 +16,7 @@ def test_atomic_add_on_array(nvshmem_init_fini, dtype):
     print("Testing atomic_add")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf = nvshmem.core.array((1,), dtype=dtype)
+    buf = nvshmem.core.array((1, ), dtype=dtype)
     buf[:] = 0
 
     @cuda.jit
@@ -39,14 +39,15 @@ def test_atomic_add_on_array(nvshmem_init_fini, dtype):
     nvshmem.core.free_array(buf)
     print("Done testing atomic_add")
 
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", amo_std_dtypes)
 def test_atomic_fetch_add_on_array(nvshmem_init_fini, dtype):
     print("Testing atomic_fetch_add")
 
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf = nvshmem.core.array((1,), dtype=dtype)
-    out = nvshmem.core.array((1,), dtype=dtype)
+    buf = nvshmem.core.array((1, ), dtype=dtype)
+    out = nvshmem.core.array((1, ), dtype=dtype)
     buf[:] = 0
 
     @cuda.jit
@@ -70,4 +71,3 @@ def test_atomic_fetch_add_on_array(nvshmem_init_fini, dtype):
     nvshmem.core.free_array(buf)
     nvshmem.core.free_array(out)
     print("Done testing atomic_fetch_add")
-

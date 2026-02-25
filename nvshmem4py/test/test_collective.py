@@ -11,10 +11,10 @@ from nvshmem.bindings.device.numba import int_p, barrier_all
 
 from utils import uid_init, mpi_init
 
+
 def test_collective(dev: Device):
 
     ffi = cffi.FFI()
-
 
     @cuda.jit(lto=True)
     def reduce_ring(dest, mype, npes):
@@ -31,7 +31,7 @@ def test_collective(dev: Device):
     mype = my_pe()
     npes = n_pes()
 
-    dest = nvshmem.core.array((1,), dtype="int32")
+    dest = nvshmem.core.array((1, ), dtype="int32")
 
     reduce_ring[1, 1, 0](dest, mype, npes)
 

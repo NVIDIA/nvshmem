@@ -7,8 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
-
 """
 The following are interoperability helpers for NVSHMEM4Py memory used with CuTe DSL
 
@@ -32,7 +30,10 @@ from cuda.core import Stream
 
 from typing import Tuple, Union
 
-__all__ = ["bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor", "register_external_tensor", "unregister_external_tensor", "cleanup_cute", "cute_compile_helper"]
+__all__ = [
+    "bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor",
+    "register_external_tensor", "unregister_external_tensor", "cleanup_cute", "cute_compile_helper"
+]
 
 try:
     from cutlass import cute
@@ -91,11 +92,14 @@ except Exception:
     _cuda_dlpack = None
     _dlpack_available = False
 
+
 class _DLDevice(ctypes.Structure):
     _fields_ = [("device_type", ctypes.c_int), ("device_id", ctypes.c_int)]
 
+
 class _DLDataType(ctypes.Structure):
     _fields_ = [("code", ctypes.c_uint8), ("bits", ctypes.c_uint8), ("lanes", ctypes.c_uint16)]
+
 
 class _DLTensor(ctypes.Structure):
     _fields_ = [
@@ -108,8 +112,10 @@ class _DLTensor(ctypes.Structure):
         ("byte_offset", ctypes.c_uint64),
     ]
 
+
 class _DLManagedTensor(ctypes.Structure):
     pass
+
 
 _DLManagedTensorDeleter = ctypes.CFUNCTYPE(None, ctypes.POINTER(_DLManagedTensor))
 
@@ -120,6 +126,7 @@ _DLManagedTensor._fields_ = [
 ]
 
 _DLPACK_TENSOR_HOLDERS = {}
+
 
 def _safe_get_attr(obj, name, default=None):
     try:
@@ -154,6 +161,7 @@ _CUTE_DLPACK_DTYPE = {
     cute.Boolean: (_DLPackTypeCode.BOOL, 1),
 }
 
+
 @_DLManagedTensorDeleter
 def _dlpack_deleter(ptr):
     if not ptr:
@@ -163,6 +171,7 @@ def _dlpack_deleter(ptr):
 
 
 class _DLPackTensorWrapper:
+
     def __init__(self, capsule):
         self._capsule = capsule
 
@@ -172,6 +181,7 @@ class _DLPackTensorWrapper:
     def __dlpack_device__(self):
         # Not used by from_dlpack(), but provided for completeness
         return self._dlpack_device
+
 
 def _make_dlpack_capsule(buf, shape, dtype, contiguous=True):
     if not _dlpack_available:
@@ -230,10 +240,9 @@ def _ensure_cute_mlir():
         _CUTE_MLIR_MODULE = ir.Module.create()
 
 
-
 def _normalize_shape(shape):
     if isinstance(shape, int):
-        return (shape,)
+        return (shape, )
     return tuple(shape)
 
 
@@ -295,6 +304,7 @@ def _make_tensor_from_buffer(buf, shape, strides, dtype):
     _register_tensor_buffer(tensor, buf, dtype=dtype, shape=shape, strides=strides)
     return tensor
 
+
 def _is_tensor(tensor: Union[Tensor, object]) -> bool:
     """
     Helper function to check if an object is a CuTe DSL tensor
@@ -304,6 +314,7 @@ def _is_tensor(tensor: Union[Tensor, object]) -> bool:
     if not _cute_enabled:
         return False
     return isinstance(tensor, Tensor)
+
 
 def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
     """
@@ -322,7 +333,7 @@ def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
     return buf, size, dtype
 
 
-def tensor(shape: Tuple[int] , dtype: dtype=Float32, release=False, morder="C", except_on_del=True) -> Tensor:
+def tensor(shape: Tuple[int], dtype: dtype = Float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a CuTe tensor view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -351,7 +362,8 @@ def tensor(shape: Tuple[int] , dtype: dtype=Float32, release=False, morder="C", 
 
     return _make_tensor_from_buffer(buf, shape, strides, dtype)
 
-def bytetensor(shape: Tuple[int] , dtype: dtype=Float32, release=False, morder="C", except_on_del=True) -> Tensor:
+
+def bytetensor(shape: Tuple[int], dtype: dtype = Float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a CuTe tensor from NVSHMEM-allocated memory with the given shape and dtype.
     """
@@ -359,7 +371,8 @@ def bytetensor(shape: Tuple[int] , dtype: dtype=Float32, release=False, morder="
         return
     return tensor(shape, dtype=Int8, release=release, morder=morder, except_on_del=except_on_del)
 
-def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
+
+def get_peer_tensor(tensor: Tensor, peer_pe: int = None) -> Tensor:
     """
     Return a Buffer based on the ``peer_buffer`` (wrapper of nvshmem_ptr) API
     """
@@ -368,6 +381,7 @@ def get_peer_tensor(tensor: Tensor, peer_pe: int=None) -> Tensor:
     buf, _, _ = tensor_get_buffer(tensor)
     peer_buf = nvshmem.core.get_peer_buffer(buf, peer_pe)
     return _make_tensor_from_buffer(peer_buf, tensor.shape, tensor.stride, tensor.element_type)
+
 
 def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
     """
@@ -379,6 +393,7 @@ def get_multicast_tensor(team: Teams, tensor: Tensor) -> Tensor:
     mc_buf = nvshmem.core.get_multicast_buffer(team, buf)
     return _make_tensor_from_buffer(mc_buf, tensor.shape, tensor.stride, tensor.element_type)
 
+
 def register_external_tensor(tensor: Tensor) -> Tensor:
     """
     Register an external tensor with NVSHMEM.
@@ -389,6 +404,7 @@ def register_external_tensor(tensor: Tensor) -> Tensor:
     registered_buf = nvshmem.core.register_external_buffer(buf)
     return _make_tensor_from_buffer(registered_buf, tensor.shape, tensor.stride, tensor.element_type)
 
+
 def unregister_external_tensor(tensor: Tensor) -> None:
     """
     Unregister an external tensor with NVSHMEM.
@@ -397,6 +413,7 @@ def unregister_external_tensor(tensor: Tensor) -> None:
         return
     buf, _, _ = tensor_get_buffer(tensor)
     nvshmem.core.unregister_external_buffer(buf)
+
 
 def cleanup_cute():
     """
@@ -438,6 +455,7 @@ def free_tensor(tensor: Tensor) -> None:
     buf, sz, dtype = tensor_get_buffer(tensor)
     nvshmem.core.free(buf)
 
+
 def cute_compile_helper(kernel_fn, *args, **kwargs):
     """
     Helper function to compile a CuTe DSL kernel function.
@@ -464,12 +482,12 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
     # Important: If _CUTE_MLIR_MODULE exists (from tensor creation via _make_tensor_from_buffer),
     # its context is active. cute.compile() checks "if ir.Context.current is None" and if not,
     # tries to access "ir.InsertionPoint.current" which raises an error if no insertion point is active.
-    # 
+    #
     # Solution: Temporarily exit our context and location if they're active, so cute.compile()
     # can create its own context. Then re-enter them after compilation.
     context_exited = False
     location_exited = False
-    
+
     if _CUTE_MLIR_CONTEXT is not None:
         # Check if our context is currently active
         try:
@@ -485,13 +503,13 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
         except Exception:
             # If we can't check, assume context is not active
             pass
-    
+
     try:
         # Build compile_kwargs with options and any user-provided kwargs
         compile_kwargs = {"options": f" --link-libraries={nvshmem_device_bc}"}
         if kwargs:
             compile_kwargs.update(kwargs)
-        
+
         # Call cute.compile() - it will create its own context if needed
         compilerd_func = cute.compile(kernel_fn, *args, **compile_kwargs)
     finally:

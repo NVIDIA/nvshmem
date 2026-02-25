@@ -14,6 +14,7 @@ __all__ = ["numba", "cute"]
 _numba_module = None
 _cute_module = None
 
+
 def __getattr__(name):
     """Lazy import of numba and cute modules."""
     if name == "numba":

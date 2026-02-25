@@ -8,8 +8,7 @@
 #
 # See License.txt for license information
 
-# Based on https://docs.pytorch.org/docs/stable/notes/cuda.html#cuda-memory-management 
-
+# Based on https://docs.pytorch.org/docs/stable/notes/cuda.html#cuda-memory-management
 """
 Example: Using NVSHMEM-backed CUDA VMM memory pool with PyTorch
 
@@ -42,7 +41,6 @@ import torch.distributed as dist
 from torch.cuda.memory import CUDAPluggableAllocator
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.utils import cpp_extension
-
 
 import nvshmem.core
 from cuda.core import Device
@@ -101,9 +99,7 @@ vmm_allocator = torch.utils.cpp_extension.load_inline(
 
 # NOTE: it would be interesting to explore if Torch is willing to support a CUDAPluggableAllocator in pure Python
 # Then we could use nvshmem4py buffer() and register_external_tensor() to register the buffer with NVSHMEM without using any C++
-allocator = CUDAPluggableAllocator(
-    f"./{vmm_allocator_libname}.so", "nvshmem_vmm_alloc", "nvshmem_vmm_free"
-).allocator()
+allocator = CUDAPluggableAllocator(f"./{vmm_allocator_libname}.so", "nvshmem_vmm_alloc", "nvshmem_vmm_free").allocator()
 
 # setup distributed
 rank = int(os.getenv("RANK"))
@@ -142,7 +138,11 @@ with torch.cuda.use_mem_pool(pool):
 registered_tensor = nvshmem.core.register_external_tensor(tensor)
 
 # Allreduce
-nvshmem.core.reduce(nvshmem.core.Teams.TEAM_WORLD, registered_tensor, registered_tensor, op="sum", stream=dev.create_stream())
+nvshmem.core.reduce(nvshmem.core.Teams.TEAM_WORLD,
+                    registered_tensor,
+                    registered_tensor,
+                    op="sum",
+                    stream=dev.create_stream())
 torch.cuda.synchronize(device=device)
 
 # Clean up memory
@@ -151,6 +151,3 @@ del tensor, pool
 
 # Finalize NVSHMEM
 nvshmem.core.finalize()
-
-
-

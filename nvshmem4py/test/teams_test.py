@@ -9,25 +9,26 @@ from cuda.core import Device
 import nvshmem.core
 from nvshmem.core import TeamConfig, TeamUniqueId, get_team_unique_id, Teams
 
+
 def test_team_split_strided():
     print("Testing team split strided")
     device = Device()
     stream = device.create_stream()
-    
+
     node_size = nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE)
     if node_size < 2:
         print("Skipping strided test - need at least 2 PEs in node team")
         return
-    
+
     # Create a TeamConfig object
     config = TeamConfig()
     config.version = 2  # Use version 2
     config.num_contexts = 1
-    
+
     # All PEs must use the same unique ID for team creation
     # Use a fixed unique ID for testing - in real applications, this would be shared properly
     config.uniqueid = 12345  # Fixed test value
-    
+
     # All PEs in TEAM_NODE must call team_split_strided, even if they won't be in the new team
     team = nvshmem.core.team_split_strided(nvshmem.core.Teams.TEAM_NODE, 0, 2, min(2, node_size), config, 0)
     if team is None:
@@ -35,19 +36,20 @@ def test_team_split_strided():
         team_size = 0
     else:
         team_size = nvshmem.core.team_n_pes(team)
-    
+
     print(f"PE {nvshmem.core.my_pe()} Team size: {team_size}")
-    
+
     # Some PEs will be in the team (team_size > 0), others won't (team_size == -1)
     # This is expected behavior for team_split_strided
     if team_size > 0:
         print(f"PE {nvshmem.core.my_pe()} I am in the new team with {team_size} PEs")
     else:
         print(f"PE {nvshmem.core.my_pe()} I am not in the new team")
-    
+
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     device.sync()
     print("Done testing team split strided")
+
 
 def test_team_split_2d():
     print("Testing team split 2d")
@@ -57,23 +59,24 @@ def test_team_split_2d():
     if node_size < 4:  # Need at least 4 PEs for 2x2 split
         print("Skipping 2d test - need at least 4 PEs in node team")
         return
-    
+
     # Create TeamConfig objects for x and y axes
     xaxis_config = TeamConfig()
     xaxis_config.version = 2
     xaxis_config.num_contexts = 1
-    
+
     # Use fixed unique IDs for testing - all PEs must use the same IDs
     xaxis_config.uniqueid = 12346  # Fixed test value for x-axis
-    
+
     yaxis_config = TeamConfig()
     yaxis_config.version = 2
     yaxis_config.num_contexts = 1
-    
+
     # Use fixed unique IDs for testing - all PEs must use the same IDs
     yaxis_config.uniqueid = 12347  # Fixed test value for y-axis
-    
-    xaxis_team, yaxis_team = nvshmem.core.team_split_2d(nvshmem.core.Teams.TEAM_NODE, 2, xaxis_config, 0, yaxis_config, 0)
+
+    xaxis_team, yaxis_team = nvshmem.core.team_split_2d(nvshmem.core.Teams.TEAM_NODE, 2, xaxis_config, 0, yaxis_config,
+                                                        0)
     x_size = nvshmem.core.team_n_pes(xaxis_team)
     y_size = nvshmem.core.team_n_pes(yaxis_team)
     print(f"X-axis team size: {x_size}")
@@ -86,22 +89,22 @@ def test_team_split_2d():
 
 def test_team_destroy():
     print("Testing team destroy")
-    
+
     # Create a TeamConfig object
     config = TeamConfig()
     config.version = 2
     config.num_contexts = 1
-    
+
     # All processes must participate in team creation
     # For a 2-PE team, both PEs must call team_init
     my_pe = nvshmem.core.my_pe()
     n_pes = nvshmem.core.n_pes()
-    
+
     if n_pes >= 2:
         # Use a fixed unique ID for testing - all processes use the same ID
         # In a real application, you would need to share the unique ID properly
         config.uniqueid = 12348  # Fixed test value
-        
+
         # Create a team with 2 PEs - both PEs must participate
         team = nvshmem.core.team_init(config, 0, n_pes, my_pe, new_team_name="TEST_TEAM")
         print(f"Created team {team} with name TEST_TEAM")
@@ -111,25 +114,26 @@ def test_team_destroy():
     else:
         print("Skipping team destroy test - need at least 2 PEs")
 
+
 def test_team_unique_id():
     print("Testing TeamUniqueId")
-    
-    
+
     # Test getting a unique ID from NVSHMEM
     unique_id1 = get_team_unique_id()
     print(f"Generated unique ID: {unique_id1}")
     print(f"Value: {unique_id1.value}")
-    
+
     # Basic validation
     assert unique_id1 is not None, "Unique ID should not be None"
     assert hasattr(unique_id1, 'value'), "Unique ID should have value attribute"
-    
+
     # Test that we can get multiple unique IDs
     unique_id2 = get_team_unique_id()
     assert unique_id2 is not None, "Second unique ID should not be None"
     print(f"Generated second unique ID: {unique_id2}")
-    
+
     print("Done testing TeamUniqueId")
+
 
 def test_team_destroy_negative():
     print("Testing team_destroy negative cases")
@@ -165,6 +169,7 @@ def test_team_destroy_negative():
     else:
         print("Skipping double destroy negative test - need at least 2 PEs")
 
+
 def test_team_init_negative():
     print("Testing team_init negative cases")
     config = TeamConfig()
@@ -179,6 +184,7 @@ def test_team_init_negative():
         raise AssertionError("Expected exception for invalid config_mask")
     except Exception as e:
         print(f"Correctly caught exception for invalid config_mask: {e}")
+
 
 def test_team_split_strided_negative():
     print("Testing team_split_strided negative cases")
@@ -208,6 +214,7 @@ def test_team_split_strided_negative():
     finally:
         # Ensure all ranks realign after the failed collective
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+
 
 def test_team_split_2d_negative():
     print("Testing team_split_2d negative cases")
@@ -240,6 +247,7 @@ def test_team_split_2d_negative():
     finally:
         # Ensure all ranks realign after the failed collective
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+
 
 def test_team_translate_pe_negative():
     print("Testing team_translate_pe negative cases")

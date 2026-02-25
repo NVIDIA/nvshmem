@@ -15,6 +15,7 @@ import nvshmem.core
 import os
 from cuda.core import Device, system
 
+
 def torchrun_uid_init():
     """
     Initialize NVSHMEM using UniqueID with `torchrun` as the launcher
@@ -34,12 +35,7 @@ def torchrun_uid_init():
 
     # Initialize torch.distributed process group
     world_size = torch.cuda.device_count()
-    dist.init_process_group(
-        backend="cpu:gloo,cuda:nccl",
-        rank=local_rank,
-        world_size=world_size,
-        device_id=device
-    )
+    dist.init_process_group(backend="cpu:gloo,cuda:nccl", rank=local_rank, world_size=world_size, device_id=device)
 
     # Extract rank, nranks from process group
     num_ranks = dist.get_world_size()
@@ -60,14 +56,16 @@ def torchrun_uid_init():
 
     nvshmem.core.init(device=dev, uid=broadcast_objects[0], rank=rank_id, nranks=num_ranks, initializer_method="uid")
 
+
 @triton.jit
-def add_kernel(x_ptr,  # *Pointer* to first input vector.
-               y_ptr,  # *Pointer* to second input vector.
-               output_ptr,  # *Pointer* to output vector.
-               n_elements,  # Size of the vector.
-               BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
-               # NOTE: `constexpr` so it can be used as a shape value.
-               ):
+def add_kernel(
+        x_ptr,  # *Pointer* to first input vector.
+        y_ptr,  # *Pointer* to second input vector.
+        output_ptr,  # *Pointer* to output vector.
+        n_elements,  # Size of the vector.
+        BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
+        # NOTE: `constexpr` so it can be used as a shape value.
+):
     """
     Addition kernel borrowed from https://triton-lang.org/main/getting-started/tutorials/01-vector-add.html
     """
@@ -93,19 +91,17 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 
 if __name__ == '__main__':
     torchrun_uid_init()
-
     """
     Allocate 3 tensors on the NVSHMEM symmetric heap
     We will add tensor1 to tensor2, and store that to tensor_out
     Then, we will use nvshmem.core to sum-reduce all PEs' copies of tensor_out
     """
     n_elements = 867530
-    tensor1 = nvshmem.core.tensor((n_elements,), dtype=torch.float32)
+    tensor1 = nvshmem.core.tensor((n_elements, ), dtype=torch.float32)
     tensor1[:] = nvshmem.core.my_pe() + 1
-    tensor2 = nvshmem.core.tensor((n_elements,), dtype=torch.float32)
+    tensor2 = nvshmem.core.tensor((n_elements, ), dtype=torch.float32)
     tensor2[:] = nvshmem.core.my_pe() + 2
-    tensor_out = nvshmem.core.tensor((n_elements,), dtype=torch.float32)
-
+    tensor_out = nvshmem.core.tensor((n_elements, ), dtype=torch.float32)
     """
     Launch the vector addition kernel
     """
@@ -114,7 +110,6 @@ if __name__ == '__main__':
     add_kernel[grid](tensor1, tensor2, tensor_out, n_elements, BLOCK_SIZE=1024)
     # If you uncomment this, you need to add torch.cuda.synchronize() first
     # print(f"From {nvshmem.core.my_pe()} intermediate output: {tensor_out}")
-
     """
     use nvshmem.core to reduce (sum) all the copies of tensor_out
     No need to synchronize, because both operations are on the same Stream

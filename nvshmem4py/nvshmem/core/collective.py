@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 The following are NVSHMEM4Py APIs that expose host-initiated collective communication
 """
@@ -29,8 +28,10 @@ import logging
 
 logger = logging.getLogger("nvshmem")
 
-__all__ = ["reduce", "reducescatter", "alltoall", "fcollect", "broadcast", "barrier", "sync", "barrier_all", "sync_all", "collective_on_buffer"]
-
+__all__ = [
+    "reduce", "reducescatter", "alltoall", "fcollect", "broadcast", "barrier", "sync", "barrier_all", "sync_all",
+    "collective_on_buffer"
+]
 """
 On-Stream Collectives
 
@@ -52,7 +53,6 @@ external_to_nvshmem_dtypes = {
     "torch.bfloat16": "bfloat16",
     "torch.float32": "float",
     "torch.float64": "double",
-    
     "torch.uint8": "uint8",
     "torch.int8": "int8",
     "torch.int16": "int16",
@@ -67,7 +67,6 @@ external_to_nvshmem_dtypes = {
     "bfloat16": "bfloat16",
     "float32": "float",
     "float64": "double",
-    
     "uint8": "uint8",
     "int8": "int8",
     "int16": "int16",
@@ -76,7 +75,14 @@ external_to_nvshmem_dtypes = {
     "bool": "uint8",  # mapped to uint8 for collective support
 }
 
-def _call_collective(coll: str, team: Teams, dst_array:object, src_array: object, op: str=None, root: int=0, stream:Stream=None):
+
+def _call_collective(coll: str,
+                     team: Teams,
+                     dst_array: object,
+                     src_array: object,
+                     op: str = None,
+                     root: int = 0,
+                     stream: Stream = None):
     """
     Executes a collective operation on structured array types (Torch or CuPy).
 
@@ -109,7 +115,16 @@ def _call_collective(coll: str, team: Teams, dst_array:object, src_array: object
 
     collective_on_buffer(coll, team, dst_buf, src_buf, dtype=src_nvshmem_dtype, op=op, root=root, stream=stream)
 
-def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtype: str=None, op: str=None, root: int=0, stream:Stream=None, enable_timing=False) -> float:
+
+def collective_on_buffer(coll: str,
+                         team: Teams,
+                         dest: Buffer,
+                         src: Buffer,
+                         dtype: str = None,
+                         op: str = None,
+                         root: int = 0,
+                         stream: Stream = None,
+                         enable_timing=False) -> float:
     """
     This function allows host-initiated collectives over raw memory buffers.
     It is used by higher-level wrappers or when working with DLPack-converted memory directly.
@@ -209,6 +224,7 @@ def collective_on_buffer(coll: str, team: Teams, dest: Buffer, src: Buffer, dtyp
 
     return time_ms
 
+
 def _check_dtype(array: object) -> Tuple[Buffer, int, str]:
     """
     Validates an array for collective operations and extracts metadata.
@@ -235,10 +251,10 @@ def _check_dtype(array: object) -> Tuple[Buffer, int, str]:
 
     if is_array:
         buf, buf_size, external_dtype = array_get_buffer(array)
-        
+
     elif is_tensor:
         buf, buf_size, external_dtype = tensor_get_buffer(array)
-    
+
     nvshmem_dtype = external_to_nvshmem_dtypes.get(external_dtype)
     if not nvshmem_dtype:
         raise NvshmemInvalid("Passed an invalid datatype into a collective function")
@@ -246,7 +262,8 @@ def _check_dtype(array: object) -> Tuple[Buffer, int, str]:
         other_dev.set_current()
     return buf, buf_size, nvshmem_dtype
 
-def barrier(team: Teams, stream: NvshmemStreamsType=None) -> None:
+
+def barrier(team: Teams, stream: NvshmemStreamsType = None) -> None:
     """
     Executes a team-wide barrier on a specified CUDA stream.
 
@@ -262,7 +279,8 @@ def barrier(team: Teams, stream: NvshmemStreamsType=None) -> None:
     if other_dev is not None:
         other_dev.set_current()
 
-def sync(team: Teams, stream: NvshmemStreamsType=None) -> None:
+
+def sync(team: Teams, stream: NvshmemStreamsType = None) -> None:
     """
     Executes a team-wide sync on a specified CUDA stream.
 
@@ -278,7 +296,8 @@ def sync(team: Teams, stream: NvshmemStreamsType=None) -> None:
     if other_dev is not None:
         other_dev.set_current()
 
-def barrier_all(stream: NvshmemStreamsType=None) -> None:
+
+def barrier_all(stream: NvshmemStreamsType = None) -> None:
     """
     Executes a runtime-wide barrier on a specified CUDA stream.
 
@@ -293,7 +312,8 @@ def barrier_all(stream: NvshmemStreamsType=None) -> None:
     if other_dev is not None:
         other_dev.set_current()
 
-def sync_all(stream: NvshmemStreamsType=None) -> None:
+
+def sync_all(stream: NvshmemStreamsType = None) -> None:
     """
     Executes a runtime-wide sync on a specified CUDA stream.
     
@@ -308,7 +328,8 @@ def sync_all(stream: NvshmemStreamsType=None) -> None:
     if other_dev is not None:
         other_dev.set_current()
 
-def reduce(team: Teams, dst_array: object, src_array: object, op: str, stream: NvshmemStreamsType=None):
+
+def reduce(team: Teams, dst_array: object, src_array: object, op: str, stream: NvshmemStreamsType = None):
     """
     Performs a reduction from src_array to dst_array on a CUDA stream.
 
@@ -321,7 +342,8 @@ def reduce(team: Teams, dst_array: object, src_array: object, op: str, stream: N
     """
     _call_collective("reduce", team, dst_array, src_array, op=op, stream=stream)
 
-def reducescatter(team: Teams, dst_array: object, src_array: object, op: str, stream: NvshmemStreamsType=None):
+
+def reducescatter(team: Teams, dst_array: object, src_array: object, op: str, stream: NvshmemStreamsType = None):
     """
     Performs a reduce-scatter operation on a CUDA stream.
 
@@ -334,7 +356,8 @@ def reducescatter(team: Teams, dst_array: object, src_array: object, op: str, st
     """
     _call_collective("reducescatter", team, dst_array, src_array, op=op, stream=stream)
 
-def alltoall(team: Teams, dst_array: object, src_array: object, stream: NvshmemStreamsType=None):
+
+def alltoall(team: Teams, dst_array: object, src_array: object, stream: NvshmemStreamsType = None):
     """
     Performs an all-to-all communication on a CUDA stream.
 
@@ -346,7 +369,8 @@ def alltoall(team: Teams, dst_array: object, src_array: object, stream: NvshmemS
     """
     _call_collective("alltoall", team, dst_array, src_array, op=None, stream=stream)
 
-def fcollect(team: Teams, dst_array: object, src_array: object, stream: NvshmemStreamsType=None):
+
+def fcollect(team: Teams, dst_array: object, src_array: object, stream: NvshmemStreamsType = None):
     """
     Performs a full-collective operation on a CUDA stream.
 
@@ -358,7 +382,8 @@ def fcollect(team: Teams, dst_array: object, src_array: object, stream: NvshmemS
     """
     _call_collective("fcollect", team, dst_array, src_array, op=None, stream=stream)
 
-def broadcast(team: Teams, dst_array: object, src_array: object, root: int=0, stream: NvshmemStreamsType=None):
+
+def broadcast(team: Teams, dst_array: object, src_array: object, root: int = 0, stream: NvshmemStreamsType = None):
     """
     Broadcasts data from src_array to dst_array across the team on a CUDA stream.
 

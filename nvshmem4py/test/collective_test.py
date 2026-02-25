@@ -15,7 +15,6 @@ try:
 except:
     _cupy_enabled = False
 
-
 from utils import uid_init, mpi_init
 import argparse
 import os
@@ -27,13 +26,16 @@ from cuda.core import Device, system
 from mpi4py import MPI
 
 all_types_cupy = ["float16", "float32", "float64", "uint8", "int8", "int16", "int32", "int64", "bool"]
-all_types_torch = [torch.float16, torch.bfloat16, torch.float32, torch.uint8, torch.int16, torch.int32, torch.int64, torch.bool]
+all_types_torch = [
+    torch.float16, torch.bfloat16, torch.float32, torch.uint8, torch.int16, torch.int32, torch.int64, torch.bool
+]
 all_types_nvshmem = ["half", "bfloat16", "uint8", "int8", "int16", "int32", "int64", "double", "float"]
 all_ops = ["sum", "min", "max"]
 
 ###
 # Collectives with no data
 ###
+
 
 def test_barrier():
     print("Testing barrier")
@@ -48,7 +50,7 @@ def test_barrier():
     stream = dev.create_stream()
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync() 
+    dev.sync()
     # Print dst, src before
     print(f"Before barrier from {nvshmem.core.my_pe()}")
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_NODE, stream=stream)
@@ -56,6 +58,7 @@ def test_barrier():
     # Print dst, src after
     print(f"After barrier from PE {nvshmem.core.my_pe()}")
     print("Done testing barrier")
+
 
 def test_team_sync():
     print("Testing team sync")
@@ -70,7 +73,7 @@ def test_team_sync():
     stream = dev.create_stream()
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync() 
+    dev.sync()
     # Print dst, src before
     print(f"Before team sync from {nvshmem.core.my_pe()}")
     nvshmem.core.sync(nvshmem.core.Teams.TEAM_NODE, stream=stream)
@@ -78,6 +81,7 @@ def test_team_sync():
     # Print dst, src after
     print(f"After team sync from PE {nvshmem.core.my_pe()}")
     print("Done testing team sync")
+
 
 def test_barrier_all():
     print("Testing barrier all")
@@ -88,7 +92,7 @@ def test_barrier_all():
     stream = dev.create_stream()
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync() 
+    dev.sync()
     # Print dst, src before
     print(f"Before barrier from {nvshmem.core.my_pe()}")
     nvshmem.core.barrier_all(stream=stream)
@@ -96,6 +100,7 @@ def test_barrier_all():
     # Print dst, src after
     print(f"After barrier from PE {nvshmem.core.my_pe()}")
     print("Done testing barrier")
+
 
 def test_all_sync():
     print("Testing all sync")
@@ -106,7 +111,7 @@ def test_all_sync():
     stream = dev.create_stream()
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync() 
+    dev.sync()
     # Print dst, src before
     print(f"Before all sync from {nvshmem.core.my_pe()}")
     nvshmem.core.sync_all(stream=stream)
@@ -115,9 +120,11 @@ def test_all_sync():
     print(f"After all sync from PE {nvshmem.core.my_pe()}")
     print("Done testing all sync")
 
+
 ###
 # CuPy Collectives
 ###
+
 
 def test_alltoall_cupy():
     print("Testing CuPy array Alltoall")
@@ -135,17 +142,17 @@ def test_alltoall_cupy():
         # Source size = n_pes * nelems, Destination size = n_pes * nelems
         n_pes = nvshmem.core.n_pes()
         my_pe = nvshmem.core.my_pe()
-        
+
         # Create source array with proper alltoall pattern
         # Each PE has data for all PEs: [PE0_data_for_PE0, PE0_data_for_PE1, PE0_data_for_PE2, ...]
         arr_src = nvshmem.core.array((n_pes, n_pes), dtype=dtype)
         arr_dst = nvshmem.core.array((n_pes, n_pes), dtype=dtype)
-        
+
         arr_src[:] = my_pe + 1
         arr_dst[:] = 0
-        
+
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-        dev.sync() 
+        dev.sync()
         # Print dst, src before
         print(f"PE {my_pe}: Dest before collective:", arr_dst)
         print(f"PE {my_pe}: Src before collective:", arr_src)
@@ -166,7 +173,7 @@ def test_alltoall_cupy():
         expected = cupy.zeros((n_pes, n_pes), dtype=dtype)
         for pe in range(n_pes):
             expected[pe, :] = pe + 1
-        
+
         if not cupy.allclose(arr_dst, expected):
             print(f"ERROR: PE {my_pe}: Alltoall failed for dtype {dtype}")
             print(f"Expected:\n{expected}")
@@ -176,6 +183,7 @@ def test_alltoall_cupy():
         nvshmem.core.free_array(arr_dst)
 
     print("Done testing CuPy array Alltoall")
+
 
 def test_fcollect_cupy():
     print("Testing CuPy array Fcollect")
@@ -191,16 +199,16 @@ def test_fcollect_cupy():
     dev.sync()
 
     for dtype in all_types_cupy:
-        arr_src = nvshmem.core.array((2,2), dtype=dtype)
+        arr_src = nvshmem.core.array((2, 2), dtype=dtype)
         # We're going to Fcollect from src to dst, so it needs to be N times as big
-        arr_dst = nvshmem.core.array((nvshmem.core.n_pes(),2,2), dtype=dtype)
+        arr_dst = nvshmem.core.array((nvshmem.core.n_pes(), 2, 2), dtype=dtype)
         # Zero out the dest and set src to my_pe
         arr_dst[:] = 0
         # as usual, local_rank_per_node + 1 so there's no zeroes
         arr_src[:] = nvshmem.core.my_pe() + 1
 
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-        dev.sync() 
+        dev.sync()
         # Print dst, src before
         print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
         print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -248,6 +256,7 @@ def test_fcollect_cupy():
 
     print("Done testing CuPy array Fcollect")
 
+
 def test_reduce_cupy():
     print("Testing CuPy array Reduce")
     if not _cupy_enabled:
@@ -261,15 +270,15 @@ def test_reduce_cupy():
 
     for dtype in all_types_cupy:
         for op in all_ops:
-            arr_src = nvshmem.core.array((2,2), dtype=dtype)
-            arr_dst = nvshmem.core.array((2,2), dtype=dtype)
+            arr_src = nvshmem.core.array((2, 2), dtype=dtype)
+            arr_dst = nvshmem.core.array((2, 2), dtype=dtype)
             # Zero out the dest and set src to my_pe
             arr_dst[:] = 0
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = nvshmem.core.my_pe() + 1
 
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
             # Print dst, src before
             print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
             print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -335,15 +344,15 @@ def test_reducescatter_cupy():
 
     for dtype in all_types_cupy:
         for op in all_ops:
-            arr_src = nvshmem.core.array((2,2, nvshmem.core.n_pes()), dtype=dtype)
+            arr_src = nvshmem.core.array((2, 2, nvshmem.core.n_pes()), dtype=dtype)
             # We're going to reducescatter from src to dst, so it needs to be N times as big
-            arr_dst = nvshmem.core.array((2,2), dtype=dtype)
+            arr_dst = nvshmem.core.array((2, 2), dtype=dtype)
             # Zero out the dest and set src to my_pe
             arr_dst[:] = 0
             arr_src[:] = nvshmem.core.my_pe() + 1
 
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
             # Print dst, src before
             print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
             print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -376,9 +385,9 @@ def test_reducescatter_cupy():
             # Build a fake "global" arr_src to compute the expected result
             # For each PE, arr_src[:,:,i] = (i+1)
             # So arr_src_global[:,:,i] = (i+1) for i in 0..n_pes-1
-            arr_src_global = cupy.empty((2,2,n_pes), dtype=arr_src.dtype)
+            arr_src_global = cupy.empty((2, 2, n_pes), dtype=arr_src.dtype)
             for i in range(n_pes):
-                arr_src_global[:,:,i] = i + 1
+                arr_src_global[:, :, i] = i + 1
 
             # Now, for reducescatter, the reduction is over axis=-1, and each PE gets its chunk
             # So, for op, we need to apply the reduction over axis=-1, then take the chunk for my_pe
@@ -390,7 +399,7 @@ def test_reducescatter_cupy():
                 expected_chunk = cupy.min(arr_src_global, axis=-1)
             else:
                 raise Exception(f"Unknown op {op} for reducescatter test")
-            
+
             if dtype == "bool":
                 nvshmem.core.free_array(arr_src)
                 nvshmem.core.free_array(arr_dst)
@@ -419,6 +428,7 @@ def test_reducescatter_cupy():
             print(f"Done testing CuPy Array Reducescatter with dtype {dtype} op {op}")
     print("Done testing CuPy array Reducescatter")
 
+
 def test_broadcast_cupy():
     print("Testing CuPy array broadcast")
     if not _cupy_enabled:
@@ -431,14 +441,14 @@ def test_broadcast_cupy():
     stream = dev.create_stream()
 
     for dtype in all_types_cupy:
-        arr_src = nvshmem.core.array((2,2), dtype=dtype)
-        arr_dst = nvshmem.core.array((2,2), dtype=dtype)
+        arr_src = nvshmem.core.array((2, 2), dtype=dtype)
+        arr_dst = nvshmem.core.array((2, 2), dtype=dtype)
         # Zero out the dest and set src to my_pe
         arr_dst[:] = 0
         arr_src[:] = nvshmem.core.my_pe() + 1
 
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-        dev.sync() 
+        dev.sync()
         # Print dst, src before
         print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
         print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -454,7 +464,7 @@ def test_broadcast_cupy():
         # Only root PE's arr_src is used for broadcast, which is root=0
         root = 0
         # Gather what the root's arr_src should be
-        expected = cupy.full((2,2), root + 1, dtype=arr_dst.dtype)
+        expected = cupy.full((2, 2), root + 1, dtype=arr_dst.dtype)
         # arr_dst should match expected on all PEs
         if not cupy.all(arr_dst == expected):
             print(f"ERROR: Broadcast result incorrect on PE {nvshmem.core.my_pe()} for dtype {dtype}")
@@ -478,6 +488,7 @@ def test_broadcast_cupy():
 # Torch Collectives
 ###
 
+
 def test_alltoall_torch():
     print("Testing Torch array Alltoall")
     n_pes = nvshmem.core.n_pes()
@@ -500,7 +511,7 @@ def test_alltoall_torch():
         arr_src[:] = nvshmem.core.my_pe() + 1
 
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-        dev.sync() 
+        dev.sync()
         # Print dst, src before
         print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
         print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -519,11 +530,11 @@ def test_alltoall_torch():
             nvshmem.core.free_tensor(arr_dst)
             print("Skipping bool/bf16 correctness check for alltoall test")
             continue
-        
+
         # Data validation for alltoall
         # Each PE should receive data from all PEs in the destination
         validation_passed = True
-        
+
         expected = torch.zeros((n_pes, n_pes), dtype=dtype, device=arr_dst.device)
         for pe in range(n_pes):
             expected[pe, :] = pe + 1
@@ -532,7 +543,7 @@ def test_alltoall_torch():
             validation_passed = False
             print(f"ERROR: Alltoall result incorrect on PE {my_pe} for dtype {dtype}")
             print(f"Expected:\n{expected}\nGot:\n{arr_dst}")
-        
+
         if not validation_passed:
             raise Exception(f"Alltoall validation failed for dtype {dtype} on PE {nvshmem.core.my_pe()}")
 
@@ -540,6 +551,7 @@ def test_alltoall_torch():
         nvshmem.core.free_tensor(arr_src)
         nvshmem.core.free_tensor(arr_dst)
         print(f"Done testing Torch array Alltoall with type={dtype}")
+
 
 def test_fcollect_torch():
     print("Testing Torch array Fcollect")
@@ -553,15 +565,15 @@ def test_fcollect_torch():
     stream = dev.create_stream()
 
     for dtype in all_types_torch:
-        arr_src = nvshmem.core.tensor((2,2), dtype=dtype)
+        arr_src = nvshmem.core.tensor((2, 2), dtype=dtype)
         # We're going to Fcollect from src to dst, so it needs to be N times as big
-        arr_dst = nvshmem.core.tensor((nvshmem.core.n_pes(),2,2), dtype=dtype)
+        arr_dst = nvshmem.core.tensor((nvshmem.core.n_pes(), 2, 2), dtype=dtype)
         # Zero out the dest and set src to my_pe
         arr_dst[:] = 0
         arr_src[:] = nvshmem.core.my_pe() + 1
 
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-        dev.sync() 
+        dev.sync()
         # Print dst, src before
         print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
         print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -584,11 +596,11 @@ def test_fcollect_torch():
         # Data validation - check that each PE's contribution is in the correct position
         validation_passed = True
         n_pes = nvshmem.core.n_pes()
-        
+
         for pe in range(n_pes):
             expected_value = pe + 1
             actual_data = arr_dst[pe, :, :]
-            
+
             # Check if all elements in this PE's contribution are correct
             if not torch.all(actual_data == expected_value):
                 print(f"ERROR: Data from PE {pe} is incorrect on PE {nvshmem.core.my_pe()}")
@@ -596,7 +608,7 @@ def test_fcollect_torch():
                 validation_passed = False
             else:
                 print(f"✓ Data from PE {pe} is correct on PE {nvshmem.core.my_pe()}")
-        
+
         if not validation_passed:
             raise Exception(f"Fcollect validation failed for dtype {dtype} on PE {nvshmem.core.my_pe()}")
 
@@ -606,6 +618,7 @@ def test_fcollect_torch():
         print(f"Done testing Torch array Fcollect with type={dtype}")
 
     print("Done testing Torch array Fcollect")
+
 
 def test_reduce_torch():
     print("Testing torch tensor Reduce")
@@ -620,15 +633,15 @@ def test_reduce_torch():
 
     for dtype in all_types_torch:
         for op in all_ops:
-            arr_src = nvshmem.core.tensor((2,2), dtype=dtype)
-            arr_dst = nvshmem.core.tensor((2,2), dtype=dtype)
+            arr_src = nvshmem.core.tensor((2, 2), dtype=dtype)
+            arr_dst = nvshmem.core.tensor((2, 2), dtype=dtype)
             # Zero out the dest and set src to my_pe
             arr_dst[:] = 0
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = nvshmem.core.my_pe() + 1
 
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
             # Print dst, src before
             print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
             print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -665,7 +678,7 @@ def test_reduce_torch():
                 expected_value = op_map[op](values)
             else:
                 raise Exception(f"Unknown reduction op: {op}")
-            
+
             if dtype == torch.bool:
                 nvshmem.core.free_tensor(arr_src)
                 nvshmem.core.free_tensor(arr_dst)
@@ -690,6 +703,7 @@ def test_reduce_torch():
             print(f"Done testing torch tensor Reduce with dtype {dtype} op {op}")
     print("Done testing torch tensor Reduce")
 
+
 def test_reducescatter_torch():
     print("Testing torch tensor reducescatter")
     if not _torch_enabled:
@@ -704,15 +718,15 @@ def test_reducescatter_torch():
 
     for dtype in all_types_torch:
         for op in all_ops:
-            arr_src = nvshmem.core.tensor((2,2, nvshmem.core.n_pes()), dtype=dtype)
-            arr_dst = nvshmem.core.tensor((2,2), dtype=dtype)
+            arr_src = nvshmem.core.tensor((2, 2, nvshmem.core.n_pes()), dtype=dtype)
+            arr_dst = nvshmem.core.tensor((2, 2), dtype=dtype)
             # Zero out the dest and set src to my_pe
             arr_dst[:] = 0
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = nvshmem.core.my_pe() + 1
 
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
             # Print dst, src before
             print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
             print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -745,7 +759,7 @@ def test_reducescatter_torch():
                 expected_value = op_map[op](values)
             else:
                 raise Exception(f"Unknown reduction op: {op}")
-            
+
             if dtype == torch.bool:
                 nvshmem.core.free_tensor(arr_src)
                 nvshmem.core.free_tensor(arr_dst)
@@ -770,6 +784,7 @@ def test_reducescatter_torch():
             print(f"Done testing torch tensor reducescatter with dtype {dtype} op {op}")
     print("Done testing torch tensor reducescatter")
 
+
 def test_broadcast_torch():
     print("Testing torch tensor broadcast")
     if not _torch_enabled:
@@ -784,15 +799,15 @@ def test_broadcast_torch():
 
     for dtype in all_types_torch:
         for op in all_ops:
-            arr_src = nvshmem.core.tensor((2,2), dtype=dtype)
-            arr_dst = nvshmem.core.tensor((2,2), dtype=dtype)
+            arr_src = nvshmem.core.tensor((2, 2), dtype=dtype)
+            arr_dst = nvshmem.core.tensor((2, 2), dtype=dtype)
             # Zero out the dest and set src to my_pe
             arr_dst[:] = 0
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = local_rank_per_node + 1
 
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
             # Print dst, src before
             print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", arr_dst)
             print(f"Src before collective from PE {nvshmem.core.my_pe()}:", arr_src)
@@ -818,10 +833,8 @@ def test_broadcast_torch():
             # On root, arr_src is filled with local_rank_per_node + 1, which is 1
             expected = torch.full_like(arr_dst, 1)
             if not torch.allclose(arr_dst, expected):
-                raise Exception(
-                    f"Broadcast validation failed for dtype {dtype} on PE {local_rank_per_node}. "
-                    f"Expected {expected}, got {arr_dst}"
-                )
+                raise Exception(f"Broadcast validation failed for dtype {dtype} on PE {local_rank_per_node}. "
+                                f"Expected {expected}, got {arr_dst}")
             else:
                 print(f"Broadcast result correct on PE {local_rank_per_node} for dtype {dtype}")
             # Free Buffers
@@ -830,9 +843,11 @@ def test_broadcast_torch():
             print(f"Done testing torch tensor broadcast with dtype {dtype} op {op}")
     print("Done testing torch tensor broadcast")
 
+
 ###
 # Collectives on raw buffers
 ###
+
 
 def test_collectives_on_raw_buffers():
     print("Testing collectives on raw buffers")
@@ -842,25 +857,38 @@ def test_collectives_on_raw_buffers():
     print("Rank:", local_rank_per_node)
     stream = dev.create_stream()
     for coll in ["reduce", "reducescatter", "fcollect", "alltoall", "broadcast"]:
-        for dtype in all_types_nvshmem: 
-            buf_src = nvshmem.core.buffer(nvshmem.core.utils.get_size((2,2,nvshmem.core.n_pes()), dtype))
-            buf_dst = nvshmem.core.buffer(nvshmem.core.n_pes() * nvshmem.core.utils.get_size((2,2,nvshmem.core.n_pes()), dtype))
+        for dtype in all_types_nvshmem:
+            buf_src = nvshmem.core.buffer(nvshmem.core.utils.get_size((2, 2, nvshmem.core.n_pes()), dtype))
+            buf_dst = nvshmem.core.buffer(nvshmem.core.n_pes() * nvshmem.core.utils.get_size(
+                (2, 2, nvshmem.core.n_pes()), dtype))
 
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
             # Print dst, src before
             print(f"Dest before collective from PE {nvshmem.core.my_pe()}:", buf_dst)
             print(f"Src before collective from PE {nvshmem.core.my_pe()}:", buf_src)
             if coll in ["reduce", "reducescatter"]:
                 for op in all_ops:
-                    nvshmem.core.collective_on_buffer(coll, nvshmem.core.Teams.TEAM_WORLD, buf_dst, buf_src, dtype=dtype, op=op, stream=stream)
+                    nvshmem.core.collective_on_buffer(coll,
+                                                      nvshmem.core.Teams.TEAM_WORLD,
+                                                      buf_dst,
+                                                      buf_src,
+                                                      dtype=dtype,
+                                                      op=op,
+                                                      stream=stream)
             else:
-                nvshmem.core.collective_on_buffer(coll, nvshmem.core.Teams.TEAM_WORLD, buf_dst, buf_src, dtype=dtype, op=None, stream=stream)
+                nvshmem.core.collective_on_buffer(coll,
+                                                  nvshmem.core.Teams.TEAM_WORLD,
+                                                  buf_dst,
+                                                  buf_src,
+                                                  dtype=dtype,
+                                                  op=None,
+                                                  stream=stream)
             # Important! Make sure you sync the stream that you launched the nvshmem collective on
             # (or the whole device like we do in this example)
             # before you use the results of the collective
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-            dev.sync() 
+            dev.sync()
 
             # Print dst, src after
             print(f"Dest after collective from PE {nvshmem.core.my_pe()}:", buf_dst)

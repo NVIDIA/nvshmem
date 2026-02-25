@@ -33,6 +33,7 @@ Comm = None
 mpi = None
 _mpi4py_enabled = False
 
+
 def _import_mpi():
     global mpi, Comm, _mpi4py_enabled
     if _mpi4py_enabled:
@@ -52,11 +53,16 @@ def _import_mpi():
         logger.warning(f"MPI4Py not enabled: {e}")
         _mpi4py_enabled = False
 
-__all__ = ['get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init', 'library_finalize', 'UniqueID', 'find_device_bitcode_library']
+
+__all__ = [
+    'get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init',
+    'library_finalize', 'UniqueID', 'find_device_bitcode_library'
+]
 
 logger = logging.getLogger("nvshmem")
 
 UniqueID = bindings.uniqueid
+
 
 def get_version() -> Version:
     """
@@ -85,12 +91,13 @@ def get_version() -> Version:
     lib_major = ctypes.c_int()
     lib_minor = ctypes.c_int()
     lib_patch = ctypes.c_int()
-    bindings.vendor_get_version_info(ctypes.addressof(lib_major), ctypes.addressof(lib_minor), ctypes.addressof(lib_patch))
-
+    bindings.vendor_get_version_info(ctypes.addressof(lib_major), ctypes.addressof(lib_minor),
+                                     ctypes.addressof(lib_patch))
 
     return Version(openshmem_spec_version=f"{int(spec_major.value)}.{int(spec_minor.value)}",
                    nvshmem4py_version=__version__,
-                   libnvshmem_version=f"{int(lib_major.value)}.{int(lib_minor.value)}.{lib_patch.value}") 
+                   libnvshmem_version=f"{int(lib_major.value)}.{int(lib_minor.value)}.{lib_patch.value}")
+
 
 def get_unique_id(empty=False) -> UniqueID:
     """
@@ -134,7 +141,13 @@ def get_unique_id(empty=False) -> UniqueID:
     bindings.get_uniqueid(unique_id.ptr)
     return unique_id
 
-def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nranks: int=None, mpi_comm: Comm=None, initializer_method: str="") -> None:
+
+def init(device: Device = None,
+         uid: bindings.uniqueid = None,
+         rank: int = None,
+         nranks: int = None,
+         mpi_comm: Comm = None,
+         initializer_method: str = "") -> None:
     """
     Initialize the NVSHMEM runtime with either MPI or UID-based bootstrapping.
 
@@ -269,7 +282,7 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         rank = mpi_comm.Get_rank()
         nranks = mpi_comm.Get_size()
         local_rank_per_node = rank % system.get_num_devices()
- 
+
         # Create an empty uniqueid for all ranks
         uniqueid = get_unique_id(empty=True)
         if rank == 0:
@@ -288,7 +301,6 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
         if uid_status != None or status != None:
             raise NvshmemError("Failed to perform emulated_mpi-based Init. status = {status}")
 
-
     log_level = os.environ.get("NVSHMEM_DEBUG")
     if log_level in ("INFO", "DEBUG"):
         _debug_mode = True
@@ -301,6 +313,7 @@ def init(device: Device=None, uid: bindings.uniqueid=None, rank: int=None, nrank
     utils._configure_logging(level=log_level)
 
     nvshmem.core._internal_tracking._is_initialized["status"] = InternalInitStatus.INITIALIZED
+
 
 def finalize() -> None:
     """
@@ -326,7 +339,8 @@ def finalize() -> None:
         raise NvshmemError("Failed to finalize Hostlib")
 
     nvshmem.core._internal_tracking._is_initialized["status"] = InternalInitStatus.DE_INITIALIZED
-        
+
+
 def module_init(mod: NvshmemKernelObject) -> None:
     """
     Initialize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
@@ -350,6 +364,7 @@ def module_init(mod: NvshmemKernelObject) -> None:
     print(f"CUmodule init status: {status}")
     if status is not None and status != 0:
         raise NvshmemError("Failed to initialize CUmodule for NVSHMEM")
+
 
 def module_finalize(mod: NvshmemKernelObject) -> None:
     """
@@ -375,6 +390,7 @@ def module_finalize(mod: NvshmemKernelObject) -> None:
     if status is not None and status != 0:
         raise NvshmemError("Failed to finalize CUmodule for NVSHMEM")
 
+
 def library_init(lib: NvshmemKernelObject) -> None:
     """
     Initialize the CUmodule instance backing the compiled object binary. The instance is of cuda.core.ObjectCode type.
@@ -394,11 +410,12 @@ def library_init(lib: NvshmemKernelObject) -> None:
     Example:
         >>> nvshmem.core.module_init(mod)
     """
-    if lib.handle is  None:
+    if lib.handle is None:
         raise NvshmemInvalid("Invalid library type passed in")
     status = bindings.culibrary_init(lib.handle)
     if status is not None and status != 0:
         raise NvshmemError("Failed to initialize CULibrary for NVSHMEM")
+
 
 def library_finalize(lib: NvshmemKernelObject) -> None:
     """
@@ -437,12 +454,12 @@ def find_device_bitcode_library() -> str:
     header_path = find_nvidia_header_directory("nvshmem")
     if not header_path:
         raise NvshmemInvalid("NVSHMEM headers not found. Cannot find the device bitcode library.")
-    
+
     # Search in ../lib/ relative to the header path
     # TODO: Switch to cuda.pathfinder when it supports bitcode libraries (https://github.com/NVIDIA/cuda-python/issues/1421)
     header_path_obj = Path(header_path)
     lib_path = header_path_obj.parent / "lib" / "libnvshmem_device.bc"
-    
+
     if not lib_path.exists():
         raise NvshmemInvalid(f"NVSHMEM device bitcode not found at {lib_path}")
     return str(lib_path)

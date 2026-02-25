@@ -34,10 +34,9 @@ def _noneptr_as_typedptr(typingctx, optr, arrty):
     def codegen(cgctx, builder, sig, args):
         optr_val, _ = args
         ret_llty = cgctx.get_value_type(sig.return_type)  # T* type
-        return builder.bitcast(optr_val, ret_llty)        # T*
+        return builder.bitcast(optr_val, ret_llty)  # T*
 
     return sig, codegen
-
 
 
 @intrinsic
@@ -58,6 +57,7 @@ def _array_data_noneptr(typingctx, arrty):
 
     return sig, codegen
 
+
 def test_ptr():
 
     @cuda.jit()
@@ -76,16 +76,15 @@ def test_ptr():
 
         peer_array = carray(other_ptr_typed, arr.shape, arr.dtype)
 
-
         # other_ptr = ptr(void_ptr, 1)
         # sync_all()
 
-
-    dest = nvshmem.core.array((1,), dtype="int16")
+    dest = nvshmem.core.array((1, ), dtype="int16")
 
     kernel_nvshmem[1, 1](dest)
 
     nvshmem.core.free_array(dest)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -96,4 +95,4 @@ if __name__ == "__main__":
     elif args.init_type == "mpi":
         mpi_init()
 
-    test_ptr()  
+    test_ptr()

@@ -7,7 +7,6 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # See License.txt for license information
-
 """
 These functions are NVSHMEM4Py APIs that expose host-initiated remote memory accesses (RMA)
 """
@@ -73,9 +72,16 @@ def _get_buffers(dst, src) -> Tuple[Buffer, Buffer]:
 
     return dst_buf, src_buf
 
-def _call_putget(dst: object, src: object, op:str = "put", 
-                 signal: bool=False, signal_var: Buffer = 0, signal_val: int = 0, signal_op: SignalOp = 0,
-                 remote_pe: int = 0, stream: NvshmemStreamsType=None) -> None:
+
+def _call_putget(dst: object,
+                 src: object,
+                 op: str = "put",
+                 signal: bool = False,
+                 signal_var: Buffer = 0,
+                 signal_val: int = 0,
+                 signal_op: SignalOp = 0,
+                 remote_pe: int = 0,
+                 stream: NvshmemStreamsType = None) -> None:
     """
     Internal helper to invoke host-initiated NVSHMEM put/get with optional signaling.
 
@@ -122,10 +128,9 @@ def _call_putget(dst: object, src: object, op:str = "put",
         if not isinstance(signal_var, Buffer) or signal_var.size < 8:
             raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
         f_args = [
-                  dst_buf.handle, src_buf.handle, safe_size, 
-                  signal_var.handle, signal_val, signal_op,
-                  remote_pe, int(stream.__cuda_stream__()[1])
-                 ]
+            dst_buf.handle, src_buf.handle, safe_size, signal_var.handle, signal_val, signal_op, remote_pe,
+            int(stream.__cuda_stream__()[1])
+        ]
     else:
         f_args = [dst_buf.handle, src_buf.handle, safe_size, remote_pe, int(stream.__cuda_stream__()[1])]
 
@@ -134,9 +139,14 @@ def _call_putget(dst: object, src: object, op:str = "put",
     if other_dev is not None:
         other_dev.set_current()
 
-def put_signal(dst: object, src: object,
-               signal_var: Buffer, signal_val: int, signal_op: SignalOp,
-               remote_pe: int=-1, stream=None) -> None:
+
+def put_signal(dst: object,
+               src: object,
+               signal_var: Buffer,
+               signal_val: int,
+               signal_op: SignalOp,
+               remote_pe: int = -1,
+               stream=None) -> None:
     """
     Performs a put with signal on a CUDA stream.
 
@@ -154,11 +164,22 @@ def put_signal(dst: object, src: object,
         - ``ValueError``: If the signal buffer is invalid or too small.
         - ``NvshmemError``: If any operations do not complete successfully
     """
-    _call_putget(dst, src, op="put", 
-                 signal=True, signal_var=signal_var, signal_val=signal_val, signal_op=signal_op,
-                 remote_pe=remote_pe, stream=stream)
+    _call_putget(dst,
+                 src,
+                 op="put",
+                 signal=True,
+                 signal_var=signal_var,
+                 signal_val=signal_val,
+                 signal_op=signal_op,
+                 remote_pe=remote_pe,
+                 stream=stream)
 
-def signal_op(signal_var: Buffer, signal_val: int, signal_op: SignalOp, remote_pe: int=-1, stream: NvshmemStreamsType=None) -> None:
+
+def signal_op(signal_var: Buffer,
+              signal_val: int,
+              signal_op: SignalOp,
+              remote_pe: int = -1,
+              stream: NvshmemStreamsType = None) -> None:
     """
     Performs a signal operation on a CUDA stream. Equivalent to a ``put_signal`` but with no data movement.
 
@@ -178,7 +199,7 @@ def signal_op(signal_var: Buffer, signal_val: int, signal_op: SignalOp, remote_p
         raise NvshmemInvalid("NVSHMEM Library is not initialized")
     user_nvshmem_dev, other_dev = _get_device()
     if not isinstance(signal_var, Buffer) or signal_var.size < 8:
-            raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
+        raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
     if stream is None:
         logger.error("Non on-stream signal operations are not yet implemented")
         raise NotImplemented
@@ -187,7 +208,10 @@ def signal_op(signal_var: Buffer, signal_val: int, signal_op: SignalOp, remote_p
         other_dev.set_current()
 
 
-def signal_wait(signal_var: Buffer, signal_val: int, signal_op: ComparisonType, stream: NvshmemStreamsType=None) -> None:
+def signal_wait(signal_var: Buffer,
+                signal_val: int,
+                signal_op: ComparisonType,
+                stream: NvshmemStreamsType = None) -> None:
     """
     Waits until a symmetric signal variable satisfies a given condition.
 
@@ -213,7 +237,7 @@ def signal_wait(signal_var: Buffer, signal_val: int, signal_op: ComparisonType, 
         other_dev.set_current()
 
 
-def quiet(stream: NvshmemStreamsType=None) -> None:
+def quiet(stream: NvshmemStreamsType = None) -> None:
     """
     Ensures completion of all previously issued NVSHMEM operations on the given stream.
 
@@ -235,7 +259,8 @@ def quiet(stream: NvshmemStreamsType=None) -> None:
     if other_dev is not None:
         other_dev.set_current()
 
-def put(dst: object, src: object, remote_pe: int=-1, stream: NvshmemStreamsType=None):
+
+def put(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
     """
     Performs a host-initiated NVSHMEM put operation on a CUDA stream.
 
@@ -250,10 +275,10 @@ def put(dst: object, src: object, remote_pe: int=-1, stream: NvshmemStreamsType=
         - ``NvshmemInvalid``: If inputs are not valid Buffer-compatible types.
         - ``NvshmemError``: If any operations do not complete successfully
     """
-    _call_putget(dst, src, op="put", signal=False,
-                 remote_pe=remote_pe, stream=stream)
+    _call_putget(dst, src, op="put", signal=False, remote_pe=remote_pe, stream=stream)
 
-def get(dst: object, src: object, remote_pe: int=-1, stream: NvshmemStreamsType=None):
+
+def get(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
     """
     Performs a host-initiated NVSHMEM get operation on a CUDA stream.
 
@@ -268,6 +293,4 @@ def get(dst: object, src: object, remote_pe: int=-1, stream: NvshmemStreamsType=
         - ``ValueError``: If inputs are not valid Buffer-compatible types.
         - ``NvshmemError``: If any operations do not complete successfully
     """
-    _call_putget(dst, src, op="get", signal=False,
-                 remote_pe=remote_pe, stream=stream)
-
+    _call_putget(dst, src, op="get", signal=False, remote_pe=remote_pe, stream=stream)

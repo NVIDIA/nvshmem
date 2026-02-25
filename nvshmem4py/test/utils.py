@@ -16,6 +16,7 @@ import ctypes
 
 import os
 
+
 def get_local_rank_per_node():
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -28,6 +29,7 @@ def get_local_rank_per_node():
     local_size = node_comm.Get_size()
     print(f"Local rank {local_rank} global rank {rank} and node size {local_size} of global size {size} ranks")
     return local_rank
+
 
 def uid_init():
     # This will use mpi4py to perform a UID based init with bcast.
@@ -48,16 +50,15 @@ def uid_init():
     # Broadcast UID to all ranks
     comm.Bcast(uniqueid._data.view(np.int8), root=0)
 
-    nvshmem.core.init(device=dev, uid=uniqueid, rank=rank, nranks=nranks,
-                      mpi_comm=None, initializer_method="uid")
+    nvshmem.core.init(device=dev, uid=uniqueid, rank=rank, nranks=nranks, mpi_comm=None, initializer_method="uid")
 
     return dev
+
 
 def mpi_init():
     local_rank_per_node = get_local_rank_per_node()
     dev = Device(local_rank_per_node)
     dev.set_current()
-    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None,
-                      mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
+    nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
     print(f"MPI initialized on device {dev.device_id}")
     return dev
