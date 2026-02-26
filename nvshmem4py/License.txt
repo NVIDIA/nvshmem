@@ -1,4 +1,4 @@
-Copyright (c) 2016-2025, NVIDIA CORPORATION. All rights reserved.
+Copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
 
 Unless otherwise noted in the ADDITIONAL LICENSES section, the entirety of the NVSHMEM repository is covered under the LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS and the NVSHMEM SUPPLEMENT TO SOFTWARE LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS supplement below.
 
