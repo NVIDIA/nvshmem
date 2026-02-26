@@ -72,7 +72,6 @@ function(generateCuteBindings)
             --output-path ${CUTE_TREE_DIR}/config_nvshmem.yml
 
         # Depends on the Numbast stuff being set up already.
-        DEPENDS pip_install_cybind
         DEPENDS pip_install_numbast
         COMMAND touch ${OUTPUT_DIR}/copy_config.txt
         COMMENT "Generating Numbast config for nvshmem"

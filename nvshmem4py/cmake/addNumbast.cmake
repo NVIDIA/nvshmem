@@ -75,14 +75,11 @@ function(AddNumbast VERSION)
         pip_install_numbast
         COMMAND mkdir -p ${ASTCANOPY_CMAKE_INSTALL_PREFIX}
         COMMAND mkdir -p ${OUTPUT_DIR}
-        COMMAND ${Python3_EXECUTABLE} -m venv ${VENV_DIR}
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt
-
         COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install numbast==${ADDNUMBAST_VERSION}
         WORKING_DIRECTORY ${WORKDIR}
         USES_TERMINAL
         DEPENDS clean_${PACKAGE_NAME}
+        DEPENDS setup_py_bindings_env
         COMMAND touch ${OUTPUT_DIR}/install_from_source.txt
         COMMENT "Installing Build Environment and Numbast"
     )

@@ -1,13 +1,37 @@
 cmake_minimum_required(VERSION 3.15)
 
-set(NVSHMEM_FORCE_REBUILD_PYTHON_LIB OFF CACHE INTERNAL "Force rebuild Python bindings")
+# NVSHMEM_FORCE_REBUILD_PYTHON_LIB is defined in NVSHMEMEnv.cmake
 
+# Must run before addCybind/addNumbast/generateCuteBindings so they can recreate targets
+if(NVSHMEM_FORCE_REBUILD_PYTHON_LIB AND EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/force-rebuild-python-lib.cmake")
+    include(cmake/force-rebuild-python-lib.cmake)
+endif()
 
 # Include the custom module
 include(cmake/buildWheel.cmake)
 
+# Set up shared Python env for bindings only when sources exist.
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addCybind.cmake" OR
+   EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" OR
+   EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-
+    # Shared Python env setup for binding generation to avoid
+    # concurrent installs and venv races.
+    set(VENV_DIR "${CMAKE_BINARY_DIR}/externals/venv")
+    set(VENV_PYTHON_EXECUTABLE "${VENV_DIR}/bin/python3")
+    set(BINDINGS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/externals/output")
+    add_custom_target(
+        setup_py_bindings_env
+        COMMAND mkdir -p ${CMAKE_BINARY_DIR}/externals
+        COMMAND mkdir -p ${BINDINGS_OUTPUT_DIR}
+        COMMAND ${Python3_EXECUTABLE} -m venv ${VENV_DIR}
+        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip
+        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt
+        COMMAND touch ${BINDINGS_OUTPUT_DIR}/setup_py_bindings_env.txt
+        COMMENT "Setting up shared Python env for bindings"
+    )
+endif()
 
 
 # Additional cleanup to clean the build/externals dir
@@ -22,7 +46,7 @@ set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
 # addCybind target is only executed in build_source_pkg instance. In subsequent
 # steps, we exclude addCybind from source file. The following step skips
 # addCybind target for all subsequent steps.
-if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addCybind.cmake")
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addCybind.cmake" AND NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/_internal/nvshmem.pyx")
     include(cmake/addCybind.cmake)
     # This finds Cybind, clones it, and generates the 1:1 bindings for NVSHMEM
     AddCybind(
@@ -49,10 +73,11 @@ if (EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND
     generateCuteBindings()
 endif()
 
-
-if (NVSHMEM_FORCE_REBUILD_PYTHON_LIB AND EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/force-rebuild-python-lib.cmake")
-    include(cmake/force-rebuild-python-lib.cmake)
+# Avoid race conditions by serializing pip installs.
+if(TARGET pip_install_cybind AND TARGET pip_install_numbast)
+    add_dependencies(pip_install_numbast pip_install_cybind)
 endif()
+
 
 # Find all the Python versions
 # Use bash to find all Python versions >= 3.9
