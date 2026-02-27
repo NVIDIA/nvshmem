@@ -4,17 +4,15 @@
  * See License.txt for license information
  */
 
-#include <stdio.h>
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
 #include <cuda.h>
 #include "nvshmem.h"
 #include "nvshmemx.h"
 #include "utils.h"
 
-__device__ long errors_d;
-
-__global__ void check_ptr(int *v_h, int *v_d) {
-    errors_d = 0;
-
+__global__ void check_ptr(int *v_h, int *v_d, int32_t *errors) {
     int me = nvshmem_my_pe();
     int npes = nvshmem_n_pes();
 
@@ -23,7 +21,7 @@ __global__ void check_ptr(int *v_h, int *v_d) {
 
         if (i == me && ptr == NULL) {
             printf("[%d] Device expected non-NULL for %p\n", me, ptr);
-            ++errors_d;
+            ++(*errors);
         }
 
         if (ptr != NULL) atomicAdd_system(ptr, 1);
@@ -33,14 +31,13 @@ __global__ void check_ptr(int *v_h, int *v_d) {
 
     if (ptr != NULL) {
         printf("[%d] Device expected NULL for %p\n", me, ptr);
-        ++errors_d;
+        ++(*errors);
     }
-
-    return;
 }
 
 int main(int argc, char **argv) {
-    long errors_h, errors = 0;
+    int32_t errors_h, errors = 0;
+    int32_t *errors_d;
 
     read_args(argc, argv);
     init_wrapper(&argc, &argv);
@@ -54,7 +51,18 @@ int main(int argc, char **argv) {
     } else {
         v_d = (int *)nvshmem_malloc(sizeof(int));
     }
+    if (v_d == NULL) {
+        fprintf(stderr, "[%d] nvshmem allocation failed\n", me);
+        return EXIT_FAILURE;
+    }
     int *v_h = (int *)malloc(sizeof(int));
+    if (v_h == NULL) {
+        fprintf(stderr, "[%d] host allocation failed\n", me);
+        return EXIT_FAILURE;
+    }
+    CUDA_CHECK(cudaMemset(v_d, 0, sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&errors_d, sizeof(int32_t)));
+    CUDA_CHECK(cudaMemset(errors_d, 0, sizeof(int32_t)));
 
     for (int i = 0; i < npes; i++) {
         int *ptr = (int *)nvshmem_ptr(v_d, i);
@@ -74,13 +82,13 @@ int main(int argc, char **argv) {
         ++errors;
     }
 
-    check_ptr<<<1, 1>>>(v_h, v_d);
+    check_ptr<<<1, 1>>>(v_h, v_d, errors_d);
 
     CUDA_CHECK(cudaStreamSynchronize(cudaStreamDefault));
 
     nvshmem_barrier_all();
 
-    CUDA_CHECK(cudaMemcpyFromSymbol(&errors_h, errors_d, sizeof(long), 0, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(&errors_h, errors_d, sizeof(int32_t), cudaMemcpyDeviceToHost));
     errors += errors_h;
 
     CUDA_CHECK(cudaMemcpy(v_h, v_d, sizeof(int), cudaMemcpyDeviceToHost));
@@ -93,6 +101,7 @@ int main(int argc, char **argv) {
         printf("[%d] v_d (%d) == npeers (%d)\n", me, *v_h, npeers);
     }
 
+    CUDA_CHECK(cudaFree(errors_d));
     finalize_wrapper();
     return errors != 0;
 }
