@@ -237,7 +237,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
     rma_verb_t verb = {desc, is_nbi, is_stream, cstrm};
     int t = nvshmemi_state->selected_transport_for_rma[pe];
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, 1, 1};
-    struct nvshmem_transport *tcurr = nvshmemi_state->transports[t];
+    struct nvshmem_transport *tcurr = (t >= 0) ? nvshmemi_state->transports[t] : NULL;
     int status = 0;
 
     /* Mapper Peer */
