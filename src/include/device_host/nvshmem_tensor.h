@@ -32,6 +32,7 @@
 #include "cuda_bf16.h"
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host_transport/nvshmem_common_transport.h"
+#include "non_abi/nvshmemx_error.h"
 #include "device_host/nvshmem_types.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "cuda/std/tuple"
