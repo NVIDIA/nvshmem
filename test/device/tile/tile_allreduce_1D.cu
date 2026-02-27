@@ -137,15 +137,21 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
             nvshmemx::shape<int> start_coord;                                                     \
             start_coord = nvshmemx::make_shape(                                                   \
                 int((my_tile_idx % num_tiles_major) * V##VLN##_TILE_SIZE_MAJOR));                 \
-            nvshmemx::tile_##OP##_reduce##SC_SUFFIX<                                           \
+            tile_errs_d = nvshmemx::tile_##OP##_reduce##SC_SUFFIX<                                           \
                 decltype(src_tensor), decltype(dest_tensor), decltype(boundary),                  \
                 nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(                              \
                 teams_dev[team_id], src_tensor, dest_tensor, start_coord, boundary,               \
                 ((my_tile_idx / SC##s_per_block) % npes), 0);                                     \
+            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                  \
+                return;                                                                             \
+            }                                                                                      \
         }                                                                                         \
                                                                                                   \
-        nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
             nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+            return;                                                                                \
+        }                                                                                          \
                                                                                                   \
         /* validate data */                                                                       \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
@@ -170,8 +176,11 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
                 get<major_dim>(boundary));                                                        \
         }                                                                                         \
                                                                                                   \
-        nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
             nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+            return;                                                                                \
+        }                                                                                          \
     }
 
 NVSHMEMTEST_TILE_REPT_SCOPES_AND_VLEN(DEFN_TYPENAME_OP_REDUCE, sum, float, float)
@@ -198,6 +207,7 @@ NVSHMEMTEST_TILE_REPT_SCOPES_AND_VLEN(DEFN_TYPENAME_OP_REDUCE, max, bfloat16, __
         V##VLN##_MATRIX_SHAPE /* tensor size 0*/, 1 /* tensor size 1*/, npes);                   \
     CUDA_CHECK(cudaGetLastError());                                                              \
     CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                    \
+    TILE_CHECK_ERRS();                                                                             \
     nvshmem_barrier_all();
 
 int main(int argc, char **argv) {

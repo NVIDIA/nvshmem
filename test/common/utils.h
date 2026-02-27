@@ -252,8 +252,18 @@ void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);
     } while (0)
 #endif
 
+#define TILE_CHECK_ERRS()                                                                      \
+    do {                                                                                       \
+        cudaMemcpyFromSymbol(&tile_errs, tile_errs_d, sizeof(int), 0);                         \
+        if (tile_errs) {                                                                       \
+            printf("NVSHMEM Error :%d , %s\n", tile_errs, get_err_string(tile_errs).c_str());  \
+            return tile_errs;                                                                  \
+        }                                                                                      \
+    } while (0)
+
 #define TOSTRING(_var) ((std::to_string(_var)).c_str())
 #define MAX_ELEMS (1 * 1024 * 1024)
+
 
 extern int mype, mype_node;
 extern int npes, npes_node;
@@ -273,6 +283,9 @@ extern void *nvml_handle;
 extern struct nvml_function_table nvml_ftable;
 extern const char *env_value;
 
+extern __device__ int tile_errs_d;
+extern int tile_errs;
+
 void init_cumodule(const char *str);
 void init_wrapper(int *c, char ***v);
 void finalize_wrapper();
@@ -282,6 +295,7 @@ void *allocate_mmap_buffer(size_t size, int mem_handle_type, bool use_egm = fals
                            bool reset_zero = false);
 void free_mmap_buffer(void *ptr);
 size_t pad_up(size_t size);
+std::string get_err_string(int errs);
 
 #define CUMODULE_LOAD(CUMODULE, CUMODULE_PATH, ERROR) \
     CU_CHECK(cuModuleLoad(&CUMODULE, CUMODULE_PATH)); \

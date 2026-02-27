@@ -201,15 +201,20 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
                     int((my_tile_idx % num_tiles_major) * V##VLN##_TILE_SIZE_MAJOR));             \
             }                                                                                     \
             if (my_pe == 0) {                                                                     \
-                nvshmemx::tile_broadcast##SC_SUFFIX<                                              \
+                tile_errs_d = nvshmemx::tile_broadcast##SC_SUFFIX<                                              \
                     decltype(src_tensor), decltype(dest_tensor), decltype(boundary),              \
                     nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(                          \
                     teams_dev[team_id], src_tensor, dest_tensor, start_coord, boundary, 0);       \
+                if (tile_errs_d != NVSHMEMX_SUCCESS) {                                              \
+                    return;                                                                         \
+                }                                                                                   \
             }                                                                                     \
         }                                                                                         \
-        nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
-                                                                                                  \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+            return;                                                                                 \
+        }                                                                                           \
         /* validate data */                                                                       \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
              i += gridDim.x * SC##s_per_block) {                                                  \
@@ -233,8 +238,11 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
                 teams_dev[team_id], offset, src_tensor, dest_tensor, V##VLN##_TENSOR_SIZE_MAJOR,  \
                 V##VLN##_TENSOR_SIZE_MINOR, get<major_dim>(boundary), get<minor_dim>(boundary));  \
         }                                                                                         \
-        nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+            return;                                                                                 \
+        }                                                                                           \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
              i += gridDim.x * SC##s_per_block) {                                                  \
             size_t thrd_grp_id = threadIdx.x / nvshmtest_##SC##_size();                           \
@@ -254,8 +262,11 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
             reset_##TYPENAME##_tile_data##SC_SUFFIX<decltype(dest_tensor), major_dim, minor_dim>( \
                 offset, dest_tensor);                                                             \
         }                                                                                         \
-        nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                     \
+            return;                                                                               \
+        }                                                                                         \
     }
 
  NVSHMEMTEST_TILE_REPT_SCOPES_AND_VLEN(DEFN_TYPENAME_TILE_BCAST, NA, float, float)
@@ -277,6 +288,7 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
          V##VLN##_MATRIX_SHAPE /* tensor size 0*/, V##VLN##_MATRIX_SHAPE /* tensor size 1*/, mype); \
      CUDA_CHECK(cudaGetLastError());                                                                \
      CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                      \
+     TILE_CHECK_ERRS();                                                                             \
      nvshmem_barrier_all();
 
  int main(int argc, char **argv) {

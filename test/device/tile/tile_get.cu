@@ -216,18 +216,21 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_GET_DATA, NA)
                      int((my_tile_idx % num_tiles_major) * V##VLN##_TILE_SIZE_MAJOR));             \
              }                                                                                     \
              if (only_p2p) {                                                                       \
-                nvshmemx::tile_get##SC_SUFFIX<                                                     \
+                tile_errs_d = nvshmemx::tile_get##SC_SUFFIX<                                                     \
                     decltype(src_tensor), decltype(dest_tensor), decltype(boundary),               \
                     nvshmemx::tile_algo_t::PEER_PULL_NBI>(                                         \
                     src_tensor, dest_tensor, start_coord, boundary,                                \
                     dest_pe, 0);                                                                   \
              } else {                                                                              \
-                nvshmemx::tile_get##SC_SUFFIX<                                                     \
+                tile_errs_d = nvshmemx::tile_get##SC_SUFFIX<                                                     \
                     decltype(src_tensor), decltype(dest_tensor), decltype(boundary),               \
                     nvshmemx::tile_algo_t::REMOTE_PULL_NBI>(                                       \
                     src_tensor, dest_tensor, start_coord, boundary,                                \
                     dest_pe, 0);                                                                   \
              }                                                                                     \
+             if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                  \
+                return;                                                                             \
+            }                                                                                      \
          }                                                                                         \
          nvshmem##SC_PREFIX##_barrier##SC_SUFFIX(teams_dev[team_id]);                              \
                                                                                                    \
@@ -299,6 +302,7 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_GET_DATA, NA)
          p2p_only, npes, mype);                                                                     \
      CUDA_CHECK(cudaGetLastError());                                                                \
      CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                      \
+     TILE_CHECK_ERRS();                                                                             \
      nvshmem_barrier_all();
 
  int main(int argc, char **argv) {

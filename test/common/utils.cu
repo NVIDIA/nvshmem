@@ -33,6 +33,9 @@ size_t _mem_handle_type = MEM_TYPE_AUTO;
 bool _only_p2p = false;
 threadgroup_scope_t threadgroup_scope = {NVSHMEM_ALL_SCOPES, "all_scopes"};
 
+__device__ int tile_errs_d;
+int tile_errs;
+
 // tracks mmap addr -> {user buff, size, handle}
 std::unordered_map<void *, std::tuple<void *, size_t, CUmemGenericAllocationHandle>> mmaped_buffers;
 
@@ -667,4 +670,23 @@ void finalize_wrapper() {
         delete bootstrap_uid;
         bootstrap_uid = nullptr;
     }
+}
+
+std::string get_err_string(int errs) {
+    std::string err_str;
+    switch (errs) {
+        case static_cast<int>(NVSHMEMX_SUCCESS):
+            err_str = "Success";
+            break;
+        case static_cast<int>(NVSHMEMX_ERROR_INVALID_VALUE):
+            err_str = "Invalid value / argument";
+            break;
+        case static_cast<int>(NVSHMEMX_ERROR_NOT_SUPPORTED):
+            err_str = "Not supported";
+            break;
+        default:
+            err_str = "Unknown error";
+            break;
+    }
+    return err_str;
 }

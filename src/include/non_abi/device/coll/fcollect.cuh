@@ -723,7 +723,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tile_allgather_mcast_thre
 // Select implementation based on the operation, datatype
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, int major_dim,
           int minor_dim>
-__device__ inline void nvshmemi_tile_allgather_nvls_threadgroup_vec(
+__device__ inline int nvshmemi_tile_allgather_nvls_threadgroup_vec(
     nvshmem_team_t team, T *src, T *dst,
     const int size_major_dim,        // size along the major dimension in elements
     const int size_minor_dim,        // size along the minor dimension in elements
@@ -735,7 +735,10 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup_vec(
     // src is local, dst is multicast address
     vtype *src_v = reinterpret_cast<vtype *>(src);
     vtype *dst_v = reinterpret_cast<vtype *>(nvshmemx_mc_ptr(team, dst));
-    assert((dst_v != nullptr) && "Failed to get multicast ptr for destination");
+    if (dst_v == nullptr) {
+        assert((dst_v != nullptr) && "Failed to get multicast ptr for destination");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     int src_stride_minor_dim_v = src_stride_minor_dim;
     if (src_stride_minor_dim > 1) {
@@ -794,14 +797,15 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup_vec(
                 dst_stride_minor_dim_v, src_stride_major_dim_v, dst_stride_major_dim_v, start_coord,
                 boundary);
         } else {
-            assert(0 && "unsupported vector type");
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
     }
+    return NVSHMEMX_SUCCESS;
 }
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
           int major_dim, int minor_dim>
-__device__ inline void nvshmemi_tile_allgather_nvls_dim(nvshmem_team_t team,
+__device__ inline int nvshmemi_tile_allgather_nvls_dim(nvshmem_team_t team,
                                                         src_tensor_t src_tensor,
                                                         dst_tensor_t dst_tensor,
                                                         tuple_t start_coord, tuple_t boundary) {
@@ -851,7 +855,7 @@ __device__ inline void nvshmemi_tile_allgather_nvls_dim(nvshmem_team_t team,
         (((get_tuple_val<major_dim>(src_tensor.shape()) * sizeof(T)) % sizeof(int4)) == 0) &&
         (((get_stride_element<minor_dim>(src_tensor) * sizeof(T)) % sizeof(int4)) == 0) &&
         (((get_stride_element<minor_dim>(dst_tensor) * sizeof(T)) % sizeof(int4)) == 0)) {
-        nvshmemi_tile_allgather_nvls_threadgroup_vec<int4, T, scope, tuple_t, major_dim, minor_dim>(
+        return nvshmemi_tile_allgather_nvls_threadgroup_vec<int4, T, scope, tuple_t, major_dim, minor_dim>(
             team, src_tensor.data(), dst,
             get_shape_element<major_dim>(src_tensor),   // contiguous size
             get_shape_element<minor_dim>(src_tensor),   // strided size
@@ -869,7 +873,7 @@ __device__ inline void nvshmemi_tile_allgather_nvls_dim(nvshmem_team_t team,
                 0) &&
                (((get_stride_element<minor_dim>(dst_tensor) * sizeof(T)) % sizeof(uint64_t)) ==
                 0)) {
-        nvshmemi_tile_allgather_nvls_threadgroup_vec<uint64_t, T, scope, tuple_t, major_dim,
+        return nvshmemi_tile_allgather_nvls_threadgroup_vec<uint64_t, T, scope, tuple_t, major_dim,
                                                      minor_dim>(
             team, src_tensor.data(), dst,
             get_shape_element<major_dim>(src_tensor),   // contiguous size
@@ -881,7 +885,7 @@ __device__ inline void nvshmemi_tile_allgather_nvls_dim(nvshmem_team_t team,
             start_coord, boundary);
 
     } else {  // vector len 1
-        nvshmemi_tile_allgather_nvls_threadgroup_vec<uint32_t, T, scope, tuple_t, major_dim,
+        return nvshmemi_tile_allgather_nvls_threadgroup_vec<uint32_t, T, scope, tuple_t, major_dim,
                                                      minor_dim>(
             team, src_tensor.data(), dst,
             get_shape_element<major_dim>(src_tensor),   // contiguous size
@@ -895,7 +899,7 @@ __device__ inline void nvshmemi_tile_allgather_nvls_dim(nvshmem_team_t team,
 }
 // specialize for the vectorization
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope>
-__device__ inline void nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t team,
+__device__ inline int nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t team,
                                                                 src_tensor_t src_tensor,
                                                                 dst_tensor_t dst_tensor,
                                                                 tuple_t start_coord,
@@ -908,14 +912,17 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t t
         constexpr int minor_dim = 1;
 
         if constexpr (sizeof(T) < 4) {
+            bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
+                ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
             // Shape along major dimension should be divisible by 2, because we operate at fp16x2
-            assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) &&
-                   "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                   "along their continuous dimension");
+            if (!is_32b_aligned) {
+                assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
+                        "along their continuous dimension");
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
         }
 
-        nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
+        return nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
                                          minor_dim>(team, src_tensor, dst_tensor, start_coord,
                                                     boundary);
     } else if constexpr ((get_constant(safe_get<1>(decltype(src_tensor.stride()){})) == 1) &&
@@ -925,14 +932,17 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t t
         constexpr int minor_dim = 0;
 
         if constexpr (sizeof(T) < 4) {
+            bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
+                ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
             // Shape along major dimension should be divisible by 2, because we operate at fp16x2
-            assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) &&
-                   "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                   "along their continuous dimension");
+            if (!is_32b_aligned) {
+                assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
+                        "along their continuous dimension");
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
         }
 
-        nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
+        return nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
                                          minor_dim>(team, src_tensor, dst_tensor, start_coord,
                                                     boundary);
     } else {
@@ -943,15 +953,18 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t t
             constexpr int minor_dim = 0;
 
             if constexpr (sizeof(T) < 4) {
+                bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
+                                       ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
                 // Shape along major dimension should be divisible by 2, because we operate at
                 // fp16x2
-                assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                       ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) &&
-                       "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                       "along their continuous dimension");
+                if (!is_32b_aligned) {
+                    assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
+                            "along their continuous dimension");
+                    return NVSHMEMX_ERROR_INVALID_VALUE;
+                }
             }
 
-            nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
+            return nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
                                              minor_dim>(team, src_tensor, dst_tensor, start_coord,
                                                         boundary);
         } else {
@@ -960,14 +973,17 @@ __device__ inline void nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t t
             constexpr int minor_dim = 1;
 
             if constexpr (sizeof(T) < 4) {
+                bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
+                                       ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
                 // Shape along major dimension should be divisible by 2, because we operate at
                 // fp16x2
-                assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                       ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) &&
-                       "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                       "along their continuous dimension");
+                if (!is_32b_aligned) {
+                    assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
+                            "along their continuous dimension");
+                    return NVSHMEMX_ERROR_INVALID_VALUE;
+                }
             }
-            nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
+            return nvshmemi_tile_allgather_nvls_dim<src_tensor_t, dst_tensor_t, tuple_t, scope, major_dim,
                                              minor_dim>(team, src_tensor, dst_tensor, start_coord,
                                                         boundary);
         }
@@ -984,6 +1000,7 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
                                               tuple_t boundary, uint64_t flag) {
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
+    return NVSHMEMX_ERROR_NOT_SUPPORTED;
 #else
     using T = typename src_tensor_t::value_type;
 
@@ -1000,27 +1017,36 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
                       (scope == NVSHMEMI_THREADGROUP_BLOCK),
                   "Unsupported scope");
 
-    assert((src_tensor.data() != nullptr) && (dst_tensor.data() != nullptr) &&
-           "Null pointers passed");
+    if ((src_tensor.data() == nullptr) || (dst_tensor.data() == nullptr)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     // check shape
-    assert((get_shape_element<0>(src_tensor) * get_shape_element<1>(src_tensor) *
-            nvshmem_team_n_pes(team)) &&
-           (get_shape_element<0>(dst_tensor) * get_shape_element<1>(dst_tensor)));
+    bool is_shape_valid = ((get_shape_element<0>(src_tensor) * get_shape_element<1>(src_tensor) *
+            nvshmem_team_n_pes(team)) == (get_shape_element<0>(dst_tensor) * get_shape_element<1>(dst_tensor)));
+    if (!is_shape_valid) {
+        assert(is_shape_valid && "Shape mismatch between source and destination tensor");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     static_assert(((is_half<T>::value) || (is_bfloat<T>::value) || (is_float<T>::value) ||
                    (is_cutlass_half<T>()) || (is_cutlass_bfloat<T>)),
                   "Unsupported datatype");
 
+    bool is_contiguous = (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
+                 ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1)));
     // check if both src and dst have same continuous dimension
     // TODO relax this constraint
-    assert(
-        (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
-         ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1))) &&
-        "Currently we only support cases where source and destination tile are continuous "
-        "along one dimension");
+    if (!is_contiguous) {
+        assert(is_contiguous && "Currently we only support cases where source and destination tile are continuous "
+                "along one dimension");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
-    assert(!flag && "Currently non-zero flag value is unsupported");
+    if (flag != 0) {
+        assert(!flag && "Currently non-zero flag value is unsupported");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     // NVLS Gather only has one-shot push support currently
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI) {
@@ -1030,16 +1056,16 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
         // NVLS ONE_SHOT AllGather is PUSH based algo, so we can directly start communicating
         // User should ensure src data is ready
 
-        nvshmemi_tile_allgather_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
+        return nvshmemi_tile_allgather_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
             team, src_tensor, dst_tensor, start_coord, boundary);
 #else
         assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
                "Unsupported NVLS on this platform");
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
 #endif
-        return 0;
     } else {
         // Extend as other algorithms are added
-        return 0;
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 #endif  //__cplusplus >= 201703L
 }

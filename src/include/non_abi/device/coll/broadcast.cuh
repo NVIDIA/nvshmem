@@ -766,7 +766,7 @@ __device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team, src_ten
 }
 // specialize for the vectorization
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope>
-__device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
+__device__ inline int nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
                                                             src_tensor_t src_tensor,
                                                             dst_tensor_t dst_tensor,
                                                             tuple_t start_coord, tuple_t boundary) {
@@ -813,6 +813,7 @@ __device__ inline void nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
                                                     boundary);
         }
     }
+    return NVSHMEMX_SUCCESS;
 }
 
 #endif /* __cplusplus >= 201703L */
@@ -825,6 +826,7 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
                                           tuple_t boundary, uint64_t flag) {
 #if defined(__cplusplus) && __cplusplus < 201703L
     assert(0 && "Tile-granular APIs need C++ 17");
+    return NVSHMEMX_ERROR_NOT_SUPPORTED;
 #else
     using T = typename src_tensor_t::value_type;
 
@@ -841,8 +843,9 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
                       (scope == NVSHMEMI_THREADGROUP_BLOCK),
                   "Unsupported scope");
 
-    assert((src_tensor.data() != nullptr) && (dst_tensor.data() != nullptr) &&
-           "Null pointers passed");
+    if ((src_tensor.data() == nullptr) || (dst_tensor.data() == nullptr)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     // check shape
     assert((get_shape_element<0>(src_tensor) * get_shape_element<1>(src_tensor) *
@@ -856,13 +859,19 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
 
     // check if both src and dst have same continuous dimension
     // TODO relax this constraint
-    assert(
-        (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
-         ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1))) &&
-        "Currently we only support cases where source and destination tile are continuous "
-        "along one dimension");
+    bool is_contiguous = (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
+                 ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1)));
 
-    assert(!flag && "Currently non-zero flag value is unsupported");
+    if (!is_contiguous) {
+        assert(is_contiguous && "Currently we only support cases where source and destination tile are continuous "
+                "along one dimension");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    if (flag != 0) {
+        assert(!flag && "Currently non-zero flag value is unsupported");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     // NVLS Bcast only has one-shot push support currently
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI) {
@@ -872,16 +881,16 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
         // NVLS ONE_SHOT broadcast is PUSH based algo, so we can directly start communicating
         // User should ensure src data is ready
 
-        nvshmemi_tile_bcast_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
+        return nvshmemi_tile_bcast_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
             team, src_tensor, dst_tensor, start_coord, boundary);
 #else
         assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
                "Unsupported NVLS on this platform");
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
 #endif
-        return 0;
     } else {
         // Extend as other algorithms are added
-        return 0;
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 #endif /* __cplusplus >= 201703L */
 }
