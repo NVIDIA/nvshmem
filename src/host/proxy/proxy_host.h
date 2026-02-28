@@ -73,6 +73,10 @@ typedef struct proxy_state {
     int gdr_device_native_ordering;
     int *global_exit_request_state;
     int *global_exit_code;
+    /* put_signal arrays */
+    rma_memdesc_t *put_signal_local_desc_arr;
+    rma_memdesc_t *put_signal_remote_desc_arr;
+    rma_bytesdesc_t *put_signal_bytes_arr;
 } proxy_state_t;
 
 #endif

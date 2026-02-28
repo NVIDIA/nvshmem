@@ -1093,9 +1093,8 @@ out:
 }
 
 int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_verb_t write_verb,
-                                  std::vector<rma_memdesc_t> &write_remote,
-                                  std::vector<rma_memdesc_t> &write_local,
-                                  std::vector<rma_bytesdesc_t> &write_bytes_desc,
+                                  rma_memdesc_t *write_remote, rma_memdesc_t *write_local,
+                                  rma_bytesdesc_t *write_bytes_desc, int num_writes,
                                   amo_verb_t sig_verb, amo_memdesc_t *sig_target,
                                   amo_bytesdesc_t sig_bytes_desc, int is_proxy) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
@@ -1129,22 +1128,20 @@ int nvshmemt_put_signal_unordered(struct nvshmem_transport *tcurr, int pe, rma_v
         goto out;
     }
 
-    assert(write_remote.size() == write_local.size() &&
-           write_local.size() == write_bytes_desc.size());
-    for (size_t i = 0; i < write_remote.size(); i++) {
+    for (int i = 0; i < num_writes; i++) {
         status =
             nvshmemt_libfabric_rma_impl(tcurr, pe, write_verb, &write_remote[i], &write_local[i],
                                         write_bytes_desc[i], is_proxy, &sequence_count);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT(
-                "Error in nvshmemt_put_signal_unordered, could not submit write #%lu\n", i);
+                "Error in nvshmemt_put_signal_unordered, could not submit write #%d\n", i);
             goto out;
         }
     }
 
     assert(use_staged_atomics == true);
     status = nvshmemt_libfabric_gdr_signal(tcurr, pe, NULL, sig_verb, sig_target, sig_bytes_desc,
-                                           is_proxy, sequence_count, (uint16_t)write_remote.size());
+                                           is_proxy, sequence_count, (uint16_t)num_writes);
 out:
     if (status) {
         NVSHMEMI_ERROR_PRINT(

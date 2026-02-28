@@ -40,6 +40,8 @@
 #include "internal/host/nvshmem_nvtx.hpp"  // for nvshmem_nvtx_...
 // IWYU pragma: no_include "nvtx3.hpp"
 
+#define NVSHMEM_PUT_SIGNAL_MAX_WRITES 256
+
 uint64_t proxy_channel_g_buf_size;     /* Total size of g_buf in bytes */
 uint64_t proxy_channel_g_buf_log_size; /* Total size of g_buf in bytes */
 
@@ -269,6 +271,19 @@ int nvshmemi_proxy_init(nvshmemi_state_t *state, int proxy_level) {
 
     proxy_state->nvshmemi_state = state;
 
+    /* Allocate put_signal arrays */
+    proxy_state->put_signal_local_desc_arr =
+        (rma_memdesc_t *)malloc(NVSHMEM_PUT_SIGNAL_MAX_WRITES * sizeof(rma_memdesc_t));
+    NVSHMEMI_NULL_ERROR_JMP(proxy_state->put_signal_local_desc_arr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "Cannot allocate proxy put_signal_local_desc_arr.\n");
+    proxy_state->put_signal_remote_desc_arr =
+        (rma_memdesc_t *)malloc(NVSHMEM_PUT_SIGNAL_MAX_WRITES * sizeof(rma_memdesc_t));
+    NVSHMEMI_NULL_ERROR_JMP(proxy_state->put_signal_remote_desc_arr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "Cannot allocate proxy put_signal_remote_desc_arr.\n");
+    proxy_state->put_signal_bytes_arr =
+        (rma_bytesdesc_t *)malloc(NVSHMEM_PUT_SIGNAL_MAX_WRITES * sizeof(rma_bytesdesc_t));
+    NVSHMEMI_NULL_ERROR_JMP(proxy_state->put_signal_bytes_arr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "Cannot allocate proxy put_signal_bytes_arr.\n");
     CUDA_RUNTIME_CHECK(
         cudaMallocHost((void **)&proxy_state->global_exit_request_state, sizeof(int), 0));
     CUDA_RUNTIME_CHECK(cudaMallocHost((void **)&proxy_state->global_exit_code, sizeof(int), 0));
@@ -1086,8 +1101,7 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     rma_verb_t write_verb;
     rma_bytesdesc_t write_bytes_desc;
     rma_memdesc_t write_remote_desc, write_local_desc;
-    std::vector<rma_memdesc_t> local_write_desc_vec, remote_write_desc_vec;
-    std::vector<rma_bytesdesc_t> write_bytes_vec;
+    int num_writes = 0;
     size_t chunk_size, local_chunk_size, remote_chunk_size, size_remaining;
     amo_verb_t sig_verb;
     amo_memdesc_t sig_target_desc;
@@ -1191,14 +1205,17 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         write_bytes_desc.nelems = chunk_size;
 
-        local_write_desc_vec.push_back(write_local_desc);
-        remote_write_desc_vec.push_back(write_remote_desc);
-        write_bytes_vec.push_back(write_bytes_desc);
+        state->put_signal_local_desc_arr[num_writes] = write_local_desc;
+        state->put_signal_remote_desc_arr[num_writes] = write_remote_desc;
+        state->put_signal_bytes_arr[num_writes] = write_bytes_desc;
+        num_writes++;
 
         size_remaining -= chunk_size;
         lwrite_ptr = (char *)lwrite_ptr + chunk_size;
         rwrite_ptr = (char *)rwrite_ptr + chunk_size;
     }
+
+    assert(num_writes <= NVSHMEM_PUT_SIGNAL_MAX_WRITES);
 
     /* build signal parameters */
     memset(&sig_target_desc, 0, sizeof(amo_memdesc_t));
@@ -1218,8 +1235,9 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_ptr, pe);
 
     tcurr = state->transport[pe];
-    status = tcurr->host_ops.put_signal(tcurr, pe, write_verb, remote_write_desc_vec,
-                                        local_write_desc_vec, write_bytes_vec, sig_verb,
+    status = tcurr->host_ops.put_signal(tcurr, pe, write_verb, state->put_signal_remote_desc_arr,
+                                        state->put_signal_local_desc_arr,
+                                        state->put_signal_bytes_arr, num_writes, sig_verb,
                                         &sig_target_desc, sig_bytes_desc, qp_index);
     if (unlikely(status)) {
         NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_put_signal\n");
@@ -1563,6 +1581,11 @@ int nvshmemi_proxy_finalize(nvshmemi_state_t *state) {
         CUDA_RUNTIME_CHECK(cudaFreeHost(proxy_state->global_exit_code));
     if (proxy_state->nvshmemi_timeout)
         CUDA_RUNTIME_CHECK(cudaFreeHost(proxy_state->nvshmemi_timeout));
+
+    /* Free put_signal arrays */
+    free(proxy_state->put_signal_local_desc_arr);
+    free(proxy_state->put_signal_remote_desc_arr);
+    free(proxy_state->put_signal_bytes_arr);
 
     return 0;
 }
