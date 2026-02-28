@@ -72,7 +72,9 @@ def test_rma_on_array():
 
 def test_rma_on_tensor():
     print("Testing RMA on tensor")
-
+    if not _torch_enabled:
+        print("Skipping test_rma_on_tensor because torch is not enabled")
+        return
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     dev = Device()
     local_rank_per_node = dev.device_id

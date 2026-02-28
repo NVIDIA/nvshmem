@@ -505,12 +505,20 @@ def test_external_buffer():
 
 def test_peer_buffer_reuse_updates_size():
     print("Testing peer buffer cleanup on free")
-    if nvshmem.core.n_pes() < 3:
-        print("Skipping test because n_pes < 3")
+    if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_SHARED) < 3:
+        print("Skipping test because it requires a team with at least 3 PEs")
         return
 
-    rank = nvshmem.core.my_pe()
-    peers = [1, 2] if rank == 0 else []
+    rank = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_SHARED)
+    # get_peer_buffer expects global PE IDs; translate TEAM_SHARED ranks 1,2 to TEAM_WORLD
+    # so each node's rank-0 PE uses same-node peers (avoids cross-node access on multi-node)
+    if rank == 0:
+        peers = [
+            nvshmem.core.team_translate_pe(nvshmem.core.Teams.TEAM_SHARED, i, nvshmem.core.Teams.TEAM_WORLD)
+            for i in range(1, 3)
+        ]
+    else:
+        peers = []
 
     buf = nvshmem.core.buffer(1024)
     peer_bufs = []
