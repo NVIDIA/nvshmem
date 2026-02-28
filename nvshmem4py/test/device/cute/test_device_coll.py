@@ -134,6 +134,7 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
     compiled = _compile_kernel(test_reducescatter_launcher, team, dest, src)
     compiled(team, dest, src)
     stream.sync()  # Stream sync first (matching Numba pattern for reducescatter)
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     dev.sync()  # Full device sync after barrier
     if op == "sum":

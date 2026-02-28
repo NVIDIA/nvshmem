@@ -147,6 +147,7 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
     peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
     compiled(dst_cute, src_cute, peer)
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
@@ -187,6 +188,7 @@ def test_get_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(test_get_launcher, dst_cute, src_cute, 0)
     compiled(dst_cute, src_cute, nvshmem.core.my_pe())
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
@@ -233,6 +235,7 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(test_put_signal_launcher, dst_cute, src_cute, signal_cute, 0, 0, 0)
     compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
@@ -281,6 +284,7 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(test_put_signal_with_wait_launcher, dst_cute, src_cute, signal_cute, 0, 0, 0)
     compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
@@ -322,6 +326,7 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
     compiled = _compile_kernel(test_signal_op_signal_wait_launcher, signal_cute, 0, 0, 0)
     compiled(signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
@@ -355,6 +360,7 @@ def test_p(dtype, nvshmem_init_fini):
     compiled = _compile_kernel(test_p_launcher, var_cute, 0, 0)
     compiled(var_cute, val, nvshmem.core.my_pe())
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
@@ -394,6 +400,7 @@ def test_g(dtype, nvshmem_init_fini):
     compiled = _compile_kernel(test_g_launcher, dest_cute, var_cute, 0)
     compiled(dest_cute, var_cute, nvshmem.core.my_pe())
 
+    torch.cuda.synchronize()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
 
