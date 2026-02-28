@@ -58,16 +58,27 @@ function(AddNumbast GIT_TAG)
     file(MAKE_DIRECTORY "${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}")
 
 
-    # Step 0: Clean the the numbast working directory
-    add_custom_target(
-        clean_${PACKAGE_NAME}
-        COMMAND rm -rvf ${WORKDIR}
-
-        COMMAND mkdir -p ${OUTPUT_DIR}
-        COMMAND touch ${OUTPUT_DIR}/clean.txt
-        COMMENT "Cleaning Numbast repository"
-        DEPENDS get_cybind_output
-    )
+# Step 0: Clean the numbast working directory
+    # When addCybind.cmake is excluded from source packages, get_cybind_output does not exist.
+    # Only add that dependency when the target exists (i.e. when addCybind was included).
+    if(TARGET get_cybind_output)
+        add_custom_target(
+            clean_${PACKAGE_NAME}
+            COMMAND rm -rvf ${WORKDIR}
+            COMMAND mkdir -p ${OUTPUT_DIR}
+            COMMAND touch ${OUTPUT_DIR}/clean.txt
+            COMMENT "Cleaning Numbast repository"
+            DEPENDS get_cybind_output
+        )
+    else()
+        add_custom_target(
+            clean_${PACKAGE_NAME}
+            COMMAND rm -rvf ${WORKDIR}
+            COMMAND mkdir -p ${OUTPUT_DIR}
+            COMMAND touch ${OUTPUT_DIR}/clean.txt
+            COMMENT "Cleaning Numbast repository"
+        )
+    endif()
     
     # Step 1: Clone the Numbast repository
     add_custom_target(
