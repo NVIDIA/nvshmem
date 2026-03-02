@@ -81,7 +81,6 @@ version.txt
 CMakeCache.txt
 *Makefile
 CPack*Config.cmake
-NVSHMEM*.cmake
 *CTest*.cmake
 cmake_install.cmake
 
