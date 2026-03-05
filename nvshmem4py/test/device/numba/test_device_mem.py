@@ -1,5 +1,5 @@
 import cupy as cp
-from cuda.core import Device, Stream
+from cuda.core import Device
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba
@@ -37,11 +37,11 @@ def test_device_get_peer_array(nvshmem_init_fini):
     peer_pe = (my_pe + 1) % nvshmem.core.n_pes()
 
     nb_stream = cuda.stream()
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    cu_stream = dev.create_stream()
 
     peer_fetch_kernel[nblocks, nthreads, nb_stream](arr, peer_pe)
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream)
+    cu_stream.sync()
     dev.sync()
     assert (arr == peer_pe).all(), f"Result {arr} did not match expected {peer_pe}"
 
@@ -74,9 +74,9 @@ def test_device_get_multicast_array(nvshmem_init_fini):
                 in_arr[i] = nvshmem.core.device.numba.my_pe() + 1
 
     nb_stream = cuda.stream()
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    cu_stream = dev.create_stream()
 
     multicast_fetch_kernel[nblocks, nthreads, nb_stream](nvshmem.core.Teams.TEAM_WORLD, arr)
-    cu_stream_ref.sync()
+    cu_stream.sync()
     dev.sync()
     assert (arr == 1).all(), f"Multicast array result {arr} did not match expected {1}"

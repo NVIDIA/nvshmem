@@ -1,4 +1,4 @@
-from cuda.core import Device, Stream
+from cuda.core import Device
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba
@@ -26,11 +26,11 @@ def test_device_sync(nvshmem_init_fini, teams, func):
         func(teams)
 
     nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    cu_stream = dev.create_stream()
 
     test_sync[nblocks, nthreads, nb_stream](teams)
-    nvshmem.core.barrier(teams, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(teams, stream=cu_stream)
+    cu_stream.sync()
     dev.sync()
     print("Done testing sync")
 
@@ -56,10 +56,10 @@ def test_device_sync_all(nvshmem_init_fini, func):
         func()
 
     nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    cu_stream = dev.create_stream()
 
     test_sync_all[nblocks, nthreads, nb_stream]()
 
-    cu_stream_ref.sync()
+    cu_stream.sync()
     dev.sync()
     print("Done testing sync_all")
