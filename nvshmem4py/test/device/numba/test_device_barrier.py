@@ -1,66 +1,42 @@
-from cuda.core import Device, Stream
-import numba.cuda as cuda
+#
+# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+#
+# See LICENSE.txt for license information
+#
+
+from cuda.core.experimental import Stream
+from numba import cuda
+
 import nvshmem.core
-import nvshmem.core.device.numba
-
-import pytest
 
 
-@pytest.mark.mpi
-@pytest.mark.parametrize("teams",
-                         [nvshmem.core.Teams.TEAM_NODE, nvshmem.core.Teams.TEAM_WORLD, nvshmem.core.Teams.TEAM_SHARED])
-@pytest.mark.parametrize("func", [
-    nvshmem.core.device.numba.barrier, nvshmem.core.device.numba.barrier_block, nvshmem.core.device.numba.barrier_warp
-])
-def test_device_barrier(nvshmem_init_fini, teams, func):
-    print(f"Testing {func.__name__} on team {teams}")
+def test_barrier(init_type, teams):
+    nvshmem.core.init(init_type)
 
-    nblocks = 1
-    nthreads = 1
-    dev = Device()
-    dev.sync()
-
-    print(f"From PE {nvshmem.core.my_pe()}")
-
-    @cuda.jit
-    def test_barrier(teams):
-        func(teams)
+    def func(teams):
+        nvshmem.core.device.numba.barrier(teams)
 
     nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
-    test_barrier[nblocks, nthreads, nb_stream](teams)
-    nvshmem.core.barrier(teams, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    dev.sync()
-    print("Done testing barrier")
+    test_barrier_kernel = cuda.jit(func)
+    test_barrier_kernel[1, 1, nb_stream](teams)
+
+    nvshmem.core.barrier_all(stream=cu_stream_ref)
+    nvshmem.core.finalize()
 
 
-@pytest.mark.mpi
-@pytest.mark.parametrize("func", [
-    nvshmem.core.device.numba.barrier_all, nvshmem.core.device.numba.barrier_all_block,
-    nvshmem.core.device.numba.barrier_all_warp
-])
-def test_device_barrier_all(nvshmem_init_fini, func):
-    print(f"Testing {func.__name__}")
+def test_barrier_all(init_type):
+    nvshmem.core.init(init_type)
 
-    nblocks = 1
-    nthreads = 1
-
-    dev = Device()
-    dev.sync()
-
-    print(f"From PE {nvshmem.core.my_pe()}")
-
-    @cuda.jit
-    def test_barrier_all():
-        func()
+    def func():
+        nvshmem.core.device.numba.barrier_all()
 
     nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
-    test_barrier_all[nblocks, nthreads, nb_stream]()
+    test_barrier_all_kernel = cuda.jit(func)
+    test_barrier_all_kernel[1, 1, nb_stream]()
 
-    cu_stream_ref.sync()
-    dev.sync()
-    print("Done testing barrier_all")
+    nvshmem.core.barrier_all(stream=cu_stream_ref)
+    nvshmem.core.finalize()

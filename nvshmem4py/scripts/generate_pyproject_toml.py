@@ -63,7 +63,7 @@ dev = [
     "isort",
 ]
 numba = [
-    "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.25.0,<0.28.0",
+    "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.28.0",
 ]
 
 [tool.black]
