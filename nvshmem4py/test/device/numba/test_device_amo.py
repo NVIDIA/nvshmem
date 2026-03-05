@@ -1,75 +1,306 @@
-from cuda.core import Device
-import numba.cuda as cuda
-import nvshmem.core
-import nvshmem.core.device.numba
+# Copyright (c) 2020-2024, NVIDIA CORPORATION. All rights reserved.
+#
+# See COPYRIGHT for license information
 
+import numpy as np
 import pytest
 
-amo_std_dtypes = ["int32", "int64", "uint64"]
-amo_ext_dtypes = ["float32", "float64"] + amo_std_dtypes
-amo_bit_dtypes = amo_std_dtypes + ["uint32"]
+import cuda.core as cc
+import numba.cuda as cuda
+
+import nvshmem.core
+from nvshmem.core.nvshmem_types import *
 
 
-@pytest.mark.mpi
-@pytest.mark.parametrize("dtype", amo_std_dtypes)
-def test_atomic_add_on_array(nvshmem_init_fini, dtype):
-    print("Testing atomic_add")
+@cuda.jit
+def test_atomic_add_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_add(dest, source[0], pe)
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf = nvshmem.core.array((1, ), dtype=dtype)
-    buf[:] = 0
 
-    @cuda.jit
-    def kernel_atomic_add(arr, val, pe):
-        nvshmem.core.device.numba.atomic_add(arr, val, pe)
+@cuda.jit
+def test_atomic_inc_kernel(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_inc(dest, pe)
 
-    nb_stream = cuda.stream()
-    dev = Device()
+
+@cuda.jit
+def test_atomic_fetch_add_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_add(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_inc_kernel(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_inc(dest, pe)
+
+
+@cuda.jit
+def test_atomic_fetch_and_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_and(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_or_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_or(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_xor_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_xor(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_kernel(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch(dest, pe)
+
+
+@cuda.jit
+def test_atomic_set_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_set(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_swap_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_swap(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_compare_swap_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_compare_swap(dest, source[0], source[1], pe)
+
+
+@cuda.jit
+def test_atomic_add_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_add(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_inc_kernel_32(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_inc(dest, pe)
+
+
+@cuda.jit
+def test_atomic_fetch_add_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_fetch_add(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_inc_kernel_32(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_fetch_inc(dest, pe)
+
+
+@cuda.jit
+def test_atomic_fetch_and_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_fetch_and(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_or_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_fetch_or(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_xor_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_fetch_xor(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_kernel_32(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_fetch(dest, pe)
+
+
+@cuda.jit
+def test_atomic_set_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_set(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_swap_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_swap(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_compare_swap_kernel_32(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint32_atomic_compare_swap(dest, source[0], source[1], pe)
+
+
+@cuda.jit
+def test_atomic_add_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_add(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_inc_kernel_64(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_inc(dest, pe)
+
+
+@cuda.jit
+def test_atomic_fetch_add_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_add(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_inc_kernel_64(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_inc(dest, pe)
+
+
+@cuda.jit
+def test_atomic_fetch_and_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_and(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_or_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_or(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_xor_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch_xor(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_fetch_kernel_64(dest, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_fetch(dest, pe)
+
+
+@cuda.jit
+def test_atomic_set_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_set(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_swap_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_swap(dest, source[0], pe)
+
+
+@cuda.jit
+def test_atomic_compare_swap_kernel_64(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.uint64_atomic_compare_swap(dest, source[0], source[1], pe)
+
+
+@pytest.mark.parametrize(
+    "kernel",
+    [
+        test_atomic_add_kernel,
+        test_atomic_inc_kernel,
+        test_atomic_fetch_add_kernel,
+        test_atomic_fetch_inc_kernel,
+        test_atomic_fetch_and_kernel,
+        test_atomic_fetch_or_kernel,
+        test_atomic_fetch_xor_kernel,
+        test_atomic_fetch_kernel,
+        test_atomic_set_kernel,
+        test_atomic_swap_kernel,
+        test_atomic_compare_swap_kernel,
+        test_atomic_add_kernel_32,
+        test_atomic_inc_kernel_32,
+        test_atomic_fetch_add_kernel_32,
+        test_atomic_fetch_inc_kernel_32,
+        test_atomic_fetch_and_kernel_32,
+        test_atomic_fetch_or_kernel_32,
+        test_atomic_fetch_xor_kernel_32,
+        test_atomic_fetch_kernel_32,
+        test_atomic_set_kernel_32,
+        test_atomic_swap_kernel_32,
+        test_atomic_compare_swap_kernel_32,
+        test_atomic_add_kernel_64,
+        test_atomic_inc_kernel_64,
+        test_atomic_fetch_add_kernel_64,
+        test_atomic_fetch_inc_kernel_64,
+        test_atomic_fetch_and_kernel_64,
+        test_atomic_fetch_or_kernel_64,
+        test_atomic_fetch_xor_kernel_64,
+        test_atomic_fetch_kernel_64,
+        test_atomic_set_kernel_64,
+        test_atomic_swap_kernel_64,
+        test_atomic_compare_swap_kernel_64,
+    ],
+)
+def test_device_amo(kernel):
+    nvshmem.core.init()
+
+    mype = nvshmem.core.my_pe()
+    npes = nvshmem.core.n_pes()
+
+    dev = cc.Device()
     cu_stream = dev.create_stream()
 
-    # Launch kernel to add 5 atomically
-    kernel_atomic_add[1, 1, nb_stream](buf, 5, nvshmem.core.my_pe())
+    source = np.array([1, 2], dtype=np.uint64)
+    dest = nvshmem.core.malloc(source.nbytes)
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream)
+    if mype == 0:
+        kernel[1, 1, cu_stream](dest, source, 1)
+    else:
+        kernel[1, 1, cu_stream](dest, source, 0)
+
     cu_stream.sync()
 
-    print(f"From PE {nvshmem.core.my_pe()} AFTER atomic_add buf={buf}")
+    nvshmem.core.barrier_all(stream=cu_stream)
 
-    assert (buf == 5).all()
-
-    nvshmem.core.free_array(buf)
-    print("Done testing atomic_add")
-
-
-@pytest.mark.mpi
-@pytest.mark.parametrize("dtype", amo_std_dtypes)
-def test_atomic_fetch_add_on_array(nvshmem_init_fini, dtype):
-    print("Testing atomic_fetch_add")
-
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
-    buf = nvshmem.core.array((1, ), dtype=dtype)
-    out = nvshmem.core.array((1, ), dtype=dtype)
-    buf[:] = 0
-
-    @cuda.jit
-    def kernel_atomic_fetch_add(arr, out, val, pe):
-        result = nvshmem.core.device.numba.atomic_fetch_add(arr, val, pe)
-        out[:] = result
-
-    nb_stream = cuda.stream()
-    dev = Device()
-    cu_stream = dev.create_stream()
-
-    # Launch kernel to add 5 atomically
-    kernel_atomic_fetch_add[1, 1, nb_stream](buf, out, 5, nvshmem.core.my_pe())
-
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream)
-    cu_stream.sync()
-
-    print(f"From PE {nvshmem.core.my_pe()} AFTER atomic_fetch_add buf={buf}, out={out}")
-
-    assert (buf == 5).all()
-
-    nvshmem.core.free_array(buf)
-    nvshmem.core.free_array(out)
-    print("Done testing atomic_fetch_add")
+    nvshmem.core.free(dest)
+    nvshmem.core.finalize()

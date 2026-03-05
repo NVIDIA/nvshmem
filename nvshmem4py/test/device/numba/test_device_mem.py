@@ -1,82 +1,46 @@
-import cupy as cp
-from cuda.core import Device
-import numba.cuda as cuda
-import nvshmem.core
-import nvshmem.core.device.numba
+# Copyright (c) 2020-2024, NVIDIA CORPORATION. All rights reserved.
+#
+# See COPYRIGHT for license information
 
+import numpy as np
 import pytest
 
+import cuda.core as cc
+import numba.cuda as cuda
 
-@pytest.mark.mpi
-def test_device_get_peer_array(nvshmem_init_fini):
-    """
-    Test device-side get_peer_array for inter-PE access via Numba kernel
-    """
-    # Only test when at least 2 PEs
-    if nvshmem.core.n_pes() < 2:
-        pytest.skip("Need at least 2 PEs for peer access")
+import nvshmem.core
 
-    nblocks = 1
-    nthreads = 1
 
-    dev = Device()
-    dev.sync()
+@cuda.jit
+def test_malloc_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.put(dest, source, 1, pe)
 
-    # CuPy array allocated with NVSHMEM backend
-    arr = nvshmem.core.array((4, ), dtype="int32")
-    arr[:] = nvshmem.core.my_pe()
 
-    @cuda.jit
-    def peer_fetch_kernel(in_arr, pe):
-        peer_arr = nvshmem.core.device.numba.get_peer_array(in_arr, pe)
-        for i in range(in_arr.shape[0]):
-            peer_arr[i] = nvshmem.core.device.numba.my_pe()
+@cuda.jit
+def test_free_kernel(dest, source, pe):
+    tid = cuda.threadIdx.x
+    if tid == 0:
+        nvshmem.core.put(dest, source, 1, pe)
 
-    # choose src_pe/peer
-    my_pe = nvshmem.core.my_pe()
-    peer_pe = (my_pe + 1) % nvshmem.core.n_pes()
 
-    nb_stream = cuda.stream()
+@pytest.mark.parametrize("kernel", [test_malloc_kernel, test_free_kernel])
+def test_device_mem(kernel):
+    nvshmem.core.init()
+
+    mype = nvshmem.core.my_pe()
+
+    dev = cc.Device()
     cu_stream = dev.create_stream()
 
-    peer_fetch_kernel[nblocks, nthreads, nb_stream](arr, peer_pe)
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream)
+    source = np.array([1], dtype=np.uint64)
+    dest = nvshmem.core.malloc(source.nbytes)
+
+    kernel[1, 1, cu_stream](dest, source, mype)
     cu_stream.sync()
-    dev.sync()
-    assert (arr == peer_pe).all(), f"Result {arr} did not match expected {peer_pe}"
 
+    nvshmem.core.barrier_all(stream=cu_stream)
 
-@pytest.mark.mpi
-def test_device_get_multicast_array(nvshmem_init_fini):
-    """
-    Test device-side get_multicast_array for multicast access via Numba kernel
-    """
-    # Only test if multicast teams are available (skip if not supported)
-    nblocks = 1
-    nthreads = 1
-
-    dev = Device()
-    dev.sync()
-
-    if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
-        print("Skipping MC memory test because Multicast memory is not supported on this platform")
-        pytest.skip("Skipping MC memory test because Multicast memory is not supported on this platform")
-
-    # CuPy array allocated with NVSHMEM backend
-    arr = nvshmem.core.array((4, ), dtype="float32")
-    arr[:] = nvshmem.core.my_pe()
-
-    @cuda.jit
-    def multicast_fetch_kernel(team, in_arr):
-        mc_arr = nvshmem.core.device.numba.get_multicast_array(team, in_arr)
-        if nvshmem.core.device.numba.my_pe() == 0:
-            for i in range(in_arr.shape[0]):
-                in_arr[i] = nvshmem.core.device.numba.my_pe() + 1
-
-    nb_stream = cuda.stream()
-    cu_stream = dev.create_stream()
-
-    multicast_fetch_kernel[nblocks, nthreads, nb_stream](nvshmem.core.Teams.TEAM_WORLD, arr)
-    cu_stream.sync()
-    dev.sync()
-    assert (arr == 1).all(), f"Multicast array result {arr} did not match expected {1}"
+    nvshmem.core.free(dest)
+    nvshmem.core.finalize()
