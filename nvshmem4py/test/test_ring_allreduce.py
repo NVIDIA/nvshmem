@@ -93,7 +93,7 @@ dev = Device(local_rank_per_node)
 dev.set_current()
 
 nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
 nvshmem.core.init(
     device=dev,

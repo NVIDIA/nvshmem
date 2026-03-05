@@ -259,7 +259,7 @@ def main():
         send_data[:] = send
     # Create a CUDA stream and use it for barriers and kernels
     nb_stream = cuda.stream()
-    cu_stream = Stream.from_handle(nb_stream.handle.value)
+    cu_stream = Stream.from_handle(int(nb_stream.handle))
     nvshmem.core.barrier_all(stream=cu_stream)
 
     # Zero signals and expert buffers
