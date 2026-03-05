@@ -54,12 +54,14 @@ def _cute_dtype(dtype_name):
 
 
 def _nvshmem_device_bc():
-    nvshmem_home = os.environ.get("NVSHMEM_HOME")
-    if not nvshmem_home:
-        pytest.skip("NVSHMEM_HOME is not set")
-    nvshmem_device_bc = os.path.join(nvshmem_home, "src", "lib", "libnvshmem_device.bc")
+    try:
+        nvshmem_device_bc = nvshmem.core.find_device_bitcode_library()
+    except Exception as e:
+        pytest.skip(f"Failed to locate NVSHMEM device bitcode library: {e}")
+
     if not os.path.exists(nvshmem_device_bc):
         pytest.skip(f"NVSHMEM device bitcode not found at {nvshmem_device_bc}")
+
     return nvshmem_device_bc
 
 
