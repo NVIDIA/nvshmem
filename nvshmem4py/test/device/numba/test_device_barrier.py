@@ -1,42 +1,33 @@
-#
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 #
 # See LICENSE.txt for license information
-#
 
-from cuda.core.experimental import Stream
-from numba import cuda
+import pytest
 
-import nvshmem.core
+from cuda import cuda
+from cuda.core.experimental import Device, Stream
+
+import nvshmem
 
 
-def test_barrier(init_type, teams):
-    nvshmem.core.init(init_type)
+@pytest.mark.parametrize("barrier", [nvshmem.core.barrier_all, nvshmem.core.sync_all])
+def test_device_barrier(barrier):
+    local_rank_per_node = int(nvshmem.core.getenv("OMPI_COMM_WORLD_LOCAL_RANK", "0"))
+    dev = Device(local_rank_per_node)
+    dev.set_current()
 
-    def func(teams):
-        nvshmem.core.device.numba.barrier(teams)
-
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
+    nb_stream = cuda.stream(
+        flags=cuda.stream_flags.NON_BLOCKING,
+    )
     cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
-    test_barrier_kernel = cuda.jit(func)
-    test_barrier_kernel[1, 1, nb_stream](teams)
+    nvshmem.core.init(
+        attr=nvshmem.core.Attr(
+            mpi_comm=nvshmem.core.MPIComm.from_mpi4py(),
+            cuda_stream=cu_stream_ref,
+        )
+    )
 
-    nvshmem.core.barrier_all(stream=cu_stream_ref)
-    nvshmem.core.finalize()
+    barrier(stream=cu_stream_ref)
 
-
-def test_barrier_all(init_type):
-    nvshmem.core.init(init_type)
-
-    def func():
-        nvshmem.core.device.numba.barrier_all()
-
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
-
-    test_barrier_all_kernel = cuda.jit(func)
-    test_barrier_all_kernel[1, 1, nb_stream]()
-
-    nvshmem.core.barrier_all(stream=cu_stream_ref)
     nvshmem.core.finalize()

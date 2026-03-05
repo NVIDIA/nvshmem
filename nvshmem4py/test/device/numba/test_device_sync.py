@@ -1,65 +1,65 @@
-from cuda.core import Device, Stream
-import numba.cuda as cuda
-import nvshmem.core
-import nvshmem.core.device.numba
+# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+#
+# See LICENSE.txt for license information
 
+import numpy as np
 import pytest
 
+from cuda import cuda
+from cuda.core.experimental import Device, Stream
 
-@pytest.mark.mpi
-@pytest.mark.parametrize("teams",
-                         [nvshmem.core.Teams.TEAM_NODE, nvshmem.core.Teams.TEAM_WORLD, nvshmem.core.Teams.TEAM_SHARED])
-@pytest.mark.parametrize(
-    "func", [nvshmem.core.device.numba.sync, nvshmem.core.device.numba.sync_block, nvshmem.core.device.numba.sync_warp])
-def test_device_sync(nvshmem_init_fini, teams, func):
-    print(f"Testing {func.__name__} on team {teams}")
+import nvshmem
 
-    nblocks = 1
-    nthreads = 1
-    dev = Device()
-    dev.sync()
 
-    print(f"From PE {nvshmem.core.my_pe()}")
+@pytest.mark.parametrize("dtype", [np.int32, np.int64])
+def test_device_wait_until(dtype):
+    local_rank_per_node = int(nvshmem.core.getenv("OMPI_COMM_WORLD_LOCAL_RANK", "0"))
+    dev = Device(local_rank_per_node)
+    dev.set_current()
 
-    @cuda.jit
-    def test_sync(teams):
-        func(teams)
-
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
+    nb_stream = cuda.stream()
     cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
-    test_sync[nblocks, nthreads, nb_stream](teams)
-    nvshmem.core.barrier(teams, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    dev.sync()
-    print("Done testing sync")
+    nvshmem.core.init(
+        attr=nvshmem.core.Attr(
+            mpi_comm=nvshmem.core.MPIComm.from_mpi4py(),
+            cuda_stream=cu_stream_ref,
+        )
+    )
 
+    # Allocate and initialize symmetric memory
+    src = np.array([0], dtype=dtype)
+    dst = np.array([0], dtype=dtype)
 
-@pytest.mark.mpi
-@pytest.mark.parametrize("func", [
-    nvshmem.core.device.numba.sync_all, nvshmem.core.device.numba.sync_all_block,
-    nvshmem.core.device.numba.sync_all_warp
-])
-def test_device_sync_all(nvshmem_init_fini, func):
-    print(f"Testing {func.__name__}")
+    d_src = nvshmem.core.malloc(src.nbytes)
+    d_dst = nvshmem.core.malloc(dst.nbytes)
 
-    nblocks = 1
-    nthreads = 1
+    cuda.memcpy_htod_async(d_src, src, nb_stream)
+    cuda.memcpy_htod_async(d_dst, dst, nb_stream)
 
-    dev = Device()
-    dev.sync()
+    # Put value 1 to PE 0
+    if nvshmem.core.my_pe() == 1:
+        one = np.array([1], dtype=dtype)
+        d_one = nvshmem.core.malloc(one.nbytes)
+        cuda.memcpy_htod_async(d_one, one, nb_stream)
+        nvshmem.core.put(d_dst, d_one, 1, 0, stream=cu_stream_ref)
+        nvshmem.core.free(d_one)
 
-    print(f"From PE {nvshmem.core.my_pe()}")
+    nvshmem.core.barrier_all(stream=cu_stream_ref)
 
-    @cuda.jit
-    def test_sync_all():
-        func()
+    # Wait until dst becomes 1 on PE 0
+    if nvshmem.core.my_pe() == 0:
+        nvshmem.core.wait_until(d_dst, 1, stream=cu_stream_ref)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    nvshmem.core.barrier_all(stream=cu_stream_ref)
 
-    test_sync_all[nblocks, nthreads, nb_stream]()
+    cuda.memcpy_dtoh_async(dst, d_dst, nb_stream)
+    nb_stream.synchronize()
 
-    cu_stream_ref.sync()
-    dev.sync()
-    print("Done testing sync_all")
+    # Verify result
+    assert dst[0] == 1
+
+    nvshmem.core.free(d_src)
+    nvshmem.core.free(d_dst)
+
+    nvshmem.core.finalize()
