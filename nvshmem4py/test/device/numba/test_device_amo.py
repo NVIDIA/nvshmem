@@ -1,98 +1,73 @@
-# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
-#
-# See LICENSE.txt for license information
+from cuda.core import Device, Stream
+import numba.cuda as cuda
+import nvshmem.core
+import nvshmem.core.device.numba
 
-import numpy as np
 import pytest
 
-from cuda import cuda
-from cuda.core.experimental import Device, Stream
+amo_std_dtypes = ["int32", "int64", "uint64"]
+amo_ext_dtypes = ["float32", "float64"] + amo_std_dtypes
+amo_bit_dtypes = amo_std_dtypes + ["uint32"]
 
-import nvshmem
 
+@pytest.mark.mpi
+@pytest.mark.parametrize("dtype", amo_std_dtypes)
+def test_atomic_add_on_array(nvshmem_init_fini, dtype):
+    print("Testing atomic_add")
 
-@pytest.mark.parametrize("dtype", [np.int32, np.int64])
-def test_device_amo_add(dtype):
-    local_rank_per_node = int(nvshmem.core.getenv("OMPI_COMM_WORLD_LOCAL_RANK", "0"))
-    dev = Device(local_rank_per_node)
-    dev.set_current()
+    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
+    buf = nvshmem.core.array((1, ), dtype=dtype)
+    buf[:] = 0
+
+    @cuda.jit
+    def kernel_atomic_add(arr, val, pe):
+        nvshmem.core.device.numba.atomic_add(arr, val, pe)
 
     nb_stream = cuda.stream()
     cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
     # Launch kernel to add 5 atomically
-    src = np.array([5], dtype=dtype)
-    dst = np.zeros(1, dtype=dtype)
+    kernel_atomic_add[1, 1, nb_stream](buf, 5, nvshmem.core.my_pe())
 
-    nvshmem.core.init(
-        attr=nvshmem.core.Attr(
-            mpi_comm=nvshmem.core.MPIComm.from_mpi4py(),
-            cuda_stream=cu_stream_ref,
-        )
-    )
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
+    cu_stream_ref.sync()
 
-    d_dst = nvshmem.core.malloc(dst.nbytes)
-    d_src = nvshmem.core.malloc(src.nbytes)
+    print(f"From PE {nvshmem.core.my_pe()} AFTER atomic_add buf={buf}")
 
-    cuda.memcpy_htod_async(d_src, src, nb_stream)
+    assert (buf == 5).all()
 
-    # Perform atomic add on PE 0
-    nvshmem.core.int_atomic_add(d_dst, d_src, 0, stream=cu_stream_ref)
-
-    nvshmem.core.barrier_all(stream=cu_stream_ref)
-
-    cuda.memcpy_dtoh_async(dst, d_dst, nb_stream)
-    nb_stream.synchronize()
-
-    # Verify result
-    if nvshmem.core.my_pe() == 0:
-        assert dst[0] == 5
-
-    nvshmem.core.free(d_dst)
-    nvshmem.core.free(d_src)
-
-    nvshmem.core.finalize()
+    nvshmem.core.free_array(buf)
+    print("Done testing atomic_add")
 
 
-@pytest.mark.parametrize("dtype", [np.int32, np.int64])
-def test_device_amo_fetch_add(dtype):
-    local_rank_per_node = int(nvshmem.core.getenv("OMPI_COMM_WORLD_LOCAL_RANK", "0"))
-    dev = Device(local_rank_per_node)
-    dev.set_current()
+@pytest.mark.mpi
+@pytest.mark.parametrize("dtype", amo_std_dtypes)
+def test_atomic_fetch_add_on_array(nvshmem_init_fini, dtype):
+    print("Testing atomic_fetch_add")
+
+    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
+    buf = nvshmem.core.array((1, ), dtype=dtype)
+    out = nvshmem.core.array((1, ), dtype=dtype)
+    buf[:] = 0
+
+    @cuda.jit
+    def kernel_atomic_fetch_add(arr, out, val, pe):
+        result = nvshmem.core.device.numba.atomic_fetch_add(arr, val, pe)
+        out[:] = result
 
     nb_stream = cuda.stream()
     cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
 
-    # Launch kernel to fetch-add 5 atomically
-    src = np.array([5], dtype=dtype)
-    dst = np.zeros(1, dtype=dtype)
+    # Launch kernel to add 5 atomically
+    kernel_atomic_fetch_add[1, 1, nb_stream](buf, out, 5, nvshmem.core.my_pe())
 
-    nvshmem.core.init(
-        attr=nvshmem.core.Attr(
-            mpi_comm=nvshmem.core.MPIComm.from_mpi4py(),
-            cuda_stream=cu_stream_ref,
-        )
-    )
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
+    cu_stream_ref.sync()
 
-    d_dst = nvshmem.core.malloc(dst.nbytes)
-    d_src = nvshmem.core.malloc(src.nbytes)
+    print(f"From PE {nvshmem.core.my_pe()} AFTER atomic_fetch_add buf={buf}, out={out}")
 
-    cuda.memcpy_htod_async(d_src, src, nb_stream)
+    assert (buf == 5).all()
 
-    # Perform atomic fetch-add on PE 0
-    old = nvshmem.core.int_atomic_fetch_add(d_dst, d_src, 0, stream=cu_stream_ref)
-
-    nvshmem.core.barrier_all(stream=cu_stream_ref)
-
-    cuda.memcpy_dtoh_async(dst, d_dst, nb_stream)
-    nb_stream.synchronize()
-
-    # Verify result
-    if nvshmem.core.my_pe() == 0:
-        assert old == 0
-        assert dst[0] == 5
-
-    nvshmem.core.free(d_dst)
-    nvshmem.core.free(d_src)
-
-    nvshmem.core.finalize()
+    nvshmem.core.free_array(buf)
+    nvshmem.core.free_array(out)
+    print("Done testing atomic_fetch_add")
