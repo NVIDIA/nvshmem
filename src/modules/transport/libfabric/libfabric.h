@@ -555,6 +555,9 @@ typedef struct {
     /* Signal ordering state */
     nvshmemt_libfabric_signal_state_t host_signal_state;
     nvshmemt_libfabric_signal_state_t proxy_signal_state;
+
+    /* Max ops per progress iteration */
+    int proxy_request_batch_max;
 } nvshmemt_libfabric_state_t;
 
 typedef struct {
