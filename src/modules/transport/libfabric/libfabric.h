@@ -346,11 +346,31 @@ typedef enum {
     NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_ACK,
 } nvshmemt_libfabric_imm_cq_data_hdr_t;
 
+/*
+ * Conditional lock: skips locking when FI_THREAD_COMPLETION is active.
+ *
+ * With FI_PROGRESS_AUTO, we request FI_THREAD_COMPLETION from the provider,
+ * meaning the host thread and proxy thread each operate on separate endpoints
+ * (eps[0] vs eps[1+]), so their op_queues are disjoint and no synchronization
+ * is needed. With FI_PROGRESS_MANUAL, we use FI_THREAD_SAFE because
+ * manual_progress() iterates all EPs from both threads, requiring locking.
+ */
+class conditional_mutex {
+    std::mutex mtx;
+    bool needs_lock;
+
+   public:
+    conditional_mutex() : needs_lock(true) {}
+    void set_needs_lock(bool v) { needs_lock = v; }
+    void lock() { if (needs_lock) mtx.lock(); }
+    void unlock() { if (needs_lock) mtx.unlock(); }
+};
+
 class threadSafeOpQueue {
    private:
-    std::mutex send_mutex;
-    std::mutex ack_recv_mutex;
-    std::mutex other_recv_mutex;
+    conditional_mutex send_mutex;
+    conditional_mutex ack_recv_mutex;
+    conditional_mutex other_recv_mutex;
     std::vector<void *> send;
     std::deque<void *> ack_recv;
     std::deque<void *> other_recv;
@@ -359,6 +379,13 @@ class threadSafeOpQueue {
     threadSafeOpQueue() = default;
     threadSafeOpQueue(const threadSafeOpQueue &) = delete;
     threadSafeOpQueue &operator=(const threadSafeOpQueue &) = delete;
+
+    /* Disable locking when FI_THREAD_COMPLETION keeps host/proxy EPs disjoint. */
+    void set_auto_progress(bool auto_progress) {
+        send_mutex.set_needs_lock(!auto_progress);
+        ack_recv_mutex.set_needs_lock(!auto_progress);
+        other_recv_mutex.set_needs_lock(!auto_progress);
+    }
 
     int getNextSends(void **elems, size_t num_elems = 1) {
         send_mutex.lock();

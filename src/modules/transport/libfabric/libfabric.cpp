@@ -1885,6 +1885,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
             state->op_queue.push_back(new threadSafeOpQueue);
             state->op_queue[i]->putToSendBulk((char *)state->send_buf[i], elem_size, num_sends);
+            state->op_queue[i]->set_auto_progress(use_auto_progress);
         }
 
         status = fi_av_open(domain, &av_attr, &address, NULL);
