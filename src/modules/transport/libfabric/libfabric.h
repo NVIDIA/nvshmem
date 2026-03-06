@@ -547,6 +547,9 @@ struct nvshmemt_libfabric_state_t {
     nvshmemt_libfabric_signal_state_t host_signal_state;
     nvshmemt_libfabric_signal_state_t proxy_signal_state;
 
+    /* Max ops per progress iteration */
+    int proxy_request_batch_max = 0;
+
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
