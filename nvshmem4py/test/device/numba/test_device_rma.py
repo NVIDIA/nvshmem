@@ -1,4 +1,4 @@
-from cuda.core import Device, Stream
+from cuda.core import Device
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba
@@ -25,19 +25,17 @@ def test_put_on_array(nvshmem_init_fini, dtype):
     def test_put(dst, src, pe):
         nvshmem.core.device.numba.put(dst, src, pe)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_put[1, 1, nb_stream](buf_dst, buf_src, (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes())
+    test_put[1, 1, stream](buf_dst, buf_src, (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
     assert (buf_dst == ((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()) + 1).all()
-
-    del nb_stream
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
     print("Done testing put on Array")
@@ -60,18 +58,17 @@ def test_get_on_array(nvshmem_init_fini, dtype):
     def test_get(dst, src, pe):
         nvshmem.core.device.numba.get(dst, src, pe)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_get[1, 1, nb_stream](buf_src, buf_dst, nvshmem.core.my_pe())
+    test_get[1, 1, stream](buf_src, buf_dst, nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
     assert (buf_dst == nvshmem.core.my_pe() + 1).all()
-    del nb_stream
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
@@ -99,13 +96,13 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
     def test_put_signal(dst, src, signal_var, signal_val, signal_op, pe):
         nvshmem.core.device.numba.put_signal(dst, src, signal_var, signal_val, signal_op, pe)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_put_signal[1, 1, nb_stream](buf_dst, buf_src, signal_var, signal_val, signal_op, nvshmem.core.my_pe())
+    test_put_signal[1, 1, stream](buf_dst, buf_src, signal_var, signal_val, signal_op, nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
@@ -113,7 +110,6 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
-    del nb_stream
     print("Done testing put signal on Array")
 
 
@@ -139,21 +135,19 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
         nvshmem.core.device.numba.put_signal(dst, src, signal_var, 1, signal_op, pe)
         nvshmem.core.device.numba.signal_wait(signal_var, nvshmem.core.ComparisonType.CMP_GE, signal_val)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_put_signal_with_wait[1, 1, nb_stream](buf_dst, buf_src, signal_var, signal_val, signal_op,
-                                               nvshmem.core.my_pe())
+    test_put_signal_with_wait[1, 1, stream](buf_dst, buf_src, signal_var, signal_val, signal_op,
+                                            nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
     if nvshmem.core.my_pe() == 1:
         assert (buf_dst == nvshmem.core.my_pe() + 1).all()
-
-    del nb_stream
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
     print("Done testing put signal with wait on Array")
@@ -174,14 +168,13 @@ def test_signal_op_signal_wait():
         nvshmem.core.device.numba.signal_op(signal_var, 1, signal_op, pe)
         nvshmem.core.device.numba.signal_wait(signal_var, nvshmem.core.ComparisonType.CMP_GE, signal_val)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_signal_op_signal_wait[1, 1, nb_stream](signal_var, signal_val, signal_op, nvshmem.core.my_pe())
+    test_signal_op_signal_wait[1, 1, stream](signal_var, signal_val, signal_op, nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    del nb_stream
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
     print("Done testing Signal Op and Signal Wait on Array")
 
 
@@ -199,20 +192,19 @@ def test_p(dtype):
     def test_p(var, val, pe):
         nvshmem.core.device.numba.p(var, val, pe)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_p[1, 1, nb_stream](var, val, nvshmem.core.my_pe())
+    test_p[1, 1, stream](var, val, nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}")
     assert (var == 1).all()
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
-    del nb_stream
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
     print("Done testing shmem_p")
 
 
@@ -232,14 +224,13 @@ def test_g(dtype):
         local = nvshmem.core.device.numba.g(var, pe)
         dest[:] = local
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(int(nb_stream.handle))
+    dev = Device()
+    stream = dev.create_stream()
 
-    test_g[1, 1, nb_stream](dest, var, nvshmem.core.my_pe())
+    test_g[1, 1, stream](dest, var, nvshmem.core.my_pe())
     print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}, dest={dest}")
     assert (dest == 1).all()
-    del nb_stream
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print("Done testing shmem_g")
