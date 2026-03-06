@@ -1,4 +1,4 @@
-from cuda.core import Device, Stream
+from cuda.core import Device
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba
@@ -26,12 +26,11 @@ def test_device_barrier(nvshmem_init_fini, teams, func):
     def test_barrier(teams):
         func(teams)
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    stream = dev.create_stream()
 
-    test_barrier[nblocks, nthreads, nb_stream](teams)
-    nvshmem.core.barrier(teams, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    test_barrier[nblocks, nthreads, stream](teams)
+    nvshmem.core.barrier(teams, stream=stream)
+    stream.sync()
     dev.sync()
     print("Done testing barrier")
 
@@ -56,11 +55,10 @@ def test_device_barrier_all(nvshmem_init_fini, func):
     def test_barrier_all():
         func()
 
-    nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    stream = dev.create_stream()
 
-    test_barrier_all[nblocks, nthreads, nb_stream]()
+    test_barrier_all[nblocks, nthreads, stream]()
 
-    cu_stream_ref.sync()
+    stream.sync()
     dev.sync()
     print("Done testing barrier_all")
