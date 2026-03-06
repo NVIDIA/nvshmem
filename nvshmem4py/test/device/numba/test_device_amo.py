@@ -1,4 +1,4 @@
-from cuda.core import Device, Stream
+from cuda.core import Device
 import numba.cuda as cuda
 import nvshmem.core
 import nvshmem.core.device.numba
@@ -23,14 +23,14 @@ def test_atomic_add_on_array(nvshmem_init_fini, dtype):
     def kernel_atomic_add(arr, val, pe):
         nvshmem.core.device.numba.atomic_add(arr, val, pe)
 
-    nb_stream = cuda.stream()
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    dev = Device()
+    stream = dev.create_stream()
 
     # Launch kernel to add 5 atomically
-    kernel_atomic_add[1, 1, nb_stream](buf, 5, nvshmem.core.my_pe())
+    kernel_atomic_add[1, 1, stream](buf, 5, nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER atomic_add buf={buf}")
 
@@ -55,14 +55,14 @@ def test_atomic_fetch_add_on_array(nvshmem_init_fini, dtype):
         result = nvshmem.core.device.numba.atomic_fetch_add(arr, val, pe)
         out[:] = result
 
-    nb_stream = cuda.stream()
-    cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+    dev = Device()
+    stream = dev.create_stream()
 
     # Launch kernel to add 5 atomically
-    kernel_atomic_fetch_add[1, 1, nb_stream](buf, out, 5, nvshmem.core.my_pe())
+    kernel_atomic_fetch_add[1, 1, stream](buf, out, 5, nvshmem.core.my_pe())
 
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
-    cu_stream_ref.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER atomic_fetch_add buf={buf}, out={out}")
 
