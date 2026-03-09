@@ -2026,9 +2026,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool ibgda_can_coalesce
     if (amask != IBGDA_FULL_WARP) return false;
 
     __match_all_sync(amask, qp->qpn, &pred_same_qp);
-    if (!pred_same_qp) return false;
-
-    return true;
+    return pred_same_qp;
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool ibgda_can_coalesce_warp_pe(
@@ -2038,9 +2036,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool ibgda_can_coalesce
     if (amask != IBGDA_FULL_WARP) return false;
 
     __match_all_sync(amask, pe, &pred_same_pe);
-    if (!pred_same_pe) return false;
-
-    return true;
+    return pred_same_pe;
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
@@ -2597,7 +2593,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_p(
     void *rptr, const T value, int dst_pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     unsigned int amask = __activemask();
     bool can_combine_data = false;
-    int pred_pe = 0;
     int pred_contiguous = 0;
     int pred_rkey = 0;
     int my_tid;
@@ -2605,32 +2600,34 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_p(
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
 
 #ifndef __clang_llvm_bitcode_lib__
-    if (amask == IBGDA_FULL_WARP) {
+    int proxy_pe = ibgda_get_proxy_pe(dst_pe);
+    if (ibgda_can_coalesce_warp_pe(amask, proxy_pe)) {
         /* TODO: Adding multi-dev support could have caused a regression with coalescing. */
         __be32 rkey;
         uint64_t raddr;
         size_t rchunk_size;
-        int proxy_pe = ibgda_get_proxy_pe(dst_pe);
         ibgda_get_raddr_rkey((uint64_t)rptr, dst_pe, proxy_pe, &raddr, &rkey, &rchunk_size, 0);
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
-        __match_all_sync(IBGDA_FULL_WARP, dst_pe, &pred_pe);
         __match_all_sync(IBGDA_FULL_WARP, (uintptr_t)(rptr) - (my_tid * sizeof(T)),
                          &pred_contiguous);
         __match_all_sync(IBGDA_FULL_WARP, rkey, &pred_rkey);
-        can_combine_data = (pred_pe && pred_contiguous && pred_rkey && state->support_half_av_seg);
-
-        if (can_combine_data)
+        can_combine_data = (pred_contiguous && pred_rkey && state->support_half_av_seg);
+        if (can_combine_data) {
             nvshmemi_ibgda_rma_p_impl<T, true, true, true>(rptr, value, dst_pe, qp_index);
-        else if (state->support_half_av_seg)
+        } else if (state->support_half_av_seg) {
             nvshmemi_ibgda_rma_p_impl<T, true, false, true>(rptr, value, dst_pe, qp_index);
-        else
+        } else {
             nvshmemi_ibgda_rma_p_impl<T, true, false, false>(rptr, value, dst_pe, qp_index);
+        }
     } else
 #endif
-        if (state->support_half_av_seg)
-        nvshmemi_ibgda_rma_p_impl<T, false, false, true>(rptr, value, dst_pe, qp_index);
-    else
-        nvshmemi_ibgda_rma_p_impl<T, false, false, false>(rptr, value, dst_pe, qp_index);
+    {
+        if (state->support_half_av_seg) {
+            nvshmemi_ibgda_rma_p_impl<T, false, false, true>(rptr, value, dst_pe, qp_index);
+        } else {
+            nvshmemi_ibgda_rma_p_impl<T, false, false, false>(rptr, value, dst_pe, qp_index);
+        }
+    }
 }
 
 /**
