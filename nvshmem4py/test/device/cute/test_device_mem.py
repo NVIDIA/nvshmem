@@ -69,8 +69,19 @@ def test_device_get_multicast_tensor(nvshmem_init_fini):
     if not Device().properties.multicast_supported:
         pytest.skip("Multicast not supported on this platform")
     if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
-        pytest.skip("Need >1 PE for multicast test")
+        pytest.skip("Need >1 PE in NVLink domain (TEAM_NODE) for multicast test")
 
+    # Use TEAM_NODE (NVLink domain) instead of TEAM_WORLD for the multicast
+    # operation. On platforms such as H20 (X84, CUDA 12) with multiple NVLink
+    # switch domains, TEAM_WORLD may span domain boundaries where multicast is
+    # not supported, while TEAM_NODE correctly reflects each NVLink domain.
+    # On GB200/GB300 (aarch64, CUDA 13) all PEs share a single NVLink domain
+    # so TEAM_NODE == TEAM_WORLD and behaviour is unchanged.
+    #
+    # The writer condition uses team_my_pe(TEAM_NODE) == 0 (evaluated at JIT
+    # compile time) so that the rank-0 PE within each NVLink domain writes via
+    # multicast, guaranteeing all domain members receive the expected value
+    # regardless of topology.
     buf = cute_interop.tensor((4, ), dtype=cute.Float32)
     _fill_cute_tensor(buf, "float32", 0)
 
@@ -78,7 +89,7 @@ def test_device_get_multicast_tensor(nvshmem_init_fini):
     def multicast_fetch_kernel(team: Int32, arr: cute.Tensor):
         mc_arr = nvshmem_cute_mem.get_multicast_tensor(team, arr)
         tidx, _, _ = cute.arch.thread_idx()
-        if tidx == 0 and nvshmem.core.my_pe() == 0:
+        if tidx == 0 and nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE) == 0:
             for i in range(4):
                 mc_arr[i] = 1.0
 
@@ -89,8 +100,8 @@ def test_device_get_multicast_tensor(nvshmem_init_fini):
             block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
         )
 
-    compiled = _compile_kernel(multicast_fetch_launcher, nvshmem.core.Teams.TEAM_WORLD, buf)
-    compiled(nvshmem.core.Teams.TEAM_WORLD, buf)
+    compiled = _compile_kernel(multicast_fetch_launcher, nvshmem.core.Teams.TEAM_NODE, buf)
+    compiled(nvshmem.core.Teams.TEAM_NODE, buf)
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     torch.cuda.synchronize()
