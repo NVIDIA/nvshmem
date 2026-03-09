@@ -189,6 +189,7 @@ typedef struct {
     struct fid_cq *cq;
     struct fid_cntr *counter;
     uint64_t submitted_ops;
+    uint64_t completed_ctr;
     uint64_t completed_staged_atomics;
     nvshmemt_libfabric_endpoint_seq_counter_t put_signal_seq_counter;
     std::unordered_map<uint64_t, std::pair<nvshmemt_libfabric_gdr_op_ctx_t *, int>>
