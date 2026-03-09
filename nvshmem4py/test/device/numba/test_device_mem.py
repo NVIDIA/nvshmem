@@ -81,7 +81,7 @@ def test_device_get_multicast_array(nvshmem_init_fini):
         # across topologies with multiple NVLink switch domains.
         if nvshmem.core.device.numba.team_my_pe(team) == 0:
             for i in range(in_arr.shape[0]):
-                in_arr[i] = 1.0
+                mc_arr[i] = 1.0
 
     nb_stream = cuda.stream()
     cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
