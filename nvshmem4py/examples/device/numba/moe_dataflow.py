@@ -277,12 +277,12 @@ def main():
     # Launch dispatch kernel: each PE sends its batch to all experts
     threads_per_block = 32
     dispatch_inputs[1, threads_per_block, stream](inputs.reshape(-1), expert_inputs.reshape(-1), expert_signals,
-                                                     BATCH_SIZE, N_FEATURES)
+                                                  BATCH_SIZE, N_FEATURES)
     nvshmem.core.barrier_all(stream=stream)
 
     # Launch expert kernel: each expert processes its batch
-    expert_kernel[1, threads_per_block, stream](expert_inputs.reshape(-1), expert_outputs, expert_signals,
-                                                   BATCH_SIZE, N_FEATURES)
+    expert_kernel[1, threads_per_block, stream](expert_inputs.reshape(-1), expert_outputs, expert_signals, BATCH_SIZE,
+                                                N_FEATURES)
     nvshmem.core.barrier_all(stream=stream)
 
     # Build routing and expert counts/offsets on device

@@ -138,8 +138,7 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     dev = Device()
     stream = dev.create_stream()
 
-    test_put_signal_with_wait[1, 1, stream](buf_dst, buf_src, signal_var, signal_val, signal_op,
-                                            nvshmem.core.my_pe())
+    test_put_signal_with_wait[1, 1, stream](buf_dst, buf_src, signal_var, signal_val, signal_op, nvshmem.core.my_pe())
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
