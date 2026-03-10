@@ -159,8 +159,9 @@ def signal_op(signal_var, signal_val, signal_op, pe):
         - ``signal_val`` (``int``): Value used to update the signal variable.
           Cast to ``uint64`` before the operation.
         - ``signal_op``: Signal operation type.  Supported values are
-          ``NVSHMEM_SIGNAL_SET`` (overwrite with ``signal_val``) and
-          ``NVSHMEM_SIGNAL_ADD`` (atomically add ``signal_val``).
+          ``nvshmem.core.SignalOp.SIGNAL_SET`` (overwrite with ``signal_val``)
+          and ``nvshmem.core.SignalOp.SIGNAL_ADD`` (atomically add
+          ``signal_val``).
         - ``pe`` (``int``): Target PE that owns ``signal_var``.
 
     Note:
