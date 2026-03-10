@@ -188,8 +188,8 @@ def signal_wait(signal_var, signal_op, signal_val):
           variable (dtype ``uint64``).  Must be a 1-element
           NVSHMEM-allocated tensor on the calling PE.
         - ``signal_op``: Comparison operator.  Supported values are
-          ``NVSHMEM_CMP_EQ``, ``NVSHMEM_CMP_NE``, ``NVSHMEM_CMP_GT``,
-          ``NVSHMEM_CMP_GE``, ``NVSHMEM_CMP_LT``, and ``NVSHMEM_CMP_LE``.
+          ``nvshmem.core.CMP_EQ``, ``nvshmem.core.CMP_NE``, ``nvshmem.core.CMP_GT``,
+          ``nvshmem.core.CMP_GE``, ``nvshmem.core.CMP_LT``, and ``nvshmem.core.CMP_LE``.
         - ``signal_val`` (``int``): Threshold value for the comparison.
           Cast to ``uint64`` before the operation.
 
