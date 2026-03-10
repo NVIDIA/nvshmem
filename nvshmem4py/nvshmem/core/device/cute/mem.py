@@ -15,7 +15,7 @@ from cutlass.base_dsl.typing import cast as cute_cast
 
 __all__ = ["get_peer_tensor", "get_multicast_tensor"]
 """
-We cannot use the generated bindings for these functions because Cutlass Python does not have an equivalent of a Void*
+We cannot use the bindings in collective.py for these functions because Cutlass Python does not have an equivalent of a Void*
 
 Theoretically, we could cast the returned void* , but it requires so much complicated type inference that it'd be too confusing to debug.
 Since there are just two typeless functions, it's easier to just have explicit bindings for them

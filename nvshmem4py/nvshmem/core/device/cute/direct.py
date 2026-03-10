@@ -111,7 +111,7 @@ def barrier_all():
     Note:
         All PEs must call ``barrier_all`` before any PE can proceed past it.
         For CTA-wide or warp-wide variants use ``barrier_all_block`` /
-        ``barrier_all_warp`` from the generated collective bindings.
+        ``barrier_all_warp`` from the bindings in collective.py.
         ``barrier_all`` provides stronger ordering guarantees than ``sync_all``.
     """
     # Use TEAM_WORLD for all PEs; match collective.py's pattern
@@ -133,7 +133,7 @@ def sync_all():
     Note:
         All PEs must call ``sync_all`` before any PE can proceed past it.
         For CTA-wide or warp-wide variants use ``sync_all_block`` /
-        ``sync_all_warp`` from the generated collective bindings.
+        ``sync_all_warp`` from the bindings in collective.py.
         Use ``barrier_all`` when a full memory fence is also required.
     """
     team = Teams.TEAM_WORLD
