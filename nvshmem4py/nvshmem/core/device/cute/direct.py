@@ -125,10 +125,11 @@ def sync_all():
     Executes a thread-level synchronization across all PEs in the NVSHMEM
     runtime (equivalent to ``sync(TEAM_WORLD)``).
 
-    This is a lightweight sync that ensures ordering of memory operations
-    visible to NVSHMEM across all PEs without the full memory fence semantics
-    of ``barrier_all``.  All PEs must call this function before any PE can
-    proceed past it.
+    This is a lightweight synchronization point that guarantees all PEs have
+    reached it before any PE proceeds.  It does not provide memory-ordering or
+    memory-visibility guarantees; use ``barrier_all`` when a memory fence is
+    also required.  All PEs must call this function before any PE can proceed
+    past it.
 
     Note:
         All PEs must call ``sync_all`` before any PE can proceed past it.
