@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights ...
+# Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights ...
 from nvshmem.bindings.device import numba as bindings
 from nvshmem.core import Teams
 
@@ -12,7 +12,7 @@ from numba.cuda.types import bfloat16
 from numba.core import types, cgutils
 from numba.cuda.extending import intrinsic
 from numba.np import arrayobj
-from numba.np.numpy_support import carray
+from numba.cuda.np.numpy_support import carray
 from numba.cuda import declare_device
 from numba.types import CPointer, void
 from numba.cuda.cudaimpl import lower
