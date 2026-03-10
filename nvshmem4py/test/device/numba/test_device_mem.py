@@ -48,7 +48,14 @@ def test_device_get_peer_array(nvshmem_init_fini):
 @pytest.mark.mpi
 def test_device_get_multicast_array(nvshmem_init_fini):
     """
-    Test device-side get_multicast_array for multicast access via Numba kernel
+    Test device-side get_multicast_array for multicast access via Numba kernel.
+
+    Uses TEAM_NODE (NVLink domain) instead of TEAM_WORLD to support platforms
+    such as H20 (X84, CUDA 12) that have multiple NVLink switch domains.  On
+    those platforms TEAM_WORLD may span domain boundaries where multicast is
+    unsupported, while TEAM_NODE correctly identifies each NVLink domain.  On
+    GB200/GB300 (aarch64, CUDA 13) all PEs are in a single NVLink domain so
+    TEAM_NODE == TEAM_WORLD and behaviour is unchanged.
     """
     # Only test if multicast teams are available (skip if not supported)
     nblocks = 1
@@ -68,13 +75,16 @@ def test_device_get_multicast_array(nvshmem_init_fini):
     @cuda.jit
     def multicast_fetch_kernel(team, in_arr):
         mc_arr = nvshmem.core.device.numba.get_multicast_array(team, in_arr)
-        if nvshmem.core.device.numba.my_pe() == 0:
+        # Use team-relative rank so that the rank-0 PE within each NVLink
+        # domain (TEAM_NODE) performs the write, making the test correct
+        # across topologies with multiple NVLink switch domains.
+        if nvshmem.core.device.numba.team_my_pe(team) == 0:
             for i in range(in_arr.shape[0]):
-                in_arr[i] = nvshmem.core.device.numba.my_pe() + 1
+                mc_arr[i] = 1.0
 
     stream = dev.create_stream()
 
-    multicast_fetch_kernel[nblocks, nthreads, stream](nvshmem.core.Teams.TEAM_WORLD, arr)
+    multicast_fetch_kernel[nblocks, nthreads, stream](nvshmem.core.Teams.TEAM_NODE, arr)
     stream.sync()
     dev.sync()
     assert (arr == 1).all(), f"Multicast array result {arr} did not match expected {1}"
