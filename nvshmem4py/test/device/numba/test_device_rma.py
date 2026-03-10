@@ -227,9 +227,9 @@ def test_g(dtype):
     stream = dev.create_stream()
 
     test_g[1, 1, stream](dest, var, nvshmem.core.my_pe())
-    print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}, dest={dest}")
-    assert (dest == 1).all()
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
+    print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}, dest={dest}")
+    assert (dest == 1).all()
 
     print("Done testing shmem_g")
