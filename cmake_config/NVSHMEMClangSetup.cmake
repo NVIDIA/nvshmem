@@ -40,12 +40,13 @@ endif()
 # --- Version checks ------------------------------------------------------------
 # CUDA 13+ requires LLVM/Clang 22+.
 # LLVM_VERSION_MAJOR is set by find_package(Clang CONFIG) -> find_package(LLVM).
-if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND LLVM_VERSION_MAJOR LESS 22)
-  message(FATAL_ERROR
-    "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR} requires "
-    "Clang >= 22 for bitcode/cubin builds, but found LLVM "
-    "${LLVM_PACKAGE_VERSION} (${NVSHMEM_CLANG_EXECUTABLE}).")
-endif()
+# TODO: reenable when LLVM 22 is supported by all dependencies.
+#if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND LLVM_VERSION_MAJOR LESS 22)
+#  message(FATAL_ERROR
+#    "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR} requires "
+#    "Clang >= 22 for bitcode/cubin builds, but found LLVM "
+#    "${LLVM_PACKAGE_VERSION} (${NVSHMEM_CLANG_EXECUTABLE}).")
+#endif()
 
 # --- Workarounds ---------------------------------------------------------------
 # CUDA 13.2+ headers need _NV_RSQRT_SPECIFIER defined when using Clang (workaround for
