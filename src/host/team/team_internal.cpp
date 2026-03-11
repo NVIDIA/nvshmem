@@ -635,7 +635,11 @@ static inline size_t get_psync_len_per_team() {
          + nvshmemi_device_state.gpu_coll_env_params_var.reduce_scratch_size / sizeof(long) +
          NVSHMEMI_BCAST_SYNC_SIZE + fcollect_sync_size + 2 * NVSHMEMI_ALLTOALL_SYNC_SIZE +
          fcollect_ll128_sync_size + nvshmemi_state->npes);
-    return ans;
+
+    /* Round up to even (in long units) so each team's region is 16-byte aligned
+     * for nvshmemi_packLL's 16-byte aligned requirement.
+     */
+    return NVSHMEMI_TEAM_ROUND_UP(ans, 2);
 }
 
 size_t nvshmemi_get_teams_mem_requirement() {

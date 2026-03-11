@@ -68,10 +68,14 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ size_t get_psync_len_pe
        same way as in reduce. The other fator of 2 is because when using LL double the space is
        needed to fuse flag with data. Npes is added for p2p sync space. */
 
-    return (4 * NVSHMEMI_SYNC_SIZE +
+    size_t ans = (4 * NVSHMEMI_SYNC_SIZE +
             nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_scratch_size / sizeof(long) +
             NVSHMEMI_BCAST_SYNC_SIZE + fcollect_sync_size + 2 * NVSHMEMI_ALLTOALL_SYNC_SIZE +
             fcollect_ll128_sync_size + nvshmemi_device_state_d.npes);
+    /* Round up to even (in long units) so each team's region is 16-byte aligned
+     * for nvshmemi_packLL's 16-byte aligned requirement.
+     */
+       return NVSHMEMI_TEAM_ROUND_UP(ans, 2);
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE int
