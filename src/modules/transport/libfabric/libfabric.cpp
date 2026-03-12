@@ -1774,8 +1774,8 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
                                   fi_strerror(status * -1));
             state->mrs.push_back(mr);
 
-            state->op_queue.emplace_back(
-                std::unique_ptr<threadSafeOpQueue>(new threadSafeOpQueue()));
+            /* Locking is not required for auto progress, required for manual progress */
+            state->op_queue.emplace_back(std::unique_ptr<threadSafeOpQueue>(new threadSafeOpQueue(!use_auto_progress)));
             NVSHMEMI_NULL_ERROR_JMP(state->op_queue[i], status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                                     "Unable to alloc thread-safe op queue struct.\n");
             state->op_queue.back()->putToSendBulk((char *)state->send_buf[i], elem_size, num_sends);
@@ -2167,7 +2167,7 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
 
     /* Try FI_PROGRESS_AUTO */
     hints->domain_attr->data_progress = FI_PROGRESS_AUTO;
-    hints->domain_attr->threading = FI_THREAD_SAFE;
+    hints->domain_attr->threading = FI_THREAD_COMPLETION;
 
     /* Require completion RMA completion at target for correctness of quiet */
     hints->tx_attr->op_flags = FI_DELIVERY_COMPLETE;
@@ -2180,13 +2180,16 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
     /* Ensure at least one fabric was returned and it matches the selected provider */
     if (!status && strstr(all_infos->fabric_attr->name, options.LIBFABRIC_PROVIDER)) {
         use_auto_progress = true;
+        INFO(state->log_level, "Using FI_PROGRESS_AUTO with FI_THREAD_COMPLETION.\n");
     } else {
         /* Cleanup and fallback to manual progress */
         if (!status) {
             fi_freeinfo(all_infos);
         }
 
+        INFO(state->log_level, "Falling back to FI_PROGRESS_MANUAL with FI_THREAD_SAFE.\n");
         hints->domain_attr->data_progress = FI_PROGRESS_MANUAL;
+        hints->domain_attr->threading = FI_THREAD_SAFE;
 
         status = fi_getinfo(FI_VERSION(NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER),
                             NULL, NULL, 0, hints.get(), &all_infos);

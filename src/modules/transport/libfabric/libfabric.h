@@ -254,22 +254,36 @@ typedef enum {
 
 class threadSafeOpQueue {
    private:
-    std::mutex send_mutex;
-    std::mutex ack_recv_mutex;
-    std::mutex other_recv_mutex;
+    struct conditional_mutex {
+       private:
+        std::mutex mtx;
+        bool should_lock;
+       public:
+        explicit conditional_mutex(bool locking_required) : should_lock(locking_required) {}
+        void lock() { if (should_lock) mtx.lock(); }
+        void unlock() noexcept { if (should_lock) mtx.unlock(); }
+    };
+
+    conditional_mutex send_mutex;
+    conditional_mutex ack_recv_mutex;
+    conditional_mutex other_recv_mutex;
     std::vector<void *> send;
     std::deque<void *> ack_recv;
     std::deque<void *> other_recv;
 
    public:
-    threadSafeOpQueue() = default;
+    explicit threadSafeOpQueue(bool locking_required)
+        : send_mutex(locking_required),
+          ack_recv_mutex(locking_required),
+          other_recv_mutex(locking_required) {}
+
     threadSafeOpQueue(const threadSafeOpQueue &) = delete;
     threadSafeOpQueue &operator=(const threadSafeOpQueue &) = delete;
     threadSafeOpQueue(threadSafeOpQueue &&) = delete;
     threadSafeOpQueue &operator=(threadSafeOpQueue &&) = delete;
 
     int getNextSends(void **elems, size_t num_elems = 1) {
-        const std::lock_guard<std::mutex> lg{send_mutex};
+        const std::lock_guard<conditional_mutex> lg{send_mutex};
         if (send.size() < num_elems) {
             for (size_t i = 0; i < num_elems; i++) {
                 elems[i] = NULL;
@@ -291,7 +305,7 @@ class threadSafeOpQueue {
         int num_sends = 0;
 
         if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK) {
-            const std::lock_guard<std::mutex> lg{other_recv_mutex};
+            const std::lock_guard<conditional_mutex> lg{other_recv_mutex};
             if (other_recv.empty()) {
                 *recv_elem = NULL;
                 return 0;
@@ -314,7 +328,7 @@ class threadSafeOpQueue {
             other_recv.pop_front();
             return 0;
         } else if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
-            const std::lock_guard<std::mutex> lg{ack_recv_mutex};
+            const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
             if (ack_recv.empty()) {
                 *recv_elem = NULL;
                 return 0;
@@ -331,13 +345,13 @@ class threadSafeOpQueue {
     }
 
     void putToSend(void *elem) {
-        const std::lock_guard<std::mutex> lg{send_mutex};
+        const std::lock_guard<conditional_mutex> lg{send_mutex};
         send.push_back(elem);
         return;
     }
 
     void putToSendBulk(char *elem, size_t elem_size, size_t num_elems) {
-        const std::lock_guard<std::mutex> lg{send_mutex};
+        const std::lock_guard<conditional_mutex> lg{send_mutex};
         for (size_t i = 0; i < num_elems; i++) {
             send.push_back(elem);
             elem = elem + elem_size;
@@ -348,7 +362,7 @@ class threadSafeOpQueue {
     void *getNextRecv(nvshmemt_libfabric_recv_type_t recv_type) {
         void *elem = NULL;
         if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
-            const std::lock_guard<std::mutex> lg{ack_recv_mutex};
+            const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
             if (ack_recv.empty()) {
                 return NULL;
             }
@@ -357,7 +371,7 @@ class threadSafeOpQueue {
             ack_recv.pop_front();
             return elem;
         } else {
-            const std::lock_guard<std::mutex> lg{other_recv_mutex};
+            const std::lock_guard<conditional_mutex> lg{other_recv_mutex};
             if (other_recv.empty()) {
                 return NULL;
             }
@@ -369,10 +383,10 @@ class threadSafeOpQueue {
 
     void putToRecv(void *elem, nvshmemt_libfabric_recv_type_t recv_type) {
         if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
-            const std::lock_guard<std::mutex> lg{ack_recv_mutex};
+            const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
             ack_recv.push_back(elem);
         } else if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK) {
-            const std::lock_guard<std::mutex> lg{other_recv_mutex};
+            const std::lock_guard<conditional_mutex> lg{other_recv_mutex};
             other_recv.push_back(elem);
         } else {
             fprintf(stderr, "putToRecv: invalid recv_type: %d\n", recv_type);
