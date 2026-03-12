@@ -197,6 +197,7 @@ typedef struct {
         *proxy_put_signal_comp_map;
     int domain_index;
     int ep_index;
+    int qp_index;
 } nvshmemt_libfabric_endpoint_t;
 
 typedef struct nvshmemt_libfabric_gdr_send_p_op {
