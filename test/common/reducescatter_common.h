@@ -106,8 +106,8 @@ NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE(INIT_REDUCESCATTER_DATA_KERNEL)
                 }                                                                                \
             }                                                                                    \
             if (dest[i] != expected) {                                                           \
-                print_err<TYPE>(dest[i], expected, i, nelems, team,                              \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));                  \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
+                       to_printable(dest[i]), to_printable(expected), i, nelems, team);          \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \

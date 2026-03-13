@@ -88,8 +88,9 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(INIT_ALLTOALL_DATA_KERNEL)
             for (size_t j = myIdx; j < nelems; j += groupSize) {                                  \
                 TYPE expected = assign<TYPE>(i * n_pes * nelems + my_pe * nelems + j);            \
                 if (dest[i * nelems + j] != expected) {                                           \
-                    print_err<TYPE>(dest[i * nelems + j], expected, i * nelems + j, nelems, team, \
-                                    NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC));                   \
+                    printf(NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC),                             \
+                           to_printable(dest[i * nelems + j]), to_printable(expected),            \
+                           i * nelems + j, nelems, team);                                         \
                     atomicAdd(&errs_d, 1);                                                        \
                 }                                                                                 \
             }                                                                                     \

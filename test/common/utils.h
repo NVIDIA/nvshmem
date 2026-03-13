@@ -154,45 +154,20 @@ __device__ __nv_bfloat16 assign<__nv_bfloat16>(const unsigned long val) {
 
 #define NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC)                          \
     "error: found = " NVSHPRI_##TYPENAME " expected = " NVSHPRI_##TYPENAME \
-        ", index = %llu, nelems = %llu type = " #TYPENAME ", scope = " #SC ", team = %d\n"
+        ", index = %zu, nelems = %zu type = " #TYPENAME ", scope = " #SC ", team = %d\n"
 
 #define NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC)                                    \
     "error: found = " NVSHPRI_##TYPENAME " expected = " NVSHPRI_##TYPENAME               \
-        ", index = %llu, nelems = %llu type = " #TYPENAME ", op = " #OP ", scope = " #SC \
+        ", index = %zu, nelems = %zu type = " #TYPENAME ", op = " #OP ", scope = " #SC   \
         ", team = %d\n"
 
 template <typename TYPE>
-static __device__ void print_err(TYPE found, TYPE expected, size_t idx, size_t nelems,
-                                 nvshmem_team_t team, const char *print_formatter) {
-    printf(print_formatter, found, expected, idx, nelems, team);
-}
-template <>
-void __device__ print_err<half>(half found, half expected, size_t idx, size_t nelems,
-                                nvshmem_team_t team, const char *print_formatter) {
-    printf(print_formatter, __half2float(found), __half2float(expected), idx, nelems, team);
-}
-template <>
-void __device__ print_err<__nv_bfloat16>(__nv_bfloat16 found, __nv_bfloat16 expected, size_t idx,
-                                         size_t nelems, nvshmem_team_t team,
-                                         const char *print_formatter) {
-    printf(print_formatter, __bfloat162float(found), __bfloat162float(expected), idx, nelems, team);
-}
-
+static __device__ auto to_printable(TYPE val) { return val; }
+static __device__ float to_printable(half val) { return __half2float(val); }
+static __device__ float to_printable(__nv_bfloat16 val) { return __bfloat162float(val); }
 #if CUTLASS_ENABLED == 1
-template <>
-void __device__ print_err<cutlass::half_t>(cutlass::half_t found, cutlass::half_t expected,
-                                           size_t idx, size_t nelems, nvshmem_team_t team,
-                                           const char *print_formatter) {
-    printf(print_formatter, float(found), float(expected), idx, nelems, team);
-}
-
-template <>
-void __device__ print_err<cutlass::bfloat16_t>(cutlass::bfloat16_t found,
-                                               cutlass::bfloat16_t expected, size_t idx,
-                                               size_t nelems, nvshmem_team_t team,
-                                               const char *print_formatter) {
-    printf(print_formatter, float(found), float(expected), idx, nelems, team);
-}
+static __device__ float to_printable(cutlass::half_t val) { return float(val); }
+static __device__ float to_printable(cutlass::bfloat16_t val) { return float(val); }
 #endif
 
 void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);

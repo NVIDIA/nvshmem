@@ -186,8 +186,8 @@ NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE(INIT_REDUCE_DATA_KERNEL)
                 }                                                                                \
             }                                                                                    \
             if (dest[i] != expected) {                                                           \
-                print_err<TYPE>(dest[i], expected, i, nelems, team,                              \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));                  \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
+                       to_printable(dest[i]), to_printable(expected), i, nelems, team);          \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \
@@ -317,9 +317,9 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_VALIDATE_ALLREDUCE_TILE_DATA
             if (((flat_elem_idx % tensor_size_major) < boundary_major) &&                        \
                 ((flat_elem_idx / tensor_size_major) < boundary_minor) &&                        \
                 (*(dest.data() + idx_in_tile) != expected)) {                                    \
-                print_err<TYPE>(*(dest.data() + idx_in_tile), expected, flat_elem_idx,           \
-                                tot_elem_in_tile, team,                                          \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));                  \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
+                       to_printable(*(dest.data() + idx_in_tile)), to_printable(expected),       \
+                       flat_elem_idx, tot_elem_in_tile, team);                                   \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \
@@ -377,9 +377,9 @@ VALIDATE_ALLREDUCE_TILE_DATA(sum, thread, , x, cutlass_bfloat16_t, cutlass::bflo
             assert(flat_elem_idx < tensor_size_major);                                           \
             if (((flat_elem_idx) < boundary_major) &&                                            \
                 (*(dest.data() + idx_in_tile) != expected)) {                                    \
-                print_err<TYPE>(*(dest.data() + idx_in_tile), expected, flat_elem_idx,           \
-                                tot_elem_in_tile, team,                                          \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));                  \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
+                       to_printable(*(dest.data() + idx_in_tile)), to_printable(expected),       \
+                       flat_elem_idx, tot_elem_in_tile, team);                                   \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \

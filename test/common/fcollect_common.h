@@ -87,8 +87,9 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(INIT_FCOLLECT_DATA_KERNEL)
             for (size_t j = myIdx; j < nelems; j += groupSize) {                                  \
                 TYPE expected = assign<TYPE>(i * nelems + j);                                     \
                 if (dest[i * nelems + j] != expected) {                                           \
-                    print_err<TYPE>(dest[i * nelems + j], expected, i * nelems + j, nelems, team, \
-                                    NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC));                   \
+                    printf(NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC),                             \
+                           to_printable(dest[i * nelems + j]), to_printable(expected),            \
+                           i * nelems + j, nelems, team);                                         \
                     atomicAdd(&errs_d, 1);                                                        \
                 }                                                                                 \
             }                                                                                     \
@@ -209,9 +210,9 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(DECL_VALIDATE_TILE_ALLGATHER_DATA, )
             if (((flat_elem_idx % tensor_size_major) < boundary_major) &&                     \
                 ((flat_elem_idx / tensor_size_major) < boundary_minor) &&                     \
                 (*(dest.data() + idx_in_tile) != expected)) {                                 \
-                print_err<TYPE>(*(dest.data() + idx_in_tile), expected, flat_elem_idx,        \
-                                tot_elem_in_tile, team,                                       \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));               \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                         \
+                       to_printable(*(dest.data() + idx_in_tile)), to_printable(expected),    \
+                       flat_elem_idx, tot_elem_in_tile, team);                                \
                 atomicAdd(&errs_d, 1);                                                        \
             }                                                                                 \
         }                                                                                     \
@@ -241,9 +242,9 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_ALLGATHER_DATA, )
             assert(flat_elem_idx < tensor_size_major);                                        \
             if (((flat_elem_idx) < boundary_major) &&                                         \
                 (*(dest.data() + idx_in_tile) != expected)) {                                 \
-                print_err<TYPE>(*(dest.data() + idx_in_tile), expected, flat_elem_idx,        \
-                                tot_elem_in_tile, team,                                       \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));               \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                         \
+                       to_printable(*(dest.data() + idx_in_tile)), to_printable(expected),    \
+                       flat_elem_idx, tot_elem_in_tile, team);                                \
                 atomicAdd(&errs_d, 1);                                                        \
             }                                                                                 \
         }                                                                                     \

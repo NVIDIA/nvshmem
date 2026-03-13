@@ -136,9 +136,9 @@
             if (((flat_elem_idx % tensor_size_major) < boundary_major) &&                        \
                 ((flat_elem_idx / tensor_size_major) < boundary_minor) &&                        \
                 (*(dest.data() + idx_in_tile) != expected)) {                                    \
-                print_err<TYPE>(*(dest.data() + idx_in_tile), expected, flat_elem_idx,           \
-                                tot_elem_in_tile, team,                                          \
-                                NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC));                  \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
+                       to_printable(*(dest.data() + idx_in_tile)), to_printable(expected),       \
+                       flat_elem_idx, tot_elem_in_tile, team);                                   \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \
