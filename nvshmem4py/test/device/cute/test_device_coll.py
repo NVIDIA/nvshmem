@@ -134,7 +134,7 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
     compiled = _compile_kernel(test_reducescatter_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(team, stream=stream)
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()  # Sync stream after barrier
     if op == "sum":
         expected = sum(range(1, nvshmem.core.n_pes() + 1))
@@ -182,7 +182,7 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
     compiled = _compile_kernel(test_fcollect_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(team, stream=stream)
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()  # Sync stream after barrier
     expected = np.concatenate([np.full(nelems, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(team_n)])
     _assert_tensor_equals(dest, dtype, expected)
@@ -223,7 +223,7 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
     compiled = _compile_kernel(test_alltoall_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(team, stream=stream)
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()  # Sync stream after barrier
     chunk = nelems // nvshmem.core.n_pes()
     expected = np.concatenate(
@@ -266,7 +266,7 @@ def test_device_broadcast(nvshmem_init_fini, team, dtype):
     compiled = _compile_kernel(test_broadcast_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(team, stream=stream)
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()  # Sync stream after barrier
     _assert_tensor_equals(dest, dtype, 1)
     cute_interop.free_tensor(src)
