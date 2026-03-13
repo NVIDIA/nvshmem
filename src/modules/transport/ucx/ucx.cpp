@@ -136,9 +136,9 @@ static void nvshmemt_ucx_send_am_request_cb(void *request, ucs_status_t status, 
 }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-static ucs_status_t nvshmemt_ucx_recv_send_am_data_cb(void *arg, const void *header,
-                                                      size_t header_length, void *data,
-                                                      size_t length,
+static ucs_status_t nvshmemt_ucx_recv_send_am_data_cb(void * /*arg*/, const void * /*header*/,
+                                                      size_t /*header_length*/, void *data,
+                                                      [[maybe_unused]] size_t length,
                                                       const ucp_am_recv_param_t *param) {
     nvshmemt_ucx_am_header_t *header_info;
     nvshmemt_ucx_am_header_t *buffer_header;
@@ -190,7 +190,8 @@ static ucs_status_t nvshmemt_ucx_recv_send_am_data_cb(void *arg, const void *hea
 }
 
 ucs_status_t ucx_recv_resp_am_data_cb(void *arg, const void *header, size_t header_length,
-                                      void *data, size_t length, const ucp_am_recv_param_t *param) {
+                                      void * /*data*/, size_t /*length*/,
+                                      const ucp_am_recv_param_t * /*param*/) {
     struct nvshmem_transport *transport = (struct nvshmem_transport *)arg;
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
     nvshmemt_ucx_am_header_t *header_info;
@@ -420,8 +421,9 @@ error:
     return status;
 }
 
-int nvshmemt_ucx_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                   int num_selected_devs, int *out_qp_indices, int num_qps) {
+int nvshmemt_ucx_connect_endpoints(nvshmem_transport_t t, int * /*selected_dev_ids*/,
+                                   int /*num_selected_devs*/, int * /*out_qp_indices*/,
+                                   int /*num_qps*/) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)t->state;
     ucx_ep_handle_t local_ep_handle, *ep_handles = NULL;
     ucs_status_t ucs_rc;
@@ -502,8 +504,8 @@ out_already_connected:
     return status;
 }
 
-int nvshmemt_ucx_can_reach_peer(int *access, struct nvshmem_transport_pe_info *peer_info,
-                                nvshmem_transport_t t) {
+int nvshmemt_ucx_can_reach_peer(int *access, struct nvshmem_transport_pe_info * /*peer_info*/,
+                                nvshmem_transport_t /*t*/) {
     *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
               NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS;
 
@@ -777,7 +779,7 @@ int nvshmemt_ucx_process_amos(struct nvshmem_transport *transport) {
 }
 #endif
 
-int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
+int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /*curetptr*/,
                            amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                            int is_proxy) {
 #ifdef NVSHMEM_USE_GDRCOPY
@@ -839,7 +841,7 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void *cu
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
-int nvshmemt_ucx_remote_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
+int nvshmemt_ucx_remote_amo(struct nvshmem_transport *transport, int pe, void * /*curetptr*/,
                             amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                             int is_proxy) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
@@ -1008,7 +1010,8 @@ fetch_atomic:
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
-int nvshmemt_ucx_fence(struct nvshmem_transport *tcurr, int pe, int qp_index, int is_multi) {
+int nvshmemt_ucx_fence(struct nvshmem_transport *tcurr, int /*pe*/, int /*qp_index*/,
+                       int /*is_multi*/) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)tcurr->state;
     ucs_status_t ucs_rc;
 
@@ -1020,7 +1023,7 @@ int nvshmemt_ucx_fence(struct nvshmem_transport *tcurr, int pe, int qp_index, in
     return 0;
 }
 
-int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
+int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int /*pe*/, int qp_index) {
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)tcurr->state;
     ucp_request_param_t param;
     void *ucs_status;
@@ -1240,12 +1243,13 @@ int nvshmemt_ucx_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
     return 0;
 }
 
-int nvshmemt_ucx_show_info(struct nvshmem_transport *transport, int style) {
+int nvshmemt_ucx_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("UCX show info not implemented");
     return 0;
 }
 
-int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, int api_version) {
+int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*table*/,
+                  int api_version) {
     ucs_status_t ucs_rc;
     ucp_params_t params;
 

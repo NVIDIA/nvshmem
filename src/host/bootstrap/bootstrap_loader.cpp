@@ -48,7 +48,7 @@ int bootstrap_loader_finalize(bootstrap_handle_t *handle) {
     return 0;
 }
 
-static int _bootstrap_loader_init_helper(const char *plugin, bootstrap_handle_t *handle) {
+static int _bootstrap_loader_init_helper(const char *plugin) {
     int status = 0;
 
     dlerror(); /* Clear any existing error */
@@ -75,7 +75,7 @@ out:
 int bootstrap_loader_preinit(const char *plugin, bootstrap_handle_t *handle) {
     int status = 0;
     int (*bootstrap_plugin_preinitops)(bootstrap_handle_t * handle, int nvshmem_version);
-    status = _bootstrap_loader_init_helper(plugin, handle);
+    status = _bootstrap_loader_init_helper(plugin);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
                           "Bootstrap library dlopen failed for %s\n", plugin);
     GET_SYMBOL(plugin_hdl, "nvshmemi_bootstrap_plugin_pre_init", bootstrap_plugin_preinitops,
@@ -93,7 +93,7 @@ out:
 int bootstrap_loader_init(const char *plugin, void *arg, bootstrap_handle_t *handle) {
     int status = 0;
     int (*bootstrap_plugin_initops)(void *arg, bootstrap_handle_t *handle, int nvshmem_version);
-    status = _bootstrap_loader_init_helper(plugin, handle);
+    status = _bootstrap_loader_init_helper(plugin);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
                           "Bootstrap library dlopen failed for %s\n", plugin);
     GET_SYMBOL(plugin_hdl, "nvshmemi_bootstrap_plugin_init", bootstrap_plugin_initops, status);

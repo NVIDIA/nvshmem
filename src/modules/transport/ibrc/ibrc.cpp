@@ -219,14 +219,14 @@ out:
     return status;
 }
 
-int nvshmemt_ibrc_show_info(struct nvshmem_transport *transport, int style) {
+int nvshmemt_ibrc_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("ibrc show info not implemented");
     return 0;
 }
 
 
-int nvshmemt_ibrc_can_reach_peer(int *access, struct nvshmem_transport_pe_info *peer_info,
-                                 nvshmem_transport_t t) {
+int nvshmemt_ibrc_can_reach_peer(int *access, struct nvshmem_transport_pe_info * /*peer_info*/,
+                                 nvshmem_transport_t /*t*/) {
     int status = 0;
 
     *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
@@ -770,7 +770,7 @@ out:
 int poll_recv(nvshmemt_ib_common_state_t ibrc_state);
 
 template <typename T>
-int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t mh, struct ibrc_atomic_op *op, void *ptr) {
+int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_op *op, void *ptr) {
     int status = 0;
 
     T old_value, new_value;
@@ -1166,7 +1166,7 @@ out:
     return status;
 }
 
-int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void *curetptr, amo_verb_t verb,
+int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr*/, amo_verb_t verb,
                       amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc, int qp_index) {
     int status = 0;
     nvshmemt_ib_common_state_t ibrc_state = (nvshmemt_ib_common_state_t)tcurr->state;

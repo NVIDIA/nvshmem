@@ -1442,7 +1442,7 @@ out:
 }
 
 // this has to be call before channels are torn down
-void force_flush(proxy_state_t *proxy_state) {}
+void force_flush() {}
 
 inline void progress(proxy_state_t *proxy_state) {
     // progress global exit request

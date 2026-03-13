@@ -131,7 +131,7 @@ void mspace::add_new_chunk(void *base, size_t capacity) {
     add_free_chunk((char *)base, capacity);
 }
 
-int mspace::track_large_chunks(int enable) { return 0; }
+int mspace::track_large_chunks(int /*enable*/) { return 0; }
 
 void *mspace::allocate(size_t bytes) {
     INFO(NVSHMEM_MEM, "mspace_malloc called with %zu bytes", bytes);

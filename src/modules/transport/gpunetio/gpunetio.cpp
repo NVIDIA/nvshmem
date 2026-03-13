@@ -1031,8 +1031,8 @@ int nvshmemt_gpunetio_connect_endpoints(nvshmem_transport_t t, int *selected_dev
     return status;
 }
 
-int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info *peer_info,
-                                     nvshmem_transport_t t) {
+int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info * /*peer_info*/,
+                                     nvshmem_transport_t /*t*/) {
     int status = 0;
 
     *access = NVSHMEM_TRANSPORT_CAP_GPU_WRITE | NVSHMEM_TRANSPORT_CAP_GPU_READ |
@@ -1041,7 +1041,7 @@ int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info *pee
     return status;
 }
 
-int nvshmemt_gpunetio_show_info(nvshmem_transport *transport, int style) {
+int nvshmemt_gpunetio_show_info(nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("gpunetio show info not implemented\n");
     return NVSHMEMX_SUCCESS;
 }

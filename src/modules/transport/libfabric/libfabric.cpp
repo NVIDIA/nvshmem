@@ -764,7 +764,7 @@ out:
     return status;
 }
 
-static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
+static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
     uint64_t completed;
     int ep_start_idx;
@@ -820,21 +820,21 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int pe, int
 }
 
 static int nvshmemt_libfabric_fence(struct nvshmem_transport *tcurr, int pe, int qp_index,
-                                    int is_multi) {
+                                    int /*is_multi*/) {
     int status = nvshmemt_libfabric_quiet(tcurr, pe, qp_index);
 
     return status;
 }
 
-static int nvshmemt_libfabric_show_info(struct nvshmem_transport *transport, int style) {
+static int nvshmemt_libfabric_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("libfabric show info not implemented");
     return 0;
 }
 
 static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                        rma_memdesc_t *remote, rma_memdesc_t *local,
-                                       rma_bytesdesc_t bytesdesc, int qp_index, uint32_t *imm_data,
-                                       nvshmemt_libfabric_endpoint_t &ep) {
+                                       rma_bytesdesc_t bytesdesc, int /*qp_index*/,
+                                       uint32_t *imm_data, nvshmemt_libfabric_endpoint_t &ep) {
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle = NULL;
     void *local_mr_desc = NULL;
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
@@ -860,7 +860,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
         do {
             status = libfabric_state->op_queue[domain_idx]->getNextSends(&gdr_ctx, 1);
         } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_GET_NEXT_SENDS, qp_index, progress_type::All));
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_GET_NEXT_SENDS, ep.qp_index, progress_type::All));
         NVSHMEMI_NULL_ERROR_JMP(gdr_ctx, status, NVSHMEMX_ERROR_INTERNAL, out,
                                 "Unable to get context buffer for put request.\n");
         context = &gdr_ctx->ofi_context;
@@ -887,7 +887,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                                   fi_mr_desc(libfabric_state->mrs[domain_idx]), target_ep,
                                   (uintptr_t)remote->ptr, remote_handle->key, context);
             } while (try_again(tcurr, &status, &num_retries,
-                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_EFA, qp_index, progress_type::All));
+                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_EFA, ep.qp_index, progress_type::All));
         } else {
             p_op_msg.msg_iov = &p_op_l_iov;
             p_op_msg.desc = NULL;  // Local buffer is on the stack
@@ -912,7 +912,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
             do {
                 status = fi_writemsg(ep.endpoint, &p_op_msg, FI_INJECT);
             } while (try_again(tcurr, &status, &num_retries,
-                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_NON_EFA, qp_index, progress_type::All));
+                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_NON_EFA, ep.qp_index, progress_type::All));
         }
     } else if (verb.desc == NVSHMEMI_OP_PUT) {
         uintptr_t remote_addr;
@@ -928,7 +928,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                 status = fi_write(ep.endpoint, local->ptr, op_size, local_mr_desc, target_ep,
                                   remote_addr, remote_handle->key, context);
         } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT, qp_index, progress_type::All));
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT, ep.qp_index, progress_type::All));
     } else if (verb.desc == NVSHMEMI_OP_G || verb.desc == NVSHMEMI_OP_GET) {
         assert(
             !imm_data);  // Write w/ imm not suppored with NVSHMEMI_OP_G/GET on Libfabric transport
@@ -942,7 +942,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
             status = fi_read(ep.endpoint, local->ptr, op_size, local_mr_desc, target_ep,
                              remote_addr, remote_handle->key, context);
         } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_GET, qp_index, progress_type::All));
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_GET, ep.qp_index, progress_type::All));
     } else {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                            "Invalid RMA operation specified.\n");
@@ -969,8 +969,8 @@ static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_v
                                        ep);
 }
 
-static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
-                                      amo_verb_t verb, amo_memdesc_t *remote,
+static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int pe,
+                                      void * /*curetptr*/, amo_verb_t verb, amo_memdesc_t *remote,
                                       amo_bytesdesc_t bytesdesc, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_gdr_op_ctx_t *amo;
@@ -1020,7 +1020,7 @@ out:
     return status;
 }
 
-static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
+static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, void * /*curetptr*/,
                                   amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                                   int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
@@ -1170,10 +1170,10 @@ out:
 }
 
 static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,
-                                         void *curetptr, amo_verb_t verb, amo_memdesc_t *remote,
-                                         amo_bytesdesc_t bytesdesc, int qp_index,
-                                         uint32_t sequence_count, uint16_t num_writes,
-                                         nvshmemt_libfabric_endpoint_t &ep) {
+                                         void * /*curetptr*/, amo_verb_t verb,
+                                         amo_memdesc_t *remote, amo_bytesdesc_t /*bytesdesc*/,
+                                         int /*qp_index*/, uint32_t sequence_count,
+                                         uint16_t num_writes, nvshmemt_libfabric_endpoint_t &ep) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     nvshmemt_libfabric_gdr_op_ctx_t *context;
     nvshmemt_libfabric_gdr_signal_op_t *signal;
@@ -1190,7 +1190,7 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
     do {
         status = libfabric_state->op_queue[domain_idx]->getNextSends(&context, 1);
     } while (try_again(transport, &status, &num_retries,
-                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_SIGNAL_GET_NEXT_SENDS, qp_index,
+                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_SIGNAL_GET_NEXT_SENDS, ep.qp_index,
                        progress_type::All));
     NVSHMEMI_NULL_ERROR_JMP(context, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "Unable to retrieve signal operation buffer.");
@@ -1210,7 +1210,7 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
             fi_send(ep.endpoint, (void *)signal, sizeof(nvshmemt_libfabric_gdr_signal_op_t),
                     fi_mr_desc(libfabric_state->mrs[domain_idx]), target_ep, &context->ofi_context);
     } while (try_again(transport, &status, &num_retries,
-                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_SIGNAL_SEND, qp_index,
+                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_SIGNAL_SEND, ep.qp_index,
                        progress_type::All));
 
     if (status) {
@@ -1605,8 +1605,8 @@ out:
 }
 
 static int nvshmemt_libfabric_can_reach_peer(int *access,
-                                             struct nvshmem_transport_pe_info *peer_info,
-                                             nvshmem_transport_t t) {
+                                             struct nvshmem_transport_pe_info * /*peer_info*/,
+                                             nvshmem_transport_t /*t*/) {
     *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
               NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS;
 
@@ -1614,8 +1614,8 @@ static int nvshmemt_libfabric_can_reach_peer(int *access,
 }
 
 static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                                int num_selected_devs, int *out_qp_indices,
-                                                int num_qps) {
+                                                int num_selected_devs, int * /*out_qp_indices*/,
+                                                int /*num_qps*/) {
     nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)t->state;
     std::vector<nvshmemt_libfabric_ep_name_t> all_ep_names;
     std::vector<nvshmemt_libfabric_ep_name_t> local_ep_names;

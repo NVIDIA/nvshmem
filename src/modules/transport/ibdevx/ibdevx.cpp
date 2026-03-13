@@ -236,13 +236,13 @@ static struct nvshmemt_mlx5dv_function_table mlx5dv_ftable;
 static void *mlx5dv_handle;
 #endif
 
-int nvshmemt_ibdevx_show_info(struct nvshmem_transport *transport, int style) {
+int nvshmemt_ibdevx_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("ibdevx show info not implemented");
     return 0;
 }
 
-int nvshmemt_ibdevx_can_reach_peer(int *access, struct nvshmem_transport_pe_info *peer_info,
-                                   nvshmem_transport_t t) {
+int nvshmemt_ibdevx_can_reach_peer(int *access, struct nvshmem_transport_pe_info * /*peer_info*/,
+                                   nvshmem_transport_t /*t*/) {
     int status = 0;
 
     *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
@@ -251,7 +251,7 @@ int nvshmemt_ibdevx_can_reach_peer(int *access, struct nvshmem_transport_pe_info
     return status;
 }
 
-static int nvshmemt_ibdevx_mlx5_qp_destroy(struct ibdevx_ep *ep, struct ibdevx_device *device) {
+static int nvshmemt_ibdevx_mlx5_qp_destroy(struct ibdevx_ep *ep) {
     int status;
 
     status = mlx5dv_devx_obj_destroy(ep->devx_qp);
@@ -525,13 +525,10 @@ out:
     return status;
 }
 
-static int ep_destroy(struct ibdevx_ep *ep, int devid, nvshmemt_ib_common_state_t ibdevx_state) {
+static int ep_destroy(struct ibdevx_ep *ep) {
     int status = 0;
-    struct ibdevx_device *device =
-        ((struct ibdevx_device *)ibdevx_state->devices + ibdevx_state->dev_ids[devid]);
-
     if (ep->devx_qp) {
-        status = nvshmemt_ibdevx_mlx5_qp_destroy(ep, device);
+        status = nvshmemt_ibdevx_mlx5_qp_destroy(ep);
         NVSHMEMI_NZ_ERROR_JMP(status, status, out,
                               "Unable to destroy qpair for ep in ibdevx transport.\n");
     }
@@ -845,13 +842,11 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)t->state;
 
     for (int i = 0; i < ibdevx_state->ep_count; i++) {
-        ep_destroy((struct ibdevx_ep *)ibdevx_state->ep[i], ibdevx_state->selected_dev_id,
-                   ibdevx_state);
+        ep_destroy((struct ibdevx_ep *)ibdevx_state->ep[i]);
     }
 
     if (ibdevx_state->cst_ep) {
-        ep_destroy((struct ibdevx_ep *)ibdevx_state->cst_ep, ibdevx_state->selected_dev_id,
-                   ibdevx_state);
+        ep_destroy((struct ibdevx_ep *)ibdevx_state->cst_ep);
     }
 
     if (local_dummy_mr.mr) {
@@ -1067,9 +1062,10 @@ out:
     return status;
 }
 
-static inline int nvshmemt_ibdevx_amo_32(struct nvshmem_transport *tcurr, int pe, void *curetptr,
-                                         amo_verb_t verb, amo_memdesc_t *remote,
-                                         amo_bytesdesc_t bytesdesc, int qp_index) {
+static inline int nvshmemt_ibdevx_amo_32(struct nvshmem_transport *tcurr, int pe,
+                                         void * /*curetptr*/, amo_verb_t verb,
+                                         amo_memdesc_t *remote, amo_bytesdesc_t /*bytesdesc*/,
+                                         int qp_index) {
     struct ibdevx_ep *ep;
     struct ibdevx_atomic_32_wqe *wqe;
     struct nvshmemt_ib_common_mem_handle *ret_handle;
@@ -1217,9 +1213,10 @@ out:
     return status;
 }
 
-static inline int nvshmemt_ibdevx_amo_64(struct nvshmem_transport *tcurr, int pe, void *curetptr,
-                                         amo_verb_t verb, amo_memdesc_t *remote,
-                                         amo_bytesdesc_t bytesdesc, int qp_index) {
+static inline int nvshmemt_ibdevx_amo_64(struct nvshmem_transport *tcurr, int pe,
+                                         void * /*curetptr*/, amo_verb_t verb,
+                                         amo_memdesc_t *remote, amo_bytesdesc_t /*bytesdesc*/,
+                                         int qp_index) {
     struct ibdevx_ep *ep;
     struct mlx5_wqe_ctrl_seg *ctrl;
     struct mlx5_wqe_raddr_seg *raddr;

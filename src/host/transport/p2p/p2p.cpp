@@ -23,7 +23,7 @@
 
 int nvshmemt_p2p_init(nvshmem_transport_t *transport);
 
-int nvshmemt_p2p_show_info(struct nvshmem_transport *transport, int style) {
+int nvshmemt_p2p_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     /*XXX : not implemented*/
     return 0;
 }

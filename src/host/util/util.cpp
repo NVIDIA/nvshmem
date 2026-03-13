@@ -21,7 +21,7 @@
 #include "internal/host/util.h"                  // for nvshmemu_getHostHash
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"  // for bootstrap_han...
 
-static void sig_handler(int sig) {
+static void sig_handler(int /*sig*/) {
     void *array[10];
     size_t size;
 

@@ -115,7 +115,7 @@ class nvshmemi_symmetric_heap {
     std::unordered_map<void *, size_t> *get_egm_map() { return &egm_map_; }
 
     /* check if passed address in within heap range*/
-    virtual bool is_egm(void *addr) { return false; }
+    virtual bool is_egm(void * /*addr*/) { return false; }
 
    private:
     /**
@@ -350,7 +350,7 @@ class nvshmemi_symmetric_heap_dynamic : public nvshmemi_symmetric_heap {
 
    protected:
     /* Stubbed implementation, accessible in derived class only */
-    virtual int allocate_physical_memory_to_heap(size_t size) {
+    virtual int allocate_physical_memory_to_heap(size_t /*size*/) {
         return (NVSHMEMX_ERROR_NOT_SUPPORTED);
     }
     virtual int export_memory(nvshmem_mem_handle_t *mem_handle,

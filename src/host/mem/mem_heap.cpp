@@ -695,7 +695,8 @@ out:
 }
 
 int nvshmemi_symmetric_heap_vidmem_static_pinned::map_heap_range_by_pe(int pe_id, int transport_idx,
-                                                                       char *buf, size_t size) {
+                                                                       char * /*buf*/,
+                                                                       size_t /*size*/) {
     nvshmemi_state_t *state = get_state();
     return (
         (empty_heap_handle_cache())
@@ -705,8 +706,10 @@ int nvshmemi_symmetric_heap_vidmem_static_pinned::map_heap_range_by_pe(int pe_id
             : 0);
 }
 
-int nvshmemi_symmetric_heap_sysmem_static_shm::map_heap_range_by_pe(int pe_id, int transport_idx,
-                                                                    char *buf, size_t size) {
+int nvshmemi_symmetric_heap_sysmem_static_shm::map_heap_range_by_pe(int pe_id,
+                                                                    int /*transport_idx*/,
+                                                                    char * /*buf*/,
+                                                                    size_t /*size*/) {
     nvshmemi_state_t *state = get_state();
     if (empty_heap_handle_cache()) {
         peer_heap_base_p2p_[state->mype] = heap_base_;
@@ -733,12 +736,12 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::map_heap_range_by_pe(int pe_id, 
 }
 
 int nvshmemi_symmetric_heap_sysmem_static_shm::exchange_heap_memory_handle(
-    nvshmem_mem_handle_t *local_handles) {
+    nvshmem_mem_handle_t * /*local_handles*/) {
     return 0;
 }
 
 int nvshmemi_symmetric_heap_vidmem_static_pinned::exchange_heap_memory_handle(
-    nvshmem_mem_handle_t *local_handles) {
+    nvshmem_mem_handle_t * /*local_handles*/) {
     return 0;
 }
 
@@ -903,8 +906,8 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_static::map_heap_memory(nvshmem_mem_handle_t *mem_handle_in, void *buf,
-                                                    size_t size) {
+int nvshmemi_symmetric_heap_static::map_heap_memory(nvshmem_mem_handle_t * /*mem_handle_in*/,
+                                                    void *buf, size_t size) {
     int status = 0;
     nvshmemi_state_t *state = get_state();
     nvshmem_mem_handle_t local_handles[state->num_initialized_transports];
@@ -1245,8 +1248,8 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_sysmem_static_shm::export_memory(nvshmem_mem_handle_t *mem_handle,
-                                                             void *buf, size_t length) {
+int nvshmemi_symmetric_heap_sysmem_static_shm::export_memory(nvshmem_mem_handle_t * /*mem_handle*/,
+                                                             void * /*buf*/, size_t /*length*/) {
     return (0); /** This is a NOOP for linux sysmem shared memory as entire memory is mapped to all
                    PEs at allocation time, so there is no step needed to export the memory */
 }
@@ -1294,7 +1297,7 @@ out:
 }
 
 int nvshmemi_symmetric_heap_vidmem_static_pinned::import_memory(nvshmem_mem_handle_t *mem_handle,
-                                                                void **buf, size_t size) {
+                                                                void **buf, size_t /*size*/) {
     int status = 0;
     cudaIpcMemHandle_t *ipc_handle = (cudaIpcMemHandle_t *)mem_handle;
 
@@ -1305,8 +1308,8 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_sysmem_static_shm::import_memory(nvshmem_mem_handle_t *mem_handle,
-                                                             void **buf, size_t size) {
+int nvshmemi_symmetric_heap_sysmem_static_shm::import_memory(nvshmem_mem_handle_t * /*mem_handle*/,
+                                                             void ** /*buf*/, size_t /*size*/) {
     return (0); /** This is a NOOP for linux sysmem shared memory as entire memory is mapped to all
                    PEs at allocation time, so there is no step needed to export the memory */
 }
@@ -1320,7 +1323,7 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_vidmem_static_pinned::release_memory(void *buf, size_t size) {
+int nvshmemi_symmetric_heap_vidmem_static_pinned::release_memory(void *buf, size_t /*size*/) {
     int status = 0;
     status = cudaIpcCloseMemHandle(buf);
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -1329,7 +1332,7 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_sysmem_static_shm::release_memory(void *buf, size_t size) {
+int nvshmemi_symmetric_heap_sysmem_static_shm::release_memory(void * /*buf*/, size_t /*size*/) {
     return (0); /** This is a NOOP for linux sysmem shared memory as entire memory is munmap to all
                    PEs at cleanup time, so there is no step needed to release buffer range */
 }

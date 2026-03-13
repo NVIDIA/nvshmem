@@ -323,7 +323,8 @@ out:
 }
 
 int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                         int num_selected_devs, int *out_qp_indices, int num_qps) {
+                                         int /*num_selected_devs*/, int *out_qp_indices,
+                                         int num_qps) {
     /* transport side */
     struct nvshmemt_ib_common_ep_handle *local_ep_handles = nullptr, *ep_handles = nullptr;
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;

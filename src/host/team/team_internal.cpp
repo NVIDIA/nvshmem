@@ -488,7 +488,8 @@ static void nvshmemi_recexchalgo_free_mem(nvshmemi_team_t *teami) {
     }
 }
 
-static inline void nvshmemi_bit_set(unsigned char *ptr, size_t size, size_t index) {
+static inline void nvshmemi_bit_set(unsigned char *ptr, [[maybe_unused]] size_t size,
+                                    size_t index) {
     assert(size > 0 && (index < size * CHAR_BIT));
 
     size_t which_byte = index / CHAR_BIT;
@@ -497,7 +498,8 @@ static inline void nvshmemi_bit_set(unsigned char *ptr, size_t size, size_t inde
     return;
 }
 
-static inline void nvshmemi_bit_clear(unsigned char *ptr, size_t size, size_t index) {
+static inline void nvshmemi_bit_clear(unsigned char *ptr, [[maybe_unused]] size_t size,
+                                      size_t index) {
     assert(size > 0 && (index < size * CHAR_BIT));
 
     size_t which_byte = index / CHAR_BIT;
@@ -1740,7 +1742,7 @@ out:
     return status;
 }
 
-int nvshmemi_copy_internal_team_pe_info(nvshmemi_team_t *myteam, nvshmemi_team_t *mydeviceteam) {
+int nvshmemi_copy_internal_team_pe_info(nvshmemi_team_t *myteam) {
     int status = NVSHMEMX_SUCCESS;
     nvshmemi_team_creation_pe_info *team_info = NULL;
 
@@ -1773,8 +1775,7 @@ out:
 }
 
 static int nvshmemi_team_populate_from_uid(nvshmemi_team_t *myteam, nvshmemi_team_t *mydeviceteam,
-                                           nvshmemi_team_uniqueid_t team_uniqueid, int npes,
-                                           int my_pe_idx_in_team) {
+                                           nvshmemi_team_uniqueid_t team_uniqueid, int npes) {
     int status = NVSHMEMX_SUCCESS;
 
     char bit_str[NVSHMEMI_DIAG_STRLEN];
@@ -1782,7 +1783,7 @@ static int nvshmemi_team_populate_from_uid(nvshmemi_team_t *myteam, nvshmemi_tea
     nvshmemi_bit_to_string(bit_str, NVSHMEMI_DIAG_STRLEN, psync_pool_avail, N_PSYNC_BYTES);
     INFO(NVSHMEM_COLL, "in nvshmemi_team_populate_from_uid, psync_pool_avail: %s\n", bit_str);
 
-    status = nvshmemi_copy_internal_team_pe_info(myteam, mydeviceteam);
+    status = nvshmemi_copy_internal_team_pe_info(myteam);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                           "Failed to copy internal team pe info\n");
 
@@ -1809,8 +1810,7 @@ int nvshmemi_team_set_team_idx_v2(nvshmemi_team_t *myteam, nvshmemi_team_t *myde
     INFO(NVSHMEM_COLL, "entering nvshmemi_team_set_team_idx_v2\n");
     assert(myteam->config.version != NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER);
 
-    nvshmemi_team_populate_from_uid(myteam, mydeviceteam, myteam->config.uniqueid, myteam->size,
-                                    myteam->my_pe);
+    nvshmemi_team_populate_from_uid(myteam, mydeviceteam, myteam->config.uniqueid, myteam->size);
 
     nvshmemi_call_team_index_kernel(mydeviceteam, nvshmemi_team_creation_psync, N_PSYNC_BYTES);
 
@@ -1854,8 +1854,9 @@ int nvshmemi_team_set_team_idx(nvshmemi_team_t *myteam, nvshmemi_team_t *mydevic
 
 /* This must be called after the team has been populated*/
 int nvshmemi_team_allocate_resources(nvshmemi_team_t *myteam, nvshmemi_team_t *mydeviceteam,
-                                     nvshmemi_team_t *parent_team, nvshmem_team_config_t *config,
-                                     long config_mask, bool is_dupl_team = false) {
+                                     nvshmemi_team_t *parent_team,
+                                     nvshmem_team_config_t * /*config*/, long /*config_mask*/,
+                                     [[maybe_unused]] bool is_dupl_team = false) {
     int status = NVSHMEMX_SUCCESS;
 
     myteam->rdxn_count = 0;
