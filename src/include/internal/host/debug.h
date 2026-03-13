@@ -57,7 +57,7 @@ extern std::chrono::high_resolution_clock::time_point nvshmem_epoch;
 #define TRACE(...)
 #endif
 
-static int strcmp_case_insensitive(const char *a, const char *b) {
+inline int strcmp_case_insensitive(const char *a, const char *b) {
     int ca, cb;
     do {
         ca = (unsigned char)*a++;

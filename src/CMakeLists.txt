@@ -389,7 +389,6 @@ macro(nvshmem_library_set_base_config LIBNAME)
               $<$<COMPILE_LANGUAGE:CXX>:-Werror
               -Wall
               -Wextra
-              -Wno-unused-function
               -Wno-unused-parameter
               -Wno-missing-field-initializers>
     )

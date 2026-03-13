@@ -87,15 +87,14 @@
 #define IBGDA_MIN(x, y) ((x) < (y) ? (x) : (y))
 #define IBGDA_MAX(x, y) ((x) > (y) ? (x) : (y))
 
-#define IBGDA_ROUND_UP(V, SIZE) (((V) + (SIZE)-1) / (SIZE) * (SIZE))
+#define IBGDA_ROUND_UP(V, SIZE) (((V) + (SIZE) - 1) / (SIZE) * (SIZE))
 
-#define IBGDA_ROUND_UP_POW2(_n)                 \
-    ({                                          \
-        typeof(_n) pow2 = 0;                    \
-        assert((_n) >= 1);                      \
-        for (pow2 = 1; pow2 < (_n); pow2 <<= 1) \
-            ;                                   \
-        pow2;                                   \
+#define IBGDA_ROUND_UP_POW2(_n)                  \
+    ({                                           \
+        typeof(_n) pow2 = 0;                     \
+        assert((_n) >= 1);                       \
+        for (pow2 = 1; pow2 < (_n); pow2 <<= 1); \
+        pow2;                                    \
     })
 
 #define IBGDA_ROUND_UP_POW2_OR_0(_n) (((_n) == 0) ? 0 : IBGDA_ROUND_UP_POW2(_n))
@@ -437,13 +436,6 @@ static int ibgda_parse_nic_handler_request(ibgda_nic_handler_t *out_loc, const c
 out:
     return status;
 }
-
-static size_t ibgda_get_host_page_size() {
-    static size_t host_page_size = 0;
-    if (!host_page_size) host_page_size = sysconf(_SC_PAGESIZE);
-    return host_page_size;
-}
-
 
 int nvshmemt_ibgda_can_reach_peer(int *access, struct nvshmem_transport_pe_info *peer_info,
                                   nvshmem_transport_t t) {
@@ -935,7 +927,7 @@ static int ibgda_mobject_nic_map(struct ibgda_mem_object *mobject, struct ibv_co
         struct mlx5dv_devx_umem_in umem_in = {
             0,
         };
-        const size_t host_page_size = ibgda_get_host_page_size();
+        static const size_t host_page_size = sysconf(_SC_PAGESIZE);
         size_t dmabuf_size = IBGDA_ROUND_UP(mobject->aligned.size, host_page_size);
         CUCHECKGOTO(ibgda_cuda_syms,
                     cuMemGetHandleForAddressRange(&fd, (CUdeviceptr)addr, dmabuf_size,
@@ -4573,8 +4565,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     NVSHMEMI_NZ_ERROR_JMP(status, status, out, "NVSHMEM_IBGDA_NIC_HANDLER is not valid.");
 
     status = nvshmemt_ib_common_enumerate_devices(&ftable, ibgda_state->common,
-                                                  sizeof(struct ibgda_device), hca_filter,
-                                                  dev_list, num_devices);
+                                                  sizeof(struct ibgda_device), hca_filter, dev_list,
+                                                  num_devices);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Device enumeration failed.\n");
 
     {
