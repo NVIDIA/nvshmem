@@ -54,6 +54,7 @@ def test_device_sync(nvshmem_init_fini, team):
     compiled(team)
     dev.sync()
     nvshmem.core.barrier(team, stream=stream)
+    stream.sync()  # Sync stream after barrier
 
 
 @pytest.mark.mpi
@@ -83,3 +84,4 @@ def test_device_barrier(nvshmem_init_fini, team):
     dev.sync()
     print(f"After barrier from {nvshmem.core.my_pe()}")
     nvshmem.core.barrier(team, stream=stream)
+    stream.sync()  # Sync stream after barrier
