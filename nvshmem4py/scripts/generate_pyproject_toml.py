@@ -35,7 +35,8 @@ packages = [
     "nvshmem.bindings.device.numba",
     "nvshmem.core",
     "nvshmem.core.device",
-    "nvshmem.core.device.numba"
+    "nvshmem.core.device.numba",
+    "nvshmem.core.device.cute"
 ]
 include-package-data = true
 
@@ -46,6 +47,7 @@ include-package-data = true
 "nvshmem.bindings" = ["*.py", "*.pxd","*.so"]
 "nvshmem.bindings._internal" = ["*.py", "*.pxd", "*.so"]
 "nvshmem.bindings.device.numba" = ["*.py", "entry_point.h"]
+"nvshmem.bindings.device.cute" = ["*.py"]
 
 
 [tool.setuptools_scm]
@@ -64,6 +66,9 @@ dev = [
 ]
 numba = [
     "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.28.0",
+]
+cute = [
+    "nvidia-cutlass-dsl>=4.4.2",
 ]
 
 [tool.black]
