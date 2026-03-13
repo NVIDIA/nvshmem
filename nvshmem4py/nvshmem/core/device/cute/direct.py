@@ -89,7 +89,7 @@ def n_pes():
     This is a thread-level query equivalent to ``team_n_pes(TEAM_WORLD)``.
 
     Returns:
-        The total number of PEs in the job (``int32``).
+        The total number of PEs running in the NVSHMEM program (``int32``).
 
     Note:
         May be called from any thread; all threads in a kernel return the same
