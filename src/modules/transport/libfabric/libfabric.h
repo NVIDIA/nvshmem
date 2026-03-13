@@ -4,10 +4,14 @@
  */
 
 #include <assert.h>
+#include <linux/futex.h>
+#include <pthread.h>
 #include <stdint.h>  // IWYU pragma: keep
 #include <stdio.h>
 #include <cstdlib>
 #include <stddef.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <string.h>
 #include <atomic>
 #include <array>
@@ -27,6 +31,18 @@
 #include "non_abi/nvshmemx_error.h"
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
+#include "internal/host_transport/transport.h"
+
+#if defined(NVSHMEM_X86_64)
+#include <immintrin.h>  // IWYU pragma: keep
+#define NVSHMEMT_LIBFABRIC_CPU_RELAX() _mm_pause()
+#elif defined(NVSHMEM_AARCH64)
+#define NVSHMEMT_LIBFABRIC_CPU_RELAX() asm volatile("yield" ::: "memory")
+#elif defined(NVSHMEM_PPC64LE)
+#define NVSHMEMT_LIBFABRIC_CPU_RELAX() asm volatile("or 27,27,27" ::: "memory")
+#else
+#define NVSHMEMT_LIBFABRIC_CPU_RELAX() asm volatile("" ::: "memory")
+#endif
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "gdrapi.h"
@@ -77,6 +93,8 @@ typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
  * This will not be returned by the sequence counter.
  */
 #define NVSHMEM_STAGED_AMO_SEQ_NUM NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK
+
+static constexpr size_t nvshmemt_libfabric_signal_queue_capacity = 1024;
 
 /**
  * Type used for tracking sequence numbers for put-signal operations
@@ -423,16 +441,16 @@ class threadSafeOpQueue {
 
     conditional_mutex send_mutex;
     conditional_mutex ack_recv_mutex;
-    conditional_mutex other_recv_mutex;
+    conditional_mutex amo_recv_mutex;
     std::vector<nvshmemt_libfabric_gdr_op_ctx_t *> send;
     std::deque<nvshmemt_libfabric_gdr_op_ctx_t *> ack_recv;
-    std::deque<nvshmemt_libfabric_gdr_op_ctx_t *> other_recv;
+    std::deque<nvshmemt_libfabric_gdr_op_ctx_t *> amo_recv;
 
    public:
     explicit threadSafeOpQueue(bool locking_required)
         : send_mutex(locking_required),
           ack_recv_mutex(locking_required),
-          other_recv_mutex(locking_required) {}
+          amo_recv_mutex(locking_required) {}
 
     threadSafeOpQueue(const threadSafeOpQueue &) = delete;
     threadSafeOpQueue &operator=(const threadSafeOpQueue &) = delete;
@@ -462,12 +480,12 @@ class threadSafeOpQueue {
         int num_sends = 0;
 
         if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK) {
-            const std::lock_guard<conditional_mutex> lg{other_recv_mutex};
-            if (other_recv.empty()) {
+            const std::lock_guard<conditional_mutex> lg{amo_recv_mutex};
+            if (amo_recv.empty()) {
                 *recv_elem = NULL;
                 return 0;
             }
-            *recv_elem = other_recv.front();
+            *recv_elem = amo_recv.front();
             nvshmemi_amo_t amo_op = static_cast<nvshmemi_amo_t>(
                 static_cast<int>((*recv_elem)->send_amo.op) & ~NVSHMEMI_AMO_FLOAT_BIT);
             if (amo_op > NVSHMEMI_AMO_END_OF_NONFETCH) {
@@ -484,7 +502,7 @@ class threadSafeOpQueue {
             for (int i = 0; i < num_sends; i++) {
                 assert(send_elems[i] != NULL);
             }
-            other_recv.pop_front();
+            amo_recv.pop_front();
             return 0;
         } else if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
             const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
@@ -521,8 +539,8 @@ class threadSafeOpQueue {
             const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
             ack_recv.push_back(elem);
         } else if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK) {
-            const std::lock_guard<conditional_mutex> lg{other_recv_mutex};
-            other_recv.push_back(elem);
+            const std::lock_guard<conditional_mutex> lg{amo_recv_mutex};
+            amo_recv.push_back(elem);
         } else {
             fprintf(stderr, "putToRecv: invalid recv_type: %d\n", recv_type);
             assert(false);
@@ -536,6 +554,50 @@ struct cuda_device_deleter {
     }
 };
 using cuda_device_ptr = std::unique_ptr<void, cuda_device_deleter>;
+
+struct signal_delivery_work_entry {
+    nvshmemt_libfabric_gdr_op_ctx_t *op;
+    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
+    uint32_t sequence_count;
+};
+
+struct signal_delivery_done_entry {
+    nvshmemt_libfabric_gdr_op_ctx_t *op;
+    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
+    uint32_t sequence_count;
+    int src_pe;
+    fi_addr_t src_addr;
+    int ep_index;
+    bool is_fetch_amo;
+    uint64_t old_value;
+    uint64_t ret_flags;
+    void *ret_addr;
+};
+
+template <typename T, size_t Capacity = nvshmemt_libfabric_signal_queue_capacity>
+class SPSCRing {
+    std::array<T, Capacity> ring{};
+    alignas(64) std::atomic<size_t> head{0};
+    alignas(64) std::atomic<size_t> tail{0};
+
+   public:
+    bool push(const T &entry) {
+        size_t h = head.load(std::memory_order_relaxed);
+        size_t next = (h + 1) % Capacity;
+        if (next == tail.load(std::memory_order_acquire)) return false;
+        ring[h] = entry;
+        head.store(next, std::memory_order_release);
+        return true;
+    }
+
+    bool pop(T &entry) {
+        size_t t = tail.load(std::memory_order_relaxed);
+        if (t == head.load(std::memory_order_acquire)) return false;
+        entry = ring[t];
+        tail.store((t + 1) % Capacity, std::memory_order_release);
+        return true;
+    }
+};
 
 /*
  * Each index of the vectors contain a domain-specific resource. Host domain resources are first,
@@ -596,10 +658,19 @@ struct nvshmemt_libfabric_state_t {
     /* Max ops per progress iteration */
     int proxy_request_batch_max = 0;
 
+    /* Signal delivery thread. */
+    pthread_t signal_delivery_thread{};
+    std::atomic<int> signal_delivery_stop{0};
+    std::atomic<int> signal_delivery_status{0};
+    nvshmem_transport_t signal_delivery_transport = nullptr;
+    std::atomic<int> signal_delivery_futex{0};
+    std::atomic_flag signal_progress_lock = ATOMIC_FLAG_INIT;
+    SPSCRing<signal_delivery_done_entry> signal_done_queue;
+    SPSCRing<signal_delivery_work_entry> signal_work_queue;
+
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
-    std::mutex gdrRecvMutex;
 };
 
 typedef struct {

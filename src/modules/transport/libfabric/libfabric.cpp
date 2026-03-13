@@ -17,14 +17,12 @@
 #include <string.h>
 #include <sys/types.h>
 #include <mutex>
+#include <new>
 #include <unordered_map>
 #include <memory>
 #include <utility>
 #include <errno.h>
-#ifdef NVSHMEM_X86_64
-#include <immintrin.h>  // IWYU pragma: keep
-#endif
-// IWYU pragma: no_include <xmmintrin.h>
+#include <sched.h>
 
 #include "internal/host_transport/cudawrap.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
@@ -122,6 +120,10 @@ struct nvshmemi_options_s options;
 
 /* Forward declarations */
 static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, int qp_index);
+static int nvshmemt_libfabric_gdr_process_amo(nvshmem_transport_t transport,
+                                              nvshmemt_libfabric_gdr_op_ctx_t *op,
+                                              nvshmemt_libfabric_gdr_op_ctx_t **send_elems,
+                                              uint32_t sequence_count);
 static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
                                                     nvshmemt_libfabric_endpoint_t &ep,
                                                     const struct fi_cq_data_entry &entry,
@@ -254,6 +256,13 @@ out:
     return status;
 }
 
+int check_signal_delivery_status(nvshmemt_libfabric_state_t *state) {
+    if (unlikely(state->signal_delivery_status.load(std::memory_order_acquire) != 0)) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    return 0;
+}
+
 int try_again(nvshmem_transport_t transport, int *status, uint64_t *num_retries,
               nvshmemt_libfabric_try_again_call_site_t call_site, int qp_index,
               progress_type prog_type) {
@@ -270,10 +279,8 @@ int try_again(nvshmem_transport_t transport, int *status, uint64_t *num_retries,
         }
         (*num_retries)++;
         /*
-         * CompletionsOnly is used by retries originating from inside
-         * nvshmemt_libfabric_gdr_process_amos, which already holds gdrRecvMutex.
-         * Those retries must not re-enter the top-level progress (would deadlock
-         * / hit try_lock UB on the non-recursive mutex).
+         * CompletionsOnly is used by retries originating from paths that must not
+         * re-enter top-level progress while signal_progress_lock is held.
          */
         if (prog_type == progress_type::All) {
             *status = nvshmemt_libfabric_progress(transport, qp_index);
@@ -347,25 +354,21 @@ template <typename T>
 int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op_ctx_t *op,
                         nvshmemt_libfabric_gdr_op_ctx_t **send_elems, uint32_t sequence_count) {
     T old_value, new_value = {};
-    uint64_t num_retries = 0;
-    int send_elems_index = 0;
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_gdr_send_amo_op_t *received_op = &(op->send_amo);
-    nvshmemt_libfabric_gdr_op_ctx_t *resp_op = NULL;
     nvshmemt_libfabric_memhandle_info_t *handle_info;
     volatile T *ptr;
     int status = 0;
     /* Decode float flag from op field */
     bool is_float = (received_op->op & NVSHMEMI_AMO_FLOAT_BIT) != 0;
     received_op->op = (nvshmemi_amo_t)(received_op->op & ~NVSHMEMI_AMO_FLOAT_BIT);
+    signal_delivery_done_entry done{};
     /* Save op fields as registers to allow posting op as RX before TX */
     int src_pe = op->send_amo.src_pe;
-    nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[op->ep_index]);
     fi_addr_t src_addr = op->src_addr;
     bool is_fetch_amo = received_op->op > NVSHMEMI_AMO_END_OF_NONFETCH;
     uint64_t ret_flags = received_op->retflag;
     void *ret_addr = received_op->ret_addr;
-    int domain_idx = ep.domain_index;
 
     handle_info = (nvshmemt_libfabric_memhandle_info_t *)nvshmemt_mem_handle_cache_get(
         transport, libfabric_state->cache, received_op->target_addr);
@@ -436,25 +439,63 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
     *ptr = new_value;
     STORE_BARRIER();
 
+    /* Push to done_queue for proxy thread to handle EP ops */
+    done.op = op;
+    done.send_elems[0] = send_elems[0];
+    done.send_elems[1] = send_elems[1];
+    done.sequence_count = sequence_count;
+    done.src_pe = src_pe;
+    done.src_addr = src_addr;
+    done.ep_index = op->ep_index;
+    done.is_fetch_amo = is_fetch_amo;
+    done.old_value = static_cast<uint64_t>(old_value);
+    done.ret_flags = ret_flags;
+    done.ret_addr = ret_addr;
+    while (!libfabric_state->signal_done_queue.push(done)) {
+        NVSHMEMT_LIBFABRIC_CPU_RELAX();
+    }
+
+out:
+    return status;
+}
+
+/* Process done_queue entries: fi_recv re-post + fi_send response + fi_writedata ACK.
+ * Process 1 per call for low latency. Deadlock-free because process_amos drains
+ * done_queue when work_queue is full instead of spinning. */
+static int nvshmemt_libfabric_gdr_complete_amos(nvshmem_transport_t transport) {
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
+    signal_delivery_done_entry done{};
+    uint64_t num_retries = 0;
+    int send_elems_index = 0;
+    int status = 0;
+
+    if (!libfabric_state->signal_done_queue.pop(done)) {
+        return 0;
+    }
+
+    nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[done.ep_index]);
+
     /* Post recv before posting TX operations to avoid deadlocks */
     status =
-        fi_recv(ep.endpoint, (void *)op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
-                fi_mr_desc(libfabric_state->mrs[domain_idx]), FI_ADDR_UNSPEC, &op->ofi_context);
+        fi_recv(ep.endpoint, (void *)done.op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
+                fi_mr_desc(libfabric_state->mrs[ep.domain_index]), FI_ADDR_UNSPEC,
+                &done.op->ofi_context);
     NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                     "Unable to re-post recv.\n");
 
-    if (is_fetch_amo) {
-        resp_op = send_elems[send_elems_index];
+    if (done.is_fetch_amo) {
+        nvshmemt_libfabric_gdr_op_ctx_t *resp_op = done.send_elems[send_elems_index];
 
-        resp_op->ret_amo.elem.data = old_value;
-        resp_op->ret_amo.elem.flag = ret_flags;
-        resp_op->ret_amo.ret_addr = ret_addr;
+        resp_op->ret_amo.elem.data = done.old_value;
+        resp_op->ret_amo.elem.flag = done.ret_flags;
+        resp_op->ret_amo.ret_addr = done.ret_addr;
         resp_op->type = NVSHMEMT_LIBFABRIC_ACK;
 
         do {
-            status = fi_send(ep.endpoint, (void *)resp_op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
-                             fi_mr_desc(libfabric_state->mrs[domain_idx]), src_addr,
-                             &resp_op->ofi_context);
+            status = fi_send(ep.endpoint, (void *)resp_op,
+                             NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
+                             fi_mr_desc(libfabric_state->mrs[ep.domain_index]),
+                             done.src_addr, &resp_op->ofi_context);
         } while (try_again(transport, &status, &num_retries,
                            NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_PERFORM_GDRCOPY_AMO_SEND,
                            ep.qp_index, progress_type::CompletionsOnly));
@@ -464,9 +505,11 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
         send_elems_index++;
     }
 
-    status = gdrcopy_amo_ack(transport, ep, src_addr, sequence_count, src_pe,
-                             &send_elems[send_elems_index],
+    status = gdrcopy_amo_ack(transport, ep, done.src_addr, done.sequence_count,
+                             done.src_pe, &done.send_elems[send_elems_index],
                              NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to send ack.\n");
+
 out:
     return status;
 }
@@ -664,10 +707,8 @@ static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, 
 }
 
 /*
- * Drain CQ completions and (for EFA) any pending staged-amo acks.
- * Does not acquire gdrRecvMutex; does not call nvshmemt_libfabric_progress.
- * Safe to call while the current thread already holds gdrRecvMutex
- * (this is the path used by try_again from inside gdr_process_amos).
+ * Drain CQ completions without calling nvshmemt_libfabric_progress.
+ * Safe for try_again paths that cannot re-enter the top-level progress loop.
  */
 static int drain_completions(nvshmem_transport_t transport, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
@@ -703,14 +744,43 @@ out:
     return status;
 }
 
+static void *nvshmemt_libfabric_signal_delivery_thread(void *arg) {
+    nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)arg;
+    nvshmem_transport_t transport = state->signal_delivery_transport;
+    signal_delivery_work_entry work{};
+
+    /* Inherit the process CPU affinity so the OS can schedule on any allowed core. */
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    if (sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0) {
+        pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+    }
+
+    while (!state->signal_delivery_stop.load(std::memory_order_relaxed)) {
+        if (!state->signal_work_queue.pop(work)) {
+            state->signal_delivery_futex.store(0, std::memory_order_release);
+            /* Re-check after store to avoid missed wake. */
+            if (!state->signal_work_queue.pop(work)) {
+                syscall(SYS_futex, &state->signal_delivery_futex, FUTEX_WAIT, 0, NULL, NULL, 0);
+                continue;
+            }
+        }
+        int status = nvshmemt_libfabric_gdr_process_amo(transport, work.op, work.send_elems,
+                                                        work.sequence_count);
+        if (unlikely(status)) {
+            NVSHMEMI_WARN_PRINT("Failed call to nvshmemt_libfabric_gdr_process_amo: %d",
+                                status);
+            state->signal_delivery_status.store(status, std::memory_order_release);
+            state->signal_delivery_stop.store(1, std::memory_order_release);
+            break;
+        }
+    }
+    return NULL;
+}
+
 /*
- * Top-level progress: drains completions, then opportunistically drains the
- * staged-amo queue under gdrRecvMutex. Non-recursive.
- *
- * Precondition: the calling thread must NOT already hold gdrRecvMutex
- * (std::mutex::try_lock is UB on a mutex the current thread owns).
- * In practice, the mutex is only held inside nvshmemt_libfabric_gdr_process_amos;
- * retries from there call drain_completions directly via try_again.
+ * Top-level progress: drains completions, drains completed signal-delivery work,
+ * then enqueues pending staged-AMOs for the signal delivery thread.
  */
 static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
@@ -719,13 +789,44 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
 
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
         int effective_qp = libfabric_state->use_auto_progress ? qp_index : NVSHMEMX_QP_ALL;
-        if (std::unique_lock<std::mutex> lock{libfabric_state->gdrRecvMutex, std::try_to_lock};
-            lock.owns_lock()) {
-            status = nvshmemt_libfabric_gdr_process_amos(transport, effective_qp);
-            if (unlikely(status)) {
-                NVSHMEMI_ERROR_PRINT("Unable to process amos: %d.\n", status);
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
+        status = check_signal_delivery_status(libfabric_state);
+        if (unlikely(status)) return status;
+
+        /* Serialize access to SPSC rings; both host and proxy threads may enter here. */
+        while (libfabric_state->signal_progress_lock.test_and_set(std::memory_order_acquire)) {
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        }
+        status = check_signal_delivery_status(libfabric_state);
+        if (unlikely(status)) {
+            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
+            return status;
+        }
+
+        /* Drain done_queue first: fi_recv + ACK, freeing space before new work. */
+        status = nvshmemt_libfabric_gdr_complete_amos(transport);
+        if (unlikely(status)) {
+            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        status = check_signal_delivery_status(libfabric_state);
+        if (unlikely(status)) {
+            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
+            return status;
+        }
+
+        /* Dequeue from op_queue, push to work_queue for signal delivery thread */
+        status = nvshmemt_libfabric_gdr_process_amos(transport, effective_qp);
+        libfabric_state->signal_progress_lock.clear(std::memory_order_release);
+        if (unlikely(status)) {
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+
+        status = check_signal_delivery_status(libfabric_state);
+        if (unlikely(status)) return status;
+
+        /* Wake Thread B only if it might be sleeping (futex was 0) */
+        if (libfabric_state->signal_delivery_futex.exchange(1, std::memory_order_release) == 0) {
+            syscall(SYS_futex, &libfabric_state->signal_delivery_futex, FUTEX_WAKE, 1, NULL, NULL, 0);
         }
     }
     return 0;
@@ -794,27 +895,29 @@ static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, in
 
             if (op) {
                 ops_processed++;
+                signal_delivery_work_entry work{};
+                work.op = op;
+                work.send_elems[0] = send_elems[0];
+                work.send_elems[1] = send_elems[1];
                 if (op->type == NVSHMEMT_LIBFABRIC_SEND) {
-                    assert(send_elems[0] != NULL);
-                    assert(send_elems[1] != NULL);
-                    status = nvshmemt_libfabric_gdr_process_amo(transport, op, send_elems,
-                                                                NVSHMEM_STAGED_AMO_SEQ_NUM);
-                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                          "Unable to process atomic.\n");
-                    /* Reposts recv in perform_gdrcopy_amo() */
-                } else if (op->type == NVSHMEMT_LIBFABRIC_MATCH) {
-                    assert(send_elems[0] != NULL);
-                    assert(send_elems[1] != NULL);
-                    status = nvshmemt_libfabric_gdr_process_amo(transport, op, send_elems,
-                                                                op->send_amo.sequence_count);
-                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                          "Unable to process atomic.\n");
-                    /* Reposts recv in perform_gdrcopy_amo() */
+                    work.sequence_count = NVSHMEM_STAGED_AMO_SEQ_NUM;
+                } else {
+                    work.sequence_count = op->send_amo.sequence_count;
+                }
+                while (!libfabric_state->signal_work_queue.push(work)) {
+                    /* Don't spin — drain done_queue so the signal delivery
+                       thread can consume work_queue and make space. */
+                    status = nvshmemt_libfabric_gdr_complete_amos(transport);
+                    if (status) {
+                        NVSHMEMI_WARN_PRINT("Failed call to nvshmemt_libfabric_gdr_complete_amos: %d",
+                                            status);
+                        return NVSHMEMX_ERROR_INTERNAL;
+                    }
                 }
             }
         } while (op && ops_processed < libfabric_state->proxy_request_batch_max);
     }
-out:
+
     return status;
 }
 
@@ -2206,6 +2309,17 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
                               "Failed to gather remote keys.\n");
     }
 
+    /* Spawn signal delivery thread for EFA staged atomics */
+    if (state->use_staged_atomics) {
+        state->signal_delivery_stop.store(0, std::memory_order_relaxed);
+        state->signal_delivery_status.store(0, std::memory_order_relaxed);
+        state->signal_delivery_transport = t;
+        status = pthread_create(&state->signal_delivery_thread, NULL,
+                                nvshmemt_libfabric_signal_delivery_thread, state);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Failed to create signal delivery thread.\n");
+    }
+
 out:
     if (status != 0) {
         for (size_t i = 0; i < state->mr_staged_amo_acks.size(); i++)
@@ -2243,6 +2357,14 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
         get_libfabric_state(transport));
     transport->state = nullptr;
     nvshmemt_libfabric_state_t *libfabric_state = libfabric_state_owner.get();
+
+    /* Stop signal delivery thread before tearing down resources */
+    if (libfabric_state->use_staged_atomics && libfabric_state->signal_delivery_transport) {
+        libfabric_state->signal_delivery_stop.store(1, std::memory_order_seq_cst);
+        libfabric_state->signal_delivery_futex.store(1, std::memory_order_release);
+        syscall(SYS_futex, &libfabric_state->signal_delivery_futex, FUTEX_WAKE, 1, NULL, NULL, 0);
+        pthread_join(libfabric_state->signal_delivery_thread, NULL);
+    }
 
     if (transport->device_pci_paths) {
         for (int i = 0; i < transport->n_devices; i++) {
