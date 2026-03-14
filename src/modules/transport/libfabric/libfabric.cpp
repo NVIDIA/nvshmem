@@ -204,9 +204,11 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
 
     if (entry->flags & FI_SEND) {
         state->op_queue[ep->domain_index]->putToSend(op);
+        ep->completed_ops++;
     } else if (entry->flags & FI_RMA) {
         /* inlined p ops or atomic responses */
         state->op_queue[ep->domain_index]->putToSend(op);
+        ep->completed_ops++;
     } else if ((op->type == NVSHMEMT_LIBFABRIC_MATCH) && (entry->flags & FI_RECV)) {
         /* Must happen after entry->flags & FI_SEND to avoid send completions */
         status = nvshmemt_libfabric_put_signal_completion(transport, ep, entry, addr);
@@ -237,31 +239,8 @@ static int nvshmemt_libfabric_single_ep_progress(nvshmem_transport_t transport,
     fi_addr_t *addr;
     ssize_t qstatus;
     struct fi_cq_data_entry *entry;
-    uint64_t cnt;
     int status = 0;
-
-    cnt = fi_cntr_readerr(ep->counter);
-    if (cnt > 0) {
-        NVSHMEMI_WARN_PRINT("Nonzero error count progressing EP (%" PRIu64 ")\n", cnt);
-        struct fi_cq_err_entry err;
-        memset(&err, 0, sizeof(struct fi_cq_err_entry));
-        ssize_t nerr = fi_cq_readerr(ep->cq, &err, 0);
-
-        if (nerr > 0) {
-            char str[100] = "\0";
-            const char *err_str = fi_cq_strerror(ep->cq, err.prov_errno, err.err_data, str, 100);
-            NVSHMEMI_WARN_PRINT(
-                "CQ reported error (%d): %s\n\tProvider error: %s\n\tSupplemental error "
-                "info: %s\n",
-                err.err, fi_strerror(err.err), err_str ? err_str : "none",
-                strlen(str) ? str : "none");
-        } else if (nerr == -FI_EAGAIN) {
-            NVSHMEMI_WARN_PRINT("fi_cq_readerr returned -FI_EAGAIN\n");
-        } else {
-            NVSHMEMI_WARN_PRINT("fi_cq_readerr returned %zd: %s\n", nerr, fi_strerror(-1 * nerr));
-        }
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
+    int ret = 0;
 
     qstatus = fi_cq_readfrom(ep->cq, buf, max_per_poll, src_addr);
     /* Note - EFA provider does not support selective completions */
@@ -277,7 +256,22 @@ static int nvshmemt_libfabric_single_ep_progress(nvshmem_transport_t transport,
             NVSHMEMI_WARN_PRINT("Got %zd unexpected events on EP\n", qstatus);
         }
     } else if (qstatus < 0 && qstatus != -FI_EAGAIN) {
-        NVSHMEMI_WARN_PRINT("Error progressing CQ (%zd): %s\n", qstatus, fi_strerror(qstatus * -1));
+        /* On call to fi_cq_readerr, Libfabric requires some members of
+            * err_entry to be zero-initialized or point to valid data.  For
+            * simplicity, just zero out the whole struct.
+            */
+        struct fi_cq_err_entry err_entry = {};
+
+        ret = fi_cq_readerr(ep->cq, &err_entry, 0);
+        if (ret == -FI_EAGAIN) {
+            return 0;
+        } else if (ret < 0) {
+            NVSHMEMI_WARN_PRINT("Unable to read from fi_cq_readerr. RC: %d. Error: %s\n", ret, fi_strerror(-ret));
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+
+        NVSHMEMI_WARN_PRINT("Received a CQE with error. RC: %d. Error: %d (%s)", err_entry.err, err_entry.prov_errno,
+                            fi_cq_strerror(ep->cq, err_entry.prov_errno, err_entry.err_data, NULL, 0));
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
@@ -875,7 +869,6 @@ out:
 
 static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
     nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)tcurr->state;
-    uint64_t completed;
     bool all_nics_quieted;
     int status = 0;
     int end_iter;
@@ -887,44 +880,20 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int pe, int
         qp_index = NVSHMEMT_LIBFABRIC_PROXY_EP_IDX;
     }
 
-    if (use_staged_atomics) {
-        for (;;) {
-            all_nics_quieted = true;
-            for (int i = qp_index; i < end_iter; i++) {
-
-                /* Quick out if the endpoint is still quiet since last time */
-                if (state->eps[i]->submitted_ops == state->eps[i]->completed_ctr) {
-                    continue;
-                }
-
-                completed = fi_cntr_read(state->eps[i]->counter) +
-                            state->eps[i]->completed_staged_atomics;
-                state->eps[i]->completed_ctr = completed;
-
-                if (state->eps[i]->submitted_ops != completed) {
-                    all_nics_quieted = false;
-                    if (nvshmemt_libfabric_progress(tcurr, qp_index)) {
-                        status = NVSHMEMX_ERROR_INTERNAL;
-                        break;
-                    }
-                }
-            }
-            if (status || all_nics_quieted) break;
-        }
-    } else {
+    for (;;) {
+        all_nics_quieted = true;
         for (int i = qp_index; i < end_iter; i++) {
-            status = fi_cntr_wait(state->eps[i]->counter, state->eps[i]->submitted_ops,
-                                  NVSHMEMT_LIBFABRIC_QUIET_TIMEOUT_MS);
-            if (status) {
-                /* note - Status is negative for this function in error cases but
-                 * fi_strerror only accepts positive values.
-                 */
-                NVSHMEMI_ERROR_PRINT("Error in quiet operation (%d): %s.\n", status,
-                                     fi_strerror(status * -1));
-                status = NVSHMEMX_ERROR_INTERNAL;
+            if (state->eps[i]->submitted_ops != state->eps[i]->completed_ops) {
+                all_nics_quieted = false;
+                if (nvshmemt_libfabric_progress(tcurr, qp_index)) {
+                    status = NVSHMEMX_ERROR_INTERNAL;
+                    break;
+                }
             }
         }
+        if (status || all_nics_quieted) break;
     }
+
 
     return status;
 }
@@ -1104,7 +1073,6 @@ static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_v
         if (seq_counter.put_count >= NVSHMEM_STAGED_AMO_PUT_ACK_FREQ) {
             header = NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ;
             seq_counter.put_count = 0;
-            ep->submitted_ops++;  // Account for incoming ack
         } else {
             header = NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT;
         }
@@ -1185,7 +1153,7 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
         NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
     } else {
-        ep->submitted_ops += 2;
+        ep->submitted_ops++;
     }
 
 out:
@@ -1383,7 +1351,7 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
         NVSHMEMI_ERROR_PRINT("Received an error when trying to post a signal operation.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
     } else {
-        ep->submitted_ops += 2;
+        ep->submitted_ops++;
     }
 
 out:
@@ -1742,7 +1710,6 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     struct fid_mr *mr;
     struct fi_av_attr av_attr;
     struct fi_cq_attr cq_attr;
-    struct fi_cntr_attr cntr_attr;
     size_t ep_namelen = NVSHMEMT_LIBFABRIC_EP_LEN;
     int status = 0;
     int total_num_eps;
@@ -1787,10 +1754,6 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     memset(&av_attr, 0, sizeof(struct fi_av_attr));
     av_attr.type = FI_AV_TABLE;
     av_attr.count = state->num_selected_domains * n_pes;
-
-    memset(&cntr_attr, 0, sizeof(struct fi_cntr_attr));
-    cntr_attr.events = FI_CNTR_EVENTS_COMP;
-    cntr_attr.wait_obj = FI_WAIT_UNSPEC;
 
     /* Find fabric info for each selected device */
     for (int dev_idx = 0; dev_idx < state->num_selected_devs; dev_idx++) {
@@ -1907,15 +1870,12 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         state->eps[i]->domain_index = i;
 
         state->eps[i]->completed_staged_atomics = 0;
+        state->eps[i]->submitted_ops = 0;
+        state->eps[i]->completed_ops = 0;
 
         status = fi_cq_open(domain, &cq_attr, &state->eps[i]->cq, NULL);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to open completion queue for endpoint: %d: %s\n", status,
-                              fi_strerror(status * -1));
-
-        status = fi_cntr_open(domain, &cntr_attr, &state->eps[i]->counter, NULL);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to open counter for endpoint: %d: %s\n", status,
                               fi_strerror(status * -1));
 
         status = fi_endpoint(domain, state->prov_infos[i], &state->eps[i]->endpoint, NULL);
@@ -1964,13 +1924,6 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->cq->fid, flags);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to bind endpoint to completion queue: %d: %s\n", status,
-                              fi_strerror(status * -1));
-
-        flags = FI_READ | FI_WRITE;
-        if (use_staged_atomics) flags |= FI_SEND;
-        status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->counter->fid, flags);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to bind endpoint to completion counter: %d: %s\n", status,
                               fi_strerror(status * -1));
 
         status = fi_enable(state->eps[i]->endpoint);
