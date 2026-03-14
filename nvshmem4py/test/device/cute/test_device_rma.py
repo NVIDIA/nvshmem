@@ -65,23 +65,18 @@ def _nvshmem_device_bc():
 
 
 def _nvshmem_stream():
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     return dev.create_stream()
 
 
 def _compile_kernel(kernel, *example_args):
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
     nvshmem_device_bc = _nvshmem_device_bc()
     compiled = cute.compile(
         kernel,
         *example_args,
         options=f" --link-libraries={nvshmem_device_bc}",
     )
-    compiled = compiled.to(nvshmem.core.my_pe())
+    compiled = compiled.to(Device().device_id)
     cuda_library = compiled.jit_module.cuda_library
     nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
     nvshmem.core.library_init(nvshmem_kernel)
@@ -99,9 +94,7 @@ def _fill_cute_tensor(tensor, dtype_name, value):
     host = np.full(tuple(tensor.shape), np_dtype(value), dtype=np_dtype)
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     cudrv.cuMemcpyHtoD(buf.handle, host, host.nbytes)
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     dev.sync()
 
 
@@ -110,9 +103,7 @@ def _read_cute_tensor(tensor, dtype_name):
     host = np.empty(tuple(tensor.shape), dtype=np_dtype)
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     cudrv.cuMemcpyDtoH(host, buf.handle, host.nbytes)
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     dev.sync()
     return host
 
@@ -121,9 +112,7 @@ def _read_cute_tensor(tensor, dtype_name):
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_put_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
     _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
@@ -167,9 +156,7 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_get_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
     _fill_cute_tensor(buf_src, dtype, 0)
@@ -210,9 +197,7 @@ def test_get_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
     _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
@@ -261,9 +246,7 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
     _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
@@ -315,9 +298,7 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.mpi
 def test_signal_op_signal_wait(nvshmem_init_fini):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
     _fill_cute_tensor(signal_var, "int64", 0)
     signal_val = 1
@@ -353,9 +334,7 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_p(dtype, nvshmem_init_fini):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     var = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(var, dtype, 0)
@@ -393,9 +372,7 @@ def test_p(dtype, nvshmem_init_fini):
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_g(dtype, nvshmem_init_fini):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     var = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(var, dtype, 1)

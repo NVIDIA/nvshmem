@@ -26,9 +26,7 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
         pytest.skip("Need at least 2 PEs for peer access")
 
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     buf = cute_interop.tensor((4, ), dtype=cute.Int32)
     _fill_cute_tensor(buf, "int32", nvshmem.core.my_pe())
 
@@ -65,9 +63,7 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
 @pytest.mark.mpi
 def test_device_get_multicast_tensor(nvshmem_init_fini):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     if not Device().properties.multicast_supported:
         pytest.skip("Multicast not supported on this platform")
     if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:

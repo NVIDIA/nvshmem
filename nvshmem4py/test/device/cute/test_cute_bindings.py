@@ -22,7 +22,7 @@ from cutlass.cute.typing import Pointer, Boolean, Int32, Int, Int64, Constexpr
 from cutlass.cutlass_dsl import T, dsl_user_op
 from cutlass.cute.arch.nvvm_wrappers import FULL_MASK, WARP_SIZE
 import cutlass
-from cuda.core import Device
+from cuda.core import Device, system
 
 from nvshmem.bindings.device.cute import int_p as cute_int_p
 from nvshmem.bindings.device.cute import my_pe as cute_my_pe
@@ -52,7 +52,10 @@ def simple_shift(destTensor: cute.Tensor, ):
 
 
 def run():
-    dev = Device()
+    my_rank = MPI.COMM_WORLD.Get_rank()
+    local_rank = my_rank % system.get_num_devices()
+    dev = Device(local_rank)
+    dev.set_current()
     nvshmem.core.init(mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
 
     my_pe = nvshmem.core.my_pe()
@@ -76,7 +79,7 @@ def run():
 
     # launch the kernel
     compilerd_func(tensor_dlpack)
-    dev.sync()
+    torch.cuda.synchronize()
     print(tensor)
     nvshmem.core.free_tensor(tensor)
     nvshmem.core.finalize()

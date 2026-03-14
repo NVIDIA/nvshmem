@@ -45,8 +45,7 @@ def _assert_tensor_equals(tensor, dtype, expected):
 def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
@@ -80,8 +79,7 @@ def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     out = cute_interop.tensor((1, ), dtype=cute_dtype)
@@ -121,8 +119,7 @@ def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     out = cute_interop.tensor((1, ), dtype=cute_dtype)
@@ -161,8 +158,7 @@ def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
@@ -196,8 +192,7 @@ def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
 def test_atomic_swap_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     out = cute_interop.tensor((1, ), dtype=cute_dtype)
