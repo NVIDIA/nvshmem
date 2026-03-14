@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import torch
 
 import cutlass.cute as cute
 from cutlass.cute.typing import Int32
@@ -28,7 +27,8 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
 
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    Device(local_rank).set_current()
+    dev = Device(local_rank)
+    dev.set_current()
     buf = cute_interop.tensor((4, ), dtype=cute.Int32)
     _fill_cute_tensor(buf, "int32", nvshmem.core.my_pe())
 
@@ -51,8 +51,9 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
     compiled = _compile_kernel(peer_fetch_launcher, buf, 0)
     compiled(buf, peer_pe)
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     expected = np.full((4, ), peer_pe, dtype=np.int32)
     host = _read_cute_tensor(buf, "int32")
@@ -65,7 +66,8 @@ def test_device_get_peer_tensor(nvshmem_init_fini):
 def test_device_get_multicast_tensor(nvshmem_init_fini):
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    Device(local_rank).set_current()
+    dev = Device(local_rank)
+    dev.set_current()
     if not Device().properties.multicast_supported:
         pytest.skip("Multicast not supported on this platform")
     if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
@@ -103,8 +105,9 @@ def test_device_get_multicast_tensor(nvshmem_init_fini):
     compiled = _compile_kernel(multicast_fetch_launcher, nvshmem.core.Teams.TEAM_NODE, buf)
     compiled(nvshmem.core.Teams.TEAM_NODE, buf)
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     expected = np.full((4, ), 1.0, dtype=np.float32)
     host = _read_cute_tensor(buf, "float32")

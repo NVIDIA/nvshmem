@@ -11,7 +11,6 @@
 import numpy as np
 import pytest
 
-import torch
 import cutlass.cute as cute
 from cutlass.cute.typing import Int32
 from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
