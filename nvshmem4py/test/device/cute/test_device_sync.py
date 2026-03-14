@@ -18,7 +18,7 @@ from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 import nvshmem.core
 import nvshmem.core.device.cute as nvshmem_cute
 
-from cuda.core import Device, system
+from cuda.core import Device
 
 from test_device_rma import (
     _compile_kernel,
@@ -30,8 +30,7 @@ from test_device_rma import (
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 def test_device_sync(nvshmem_init_fini, team):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
+    dev = Device()
     dev.set_current()
 
     @cute.kernel
@@ -60,8 +59,7 @@ def test_device_sync(nvshmem_init_fini, team):
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])
 def test_device_barrier(nvshmem_init_fini, team):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
+    dev = Device()
     dev.set_current()
 
     @cute.kernel
