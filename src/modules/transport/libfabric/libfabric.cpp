@@ -113,7 +113,6 @@ struct nvshmemi_options_s options;
 
 /* Forward declarations */
 static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, int qp_index);
-static int nvshmemt_libfabric_gdr_process_amos_ack(nvshmem_transport_t transport, int qp_index);
 static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transport,
                                                     nvshmemt_libfabric_endpoint_t &ep,
                                                     const struct fi_cq_data_entry &entry,
@@ -468,6 +467,31 @@ static inline bool is_signal_only_op(nvshmemi_amo_t op) {
             op == NVSHMEMI_AMO_SIGNAL_ADD);
 }
 
+static inline int nvshmemt_libfabric_gdr_process_ack(nvshmem_transport_t transport,
+                                                     nvshmemt_libfabric_gdr_op_ctx_t *op) {
+    nvshmemt_libfabric_gdr_ret_amo_op_t *ret = &op->ret_amo;
+    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_memhandle_info_t *handle_info;
+    g_elem_t *elem;
+    void *valid_cpu_ptr;
+
+    handle_info = (nvshmemt_libfabric_memhandle_info_t *)nvshmemt_mem_handle_cache_get(
+        transport, libfabric_state->cache, ret->ret_addr);
+    if (!handle_info) {
+        NVSHMEMI_ERROR_PRINT("Unable to get handle info for atomic response.\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    valid_cpu_ptr =
+        (void *)((char *)handle_info->cpu_ptr + ((char *)ret->ret_addr - (char *)handle_info->ptr));
+    assert(valid_cpu_ptr);
+    elem = (g_elem_t *)valid_cpu_ptr;
+    elem->data = ret->elem.data;
+    elem->flag = ret->elem.flag;
+
+    return 0;
+}
+
 static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transport,
                                                      nvshmemt_libfabric_endpoint_t &ep,
                                                      const struct fi_cq_data_entry &entry,
@@ -513,7 +537,15 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
     } else if (entry.flags & FI_RECV) {
         op->ep_index = ep.ep_index;
         if (op->type == NVSHMEMT_LIBFABRIC_ACK) {
-            state->op_queue[domain_idx]->putToRecv(op, NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK);
+            status = nvshmemt_libfabric_gdr_process_ack(transport, op);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "Unable to process atomic.\n");
+
+            status = fi_recv(ep.endpoint, (void *)op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
+                             fi_mr_desc(state->mrs[domain_idx]), FI_ADDR_UNSPEC,
+                             &op->ofi_context);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "Unable to re-post recv.\n");
         } else {
             state->op_queue[domain_idx]->putToRecv(op, NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK);
         }
@@ -611,12 +643,6 @@ static int drain_completions(nvshmem_transport_t transport, int qp_index) {
                               "Unable to complete progress: %d.\n", status);
     }
 
-    if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
-        status = nvshmemt_libfabric_gdr_process_amos_ack(transport, qp_index);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to process amo acks: %d.\n", status);
-    }
-
 out:
     return status;
 }
@@ -672,80 +698,6 @@ static int nvshmemt_libfabric_gdr_process_amo(nvshmem_transport_t transport,
         default:
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                "invalid element size encountered %u\n", op->send_amo.size);
-    }
-
-out:
-    return status;
-}
-
-static int nvshmemt_libfabric_gdr_process_ack(nvshmem_transport_t transport,
-                                              nvshmemt_libfabric_gdr_op_ctx_t *op) {
-    nvshmemt_libfabric_gdr_ret_amo_op_t *ret = &op->ret_amo;
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
-    nvshmemt_libfabric_memhandle_info_t *handle_info;
-    g_elem_t *elem;
-    void *valid_cpu_ptr;
-
-    handle_info = (nvshmemt_libfabric_memhandle_info_t *)nvshmemt_mem_handle_cache_get(
-        transport, libfabric_state->cache, ret->ret_addr);
-    if (!handle_info) {
-        NVSHMEMI_ERROR_PRINT("Unable to get handle info for atomic response.\n");
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
-    valid_cpu_ptr =
-        (void *)((char *)handle_info->cpu_ptr + ((char *)ret->ret_addr - (char *)handle_info->ptr));
-    assert(valid_cpu_ptr);
-    elem = (g_elem_t *)valid_cpu_ptr;
-    elem->data = ret->elem.data;
-    elem->flag = ret->elem.flag;
-    return 0;
-}
-
-static int nvshmemt_libfabric_gdr_process_amos_ack(nvshmem_transport_t transport, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
-    nvshmemt_libfabric_gdr_op_ctx_t *op;
-    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
-    size_t num_retries = 0;
-    int domain_start_idx;
-    int domain_end_idx;
-    int status = 0;
-
-    if (qp_index == NVSHMEMX_QP_HOST) {
-        domain_start_idx = 0;
-        domain_end_idx = libfabric_state->num_host_domains;
-    } else if (qp_index == NVSHMEMX_QP_ALL) {
-        domain_start_idx = 0;
-        domain_end_idx = libfabric_state->domains.size();
-    } else {
-        domain_start_idx = libfabric_state->num_host_domains;
-        domain_end_idx = libfabric_state->domains.size();
-    }
-
-    for (int i = domain_start_idx; i < domain_end_idx; i++) {
-        int ops_processed = 0;
-        do {
-            do {
-                status = libfabric_state->op_queue[i]->getNextAmoOps(
-                    send_elems, &op, NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK);
-            } while (try_again(transport, &status, &num_retries,
-                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_PROCESS_AMOS_GET_NEXT_ACK,
-                               qp_index, progress_type::CompletionsOnly));
-            num_retries = 0;
-
-            if (op) {
-                ops_processed++;
-                nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[op->ep_index]);
-                status = nvshmemt_libfabric_gdr_process_ack(transport, op);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "Unable to process atomic.\n");
-                status =
-                    fi_recv(ep.endpoint, (void *)op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
-                            fi_mr_desc(libfabric_state->mrs[i]), FI_ADDR_UNSPEC, &op->ofi_context);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "Unable to re-post recv.\n");
-            }
-        } while (op && ops_processed < libfabric_state->proxy_request_batch_max);
     }
 
 out:
