@@ -281,3 +281,7 @@ endif()
 if (NVSHMEM_BUILD_PYTHON_LIB)
   add_subdirectory(nvshmem4py)
 endif()
+
+if (NVSHMEM_BUILD_LIBS_WHEEL)
+  add_subdirectory(python_libs_wheel)
+endif()

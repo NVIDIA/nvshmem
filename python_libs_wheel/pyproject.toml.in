@@ -1,0 +1,28 @@
+# pyproject.toml.in — CMake configure_file template.
+# @CUDA_MAJOR@ and @PROJECT_VERSION@ are substituted by CMake at configure time.
+# The generated pyproject.toml is written to the build-tree staging directory
+# and is never committed to the source tree.
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Package name follows the convention used by NVIDIA's published libs wheels,
+# e.g. nvidia-nvshmem-cu12 or nvidia-nvshmem-cu13.
+name = "nvidia-nvshmem-cu@CUDA_MAJOR@"
+version = "@PROJECT_VERSION@"
+description = "NVSHMEM C libraries (source build) for CUDA @CUDA_MAJOR@"
+readme = {text = "NVSHMEM C libraries built from source for CUDA @CUDA_MAJOR@.", content-type = "text/plain"}
+
+# No Python-version restriction; this is a pure-data wheel.
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+# Discover nvidia.nvshmem and nvidia.nvshmem.lib as namespace packages.
+namespaces = true
+where = ["."]
+
+[tool.setuptools.package-data]
+# Include all shared and static library files as package data.
+"nvidia.nvshmem.lib" = ["*.so", "*.so.*", "*.a"]

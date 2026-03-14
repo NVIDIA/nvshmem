@@ -54,6 +54,7 @@ nvshmem_add_default_off_option(NVSHMEM_BUILD_WITH_CUTLASS "Build with CUTLASS da
 nvshmem_add_default_on_option(NVSHMEM_BUILD_PYTHON_LIB "Builds NVSHMEM4PY Wheels and Python source tarballs")
 nvshmem_add_default_on_option(NVSHMEM_BUILD_PYTHON_DEVICE_LIB "Builds NVSHMEM4PY Device Library")
 nvshmem_add_default_off_option(NVSHMEM_FORCE_REBUILD_PYTHON_LIB "Force rebuild Python bindings")
+nvshmem_add_default_off_option(NVSHMEM_BUILD_LIBS_WHEEL "Build a libs-only Python wheel packaging the NVSHMEM C libraries")
 message( "___________________________________________________________________________________________________\n\n")
 
 message( "Options set to OFF by Default")
