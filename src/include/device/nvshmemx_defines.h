@@ -40,11 +40,6 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
     }
 }
 
-#ifdef __CUDA_ARCH__
-#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
-extern "C" {
-#endif
-
 /*
  * nvshmemx_give_smem - Give a block of shared memory to the NVSHMEM runtime for
  * TMA-based transfers.
@@ -56,8 +51,8 @@ extern "C" {
  * smem: Pointer to shared memory (must be within the CTA's shared memory)
  * size: Size of the shared memory region in bytes
  */
-NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(char *smem,
-                                                                              size_t size) {
+__device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
+#ifdef __CUDA_ARCH__
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
 
@@ -66,7 +61,13 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(cha
     if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
         bases[block_id] = (uintptr_t)smem;
     }
+#endif
 }
+
+#ifdef __CUDA_ARCH__
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
+extern "C" {
+#endif
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_vendor_get_version_info(
     int *major, int *minor, int *patch) {
