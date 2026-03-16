@@ -167,6 +167,7 @@ set(OPTIONAL_MPI_EXAMPLES
   ring-reduce.cu
   moe_shuffle.cu
   user-buffer.cu
+  tma-smem.cu
   )
 
 set(CUTLASS_EXAMPLES

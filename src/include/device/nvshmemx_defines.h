@@ -13,10 +13,60 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device/nvshmemx_collective_launch_apis.h"
 
+/*
+ * nvshmemx_ask_smem - Returns the amount of shared memory (in bytes) that NVSHMEM
+ * needs for TMA-based transfers.
+ *
+ * This function is available on both host and device. On the host side, the
+ * returned value can be used to configure the dynamic shared memory size for
+ * kernel launches. Each CTA must provide at least this much shared memory via
+ * nvshmemx_give_smem() for TMA to be used.
+ *
+ * flag:
+ *   NVSHMEMX_SMEM_RECOMMENDED  - Recommended amount for best performance (default)
+ *   NVSHMEMX_SMEM_MINIMUM      - Minimum amount for TMA to function
+ *   NVSHMEMX_SMEM_BARRIERS_ONLY - Only allocate space for barriers/sync objects
+ */
+__host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
+    switch (flag) {
+        case NVSHMEMX_SMEM_RECOMMENDED:
+            return 65536; /* 64 KiB - recommended for double-buffered TMA */
+        case NVSHMEMX_SMEM_MINIMUM:
+            return 32768; /* 32 KiB - minimum for single-buffered TMA */
+        case NVSHMEMX_SMEM_BARRIERS_ONLY:
+            return 256; /* Space for barriers and descriptors only */
+        default:
+            return 65536;
+    }
+}
+
 #ifdef __CUDA_ARCH__
 #if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {
 #endif
+
+/*
+ * nvshmemx_give_smem - Give a block of shared memory to the NVSHMEM runtime for
+ * TMA-based transfers.
+ *
+ * Must be called once per CTA by exactly one thread (typically thread 0).
+ * The given shared memory region will be used by NVSHMEM for buffering TMA
+ * transfers and storing synchronization objects.
+ *
+ * smem: Pointer to shared memory (must be within the CTA's shared memory)
+ * size: Size of the shared memory region in bytes
+ */
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(char *smem,
+                                                                              size_t size) {
+    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
+    if (smem == NULL || size == 0) return;
+
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+    if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
+        bases[block_id] = (uintptr_t)smem;
+    }
+}
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_vendor_get_version_info(
     int *major, int *minor, int *patch) {

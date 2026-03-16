@@ -22,6 +22,8 @@
 #include "non_abi/device/pt-to-pt/ibgda_device.cuh"
 #endif
 
+#include "non_abi/device/pt-to-pt/tma_device.cuh"
+
 #undef NVSHMEMI_TRANSFER_INLINE
 #undef NVSHMEMI_TRANSFER_STATIC
 #if defined __clang_llvm_bitcode_lib__

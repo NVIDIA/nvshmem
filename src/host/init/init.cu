@@ -1512,6 +1512,8 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.peer_heap_base_remote));
         if (nvshmemi_device_state.test_wait_any_start_idx_ptr)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.test_wait_any_start_idx_ptr));
+        if (nvshmemi_device_state.tma_smem_bases)
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
 
         /* cleanup state */
         free(nvshmemi_state);
@@ -1888,6 +1890,33 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     nvshmemi_device_state.test_wait_any_start_idx_ptr = test_wait_any_start_idx_ptr;
 
+    /* TMA policy */
+    nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
+    if (nvshmemi_options.TMA_POLICY_provided) {
+        if (strncasecmp(nvshmemi_options.TMA_POLICY, "ENABLE", 100) == 0) {
+            nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_ENABLE;
+        } else if (strncasecmp(nvshmemi_options.TMA_POLICY, "FORCE", 100) == 0) {
+            nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_FORCE;
+        } else if (strncasecmp(nvshmemi_options.TMA_POLICY, "DISABLE", 100) == 0) {
+            nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
+        } else {
+            NVSHMEMI_ERROR_PRINT("Invalid NVSHMEM_TMA_POLICY value: %s. Using DISABLE.\n",
+                                 nvshmemi_options.TMA_POLICY);
+        }
+    }
+    INFO(NVSHMEM_INIT, "NVSHMEM TMA policy = %d", nvshmemi_device_state.tma_policy);
+
+    /* Allocate per-CTA shared memory tracking array for TMA */
+    if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
+        uintptr_t *tma_smem_bases_dptr = NULL;
+        size_t tma_alloc_size = NVSHMEMI_TMA_MAX_BLOCKS * sizeof(uintptr_t);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_bases_dptr, tma_alloc_size),
+                                status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_bases_dptr, 0, tma_alloc_size), status, out);
+        nvshmemi_device_state.tma_smem_bases = tma_smem_bases_dptr;
+        nvshmemi_device_state.tma_smem_bases_len = NVSHMEMI_TMA_MAX_BLOCKS;
+    }
+
     nvshmemi_update_device_state();
 
 out:
@@ -1895,6 +1924,8 @@ out:
         if (heap_base_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_array_dptr));
         if (heap_base_actual_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_actual_array_dptr));
         if (test_wait_any_start_idx_ptr) CUDA_RUNTIME_CHECK(cudaFree(test_wait_any_start_idx_ptr));
+        if (nvshmemi_device_state.tma_smem_bases)
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
     }
     return status;
 }

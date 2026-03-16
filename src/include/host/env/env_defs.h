@@ -363,4 +363,9 @@ NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_GDAKI, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set to enable GPU-initiated communication transport via GPUNetIO.")
 #endif
 
+/** TMA **/
+NVSHMEMI_ENV_DEF(TMA_POLICY, string, "DISABLE", NVSHMEMI_ENV_CAT_OTHER,
+                 "Control TMA usage for point-to-point operations.\n"
+                 "Allowed values: DISABLE, ENABLE, FORCE")
+
 #endif

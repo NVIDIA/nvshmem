@@ -233,7 +233,10 @@
             false,                                        /* ibgda_is_initialized */              \
             false,                                        /* nvshmemi_is_nvshmem_initialized */   \
             false,                                        /* nvshmemi_is_nvshmem_bootstrapped */  \
-            NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY          /* selected_device_transport */         \
+            NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY,         /* selected_device_transport */         \
+            0,                                            /* tma_policy (NVSHMEMX_TMA_DISABLE) */ \
+            NULL,                                         /* tma_smem_bases */                    \
+            0                                             /* tma_smem_bases_len */                \
     }
 #else
 #include <cuda/std/cstddef>
@@ -261,6 +264,22 @@ typedef enum {
 } nvshmemi_selected_device_transport_t;
 static_assert(sizeof(nvshmemi_selected_device_transport_t) == 4,
               "selected_device_transport enum type must be 4 bytes.");
+
+typedef enum {
+    NVSHMEMX_TMA_DISABLE = 0,
+    NVSHMEMX_TMA_ENABLE = 1,
+    NVSHMEMX_TMA_FORCE = 2,
+    NVSHMEMX_TMA_POLICY_MAX = INT_MAX
+} nvshmemx_tma_policy_t;
+
+typedef enum {
+    NVSHMEMX_SMEM_RECOMMENDED = 0,
+    NVSHMEMX_SMEM_MINIMUM = 1,
+    NVSHMEMX_SMEM_BARRIERS_ONLY = 2,
+    NVSHMEMX_SMEM_AMOUNT_MAX = INT_MAX
+} nvshmemx_smem_amount_t;
+
+#define NVSHMEMI_TMA_MAX_BLOCKS 4096
 
 typedef struct {
     int version;
@@ -546,9 +565,13 @@ typedef struct {
     bool nvshmemi_is_nvshmem_initialized;
     bool nvshmemi_is_nvshmem_bootstrapped;
     nvshmemi_selected_device_transport_t selected_device_transport;
+
+    int tma_policy;              /* nvshmemx_tma_policy_t: TMA usage policy */
+    uintptr_t *tma_smem_bases;   /* Per-CTA shared memory base pointers for TMA */
+    size_t tma_smem_bases_len;   /* Number of entries in tma_smem_bases */
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 776,
-              "device_host_state_v1 must be 776 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 800,
+              "device_host_state_v1 must be 800 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 
