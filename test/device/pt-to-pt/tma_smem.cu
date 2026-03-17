@@ -19,15 +19,6 @@
 
 #define NUM_ELEMS 256
 
-#define CUDA_CHECK(stmt)                                                          \
-    do {                                                                          \
-        cudaError_t result = (stmt);                                              \
-        if (cudaSuccess != result) {                                              \
-            fprintf(stderr, "[PE %d][%s:%d] CUDA error: %s\n", nvshmem_my_pe(),   \
-                    __FILE__, __LINE__, cudaGetErrorString(result));               \
-        }                                                                         \
-    } while (0)
-
 /* Test 1: Verify nvshmemx_ask_smem returns valid sizes */
 __global__ void test_ask_smem(int *results) {
     if (threadIdx.x == 0) {
