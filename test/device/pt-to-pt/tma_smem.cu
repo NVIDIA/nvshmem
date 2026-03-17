@@ -127,6 +127,10 @@ int main(int argc, char **argv) {
         cudaMemset(recv_data, 0, sizeof(int) * NUM_ELEMS);
 
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        if (smem_size > 48 * 1024) {
+            cudaFuncSetAttribute(test_give_smem_and_put,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
+        }
         nvshmem_barrier_all();
 
         test_give_smem_and_put<<<1, NUM_ELEMS, smem_size>>>(send_data, recv_data, NUM_ELEMS, mype,
@@ -169,6 +173,10 @@ int main(int argc, char **argv) {
         cudaMemset(recv_data, 0, sizeof(int) * total_elems);
 
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+        if (smem_size > 48 * 1024) {
+            cudaFuncSetAttribute(test_multiblock_give_smem,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
+        }
         nvshmem_barrier_all();
 
         test_multiblock_give_smem<<<num_blocks, threads_per_block, smem_size>>>(

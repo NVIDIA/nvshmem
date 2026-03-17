@@ -109,6 +109,12 @@ int main(int c, char *v[]) {
 
     CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * NUM_ELEMS));
 
+    /* Opt in to > 48 KiB dynamic shared memory if needed */
+    if (smem_size > 48 * 1024) {
+        CUDA_CHECK(cudaFuncSetAttribute(tma_smem_put_kernel,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+    }
+
     /* Launch kernel with dynamic shared memory for NVSHMEM TMA */
     tma_smem_put_kernel<<<1, NUM_ELEMS, smem_size>>>(send_data, recv_data, NUM_ELEMS, mype, npes);
     CUDA_CHECK(cudaGetLastError());
