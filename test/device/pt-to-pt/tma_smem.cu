@@ -19,6 +19,15 @@
 
 #define NUM_ELEMS 256
 
+#define CUDA_CHECK(stmt)                                                          \
+    do {                                                                          \
+        cudaError_t result = (stmt);                                              \
+        if (cudaSuccess != result) {                                              \
+            fprintf(stderr, "[PE %d][%s:%d] CUDA error: %s\n", nvshmem_my_pe(),   \
+                    __FILE__, __LINE__, cudaGetErrorString(result));               \
+        }                                                                         \
+    } while (0)
+
 /* Test 1: Verify nvshmemx_ask_smem returns valid sizes */
 __global__ void test_ask_smem(int *results) {
     if (threadIdx.x == 0) {
@@ -38,6 +47,33 @@ __global__ void test_give_smem_and_put(int *send_data, int *recv_data, int num_e
     }
     __syncthreads();
 
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < num_elems) {
+        send_data[tid] = mype * 100 + tid;
+    }
+    __syncthreads();
+
+    int peer = (mype + 1) % npes;
+
+    if (threadIdx.x == 0) {
+        printf("[PE %d][kernel] putting %d elems to peer %d, send_data=%p recv_data=%p\n",
+               mype, num_elems, peer, send_data, recv_data);
+        printf("[PE %d][kernel] send_data[0]=%d send_data[1]=%d send_data[255]=%d\n",
+               mype, send_data[0], send_data[1], send_data[num_elems - 1]);
+    }
+    __syncthreads();
+
+    nvshmemx_int_put_nbi_block(recv_data, send_data, num_elems, peer);
+    nvshmem_quiet();
+
+    if (threadIdx.x == 0) {
+        printf("[PE %d][kernel] put+quiet done\n", mype);
+    }
+}
+
+/* Test 2b: Same as test 2 but without give_smem (control test) */
+__global__ void test_put_no_give_smem(int *send_data, int *recv_data, int num_elems, int mype,
+                                      int npes) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < num_elems) {
         send_data[tid] = mype * 100 + tid;
@@ -75,6 +111,8 @@ int main(int argc, char **argv) {
 
     int mype = nvshmem_my_pe();
     int npes = nvshmem_n_pes();
+
+    printf("[PE %d] npes=%d\n", mype, npes);
 
     /* ============ Test 1: ask_smem returns valid sizes ============ */
     {
@@ -119,23 +157,20 @@ int main(int argc, char **argv) {
                host_recommended, host_minimum, host_barriers);
     }
 
-    /* ============ Test 2: give_smem + single-block put ============ */
+    /* ============ Test 2a: control - put WITHOUT give_smem, no dynamic smem ============ */
     {
         int *send_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
         int *recv_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
         assert(send_data && recv_data);
         cudaMemset(recv_data, 0, sizeof(int) * NUM_ELEMS);
 
-        int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-        if (smem_size > 48 * 1024) {
-            cudaFuncSetAttribute(test_give_smem_and_put,
-                                 cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
-        }
+        printf("[PE %d] Test 2a: control put (no smem), send=%p recv=%p\n", mype, send_data,
+               recv_data);
         nvshmem_barrier_all();
 
-        test_give_smem_and_put<<<1, NUM_ELEMS, smem_size>>>(send_data, recv_data, NUM_ELEMS, mype,
-                                                            npes);
-        cudaDeviceSynchronize();
+        test_put_no_give_smem<<<1, NUM_ELEMS>>>(send_data, recv_data, NUM_ELEMS, mype, npes);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
         int *host = new int[NUM_ELEMS];
@@ -145,12 +180,67 @@ int main(int argc, char **argv) {
         for (int i = 0; i < NUM_ELEMS; i++) {
             int expected = prev_pe * 100 + i;
             if (host[i] != expected) {
-                printf("[PE %d] FAIL: single-block put at %d: got %d, expected %d\n", mype, i,
-                       host[i], expected);
+                printf("[PE %d] FAIL: control put at %d: got %d, expected %d\n", mype, i, host[i],
+                       expected);
                 pass = false;
                 break;
             }
         }
+        if (pass)
+            printf("[PE %d] PASS: control put (no smem)\n", mype);
+        else
+            status = 1;
+
+        delete[] host;
+        nvshmem_free(send_data);
+        nvshmem_free(recv_data);
+    }
+
+    /* ============ Test 2b: give_smem + single-block put ============ */
+    {
+        int *send_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
+        int *recv_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
+        assert(send_data && recv_data);
+        cudaMemset(recv_data, 0, sizeof(int) * NUM_ELEMS);
+
+        int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        printf("[PE %d] Test 2b: give_smem put, smem_size=%d, send=%p recv=%p\n", mype, smem_size,
+               send_data, recv_data);
+
+        if (smem_size > 48 * 1024) {
+            cudaError_t attr_err = cudaFuncSetAttribute(
+                test_give_smem_and_put, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
+            printf("[PE %d] cudaFuncSetAttribute(%d) = %s\n", mype, smem_size,
+                   cudaGetErrorString(attr_err));
+        }
+        nvshmem_barrier_all();
+
+        test_give_smem_and_put<<<1, NUM_ELEMS, smem_size>>>(send_data, recv_data, NUM_ELEMS, mype,
+                                                            npes);
+        cudaError_t launch_err = cudaGetLastError();
+        printf("[PE %d] kernel launch = %s\n", mype, cudaGetErrorString(launch_err));
+        cudaError_t sync_err = cudaDeviceSynchronize();
+        printf("[PE %d] cudaDeviceSynchronize = %s\n", mype, cudaGetErrorString(sync_err));
+        nvshmem_barrier_all();
+
+        int *host = new int[NUM_ELEMS];
+        cudaMemcpy(host, recv_data, sizeof(int) * NUM_ELEMS, cudaMemcpyDeviceToHost);
+        int prev_pe = (mype - 1 + npes) % npes;
+        bool pass = true;
+        int num_wrong = 0;
+        for (int i = 0; i < NUM_ELEMS; i++) {
+            int expected = prev_pe * 100 + i;
+            if (host[i] != expected) {
+                if (num_wrong < 5) {
+                    printf("[PE %d] FAIL: single-block put at %d: got %d, expected %d\n", mype, i,
+                           host[i], expected);
+                }
+                num_wrong++;
+                pass = false;
+            }
+        }
+        if (!pass)
+            printf("[PE %d] total wrong: %d / %d\n", mype, num_wrong, NUM_ELEMS);
         if (pass)
             printf("[PE %d] PASS: give_smem + single-block put\n", mype);
         else
@@ -181,7 +271,8 @@ int main(int argc, char **argv) {
 
         test_multiblock_give_smem<<<num_blocks, threads_per_block, smem_size>>>(
             send_data, recv_data, threads_per_block, mype, npes);
-        cudaDeviceSynchronize();
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
         int *host = new int[total_elems];
