@@ -1,5 +1,5 @@
 ===============================================================================
-                               Changes in 3.6.xx
+                               Changes in 3.6.4
 ===============================================================================
 
 # Added configuration file support (similar to NCCL) for easy and repeatable environment variable management.
