@@ -176,7 +176,7 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
 
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
+@pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_broadcast(nvshmem_init_fini, team, dtype):
     if nvshmem.core.team_n_pes(team) < 2:
