@@ -418,7 +418,6 @@ set(NVSHMEM_HOST_SOURCES
     host/team/team_internal_cuda.cu
     host/team/team_internal_nvls.cpp
     host/topo/topo.cpp
-    host/util/cs.cpp
     host/util/debug.cpp
     host/util/env_vars.cpp
     host/util/util.cpp

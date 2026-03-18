@@ -147,10 +147,6 @@
         exit(-1);                                                                                \
     }
 
-#define NVSHMEMU_THREAD_CS_INIT nvshmemu_thread_cs_init
-#define NVSHMEMU_THREAD_CS_ENTER nvshmemu_thread_cs_enter
-#define NVSHMEMU_THREAD_CS_EXIT nvshmemu_thread_cs_exit
-#define NVSHMEMU_THREAD_CS_FINALIZE nvshmemu_thread_cs_finalize
 
 #define NVSHMEMU_MAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                          \
     toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_local_pe_base()[peer]) + \
@@ -181,11 +177,6 @@
                    nvshmemi_state->mype_node;                                       \
         }                                                                           \
     } while (0)
-
-void nvshmemu_thread_cs_init();
-void nvshmemu_thread_cs_finalize();
-void nvshmemu_thread_cs_enter();
-void nvshmemu_thread_cs_exit();
 
 int nvshmemu_get_num_gpus_per_node();
 

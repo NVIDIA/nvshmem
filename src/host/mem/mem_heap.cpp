@@ -14,6 +14,7 @@
 #include <stdlib.h>                                                        // for calloc
 #include <string.h>                                                        // for memset
 #include <unistd.h>                                                        // for pid_t
+#include <mutex>                                                           // for std::lock_guard
 #include <algorithm>                                                       // for max
 #include <iosfwd>                                                          // for std
 #include <map>                                                             // for map
@@ -54,6 +55,13 @@
 
 static_assert(sizeof(CUmemGenericAllocationHandle) <= NVSHMEM_MEM_HANDLE_SIZE,
               "sizeof(CUmemGenericAllocationHandle) <= NVSHMEM_MEM_HANDLE_SIZE");
+
+namespace {
+std::mutex& get_cs_mutex() {
+    static std::mutex instance;
+    return instance;
+}
+}  // namespace
 
 long nvshmem_error = 0;
 
@@ -2360,26 +2368,23 @@ void *nvshmem_malloc(size_t size) {
 
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
     int ret = nvshmemi_check_state_and_init();
     if (ret) {
         nvshmem_error = 1;
-        goto exit_and_return;
+        return ptr;
     }
 
     if (NVSHMEMI_IS_NO_ACTION_BY_SIZE(size)) {
-        goto exit_and_return;
+        return ptr;
     }
 
     ptr = nvshmemi_state->heap_obj->heap_malloc(size);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
-        goto exit_and_return;
+        return ptr;
     }
 
     nvshmemi_barrier_all();
-
-exit_and_return:
-    NVSHMEMU_THREAD_CS_EXIT();
 
     return ptr;
 }
@@ -2389,26 +2394,23 @@ void *nvshmem_calloc(size_t count, size_t size) {
 
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
     int ret = nvshmemi_check_state_and_init();
     if (ret) {
         nvshmem_error = 1;
-        goto exit_and_return;
+        return ptr;
     }
 
     if (NVSHMEMI_IS_NO_ACTION_BY_SIZE(count * size)) {
-        goto exit_and_return;
+        return ptr;
     }
 
     ptr = nvshmemi_state->heap_obj->heap_calloc(size, count);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
-        goto exit_and_return;
+        return ptr;
     }
 
     nvshmemi_barrier_all();
-
-exit_and_return:
-    NVSHMEMU_THREAD_CS_EXIT();
 
     return ptr;
 }
@@ -2418,25 +2420,22 @@ void *nvshmem_align(size_t alignment, size_t size) {
 
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
     int ret = nvshmemi_check_state_and_init();
     if (ret) {
         nvshmem_error = 1;
-        goto exit_and_return;
+        return ptr;
     }
 
     if (NVSHMEMI_IS_NO_ACTION_BY_SIZE(size)) {
-        goto exit_and_return;
+        return ptr;
     }
 
     ptr = nvshmemi_state->heap_obj->heap_align(size, alignment);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
-        goto exit_and_return;
+        return ptr;
     }
     nvshmemi_barrier_all();
-
-exit_and_return:
-    NVSHMEMU_THREAD_CS_EXIT();
 
     return ptr;
 }
@@ -2444,20 +2443,17 @@ exit_and_return:
 void nvshmem_free(void *ptr) {
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
 
     NVSHMEMI_CHECK_INIT_STATUS();
 
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
-        goto exit_and_return;
+        return;
     }
 
     nvshmemi_barrier_all();
 
     nvshmemi_free(ptr);
-
-exit_and_return:
-    NVSHMEMU_THREAD_CS_EXIT();
 }
 
 void *nvshmemi_ptr(const void *ptr, int pe) {
@@ -2498,25 +2494,23 @@ void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags) 
 
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
     int ret = nvshmemi_check_state_and_init();
     if (ret) {
         nvshmem_error = 1;
-        goto exit_and_return;
+        return ptr;
     }
 
     if (nvshmemi_state->vmm_heap == nullptr) {
         NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
-        goto exit_and_return;
+        return ptr;
     }
     ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, NULL, flags);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
-        goto exit_and_return;
+        return ptr;
     }
     nvshmemi_barrier_all();
 
-exit_and_return:
-    NVSHMEMU_THREAD_CS_EXIT();
     return ptr;
 }
 
@@ -2526,25 +2520,23 @@ void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, siz
 
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
     int ret = nvshmemi_check_state_and_init();
     if (ret) {
         nvshmem_error = 1;
-        goto exit_and_return;
+        return ptr;
     }
 
     if (nvshmemi_state->vmm_heap == nullptr) {
         NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
-        goto exit_and_return;
+        return ptr;
     }
     ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, preferred_addr, flags);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
-        goto exit_and_return;
+        return ptr;
     }
     nvshmemi_barrier_all();
 
-exit_and_return:
-    NVSHMEMU_THREAD_CS_EXIT();
     return ptr;
 }
 
@@ -2553,19 +2545,16 @@ int nvshmemx_buffer_unregister_symmetric(void *ptr, size_t size) {
 
     NVTX_FUNC_RANGE_IN_GROUP(ALLOC);
 
-    NVSHMEMU_THREAD_CS_ENTER();
+    std::lock_guard<std::mutex> cs_lock(get_cs_mutex());
     NVSHMEMI_CHECK_INIT_STATUS();
 
     if (nvshmemi_state->vmm_heap == nullptr) {
-        NVSHMEMU_THREAD_CS_EXIT();
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 
     nvshmemi_barrier_all();
 
     status = nvshmemi_state->vmm_heap->unmap_mem(ptr, size);
-
-    NVSHMEMU_THREAD_CS_EXIT();
 
     return status;
 }

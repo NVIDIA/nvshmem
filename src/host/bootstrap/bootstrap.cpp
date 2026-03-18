@@ -261,6 +261,5 @@ void bootstrap_finalize() {
             free(nvshmemi_default_session);
             nvshmemi_default_session = nullptr;
         }
-        NVSHMEMU_THREAD_CS_FINALIZE();
     }
 }

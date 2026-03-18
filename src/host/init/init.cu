@@ -1293,7 +1293,6 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
     NVTX_FUNC_RANGE_IN_GROUP(INIT);
 
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
-        NVSHMEMU_THREAD_CS_INIT();
         nvshmemi_init_debug();
 
         if (nvshmemi_options.DEBUG_ATTACH_DELAY) {
@@ -1332,8 +1331,6 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
     *provided = NVSHMEM_THREAD_SERIALIZED;
 
 out:
-    if (status) NVSHMEMU_THREAD_CS_FINALIZE();
-
     return (status);
 }
 

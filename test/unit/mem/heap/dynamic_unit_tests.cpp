@@ -73,10 +73,8 @@ class Mock_general_global_functions {
     MOCK_METHOD2(nvshmemi_team_translate_pe_to_team_world_wrap,
                  int(nvshmemi_team_t *src_team, int src_pe));
     MOCK_METHOD0(nvshmemi_update_device_state, int());
-    MOCK_METHOD0(nvshmemu_thread_cs_enter, void());
     MOCK_METHOD0(nvshmemi_check_state_and_init, int());
     MOCK_METHOD0(nvshmemi_barrier_all, void());
-    MOCK_METHOD0(nvshmemu_thread_cs_exit, void());
     MOCK_METHOD3(ipcOpenSocket, int(ipcHandle *&handle, pid_t a, pid_t b));
     MOCK_METHOD4(ipcSendFd, int(ipcHandle *handle, const int fd, pid_t process, pid_t a));
     MOCK_METHOD2(ipcRecvFd, int(ipcHandle *handle, int *fd));
@@ -171,10 +169,8 @@ int nvshmemi_team_translate_pe_to_team_world_wrap(nvshmemi_team_t *src_team, int
     return mggf->nvshmemi_team_translate_pe_to_team_world_wrap(src_team, src_pe);
 }
 int nvshmemi_update_device_state() { return mggf->nvshmemi_update_device_state(); }
-void nvshmemu_thread_cs_enter() { return mggf->nvshmemu_thread_cs_enter(); }
 int nvshmemi_check_state_and_init() { return mggf->nvshmemi_check_state_and_init(); }
 void nvshmemi_barrier_all() { return mggf->nvshmemi_barrier_all(); }
-void nvshmemu_thread_cs_exit() { return mggf->nvshmemu_thread_cs_exit(); }
 int ipcOpenSocket(ipcHandle *&handle, pid_t a, pid_t b) {
     return mggf->ipcOpenSocket(handle, a, b);
 }
