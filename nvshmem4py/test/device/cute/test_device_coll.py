@@ -229,6 +229,8 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_broadcast(nvshmem_init_fini, team, dtype):
+    if nvshmem.core.team_n_pes(team) < 2:
+        pytest.skip("Need >1 PE in team for broadcast test")
     stream = _nvshmem_stream()
     dev = Device()
     cute_dtype = _cute_dtype(dtype)

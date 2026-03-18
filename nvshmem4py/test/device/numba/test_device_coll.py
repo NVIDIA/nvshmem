@@ -85,8 +85,8 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
 
     test_reducescatter[nblocks, nthreads, stream](team, dest, src)
 
-    stream.sync()
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
     print(f"Dest after reducescatter: {dest}")
     if op == "sum":
         expected = sum(range(1, nvshmem.core.n_pes() + 1))
@@ -179,6 +179,8 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_broadcast(nvshmem_init_fini, team, dtype):
+    if nvshmem.core.team_n_pes(team) < 2:
+        pytest.skip("Need >1 PE in team for broadcast test")
     print(f"Testing {dtype} broadcast on team {team}")
 
     nblocks = 1

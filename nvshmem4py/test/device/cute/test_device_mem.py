@@ -24,6 +24,8 @@ from test_device_rma import (
 def test_device_get_peer_tensor(nvshmem_init_fini):
     if nvshmem.core.n_pes() < 2:
         pytest.skip("Need at least 2 PEs for peer access")
+    if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
+        pytest.skip("Need >1 PE in NVLink domain (TEAM_NODE) for peer access test")
 
     stream = _nvshmem_stream()
     dev = Device()
