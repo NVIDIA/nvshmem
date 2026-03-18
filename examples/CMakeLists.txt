@@ -168,6 +168,7 @@ set(OPTIONAL_MPI_EXAMPLES
   moe_shuffle.cu
   user-buffer.cu
   tma-smem.cu
+  tma-smem-bw.cu
   )
 
 set(CUTLASS_EXAMPLES

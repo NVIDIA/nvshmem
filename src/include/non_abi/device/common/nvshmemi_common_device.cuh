@@ -30,6 +30,7 @@
 #endif
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
+#include "non_abi/device/pt-to-pt/tma_device.cuh"
 
 #define _LL_MAX_UNROLL 4
 
@@ -359,6 +360,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_P
     if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
         nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
     } else {
+#if __CUDA_ARCH__ >= 900
+        /* Wait for any in-flight TMA bulk async copies issued by this thread.
+         * cp.async.bulk.wait_group.read 0 is a per-thread op and a no-op if
+         * this thread has no pending bulk groups. */
+        if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
+            int block_id =
+                blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+            uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+            if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
+                bases[block_id] != 0) {
+                nvshmemi_tma_bulk_wait_group_read_0();
+            }
+        }
+#endif
         if (!myIdx)
             __threadfence_system(); /* Use __threadfence_system instead of __threadfence
                                      for data visibility in case of intra-node GPU transfers */
@@ -470,8 +485,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     if (peer_base_addr) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source,
-                                           nelems * sizeof(T));
+        size_t nbytes = nelems * sizeof(T);
+#if __CUDA_ARCH__ >= 900
+        if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
+            int block_id =
+                blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+            uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+            if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
+                bases[block_id] != 0 && __isShared(source)) {
+                nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>((void *)dest_actual,
+                                                             (const void *)source, nbytes);
+                return;
+            }
+        }
+#endif
+        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
         nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
                                                           nelems * sizeof(T), pe, qp_index);
@@ -497,8 +525,22 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     if (peer_base_addr) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source,
-                                           nelems * sizeof(T));
+        size_t nbytes = nelems * sizeof(T);
+#if __CUDA_ARCH__ >= 900
+        if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
+            int block_id =
+                blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+            uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+            if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
+                bases[block_id] != 0 && __isShared(source)) {
+                nvshmemi_memcpy_tma_shared_global<SCOPE>((void *)dest_actual,
+                                                        (const void *)source, nbytes);
+                nvshmemi_threadgroup_sync<SCOPE>();
+                return;
+            }
+        }
+#endif
+        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
                                                       nelems * sizeof(T), pe, qp_index);
