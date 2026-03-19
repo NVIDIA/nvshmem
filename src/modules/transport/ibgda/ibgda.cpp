@@ -445,23 +445,6 @@ static size_t ibgda_get_host_page_size() {
     return host_page_size;
 }
 
-static int get_pci_path(int dev, char **pci_path, nvshmem_transport_t t) {
-    int status = NVSHMEMX_SUCCESS;
-
-    struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
-    nvshmemt_ibgda_state_t *ibgda_state = (nvshmemt_ibgda_state_t *)transport->state;
-    int dev_id = ibgda_state->common.dev_ids[dev];
-
-    struct ibgda_device *device = &(((struct ibgda_device *)ibgda_state->common.devices)[dev_id]);
-    status = nvshmemt_ib_iface_get_mlx_path(
-        device->common_device.dev, device->common_device.context, pci_path, &ftable, &mlx5dv_ftable,
-        &(device->common_device.data_direct), ibgda_state->common.log_level);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmemt_ib_iface_get_mlx_path failed \n");
-
-out:
-    return status;
-}
 
 int nvshmemt_ibgda_can_reach_peer(int *access, struct nvshmem_transport_pe_info *peer_info,
                                   nvshmem_transport_t t) {
@@ -747,9 +730,9 @@ int nvshmemt_ibgda_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, s
              transport->my_pe, device->common_device.dev->name, device->common_device.data_direct);
         status = nvshmemt_ib_common_reg_mem_handle(
             &ftable, &mlx5dv_ftable, device->common_device.pd, dev_handle, buf, length, local_only,
-            ibgda_state->dmabuf_support_for_data_buffers, ibgda_cuda_syms, ibgda_state->common.log_level,
-            ibgda_state->common.options->IB_ENABLE_RELAXED_ORDERING, device->common_device.data_direct,
-            alias_va_ptr);
+            ibgda_state->dmabuf_support_for_data_buffers, ibgda_cuda_syms,
+            ibgda_state->common.log_level, ibgda_state->common.options->IB_ENABLE_RELAXED_ORDERING,
+            device->common_device.data_direct, alias_va_ptr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to register memory handle.\n");
     }
@@ -1350,9 +1333,9 @@ static int ibgda_alloc_and_map_qp_uar(struct ibv_context *context, ibgda_nic_han
          * code, we will need to add an explicit check for mmio support in the cuda driver.
          */
         if (use_nc_uar) {
-        uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_NC);
-        if (uar) uar_reg_size = IBGDA_MLX5_NC_UAR_SIZE;
-    }
+            uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_NC);
+            if (uar) uar_reg_size = IBGDA_MLX5_NC_UAR_SIZE;
+        }
 
     if (!uar) {
         uint8_t cmd_cap_in[DEVX_ST_SZ_BYTES(query_hca_cap_in)] = {
@@ -1526,7 +1509,7 @@ static int ibgda_create_cq(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_cq 
     DEVX_SET(create_cq_in, cmd_in, opcode, MLX5_CMD_OP_CREATE_CQ);
     DEVX_SET(create_cq_in, cmd_in, cq_umem_id, cq_umem->umem_id);  // CQ buffer
     DEVX_SET(create_cq_in, cmd_in, cq_umem_valid,
-             IBGDA_MLX5_UMEM_VALID_ENABLE);  // Enable cq_umem_id
+             IBGDA_MLX5_UMEM_VALID_ENABLE);  // Enable cq_umem_id@
     DEVX_SET64(create_cq_in, cmd_in, cq_umem_offset, 0);
 
     cq_context = DEVX_ADDR_OF(create_cq_in, cmd_in, cq_context);
@@ -1671,9 +1654,11 @@ static int ibgda_dci_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
         DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->common.options->IB_SL);
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        DEVX_SET(qpc, qpc, primary_address_path.tclass, ibgda_state->common.options->IB_TRAFFIC_CLASS);
+        DEVX_SET(qpc, qpc, primary_address_path.tclass,
+                 ibgda_state->common.options->IB_TRAFFIC_CLASS);
         DEVX_SET(qpc, qpc, primary_address_path.eth_prio, ibgda_state->common.options->IB_SL);
-        DEVX_SET(qpc, qpc, primary_address_path.dscp, ibgda_state->common.options->IB_TRAFFIC_CLASS >> 2);
+        DEVX_SET(qpc, qpc, primary_address_path.dscp,
+                 ibgda_state->common.options->IB_TRAFFIC_CLASS >> 2);
     }
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
@@ -1715,7 +1700,8 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
              IBGDA_ILOG2_OR0(device->common_device.device_attr.max_qp_rd_atom));
 
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
-        DEVX_SET(qpc, qpc, primary_address_path.tclass, ibgda_state->common.options->IB_TRAFFIC_CLASS);
+        DEVX_SET(qpc, qpc, primary_address_path.tclass,
+                 ibgda_state->common.options->IB_TRAFFIC_CLASS);
         DEVX_SET(qpc, qpc, primary_address_path.rlid, peer_ep_handle->lid);
         DEVX_SET(qpc, qpc, primary_address_path.mlid, 0);
         DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->common.options->IB_SL);
@@ -1770,7 +1756,8 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
                  device->common_device.gid_info[portid - 1].local_gid_index);
         DEVX_SET(qpc, qpc, primary_address_path.eth_prio, ibgda_state->common.options->IB_SL);
         DEVX_SET(qpc, qpc, primary_address_path.udp_sport, ah_attr.dlid);
-        DEVX_SET(qpc, qpc, primary_address_path.dscp, ibgda_state->common.options->IB_TRAFFIC_CLASS >> 2);
+        DEVX_SET(qpc, qpc, primary_address_path.dscp,
+                 ibgda_state->common.options->IB_TRAFFIC_CLASS >> 2);
 
         memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rgid_rip), &dah.av->rgid,
                sizeof(dah.av->rgid));
@@ -1834,8 +1821,9 @@ static int ibgda_destroy_internal_buffer(struct ibgda_internal_buffer *internal_
     int status = 0;
 
     if (internal_buf->mem_handle) {
-        nvshmemt_ib_common_release_mem_handle(
-            &ftable, (nvshmem_mem_handle_t *)internal_buf->mem_handle, ibgda_state->common.log_level);
+        nvshmemt_ib_common_release_mem_handle(&ftable,
+                                              (nvshmem_mem_handle_t *)internal_buf->mem_handle,
+                                              ibgda_state->common.log_level);
         free(internal_buf->mem_handle);
     }
 
@@ -1866,8 +1854,8 @@ static int ibgda_create_internal_buffer(struct ibgda_internal_buffer *internal_b
         &ftable, &mlx5dv_ftable, device->common_device.pd,
         (nvshmem_mem_handle_t *)internal_buf_mhandle, (void *)internal_buf_mobject->aligned.gpu_ptr,
         internal_buf_mobject->aligned.size, false, ibgda_state->dmabuf_support_for_data_buffers,
-        ibgda_cuda_syms, ibgda_state->common.log_level, ibgda_state->common.options->IB_ENABLE_RELAXED_ORDERING,
-        device->common_device.data_direct);
+        ibgda_cuda_syms, ibgda_state->common.log_level,
+        ibgda_state->common.options->IB_ENABLE_RELAXED_ORDERING, device->common_device.data_direct);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to register memory for IBGDA transport.\n");
 
@@ -2654,7 +2642,8 @@ static int ibgda_populate_dct_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvsh
         for (int j = 0; j < n_devs_selected; j++) {
             int arr_idx = i * n_devs_selected + j;
             int dev_idx = ibgda_state->selected_dev_ids[j];
-            struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
+            struct ibgda_device *device =
+                (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
             ibgda_get_device_dct(&dct_h[arr_idx], &device->dct.dct_handles[i], device);
         }
     }
@@ -2916,14 +2905,15 @@ static int ibgda_populate_dci_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvsh
         for (int j = 0; j < n_devs_selected; j++) {
             int arr_idx = i * n_devs_selected + j;
             int dev_idx = ibgda_state->selected_dev_ids[j];
-            struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
+            struct ibgda_device *device =
+                (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
             uintptr_t base_mvars_d_addr = (uintptr_t)(&dci_d[arr_idx]) + mvars_offset;
 
             ibgda_get_device_qp(ibgda_state, &dci_h[arr_idx], device, device->dci.eps[i],
                                 i - device->dci.num_eps, j);
             dci_h[arr_idx].tx_wq.cq = &cq_d[cq_idx];
-            TRACE(ibgda_state->common.log_level, "Populating DCI at qp_idx #%d, cq_idx #%d", arr_idx,
-                  cq_idx);
+            TRACE(ibgda_state->common.log_level, "Populating DCI at qp_idx #%d, cq_idx #%d",
+                  arr_idx, cq_idx);
 
             ibgda_get_device_cq(&cq_h[cq_idx], device->dci.eps[i]->send_cq);
             cq_h[cq_idx].cons_idx = (uint64_t *)(base_mvars_d_addr + cons_t_offset);
@@ -3102,8 +3092,8 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
             int mapped_i = rc_first_index + i * n_pes + dst_pe;
             int local_mapped_i = i + num_eps_per_pe * dst_pe;
 
-            TRACE(ibgda_state->common.log_level, "dst_pe: %d, mapped_i: %d, local_mapped_i: %d", dst_pe,
-                  mapped_i, local_mapped_i);
+            TRACE(ibgda_state->common.log_level, "dst_pe: %d, mapped_i: %d, local_mapped_i: %d",
+                  dst_pe, mapped_i, local_mapped_i);
             status = ibgda_create_qp(ibgda_state, &device->rc.eps[mapped_i], device, portid,
                                      mapped_i, NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -3181,7 +3171,8 @@ static int ibgda_populate_rc_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvshm
     if (num_rc_handles > 0) {
         for (int i = 0; i < n_devs_selected; i++) {
             int dev_idx = ibgda_state->selected_dev_ids[i];
-            struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
+            struct ibgda_device *device =
+                (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
             int first_cq_index = device->dci.num_eps;
             for (int j = 0; j < device->rc.num_eps_per_pe * n_pes; j++) {
                 num_rc_handles_populated++;
@@ -3213,8 +3204,9 @@ static int ibgda_populate_rc_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvshm
                 cq_h[my_cq_index].qpn = rc_h[qp_index].qpn;
                 cq_h[my_cq_index].qp_type = rc_h[qp_index].qp_type;
 
-                TRACE(ibgda_state->common.log_level, "Populating cq at cq_idx #%d qpn: %u qp_type: %u",
-                      my_cq_index, cq_h[my_cq_index].qpn, cq_h[my_cq_index].qp_type);
+                TRACE(ibgda_state->common.log_level,
+                      "Populating cq at cq_idx #%d qpn: %u qp_type: %u", my_cq_index,
+                      cq_h[my_cq_index].qpn, cq_h[my_cq_index].qp_type);
                 rc_h[qp_index].tx_wq.prod_idx = (uint64_t *)(base_mvars_d_addr + prod_idx_offset);
                 cq_h[my_cq_index].prod_idx = (uint64_t *)(base_mvars_d_addr + prod_idx_offset);
             }
@@ -3415,8 +3407,9 @@ static int ibgda_post_gpu_device_state(
     int n_pes = t->n_pes;
 
     /* Post the device state start */
-    TRACE(ibgda_state->common.log_level, "Posting device state DCI_d: %p, RC_d: %p, DCT_d: %p, CQ_d: %p",
-          dci_d, rc_d, dct_d, cq_d);
+    TRACE(ibgda_state->common.log_level,
+          "Posting device state DCI_d: %p, RC_d: %p, DCT_d: %p, CQ_d: %p", dci_d, rc_d, dct_d,
+          cq_d);
     ibgda_device_state_h->globalmem.qp_group_switches = qp_group_switches_d;
     ibgda_device_state_h->globalmem.dcis = dci_d;
     ibgda_device_state_h->globalmem.rcs = rc_d;
@@ -3512,8 +3505,9 @@ static void ibgda_get_device_qp(nvshmemt_ibgda_state_t *ibgda_state,
     assert(qp_ctrl->wq_mobject->has_gpu_mapping);
 
     if (dev_qp->qpn != NVSHMEMI_IBGDA_USCALAR_INVALID) {
-        TRACE(ibgda_state->common.log_level, "Not re-populating RC at ep_index #%d, qp_idx #%d, qpn: %u",
-              ep_idx, ep->user_index, dev_qp->qpn);
+        TRACE(ibgda_state->common.log_level,
+              "Not re-populating RC at ep_index #%d, qp_idx #%d, qpn: %u", ep_idx, ep->user_index,
+              dev_qp->qpn);
         return;
     }
 
@@ -3644,7 +3638,8 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     /* Setup CQ GPU state end */
 
     /* Setup QP groups start only set for RC QPs */
-    if (num_rc_handles == ibgda_state->common.options->IBGDA_NUM_RC_PER_PE * n_devs_selected * t->n_pes) {
+    if (num_rc_handles ==
+        ibgda_state->common.options->IBGDA_NUM_RC_PER_PE * n_devs_selected * t->n_pes) {
         status = ibgda_setup_qp_groups_gpu_state(ibgda_state, t, num_dci_handles, num_rc_handles,
                                                  &num_qp_groups, &qp_group_switches_d);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -4000,7 +3995,8 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     // Set all device support_half_av_seg
     for (int i = 0; i < init_dev_cnt; i++) {
         int curr_dev_id = ibgda_state->selected_dev_ids[i];
-        struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + curr_dev_id;
+        struct ibgda_device *device =
+            (struct ibgda_device *)ibgda_state->common.devices + curr_dev_id;
         device->support_half_av_seg = ibgda_state->support_half_av_seg;
     }
 
@@ -4091,15 +4087,17 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     /* Free all devices, not just ones we used. */
     for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
-        device = (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
+        device =
+            (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
         if (device->common_device.pd) {
             status = ftable.dealloc_pd(device->common_device.pd);
             // NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed
             // \n"); For now, don't exit early. We need to free all the devices and zero out the
             // pointers for reinitalization.
             if (status) {
-                INFO(ibgda_state->common.log_level, "ibv_dealloc_pd failed for device %d Err: %d:%s.\n", i,
-                     errno, strerror(errno));
+                INFO(ibgda_state->common.log_level,
+                     "ibv_dealloc_pd failed for device %d Err: %d:%s.\n", i, errno,
+                     strerror(errno));
             }
         }
 
@@ -4371,17 +4369,11 @@ out:
 }
 
 int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, int api_version) {
-    struct nvshmemt_hca_info hca_list[MAX_NUM_HCAS];
-    struct nvshmemt_hca_info pe_hca_mapping[MAX_NUM_PES_PER_NODE];
     struct nvshmemi_options_s *options = NULL;
     nvshmemt_ibgda_device_state_cache_t device_state_cache = NULL;
+    struct nvshmemt_ib_hca_filter hca_filter;
 
     int status = 0;
-    int exclude_list = 0;
-    int hca_list_count = 0;
-    int pe_hca_map_count = 0;
-    int user_selection = 0;
-    int offset = 0;
     int num_devices = 0;
     int lowest_stream_priority;
     int highest_stream_priority;
@@ -4499,21 +4491,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     }
 
 #ifdef NVSHMEM_USE_MLX5DV
-    if (!ibgda_state->common.options->DISABLE_DATA_DIRECT) {
-        if (nvshmemt_mlx5dv_ftable_init(&mlx5dv_handle, &mlx5dv_ftable, ibgda_state->common.log_level)) {
-            NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.");
-            // mlx5dv_handle will be NULL on failure
-            mlx5dv_ftable.mlx5dv_internal_is_supported = NULL;
-            mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = NULL;
-            mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = NULL;
-        }
-    } else {
-        mlx5dv_ftable.mlx5dv_internal_is_supported = NULL;
-        mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = NULL;
-        mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = NULL;
-        INFO(ibgda_state->common.log_level,
-             "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
-    }
+    nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
+                                   ibgda_state->common.options->DISABLE_DATA_DIRECT,
+                                   ibgda_state->common.log_level);
 #else
     INFO(ibgda_state->common.log_level, "directNIC features are disabled");
 #endif
@@ -4573,26 +4553,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibgda_state->common.port_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibgda_state->common.port_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "malloc failed \n");
-    if (options->HCA_LIST_provided) {
-        user_selection = 1;
-        exclude_list = (options->HCA_LIST[0] == '^');
-        hca_list_count = nvshmemt_parse_hca_list(options->HCA_LIST, hca_list, MAX_NUM_HCAS,
-                                                 ibgda_state->common.log_level);
-    }
-
-    if (options->HCA_PE_MAPPING_provided) {
-        if (hca_list_count) {
-            NVSHMEMI_WARN_PRINT(
-                "Found conflicting parameters NVSHMEM_HCA_LIST and NVSHMEM_HCA_PE_MAPPING, "
-                "ignoring "
-                "NVSHMEM_HCA_PE_MAPPING \n");
-        } else {
-            user_selection = 1;
-            pe_hca_map_count =
-                nvshmemt_parse_hca_list(options->HCA_PE_MAPPING, pe_hca_mapping,
-                                        MAX_NUM_PES_PER_NODE, ibgda_state->common.log_level);
-        }
-    }
+    nvshmemt_ib_common_parse_hca_filter(hca_filter, ibgda_state->common);
 
     nic_mapping_memtype_request =
         ibgda_parse_nic_mapping_memtype_request(options->IBGDA_FORCE_NIC_BUF_MEMTYPE);
@@ -4608,201 +4569,115 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 #endif
 
     status = ibgda_parse_nic_handler_request(&nic_handler_request, options->IBGDA_NIC_HANDLER);
-    INFO(ibgda_state->common.log_level, "NVSHMEM_IBGDA_NIC_HANDLER: %s\n", options->IBGDA_NIC_HANDLER);
+    INFO(ibgda_state->common.log_level, "NVSHMEM_IBGDA_NIC_HANDLER: %s\n",
+         options->IBGDA_NIC_HANDLER);
     NVSHMEMI_NZ_ERROR_JMP(status, status, out, "NVSHMEM_IBGDA_NIC_HANDLER is not valid.");
 
-    INFO(ibgda_state->common.log_level,
-         "Begin - Enumerating IB devices in the system ([<dev_id, device_name, num_ports>]) - \n");
-    for (int i = 0; i < num_devices; i++) {
-        device = (struct ibgda_device *)ibgda_state->common.devices + i;
-        device->common_device.dev = dev_list[i];
+    status = nvshmemt_ib_common_enumerate_devices(&ftable, ibgda_state->common,
+                                                  sizeof(struct ibgda_device), hca_filter,
+                                                  dev_list, num_devices);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Device enumeration failed.\n");
 
-        device->common_device.context = ftable.open_device(device->common_device.dev);
-        if (!device->common_device.context) {
-            INFO(ibgda_state->common.log_level, "open_device failed for IB device at index %d\n", i);
-            continue;
-        }
+    {
+        bool device_checked[MAX_NUM_HCAS] = {};
+        int write_idx = 0;
+        for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
+            int dev_idx = ibgda_state->common.dev_ids[i];
+            struct ibgda_device *ibgda_dev =
+                &((struct ibgda_device *)ibgda_state->common.devices)[dev_idx];
+            struct nvshmemt_ib_common_device *dev = &ibgda_dev->common_device;
 
-        const char *name = ftable.get_device_name(device->common_device.dev);
-        NVSHMEMI_NULL_ERROR_JMP(name, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                "ibv_get_device_name failed \n");
+            if (!device_checked[dev_idx]) {
+                device_checked[dev_idx] = true;
+                const char *name = ftable.get_device_name(dev->dev);
 
-        bool device_supported = nvshmemt_check_hca_prefix(ibgda_state->common.options, name);
-
-        if (!device_supported) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            continue;
-        }
-
-        status =
-            ftable.query_device(device->common_device.context, &device->common_device.device_attr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_query_device failed \n");
-
-        if (!nvshmemt_ib_common_query_mlx5_caps(device->common_device.context)) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            NVSHMEMI_WARN_PRINT("device %s is not enumerated as an mlx5 device. Skipping...\n",
-                                name);
-            continue;
-        }
-
-        if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
-            device->nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
-        } else if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
-            device->nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
-        } else {
-            status = ibgda_check_gpu_mapping_nic_uar(device);
-            if (status) {
-                if (use_gdrcopy) {
-                    device->nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
-                } else {
-                    device->nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
-                }
-            } else {
-                device->nic_handler = IBGDA_NIC_HANDLER_GPU;
-            }
-        }
-
-        status = ibgda_check_nic_mapping_memtypes(ibgda_state, device, nic_mapping_memtype_request);
-        if (status) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            NVSHMEMI_WARN_PRINT(
-                "device %s cannot allocate buffer on the specified memory type. Skipping...\n",
-                name);
-            continue;
-        }
-
-        if (device->support_nic_buf_on_gpumem && !ibgda_state->common.options->IB_DISABLE_DMABUF &&
-            !ibgda_state->dmabuf_support_for_control_buffers) {
-            INFO(ibgda_state->common.log_level,
-                 "The system does not support registering the NIC control buffers with DMABUF. "
-                 "Fallback to use either nv_peer_mem or nvidia_peermem.\n");
-        }
-
-        status = nvshmemt_ib_common_check_nic_ext_atomic_support(device->common_device.context);
-        if (status) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            NVSHMEMI_WARN_PRINT(
-                "device %s does not support all necessary atomic operations. You may want to check "
-                "the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
-                name);
-            continue;
-        }
-
-        INFO(ibgda_state->common.log_level,
-             "Enumerated IB devices in the system - device id=%d (of %d), name=%s, num_ports=%d\n",
-             i, num_devices, name, device->common_device.device_attr.phys_port_cnt);
-        int device_used = 0;
-        for (int p = 1; p <= device->common_device.device_attr.phys_port_cnt; p++) {
-            int allowed_device = 1;
-            int replicate_count = 1;
-            if (hca_list_count) {
-                // filter out based on user hca list
-                allowed_device = exclude_list;
-                for (int j = 0; j < hca_list_count; j++) {
-                    if (!strcmp(hca_list[j].name, name)) {
-                        if (hca_list[j].port == -1 || hca_list[j].port == p) {
-                            hca_list[j].found = 1;
-                            allowed_device = !exclude_list;
-                        }
-                    }
-                }
-            } else if (pe_hca_map_count) {
-                // filter devices based on user hca-pe mapping
-                allowed_device = 0;
-                for (int j = 0; j < pe_hca_map_count; j++) {
-                    if (!strcmp(pe_hca_mapping[j].name, name)) {
-                        if (pe_hca_mapping[j].port == -1 || pe_hca_mapping[j].port == p) {
-                            allowed_device = 1;
-                            pe_hca_mapping[j].found = 1;
-                            replicate_count = pe_hca_mapping[j].count;
-                        }
-                    }
-                }
-            }
-
-            if (!allowed_device) {
-                continue;
-            } else {
-                status = ftable.query_port(device->common_device.context, p,
-                                           &device->common_device.port_attr[p - 1]);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_port_query failed \n");
-
-                // IBGDA supports IB and RoCE.
-                if ((device->common_device.port_attr[p - 1].state != IBV_PORT_ACTIVE) ||
-                    ((device->common_device.port_attr[p - 1].link_layer !=
-                      IBV_LINK_LAYER_INFINIBAND) &&
-                     (device->common_device.port_attr[p - 1].link_layer !=
-                      IBV_LINK_LAYER_ETHERNET))) {
-                    if (user_selection) {
-                        NVSHMEMI_WARN_PRINT(
-                            "found inactive port or port with non IB/RoCE link layer protocol, "
-                            "skipping...\n");
-                    }
+                if (!nvshmemt_ib_common_query_mlx5_caps(dev->context)) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s is not enumerated as an mlx5 device. Skipping...\n", name);
+                    ftable.close_device(dev->context);
+                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    dev->context = NULL;
+                    dev->pd = NULL;
                     continue;
                 }
 
-                ib_get_gid_index(&ftable, device->common_device.context, p,
-                                 device->common_device.port_attr[p - 1].gid_tbl_len,
-                                 &device->common_device.gid_info[p - 1].local_gid_index,
-                                 ibgda_state->common.log_level, options);
-                status = ftable.query_gid(device->common_device.context, p,
-                                          device->common_device.gid_info[p - 1].local_gid_index,
-                                          &device->common_device.gid_info[p - 1].local_gid);
-                NVSHMEMI_NULL_ERROR_JMP(dev_list, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                        "query_gid failed \n");
-
-                if (!device->common_device.pd) {
-                    device->common_device.pd = ftable.alloc_pd(device->common_device.context);
-                    NVSHMEMI_NULL_ERROR_JMP(device->common_device.pd, status,
-                                            NVSHMEMX_ERROR_INTERNAL, out, "ibv_alloc_pd failed \n");
+                if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
+                    ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
+                } else if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
+                    ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
+                } else {
+                    status = ibgda_check_gpu_mapping_nic_uar(ibgda_dev);
+                    if (status) {
+                        if (use_gdrcopy) {
+                            ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
+                        } else {
+                            ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
+                        }
+                    } else {
+                        ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_GPU;
+                    }
                 }
 
-                for (int k = 0; k < replicate_count; k++) {
-                    ibgda_state->common.dev_ids[offset] = i;
-                    ibgda_state->common.port_ids[offset] = p;
-                    offset++;
+                status = ibgda_check_nic_mapping_memtypes(ibgda_state, ibgda_dev,
+                                                          nic_mapping_memtype_request);
+                if (status) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s cannot allocate buffer on the specified memory type. "
+                        "Skipping...\n",
+                        name);
+                    ftable.close_device(dev->context);
+                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    dev->context = NULL;
+                    dev->pd = NULL;
+                    continue;
                 }
 
-                device_used = 1;
+                if (ibgda_dev->support_nic_buf_on_gpumem &&
+                    !ibgda_state->common.options->IB_DISABLE_DMABUF &&
+                    !ibgda_state->dmabuf_support_for_control_buffers) {
+                    INFO(ibgda_state->common.log_level,
+                         "The system does not support registering the NIC control buffers with "
+                         "DMABUF. Fallback to use either nv_peer_mem or nvidia_peermem.\n");
+                }
+
+                status = nvshmemt_ib_common_check_nic_ext_atomic_support(dev->context);
+                if (status) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s does not support all necessary atomic operations. You may want "
+                        "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
+                        name);
+                    ftable.close_device(dev->context);
+                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    dev->context = NULL;
+                    dev->pd = NULL;
+                    continue;
+                }
+
+                status = nvshmemt_ib_common_query_endianness_conversion_size(
+                    &atomic_host_endian_size, dev->context);
+                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "query_endianness_conversion_size failed\n");
             }
+
+            if (!dev->context) continue;
+
+            ibgda_state->common.dev_ids[write_idx] = ibgda_state->common.dev_ids[i];
+            ibgda_state->common.port_ids[write_idx] = ibgda_state->common.port_ids[i];
+            write_idx++;
         }
+        ibgda_state->common.n_dev_ids = write_idx;
 
-        if (!device_used) {
-            status = ftable.close_device(device->common_device.context);
-            if (device->common_device.pd) {
-                status = ftable.dealloc_pd(device->common_device.pd);
-            }
-
-            device->common_device.context = NULL;
-            device->common_device.pd = NULL;
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "ibv_close_device or ibv_dealloc_pd failed \n");
-            continue;
+        if (!ibgda_state->common.n_dev_ids) {
+            INFO(ibgda_state->common.log_level,
+                 "no suitable IB device found after filtering, exiting");
+            status = NVSHMEMX_ERROR_INTERNAL;
+            goto out;
         }
-
-        /* Report whether we need to do atomic endianness conversions on 8 byte operands. */
-        status = nvshmemt_ib_common_query_endianness_conversion_size(&atomic_host_endian_size,
-                                                                     device->common_device.context);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "nvshmemt_ib_common_query_endianness_conversion_size failed.\n");
     }
-    INFO(ibgda_state->common.log_level, "End - Enumerating IB devices in the system\n");
 
-    ibgda_state->common.n_dev_ids = offset;
-    INFO(ibgda_state->common.log_level,
-         "Begin - Ordered list of devices for assignment (after processing user provdied env vars "
-         "(if any))  - \n");
     for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
-        INFO(ibgda_state->common.log_level,
-             "Ordered list of devices for assignment - idx=%d (of %d), device id=%d, port_num=%d\n",
-             i, ibgda_state->common.n_dev_ids, ibgda_state->common.dev_ids[i], ibgda_state->common.port_ids[i]);
-
-        device = (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
+        device =
+            (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
         nic_buf_on_gpumem &= device->support_nic_buf_on_gpumem;
         nic_buf_on_hostmem &= device->support_nic_buf_on_hostmem;
         if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY)
@@ -4810,29 +4685,18 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY)
             nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
     }
-    INFO(ibgda_state->common.log_level,
-         "End - Ordered list of devices for assignment (after processing user provdied env vars "
-         "(if any))\n");
 
-    if (!ibgda_state->common.n_dev_ids) {
-        INFO(
-            ibgda_state->common.log_level,
-            "no active IB device that supports GPU-initiated communication is found, exiting...\n");
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
+    nvshmemt_ib_common_log_device_assignment(ibgda_state->common);
 
-    transport->n_devices = ibgda_state->common.n_dev_ids;
-    transport->device_pci_paths = (char **)calloc(transport->n_devices, sizeof(char *));
-    NVSHMEMI_NULL_ERROR_JMP(transport->device_pci_paths, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "Unable to allocate paths for IB transport.\n");
+    status = nvshmemt_ib_common_discover_pci_paths(
+        transport, ibgda_state->common, sizeof(struct ibgda_device), &ftable, &mlx5dv_ftable);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "PCI path discovery failed.\n");
+
     for (int i = 0; i < transport->n_devices; i++) {
-        status = get_pci_path(i, &transport->device_pci_paths[i], transport);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Failed to get paths for PCI devices.\n");
-        if (((struct ibgda_device *)ibgda_state->common.devices)[ibgda_state->common.dev_ids[i]].data_direct &&
+        if (((struct ibgda_device *)ibgda_state->common.devices)[ibgda_state->common.dev_ids[i]]
+                .common_device.data_direct &&
             !ibgda_state->common.options->IBGDA_NUM_RC_PER_PE_provided) {
-            // Need 4 QPs for achieving bandwidth in data direct device
+            // Need 8 QPs for achieving bandwidth in data direct device
             ibgda_state->common.options->IBGDA_NUM_RC_PER_PE = 8;
             INFO(ibgda_state->common.log_level,
                  "Setting IBGDA_NUM_RC_PER_PE = 8 as data direct device is detected");
@@ -4860,25 +4724,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     }
     ibgda_nic_handler = nic_handler;
 
-    // print devices that were not found
-    if (hca_list_count) {
-        for (int j = 0; j < hca_list_count; j++) {
-            if (hca_list[j].found != 1) {
-                NVSHMEMI_WARN_PRINT(
-                    "cound not find user specified HCA name: %s port: %d, skipping\n",
-                    hca_list[j].name, hca_list[j].port);
-            }
-        }
-    } else if (pe_hca_map_count) {
-        // filter devices based on user hca-pe mapping
-        for (int j = 0; j < pe_hca_map_count; j++) {
-            if (pe_hca_mapping[j].found != 1) {
-                NVSHMEMI_WARN_PRINT(
-                    "cound not find user specified HCA name: %s port: %d, skipping\n",
-                    pe_hca_mapping[j].name, pe_hca_mapping[j].port);
-            }
-        }
-    }
+    nvshmemt_ib_common_warn_missing_hcas(hca_filter);
 
     status = cudaDeviceGetStreamPriorityRange(&lowest_stream_priority, &highest_stream_priority);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "stream priority query failed. \n");

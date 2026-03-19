@@ -41,6 +41,14 @@
 
 #define NETMASK(bits) (htonl(0xffffffff << (32 - bits)))
 
+#ifndef MAX_NUM_HCAS
+#define MAX_NUM_HCAS 48
+#endif
+
+#ifndef MAX_NUM_PES_PER_NODE
+#define MAX_NUM_PES_PER_NODE 32
+#endif
+
 typedef void *nvshmemt_ib_common_ep_ptr_t;
 
 typedef enum {
@@ -174,12 +182,12 @@ struct nvshmemt_mlx5dv_function_table {
 };
 
 bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
-                                    struct nvshmemt_ibv_function_table *ftable,
-                                    struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
+                                    const struct nvshmemt_ibv_function_table *ftable,
+                                    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
 
 int nvshmemt_ib_iface_get_mlx_path(ibv_device *dev, ibv_context *ctx, char **path,
-                                   struct nvshmemt_ibv_function_table *ftable,
-                                   struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
+                                   const struct nvshmemt_ibv_function_table *ftable,
+                                   const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
                                    bool *is_data_direct, int log_level);
 
 int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_table *ftable,
@@ -220,7 +228,45 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
                                                                     int qp_index, int pe_index);
 
 /* Helper function to filter devices based on HCA_PREFIX */
-bool nvshmemt_check_hca_prefix(nvshmemi_options_s* options, const char* name);
+bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *name);
+
+#ifdef NVSHMEM_USE_MLX5DV
+int nvshmemt_ib_common_init_mlx5dv(void **mlx5dv_handle,
+                                   struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
+                                   bool disable_data_direct, int log_level);
+#endif
+
+struct nvshmemt_ib_hca_filter {
+    struct nvshmemt_hca_info hca_list[MAX_NUM_HCAS];
+    struct nvshmemt_hca_info pe_hca_mapping[MAX_NUM_PES_PER_NODE];
+    int hca_list_count;
+    int pe_hca_map_count;
+    int user_selection;
+    int exclude_list;
+};
+
+int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
+                                        const struct nvshmemt_ib_common_state &state);
+
+void nvshmemt_ib_common_warn_missing_hcas(const struct nvshmemt_ib_hca_filter &filter);
+
+void nvshmemt_ib_common_log_device_assignment(const struct nvshmemt_ib_common_state &state);
+
+int nvshmemt_ib_common_check_dmabuf_support(bool &out_dmabuf_support,
+                                            const struct nvshmemi_cuda_fn_table *table,
+                                            bool ib_disable_dmabuf);
+
+int nvshmemt_ib_common_discover_pci_paths(nvshmem_transport_t t,
+                                          struct nvshmemt_ib_common_state &state,
+                                          size_t device_struct_size,
+                                          const struct nvshmemt_ibv_function_table *ftable,
+                                          const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
+
+int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_table *ftable,
+                                         struct nvshmemt_ib_common_state &state,
+                                         size_t device_struct_size,
+                                         struct nvshmemt_ib_hca_filter &filter,
+                                         struct ibv_device **dev_list, int num_devices);
 
 /* The following code is for dynamic GID detection for RoCE platforms.
    It has been adapted from NCCL: https://gitlab-master.nvidia.com/nccl/nccl/-/merge_requests/359 */
@@ -395,7 +441,7 @@ static int ib_roce_get_version_num(const char *deviceName, int portNum, int gidI
     return NVSHMEMX_SUCCESS;
 }
 
-static void update_gid_index(struct nvshmemt_ibv_function_table *ftable,
+static void update_gid_index(const struct nvshmemt_ibv_function_table *ftable,
                              struct ibv_context *context, uint8_t portNum, sa_family_t af,
                              void *prefix, int prefixlen, int roceVer, int gidIndexCandidate,
                              int *gidIndex) {
@@ -428,7 +474,7 @@ static void update_gid_index(struct nvshmemt_ibv_function_table *ftable,
     return;
 }
 
-static void ib_get_gid_index(struct nvshmemt_ibv_function_table *ftable,
+static void ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable,
                              struct ibv_context *context, uint8_t portNum, int gidTblLen,
                              int *gidIndex, int log_level, nvshmemi_options_s *options) {
     *gidIndex = options->IB_GID_INDEX;
