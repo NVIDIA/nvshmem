@@ -44,7 +44,7 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
                                       void *alias_va_ptr) {
     struct nvshmemt_ib_common_mem_handle *handle =
         (struct nvshmemt_ib_common_mem_handle *)mem_handle;
-    struct ibv_mr *mr = NULL;
+    struct ibv_mr *mr = nullptr;
     int status = 0;
     int ro_flag = 0;
     bool host_memory = false;
@@ -54,10 +54,10 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
     cudaPointerAttributes attr;
     status = cudaPointerGetAttributes(&attr, buf);
     if (status != cudaSuccess) {
-        host_memory = true;
-        status = 0;
-        cudaGetLastError();
-    } else if (attr.type != cudaMemoryTypeDevice) {
+        NVSHMEMI_ERROR_PRINT("cudaPointerGetAttributes failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    if (attr.type != cudaMemoryTypeDevice) {
         host_memory = true;
     }
 
@@ -70,7 +70,7 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
 #endif
 #endif
 
-    if (ftable->reg_dmabuf_mr != NULL && !host_memory && dmabuf_support &&
+    if (ftable->reg_dmabuf_mr != nullptr && !host_memory && dmabuf_support &&
         CUPFN(table, cuMemGetHandleForAddressRange)) {
         size_t page_size = sysconf(_SC_PAGESIZE);
         size_t size_aligned;
@@ -92,7 +92,7 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
                 IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
                     IBV_ACCESS_REMOTE_ATOMIC | ro_flag,
                 MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
-            if (mr == NULL) {
+            if (mr == nullptr) {
                 close(handle->fd);
                 goto reg_dmabuf_failure;
             }
@@ -102,7 +102,7 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
                                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
                                            ro_flag);
-            if (mr == NULL) {
+            if (mr == nullptr) {
                 close(handle->fd);
                 goto reg_dmabuf_failure;
             }
@@ -157,14 +157,14 @@ out:
 }
 
 bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
-                                    struct nvshmemt_ibv_function_table *ftable,
-                                    struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable) {
+                                    const struct nvshmemt_ibv_function_table *ftable,
+                                    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable) {
     int status = 0;
     int dev_fail = 0;
     struct ibv_pd *pd = ftable->alloc_pd(context);
     NVSHMEMI_NULL_ERROR_JMP(pd, status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_alloc_pd failed \n");
 
-    if (mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr == NULL) {
+    if (mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr == nullptr) {
         errno = EOPNOTSUPP;
     } else {
         mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/,
@@ -323,12 +323,12 @@ out:
 int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
                                          int num_selected_devs, int *out_qp_indices, int num_qps) {
     /* transport side */
-    struct nvshmemt_ib_common_ep_handle *local_ep_handles = NULL, *ep_handles = NULL;
+    struct nvshmemt_ib_common_ep_handle *local_ep_handles = nullptr, *ep_handles = nullptr;
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
     int n_pes = t->n_pes;
     int status = 0;
     int first_ep_idx;
-    bool is_initial_call = (ib_state->ep == NULL);
+    bool is_initial_call = (ib_state->ep == nullptr);
 
     /* Calculate ep_count and total_eps based on call type */
     int ep_count, total_eps, qps_to_create;
@@ -357,7 +357,7 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_de
                                 "failed allocating space for endpoints \n");
         ib_state->ep_count = total_eps;
     } else {
-        assert(out_qp_indices != NULL);
+        assert(out_qp_indices != nullptr);
         ep_count = num_qps;
         total_eps = n_pes * num_qps;
         qps_to_create = num_qps;
@@ -424,7 +424,7 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_de
     }
 
     /* Populate out_qp_indices array with QP numbers */
-    if (out_qp_indices != NULL) {
+    if (out_qp_indices != nullptr) {
         for (int i = 0; i < qps_to_create; i++) {
             out_qp_indices[i] = ib_state->next_qp_index;
             ib_state->next_qp_index += n_pes;
@@ -439,7 +439,7 @@ out:
             ib_state->selected_dev_id = -1;
             if (ib_state->ep) {
                 free(ib_state->ep);
-                ib_state->ep = NULL;
+                ib_state->ep = nullptr;
             }
         }
         if (local_ep_handles) free(local_ep_handles);
@@ -481,12 +481,12 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
         return ib_state->ep[qp_index + pe_index];
     }
 
-    return NULL;
+    return nullptr;
 }
 
 int nvshmemt_ib_iface_get_mlx_path(ibv_device *dev, ibv_context *ctx, char **path,
-                                   struct nvshmemt_ibv_function_table *ftable,
-                                   struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
+                                   const struct nvshmemt_ibv_function_table *ftable,
+                                   const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
                                    bool *is_data_direct, int log_level) {
     int status;
     char device_path[MAXPATHSIZE];
@@ -517,7 +517,7 @@ int nvshmemt_ib_iface_get_mlx_path(ibv_device *dev, ibv_context *ctx, char **pat
         }
     }
 
-    *path = realpath(device_path, NULL);
+    *path = realpath(device_path, nullptr);
     NVSHMEMI_NULL_ERROR_JMP(*path, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out, "realpath failed \n");
 
 out:
@@ -527,7 +527,7 @@ out:
 int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_table *ftable,
                              int log_level) {
     *ibv_handle = dlopen("libibverbs.so.1", RTLD_LAZY);
-    if (*ibv_handle == NULL) {
+    if (*ibv_handle == nullptr) {
         INFO(log_level, "libibverbs not found on the system.");
         return -1;
     }
@@ -562,14 +562,14 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
 int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_function_table *ftable,
                                 int log_level) {
     *mlx5dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
-    if (*mlx5dv_handle == NULL) {
+    if (*mlx5dv_handle == nullptr) {
         *mlx5dv_handle = dlopen("libmlx5.so.1", RTLD_LAZY);
     }
-    if (*mlx5dv_handle == NULL) {
+    if (*mlx5dv_handle == nullptr) {
         INFO(log_level, "Failed to open libmlx5.so[.1]");
-        ftable->mlx5dv_internal_is_supported = NULL;
-        ftable->mlx5dv_internal_get_data_direct_sysfs_path = NULL;
-        ftable->mlx5dv_internal_reg_dmabuf_mr = NULL;
+        ftable->mlx5dv_internal_is_supported = nullptr;
+        ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+        ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
         return -1;
     }
     LOAD_SYM_VERSION(*mlx5dv_handle, "mlx5dv_is_supported", ftable->mlx5dv_internal_is_supported,
@@ -604,7 +604,7 @@ void nvshmemt_mlx5dv_ftable_fini(void **mlx5dv_handle) {
     }
 }
 
-bool nvshmemt_check_hca_prefix(nvshmemi_options_s* options, const char* name) {
+bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *name) {
     bool device_supported = false;
     const char *hca_prefix = "^smi";
     if (options->HCA_PREFIX_provided) {
@@ -613,16 +613,347 @@ bool nvshmemt_check_hca_prefix(nvshmemi_options_s* options, const char* name) {
 
     if (hca_prefix[0] == '^') {
         // ignore first letter : "^"
-        device_supported = strstr(name, &hca_prefix[1]) == NULL;
+        device_supported = strstr(name, &hca_prefix[1]) == nullptr;
     } else {
-        device_supported = strstr(name, hca_prefix) != NULL;
+        device_supported = strstr(name, hca_prefix) != nullptr;
     }
     if (!device_supported) {
         NVSHMEMI_WARN_PRINT(
-                "device %s is not supported (expected HCA interface: %s). Skipping...\n", name,
-                hca_prefix);
+            "device %s is not supported (expected HCA interface: %s). Skipping...\n", name,
+            hca_prefix);
     }
 
-
     return device_supported;
+}
+
+#ifdef NVSHMEM_USE_MLX5DV
+int nvshmemt_ib_common_init_mlx5dv(void **mlx5dv_handle,
+                                   struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
+                                   bool disable_data_direct, int log_level) {
+    if (!disable_data_direct) {
+        if (nvshmemt_mlx5dv_ftable_init(mlx5dv_handle, mlx5dv_ftable, log_level)) {
+            NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.");
+            mlx5dv_ftable->mlx5dv_internal_is_supported = nullptr;
+            mlx5dv_ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+            mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+        }
+    } else {
+        mlx5dv_ftable->mlx5dv_internal_is_supported = nullptr;
+        mlx5dv_ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+        mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+        INFO(log_level, "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
+    }
+    return 0;
+}
+#endif
+
+int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
+                                        const struct nvshmemt_ib_common_state &state) {
+    struct nvshmemi_options_s *options = state.options;
+    int log_level = state.log_level;
+    filter.hca_list_count = 0;
+    filter.pe_hca_map_count = 0;
+    filter.user_selection = 0;
+    filter.exclude_list = 0;
+
+    if (options->HCA_LIST_provided) {
+        filter.user_selection = 1;
+        filter.exclude_list = (options->HCA_LIST[0] == '^');
+        filter.hca_list_count =
+            nvshmemt_parse_hca_list(options->HCA_LIST, filter.hca_list, MAX_NUM_HCAS, log_level);
+    }
+
+    if (options->HCA_PE_MAPPING_provided) {
+        if (filter.hca_list_count) {
+            NVSHMEMI_WARN_PRINT(
+                "Found conflicting parameters NVSHMEM_HCA_LIST and NVSHMEM_HCA_PE_MAPPING, "
+                "ignoring "
+                "NVSHMEM_HCA_PE_MAPPING \n");
+        } else {
+            filter.user_selection = 1;
+            filter.pe_hca_map_count = nvshmemt_parse_hca_list(
+                options->HCA_PE_MAPPING, filter.pe_hca_mapping, MAX_NUM_PES_PER_NODE, log_level);
+        }
+    }
+
+    return 0;
+}
+
+void nvshmemt_ib_common_warn_missing_hcas(const struct nvshmemt_ib_hca_filter &filter) {
+    if (filter.hca_list_count) {
+        for (int j = 0; j < filter.hca_list_count; j++) {
+            if (filter.hca_list[j].found != 1) {
+                NVSHMEMI_WARN_PRINT(
+                    "could not find user specified HCA name: %s port: %d, skipping\n",
+                    filter.hca_list[j].name, filter.hca_list[j].port);
+            }
+        }
+    } else if (filter.pe_hca_map_count) {
+        for (int j = 0; j < filter.pe_hca_map_count; j++) {
+            if (filter.pe_hca_mapping[j].found != 1) {
+                NVSHMEMI_WARN_PRINT(
+                    "could not find user specified HCA name: %s port: %d, skipping\n",
+                    filter.pe_hca_mapping[j].name, filter.pe_hca_mapping[j].port);
+            }
+        }
+    }
+}
+
+void nvshmemt_ib_common_log_device_assignment(const struct nvshmemt_ib_common_state &state) {
+    INFO(state.log_level,
+         "Begin - Ordered list of devices for assignment (after processing user provided env vars "
+         "(if any))  - ");
+    for (int i = 0; i < state.n_dev_ids; i++) {
+        INFO(state.log_level,
+             "Ordered list of devices for assignment - idx=%d (of %d), device id=%d, port_num=%d",
+             i, state.n_dev_ids, state.dev_ids[i], state.port_ids[i]);
+    }
+    INFO(state.log_level,
+         "End - Ordered list of devices for assignment (after processing user provided env vars "
+         "(if any))");
+}
+
+int nvshmemt_ib_common_check_dmabuf_support(bool &out_dmabuf_support,
+                                            const struct nvshmemi_cuda_fn_table *table,
+                                            bool ib_disable_dmabuf) {
+    int status = 0;
+    int flag;
+    CUdevice gpu_device_id;
+
+    out_dmabuf_support = false;
+
+    if (!ib_disable_dmabuf) {
+        status = CUPFN(table, cuCtxGetDevice(&gpu_device_id));
+        if (status != CUDA_SUCCESS) {
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        status = CUPFN(table, cuDeviceGetAttribute(
+                                  &flag, (CUdevice_attribute)CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED,
+                                  gpu_device_id));
+        if (status != CUDA_SUCCESS) {
+            status = 0;
+            cudaGetLastError();
+        } else if (flag == 1) {
+            out_dmabuf_support = true;
+        }
+    }
+
+    if (!out_dmabuf_support) {
+        if (nvshmemt_ib_common_nv_peer_mem_available() != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT(
+                "neither nv_peer_mem, or nvidia_peermem detected. Skipping transport.\n");
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+    }
+
+    return 0;
+}
+
+int nvshmemt_ib_common_discover_pci_paths(nvshmem_transport_t t,
+                                          struct nvshmemt_ib_common_state &state,
+                                          size_t device_struct_size,
+                                          const struct nvshmemt_ibv_function_table *ftable,
+                                          const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable) {
+    int status = 0;
+    struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
+
+    transport->n_devices = state.n_dev_ids;
+    transport->device_pci_paths = (char **)calloc(transport->n_devices, sizeof(char *));
+    if (!transport->device_pci_paths) {
+        NVSHMEMI_ERROR_PRINT("Unable to allocate paths for IB transport.");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    for (int i = 0; i < transport->n_devices; i++) {
+        int dev_id = state.dev_ids[i];
+        struct nvshmemt_ib_common_device *device =
+            (struct nvshmemt_ib_common_device *)((char *)state.devices +
+                                                 dev_id * device_struct_size);
+        status = nvshmemt_ib_iface_get_mlx_path(
+            device->dev, device->context, &transport->device_pci_paths[i], ftable, mlx5dv_ftable,
+            &device->data_direct, state.log_level);
+        if (status) {
+            NVSHMEMI_ERROR_PRINT("nvshmemt_ib_iface_get_mlx_path failed \n");
+            status = NVSHMEMX_ERROR_INTERNAL;
+            for (int j = 0; j < i; j++) {
+                free(transport->device_pci_paths[j]);
+            }
+            free(transport->device_pci_paths);
+            transport->device_pci_paths = nullptr;
+            transport->n_devices = 0;
+            break;
+        }
+    }
+
+    return status;
+}
+
+int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_table *ftable,
+                                         struct nvshmemt_ib_common_state &state,
+                                         size_t device_struct_size,
+                                         struct nvshmemt_ib_hca_filter &filter,
+                                         struct ibv_device **dev_list, int num_devices) {
+    void *devices = state.devices;
+    int *dev_ids = state.dev_ids;
+    int *port_ids = state.port_ids;
+    struct nvshmemi_options_s *options = state.options;
+    int log_level = state.log_level;
+    int status = 0;
+    int offset = 0;
+
+    INFO(log_level,
+         "Begin - Enumerating IB devices in the system ([<dev_id, device_name, num_ports>]) - ");
+    for (int i = 0; i < num_devices; i++) {
+        struct nvshmemt_ib_common_device *device =
+            (struct nvshmemt_ib_common_device *)((char *)devices + i * device_struct_size);
+        device->dev = dev_list[i];
+
+        device->context = ftable->open_device(device->dev);
+        if (!device->context) {
+            INFO(log_level, "open_device failed for IB device at index %d", i);
+            continue;
+        }
+
+        const char *name = ftable->get_device_name(device->dev);
+        NVSHMEMI_NULL_ERROR_JMP(name, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "ibv_get_device_name failed \n");
+
+        bool device_supported = nvshmemt_check_hca_prefix(options, name);
+
+        if (!device_supported) {
+            ftable->close_device(device->context);
+            device->context = nullptr;
+            continue;
+        }
+
+        status = ftable->query_device(device->context, &device->device_attr);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_query_device failed \n");
+
+        INFO(log_level,
+             "Enumerated IB devices in the system - device id=%d (of %d), name=%s, num_ports=%d", i,
+             num_devices, name, device->device_attr.phys_port_cnt);
+        int device_used = 0;
+        for (int p = 1; p <= device->device_attr.phys_port_cnt; p++) {
+            int allowed_device = 1;
+            int replicate_count = 1;
+            if (filter.hca_list_count) {
+                allowed_device = filter.exclude_list;
+                for (int j = 0; j < filter.hca_list_count; j++) {
+                    if (!strcmp(filter.hca_list[j].name, name)) {
+                        if (filter.hca_list[j].port == -1 || filter.hca_list[j].port == p) {
+                            filter.hca_list[j].found = 1;
+                            allowed_device = !filter.exclude_list;
+                        }
+                    }
+                }
+            } else if (filter.pe_hca_map_count) {
+                allowed_device = 0;
+                for (int j = 0; j < filter.pe_hca_map_count; j++) {
+                    if (!strcmp(filter.pe_hca_mapping[j].name, name)) {
+                        if (filter.pe_hca_mapping[j].port == -1 ||
+                            filter.pe_hca_mapping[j].port == p) {
+                            allowed_device = 1;
+                            filter.pe_hca_mapping[j].found = 1;
+                            replicate_count = filter.pe_hca_mapping[j].count;
+                        }
+                    }
+                }
+            }
+
+            if (!allowed_device) {
+                continue;
+            }
+
+            status = ftable->query_port(device->context, p, &device->port_attr[p - 1]);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "ibv_port_query failed \n");
+
+            if ((device->port_attr[p - 1].state != IBV_PORT_ACTIVE) ||
+                (device->port_attr[p - 1].link_layer != IBV_LINK_LAYER_INFINIBAND &&
+                    device->port_attr[p - 1].link_layer != IBV_LINK_LAYER_ETHERNET)) {
+                if (filter.user_selection) {
+                    NVSHMEMI_WARN_PRINT(
+                        "found inactive port or port with non-IB link layer protocol, "
+                        "skipping...\n");
+                }
+                continue;
+            }
+
+            ib_get_gid_index(ftable, device->context, p, device->port_attr[p - 1].gid_tbl_len,
+                                &device->gid_info[p - 1].local_gid_index, log_level, options);
+            status =
+                ftable->query_gid(device->context, p, device->gid_info[p - 1].local_gid_index,
+                                    &device->gid_info[p - 1].local_gid);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "query_gid failed \n");
+
+            if (!device->pd) {
+                device->pd = ftable->alloc_pd(device->context);
+                NVSHMEMI_NULL_ERROR_JMP(device->pd, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_alloc_pd failed \n");
+            }
+
+            for (int k = 0; k < replicate_count; k++) {
+                if (offset >= MAX_NUM_PES_PER_NODE) {
+                    NVSHMEMI_ERROR_PRINT(
+                        "Too many device/port entries (%d), exceeds MAX_NUM_PES_PER_NODE "
+                        "(%d)\n",
+                        offset + 1, MAX_NUM_PES_PER_NODE);
+                    status = NVSHMEMX_ERROR_INTERNAL;
+                    goto out;
+                }
+                dev_ids[offset] = i;
+                port_ids[offset] = p;
+                offset++;
+            }
+
+            device_used = 1;
+        }
+
+        if (!device_used) {
+            if (device->pd) {
+                status = ftable->dealloc_pd(device->pd);
+                device->pd = nullptr;
+            }
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed \n");
+
+            if (device->context) {
+                status = ftable->close_device(device->context);
+                device->context = nullptr;
+            }
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_close_device failed \n");
+        }
+    }
+    INFO(log_level, "End - Enumerating IB devices in the system");
+
+    state.n_dev_ids = offset;
+
+    if (!state.n_dev_ids) {
+        INFO(log_level, "no active IB device found, exiting");
+        status = NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+
+out:
+    if (status) {
+        for (int i = 0; i < num_devices; i++) {
+            struct nvshmemt_ib_common_device *device =
+                (struct nvshmemt_ib_common_device *)((char *)devices + i * device_struct_size);
+            if (device->pd) {
+                int rc = ftable->dealloc_pd(device->pd);
+                if (rc) {
+                    NVSHMEMI_ERROR_PRINT("ibv_dealloc_pd failed during cleanup for device %d\n", i);
+                }
+                device->pd = nullptr;
+            }
+            if (device->context) {
+                int rc = ftable->close_device(device->context);
+                if (rc) {
+                    NVSHMEMI_ERROR_PRINT("ibv_close_device failed during cleanup for device %d\n",
+                                         i);
+                }
+                device->context = nullptr;
+            }
+        }
+        state.n_dev_ids = 0;
+    }
+    return status;
 }

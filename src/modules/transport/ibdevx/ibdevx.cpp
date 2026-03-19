@@ -71,10 +71,6 @@ static inline int get_ibdevx_srq_depth(nvshmemt_ib_common_state_t state) {
 #define MAX_NUM_PES_PER_NODE 32
 #define BAR_READ_BUFSIZE (sizeof(uint64_t))
 
-int NVSHMEMT_IBDEVX_MAX_RD_ATOMIC; /* Maximum number of RDMA Read & Atomic operations that can be
-                                    * outstanding per QP
-                                    */
-
 struct ibdevx_cq {
     void *buf;
     uint32_t num_cqe;
@@ -230,6 +226,9 @@ static uint64_t connected_qp_count;
 
 static int use_ib_native_atomics = 1;
 
+/* Maximum number of RDMA Read & Atomic operations that can be outstanding per QP */
+static int nvshmemt_ibdevx_max_rd_atomic = INT_MAX;
+
 static struct nvshmemt_ibv_function_table ftable;
 static void *ibv_handle;
 
@@ -241,24 +240,6 @@ static void *mlx5dv_handle;
 int nvshmemt_ibdevx_show_info(struct nvshmem_transport *transport, int style) {
     NVSHMEMI_ERROR_PRINT("ibdevx show info not implemented");
     return 0;
-}
-
-static int get_pci_path(int dev, char **pci_path, nvshmem_transport_t t) {
-    int status = NVSHMEMX_SUCCESS;
-
-    struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
-    nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)transport->state;
-    int dev_id = ibdevx_state->dev_ids[dev];
-
-    struct ibdevx_device *device = &(((struct ibdevx_device *)ibdevx_state->devices)[dev_id]);
-    status = nvshmemt_ib_iface_get_mlx_path(
-        device->common_device.dev, device->common_device.context, pci_path, &ftable, &mlx5dv_ftable,
-        &(device->common_device.data_direct), ibdevx_state->log_level);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmemt_ib_iface_get_mlx_path failed \n");
-
-out:
-    return status;
 }
 
 int nvshmemt_ibdevx_can_reach_peer(int *access, struct nvshmem_transport_pe_info *peer_info,
@@ -746,10 +727,10 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
         DEVX_SET(qpc, qp_context, primary_address_path.grh, false);
     }
 
-    if (NVSHMEMT_IBDEVX_MAX_RD_ATOMIC == 0) {
+    if (nvshmemt_ibdevx_max_rd_atomic == 0) {
         DEVX_SET(qpc, qp_context, log_rra_max, 0);
     } else {
-        DEVX_SET(qpc, qp_context, log_rra_max, (int)log2(NVSHMEMT_IBDEVX_MAX_RD_ATOMIC));
+        DEVX_SET(qpc, qp_context, log_rra_max, (int)log2(nvshmemt_ibdevx_max_rd_atomic));
     }
 
     status =
@@ -762,10 +743,10 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
     DEVX_SET(rtr2rts_qp_in, cmd_in3, qpn, ep->qpid);
 
     qp_context = DEVX_ADDR_OF(rtr2rts_qp_in, cmd_in3, qpc);
-    if (NVSHMEMT_IBDEVX_MAX_RD_ATOMIC == 0) {
+    if (nvshmemt_ibdevx_max_rd_atomic == 0) {
         DEVX_SET(qpc, qp_context, log_sra_max, 0);
     } else {
-        DEVX_SET(qpc, qp_context, log_sra_max, (int)log2(NVSHMEMT_IBDEVX_MAX_RD_ATOMIC));
+        DEVX_SET(qpc, qp_context, log_sra_max, (int)log2(nvshmemt_ibdevx_max_rd_atomic));
     }
     DEVX_SET(qpc, qp_context, retry_count, 7);
     DEVX_SET(qpc, qp_context, rnr_retry, 7);
@@ -1558,18 +1539,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     nvshmemt_ib_common_state_t ibdevx_state = NULL;
     struct ibv_device **dev_list = NULL;
     int num_devices;
-    struct ibdevx_device *device;
-    std::vector<std::string> nic_names_n_pes;
-    std::vector<std::string> nic_names;
-    int exclude_list = 0;
-    struct nvshmemt_hca_info hca_list[MAX_NUM_HCAS];
-    struct nvshmemt_hca_info pe_hca_mapping[MAX_NUM_PES_PER_NODE];
-    int hca_list_count = 0, pe_hca_map_count = 0, user_selection = 0;
-    int offset = 0;
+    struct nvshmemt_ib_hca_filter hca_filter;
     int log_qp_depth;
     uint32_t atomic_host_endian_size = 0;
-    int flag;
-    CUdevice gpu_device_id;
 
     if (NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version) != NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION) {
         NVSHMEMI_ERROR_PRINT(
@@ -1610,21 +1582,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     }
 
 #ifdef NVSHMEM_USE_MLX5DV
-    if (!ibdevx_state->options->DISABLE_DATA_DIRECT) {
-        if (nvshmemt_mlx5dv_ftable_init(&mlx5dv_handle, &mlx5dv_ftable, ibdevx_state->log_level)) {
-            NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.");
-            // mlx5dv_handle will be NULL on failure
-            mlx5dv_ftable.mlx5dv_internal_is_supported = NULL;
-            mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = NULL;
-            mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = NULL;
-        }
-    } else {
-        mlx5dv_ftable.mlx5dv_internal_is_supported = NULL;
-        mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = NULL;
-        mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = NULL;
-        INFO(ibdevx_state->log_level,
-             "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
-    }
+    nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
+                                   ibdevx_state->options->DISABLE_DATA_DIRECT,
+                                   ibdevx_state->log_level);
 #else
     INFO(ibdevx_state->log_level, "directNIC features are disabled");
 #endif
@@ -1681,204 +1641,76 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = pthread_mutex_init(&ibdevx_mutex_send_progress, NULL);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "pthread_mutex_init failed \n");
 
-    if (ibdevx_state->options->HCA_LIST_provided) {
-        user_selection = 1;
-        exclude_list = (ibdevx_state->options->HCA_LIST[0] == '^');
-        hca_list_count = nvshmemt_parse_hca_list(ibdevx_state->options->HCA_LIST, hca_list,
-                                                 MAX_NUM_HCAS, ibdevx_state->log_level);
-    }
+    nvshmemt_ib_common_parse_hca_filter(hca_filter, *ibdevx_state);
 
-    if (ibdevx_state->options->HCA_PE_MAPPING_provided) {
-        if (hca_list_count) {
-            NVSHMEMI_WARN_PRINT(
-                "Found conflicting parameters NVSHMEM_HCA_LIST and NVSHMEM_HCA_PE_MAPPING, "
-                "ignoring "
-                "NVSHMEM_HCA_PE_MAPPING \n");
-        } else {
-            user_selection = 1;
-            pe_hca_map_count =
-                nvshmemt_parse_hca_list(ibdevx_state->options->HCA_PE_MAPPING, pe_hca_mapping,
-                                        MAX_NUM_PES_PER_NODE, ibdevx_state->log_level);
-        }
-    }
+    status = nvshmemt_ib_common_enumerate_devices(
+        &ftable, *ibdevx_state, sizeof(struct ibdevx_device), hca_filter, dev_list, num_devices);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Device enumeration failed.\n");
 
-    INFO(ibdevx_state->log_level,
-         "Begin - Enumerating IB devices in the system ([<dev_id, device_name, num_ports>]) - ");
-    for (int i = 0; i < num_devices; i++) {
-        device = (struct ibdevx_device *)ibdevx_state->devices + i;
-        device->common_device.dev = dev_list[i];
+    {
+        bool device_checked[MAX_NUM_HCAS] = {};
+        int write_idx = 0;
+        for (int i = 0; i < ibdevx_state->n_dev_ids; i++) {
+            int dev_idx = ibdevx_state->dev_ids[i];
+            struct ibdevx_device *dev = &((struct ibdevx_device *)ibdevx_state->devices)[dev_idx];
 
-        device->common_device.context = ftable.open_device(device->common_device.dev);
-        if (!device->common_device.context) {
-            INFO(ibdevx_state->log_level, "open_device failed for IB device at index %d", i);
-            continue;
-        }
+            if (!device_checked[dev_idx]) {
+                device_checked[dev_idx] = true;
+                const char *name = ftable.get_device_name(dev->common_device.dev);
 
-        const char *name = ftable.get_device_name(device->common_device.dev);
-        NVSHMEMI_NULL_ERROR_JMP(name, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                "ibv_get_device_name failed \n");
-
-        bool device_supported = nvshmemt_check_hca_prefix(ibdevx_state->options, name);
-
-        if (!device_supported) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            continue;
-        }
-
-        status =
-            ftable.query_device(device->common_device.context, &device->common_device.device_attr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_query_device failed \n");
-
-        if (!nvshmemt_ib_common_query_mlx5_caps(device->common_device.context)) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            NVSHMEMI_WARN_PRINT("device %s is not enumerated as an mlx5 device. Skipping...", name);
-            continue;
-        }
-
-        /* Report whether we need to do atomic endianness conversions on 8 byte operands. */
-        status = nvshmemt_ib_common_query_endianness_conversion_size(&atomic_host_endian_size,
-                                                                     device->common_device.context);
-        if (status != 0) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-        }
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "nvshmemt_ib_common_query_endianness_conversion_size failed.\n");
-
-        status = nvshmemt_ib_common_check_nic_ext_atomic_support(device->common_device.context);
-        if (status) {
-            ftable.close_device(device->common_device.context);
-            device->common_device.context = NULL;
-            NVSHMEMI_WARN_PRINT(
-                "device %s does not support all necessary atomic operations. You may want to check "
-                "the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
-                name);
-            continue;
-        }
-
-        NVSHMEMT_IBDEVX_MAX_RD_ATOMIC = (device->common_device.device_attr).max_qp_rd_atom;
-        INFO(ibdevx_state->log_level,
-             "Enumerated IB devices in the system - device id=%d (of %d), name=%s, num_ports=%d", i,
-             num_devices, name, device->common_device.device_attr.phys_port_cnt);
-        int device_used = 0;
-        for (int p = 1; p <= device->common_device.device_attr.phys_port_cnt; p++) {
-            int allowed_device = 1;
-            int replicate_count = 1;
-            if (hca_list_count) {
-                // filter out based on user hca list
-                allowed_device = exclude_list;
-                for (int j = 0; j < hca_list_count; j++) {
-                    if (!strcmp(hca_list[j].name, name)) {
-                        if (hca_list[j].port == -1 || hca_list[j].port == p) {
-                            hca_list[j].found = 1;
-                            allowed_device = !exclude_list;
-                        }
-                    }
-                }
-            } else if (pe_hca_map_count) {
-                // filter devices based on user hca-pe mapping
-                allowed_device = 0;
-                for (int j = 0; j < pe_hca_map_count; j++) {
-                    if (!strcmp(pe_hca_mapping[j].name, name)) {
-                        if (pe_hca_mapping[j].port == -1 || pe_hca_mapping[j].port == p) {
-                            allowed_device = 1;
-                            pe_hca_mapping[j].found = 1;
-                            replicate_count = pe_hca_mapping[j].count;
-                        }
-                    }
-                }
-            }
-
-            if (!allowed_device) {
-                continue;
-            } else {
-                status = ftable.query_port(device->common_device.context, p,
-                                           &device->common_device.port_attr[p - 1]);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_port_query failed \n");
-
-                if ((device->common_device.port_attr[p - 1].state != IBV_PORT_ACTIVE) ||
-                    (device->common_device.port_attr[p - 1].link_layer !=
-                         IBV_LINK_LAYER_INFINIBAND &&
-                     device->common_device.port_attr[p - 1].link_layer !=
-                         IBV_LINK_LAYER_ETHERNET)) {
-                    if (user_selection) {
-                        NVSHMEMI_WARN_PRINT(
-                            "found inactive port or port with non-IB link layer protocol, "
-                            "skipping...\n");
-                    }
+                if (!nvshmemt_ib_common_query_mlx5_caps(dev->common_device.context)) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s is not enumerated as an mlx5 device. Skipping...", name);
+                    ftable.close_device(dev->common_device.context);
+                    if (dev->common_device.pd) ftable.dealloc_pd(dev->common_device.pd);
+                    dev->common_device.context = NULL;
+                    dev->common_device.pd = NULL;
                     continue;
                 }
-
-                ib_get_gid_index(&ftable, device->common_device.context, p,
-                                 device->common_device.port_attr[p - 1].gid_tbl_len,
-                                 &device->common_device.gid_info[p - 1].local_gid_index,
-                                 ibdevx_state->log_level, ibdevx_state->options);
-                status = ftable.query_gid(device->common_device.context, p,
-                                          device->common_device.gid_info[p - 1].local_gid_index,
-                                          &device->common_device.gid_info[p - 1].local_gid);
-                NVSHMEMI_NULL_ERROR_JMP(dev_list, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                        "query_gid failed \n");
-
-                if (!device->common_device.pd) {
-                    device->common_device.pd = ftable.alloc_pd(device->common_device.context);
-                    NVSHMEMI_NULL_ERROR_JMP(device->common_device.pd, status,
-                                            NVSHMEMX_ERROR_INTERNAL, out, "ibv_alloc_pd failed \n");
+                /* Report whether we need to do atomic endianness conversions on 8 byte operands. */
+                status = nvshmemt_ib_common_query_endianness_conversion_size(
+                    &atomic_host_endian_size, dev->common_device.context);
+                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "query_endianness_conversion_size failed\n");
+                status =
+                    nvshmemt_ib_common_check_nic_ext_atomic_support(dev->common_device.context);
+                if (status) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s does not support all necessary atomic operations. You may want "
+                        "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
+                        name);
+                    ftable.close_device(dev->common_device.context);
+                    if (dev->common_device.pd) ftable.dealloc_pd(dev->common_device.pd);
+                    dev->common_device.context = NULL;
+                    dev->common_device.pd = NULL;
+                    continue;
                 }
-
-                for (int k = 0; k < replicate_count; k++) {
-                    ibdevx_state->dev_ids[offset] = i;
-                    ibdevx_state->port_ids[offset] = p;
-                    offset++;
-                }
-
-                device_used = 1;
-            }
-        }
-
-        if (!device_used) {
-            status = ftable.close_device(device->common_device.context);
-            if (device->common_device.pd) {
-                status = ftable.dealloc_pd(device->common_device.pd);
+                nvshmemt_ibdevx_max_rd_atomic = std::min(
+                    nvshmemt_ibdevx_max_rd_atomic, dev->common_device.device_attr.max_qp_rd_atom);
             }
 
-            device->common_device.context = NULL;
-            device->common_device.pd = NULL;
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "ibv_close_device or ibv_dealloc_pd failed \n");
+            if (!dev->common_device.context) continue;
+
+            ibdevx_state->dev_ids[write_idx] = ibdevx_state->dev_ids[i];
+            ibdevx_state->port_ids[write_idx] = ibdevx_state->port_ids[i];
+            write_idx++;
+        }
+        ibdevx_state->n_dev_ids = write_idx;
+
+        if (!ibdevx_state->n_dev_ids) {
+            INFO(ibdevx_state->log_level, "no suitable IB device found after filtering, exiting");
+            status = NVSHMEMX_ERROR_INTERNAL;
+            goto out;
         }
     }
-    INFO(ibdevx_state->log_level, "End - Enumerating IB devices in the system");
 
-    ibdevx_state->n_dev_ids = offset;
-    INFO(ibdevx_state->log_level,
-         "Begin - Ordered list of devices for assignment (after processing user provdied env vars "
-         "(if any))  - ");
-    for (int i = 0; i < ibdevx_state->n_dev_ids; i++) {
-        INFO(ibdevx_state->log_level,
-             "Ordered list of devices for assignment - idx=%d (of %d), device id=%d, port_num=%d",
-             i, ibdevx_state->n_dev_ids, ibdevx_state->dev_ids[i], ibdevx_state->port_ids[i]);
-    }
-    INFO(ibdevx_state->log_level,
-         "End - Ordered list of devices for assignment (after processing user provdied env vars "
-         "(if any))");
+    nvshmemt_ib_common_log_device_assignment(*ibdevx_state);
 
-    if (!ibdevx_state->n_dev_ids) {
-        INFO(ibdevx_state->log_level, "no active IB device found, exiting");
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
+    status = nvshmemt_ib_common_discover_pci_paths(
+        transport, *ibdevx_state, sizeof(struct ibdevx_device), &ftable, &mlx5dv_ftable);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "PCI path discovery failed.\n");
 
-    transport->n_devices = ibdevx_state->n_dev_ids;
-    transport->device_pci_paths = (char **)calloc(transport->n_devices, sizeof(char *));
-    NVSHMEMI_NULL_ERROR_JMP(transport->device_pci_paths, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "Unable to allocate paths for IB transport.");
     for (int i = 0; i < transport->n_devices; i++) {
-        status = get_pci_path(i, &transport->device_pci_paths[i], transport);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Failed to get paths for PCI devices.");
         if (((struct ibdevx_device *)ibdevx_state->devices)[ibdevx_state->dev_ids[i]]
                 .common_device.data_direct &&
             !ibdevx_state->options->IB_NUM_RC_PER_DEVICE_provided) {
@@ -1889,27 +1721,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         }
     }
 
-    // print devices that were not found
-    if (hca_list_count) {
-        for (int j = 0; j < hca_list_count; j++) {
-            if (hca_list[j].found != 1) {
-                NVSHMEMI_WARN_PRINT(
-                    "cound not find user specified HCA name: %s port: %d, skipping\n",
-                    hca_list[j].name, hca_list[j].port);
-            }
-        }
-    } else if (pe_hca_map_count) {
-        // filter devices based on user hca-pe mapping
-        for (int j = 0; j < pe_hca_map_count; j++) {
-            if (pe_hca_mapping[j].found != 1) {
-                NVSHMEMI_WARN_PRINT(
-                    "cound not find user specified HCA name: %s port: %d, skipping\n",
-                    pe_hca_mapping[j].name, pe_hca_mapping[j].port);
-            }
-        }
-    }
-
-    // TODO: When we introduce a new version of the interface, add logic for handling them.
+    nvshmemt_ib_common_warn_missing_hcas(hca_filter);
 
     transport->host_ops.can_reach_peer = nvshmemt_ibdevx_can_reach_peer;
     transport->host_ops.connect_endpoints = nvshmemt_ib_common_connect_endpoints;
@@ -1947,37 +1759,10 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibdevx_state->ib_transport_ftable->ep_connect = nvshmemt_ibdevx_ep_connect_wrapper;
     ibdevx_state->ib_transport_ftable->progress = nvshmemt_ibdevx_progress;
     ibdevx_state->ib_transport_ftable->progress_recv = NULL;
-    ibdevx_state->dmabuf_support = false;
 
-    if (ibdevx_state->options->IB_DISABLE_DMABUF) {
-        ibdevx_state->dmabuf_support = false;
-        goto check_nv_peer_mem;
-    }
-
-    status = CUPFN(table, cuCtxGetDevice(&gpu_device_id));
-    if (status != CUDA_SUCCESS) {
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
-    status = CUPFN(table, cuDeviceGetAttribute(
-                              &flag, (CUdevice_attribute)CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED,
-                              gpu_device_id));
-    if (status != CUDA_SUCCESS) {
-        status = 0;
-        cudaGetLastError();
-    } else if (flag == 1) {
-        ibdevx_state->dmabuf_support = true;
-    }
-check_nv_peer_mem:
-
-    if (ibdevx_state->dmabuf_support == false) {
-        if (nvshmemt_ib_common_nv_peer_mem_available() != NVSHMEMX_SUCCESS) {
-            NVSHMEMI_ERROR_PRINT(
-                "neither nv_peer_mem, or nvidia_peermem detected. Skipping transport.\n");
-            status = NVSHMEMX_ERROR_INTERNAL;
-            goto out;
-        }
-    }
+    status = nvshmemt_ib_common_check_dmabuf_support(ibdevx_state->dmabuf_support, table,
+                                                     ibdevx_state->options->IB_DISABLE_DMABUF);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "DMA-BUF support check failed.\n");
 
 out:
 
