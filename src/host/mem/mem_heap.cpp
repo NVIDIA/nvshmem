@@ -2284,12 +2284,17 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Failed to get allocation properties of user buffer %p\n", ptr);
 
-    // Check if requestedHandleType is same as symmetric heap
-    status = !(userAllocProp.requestedHandleTypes == get_mem_handle_type());
+    // Check if requestedHandleTypes includes the handle type selected for the symmetric heap.
+    // External cuMem allocations (e.g. from ncclMemAlloc on GB200) may report a combined
+    // handle-type bitmask such as CU_MEM_HANDLE_TYPE_FABRIC |
+    // CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR.  NVSHMEM accepts any allocation whose mask
+    // includes the heap's selected handle type; export/import will use that specific type.
+    status = !(userAllocProp.requestedHandleTypes & get_mem_handle_type());
     NVSHMEMI_NZ_ERROR_JMP(
         status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-        "user buffer %p requested handle type %d doesn't match symmetric heap %d\n", ptr,
-        userAllocProp.requestedHandleTypes, get_mem_handle_type());
+        "user buffer %p requested handle type mask 0x%x doesn't include symmetric heap handle "
+        "type 0x%x\n",
+        ptr, userAllocProp.requestedHandleTypes, get_mem_handle_type());
 
     // Get allocation granularity
     status = CUPFN(nvshmemi_cuda_syms,
