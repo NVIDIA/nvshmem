@@ -115,8 +115,10 @@ int nvshmemi_nvls_rsc::export_group(uint64_t mem_size, char *shareable_handle) {
     INFO(NVSHMEM_TEAM, "Creating mcHandle %lld on GPU device %d of size: %zu\n", mc_handle,
          current_dev_, mem_size);
     cumc_handles_.push_back(std::make_pair(mc_handle, mem_size));
-    status = CUPFN(nvshmemi_cuda_syms, cuMemExportToShareableHandle(shareable_handle, mc_handle,
-                                                                    alloc_mem_handle_type_, 0));
+    status = CUPFN(nvshmemi_cuda_syms,
+                   cuMemExportToShareableHandle(shareable_handle, mc_handle,
+                                               state->heap_obj->get_effective_import_handle_type(),
+                                               0));
 
     if (state->heap_obj->is_cuda_mem_handle_type_fabric()) {
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
@@ -143,8 +145,9 @@ int nvshmemi_nvls_rsc::import_group(char *shareable_handle, CUmemGenericAllocati
     if (state->heap_obj->is_cuda_mem_handle_type_ipc()) {
         int fd = *(int *)shareable_handle;
         status = CUPFN(nvshmemi_cuda_syms,
-                       cuMemImportFromShareableHandle(mc_handle, (void *)(uintptr_t)fd,
-                                                      alloc_mem_handle_type_));
+                       cuMemImportFromShareableHandle(
+                           mc_handle, (void *)(uintptr_t)fd,
+                           state->heap_obj->get_effective_import_handle_type()));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuMemImportFromShareableHandle failed for ipc handles\n");
         INFO(NVSHMEM_TEAM, "Importing mcHandle %lld via POSIX FD on GPU device %d\n", *mc_handle,
@@ -152,8 +155,9 @@ int nvshmemi_nvls_rsc::import_group(char *shareable_handle, CUmemGenericAllocati
         close(fd);
     } else {
         status = CUPFN(nvshmemi_cuda_syms,
-                       cuMemImportFromShareableHandle(mc_handle, (void *)shareable_handle,
-                                                      alloc_mem_handle_type_));
+                       cuMemImportFromShareableHandle(
+                           mc_handle, (void *)shareable_handle,
+                           state->heap_obj->get_effective_import_handle_type()));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuMemImportFromShareableHandle failed for fabric handles \n");
         INFO(NVSHMEM_TEAM, "Importing mcHandle %lld via FH on GPU device %d\n", *mc_handle,

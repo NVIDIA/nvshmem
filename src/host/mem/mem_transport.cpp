@@ -239,8 +239,13 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     }
 
     INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: %s\n",
-         nvshmemi_mem_handle_type_ == CU_MEM_HANDLE_TYPE_FABRIC ? "Fabric Handle"
-                                                                : "POSIX File Descriptor");
+         (nvshmemi_mem_handle_type_ == CU_MEM_HANDLE_TYPE_FABRIC)
+             ? "Fabric Handle"
+             : (nvshmemi_mem_handle_type_ ==
+                        (CU_MEM_HANDLE_TYPE_FABRIC | CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)
+                    ? "Fabric+POSIX File Descriptor (effective: "
+                      "Fabric when MNNVL active, POSIX otherwise)"
+                    : "POSIX File Descriptor"));
 out:
     if (status == 0) errored_on_initialization_ = false;
 

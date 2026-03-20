@@ -79,6 +79,18 @@ std::vector<nvshmemi_shared_memory_info_t> nvshmemi_symmetric_heap_sysmem_static
 nvshmemi_mem_remote_transport *nvshmemi_mem_remote_transport::remote_objref_;
 nvshmemi_mem_p2p_transport *nvshmemi_mem_p2p_transport::p2p_objref_;
 
+/* Returns the single concrete handle type to use for cuMem export/import operations.
+ * When mem_handle_type_ is a combined bitmask (FABRIC | POSIX_FILE_DESCRIPTOR), selects
+ * FABRIC when the MNNVL fabric is active on this PE, otherwise POSIX_FILE_DESCRIPTOR. */
+CUmemAllocationHandleType nvshmemi_symmetric_heap::get_effective_import_handle_type(void) const {
+    if ((mem_handle_type_ & CU_MEM_HANDLE_TYPE_FABRIC) &&
+        (mem_handle_type_ & CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)) {
+        return (p2p_ref_ && p2p_ref_->is_mnnvl_fabric()) ? CU_MEM_HANDLE_TYPE_FABRIC
+                                                         : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+    }
+    return mem_handle_type_;
+}
+
 int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind) {
     int status = NVSHMEMX_SUCCESS;
 
@@ -1225,8 +1237,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::export_memory(nvshmem_mem_handle
     CUmemGenericAllocationHandle *handle_in =
         reinterpret_cast<CUmemGenericAllocationHandle *>(mem_handle_in);
     INFO(NVSHMEM_MEM, "calling cuMemExportToShareableHandle on handle: %p", handle_in);
-    status = CUPFN(nvshmemi_cuda_syms, cuMemExportToShareableHandle((void *)mem_handle, *handle_in,
-                                                                    get_mem_handle_type(), 0));
+    status = CUPFN(nvshmemi_cuda_syms,
+                   cuMemExportToShareableHandle((void *)mem_handle, *handle_in,
+                                               get_effective_import_handle_type(), 0));
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemExportToShareableHandle failed \n");
 out:
@@ -1252,15 +1265,15 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::import_memory(nvshmem_mem_handle
         goto out;
     }
 
-    if (get_mem_handle_type() == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+    if (is_cuda_mem_handle_type_ipc()) {
         int fd = *(int *)mem_handle;
         status = CUPFN(nvshmemi_cuda_syms,
                        cuMemImportFromShareableHandle(&peer_handle, (void *)(uintptr_t)fd,
-                                                      get_mem_handle_type()));
+                                                      get_effective_import_handle_type()));
     } else {
-        status =
-            CUPFN(nvshmemi_cuda_syms, cuMemImportFromShareableHandle(
-                                          &peer_handle, (void *)mem_handle, get_mem_handle_type()));
+        status = CUPFN(nvshmemi_cuda_syms,
+                       cuMemImportFromShareableHandle(&peer_handle, (void *)mem_handle,
+                                                      get_effective_import_handle_type()));
     }
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemImportFromShareableHandle failed state->device_id : %d \n",

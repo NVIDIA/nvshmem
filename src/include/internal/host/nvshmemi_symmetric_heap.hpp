@@ -60,12 +60,18 @@ class nvshmemi_symmetric_heap {
     size_t get_physical_heap_size(void) const { return physical_internal_heap_size_; }
     uint64_t get_logical_heap_size(void) const { return heap_size_; }
     CUmemAllocationHandleType get_mem_handle_type(void) { return mem_handle_type_; }
+    /**
+     * Derive the single concrete handle type to use for cuMem export/import operations.
+     * When mem_handle_type_ is a combined bitmask (e.g. FABRIC | POSIX_FILE_DESCRIPTOR),
+     * select FABRIC when the MNNVL fabric is active on this PE, otherwise POSIX_FILE_DESCRIPTOR.
+     */
+    CUmemAllocationHandleType get_effective_import_handle_type(void) const;
     bool is_cuda_mem_handle_type_ipc(void) const {
-        return (mem_handle_type_ == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
+        return (get_effective_import_handle_type() == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
     }
 
     bool is_cuda_mem_handle_type_fabric(void) const {
-        return (mem_handle_type_ == CU_MEM_HANDLE_TYPE_FABRIC);
+        return (get_effective_import_handle_type() == CU_MEM_HANDLE_TYPE_FABRIC);
     }
 
     /** Common to all memory kinds */
