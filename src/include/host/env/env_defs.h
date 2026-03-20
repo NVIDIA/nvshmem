@@ -221,7 +221,8 @@ NVSHMEMI_ENV_DEF(CUMEM_GRANULARITY, size, (size_t)((size_t)1 << 29), NVSHMEMI_EN
                  "Granularity for ``cuMemAlloc``/``cuMemCreate``")
 
 NVSHMEMI_ENV_DEF(CUMEM_HANDLE_TYPE, string, "FILE_DESCRIPTOR", NVSHMEMI_ENV_CAT_HIDDEN,
-                 "Handle type for ``cuMemCreate``. Supported are - FABRIC or FILE_DESCRIPTOR")
+                 "Handle type for ``cuMemCreate``. Supported are - FABRIC, FILE_DESCRIPTOR, or "
+                 "FABRIC+FILE_DESCRIPTOR")
 
 NVSHMEMI_ENV_DEF(BYPASS_ACCESSIBILITY_CHECK, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Bypass peer GPU accessbility checks")
