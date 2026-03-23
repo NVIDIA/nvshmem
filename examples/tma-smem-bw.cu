@@ -33,7 +33,7 @@
         }                                                                         \
     } while (0)
 
-#define THREADS_PER_CTA  128
+#define THREADS_PER_CTA  32
 #define WARMUP_ITERS     10
 #define BENCH_ITERS      50
 
@@ -49,9 +49,19 @@ __global__ void put_tma_kernel(char *dst, size_t bytes_per_cta,
 
     int val = threadIdx.x + blockIdx.x;
 
-    /* Register the smem buffer once for this CTA */
-    if (threadIdx.x == 0)
-        nvshmemx_give_smem(smem, smem_size);
+    /* Elect one leader across all threads to register the smem base */
+    {
+        uint32_t is_leader;
+        asm volatile(
+            "{\n\t"
+            ".reg .pred elect_p;\n\t"
+            ".reg .u32  elect_id;\n\t"
+            "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
+            "selp.u32 %0, 1, 0, elect_p;\n\t"
+            "}\n\t"
+            : "=r"(is_leader));
+        if (is_leader) nvshmemx_give_smem(smem, smem_size);
+    }
     __syncthreads();
 
     size_t chunk    = (size_t)smem_size;
@@ -85,7 +95,18 @@ __global__ void put_normal_kernel(const char *src, char *dst,
                                src + (size_t)blockIdx.x * bytes_per_cta,
                                bytes_per_cta, peer);
     __syncthreads();
-    if (threadIdx.x == 0) nvshmem_quiet();
+    {
+        uint32_t is_leader;
+        asm volatile(
+            "{\n\t"
+            ".reg .pred elect_p;\n\t"
+            ".reg .u32  elect_id;\n\t"
+            "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
+            "selp.u32 %0, 1, 0, elect_p;\n\t"
+            "}\n\t"
+            : "=r"(is_leader));
+        if (is_leader) nvshmem_quiet();
+    }
 }
 
 static double measure_bw_tma(int n_ctas, char *dst, int peer,

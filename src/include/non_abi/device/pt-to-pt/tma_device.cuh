@@ -15,6 +15,23 @@
 #if __CUDA_ARCH__ >= 900
 
 /*
+ * Elect one leader from the active threads in the calling warp.
+ * Returns true for exactly one thread.  Uses PTX elect.sync (sm_90+).
+ */
+__device__ __forceinline__ bool nvshmemi_tma_elect_warp() {
+    uint32_t is_leader;
+    asm volatile(
+        "{\n\t"
+        ".reg .pred elect_p;\n\t"
+        ".reg .u32  elect_id;\n\t"
+        "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
+        "selp.u32 %0, 1, 0, elect_p;\n\t"
+        "}\n\t"
+        : "=r"(is_leader));
+    return (bool)is_leader;
+}
+
+/*
  * PTX helper: convert a generic pointer to a shared-memory-space 32-bit address.
  */
 __device__ __forceinline__ unsigned int nvshmemi_tma_cvta_to_shared(const void *ptr) {
@@ -89,7 +106,7 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
         nvshmemi_tma_bulk_wait_group_0();
         __threadfence_system();
     } else if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
-        if (myIdx == 0) {
+        if (nvshmemi_tma_elect_warp()) {
             unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
             nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
             nvshmemi_tma_bulk_commit_group();
@@ -102,18 +119,17 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
         int block_size = blockDim.x * blockDim.y * blockDim.z;
         int num_warps = (block_size + warpSize - 1) / warpSize;
         int warp_id = tid / warpSize;
-        int lane_id = tid % warpSize;
 
         /* Divide transfer across warps, each chunk 16-byte aligned */
         size_t base_chunk = (bytes / num_warps) & ~(size_t)15;
 
         if (base_chunk >= 16) {
-            /* Multi-warp path: each warp handles a chunk */
+            /* Multi-warp path: elected leader of each warp handles its chunk */
             size_t offset = (size_t)warp_id * base_chunk;
             size_t this_chunk =
                 (warp_id < num_warps - 1) ? base_chunk : (bytes - offset);
 
-            if (lane_id == 0 && offset < bytes) {
+            if (nvshmemi_tma_elect_warp() && offset < bytes) {
                 unsigned int smem_addr =
                     nvshmemi_tma_cvta_to_shared((const char *)smem_src + offset);
                 nvshmemi_tma_bulk_shared_to_global((char *)gmem_dst + offset, smem_addr,
@@ -123,8 +139,8 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
                 __threadfence_system();
             }
         } else {
-            /* Small transfer: single thread handles everything */
-            if (tid == 0) {
+            /* Small transfer: elected leader of warp 0 handles everything */
+            if (tid < warpSize && nvshmemi_tma_elect_warp()) {
                 unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
                 nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
                 nvshmemi_tma_bulk_commit_group();
@@ -160,14 +176,12 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, cons
 #if __CUDA_ARCH__ >= 900
     if (bytes == 0) return 0;
 
-    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
         unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
         nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
         nvshmemi_tma_bulk_commit_group();
     } else if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
-        if (myIdx == 0) {
+        if (nvshmemi_tma_elect_warp()) {
             unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
             nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
             nvshmemi_tma_bulk_commit_group();
@@ -178,7 +192,6 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, cons
         int block_size = blockDim.x * blockDim.y * blockDim.z;
         int num_warps = (block_size + warpSize - 1) / warpSize;
         int warp_id = tid / warpSize;
-        int lane_id = tid % warpSize;
 
         size_t base_chunk = (bytes / num_warps) & ~(size_t)15;
 
@@ -187,7 +200,7 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, cons
             size_t this_chunk =
                 (warp_id < num_warps - 1) ? base_chunk : (bytes - offset);
 
-            if (lane_id == 0 && offset < bytes) {
+            if (nvshmemi_tma_elect_warp() && offset < bytes) {
                 unsigned int smem_addr =
                     nvshmemi_tma_cvta_to_shared((const char *)smem_src + offset);
                 nvshmemi_tma_bulk_shared_to_global((char *)gmem_dst + offset, smem_addr,
@@ -195,7 +208,7 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, cons
                 nvshmemi_tma_bulk_commit_group();
             }
         } else {
-            if (tid == 0) {
+            if (tid < warpSize && nvshmemi_tma_elect_warp()) {
                 unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
                 nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
                 nvshmemi_tma_bulk_commit_group();
