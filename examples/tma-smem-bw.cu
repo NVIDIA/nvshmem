@@ -109,6 +109,88 @@ __global__ void put_normal_kernel(const char *src, char *dst,
     }
 }
 
+/*
+ * TMA NBI kernel: submit all puts non-blocking, wait only for smem reads
+ * between chunks (so smem can be reused), then quiet() once at the end.
+ *
+ * Mirrors put_normal_kernel exactly: nvshmemx_putmem_nbi_block + syncthreads
+ * + leader calls nvshmem_quiet().  Between chunks, wait_group.read 0 (leader
+ * only + syncthreads) ensures smem is safe to overwrite before the next fill.
+ */
+__global__ void put_tma_nbi_kernel(char *dst, size_t bytes_per_cta,
+                                    int smem_size, int peer) {
+    extern __shared__ char smem[];
+
+    int val = threadIdx.x + blockIdx.x;
+
+    /* Elect one leader across all threads to register the smem base */
+    {
+        uint32_t is_leader;
+        asm volatile(
+            "{\n\t"
+            ".reg .pred elect_p;\n\t"
+            ".reg .u32  elect_id;\n\t"
+            "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
+            "selp.u32 %0, 1, 0, elect_p;\n\t"
+            "}\n\t"
+            : "=r"(is_leader));
+        if (is_leader) nvshmemx_give_smem(smem, smem_size);
+    }
+    __syncthreads();
+
+    size_t chunk    = (size_t)smem_size;
+    size_t n_chunks = (bytes_per_cta + chunk - 1) / chunk;
+
+    for (size_t c = 0; c < n_chunks; c++) {
+        size_t this_bytes = (c < n_chunks - 1) ? chunk
+                                               : (bytes_per_cta - c * chunk);
+
+        /* Fill smem */
+        for (int i = threadIdx.x; i < (int)(this_bytes / sizeof(int)); i += blockDim.x)
+            ((int *)smem)[i] = val;
+        __syncthreads();
+
+        /* Make smem writes visible to the TMA proxy */
+        asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
+
+        /* Submit NBI: cp.async.bulk + commit_group, no wait yet */
+        nvshmemx_putmem_nbi_block(
+            dst + (size_t)blockIdx.x * bytes_per_cta + c * chunk,
+            smem, this_bytes, peer);
+
+        /* Between chunks: wait for smem READ to complete so we can reuse it */
+        if (c < n_chunks - 1) {
+            uint32_t is_leader;
+            asm volatile(
+                "{\n\t"
+                ".reg .pred elect_p;\n\t"
+                ".reg .u32  elect_id;\n\t"
+                "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
+                "selp.u32 %0, 1, 0, elect_p;\n\t"
+                "}\n\t"
+                : "=r"(is_leader));
+            if (is_leader)
+                asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
+            __syncthreads();
+        }
+    }
+
+    /* All chunks submitted; sync then quiet (mirrors put_normal_kernel) */
+    __syncthreads();
+    {
+        uint32_t is_leader;
+        asm volatile(
+            "{\n\t"
+            ".reg .pred elect_p;\n\t"
+            ".reg .u32  elect_id;\n\t"
+            "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
+            "selp.u32 %0, 1, 0, elect_p;\n\t"
+            "}\n\t"
+            : "=r"(is_leader));
+        if (is_leader) nvshmem_quiet();
+    }
+}
+
 static double measure_bw_tma(int n_ctas, char *dst, int peer,
                               size_t bytes_per_cta, int smem_size) {
     cudaEvent_t ev_start, ev_stop;
@@ -124,6 +206,34 @@ static double measure_bw_tma(int n_ctas, char *dst, int peer,
     CUDA_CHECK(cudaEventRecord(ev_start));
     for (int i = 0; i < BENCH_ITERS; i++)
         put_tma_kernel<<<n_ctas, THREADS_PER_CTA, smem_size>>>(
+            dst, bytes_per_cta, smem_size, peer);
+    CUDA_CHECK(cudaEventRecord(ev_stop));
+    CUDA_CHECK(cudaEventSynchronize(ev_stop));
+    nvshmem_barrier_all();
+
+    float ms = 0;
+    CUDA_CHECK(cudaEventElapsedTime(&ms, ev_start, ev_stop));
+    CUDA_CHECK(cudaEventDestroy(ev_start));
+    CUDA_CHECK(cudaEventDestroy(ev_stop));
+
+    return (double)n_ctas * bytes_per_cta * BENCH_ITERS / (ms * 1e-3) / 1e9;
+}
+
+static double measure_bw_tma_nbi(int n_ctas, char *dst, int peer,
+                                  size_t bytes_per_cta, int smem_size) {
+    cudaEvent_t ev_start, ev_stop;
+    CUDA_CHECK(cudaEventCreate(&ev_start));
+    CUDA_CHECK(cudaEventCreate(&ev_stop));
+
+    for (int i = 0; i < WARMUP_ITERS; i++)
+        put_tma_nbi_kernel<<<n_ctas, THREADS_PER_CTA, smem_size>>>(
+            dst, bytes_per_cta, smem_size, peer);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    nvshmem_barrier_all();
+
+    CUDA_CHECK(cudaEventRecord(ev_start));
+    for (int i = 0; i < BENCH_ITERS; i++)
+        put_tma_nbi_kernel<<<n_ctas, THREADS_PER_CTA, smem_size>>>(
             dst, bytes_per_cta, smem_size, peer);
     CUDA_CHECK(cudaEventRecord(ev_stop));
     CUDA_CHECK(cudaEventSynchronize(ev_stop));
@@ -195,6 +305,9 @@ int main(int argc, char *argv[]) {
     CUDA_CHECK(cudaFuncSetAttribute(put_tma_kernel,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize,
                                     smem_size));
+    CUDA_CHECK(cudaFuncSetAttribute(put_tma_nbi_kernel,
+                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                    smem_size));
 
     /* Sizes to sweep: 4K to 8M */
     static const size_t sizes[] = {
@@ -235,33 +348,31 @@ int main(int argc, char *argv[]) {
     for (int ci = 0; ci < n_cta_counts; ci++) {
         int n_ctas = cta_counts[ci];
 
-        /* normal row */
-        if (mype == 0) printf("  %-10d", n_ctas);
+        double bw_normal[n_sizes], bw_tma[n_sizes], bw_nbi[n_sizes];
         for (int s = 0; s < n_sizes; s++) {
-            size_t bpc = sizes[s];
-            double bw = measure_bw_normal(n_ctas, src, dst, peer, bpc);
-            if (mype == 0) printf("  %6.1f", bw);
+            bw_normal[s] = measure_bw_normal(n_ctas, src, dst, peer, sizes[s]);
+            bw_tma[s]    = measure_bw_tma(n_ctas, dst, peer, sizes[s], smem_size);
+            bw_nbi[s]    = measure_bw_tma_nbi(n_ctas, dst, peer, sizes[s], smem_size);
         }
-        if (mype == 0) printf("  (normal)\n");
 
-        /* tma row */
-        if (mype == 0) printf("  %-10s", "");
-        for (int s = 0; s < n_sizes; s++) {
-            size_t bpc = sizes[s];
-            double bw = measure_bw_tma(n_ctas, dst, peer, bpc, smem_size);
-            if (mype == 0) printf("  %6.1f", bw);
-        }
-        if (mype == 0) printf("  (tma)\n");
+        if (mype == 0) {
+            printf("  %-10d", n_ctas);
+            for (int s = 0; s < n_sizes; s++) printf("  %6.1f", bw_normal[s]);
+            printf("  (normal)\n");
 
-        /* ratio row — recompute both */
-        if (mype == 0) printf("  %-10s", "");
-        for (int s = 0; s < n_sizes; s++) {
-            size_t bpc = sizes[s];
-            double bw_n = measure_bw_normal(n_ctas, src, dst, peer, bpc);
-            double bw_t = measure_bw_tma(n_ctas, dst, peer, bpc, smem_size);
-            if (mype == 0) printf("  %5.0f%%", 100.0 * bw_t / bw_n);
+            printf("  %-10s", "");
+            for (int s = 0; s < n_sizes; s++) printf("  %6.1f", bw_tma[s]);
+            printf("  (tma)\n");
+
+            printf("  %-10s", "");
+            for (int s = 0; s < n_sizes; s++) printf("  %6.1f", bw_nbi[s]);
+            printf("  (tma_nbi)\n");
+
+            printf("  %-10s", "");
+            for (int s = 0; s < n_sizes; s++)
+                printf("  %5.0f%%", 100.0 * bw_nbi[s] / bw_normal[s]);
+            printf("  (tma_nbi/normal)\n\n");
         }
-        if (mype == 0) printf("  (tma/normal)\n\n");
     }
 
     nvshmem_free(src);
