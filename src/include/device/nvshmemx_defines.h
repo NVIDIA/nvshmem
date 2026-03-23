@@ -44,7 +44,13 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * nvshmemx_give_smem - Give a block of shared memory to the NVSHMEM runtime for
  * TMA-based transfers.
  *
- * Must be called once per CTA by exactly one thread (typically thread 0).
+ * Must be called once per CTA by exactly one thread (typically thread 0) in
+ * EVERY CTA of the grid before issuing any TMA-backed puts.  CTAs that do not
+ * call this function will fall back to P2P stores for all puts.
+ *
+ * After the call, the CTA must __syncthreads() before any thread issues a
+ * TMA put, to ensure the registration is visible to all threads.
+ *
  * The given shared memory region will be used by NVSHMEM for buffering TMA
  * transfers and storing synchronization objects.
  *

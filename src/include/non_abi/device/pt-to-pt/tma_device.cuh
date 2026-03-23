@@ -88,6 +88,9 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
  *   - gmem_dst must be 16-byte aligned
  *   - smem_src must be 16-byte aligned
  *   - bytes must be a multiple of 16 and > 0
+ *   - The caller must issue fence.proxy.async.shared::cta before calling this
+ *     function to make any prior shared-memory stores visible to the TMA async
+ *     proxy engine.  Without this fence, the TMA engine may read stale data.
  *
  * Returns 0 on success, -1 if TMA is not available for this architecture.
  */
@@ -164,9 +167,20 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
  * nvshmemi_memcpy_tma_shared_global_nbi - Non-blocking variant.
  *
  * Same scoping as nvshmemi_memcpy_tma_shared_global but does not wait for
- * the transfer to complete. The caller is responsible for ensuring the
- * transfer has finished (e.g. via nvshmem_quiet) before reusing the shared
- * memory buffer.
+ * the transfer to complete.
+ *
+ * Caller responsibilities:
+ *   - fence.proxy.async.shared::cta must be issued before each call to make
+ *     smem stores visible to the TMA async proxy (same as the blocking variant).
+ *   - To reuse the smem buffer for the next chunk before all remote writes
+ *     complete: call cp.async.bulk.wait_group.read 0 (warp-level; one thread
+ *     per warp suffices) followed by __syncthreads().  This waits only for the
+ *     smem READ phase to finish, leaving the remote write in flight.
+ *   - For full completion (smem read + remote write both done): call
+ *     nvshmemi_quiet<SCOPE>() or nvshmem_quiet() from the thread that issued
+ *     the transfer.  nvshmem_quiet() is THREAD scope — for a multi-warp CTA
+ *     using BLOCK-scope NBI, use nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>()
+ *     so that every warp's in-flight groups are drained.
  *
  * Returns 0 on success, -1 if TMA is not available.
  */

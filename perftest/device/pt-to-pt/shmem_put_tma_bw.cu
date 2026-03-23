@@ -37,9 +37,12 @@
  * give_smem is called once before the iteration loop; the smem address is
  * stable across iterations within a single kernel invocation.
  *
- * For multi-warp CTAs: thread 0 of each warp handles warp-level bulk async
- * operations (wait_group.read between chunks and quiet after all chunks),
- * since cp.async.bulk group state is per-warp.
+ * cp.async.bulk group state is per-thread: only the thread that issued the
+ * TMA op (the warp's elected leader via elect.sync) has a pending group.
+ * nvshmem_quiet() is THREAD scope — it drains only the calling thread's
+ * pending groups.  Calling it from every thread is safe: non-issuing threads
+ * have no pending groups, so their commit_group + wait_group 0 are no-ops.
+ * This avoids assuming that elect.sync always picks lane 0.
  */
 __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, int iter) {
     extern __shared__ char smem[];
@@ -75,21 +78,19 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
             nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, this_bytes, peer);
 
             /* Between chunks: wait for smem READ to complete before reusing.
-             * cp.async.bulk.wait_group.read is warp-level; one thread per warp
-             * suffices.  __syncthreads() propagates completion to all warps. */
+             * Called from all threads: non-issuing threads have no pending
+             * groups so wait_group.read returns immediately for them. */
             if (c < n_chunks - 1) {
-                if (threadIdx.x % warpSize == 0)
-                    asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
+                asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
                 __syncthreads();
             }
         }
 
-        /* All chunks submitted; quiet once per iteration.
-         * nvshmem_quiet() is thread-scope: call from one thread per warp to
-         * drain each warp's pending bulk async groups, then sync. */
-        __syncthreads();
-        if (threadIdx.x % warpSize == 0)
-            nvshmem_quiet();
+        /* All chunks submitted; drain all warps' pending TMA groups.
+         * nvshmem_quiet() is THREAD scope; calling from every thread ensures
+         * each warp's elected leader drains its own groups, regardless of
+         * which lane elect.sync chose.  __syncthreads() orders the fence. */
+        nvshmem_quiet();
         __syncthreads();
     }
 }
