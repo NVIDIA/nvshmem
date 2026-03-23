@@ -361,16 +361,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_P
         nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
     } else {
 #if __CUDA_ARCH__ >= 900
-        /* Wait for any in-flight TMA bulk async copies issued by this thread.
-         * cp.async.bulk.wait_group.read 0 is a per-thread op and a no-op if
-         * this thread has no pending bulk groups. */
+        /* Flush and wait for any in-flight TMA bulk async copies.
+         * commit_group seals any uncommitted ops, then wait_group 0 waits for
+         * both the smem read and the remote global write to complete. */
         if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
             int block_id =
                 blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
             uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
             if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
                 bases[block_id] != 0) {
-                nvshmemi_tma_bulk_wait_group_read_0();
+                nvshmemi_tma_bulk_commit_group();
+                nvshmemi_tma_bulk_wait_group_0();
             }
         }
 #endif

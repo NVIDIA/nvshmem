@@ -873,6 +873,7 @@ set(INC_EXPORTS
     non_abi/device/pt-to-pt/ibgda_device.cuh
     non_abi/device/pt-to-pt/gdaki_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh
+    non_abi/device/pt-to-pt/tma_device.cuh
     non_abi/device/pt-to-pt/utils_device.h
     non_abi/device/pt-to-pt/tile.cuh
     non_abi/device/common/nvshmemi_tile_utils.cuh
