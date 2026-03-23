@@ -347,7 +347,7 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
     NVSHMEMI_NULL_ERROR_JMP(dbr_buf, status, ENOMEM, out, "cannot allocate dbr buf for qpair.\n");
 
     db_umem = mlx5dv_devx_umem_reg(context, dbr_buf, NVSHMEMT_IBDEVX_DBSIZE, 0);
-    NVSHMEMI_NULL_ERROR_JMP(wq_umem, status, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_NULL_ERROR_JMP(db_umem, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "cannot register dbr buf for qpair.\n");
 
     if (device->pdn == 0) {
