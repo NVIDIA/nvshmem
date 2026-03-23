@@ -7,11 +7,9 @@
 /*
  * Bandwidth benchmark: TMA (smem→remote) vs normal put (gmem→remote)
  *
- * Goal: verify that TMA achieves ~100% of normal put bandwidth.
- * In real workloads data is already in smem after computation, so the
- * gmem→smem staging cost is not part of the "put" cost.  Here smem is
- * populated from registers (a simple store loop) to isolate just the
- * smem→remote transfer, matching the real use-case cost model.
+ * Sweeps both message size (4K–8M per CTA) and CTA count (1–128).
+ * For sizes larger than smem (64K), the TMA kernel loops over smem-sized
+ * chunks, issuing each as an NBI put, then calls quiet once at the end.
  *
  * Set NVSHMEM_TMA_POLICY=ENABLE to activate TMA-backed transfers.
  */
@@ -40,31 +38,63 @@
 #define BENCH_ITERS      50
 
 /*
- * TMA kernel: smem is pre-filled from registers (simulating data that
- * already lives in smem after computation), then given to NVSHMEM and
- * put to the remote PE.  This measures pure smem→remote bandwidth.
+ * TMA kernel: for each smem-sized chunk of bytes_per_cta, fill smem from
+ * registers, give to NVSHMEM, and issue an NBI put.  Quiet once at the end.
+ * smem_size is always the recommended smem size (64K); bytes_per_cta may be
+ * smaller (sub-64K sizes) or a multiple of smem_size (larger sizes).
  */
-__global__ void put_tma_kernel(char *dst, size_t bytes_per_cta, int peer) {
+__global__ void put_tma_kernel(char *dst, size_t bytes_per_cta,
+                                int smem_size, int peer) {
     extern __shared__ char smem[];
 
-    /* Fill smem from registers — models data already computed into smem */
-    int val = threadIdx.x + blockIdx.x;
-    for (int i = threadIdx.x; i < (int)(bytes_per_cta / sizeof(int)); i += blockDim.x)
-        ((int *)smem)[i] = val;
-    __syncthreads();
+    int val    = threadIdx.x + blockIdx.x;
+    int lane   = threadIdx.x % warpSize;
 
+    /* Register the smem buffer once for this CTA */
     if (threadIdx.x == 0)
-        nvshmemx_give_smem(smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
+        nvshmemx_give_smem(smem, smem_size);
     __syncthreads();
 
-    nvshmemx_putmem_nbi_block(dst + (size_t)blockIdx.x * bytes_per_cta,
-                               smem, bytes_per_cta, peer);
-    __syncthreads();
-    if (threadIdx.x == 0) nvshmem_quiet();
+    size_t chunk    = (size_t)smem_size;
+    size_t n_chunks = (bytes_per_cta + chunk - 1) / chunk;
+
+    for (size_t c = 0; c < n_chunks; c++) {
+        size_t this_bytes = (c < n_chunks - 1) ? chunk
+                                               : (bytes_per_cta - c * chunk);
+
+        /* Fill smem from registers */
+        for (int i = threadIdx.x; i < (int)(this_bytes / sizeof(int)); i += blockDim.x)
+            ((int *)smem)[i] = val;
+        __syncthreads();
+
+        /* Ensure smem stores are visible to the TMA async proxy */
+        asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
+
+        nvshmemx_putmem_nbi_block(
+            dst + (size_t)blockIdx.x * bytes_per_cta + c * chunk,
+            smem, this_bytes, peer);
+
+        /*
+         * Wait until each warp's TMA op has finished READING smem so we can
+         * safely overwrite it with the next chunk.  (The remote write may
+         * still be in flight — that's fine for pipelining.)
+         */
+        if (lane == 0)
+            asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
+        __syncthreads();
+    }
+
+    /*
+     * Full-completion wait: cp.async.bulk.wait_group 0 (without .read) waits
+     * for both the smem-read AND the global write to finish, so the event
+     * recorded after this kernel reflects actual transfer time.
+     */
+    if (lane == 0)
+        asm volatile("cp.async.bulk.wait_group 0;\n" ::: "memory");
 }
 
 /*
- * Normal kernel: put from global memory (gmem→remote).
+ * Normal kernel: put directly from global memory (gmem→remote).
  */
 __global__ void put_normal_kernel(const char *src, char *dst,
                                    size_t bytes_per_cta, int peer) {
@@ -76,21 +106,21 @@ __global__ void put_normal_kernel(const char *src, char *dst,
 }
 
 static double measure_bw_tma(int n_ctas, char *dst, int peer,
-                              size_t bytes_per_cta, int smem_per_cta) {
+                              size_t bytes_per_cta, int smem_size) {
     cudaEvent_t ev_start, ev_stop;
     CUDA_CHECK(cudaEventCreate(&ev_start));
     CUDA_CHECK(cudaEventCreate(&ev_stop));
 
     for (int i = 0; i < WARMUP_ITERS; i++)
-        put_tma_kernel<<<n_ctas, THREADS_PER_CTA, smem_per_cta>>>(
-            dst, bytes_per_cta, peer);
+        put_tma_kernel<<<n_ctas, THREADS_PER_CTA, smem_size>>>(
+            dst, bytes_per_cta, smem_size, peer);
     CUDA_CHECK(cudaDeviceSynchronize());
     nvshmem_barrier_all();
 
     CUDA_CHECK(cudaEventRecord(ev_start));
     for (int i = 0; i < BENCH_ITERS; i++)
-        put_tma_kernel<<<n_ctas, THREADS_PER_CTA, smem_per_cta>>>(
-            dst, bytes_per_cta, peer);
+        put_tma_kernel<<<n_ctas, THREADS_PER_CTA, smem_size>>>(
+            dst, bytes_per_cta, smem_size, peer);
     CUDA_CHECK(cudaEventRecord(ev_stop));
     CUDA_CHECK(cudaEventSynchronize(ev_stop));
     nvshmem_barrier_all();
@@ -151,49 +181,87 @@ int main(int argc, char *argv[]) {
 
     int peer = (mype + 1) % npes;
 
-    int smem_per_cta  = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-    size_t bytes_per_cta = (size_t)smem_per_cta;
+    /* Confirm each PE has a distinct ID */
+    printf("[PE %d / %d] peer=%d\n", mype, npes, peer);
+    fflush(stdout);
+    nvshmem_barrier_all();
+
+    int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
 
     CUDA_CHECK(cudaFuncSetAttribute(put_tma_kernel,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                    smem_per_cta));
+                                    smem_size));
 
+    /* Sizes to sweep: 4K to 8M */
+    static const size_t sizes[] = {
+        4*1024, 8*1024, 16*1024, 32*1024, 64*1024,
+        128*1024, 256*1024, 512*1024,
+        1*1024*1024, 2*1024*1024, 4*1024*1024, 8*1024*1024
+    };
+    static const int n_sizes = (int)(sizeof(sizes) / sizeof(sizes[0]));
+
+    static const int cta_counts[] = {1, 2, 4, 8, 16, 32, 64, 128};
+    static const int n_cta_counts = (int)(sizeof(cta_counts) / sizeof(cta_counts[0]));
+
+    /* Allocate max needed: 128 CTAs × 8M = 1 GB */
+    size_t max_per_cta = sizes[n_sizes - 1];
+    int    max_ctas    = cta_counts[n_cta_counts - 1];
+    size_t alloc_bytes = (size_t)max_ctas * max_per_cta;
+
+    char *src = (char *)nvshmem_malloc(alloc_bytes);
+    char *dst = (char *)nvshmem_malloc(alloc_bytes);
+    assert(src && dst);
+    CUDA_CHECK(cudaMemset(src, 1, alloc_bytes));
+    CUDA_CHECK(cudaMemset(dst, 0, alloc_bytes));
+
+    /* Print header */
     if (mype == 0) {
-        printf("bytes_per_cta = %zu KiB,  smem_per_cta = %d KiB,  threads = %d\n",
-               bytes_per_cta / 1024, smem_per_cta / 1024, THREADS_PER_CTA);
-        printf("TMA kernel: smem filled from registers (models post-compute smem)\n");
-        printf("Normal kernel: put directly from global memory\n\n");
-        printf("%-8s  %-10s  %-18s  %-16s  %s\n",
-               "n_ctas", "total_MiB", "normal_GB/s(pe0)", "tma_GB/s(pe0)", "tma/normal");
-        printf("%-8s  %-10s  %-18s  %-16s  %s\n",
-               "------", "---------", "----------------", "-------------", "----------");
+        printf("  n_ctas\\sz  ");
+        for (int s = 0; s < n_sizes; s++) {
+            size_t kb = sizes[s] / 1024;
+            if (kb < 1024) printf(" %6zuK", kb);
+            else           printf(" %6zuM", kb / 1024);
+        }
+        printf("\n");
+        printf("  ----------");
+        for (int s = 0; s < n_sizes; s++) printf("  ------");
+        printf("\n");
     }
 
-    for (int n_ctas = 1; n_ctas <= 128; n_ctas *= 2) {
-        size_t total_bytes = (size_t)n_ctas * bytes_per_cta;
+    for (int ci = 0; ci < n_cta_counts; ci++) {
+        int n_ctas = cta_counts[ci];
 
-        char *src = (char *)nvshmem_malloc(total_bytes);
-        char *dst = (char *)nvshmem_malloc(total_bytes);
-        assert(src && dst);
-        CUDA_CHECK(cudaMemset(src, 1, total_bytes));
-        CUDA_CHECK(cudaMemset(dst, 0, total_bytes));
+        /* normal row */
+        if (mype == 0) printf("  %-10d", n_ctas);
+        for (int s = 0; s < n_sizes; s++) {
+            size_t bpc = sizes[s];
+            double bw = measure_bw_normal(n_ctas, src, dst, peer, bpc);
+            if (mype == 0) printf("  %6.1f", bw);
+        }
+        if (mype == 0) printf("  (normal)\n");
 
-        double bw_normal = measure_bw_normal(n_ctas, src, dst, peer, bytes_per_cta);
-        double bw_tma    = measure_bw_tma(n_ctas, dst, peer, bytes_per_cta, smem_per_cta);
+        /* tma row */
+        if (mype == 0) printf("  %-10s", "");
+        for (int s = 0; s < n_sizes; s++) {
+            size_t bpc = sizes[s];
+            double bw = measure_bw_tma(n_ctas, dst, peer, bpc, smem_size);
+            if (mype == 0) printf("  %6.1f", bw);
+        }
+        if (mype == 0) printf("  (tma)\n");
 
-        double bw_normal_total = 0, bw_tma_total = 0;
-        nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, &bw_normal_total, &bw_normal, 1);
-        nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, &bw_tma_total,    &bw_tma,    1);
-
-        if (mype == 0)
-            printf("%-8d  %-10zu  %-18.2f  %-16.2f  %.0f%%\n",
-                   n_ctas, total_bytes / (1024 * 1024),
-                   bw_normal, bw_tma,
-                   100.0 * bw_tma / bw_normal);
-
-        nvshmem_free(src);
-        nvshmem_free(dst);
+        /* ratio row — recompute both */
+        if (mype == 0) printf("  %-10s", "");
+        for (int s = 0; s < n_sizes; s++) {
+            size_t bpc = sizes[s];
+            double bw_n = measure_bw_normal(n_ctas, src, dst, peer, bpc);
+            double bw_t = measure_bw_tma(n_ctas, dst, peer, bpc, smem_size);
+            if (mype == 0) printf("  %5.0f%%", 100.0 * bw_t / bw_n);
+        }
+        if (mype == 0) printf("  (tma/normal)\n\n");
     }
+
+    nvshmem_free(src);
+    nvshmem_free(dst);
 
     nvshmem_finalize();
 #ifdef NVSHMEMTEST_MPI_SUPPORT
