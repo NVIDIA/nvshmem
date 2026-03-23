@@ -47,6 +47,11 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_read_0() {
     asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
 }
 
+/* Full completion wait: smem read AND global write both done. */
+__device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
+    asm volatile("cp.async.bulk.wait_group 0;\n" ::: "memory");
+}
+
 #endif /* __CUDA_ARCH__ >= 900 */
 
 /*
@@ -81,14 +86,15 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
         unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
         nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
         nvshmemi_tma_bulk_commit_group();
-        nvshmemi_tma_bulk_wait_group_read_0();
-        __threadfence_block();
+        nvshmemi_tma_bulk_wait_group_0();
+        __threadfence_system();
     } else if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
         if (myIdx == 0) {
             unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
             nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
             nvshmemi_tma_bulk_commit_group();
-            nvshmemi_tma_bulk_wait_group_read_0();
+            nvshmemi_tma_bulk_wait_group_0();
+            __threadfence_system();
         }
         nvshmemi_threadgroup_sync<SCOPE>();
     } else if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
@@ -113,7 +119,8 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
                 nvshmemi_tma_bulk_shared_to_global((char *)gmem_dst + offset, smem_addr,
                                                    (uint32_t)this_chunk);
                 nvshmemi_tma_bulk_commit_group();
-                nvshmemi_tma_bulk_wait_group_read_0();
+                nvshmemi_tma_bulk_wait_group_0();
+                __threadfence_system();
             }
         } else {
             /* Small transfer: single thread handles everything */
@@ -121,7 +128,8 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
                 unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
                 nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
                 nvshmemi_tma_bulk_commit_group();
-                nvshmemi_tma_bulk_wait_group_read_0();
+                nvshmemi_tma_bulk_wait_group_0();
+                __threadfence_system();
             }
         }
         __syncthreads();

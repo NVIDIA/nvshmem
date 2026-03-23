@@ -47,8 +47,7 @@ __global__ void put_tma_kernel(char *dst, size_t bytes_per_cta,
                                 int smem_size, int peer) {
     extern __shared__ char smem[];
 
-    int val    = threadIdx.x + blockIdx.x;
-    int lane   = threadIdx.x % warpSize;
+    int val = threadIdx.x + blockIdx.x;
 
     /* Register the smem buffer once for this CTA */
     if (threadIdx.x == 0)
@@ -67,30 +66,14 @@ __global__ void put_tma_kernel(char *dst, size_t bytes_per_cta,
             ((int *)smem)[i] = val;
         __syncthreads();
 
-        /* Ensure smem stores are visible to the TMA async proxy */
+        /* Caller's responsibility: make smem writes visible to the TMA proxy */
         asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
 
-        nvshmemx_putmem_nbi_block(
+        /* Blocking put handles: cp.async.bulk + commit + wait_group 0 + __threadfence_system */
+        nvshmemx_putmem_block(
             dst + (size_t)blockIdx.x * bytes_per_cta + c * chunk,
             smem, this_bytes, peer);
-
-        /*
-         * Wait until each warp's TMA op has finished READING smem so we can
-         * safely overwrite it with the next chunk.  (The remote write may
-         * still be in flight — that's fine for pipelining.)
-         */
-        if (lane == 0)
-            asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
-        __syncthreads();
     }
-
-    /*
-     * Full-completion wait: cp.async.bulk.wait_group 0 (without .read) waits
-     * for both the smem-read AND the global write to finish, so the event
-     * recorded after this kernel reflects actual transfer time.
-     */
-    if (lane == 0)
-        asm volatile("cp.async.bulk.wait_group 0;\n" ::: "memory");
 }
 
 /*
