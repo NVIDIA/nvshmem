@@ -172,6 +172,56 @@ int main(int argc, char *argv[]) {
                 nvshmem_barrier_all();
             }
         }
+
+        /* Optional correctness check: set NVSHMEM_PERFTEST_VERIFY=1 to enable.
+         * PE 0 sends one smem-sized chunk with a known pattern (element j gets
+         * value j % threads_per_block).  PE 1 checks its dst buffer against
+         * that pattern and prints PASS or FAIL. */
+        if (getenv("NVSHMEM_PERFTEST_VERIFY")) {
+            size_t verify_size = (size_t)smem_size;  /* one chunk, no multi-chunk complexity */
+
+            /* PE 1 fills its buffer with a canary so stale data can't mask failures */
+            if (mype == 1)
+                CUDA_CHECK(cudaMemset(dst, 0xFF, verify_size));
+            CUDA_CHECK(cudaDeviceSynchronize());
+            nvshmem_barrier_all();
+
+            /* PE 0 transfers one chunk with the standard fill pattern */
+            if (mype == 0) {
+                bw_smem_tma<<<1, max_threads, smem_size>>>(
+                    dst, verify_size, smem_size, 1 /*peer*/, 1 /*iter*/);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaDeviceSynchronize());
+            }
+            nvshmem_barrier_all();  /* ensure PE 1 has received the data */
+
+            /* PE 1 copies and checks: element j should equal j % threads_per_block */
+            if (mype == 1) {
+                int  n_ints = (int)(verify_size / sizeof(int));
+                int *h_buf  = (int *)malloc(verify_size);
+                assert(h_buf);
+                CUDA_CHECK(cudaMemcpy(h_buf, dst, verify_size, cudaMemcpyDeviceToHost));
+
+                int errors = 0;
+                for (int j = 0; j < n_ints; j++) {
+                    int expected = j % max_threads;
+                    if (h_buf[j] != expected) {
+                        if (errors < 5)
+                            fprintf(stderr, "[verify] FAIL at int[%d]: got %d, expected %d\n",
+                                    j, h_buf[j], expected);
+                        errors++;
+                    }
+                }
+                if (errors == 0)
+                    printf("[verify] PASS (%zu bytes, pattern j%%threads_per_block)\n",
+                           verify_size);
+                else
+                    printf("[verify] FAIL: %d / %d ints wrong\n", errors, n_ints);
+                fflush(stdout);
+                free(h_buf);
+            }
+            nvshmem_barrier_all();
+        }
     }
 
 finalize:
