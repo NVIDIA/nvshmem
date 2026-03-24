@@ -109,6 +109,7 @@ struct nvshmemt_ib_common_state {
     int selected_dev_id;
     int log_level;
     bool dmabuf_support;
+    bool srq_support;
     nvshmemt_ib_common_ep_ptr_t cst_ep;
     nvshmemt_ib_common_ep_ptr_t *ep;
     struct nvshmemi_options_s *options;
