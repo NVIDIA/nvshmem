@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -68,7 +68,7 @@ cpdef intptr_t mc_ptr(int32_t team, intptr_t ptr) except? 0
 cpdef int team_my_pe(int32_t team) except? -1
 cpdef int team_n_pes(int32_t team) except? -1
 cpdef void team_get_config(int32_t team, intptr_t config) except*
-cpdef team_translate_pe(int32_t src_team, int src_pe, int32_t dest_team)
+cpdef int team_translate_pe(int32_t src_team, int src_pe, int32_t dest_team) except? -1
 cpdef team_split_strided(int32_t parent_team, int pe_start, int pe_stride, int pe_size, intptr_t config, long config_mask, intptr_t new_team)
 cpdef team_get_uniqueid(intptr_t uniqueid)
 cpdef team_init(intptr_t team, intptr_t config, long config_mask, int npes, int pe_idx_in_team)
