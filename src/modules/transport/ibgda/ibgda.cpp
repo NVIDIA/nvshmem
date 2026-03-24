@@ -4106,6 +4106,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
                 INFO(ibgda_state->log_level, "ibv_dealloc_pd failed for device %d Err: %d:%s.\n", i,
                      errno, strerror(errno));
             }
+            device->common_device.pd = NULL;
         }
 
         if (device->common_device.context) {
@@ -4118,6 +4119,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
                 NVSHMEMI_WARN_PRINT("ibv_close_device failed for device %d Err: %d:%s.\n", i, errno,
                                     strerror(errno));
             }
+            device->common_device.context = NULL;
         }
         status = 0;
         // NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
