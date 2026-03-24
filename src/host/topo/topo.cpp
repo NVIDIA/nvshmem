@@ -12,6 +12,7 @@
 #include <array>                                     // for array
 #include <dirent.h>                                  // for opendir, readdir
 #include <limits.h>                                  // for PATH_MAX
+#include <sched.h>                                   // for cpu_set_t, sched_setaffinity
 #include <stdio.h>                                   // for NULL, fclose
 #include <stdlib.h>                                  // for free, calloc
 #include <string.h>                                  // for strlen
@@ -781,4 +782,67 @@ out:
         if (state->pe_info) free(state->pe_info);
     }
     return status;
+}
+
+/* Read a sysfs file into a string buffer. Mirrors NCCL's ncclTopoGetStrFromSys. */
+static int read_sysfs_str(const char *path, char *buf, size_t len) {
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    size_t n = fread(buf, 1, len - 1, f);
+    fclose(f);
+    if (n == 0) return -1;
+    buf[n - 1] = '\0';
+    return 0;
+}
+
+/* Parse hex cpumap string (e.g. "0000ffff,0000ffff") into cpu_set_t. Mirrors NCCL's ncclStrToCpuset. */
+static void cpumap_to_cpuset(const char *mapStr, cpu_set_t *set) {
+    uint32_t masks[CPU_SETSIZE / 32] = {0};
+    int m = CPU_SETSIZE / 32;
+    char *str = strdup(mapStr);
+    char *tok = strtok(str, ",");
+    while (tok && m > 0) {
+        masks[--m] = strtoul(tok, NULL, 16);
+        tok = strtok(NULL, ",");
+    }
+    free(str);
+    CPU_ZERO(set);
+    for (int a = 0; (a + m) < CPU_SETSIZE / 32; a++)
+        for (int i = 0; i < 32; i++)
+            if (masks[a + m] & (1U << i))
+                CPU_SET(i + a * 32, set);
+}
+
+int nvshmemi_set_cpu_affinity(nvshmemi_state_t *state) {
+    CUdevice cudev;
+    int numa_id = -1;
+    int status;
+
+    status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet)(&cudev, state->device_id);
+    if (status != CUDA_SUCCESS) return 0;
+
+    status = CUPFN(nvshmemi_cuda_syms, cuDeviceGetAttribute)(
+        &numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, cudev);
+    if (status != CUDA_SUCCESS || numa_id < 0) return 0;
+
+    /* Get current process affinity */
+    cpu_set_t cur_set;
+    if (sched_getaffinity(0, sizeof(cur_set), &cur_set) != 0) return 0;
+
+    /* Read cpumap for this NUMA node */
+    char path[PATH_MAX], mapStr[1024];
+    snprintf(path, sizeof(path), "/sys/devices/system/node/node%d/cpumap", numa_id);
+    if (read_sysfs_str(path, mapStr, sizeof(mapStr)) != 0) return 0;
+
+    /* Parse and intersect with current affinity */
+    cpu_set_t numa_set, final_set;
+    cpumap_to_cpuset(mapStr, &numa_set);
+    CPU_AND(&final_set, &cur_set, &numa_set);
+
+    if (CPU_COUNT(&final_set) == 0) return 0;
+
+    sched_setaffinity(0, sizeof(final_set), &final_set);
+    INFO(NVSHMEM_INIT, "PE %d pinned to NUMA node %d (%d CPUs) for GPU %d",
+         nvshmemi_boot_handle.pg_rank, numa_id, CPU_COUNT(&final_set), state->device_id);
+    return 0;
 }

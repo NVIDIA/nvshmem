@@ -1126,6 +1126,11 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmem_query_cuda_attributes() failed\n");
 
+    /* Pin to NUMA-local CPUs for this GPU before heap allocation */
+    if (!nvshmemi_options.DISABLE_CPU_AFFINITY) {
+        nvshmemi_set_cpu_affinity(state);
+    }
+
     if (nvshmemi_options.DISABLE_CUDA_VMM == 0 && nvshmemi_is_vmm_supported &&
         nvshmemi_device_state.symmetric_heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
         nvshmemi_use_cuda_vmm = 1;

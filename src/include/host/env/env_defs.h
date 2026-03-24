@@ -44,6 +44,9 @@ NVSHMEMI_ENV_DEF(DISABLE_NVLS, bool, false, NVSHMEMI_ENV_CAT_OPENSHMEM,
 NVSHMEMI_ENV_DEF(DISABLE_NVLS_SHARING, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Disable NVLS SHARP resource sharing for user-defined teams")
 
+NVSHMEMI_ENV_DEF(DISABLE_CPU_AFFINITY, bool, false, NVSHMEMI_ENV_CAT_OPENSHMEM,
+                 "Disable automatic NUMA-aware CPU affinity pinning during initialization")
+
 NVSHMEMI_ENV_DEF(SYMMETRIC_SIZE, size, (size_t)(SYMMETRIC_SIZE_DEFAULT), NVSHMEMI_ENV_CAT_OPENSHMEM,
                  "Specifies the size (in bytes) of the symmetric heap memory per PE. The resulting "
                  "size is implementation-defined and must be at least as large as the integer "
