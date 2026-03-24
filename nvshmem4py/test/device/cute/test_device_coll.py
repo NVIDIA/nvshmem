@@ -57,9 +57,8 @@ def _assert_tensor_equals(tensor, dtype, expected):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 @pytest.mark.parametrize("op", ["sum", "min", "max"])
 def test_device_reduce(nvshmem_init_fini, team, dtype, op):
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    stream = _nvshmem_stream()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
     src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
@@ -85,9 +84,8 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
     compiled = _compile_kernel(test_reduce_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    stream = dev.create_stream()
     nvshmem.core.barrier(team, stream=stream)
-    dev.sync()  # Full device sync after barrier
+    stream.sync()  # Sync stream after barrier
     if op == "sum":
         expected = sum(range(1, nvshmem.core.n_pes() + 1))
     elif op == "min":
@@ -106,9 +104,7 @@ def test_device_reduce(nvshmem_init_fini, team, dtype, op):
 @pytest.mark.parametrize("op", ["sum", "min", "max"])
 def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
     src = cute_interop.tensor((nelems * nvshmem.core.n_pes(), ), dtype=cute_dtype)
@@ -133,10 +129,9 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
 
     compiled = _compile_kernel(test_reducescatter_launcher, team, dest, src)
     compiled(team, dest, src)
-    stream.sync()  # Stream sync first (matching Numba pattern for reducescatter)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync()  # Full device sync after barrier
+    nvshmem.core.barrier(team, stream=stream)
+    stream.sync()  # Sync stream after barrier
     if op == "sum":
         expected = sum(range(1, nvshmem.core.n_pes() + 1))
     elif op == "min":
@@ -154,9 +149,7 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_fcollect(nvshmem_init_fini, team, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
     src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
@@ -183,8 +176,8 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
     compiled = _compile_kernel(test_fcollect_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync()  # Full device sync after barrier
+    nvshmem.core.barrier(team, stream=stream)
+    stream.sync()  # Sync stream after barrier
     expected = np.concatenate([np.full(nelems, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(team_n)])
     _assert_tensor_equals(dest, dtype, expected)
     cute_interop.free_tensor(src)
@@ -196,9 +189,7 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_alltoall(nvshmem_init_fini, team, dtype):
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
     src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
@@ -224,8 +215,8 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
     compiled = _compile_kernel(test_alltoall_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync()  # Full device sync after barrier
+    nvshmem.core.barrier(team, stream=stream)
+    stream.sync()  # Sync stream after barrier
     chunk = nelems // nvshmem.core.n_pes()
     expected = np.concatenate(
         [np.full(chunk, pe + 1, dtype=_NUMPY_DTYPE_MAP[dtype]) for pe in range(nvshmem.core.n_pes())])
@@ -238,10 +229,10 @@ def test_device_alltoall(nvshmem_init_fini, team, dtype):
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 @pytest.mark.parametrize("dtype", coll_dtypes)
 def test_device_broadcast(nvshmem_init_fini, team, dtype):
+    if nvshmem.core.team_n_pes(team) < 2:
+        pytest.skip("Need >1 PE in team for broadcast test")
     stream = _nvshmem_stream()
-    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
-    dev = Device(local_rank)
-    dev.set_current()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     nelems = 16
     src = cute_interop.tensor((nelems, ), dtype=cute_dtype)
@@ -267,8 +258,8 @@ def test_device_broadcast(nvshmem_init_fini, team, dtype):
     compiled = _compile_kernel(test_broadcast_launcher, team, dest, src)
     compiled(team, dest, src)
     dev.sync()  # Sync to ensure kernel completes before barrier
-    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    dev.sync()  # Full device sync after barrier
+    nvshmem.core.barrier(team, stream=stream)
+    stream.sync()  # Sync stream after barrier
     _assert_tensor_equals(dest, dtype, 1)
     cute_interop.free_tensor(src)
     cute_interop.free_tensor(dest)

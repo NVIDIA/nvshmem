@@ -1,7 +1,6 @@
-from cuda.core import Device, Stream
+from cuda.core import Device, Stream, system
 import numpy as np
 import pytest
-import torch
 
 import cutlass.cute as cute
 from cutlass.cute.typing import Int32
@@ -45,6 +44,8 @@ def _assert_tensor_equals(tensor, dtype, expected):
 @pytest.mark.parametrize("dtype", amo_std_dtypes)
 def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
@@ -65,8 +66,9 @@ def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(kernel_atomic_add_launcher, buf, 0, 0)
     compiled(buf, 5, nvshmem.core.my_pe())
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     _assert_tensor_equals(buf, dtype, _NUMPY_DTYPE_MAP[dtype](5))
     cute_interop.free_tensor(buf)
@@ -76,6 +78,8 @@ def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", amo_std_dtypes)
 def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     out = cute_interop.tensor((1, ), dtype=cute_dtype)
@@ -99,8 +103,9 @@ def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(kernel_atomic_fetch_add_launcher, buf, out, 0, 0)
     compiled(buf, out, 5, nvshmem.core.my_pe())
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     _assert_tensor_equals(buf, dtype, _NUMPY_DTYPE_MAP[dtype](5))
     _assert_tensor_equals(out, dtype, _NUMPY_DTYPE_MAP[dtype](0))
@@ -113,6 +118,8 @@ def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", amo_float_dtypes)
 def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     out = cute_interop.tensor((1, ), dtype=cute_dtype)
@@ -136,8 +143,9 @@ def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(kernel_atomic_fetch_launcher, buf, out, 0)
     compiled(buf, out, nvshmem.core.my_pe())
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     _assert_tensor_equals(out, dtype, _NUMPY_DTYPE_MAP[dtype](4.5))
 
@@ -149,6 +157,8 @@ def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", amo_float_dtypes)
 def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     _fill_cute_tensor(buf, dtype, 0)
@@ -169,8 +179,9 @@ def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(kernel_atomic_set_launcher, buf, 0)
     compiled(buf, nvshmem.core.my_pe())
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     _assert_tensor_equals(buf, dtype, _NUMPY_DTYPE_MAP[dtype](7.25))
     cute_interop.free_tensor(buf)
@@ -180,6 +191,8 @@ def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.parametrize("dtype", amo_swap_dtypes)
 def test_atomic_swap_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
+    local_rank = nvshmem.core.my_pe() % system.get_num_devices()
+    dev = Device()
     cute_dtype = _cute_dtype(dtype)
     buf = cute_interop.tensor((1, ), dtype=cute_dtype)
     out = cute_interop.tensor((1, ), dtype=cute_dtype)
@@ -203,8 +216,9 @@ def test_atomic_swap_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(kernel_atomic_swap_launcher, buf, out, 0)
     compiled(buf, out, nvshmem.core.my_pe())
 
+    dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
-    torch.cuda.synchronize()
+    stream.sync()
 
     _assert_tensor_equals(buf, dtype, _NUMPY_DTYPE_MAP[dtype](3.5))
     if dtype in amo_float_dtypes:

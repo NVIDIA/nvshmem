@@ -853,7 +853,6 @@ int nvshmemi_symmetric_heap_static::register_heap_memory(nvshmem_mem_handle_t *m
 
     // assuming symmetry of transports across all PEs
     assert(buf != nullptr);
-    assert(size < NVSHMEMI_DMA_BUF_MAX_LENGTH);
 
     // register the entire size in one go for p2p
     INFO(NVSHMEM_MEM, "[%d] heap type: %s calling register_heap_p2p: %p size: %lu", state->mype,
@@ -868,8 +867,10 @@ int nvshmemi_symmetric_heap_static::register_heap_memory(nvshmem_mem_handle_t *m
     do {
         registration_size =
             remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
+        assert(registration_size < NVSHMEMI_DMA_BUF_MAX_LENGTH);
         INFO(NVSHMEM_MEM, "[%d] heap type: %s calling register_heap_remote: %p size: %lu",
              state->mype, typeid(decltype(this)).name(), buf_start, registration_size);
+
         status = register_heap_chunk_by_size(buf_start, registration_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "register_heap_chunk_by_size on heap static \n");
@@ -1119,7 +1120,6 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_memory(nvshmem_mem_handle_t *
 
     // assuming symmetry of transports across all PEs
     assert(buf != nullptr);
-    assert(size < NVSHMEMI_DMA_BUF_MAX_LENGTH);
 
     // register the entire size in one go for p2p
     INFO(NVSHMEM_MEM, "[%d] heap type: %s calling register_heap_p2p: %p size: %lu", state->mype,
@@ -1172,7 +1172,7 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_memory(nvshmem_mem_handle_t *
     do {
         registration_size =
             remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
-
+        assert(registration_size < NVSHMEMI_DMA_BUF_MAX_LENGTH);
         INFO(NVSHMEM_MEM, "[%d] heap type: %s calling register_heap_remote: %p size: %lu",
              state->mype, typeid(decltype(this)).name(), buf_start, registration_size);
         status = register_heap_chunk_by_size(buf_start, registration_size, ext_allocation);

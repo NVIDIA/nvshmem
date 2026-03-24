@@ -1,6 +1,32 @@
 ===============================================================================
-                               Changes in 3.5.X
+                               Changes in 3.6.5
 ===============================================================================
+
+# Added configuration file support (similar to NCCL) for easy and repeatable environment variable management.
+# Added experimental NVSHMEM LTO-IR (Link-Time Optimization IR) library build option for improved device code optimization.
+# Added enhanced user buffer registration with preferred address support via `nvshmemx_buffer_register_symmetric`.
+# Added error code return values for tile API calls to improve error handling.
+# Added multi-NIC support for `libfabric` transport with round-robin NIC selection. The new environment variable `NVSHMEM_LIBFABRIC_MAX_NIC_PER_PE` controls the maximum number of NICs used per PE.
+# Improved version mismatch error messages to include detailed host and device library version information.
+# Fixed IBGDA to activate CST optimizations on supported architectures.
+# Fixed LLVM Dead Store Elimination removing WQE stores in bitcode library builds.
+# Fixed `NVSHMEM_TEAM_SHARED` initialization for imbalanced P2P-connected groups of PEs in MNNVL setups.
+# Fixed `libfabric` transport compatibility issues between build and runtime versions.
+# Fixed PMIx bootstrap to handle empty environment variables correctly.
+# Fixed host RMA off-stream transport capability check.
+
+NVSHMEM4Py
+
+# Added CuTe DSL support for NVSHMEM4Py with device-side bindings for RMA, collective, AMO, and memory operations.
+# Added device-side construction of peer and multicast tensors for CuTe DSL.
+# Added helper functions to simplify NVSHMEM/CuTe DSL usage.
+# Made Numba-CUDA an optional dependency and bumped minimum version to 0.25.
+# Fixed peer/multimem buffer tracking assumptions for parent buffer cleanup.
+
+===============================================================================
+                               Changes in 3.5.19
+===============================================================================
+
 # Added tile-granular RMA routines ``tile_put``, ``tile_get``, and ``tile_broadcast`` APIs
 # Added CUTLASS support to tile API
 # Added qpair-specific APIs (``nvshmemx_qp_*``) that provide RMA operations on specific queue pairs abstracted via ``nvshmemx_qp_handle_t``
@@ -41,10 +67,10 @@ NVSHMEM4Py
 # Updated `requirements.txt` to pull in the correct versions of `nvcc` and `nvjitlink` which do not interfere with Torch
 # Fixed several minor bugs
 
-
 ===============================================================================
                                Changes in 3.4.5
 ===============================================================================
+
 # Added support for data direct NIC configurations in the IB transports.
 # Added a new environment variable, `NVSHMEM_DISABLE_DATA_DIRECT`, to force disable data direct NIC even when present.
 # Added support for CPU-Assisted IBGDA without the use of GDRCopy or the x86 regkey. 
@@ -57,6 +83,7 @@ name their HCA devices in a non-standard way (for example, `ipb*` instead of `ml
 ===============================================================================
                                Changes in 3.3.9
 ===============================================================================
+
 # Enabled GA platform support for Blackwell B200/GB200NVL72-based systems. Additionally, enabled SASS support for Ada architecture.
 # Added support for official python language bindings (`nvshmem4py`) enabling symmetric memory management, on-stream RMA and collective APIs
 to aid in development of custom kernels using symmetric memory and enable fine-grained communication in native Python.
@@ -108,10 +135,10 @@ operations.
 for 16-byte aligned put/get operations which had a size that was not a multiple of 16 bytes.
 See https://forums.developer.nvidia.com/t/bug-with-nvshmem-3-2-5-for-bitcode-compiling/327847
 
-
 ===============================================================================
                                Changes in 3.2.0
 ===============================================================================
+
 # Enable experimental platform support for Blackwell B200-based systems.
 # Added one-shot and two-shot NVLINK SHARP (NVLS) allreduce algorithms for
 half-precision (``float16``, ``bfloat16``) and full-precision (``float32``) datatypes on
@@ -152,11 +179,10 @@ based symmetric heap reservation on platforms with > 8 NVLINK connected GPUs.
 # Fixed a bug that was related to host memory corruption/free when creating
 multiple teams using ``nvshmem_team_split_strided``.
 
-
-
 ===============================================================================
 				Changes in 3.1.0
 ===============================================================================
+
 # Added support for NVLINK SHARP (NVLS) based collective algorithms on x86 + Hopper and
 Grace Hopper architecture based single and multi-node NVLINK platforms for
 popular deep-learning collective communications (ReduceScatter, Allgather, Allreduce)
@@ -235,6 +261,7 @@ creating a new team using `nvshmem_team_split_strided`.
 ===============================================================================
 				Changes in 3.0.6
 ===============================================================================
+
 # Added support for Multi-node systems that have both RDMA networks
 (IB, RoCE, Slingshot, etc) as well as NVLink as a multi-node interconnects.
 # Added support for ABI backward compatibility between host and device libraries.

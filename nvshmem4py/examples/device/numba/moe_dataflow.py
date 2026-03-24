@@ -17,7 +17,7 @@ import nvshmem.core
 import nvshmem.core.device.numba as shmem_dev
 from nvshmem.core import SignalOp, ComparisonType
 from nvshmem.core.device.numba import my_pe, n_pes
-from cuda.core import Device, system, Stream
+from cuda.core import Device, system
 from mpi4py import MPI
 
 # Constants for the MoE pattern
@@ -258,9 +258,8 @@ def main():
         send = cp.asarray(np.arange(NUM_SRC_ROWS * N_FEATURES, dtype=np.float32).reshape(NUM_SRC_ROWS, N_FEATURES))
         send_data[:] = send
     # Create a CUDA stream and use it for barriers and kernels
-    nb_stream = cuda.stream()
-    cu_stream = Stream.from_handle(nb_stream.handle.value)
-    nvshmem.core.barrier_all(stream=cu_stream)
+    stream = dev.create_stream()
+    nvshmem.core.barrier_all(stream=stream)
 
     # Zero signals and expert buffers
     expert_signals[:] = 0
@@ -277,48 +276,48 @@ def main():
 
     # Launch dispatch kernel: each PE sends its batch to all experts
     threads_per_block = 32
-    dispatch_inputs[1, threads_per_block, nb_stream](inputs.reshape(-1), expert_inputs.reshape(-1), expert_signals,
-                                                     BATCH_SIZE, N_FEATURES)
-    nvshmem.core.barrier_all(stream=cu_stream)
+    dispatch_inputs[1, threads_per_block, stream](inputs.reshape(-1), expert_inputs.reshape(-1), expert_signals,
+                                                  BATCH_SIZE, N_FEATURES)
+    nvshmem.core.barrier_all(stream=stream)
 
     # Launch expert kernel: each expert processes its batch
-    expert_kernel[1, threads_per_block, nb_stream](expert_inputs.reshape(-1), expert_outputs, expert_signals,
-                                                   BATCH_SIZE, N_FEATURES)
-    nvshmem.core.barrier_all(stream=cu_stream)
+    expert_kernel[1, threads_per_block, stream](expert_inputs.reshape(-1), expert_outputs, expert_signals, BATCH_SIZE,
+                                                N_FEATURES)
+    nvshmem.core.barrier_all(stream=stream)
 
     # Build routing and expert counts/offsets on device
     threads = 128
     rows_total = NUM_ROWS
     grid_rows = (rows_total + threads - 1) // threads
-    build_routing[grid_rows, threads, nb_stream](
+    build_routing[grid_rows, threads, stream](
         expanded_src_row,
         expert_for_expanded_src_row,
         NUM_SRC_ROWS,
         TOP_K,
         N_EXPERTS,
     )
-    nvshmem.core.barrier_all(stream=cu_stream)
-    count_experts[grid_rows, threads, nb_stream](
+    nvshmem.core.barrier_all(stream=stream)
+    count_experts[grid_rows, threads, stream](
         expert_for_expanded_src_row,
         expert_counts,
         NUM_ROWS,
     )
-    nvshmem.core.barrier_all(stream=cu_stream)
-    prefix_expert_offsets[1, 1, nb_stream](
+    nvshmem.core.barrier_all(stream=stream)
+    prefix_expert_offsets[1, 1, stream](
         expert_counts,
         expert_offsets,
         N_EXPERTS,
     )
-    nvshmem.core.barrier_all(stream=cu_stream)
+    nvshmem.core.barrier_all(stream=stream)
 
     # Two-step offset exchange for shuffle-style path
-    exchange_offsets[1, 1, nb_stream](expert_counts, expert_pos_out, N_EXPERTS)
-    nvshmem.core.barrier_all(stream=cu_stream)
+    exchange_offsets[1, 1, stream](expert_counts, expert_pos_out, N_EXPERTS)
+    nvshmem.core.barrier_all(stream=stream)
 
     # Token shuffle (by-peer style loop with block puts)
     gridsize = max(1, min(NUM_ROWS, 32))
     threads = 128
-    token_shuffle_two_step_allpush[gridsize, threads, nb_stream](
+    token_shuffle_two_step_allpush[gridsize, threads, stream](
         send_data.reshape(-1),
         recv_data.reshape(-1),
         expanded_src_row,
@@ -330,16 +329,16 @@ def main():
         expert_pos_out,
         N_EXPERTS,
     )
-    nvshmem.core.barrier_all(stream=cu_stream)
+    nvshmem.core.barrier_all(stream=stream)
 
     # Launch combine kernel: gather expert outputs to root
-    combine_outputs[1, threads_per_block, nb_stream](
+    combine_outputs[1, threads_per_block, stream](
         expert_outputs,
         combined_outputs,
         root_signals,
         BATCH_SIZE,
     )
-    nvshmem.core.barrier_all(stream=cu_stream)
+    nvshmem.core.barrier_all(stream=stream)
     dev.sync()
 
     # Print combined results (from PE 0)

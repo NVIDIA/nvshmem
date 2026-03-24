@@ -1,5 +1,5 @@
 from mpi4py import MPI
-from cuda.core import Device, system, Stream
+from cuda.core import Device, system
 
 from numba import cuda, uint64
 
@@ -74,8 +74,7 @@ local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
 dev = Device(local_rank_per_node)
 dev.set_current()
 
-nb_stream = cuda.stream()  # WAR: Numba-CUDA takes numba stream object or int
-cu_stream_ref = Stream.from_handle(nb_stream.handle.value)
+stream = dev.create_stream()
 
 nvshmem.core.init(
     device=dev,
@@ -115,9 +114,9 @@ for i in range(num_blocks):
     signal[i] = 0
 
 # Launch kernel
-ring_reduce[num_blocks, threads_per_block, nb_stream, 0](dst, src, nreduce, signal, chunk_size)
+ring_reduce[num_blocks, threads_per_block, stream, 0](dst, src, nreduce, signal, chunk_size)
 
-nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=cu_stream_ref)
+nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
 dev.sync()
 
 # Check results

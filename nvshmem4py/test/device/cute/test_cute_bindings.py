@@ -64,7 +64,7 @@ def run():
     tensor_dlpack = from_dlpack(tensor).mark_layout_dynamic()
     print(tensor_dlpack)
 
-    nvshmem_device_bc = f"{os.environ['NVSHMEM_HOME']}/src/lib/libnvshmem_device.bc"
+    nvshmem_device_bc = nvshmem.core.find_device_bitcode_library()
 
     compilerd_func = cute.compile(
         simple_shift,
@@ -86,6 +86,4 @@ def run():
 
 
 if __name__ == "__main__":
-    if "NVSHMEM_HOME" not in os.environ:
-        raise ValueError("NVSHMEM_HOME is not set")
     run()

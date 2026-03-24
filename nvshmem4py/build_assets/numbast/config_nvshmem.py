@@ -79,6 +79,12 @@ def generate_cooperative_launch_functions():
             for variant in block_variants:
                 functions.append(f"nvshmemx_{data_type}_{op}_reduce_{variant}")
 
+        # Reducescatter operations
+        for op in reduction_operators:
+            functions.append(f"nvshmem_{data_type}_{op}_reducescatter")
+            for variant in block_variants:
+                functions.append(f"nvshmemx_{data_type}_{op}_reducescatter_{variant}")
+
         # Wait operations
         functions.extend([
             f"nvshmem_{data_type}_wait", f"nvshmem_{data_type}_wait_until", f"nvshmem_{data_type}_wait_until_all",

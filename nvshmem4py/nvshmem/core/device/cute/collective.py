@@ -64,7 +64,7 @@ def _size_of(obj):
 
 @cute.jit
 def _resolve_dtype(dst):
-    return dst.dtype
+    return dst.element_type
 
 
 @cute.jit
@@ -103,80 +103,278 @@ def _resolve_nelems_alltoall(src, team):
 
 # sync variations
 
+
 @cute.jit
 def sync_block(team):
+    """
+    Executes a CTA-level synchronization across all PEs in ``team``. All threads in the CTA must call this function.
+
+    This is a lightweight synchronization point that guarantees all PEs in the team have
+    reached it before any PE proceeds.  It does not provide memory-ordering or
+    memory-visibility guarantees; use ``barrier`` when a memory fence is also required.
+    All PEs in the team must call this function before any PE can proceed past it.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the set of PEs to synchronize.
+          Use ``nvshmem.core.Teams.TEAM_WORLD`` to synchronize all PEs.
+
+    Note:
+        All PEs in ``team`` must call ``sync_block`` with the same ``team`` argument.
+        Use ``sync_all_block`` to synchronize across all PEs without specifying a team.
+    """
     team = _resolve_team(team)
     return team_sync_block(team)
 
+
 @cute.jit
 def sync_warp(team):
+    """
+    Executes a warp-level synchronization across all PEs in ``team``. All threads in the warp must call this function.
+
+    This is a lightweight synchronization point that guarantees all PEs in the team have
+    reached it before any PE proceeds.  It does not provide memory-ordering or
+    memory-visibility guarantees; use ``barrier`` when a memory fence is also required.
+    All PEs in the team must call this function before any PE can proceed past it.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the set of PEs to synchronize.
+          Use ``nvshmem.core.Teams.TEAM_WORLD`` to synchronize all PEs.
+
+    Note:
+        All PEs in ``team`` must call ``sync_warp`` with the same ``team`` argument.
+        Use ``sync_all_warp`` to synchronize across all PEs without specifying a team.
+    """
     team = _resolve_team(team)
     return team_sync_warp(team)
 
+
 @cute.jit
 def sync(team):
+    """
+    Executes a thread-level synchronization across all PEs in ``team``.
+
+    This is a lightweight synchronization point that guarantees all PEs in the team have
+    reached it before any PE proceeds.  It does not provide memory-ordering or
+    memory-visibility guarantees; use ``barrier`` when a memory fence is also required.
+    All PEs in the team must call this function before any PE can proceed past it.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the set of PEs to synchronize.
+          Use ``nvshmem.core.Teams.TEAM_WORLD`` to synchronize all PEs.
+
+    Note:
+        All PEs in ``team`` must call ``sync`` with the same ``team`` argument.
+        Use ``sync_all`` to synchronize across all PEs without specifying a team.
+    """
     team = _resolve_team(team)
     return team_sync(team)
 
 
 # sync_all variations
 
+
 @cute.jit
 def sync_all_block():
+    """
+    Executes a CTA-level synchronization across all PEs in the NVSHMEM runtime
+    (equivalent to ``sync_block(TEAM_WORLD)``). All threads in the CTA must call this function.
+
+    This is a convenience wrapper around ``sync_block`` that automatically uses
+    ``TEAM_WORLD`` as the team, covering all PEs participating in the NVSHMEM job.
+
+    Note:
+        All PEs must call ``sync_all_block`` before any PE can proceed past it.
+    """
     team = _resolve_team(nvshmem.core.Teams.TEAM_WORLD)
     return team_sync_block(team)
 
+
 @cute.jit
 def sync_all_warp():
+    """
+    Executes a warp-level synchronization across all PEs in the NVSHMEM runtime
+    (equivalent to ``sync_warp(TEAM_WORLD)``). All threads in the warp must call this function.
+
+    This is a convenience wrapper around ``sync_warp`` that automatically uses
+    ``TEAM_WORLD`` as the team, covering all PEs participating in the NVSHMEM job.
+
+    Note:
+        All PEs must call ``sync_all_warp`` before any PE can proceed past it.
+    """
     team = _resolve_team(nvshmem.core.Teams.TEAM_WORLD)
     return team_sync_warp(team)
 
+
 @cute.jit
 def sync_all():
+    """
+    Executes a thread-level synchronization across all PEs in the NVSHMEM runtime
+    (equivalent to ``sync(TEAM_WORLD)``).
+
+    This is a convenience wrapper around ``sync`` that automatically uses
+    ``TEAM_WORLD`` as the team, covering all PEs participating in the NVSHMEM job.
+
+    Note:
+        All PEs must call ``sync_all`` before any PE can proceed past it.
+    """
     team = _resolve_team(nvshmem.core.Teams.TEAM_WORLD)
     return team_sync(team)
 
 
 # barrier variations
 
+
 @cute.jit
 def barrier_block(team):
+    """
+    Executes a CTA-level barrier across all PEs in ``team``. All threads in the CTA must call this function.
+
+    A barrier combines synchronization with a full memory fence, ensuring that all
+    outstanding NVSHMEM memory operations (puts, gets, atomics) issued before the barrier
+    are complete and visible before any PE in the team proceeds past the barrier.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the set of PEs to barrier on.
+          Use ``nvshmem.core.Teams.TEAM_WORLD`` to barrier across all PEs.
+
+    Note:
+        All PEs in ``team`` must call ``barrier_block`` with the same ``team`` argument.
+        Use ``barrier_all_block`` to barrier across all PEs without specifying a team.
+        ``barrier`` provides stronger ordering guarantees than ``sync``.
+    """
     team = _resolve_team(team)
     return _nvshmem_barrier_block(team)
 
+
 @cute.jit
 def barrier_warp(team):
+    """
+    Executes a warp-level barrier across all PEs in ``team``. All threads in the warp must call this function.
+
+    A barrier combines synchronization with a full memory fence, ensuring that all
+    outstanding NVSHMEM memory operations (puts, gets, atomics) issued before the barrier
+    are complete and visible before any PE in the team proceeds past the barrier.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the set of PEs to barrier on.
+          Use ``nvshmem.core.Teams.TEAM_WORLD`` to barrier across all PEs.
+
+    Note:
+        All PEs in ``team`` must call ``barrier_warp`` with the same ``team`` argument.
+        Use ``barrier_all_warp`` to barrier across all PEs without specifying a team.
+        ``barrier`` provides stronger ordering guarantees than ``sync``.
+    """
     team = _resolve_team(team)
     return _nvshmem_barrier_warp(team)
 
+
 @cute.jit
 def barrier(team):
+    """
+    Executes a thread-level barrier across all PEs in ``team``.
+
+    A barrier combines synchronization with a full memory fence, ensuring that all
+    outstanding NVSHMEM memory operations (puts, gets, atomics) issued before the barrier
+    are complete and visible before any PE in the team proceeds past the barrier.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the set of PEs to barrier on.
+          Use ``nvshmem.core.Teams.TEAM_WORLD`` to barrier across all PEs.
+
+    Note:
+        All PEs in ``team`` must call ``barrier`` with the same ``team`` argument.
+        Use ``barrier_all`` to barrier across all PEs without specifying a team.
+        ``barrier`` provides stronger ordering guarantees than ``sync``.
+    """
     team = _resolve_team(team)
     return _nvshmem_barrier(team)
 
 
 # barrier_all variations
 
+
 @cute.jit
 def barrier_all_block():
+    """
+    Executes a CTA-level barrier across all PEs in the NVSHMEM runtime
+    (equivalent to ``barrier_block(TEAM_WORLD)``). All threads in the CTA must call this function.
+
+    This is a convenience wrapper around ``barrier_block`` that automatically uses
+    ``TEAM_WORLD`` as the team. It combines synchronization with a full memory fence,
+    ensuring all outstanding NVSHMEM memory operations are visible before proceeding.
+
+    Note:
+        All PEs must call ``barrier_all_block`` before any PE can proceed past it.
+        ``barrier_all`` provides stronger ordering guarantees than ``sync_all``.
+    """
     team = _resolve_team(nvshmem.core.Teams.TEAM_WORLD)
     return _nvshmem_barrier_block(team)
 
+
 @cute.jit
 def barrier_all_warp():
+    """
+    Executes a warp-level barrier across all PEs in the NVSHMEM runtime
+    (equivalent to ``barrier_warp(TEAM_WORLD)``). All threads in the warp must call this function.
+
+    This is a convenience wrapper around ``barrier_warp`` that automatically uses
+    ``TEAM_WORLD`` as the team. It combines synchronization with a full memory fence,
+    ensuring all outstanding NVSHMEM memory operations are visible before proceeding.
+
+    Note:
+        All PEs must call ``barrier_all_warp`` before any PE can proceed past it.
+        ``barrier_all`` provides stronger ordering guarantees than ``sync_all``.
+    """
     team = _resolve_team(nvshmem.core.Teams.TEAM_WORLD)
     return _nvshmem_barrier_warp(team)
 
+
 @cute.jit
 def barrier_all():
+    """
+    Executes a thread-level barrier across all PEs in the NVSHMEM runtime
+    (equivalent to ``barrier(TEAM_WORLD)``).
+
+    This is a convenience wrapper around ``barrier`` that automatically uses
+    ``TEAM_WORLD`` as the team. It combines synchronization with a full memory fence,
+    ensuring all outstanding NVSHMEM memory operations are visible before proceeding.
+
+    Note:
+        All PEs must call ``barrier_all`` before any PE can proceed past it.
+        ``barrier_all`` provides stronger ordering guarantees than ``sync_all``.
+    """
     team = _resolve_team(nvshmem.core.Teams.TEAM_WORLD)
     return _nvshmem_barrier(team)
 
 
 # reduce variations
 
+
 @cute.jit
 def reduce_block(team, dst, src, op):
+    """
+    Performs a CTA-scoped all-reduce from ``src`` to ``dst`` across all PEs in ``team``. All threads in the CTA must call this function with the same arguments.
+
+    Each PE contributes ``size(dst)`` elements from ``src``, and the result of applying
+    the reduction operator ``op`` element-wise across all PEs is written to ``dst`` on
+    every PE in the team (all-reduce semantics).
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of elements reduced
+          is ``size(dst)``.
+        - ``src``: CuTe tensor view pointing to the symmetric source array.
+          Must be a symmetric (NVSHMEM-allocated) tensor with at least ``size(dst)`` elements.
+        - ``op`` (``str``): Reduction operator string. Supported operators for numeric types:
+          ``"sum"``, ``"prod"``, ``"min"``, ``"max"``. Additional bitwise operators for
+          integral types: ``"and"``, ``"or"``, ``"xor"``.
+
+    Note:
+        All PEs in ``team`` must call ``reduce_block`` before any PE can proceed past it.
+        The element count is taken from ``dst``. Passing an unsupported op/dtype combination
+        raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -411,8 +609,32 @@ def reduce_block(team, dst, src, op):
 
     raise RuntimeError(f"Unsupported CuTe reduce op/dtype combination: op={op}, dtype={dtype}")
 
+
 @cute.jit
 def reduce_warp(team, dst, src, op):
+    """
+    Performs a warp-scoped all-reduce from ``src`` to ``dst`` across all PEs in ``team``. All threads in the warp must call this function with the same arguments.
+
+    Each PE contributes ``size(dst)`` elements from ``src``, and the result of applying
+    the reduction operator ``op`` element-wise across all PEs is written to ``dst`` on
+    every PE in the team (all-reduce semantics).
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of elements reduced
+          is ``size(dst)``.
+        - ``src``: CuTe tensor view pointing to the symmetric source array.
+          Must be a symmetric (NVSHMEM-allocated) tensor with at least ``size(dst)`` elements.
+        - ``op`` (``str``): Reduction operator string. Supported operators for numeric types:
+          ``"sum"``, ``"prod"``, ``"min"``, ``"max"``. Additional bitwise operators for
+          integral types: ``"and"``, ``"or"``, ``"xor"``.
+
+    Note:
+        All PEs in ``team`` must call ``reduce_warp`` before any PE can proceed past it.
+        The element count is taken from ``dst``. Passing an unsupported op/dtype combination
+        raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -647,8 +869,32 @@ def reduce_warp(team, dst, src, op):
 
     raise RuntimeError(f"Unsupported CuTe reduce op/dtype combination: op={op}, dtype={dtype}")
 
+
 @cute.jit
 def reduce(team, dst, src, op):
+    """
+    Performs a thread-scoped all-reduce from ``src`` to ``dst`` across all PEs in ``team``.
+
+    Each PE contributes ``size(dst)`` elements from ``src``, and the result of applying
+    the reduction operator ``op`` element-wise across all PEs is written to ``dst`` on
+    every PE in the team (all-reduce semantics).
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of elements reduced
+          is ``size(dst)``.
+        - ``src``: CuTe tensor view pointing to the symmetric source array.
+          Must be a symmetric (NVSHMEM-allocated) tensor with at least ``size(dst)`` elements.
+        - ``op`` (``str``): Reduction operator string. Supported operators for numeric types:
+          ``"sum"``, ``"prod"``, ``"min"``, ``"max"``. Additional bitwise operators for
+          integral types: ``"and"``, ``"or"``, ``"xor"``.
+
+    Note:
+        All PEs in ``team`` must call ``reduce`` before any PE can proceed past it.
+        The element count is taken from ``dst``. Passing an unsupported op/dtype combination
+        raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -886,8 +1132,33 @@ def reduce(team, dst, src, op):
 
 # reducescatter variations
 
+
 @cute.jit
 def reducescatter_block(team, dst, src, op):
+    """
+    Performs a CTA-scoped reduce-scatter from ``src`` to ``dst`` across all PEs in ``team``. All threads in the CTA must call this function with the same arguments.
+
+    In a reduce-scatter, each PE contributes elements from ``src``, and the result of
+    applying the reduction operator element-wise across all PEs is divided into equal
+    portions, each portion written to ``dst`` on a different PE (scatter semantics).
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of output elements
+          per PE is ``size(dst)``. The ``src`` array should have at least
+          ``size(dst) * team_n_pes(team)`` elements.
+        - ``src``: CuTe tensor view pointing to the symmetric source array.
+          Must be a symmetric (NVSHMEM-allocated) tensor.
+        - ``op`` (``str``): Reduction operator string. Supported operators for numeric types:
+          ``"sum"``, ``"prod"``, ``"min"``, ``"max"``. Additional bitwise operators for
+          integral types: ``"and"``, ``"or"``, ``"xor"``.
+
+    Note:
+        All PEs in ``team`` must call ``reducescatter_block`` before any PE can proceed past it.
+        The element count is taken from ``dst``. Passing an unsupported op/dtype combination
+        raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1122,8 +1393,33 @@ def reducescatter_block(team, dst, src, op):
 
     raise RuntimeError(f"Unsupported CuTe reducescatter op/dtype combination: op={op}, dtype={dtype}")
 
+
 @cute.jit
 def reducescatter_warp(team, dst, src, op):
+    """
+    Performs a warp-scoped reduce-scatter from ``src`` to ``dst`` across all PEs in ``team``. All threads in the warp must call this function with the same arguments.
+
+    In a reduce-scatter, each PE contributes elements from ``src``, and the result of
+    applying the reduction operator element-wise across all PEs is divided into equal
+    portions, each portion written to ``dst`` on a different PE (scatter semantics).
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of output elements
+          per PE is ``size(dst)``. The ``src`` array should have at least
+          ``size(dst) * team_n_pes(team)`` elements.
+        - ``src``: CuTe tensor view pointing to the symmetric source array.
+          Must be a symmetric (NVSHMEM-allocated) tensor.
+        - ``op`` (``str``): Reduction operator string. Supported operators for numeric types:
+          ``"sum"``, ``"prod"``, ``"min"``, ``"max"``. Additional bitwise operators for
+          integral types: ``"and"``, ``"or"``, ``"xor"``.
+
+    Note:
+        All PEs in ``team`` must call ``reducescatter_warp`` before any PE can proceed past it.
+        The element count is taken from ``dst``. Passing an unsupported op/dtype combination
+        raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1358,8 +1654,33 @@ def reducescatter_warp(team, dst, src, op):
 
     raise RuntimeError(f"Unsupported CuTe reducescatter op/dtype combination: op={op}, dtype={dtype}")
 
+
 @cute.jit
 def reducescatter(team, dst, src, op):
+    """
+    Performs a thread-scoped reduce-scatter from ``src`` to ``dst`` across all PEs in ``team``.
+
+    In a reduce-scatter, each PE contributes elements from ``src``, and the result of
+    applying the reduction operator element-wise across all PEs is divided into equal
+    portions, each portion written to ``dst`` on a different PE (scatter semantics).
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of output elements
+          per PE is ``size(dst)``. The ``src`` array should have at least
+          ``size(dst) * team_n_pes(team)`` elements.
+        - ``src``: CuTe tensor view pointing to the symmetric source array.
+          Must be a symmetric (NVSHMEM-allocated) tensor.
+        - ``op`` (``str``): Reduction operator string. Supported operators for numeric types:
+          ``"sum"``, ``"prod"``, ``"min"``, ``"max"``. Additional bitwise operators for
+          integral types: ``"and"``, ``"or"``, ``"xor"``.
+
+    Note:
+        All PEs in ``team`` must call ``reducescatter`` before any PE can proceed past it.
+        The element count is taken from ``dst``. Passing an unsupported op/dtype combination
+        raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1597,8 +1918,30 @@ def reducescatter(team, dst, src, op):
 
 # fcollect variations
 
+
 @cute.jit
 def fcollect_block(team, dst, src):
+    """
+    Performs a CTA-scoped fcollect (all-gather) from ``src`` to ``dst`` across all PEs in ``team``. All threads in the CTA must call this function with the same arguments.
+
+    Each PE contributes ``size(src)`` elements, and the concatenated result from all PEs
+    is written to ``dst`` on every PE. The ``dst`` array must be large enough to hold
+    contributions from all PEs: ``size(dst) >= size(src) * team_n_pes(team)``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor with at least
+          ``size(src) * team_n_pes(team)`` elements.
+        - ``src``: CuTe tensor view pointing to the symmetric source array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of elements
+          contributed per PE is ``size(src)``.
+
+    Note:
+        All PEs in ``team`` must call ``fcollect_block`` before any PE can proceed past it.
+        The element count per PE is taken from ``src``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1640,8 +1983,30 @@ def fcollect_block(team, dst, src):
 
     raise RuntimeError(f"Unsupported CuTe dtype for fcollect: {dtype}")
 
+
 @cute.jit
 def fcollect_warp(team, dst, src):
+    """
+    Performs a warp-scoped fcollect (all-gather) from ``src`` to ``dst`` across all PEs in ``team``. All threads in the warp must call this function with the same arguments.
+
+    Each PE contributes ``size(src)`` elements, and the concatenated result from all PEs
+    is written to ``dst`` on every PE. The ``dst`` array must be large enough to hold
+    contributions from all PEs: ``size(dst) >= size(src) * team_n_pes(team)``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor with at least
+          ``size(src) * team_n_pes(team)`` elements.
+        - ``src``: CuTe tensor view pointing to the symmetric source array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of elements
+          contributed per PE is ``size(src)``.
+
+    Note:
+        All PEs in ``team`` must call ``fcollect_warp`` before any PE can proceed past it.
+        The element count per PE is taken from ``src``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1683,8 +2048,30 @@ def fcollect_warp(team, dst, src):
 
     raise RuntimeError(f"Unsupported CuTe dtype for fcollect: {dtype}")
 
+
 @cute.jit
 def fcollect(team, dst, src):
+    """
+    Performs a thread-scoped fcollect (all-gather) from ``src`` to ``dst`` across all PEs in ``team``.
+
+    Each PE contributes ``size(src)`` elements, and the concatenated result from all PEs
+    is written to ``dst`` on every PE. The ``dst`` array must be large enough to hold
+    contributions from all PEs: ``size(dst) >= size(src) * team_n_pes(team)``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor with at least
+          ``size(src) * team_n_pes(team)`` elements.
+        - ``src``: CuTe tensor view pointing to the symmetric source array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The number of elements
+          contributed per PE is ``size(src)``.
+
+    Note:
+        All PEs in ``team`` must call ``fcollect`` before any PE can proceed past it.
+        The element count per PE is taken from ``src``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1729,8 +2116,29 @@ def fcollect(team, dst, src):
 
 # broadcast variations
 
+
 @cute.jit
 def broadcast_block(team, dst, src, root=0):
+    """
+    Performs a CTA-scoped broadcast from ``src`` on ``root`` PE to ``dst`` on all PEs in ``team``. All threads in the CTA must call this function with the same arguments.
+
+    The root PE broadcasts the contents of its ``src`` array to the ``dst`` array on
+    every PE in the team (including the root itself). Non-root PEs ignore their own ``src``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor on all PEs.
+        - ``src``: CuTe tensor view pointing to the symmetric source array on the root PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. Only the root PE's ``src`` is used.
+        - ``root`` (``int``, optional): PE rank within ``team`` that serves as the broadcast source.
+          Defaults to ``0`` (the first PE in the team).
+
+    Note:
+        All PEs in ``team`` must call ``broadcast_block`` before any PE can proceed past it.
+        The number of elements broadcast is ``min(size(dst), size(src))``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1773,8 +2181,29 @@ def broadcast_block(team, dst, src, root=0):
 
     raise RuntimeError(f"Unsupported CuTe dtype for broadcast: {dtype}")
 
+
 @cute.jit
 def broadcast_warp(team, dst, src, root=0):
+    """
+    Performs a warp-scoped broadcast from ``src`` on ``root`` PE to ``dst`` on all PEs in ``team``. All threads in the warp must call this function with the same arguments.
+
+    The root PE broadcasts the contents of its ``src`` array to the ``dst`` array on
+    every PE in the team (including the root itself). Non-root PEs ignore their own ``src``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor on all PEs.
+        - ``src``: CuTe tensor view pointing to the symmetric source array on the root PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. Only the root PE's ``src`` is used.
+        - ``root`` (``int``, optional): PE rank within ``team`` that serves as the broadcast source.
+          Defaults to ``0`` (the first PE in the team).
+
+    Note:
+        All PEs in ``team`` must call ``broadcast_warp`` before any PE can proceed past it.
+        The number of elements broadcast is ``min(size(dst), size(src))``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1817,8 +2246,29 @@ def broadcast_warp(team, dst, src, root=0):
 
     raise RuntimeError(f"Unsupported CuTe dtype for broadcast: {dtype}")
 
+
 @cute.jit
 def broadcast(team, dst, src, root=0):
+    """
+    Performs a thread-scoped broadcast from ``src`` on ``root`` PE to ``dst`` on all PEs in ``team``.
+
+    The root PE broadcasts the contents of its ``src`` array to the ``dst`` array on
+    every PE in the team (including the root itself). Non-root PEs ignore their own ``src``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array.
+          Must be a symmetric (NVSHMEM-allocated) tensor on all PEs.
+        - ``src``: CuTe tensor view pointing to the symmetric source array on the root PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. Only the root PE's ``src`` is used.
+        - ``root`` (``int``, optional): PE rank within ``team`` that serves as the broadcast source.
+          Defaults to ``0`` (the first PE in the team).
+
+    Note:
+        All PEs in ``team`` must call ``broadcast`` before any PE can proceed past it.
+        The number of elements broadcast is ``min(size(dst), size(src))``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1864,8 +2314,33 @@ def broadcast(team, dst, src, root=0):
 
 # alltoall variations
 
+
 @cute.jit
 def alltoall_block(team, dst, src):
+    """
+    Performs a CTA-scoped all-to-all exchange from ``src`` to ``dst`` across all PEs in ``team``. All threads in the CTA must call this function with the same arguments.
+
+    In an all-to-all operation, each PE sends a distinct portion of its ``src`` array to
+    every other PE, and receives a portion from every PE into its ``dst`` array.
+    The ``src`` array is logically divided into ``team_n_pes(team)`` equal segments;
+    segment ``i`` is sent to PE ``i``. Each PE receives one segment from every PE into
+    the corresponding portion of ``dst``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. Must have at least
+          ``size(src)`` elements (same total size as ``src``).
+        - ``src``: CuTe tensor view pointing to the symmetric source array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The per-PE send count is
+          ``size(src) // team_n_pes(team)`` elements.
+
+    Note:
+        All PEs in ``team`` must call ``alltoall_block`` before any PE can proceed past it.
+        ``size(src)`` must be evenly divisible by ``team_n_pes(team)``.
+        The per-PE element count passed to NVSHMEM is ``size(src) // team_n_pes(team)``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1907,8 +2382,33 @@ def alltoall_block(team, dst, src):
 
     raise RuntimeError(f"Unsupported CuTe dtype for alltoall: {dtype}")
 
+
 @cute.jit
 def alltoall_warp(team, dst, src):
+    """
+    Performs a warp-scoped all-to-all exchange from ``src`` to ``dst`` across all PEs in ``team``. All threads in the warp must call this function with the same arguments.
+
+    In an all-to-all operation, each PE sends a distinct portion of its ``src`` array to
+    every other PE, and receives a portion from every PE into its ``dst`` array.
+    The ``src`` array is logically divided into ``team_n_pes(team)`` equal segments;
+    segment ``i`` is sent to PE ``i``. Each PE receives one segment from every PE into
+    the corresponding portion of ``dst``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. Must have at least
+          ``size(src)`` elements (same total size as ``src``).
+        - ``src``: CuTe tensor view pointing to the symmetric source array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The per-PE send count is
+          ``size(src) // team_n_pes(team)`` elements.
+
+    Note:
+        All PEs in ``team`` must call ``alltoall_warp`` before any PE can proceed past it.
+        ``size(src)`` must be evenly divisible by ``team_n_pes(team)``.
+        The per-PE element count passed to NVSHMEM is ``size(src) // team_n_pes(team)``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)
@@ -1950,8 +2450,33 @@ def alltoall_warp(team, dst, src):
 
     raise RuntimeError(f"Unsupported CuTe dtype for alltoall: {dtype}")
 
+
 @cute.jit
 def alltoall(team, dst, src):
+    """
+    Performs a thread-scoped all-to-all exchange from ``src`` to ``dst`` across all PEs in ``team``.
+
+    In an all-to-all operation, each PE sends a distinct portion of its ``src`` array to
+    every other PE, and receives a portion from every PE into its ``dst`` array.
+    The ``src`` array is logically divided into ``team_n_pes(team)`` equal segments;
+    segment ``i`` is sent to PE ``i``. Each PE receives one segment from every PE into
+    the corresponding portion of ``dst``.
+
+    Args:
+        - ``team`` (``int``): NVSHMEM team handle identifying the participating PEs.
+        - ``dst``: CuTe tensor view pointing to the symmetric destination array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. Must have at least
+          ``size(src)`` elements (same total size as ``src``).
+        - ``src``: CuTe tensor view pointing to the symmetric source array on this PE.
+          Must be a symmetric (NVSHMEM-allocated) tensor. The per-PE send count is
+          ``size(src) // team_n_pes(team)`` elements.
+
+    Note:
+        All PEs in ``team`` must call ``alltoall`` before any PE can proceed past it.
+        ``size(src)`` must be evenly divisible by ``team_n_pes(team)``.
+        The per-PE element count passed to NVSHMEM is ``size(src) // team_n_pes(team)``.
+        Passing an unsupported dtype raises ``RuntimeError`` at JIT compile time.
+    """
     team = _resolve_team(team)
     dst_ptr = _resolve_ptr(dst)
     src_ptr = _resolve_ptr(src)

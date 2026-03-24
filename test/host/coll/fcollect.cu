@@ -63,7 +63,7 @@
 
 int main(int argc, char **argv) {
     int status = 0;
-    size_t alloc_size = ALLOC_SIZE_STEP * (MAX_NPES + 1) * sizeof(LARGEST_DT);
+    size_t alloc_size = (ALLOC_SIZE_STEP + (size_t)MAX_ELEMS * MAX_NPES) * sizeof(LARGEST_DT);
     LARGEST_DT *d_buffer = NULL;
     LARGEST_DT *source, *dest;
     char size_string[100];

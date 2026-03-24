@@ -484,10 +484,8 @@ cpdef void team_get_config(int32_t team, intptr_t config) except*:
     nvshmem_team_get_config(<nvshmem_team_t>team, <nvshmem_team_config_t*>config)
 
 
-cpdef team_translate_pe(int32_t src_team, int src_pe, int32_t dest_team):
-    with nogil:
-        status = nvshmem_team_translate_pe(<nvshmem_team_t>src_team, src_pe, <nvshmem_team_t>dest_team)
-    check_status(status)
+cpdef int team_translate_pe(int32_t src_team, int src_pe, int32_t dest_team) except? -1:
+    return nvshmem_team_translate_pe(<nvshmem_team_t>src_team, src_pe, <nvshmem_team_t>dest_team)
 
 
 cpdef team_split_strided(int32_t parent_team, int pe_start, int pe_stride, int pe_size, intptr_t config, long config_mask, intptr_t new_team):
