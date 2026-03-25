@@ -1019,18 +1019,12 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle = NULL;
     void *local_mr_desc = NULL;
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
-    struct iovec p_op_l_iov;
-    struct fi_msg_rma p_op_msg;
-    struct fi_rma_iov p_op_r_iov;
     size_t op_size;
     uint64_t num_retries = 0;
     int status = 0;
     int target_ep, ep_idx, domain_idx;
     void *context = NULL;
 
-    memset(&p_op_l_iov, 0, sizeof(struct iovec));
-    memset(&p_op_msg, 0, sizeof(struct fi_msg_rma));
-    memset(&p_op_r_iov, 0, sizeof(struct fi_rma_iov));
 
     ep_idx = ep.ep_index;
     domain_idx = ep.domain_index;
@@ -1072,6 +1066,10 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                                NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_EFA,
                                ep.qp_index, progress_type::All));
         } else {
+            struct iovec p_op_l_iov = {};
+            struct fi_msg_rma p_op_msg = {};
+            struct fi_rma_iov p_op_r_iov = {};
+
             p_op_msg.msg_iov = &p_op_l_iov;
             p_op_msg.desc = NULL;  // Local buffer is on the stack
             p_op_msg.iov_count = 1;
