@@ -690,7 +690,7 @@ static int drain_completions(nvshmem_transport_t transport, int qp_index) {
         ep_start_idx = 0;
         ep_end_idx = libfabric_state->eps.size();
         qp_index = NVSHMEMX_QP_ALL;
-        /* Setting qp_index to ensure all QPs processed in gdr_process_amos[_ack] below */
+        /* Setting qp_index to ensure all QPs are processed in gdr_process_amos below. */
     }
 
     for (int i = ep_start_idx; i < ep_end_idx; i++) {
