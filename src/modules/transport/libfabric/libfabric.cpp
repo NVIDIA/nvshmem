@@ -116,7 +116,9 @@ int get_next_remote_domain(nvshmemt_libfabric_state_t *state, int qp_index, int 
     if (qp_index == NVSHMEMX_QP_HOST) {
         return 0;
     } else {
-        return ((my_pe + pe) % state->num_proxy_domains) + state->num_host_domains;
+        int base = (my_pe + pe) % state->num_proxy_domains;
+        int rr = (state->remote_ep_cntr++) % state->num_proxy_domains;
+        return ((base + rr) % state->num_proxy_domains) + state->num_host_domains;
     }
 }
 
@@ -1639,6 +1641,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     /* One-time initializations */
     t->max_op_len = UINT64_MAX;
     state->proxy_ep_cntr = 0;
+    state->remote_ep_cntr = 0;
 
     memset(&cq_attr, 0, sizeof(struct fi_cq_attr));
     if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_SLINGSHOT) {
