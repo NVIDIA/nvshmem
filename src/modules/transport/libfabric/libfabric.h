@@ -240,7 +240,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
         /* Note: in the wraparound case, the (start_seq, end_seq) range will include last_seq_num,
            which is not used. The logic below handles this correctly, as long as `start_category`
            is correct (which is true as long as the index space is sufficiently large that we can
-           only span two categories, as static-asserted above.) */
+           only span two categories.) */
 
         if (end_index >= count - 1) {
             /* All sequence numbers within the same category */
@@ -351,10 +351,52 @@ struct signal_seq_map {
     }
 };
 
+/* Ack aggregator: accumulates signal/AMO acks per peer, flushes as coalesced fi_send */
+struct nvshmemt_libfabric_ack_aggregator_t {
+    /* Per-peer pending ack state for the ack aggregator */
+    struct nvshmemt_libfabric_peer_pending_acks_t {
+        uint16_t range_end;
+        uint16_t range_count;
+        bool has_range;
+        uint16_t amo_ack_count;
+        uint16_t signal_ack_count; /* Number of record_ack calls (signals/AMOs with submitted_ops+=2) */
+        bool is_dirty; /* Whether this peer is in the dirty_peers vector */
+
+        nvshmemt_libfabric_peer_pending_acks_t()
+            : range_end{0}, range_count{0}, has_range{false}, amo_ack_count{0}, signal_ack_count{0},
+              is_dirty{false} {}
+
+        uint16_t total_pending() const {
+            return range_count + amo_ack_count;
+        }
+    };
+
+    /* Maximum accumulated acks before a flush is triggered */
+    static constexpr uint32_t flush_threshold = 64;
+
+    std::vector<nvshmemt_libfabric_peer_pending_acks_t> pending_per_peer;
+    std::vector<int> dirty_peers;
+
+    nvshmemt_libfabric_ack_aggregator_t(int npes)
+        : pending_per_peer(npes) {
+        dirty_peers.reserve(npes);
+    }
+
+    int record_ack(int pe, uint16_t seq_num, nvshmem_transport_t transport,
+                   nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr,
+                   uint8_t preceding_put_count);
+    int record_amo_ack(int pe, nvshmem_transport_t transport,
+                       nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr);
+    int flush_peer(int pe, nvshmem_transport_t transport,
+                   nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr);
+    int flush_all(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep);
+};
+
 struct nvshmemt_libfabric_signal_state_t {
     std::vector<nvshmemt_libfabric_endpoint_seq_counter_t> put_signal_seq_counter;
     std::vector<signal_seq_map> proxy_put_signal_comp_map;
     std::vector<uint32_t> next_expected_seq;
+    std::unique_ptr<nvshmemt_libfabric_ack_aggregator_t> ack_aggregator;
     uint64_t completed_staged_atomics;
 
     void clear() {
@@ -420,11 +462,6 @@ typedef enum {
     NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT,
     NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ,
 } nvshmemt_libfabric_imm_cq_data_hdr_t;
-
-typedef enum {
-    NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK,
-    NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_ACK,
-} nvshmemt_libfabric_ack_t;
 
 class threadSafeOpQueue {
    private:
@@ -561,14 +598,14 @@ using cuda_device_ptr = std::unique_ptr<void, cuda_device_deleter>;
 
 struct signal_delivery_work_entry {
     nvshmemt_libfabric_gdr_op_ctx_t *op;
-    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
+    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2] = {NULL, NULL};
     uint16_t sequence_count;
     uint8_t preceding_put_count;
 };
 
 struct signal_delivery_done_entry {
     nvshmemt_libfabric_gdr_op_ctx_t *op;
-    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
+    nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2] = {NULL, NULL};
     uint16_t sequence_count;
     int src_pe;
     fi_addr_t src_addr;
@@ -742,12 +779,15 @@ static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) <=
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");
 
 /* Wire data for AMO ack sent via fi_send
- * | 4 type | 4 ack_type | 2 sequence_count | 1 put_count
+ * | 4 type | 2 range_end | 2 range_count | 2 amo_ack_count | 2 num_ack_ops
+ * | 1 put_count |
  */
 typedef struct nvshmemt_libfabric_gdr_amo_ack_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
-    nvshmemt_libfabric_ack_t ack_type;
-    uint16_t sequence_count;
+    uint16_t range_end;     /* End (last seq num) of signal sequence number range */
+    uint16_t range_count;   /* Count of acked sequence numbers */
+    uint16_t amo_ack_count; /* Count of AMO acks (NVSHMEM_STAGED_AMO_SEQ_NUM) */
+    uint16_t num_ack_ops;   /* Number of original ack operations (for completed_staged_atomics) */
     uint8_t put_count;
 } nvshmemt_libfabric_gdr_amo_ack_op_t;
 static_assert(sizeof(nvshmemt_libfabric_gdr_amo_ack_op_t) <= 32,
