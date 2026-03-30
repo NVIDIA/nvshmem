@@ -470,7 +470,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     }
 }
 
-#if defined(__cplusplus) && __cplusplus >= 201703L
 // ************** Tile allgather **************/
 
 template <typename elemType, threadgroup_t SCOPE, typename tuple_t, int major_dim, int minor_dim>
@@ -989,8 +988,6 @@ __device__ inline int nvshmemi_tile_allgather_nvls_threadgroup(nvshmem_team_t te
         }
     }
 }
-#endif  //__cplusplus >= 201703L
-
 // Tile allgather entrypoint
 // Call underlying function based on scope and algo
 template <nvshmemx::tile_coll_algo_t algo, typename src_tensor_t, typename dst_tensor_t,
@@ -998,10 +995,6 @@ template <nvshmemx::tile_coll_algo_t algo, typename src_tensor_t, typename dst_t
 __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t src_tensor,
                                               dst_tensor_t dst_tensor, tuple_t start_coord,
                                               tuple_t boundary, uint64_t flag) {
-#if defined(__cplusplus) && __cplusplus < 201703L
-    assert(0 && "Tile-granular APIs need C++ 17");
-    return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#else
     using T = typename src_tensor_t::value_type;
 
     static_assert(
@@ -1067,7 +1060,6 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
-#endif  //__cplusplus >= 201703L
 }
 #endif /* __CUDA_ARCH__ */
 #endif /* FCOLLECT_DEVICE_CUH */

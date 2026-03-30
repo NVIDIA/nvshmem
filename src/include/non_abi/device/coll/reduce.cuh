@@ -225,8 +225,6 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
         }                                                                                      \
     }
 
-#if defined(__cplusplus) && __cplusplus >= 201703L
-
 /* nvshmemi_<PTX_TYPE>_add_reduce_mcast16_v4_threadgroup(int4 *dest,const int4 *source, size_t
  * nelems) distributes contiguous "nelems" elements across the threadgroup. For tile collective,
  * input is a tile (often strided along a dimension), calling the above function along the contigous
@@ -600,8 +598,6 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_
             }                                                                                      \
         }                                                                                          \
     }
-#endif  //__cplusplus >= 201703L
-
 // mcast ldreduce+st of 16B
 // The requirement to use these primitives is that nelems % UNROLL == 0
 #define NVSHMEMI_MCAST16_LOCAL_REDUCE_THREADGROUP_SUM_V4(PTX_TYPE)                               \
@@ -791,7 +787,6 @@ NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(f16x2)
 NVSHMEMI_MCAST16_REDUCE_THREADGROUP_SUM_V4(bf16x2)
 
 // Tile specific macros
-#if defined(__cplusplus) && __cplusplus >= 201703L
 // ld_reduce errors on using .acc for min, max
 #undef NVSHMEMI_MCAST_MIN_MIXOP_f16x2
 #undef NVSHMEMI_MCAST_MIN_MIXOP_bf16x2
@@ -817,15 +812,7 @@ NVSHMEMI_MCAST_TILE_ALLREDUCE_THREADGROUP(uint32_t, bf16x2, MAX)
 #define NVSHMEMI_MCAST_MIN_MIXOP_bf16x2 "min.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_f16x2 "max.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_bf16x2 "max.acc::f32"
-#endif
 
-#if defined(__cplusplus) && __cplusplus >= 201703L
-#define IF_CONSTEXPR(expression) if constexpr (expression)
-#define ELSE_IF_CONSTEXPR(expression) else if constexpr (expression)
-#else
-#define IF_CONSTEXPR(expression) if (expression)
-#define ELSE_IF_CONSTEXPR(expression) else if (expression)
-#endif
 
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadgroup(
@@ -846,23 +833,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadg
         int4 *__restrict__ dst_p = (int4 *)dest;
         const int4 *__restrict__ src_p = (const int4 *)src;
 
-        IF_CONSTEXPR(is_unsigned || is_signed || is_float_v) {
+        if constexpr (is_unsigned || is_signed || is_float_v) {
             if (len >= 192 && len % 192 == 0)
                 nvshmemi_f32_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 12>(dst_p, src_p,
                                                                                 nelems);
             else
                 nvshmemi_f32_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 1>(dst_p, src_p,
                                                                                nelems);
-        }
-        ELSE_IF_CONSTEXPR(is_half_v) {
+        } else if constexpr (is_half_v) {
             if (len >= 192 && len % 192 == 0)
                 nvshmemi_f16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 12>(dst_p, src_p,
                                                                                   nelems);
             else
                 nvshmemi_f16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 1>(dst_p, src_p,
                                                                                  nelems);
-        }
-        ELSE_IF_CONSTEXPR(is_bfloat_v) {
+        } else if constexpr (is_bfloat_v) {
             if (len >= 192 && len % 192 == 0)
                 nvshmemi_bf16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 12>(dst_p, src_p,
                                                                                    nelems);
@@ -1313,7 +1298,7 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
         nvshmemi_fcollect_threadgroup<TYPE, SCOPE>(
             NVSHMEMX_TEAM_SAME_MYPE_NODE, pWrk, dest,
             nvshmemi_team_my_pe(NVSHMEMX_TEAM_SAME_MYPE_NODE) * nreduce, nreduce);
-#if CUDART_VERSION >= 12000 && defined(__cplusplus) && __cplusplus >= 201703L
+#if CUDART_VERSION >= 12000
         if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && OP == RDXN_OPS_SUM &&
                       sizeof(TYPE) >= 4 && sizeof(TYPE) <= 8) {
             for (int i = myIdx; i < nreduce; i += groupSize) *(dest + i) = 0;
@@ -1405,23 +1390,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
         const size_t nelems = len / sizeof(int4);
         int4 *__restrict__ dst_p = (int4 *)dest;
         const int4 *__restrict__ src_p = (const int4 *)src;
-        IF_CONSTEXPR(is_half_v) {
+        if constexpr (is_half_v) {
             if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0)
                 NVSHMEMI_HALF_ADD_REDUCE_MCAST16_THREADGROUP_UNROLLED(SCOPE, ONESHOT, dst_p, src_p,
                                                                       nelems);
             else
                 nvshmemi_f16x2_add_reduce_mcast16_v4_threadgroup<SCOPE, 1, ONESHOT>(dst_p, src_p,
                                                                                     nelems);
-        }
-        ELSE_IF_CONSTEXPR(is_bfloat_v) {
+        } else if constexpr (is_bfloat_v) {
             if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0)
                 NVSHMEMI_BFLOAT_ADD_REDUCE_MCAST16_THREADGROUP_UNROLLED(SCOPE, ONESHOT, dst_p,
                                                                         src_p, nelems);
             else
                 nvshmemi_bf16x2_add_reduce_mcast16_v4_threadgroup<SCOPE, 1, ONESHOT>(dst_p, src_p,
                                                                                      nelems);
-        }
-        else {
+        } else {
             if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0)
                 NVSHMEMI_FLOAT_ADD_REDUCE_MCAST16_THREADGROUP_UNROLLED(SCOPE, ONESHOT, dst_p, src_p,
                                                                        nelems);
@@ -1440,13 +1423,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
         const size_t nelems = len / sizeof(uint64_t);
         uint64_t *__restrict__ dst_p = (uint64_t *)dest;
         const uint64_t *__restrict__ src_p = (const uint64_t *)src;
-        IF_CONSTEXPR(is_half_v) {
+        if constexpr (is_half_v) {
             nvshmemi_f16x2_add_reduce_mcast8_v2_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
-        }
-        ELSE_IF_CONSTEXPR(is_bfloat_v) {
+        } else if constexpr (is_bfloat_v) {
             nvshmemi_bf16x2_add_reduce_mcast8_v2_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
-        }
-        else {
+        } else {
             nvshmemi_f32_add_reduce_mcast8_v2_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
         }
         len -= nelems * sizeof(uint64_t);
@@ -1460,13 +1441,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
         const size_t nelems = len / sizeof(uint32_t);
         uint32_t *__restrict__ dst_p = (uint32_t *)dest;
         const uint32_t *__restrict__ src_p = (const uint32_t *)src;
-        IF_CONSTEXPR(is_half_v) {
+        if constexpr (is_half_v) {
             nvshmemi_f16x2_add_reduce_mcast4_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
-        }
-        ELSE_IF_CONSTEXPR(is_bfloat_v) {
+        } else if constexpr (is_bfloat_v) {
             nvshmemi_bf16x2_add_reduce_mcast4_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
-        }
-        else {
+        } else {
             nvshmemi_f32_add_reduce_mcast4_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
         }
         len -= nelems * sizeof(uint32_t);
@@ -1745,7 +1724,6 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 }
 
 /******* Tile collective functions ********/
-#if defined(__cplusplus) && __cplusplus >= 201703L
 
 // Select implementation based on the operation, datatype
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, rdxn_ops_t op,
@@ -2005,7 +1983,6 @@ __device__ inline int nvshmemi_tile_allreduce_nvls_thread(nvshmem_team_t team,
         }
     }
 }
-#endif  // __cplusplus >= 201703L
 
 // Tile allreduce entrypoint
 // Call underlying function based on scope and algo
@@ -2015,11 +1992,6 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
                                               dst_tensor_t dst_tensor, tuple_t start_coord,
                                               tuple_t boundary, int root, uint64_t flag) {
     using T = typename src_tensor_t::value_type;
-#if defined(__cplusplus) && __cplusplus < 201703L
-    assert(0 && "Tile-granular APIs need C++ 17");
-    return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#else
-
     static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
                                        typename dst_tensor_t::value_type>::value,
                   "Source and destination tensors must have the same type");
@@ -2105,7 +2077,6 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
 #endif
     }
-#endif  // __cplusplus >= 201703L
 }
 
 // Tile reduce entrypoint
@@ -2116,11 +2087,6 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
                                            dst_tensor_t dst_tensor, tuple_t start_coord,
                                            tuple_t boundary, int root, uint64_t flag) {
     using T = typename src_tensor_t::value_type;
-
-#if defined(__cplusplus) && __cplusplus < 201703L
-    assert(0 && "Tile-granular APIs need C++ 17");
-    return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#else
 
     static_assert(::cuda::std::is_same<typename src_tensor_t::value_type,
                                        typename dst_tensor_t::value_type>::value,
@@ -2196,7 +2162,6 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
-#endif  // __cplusplus >= 201703L
 }
 
 #endif /* __CUDA_ARCH__ */

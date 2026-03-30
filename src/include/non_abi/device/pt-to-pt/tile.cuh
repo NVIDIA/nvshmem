@@ -13,9 +13,6 @@
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
 
 #ifdef __CUDA_ARCH__
-// Tile APIs need C++ 17
-#if defined(__cplusplus) && __cplusplus >= 201703L
-
 template <typename elemType, threadgroup_t SCOPE, typename tuple_t, int major_dim, int minor_dim>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tile_cpy_threadgroup_v4(
     int4 *dest, const int4 *source, const int nelem_major_dim, const int nelem_minor_dim,
@@ -544,7 +541,6 @@ __device__ inline int nvshmemi_tile_cpy_remote_threadgroup(src_tensor_t src_tens
     return NVSHMEMX_SUCCESS;
 }
 
-#endif  // __cplusplus >= 201703L
 // Tile Put entrypoint
 // Call underlying function based on scope and algo
 template <nvshmemx::tile_algo_t algo, typename src_tensor_t, typename dst_tensor_t,
@@ -552,10 +548,6 @@ template <nvshmemx::tile_algo_t algo, typename src_tensor_t, typename dst_tensor
 __device__ inline int nvshmemi_tile_put(src_tensor_t src_tensor, dst_tensor_t dst_tensor,
                                         tuple_t start_coord, tuple_t boundary, int pe,
                                         uint64_t flag) {
-#if defined(__cplusplus) && __cplusplus < 201703L
-    assert(0 && "Tile-granular APIs need C++ 17");
-    return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#else
     using T = typename src_tensor_t::value_type;
 
     static_assert(
@@ -609,7 +601,6 @@ __device__ inline int nvshmemi_tile_put(src_tensor_t src_tensor, dst_tensor_t ds
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
-#endif  // __cplusplus >= 201703L
 }
 
 // Tile Get entrypoint
@@ -619,10 +610,6 @@ template <nvshmemx::tile_algo_t algo, typename src_tensor_t, typename dst_tensor
 __device__ inline int nvshmemi_tile_get(src_tensor_t src_tensor, dst_tensor_t dst_tensor,
                                         tuple_t start_coord, tuple_t boundary, int pe,
                                         uint64_t flag) {
-#if defined(__cplusplus) && __cplusplus < 201703L
-    assert(0 && "Tile-granular APIs need C++ 17");
-    return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#else
     using T = typename src_tensor_t::value_type;
 
     static_assert(
@@ -684,7 +671,6 @@ __device__ inline int nvshmemi_tile_get(src_tensor_t src_tensor, dst_tensor_t ds
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
-#endif  // __cplusplus >= 201703L
 }
 
 #endif /* __CUDA_ARCH__ */

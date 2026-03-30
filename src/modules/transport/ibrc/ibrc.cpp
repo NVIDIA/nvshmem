@@ -779,10 +779,8 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
     // status = gdrcopy_ftable.copy_from_mapping(mh, &old_value, ptr, sizeof(T));
     // NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr copy from mapping
     // failed\n");
-#if __cplusplus >= 201103L
     // assert size is 64-bit or smaller, issued as single tansaction
     static_assert(sizeof(T) <= 8, "static_assert(sizeof(T) >= 8) failed");
-#endif
     old_value = *((volatile T *)ptr);
 
     switch (op->op) {

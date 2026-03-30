@@ -102,10 +102,8 @@ struct __attribute__((__packed__)) ibdevx_rw_inline_data_seg {
     } data;
     uint32_t reserved;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_rw_inline_data_seg) == 16,
               "static_assert(sizeof(T) == 16) failed");
-#endif
 
 struct __attribute__((__packed__, aligned(4))) ibdevx_rw_wqe {
     struct mlx5_wqe_ctrl_seg ctrl;
@@ -115,28 +113,22 @@ struct __attribute__((__packed__, aligned(4))) ibdevx_rw_wqe {
         struct ibdevx_rw_inline_data_seg data_inl;
     } data;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_rw_wqe) == 48, "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__)) ibdevx_atomic_32_masked_fetch_add_seg {
     uint32_t add_data;
     uint32_t field_boundary;
     uint64_t reserved;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_atomic_32_masked_fetch_add_seg) == 16,
               "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__)) ibdevx_atomic_64_masked_fetch_add_seg {
     uint64_t add_data;
     uint64_t field_boundary;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_atomic_64_masked_fetch_add_seg) == 16,
               "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__)) ibdevx_atomic_32_masked_compare_swap_seg {
     uint32_t swap_data;
@@ -144,19 +136,15 @@ struct __attribute__((__packed__)) ibdevx_atomic_32_masked_compare_swap_seg {
     uint32_t swap_mask;
     uint32_t compare_mask;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_atomic_32_masked_compare_swap_seg) == 16,
               "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__)) ibdevx_atomic_64_masked_compare_swap_seg {
     uint64_t swap;
     uint64_t compare;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_atomic_64_masked_compare_swap_seg) == 16,
               "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__, aligned(4))) ibdevx_atomic_32_wqe {
     struct mlx5_wqe_ctrl_seg ctrl;
@@ -168,9 +156,7 @@ struct __attribute__((__packed__, aligned(4))) ibdevx_atomic_32_wqe {
     };
     struct mlx5_wqe_data_seg data;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_atomic_32_wqe) == 64, "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__, aligned(4))) ibdevx_atomic_64_amo_wqe {
     struct mlx5_wqe_ctrl_seg ctrl;
@@ -181,10 +167,8 @@ struct __attribute__((__packed__, aligned(4))) ibdevx_atomic_64_amo_wqe {
     };
     struct mlx5_wqe_data_seg data;
 };
-#if __cplusplus >= 201103L
 static_assert(sizeof(struct ibdevx_atomic_64_amo_wqe) == 64,
               "static_assert(sizeof(T) >= 8) failed");
-#endif
 
 struct __attribute__((__packed__)) ibdevx_dbr_buf {
     volatile uint16_t rsvd_1;

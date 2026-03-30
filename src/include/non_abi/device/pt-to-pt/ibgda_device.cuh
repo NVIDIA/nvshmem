@@ -150,28 +150,22 @@ typedef struct {
     uint8_t fl_mlid;
     __be16 rlid;
 } __attribute__((__packed__)) __attribute__((__aligned__(4))) ibgda_half_av_seg_t;
-#if __cplusplus >= 201103L
 static_assert(sizeof(ibgda_half_av_seg_t) == 16, "sizeof(ibgda_half_av_seg_t) == 16 failed.");
-#endif
 
 typedef struct {
     uint32_t add_data;
     uint32_t field_boundary;
     uint64_t reserved;
 } __attribute__((__packed__)) ibgda_atomic_32_masked_fa_seg_t;
-#if __cplusplus >= 201103L
 static_assert(sizeof(ibgda_atomic_32_masked_fa_seg_t) == 16,
               "sizeof(ibgda_atomic_32_masked_fa_seg_t) == 16 failed.");
-#endif
 
 typedef struct {
     uint64_t add_data;
     uint64_t field_boundary;
 } __attribute__((__packed__)) ibgda_atomic_64_masked_fa_seg_t;
-#if __cplusplus >= 201103L
 static_assert(sizeof(ibgda_atomic_64_masked_fa_seg_t) == 16,
               "sizeof(ibgda_atomic_64_masked_fa_seg_t) == 16 failed.");
-#endif
 
 typedef struct {
     uint32_t swap_data;
@@ -179,19 +173,15 @@ typedef struct {
     uint32_t swap_mask;
     uint32_t compare_mask;
 } __attribute__((__packed__)) ibgda_atomic_32_masked_cs_seg_t;
-#if __cplusplus >= 201103L
 static_assert(sizeof(ibgda_atomic_32_masked_cs_seg_t) == 16,
               "sizeof(ibgda_atomic_32_masked_cs_seg_t) == 16 failed.");
-#endif
 
 typedef struct {
     uint64_t swap;
     uint64_t compare;
 } __attribute__((__packed__)) ibgda_atomic_64_masked_cs_seg_t;
-#if __cplusplus >= 201103L
 static_assert(sizeof(ibgda_atomic_64_masked_cs_seg_t) == 16,
               "sizeof(ibgda_atomic_64_masked_cs_seg_t) == 16 failed.");
-#endif
 
 #ifdef __CUDA_ARCH__
 
@@ -470,10 +460,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE int ibgda_check_poll_ti
 }
 #endif
 
-#if __cplusplus >= 201103L
 static_assert(NVSHMEMI_IBGDA_MAX_QP_DEPTH <= 32768,
               "static_assert(NVSHMEMI_IBGDA_MAX_QP_DEPTH <= 32768) failed");
-#endif
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE int ibgda_poll_cq(
     nvshmemi_ibgda_device_cq_t *cq, uint64_t idx, int *error) {
     int status = 0;
@@ -2253,10 +2241,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
     }
 }
 
-#if __cplusplus >= 201103L
 static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64) failed");
-#endif
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
     uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
@@ -2441,10 +2427,8 @@ out:
 /**
  * RMA P base
  */
-#if __cplusplus >= 201103L
 static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64) failed");
-#endif
 template <typename T, bool is_full_warp, bool can_combine_data, bool support_half_av_seg>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_p_impl(
     void *rptr, const T value, int dst_pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -3057,10 +3041,8 @@ nvshmemi_ibgda_amo_fetch(void *rptr, const T value, const T compare, int pe, nvs
     return ret;
 }
 
-#if __cplusplus >= 201103L
 static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 128,
               "static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 128) failed");
-#endif
 template <bool is_nbi, bool support_half_av_seg>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put_signal_thread_impl(
     void *rptr, void *lptr, size_t bytes, void *sig_rptr, uint64_t signal, nvshmemi_amo_t sig_op,
@@ -3207,10 +3189,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
 /**
  * PUT SIGNAL base
  */
-#if __cplusplus >= 201103L
 static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64) failed");
-#endif
 template <threadgroup_t SCOPE, bool is_nbi, bool support_half_av_seg>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put_signal_impl(
     void *req_rptr, void *req_lptr, size_t bytes, void *sig_rptr, uint64_t signal,

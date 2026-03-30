@@ -260,11 +260,6 @@ __device__ inline int nvshmemi_tile_collective_wait(nvshmem_team_t team, uint64_
                       (algo == nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI),
                   "Unsupported tile algorithm");
 
-#if defined(__cplusplus) && __cplusplus < 201703L
-    assert(0 && "Tile-granular APIs need C++ 17");
-    return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#else
-
     if (flag != 0) {
         assert(!flag && "Currently non-zero flag value is unsupported");
         return NVSHMEMX_ERROR_INVALID_VALUE;
@@ -284,7 +279,6 @@ __device__ inline int nvshmemi_tile_collective_wait(nvshmem_team_t team, uint64_
         nvshmemi_threadgroup_sync<scope>();
         return NVSHMEMX_SUCCESS;
     }
-#endif  // __cplusplus >= 201703L
 }
 
 #endif /* __CUDA_ARCH__ */
