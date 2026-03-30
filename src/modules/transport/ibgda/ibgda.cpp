@@ -1790,7 +1790,7 @@ out:
     return status;
 }
 
-static int ibgda_qp_rtr2rts(struct ibgda_ep *ep, const struct ibgda_device *device, int portid) {
+static int ibgda_qp_rtr2rts(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep, const struct ibgda_device *device, int portid) {
     int status = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(rtr2rts_qp_in)] = {
@@ -1815,7 +1815,7 @@ static int ibgda_qp_rtr2rts(struct ibgda_ep *ep, const struct ibgda_device *devi
     DEVX_SET(qpc, qpc, next_send_psn, 0x0);
     DEVX_SET(qpc, qpc, retry_count, 7);
     DEVX_SET(qpc, qpc, rnr_retry, 7);
-    DEVX_SET(qpc, qpc, primary_address_path.ack_timeout, 20);
+    DEVX_SET(qpc, qpc, primary_address_path.ack_timeout, ibgda_state->option->IBGDA_TIMEOUT);
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -3147,7 +3147,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_rc_init2rtr failed on RC #%d.", ep_index);
 
-            status = ibgda_qp_rtr2rts(device->rc.eps[ep_index], device, portid);
+            status = ibgda_qp_rtr2rts(ibgda_state, device->rc.eps[ep_index], device, portid);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_qp_rtr2rts failed on RC #%d.", ep_index);
         }

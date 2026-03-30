@@ -152,6 +152,9 @@ NVSHMEMI_ENV_DEF(IBGDA_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "- gpu: use GPU SMs.\n"
                  "- cpu: use CPU with gdrcopy backend.\n"
                  "- cpu_host_memory: use CPU with CUDA memory.")
+NVSHMEMI_ENV_DEF(IBGDA_TIMEOUT, int, 22, NVSHMEMI_ENV_CAT_TRANSPORT,
+                "IBGDA ibverbs timeout. Values can be 0-31, 0 means infinite. "
+                "Actual timeout value = 4.096us * 2^timeout .")
 NVSHMEMI_ENV_DEF(IB_ENABLE_IBGDA, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set to enable GPU-initiated communication transport.")
 #endif
