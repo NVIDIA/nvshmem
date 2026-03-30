@@ -134,7 +134,6 @@ if(NOT SubBuild)
       target_compile_options(shmem INTERFACE ${MPI_C_COMPILE_OPTIONS})
     endif()
   endif()
-  else()
 endif()
 
 set(TEST_CXX_ARG "c++${CMAKE_CXX_STANDARD}")

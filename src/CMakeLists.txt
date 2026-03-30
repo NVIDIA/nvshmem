@@ -59,6 +59,8 @@ else()
   set(DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS "")
 endif()
 
+set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
+
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
     configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in llvm_lib/non_abi/device/pt-to-pt/transfer_device.cuh COPYONLY)
@@ -68,8 +70,6 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   else()
     set(BITCODE_LIB_ARCH "sm_90")
   endif()
-
-  set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
 
   # Note - today we do optimization to avoid having a too large bitcode file. There are, as of clang 18, some existing
   # limitations around compiling device libraries which make optimizing this library fine. Once these issues are fixed
@@ -238,7 +238,6 @@ if(NVSHMEM_MPI_SUPPORT)
     nvshmem_bootstrap_mpi SHARED
   )
   set(ACTIVE_BOOTSTRAPS ${ACTIVE_BOOTSTRAPS} nvshmem_bootstrap_mpi)
-  set_target_properties(nvshmem_bootstrap_mpi PROPERTIES C_STANDARD 11)
   target_sources(nvshmem_bootstrap_mpi PRIVATE modules/bootstrap/common/bootstrap_util.cpp
                                                modules/bootstrap/mpi/bootstrap_mpi.c)
   target_link_libraries(nvshmem_bootstrap_mpi PRIVATE MPI::MPI_C)
@@ -254,7 +253,6 @@ if(NVSHMEM_SHMEM_SUPPORT)
     nvshmem_bootstrap_shmem SHARED
   )
   set(ACTIVE_BOOTSTRAPS ${ACTIVE_BOOTSTRAPS} nvshmem_bootstrap_shmem)
-  set_target_properties(nvshmem_bootstrap_shmem PROPERTIES C_STANDARD 11)
   target_sources(nvshmem_bootstrap_shmem PRIVATE modules/bootstrap/common/bootstrap_util.cpp
                                                  modules/bootstrap/shmem/bootstrap_shmem.c)
   target_link_libraries(nvshmem_bootstrap_shmem PRIVATE shmem)
@@ -329,8 +327,6 @@ endif()
 # Always compile uid bootstrap as no dependency on external sources or libraries
 add_library(nvshmem_bootstrap_uid SHARED)
 set(ACTIVE_BOOTSTRAPS ${ACTIVE_BOOTSTRAPS} nvshmem_bootstrap_uid)
-set_target_properties(nvshmem_bootstrap_uid
-                      PROPERTIES C_STANDARD 11)
 target_sources(nvshmem_bootstrap_uid PRIVATE modules/bootstrap/common/bootstrap_util.cpp
                                              modules/bootstrap/uid/ncclSocket/ncclsocket_socket.cpp
 					                                   modules/bootstrap/uid/bootstrap_uid.cpp)
