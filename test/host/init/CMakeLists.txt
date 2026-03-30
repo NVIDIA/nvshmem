@@ -19,4 +19,6 @@ endif()
 
 if(NVSHMEM_SHMEM_SUPPORT)
   nvshmem_add_test(shmem_init.cpp)
+  # Regression test: odd PE count + sub-4-byte bootstrap allgather payload
+  nvshmem_add_test(shmem_init_odd_pes.cpp)
 endif()
