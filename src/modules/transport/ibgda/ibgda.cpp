@@ -922,10 +922,8 @@ static int ibgda_mobject_nic_map(struct ibgda_mem_object *mobject, struct ibv_co
 
     if (use_dmabuf && mobject->mem_type == IBGDA_MEM_TYPE_GPU) {
 #ifdef HAVE_MLX5DV_UMEM_MASK_DMABUF
-        int fd;
-        struct mlx5dv_devx_umem_in umem_in = {
-            0,
-        };
+        int fd = 0;
+        struct mlx5dv_devx_umem_in umem_in = {};
         static const size_t host_page_size = sysconf(_SC_PAGESIZE);
         size_t dmabuf_size = IBGDA_ROUND_UP(mobject->aligned.size, host_page_size);
         CUCHECKGOTO(ibgda_cuda_syms,

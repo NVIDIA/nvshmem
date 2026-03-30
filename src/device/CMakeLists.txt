@@ -149,8 +149,7 @@ macro(nvshmem_library_set_base_config LIBNAME)
               all-warnings>
               $<$<COMPILE_LANGUAGE:CXX>:-Werror
               -Wall
-              -Wextra
-              -Wno-missing-field-initializers>
+              -Wextra>
     )
   endif()
 endmacro()
