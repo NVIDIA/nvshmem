@@ -83,23 +83,28 @@ static int bootstrap_shmem_allgather(const void *sendbuf, void *recvbuf, int len
                                      struct bootstrap_handle *handle) {
     int status = 0;
     void *sendbuf_i = NULL, *recvbuf_i = NULL;
+    /* Round up to a multiple of 4 bytes for shmem_collect32 compatibility. */
+    size_t length_rup = ((size_t)length + 3) & ~(size_t)3;
 
-    sendbuf_i = shmem_malloc(length);
+    sendbuf_i = shmem_malloc(length_rup);
     BOOTSTRAP_NULL_ERROR_JMP(sendbuf_i, status, NVSHMEMX_ERROR_INTERNAL, out,
                              "shmem_malloc failed\n");
-    recvbuf_i = shmem_malloc(length * handle->pg_size);
+    recvbuf_i = shmem_malloc(length_rup * handle->pg_size);
     BOOTSTRAP_NULL_ERROR_JMP(recvbuf_i, status, NVSHMEMX_ERROR_INTERNAL, out,
                              "shmem_malloc failed\n");
     shmem_barrier_all();
 
+    memset(sendbuf_i, 0, length_rup);
     memcpy(sendbuf_i, sendbuf, length);
 
     shmem_barrier_all();
     assert(scratch_size >= SHMEM_COLLECT_SYNC_SIZE * sizeof(long));
-    shmem_collect32(recvbuf_i, sendbuf_i, length / 4, 0, 0, handle->pg_size, scratch);
+    shmem_collect32(recvbuf_i, sendbuf_i, length_rup / 4, 0, 0, handle->pg_size, scratch);
     shmem_barrier_all();
 
-    memcpy(recvbuf, recvbuf_i, length * handle->pg_size);
+    for (int i = 0; i < handle->pg_size; i++) {
+        memcpy((char *)recvbuf + i * length, (char *)recvbuf_i + i * length_rup, length);
+    }
 
     shmem_barrier_all();
     shmem_free(sendbuf_i);
@@ -113,23 +118,30 @@ static int bootstrap_shmem_alltoall(const void *sendbuf, void *recvbuf, int leng
                                     struct bootstrap_handle *handle) {
     int status = 0;
     void *sendbuf_i = NULL, *recvbuf_i = NULL;
+    /* Round up to a multiple of 4 bytes for shmem_alltoall32 compatibility. */
+    size_t length_rup = ((size_t)length + 3) & ~(size_t)3;
 
-    sendbuf_i = shmem_malloc(length * handle->pg_size);
+    sendbuf_i = shmem_malloc(length_rup * handle->pg_size);
     BOOTSTRAP_NULL_ERROR_JMP(sendbuf_i, status, NVSHMEMX_ERROR_INTERNAL, out,
                              "shmem_malloc failed\n");
-    recvbuf_i = shmem_malloc(length * handle->pg_size);
+    recvbuf_i = shmem_malloc(length_rup * handle->pg_size);
     BOOTSTRAP_NULL_ERROR_JMP(recvbuf_i, status, NVSHMEMX_ERROR_INTERNAL, out,
                              "shmem_malloc failed\n");
     shmem_barrier_all();
 
-    memcpy(sendbuf_i, sendbuf, length * handle->pg_size);
+    memset(sendbuf_i, 0, length_rup * handle->pg_size);
+    for (int i = 0; i < handle->pg_size; i++) {
+        memcpy((char *)sendbuf_i + i * length_rup, (const char *)sendbuf + i * length, length);
+    }
 
     shmem_barrier_all();
     assert(scratch_size >= SHMEM_ALLTOALL_SYNC_SIZE * sizeof(long));
-    shmem_alltoall32(recvbuf_i, sendbuf_i, length / 4, 0, 0, handle->pg_size, scratch);
+    shmem_alltoall32(recvbuf_i, sendbuf_i, length_rup / 4, 0, 0, handle->pg_size, scratch);
     shmem_barrier_all();
 
-    memcpy(recvbuf, recvbuf_i, length * handle->pg_size);
+    for (int i = 0; i < handle->pg_size; i++) {
+        memcpy((char *)recvbuf + i * length, (char *)recvbuf_i + i * length_rup, length);
+    }
 
     shmem_barrier_all();
     shmem_free(sendbuf_i);
