@@ -63,11 +63,12 @@ static void *env_ib_addr_range(sa_family_t af, int *prefix_len, int log_level,
     char addr_string[128] = {0};
     snprintf(addr_string, 128, "%s", env);
     char *addr_str_ptr = addr_string;
-    char *mask_str_ptr = strstr(addr_string, "/") + 1;
-    if (NULL == mask_str_ptr) {
+    char *slash_ptr = strstr(addr_string, "/");
+    if (slash_ptr == NULL) {
         return NULL;
     }
-    *(mask_str_ptr - 1) = '\0';
+    *slash_ptr = '\0';
+    char *mask_str_ptr = slash_ptr + 1;
 
     if (inet_pton(af, addr_str_ptr, ret) == 0) {
         INFO(log_level, "NET/IB: Ip address '%s' is invalid for family %s, ignoring address",
