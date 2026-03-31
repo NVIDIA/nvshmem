@@ -131,8 +131,6 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
     endforeach()
 
     # Ensure the venv exists before attempting to build.
-    if(NOT EXISTS "${VENV_PYTHON}")
-        add_dependencies(${WHEEL_TARGET} make_venv_libs_wheel)
-    endif()
+    add_dependencies(${WHEEL_TARGET} make_venv_libs_wheel)
 
 endfunction()
