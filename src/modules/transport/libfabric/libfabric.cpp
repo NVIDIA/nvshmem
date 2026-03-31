@@ -536,9 +536,9 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
                               "Unable to process amo acks: %d.\n", status);
 
         if (prog_type == progress_type::All) {
-            if (gdrRecvMutex.try_lock()) {
+            std::unique_lock<std::recursive_mutex> lock{gdrRecvMutex, std::try_to_lock};
+            if (lock.owns_lock()) {
                 status = nvshmemt_libfabric_gdr_process_amos(transport, qp_index);
-                gdrRecvMutex.unlock();
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "Unable to process amos: %d.\n", status);
             }
