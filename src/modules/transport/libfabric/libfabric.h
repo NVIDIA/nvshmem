@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdint.h>  // IWYU pragma: keep
 #include <stdio.h>
+#include <cstdlib>
 #include <stddef.h>
 #include <string.h>
 #include <atomic>
@@ -15,6 +16,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <memory>
 #include <cuda_runtime.h>
 #include "rdma/fabric.h"
@@ -22,6 +24,7 @@
 // IWYU pragma: no_include <bits/stdint-uintn.h>
 
 #include "non_abi/nvshmem_build_options.h"
+#include "non_abi/nvshmemx_error.h"
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 
@@ -266,12 +269,6 @@ typedef struct {
     int qp_index;
 } nvshmemt_libfabric_endpoint_t;
 
-// Entry types for completion map
-enum nvshmemt_libfabric_comp_entry_type {
-    NVSHMEMT_LIBFABRIC_COMP_ENTRY_SIGNAL,
-    NVSHMEMT_LIBFABRIC_COMP_ENTRY_PUT_ACK
-};
-
 // Entry for signal operations (put-signal, atomic)
 struct nvshmemt_libfabric_signal_comp_entry {
     nvshmemt_libfabric_gdr_op_ctx_t *op;
@@ -284,19 +281,66 @@ struct nvshmemt_libfabric_put_ack_entry {
     int ep_index;
 };
 
-// Tagged union for completion entries
-struct nvshmemt_libfabric_comp_entry_t {
-    nvshmemt_libfabric_comp_entry_type type;
-    union {
-        nvshmemt_libfabric_signal_comp_entry signal_entry;
-        nvshmemt_libfabric_put_ack_entry ack_entry;
+using nvshmemt_libfabric_comp_entry_t =
+    std::variant<nvshmemt_libfabric_signal_comp_entry, nvshmemt_libfabric_put_ack_entry>;
+
+/**
+ * Per-PE flat array + overflow map for signal completion entries.
+ * Fast path: O(1) direct index by (seq % window). Covers normal operation.
+ * Slow path: falls back to std::unordered_map on slot collision.
+ */
+struct signal_seq_map {
+    static constexpr size_t window = 64;
+
+    struct slot {
+        nvshmemt_libfabric_comp_entry_t entry;
+        uint32_t seq;
+        bool occupied;
     };
+
+    std::array<slot, window> slots{};
+    std::unordered_map<uint32_t, nvshmemt_libfabric_comp_entry_t> overflow;
+
+    nvshmemt_libfabric_comp_entry_t *find(uint32_t seq) {
+        slot &s = slots[seq % window];
+        if (s.occupied && s.seq == seq) return &s.entry;
+        auto it = overflow.find(seq);
+        return (it != overflow.end()) ? &it->second : nullptr;
+    }
+
+    std::pair<nvshmemt_libfabric_comp_entry_t *, bool> insert(
+        uint32_t seq, const nvshmemt_libfabric_comp_entry_t &e) {
+        slot &s = slots[seq % window];
+
+        if (!s.occupied) {
+            s.entry = e;
+            s.seq = seq;
+            s.occupied = true;
+            return {&s.entry, true};
+        }
+
+        if (s.seq == seq) {
+            return {&s.entry, false};
+        }
+
+        auto [it, inserted] = overflow.try_emplace(seq, e);
+        return {&it->second, inserted};
+    }
+
+    void erase(uint32_t seq) {
+        slot &s = slots[seq % window];
+        if (s.occupied && s.seq == seq) {
+            s.occupied = false;
+        } else {
+            overflow.erase(seq);
+        }
+    }
 };
 
 struct nvshmemt_libfabric_signal_state_t {
-    std::unordered_map<int, nvshmemt_libfabric_endpoint_seq_counter_t> put_signal_seq_counter;
-    std::unordered_map<uint64_t, nvshmemt_libfabric_comp_entry_t> proxy_put_signal_comp_map;
-    std::unordered_map<int, uint32_t> next_expected_seq;
+    std::vector<nvshmemt_libfabric_endpoint_seq_counter_t> put_signal_seq_counter;
+    std::vector<signal_seq_map> proxy_put_signal_comp_map;
+    std::vector<uint32_t> next_expected_seq;
 
     void clear() {
         put_signal_seq_counter.clear();
