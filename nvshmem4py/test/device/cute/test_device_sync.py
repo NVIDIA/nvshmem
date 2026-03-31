@@ -21,8 +21,7 @@ import nvshmem.core.device.cute as nvshmem_cute
 from cuda.core import Device
 
 from test_device_rma import (
-    _compile_kernel,
-)
+    _compile_kernel, )
 
 
 @pytest.mark.mpi
