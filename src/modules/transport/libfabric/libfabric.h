@@ -267,9 +267,9 @@ class threadSafeOpQueue {
     conditional_mutex send_mutex;
     conditional_mutex ack_recv_mutex;
     conditional_mutex other_recv_mutex;
-    std::vector<void *> send;
-    std::deque<void *> ack_recv;
-    std::deque<void *> other_recv;
+    std::vector<nvshmemt_libfabric_gdr_op_ctx_t *> send;
+    std::deque<nvshmemt_libfabric_gdr_op_ctx_t *> ack_recv;
+    std::deque<nvshmemt_libfabric_gdr_op_ctx_t *> other_recv;
 
    public:
     explicit threadSafeOpQueue(bool locking_required)
@@ -282,7 +282,7 @@ class threadSafeOpQueue {
     threadSafeOpQueue(threadSafeOpQueue &&) = delete;
     threadSafeOpQueue &operator=(threadSafeOpQueue &&) = delete;
 
-    int getNextSends(void **elems, size_t num_elems = 1) {
+    int getNextSends(nvshmemt_libfabric_gdr_op_ctx_t **elems, size_t num_elems = 1) {
         const std::lock_guard<conditional_mutex> lg{send_mutex};
         if (send.size() < num_elems) {
             for (size_t i = 0; i < num_elems; i++) {
@@ -310,13 +310,13 @@ class threadSafeOpQueue {
                 *recv_elem = NULL;
                 return 0;
             }
-            *recv_elem = (nvshmemt_libfabric_gdr_op_ctx_t *)other_recv.front();
+            *recv_elem = other_recv.front();
             if ((&((*recv_elem)->send_amo))->op > NVSHMEMI_AMO_END_OF_NONFETCH) {
                 num_sends = 2;
             } else {
                 num_sends = 1;
             }
-            status = getNextSends((void **)send_elems, num_sends);
+            status = getNextSends(send_elems, num_sends);
             if (status == -EAGAIN) {
                 *recv_elem = NULL;
                 return -EAGAIN;
@@ -333,7 +333,7 @@ class threadSafeOpQueue {
                 *recv_elem = NULL;
                 return 0;
             }
-            *recv_elem = (nvshmemt_libfabric_gdr_op_ctx_t *)ack_recv.front();
+            *recv_elem = ack_recv.front();
             assert(*recv_elem != NULL);
             ack_recv.pop_front();
             return 0;
@@ -344,44 +344,19 @@ class threadSafeOpQueue {
         }
     }
 
-    void putToSend(void *elem) {
+    void putToSend(nvshmemt_libfabric_gdr_op_ctx_t *elem) {
         const std::lock_guard<conditional_mutex> lg{send_mutex};
         send.push_back(elem);
-        return;
     }
 
-    void putToSendBulk(char *elem, size_t elem_size, size_t num_elems) {
+    void putToSendBulk(nvshmemt_libfabric_gdr_op_ctx_t *elem, size_t num_elems) {
         const std::lock_guard<conditional_mutex> lg{send_mutex};
-        for (size_t i = 0; i < num_elems; i++) {
+        for (size_t i = 0; i < num_elems; ++i, ++elem) {
             send.push_back(elem);
-            elem = elem + elem_size;
-        }
-        return;
-    }
-
-    void *getNextRecv(nvshmemt_libfabric_recv_type_t recv_type) {
-        void *elem = NULL;
-        if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
-            const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
-            if (ack_recv.empty()) {
-                return NULL;
-            }
-
-            elem = ack_recv.front();
-            ack_recv.pop_front();
-            return elem;
-        } else {
-            const std::lock_guard<conditional_mutex> lg{other_recv_mutex};
-            if (other_recv.empty()) {
-                return NULL;
-            }
-            elem = other_recv.front();
-            other_recv.pop_front();
-            return elem;
         }
     }
 
-    void putToRecv(void *elem, nvshmemt_libfabric_recv_type_t recv_type) {
+    void putToRecv(nvshmemt_libfabric_gdr_op_ctx_t *elem, nvshmemt_libfabric_recv_type_t recv_type) {
         if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
             const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
             ack_recv.push_back(elem);
@@ -391,7 +366,6 @@ class threadSafeOpQueue {
         } else {
             fprintf(stderr, "putToRecv: invalid recv_type: %d\n", recv_type);
             assert(false);
-            return;
         }
     }
 };
@@ -435,8 +409,7 @@ typedef struct {
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;
-    std::vector<void *> send_buf;
-    std::vector<void *> recv_buf;
+    std::vector<std::vector<nvshmemt_libfabric_gdr_op_ctx_t>> recv_buf;
     std::vector<struct fid_mr *> mrs;
     std::vector<struct fid_mr *> mr_staged_amo_acks;
     void **remote_addr_staged_amo_ack;
