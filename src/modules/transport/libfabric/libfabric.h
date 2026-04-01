@@ -414,6 +414,11 @@ typedef struct {
     std::vector<struct fid_mr *> mr_staged_amo_acks;
     void **remote_addr_staged_amo_ack;
     uint64_t *rkey_staged_amo_ack;
+
+    /* Misc state management */
+    bool use_staged_atomics = false;
+    bool use_auto_progress = false;
+    std::recursive_mutex gdrRecvMutex;
 } nvshmemt_libfabric_state_t;
 
 typedef struct {

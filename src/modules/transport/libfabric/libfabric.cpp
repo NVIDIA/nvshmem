@@ -96,9 +96,6 @@ bool use_gdrcopy = false;
 #endif
 
 struct nvshmemi_options_s options;
-bool use_staged_atomics = false;
-bool use_auto_progress = false;
-std::recursive_mutex gdrRecvMutex;
 }
 
 /* Forward declarations */
@@ -507,7 +504,7 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
     int status = 0;
 
     /* Note this is only valid because we have 1 EP per domain */
-    if (use_auto_progress) {
+    if (libfabric_state->use_auto_progress) {
         /* Auto - only progress EPs related to the qp_index */
         if (qp_index == NVSHMEMX_QP_HOST) {
             ep_start_idx = 0;
@@ -536,7 +533,7 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
                               "Unable to process amo acks: %d.\n", status);
 
         if (prog_type == progress_type::All) {
-            std::unique_lock<std::recursive_mutex> lock{gdrRecvMutex, std::try_to_lock};
+            std::unique_lock<std::recursive_mutex> lock{libfabric_state->gdrRecvMutex, std::try_to_lock};
             if (lock.owns_lock()) {
                 status = nvshmemt_libfabric_gdr_process_amos(transport, qp_index);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -785,7 +782,7 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int pe, int
         ep_end_idx = libfabric_state->eps.size();
     }
 
-    if ((use_staged_atomics)
+    if ((libfabric_state->use_staged_atomics)
 #ifdef NVSHMEM_USE_GDRCOPY
         || (use_gdrcopy == true)
 #endif
@@ -1274,7 +1271,7 @@ static int nvshmemt_libfabric_put_signal_unordered(struct nvshmem_transport *tcu
         }
     }
 
-    assert(use_staged_atomics == true);
+    assert(libfabric_state->use_staged_atomics == true);
     status =
         nvshmemt_libfabric_gdr_signal(tcurr, pe, NULL, sig_verb, sig_target, sig_bytes_desc,
                                       qp_index, sequence_count, (uint16_t)write_remote.size(), ep);
@@ -1788,7 +1785,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
             state->mrs.push_back(mr);
 
             /* Locking is not required for auto progress, required for manual progress */
-            state->op_queue.emplace_back(std::unique_ptr<threadSafeOpQueue>(new threadSafeOpQueue(!use_auto_progress)));
+            state->op_queue.emplace_back(std::unique_ptr<threadSafeOpQueue>(new threadSafeOpQueue(!state->use_auto_progress)));
             NVSHMEMI_NULL_ERROR_JMP(state->op_queue[i], status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                                     "Unable to alloc thread-safe op queue struct.\n");
             state->op_queue.back()->putToSendBulk(&state->recv_buf[i][num_recvs], num_sends);
@@ -1887,7 +1884,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 #ifdef NVSHMEM_USE_GDRCOPY
         if (use_gdrcopy) flags |= FI_SEND;
 #endif
-        if (use_staged_atomics) flags |= FI_SEND;
+        if (state->use_staged_atomics) flags |= FI_SEND;
 
         status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->counter->fid, flags);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1950,7 +1947,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     }
 
     /* Exchange a pre-registered write w/imm target for staged_amo acks */
-    if (use_staged_atomics) {
+    if (state->use_staged_atomics) {
         state->remote_addr_staged_amo_ack = (void **)calloc(sizeof(void *), t->n_pes);
         NVSHMEMI_NULL_ERROR_JMP(state->remote_addr_staged_amo_ack, status,
                                 NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -2171,7 +2168,7 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
         hints->domain_attr->mr_mode |= FI_MR_LOCAL | FI_MR_VIRT_ADDR | FI_MR_HMEM;
     }
 
-    if (use_staged_atomics) {
+    if (state->use_staged_atomics) {
         hints->mode |= FI_CONTEXT2;
     }
 
@@ -2189,7 +2186,7 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
 
     /* Ensure at least one fabric was returned and it matches the selected provider */
     if (!status && strstr(all_infos->fabric_attr->name, options.LIBFABRIC_PROVIDER)) {
-        use_auto_progress = true;
+        state->use_auto_progress = true;
         INFO(state->log_level, "Using FI_PROGRESS_AUTO with FI_THREAD_COMPLETION.\n");
     } else {
         /* Cleanup and fallback to manual progress */
@@ -2381,7 +2378,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 #endif
 
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
-        use_staged_atomics = true;
+        libfabric_state->use_staged_atomics = true;
         transport->host_ops.amo = nvshmemt_libfabric_gdr_amo;
     } else {
         transport->host_ops.amo = nvshmemt_libfabric_amo;
