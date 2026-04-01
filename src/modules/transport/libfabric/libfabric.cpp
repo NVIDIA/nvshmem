@@ -419,7 +419,8 @@ out:
 nvshmemt_libfabric_gdr_op_ctx_t *inplace_copy_sig_op_to_gdr_op(
     nvshmemt_libfabric_gdr_signal_op *sig_op, int ep_index) {
     nvshmemt_libfabric_gdr_op_ctx_t *amo;
-    uint16_t op = sig_op->op;
+    uint8_t op = sig_op->op;
+    uint8_t elem_size = sig_op->elem_size;
     uint64_t sig_val = sig_op->sig_val;
     void *target_addr = sig_op->target_addr;
     uint32_t src_pe = sig_op->src_pe;
@@ -428,11 +429,11 @@ nvshmemt_libfabric_gdr_op_ctx_t *inplace_copy_sig_op_to_gdr_op(
     amo = (nvshmemt_libfabric_gdr_op_ctx_t *)sig_op;
     amo->ep_index = ep_index;
     amo->type = NVSHMEMT_LIBFABRIC_MATCH;
-    amo->send_amo.op = (nvshmemi_amo_t)op;
+    amo->send_amo.op = static_cast<nvshmemi_amo_t>(op);
     amo->send_amo.target_addr = target_addr;
     amo->send_amo.swap_add = sig_val;
     amo->send_amo.src_pe = src_pe;
-    amo->send_amo.size = 8;
+    amo->send_amo.size = elem_size;
     amo->send_amo.sequence_count = sequence_count;
 
     return amo;
@@ -464,7 +465,7 @@ static void nvshmemt_libfabric_put_signal_ack_completion(nvshmemt_libfabric_stat
 
 static inline bool is_signal_only_op(nvshmemi_amo_t op) {
     return (op == NVSHMEMI_AMO_SIGNAL || op == NVSHMEMI_AMO_SIGNAL_SET ||
-            op == NVSHMEMI_AMO_SIGNAL_ADD);
+            op == NVSHMEMI_AMO_SIGNAL_ADD || op == NVSHMEMI_AMO_ADD);
 }
 
 static inline int nvshmemt_libfabric_gdr_process_ack(nvshmem_transport_t transport,
@@ -1342,7 +1343,7 @@ out:
 
 static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,
                                          void * /*curetptr*/, amo_verb_t verb,
-                                         amo_memdesc_t *remote, amo_bytesdesc_t /*bytesdesc*/,
+                                         amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                                          int /*qp_index*/, uint32_t sequence_count,
                                          uint16_t num_writes, nvshmemt_libfabric_endpoint_t &ep) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
@@ -1368,7 +1369,8 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
 
     signal = (nvshmemt_libfabric_gdr_signal_op_t *)context;
     signal->type = NVSHMEMT_LIBFABRIC_MATCH;
-    signal->op = verb.desc;
+    signal->op = static_cast<uint8_t>(verb.desc);
+    signal->elem_size = static_cast<uint8_t>(bytesdesc.elembytes);
     signal->sequence_count = sequence_count;
     signal->target_addr = remote->remote_memdesc.ptr;
     signal->sig_val = remote->val;

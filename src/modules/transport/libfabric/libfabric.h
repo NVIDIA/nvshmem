@@ -596,11 +596,12 @@ static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_
 
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
- * | 4 type | 2 op | 2 num_writes | 8 signal | 8 target_addr | 4 sequence_count | 4 resv
+ * | 4 type | 1 op | 1 elem_size | 2 num_writes | 8 signal | 8 target_addr | 4 sequence_count | 4 src_pe
  */
 typedef struct nvshmemt_libfabric_gdr_signal_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
-    uint16_t op;
+    uint8_t op;
+    uint8_t elem_size;
     uint16_t num_writes;
     uint64_t sig_val;
     void *target_addr;
