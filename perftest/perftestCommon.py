@@ -331,7 +331,6 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
     gdrcopy_install_path = "%s/lib:%s/lib64" % (os.environ['GDRCOPY_HOME'], os.environ['GDRCOPY_HOME'])
   else:
     gdrcopy_install_path = ""
-    print('GDRCOPY_HOME not set, will not use gdrcopy')
 
   if 'NCCL_HOME' in os.environ:
     nccl_install_lib = ":%s/lib64:%s/lib" % (os.environ['NCCL_HOME'], os.environ['NCCL_HOME'])

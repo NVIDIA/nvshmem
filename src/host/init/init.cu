@@ -56,7 +56,7 @@ static std::set<nvshmemx_device_lib_init_cb> registered_device_state_cb;
 
 static void nvshmemi_init_debug(void);
 static void nvshmemi_init_msg(void);
-int set_job_connectivity(nvshmemi_state_t*);
+int set_job_connectivity(nvshmemi_state_t *);
 
 struct nvshmemi_cuda_fn_table *nvshmemi_cuda_syms;
 nvshmemi_state_t *nvshmemi_state;
@@ -511,6 +511,14 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
     status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&current_dev, cuda_dev));
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuDeviceGet failed \n");
 
+    /* Skip multicast attribute query when NVLS is disabled: avoids driver quirks (e.g.
+     * CUDA_ERROR_INVALID_VALUE on some GPU/driver combos) when the result would be unused. */
+    if (nvshmemi_options.DISABLE_NVLS) {
+        INFO(NVSHMEM_INIT, "NVLS: disabled by user (NVSHMEM_DISABLE_NVLS)\n");
+        status = NVSHMEMX_SUCCESS;
+        goto out;
+    }
+
     status = CUPFN(
         nvshmemi_cuda_syms,
         cuDeviceGetAttribute(
@@ -518,8 +526,8 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
             current_dev));
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cuDeviceGetAttribute failed \n");
 
-    if (!mc_support || nvshmemi_options.DISABLE_NVLS) {
-        INFO(NVSHMEM_INIT, "NVLS: cuMulticast is not supported on CUDA or disabled by user\n");
+    if (!mc_support) {
+        INFO(NVSHMEM_INIT, "NVLS: cuMulticast is not supported on CUDA\n");
         status = NVSHMEMX_SUCCESS;
         goto out;
     }
@@ -1112,7 +1120,8 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     }
 
     status = nvshmemi_query_cuda_attributes();
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem_query_cuda_attributes() failed\n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "nvshmem_query_cuda_attributes() failed\n");
 
     if (nvshmemi_options.DISABLE_CUDA_VMM == 0 && nvshmemi_is_vmm_supported &&
         nvshmemi_device_state.symmetric_heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
@@ -1153,14 +1162,16 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
      * Depends on heap type being discovered aprior
      */
     status = nvshmemi_detect_nvls_support(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmemi_detect_nvls_support() failed\n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "nvshmemi_detect_nvls_support() failed\n");
 
     /* Set max teams before reserving heap */
     status = nvshmemi_set_max_teams();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Requested too many teams.\n");
 
     status = nvshmemi_get_device_state_ptrs(&dev_state_ptr, &transport_dev_state_ptr);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out, "Unable to get device symbols.\n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                          "Unable to get device symbols.\n");
 
     status = register_state_ptr(dev_state_ptr, transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
