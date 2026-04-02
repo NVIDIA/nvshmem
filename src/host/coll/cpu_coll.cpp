@@ -192,6 +192,30 @@ int nvshmemi_coll_common_cpu_init() {
     }
 
 fn_out:
+    /* Ensure nvshmemi_use_nccl is consistent across all PEs to avoid hang in finalize_team_init(). */
+    {
+        std::vector<int> use_nccl_all(nvshmemi_state->npes);
+        status = nvshmemi_boot_handle.allgather(&nvshmemi_use_nccl, use_nccl_all.data(), sizeof(int),
+                                               &nvshmemi_boot_handle);
+
+        if (status != 0) {
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+
+        for (int i = 0; i < nvshmemi_state->npes; i++) {
+            if (use_nccl_all[i] != nvshmemi_use_nccl) {
+                if (nvshmemi_state->mype == 0) {
+                    NVSHMEMI_ERROR_PRINT(
+                        "NVSHMEM_DISABLE_NCCL or NCCL availability is not consistent across PEs: "
+                        "PE %d has nvshmemi_use_nccl=%d but PE %d has %d. "
+                        "This would cause a hang in team NCCL init. Aborting.\n",
+                        nvshmemi_state->mype, nvshmemi_use_nccl, i, use_nccl_all[i]);
+                }
+
+                return NVSHMEMX_ERROR_SYMMETRY;
+            }
+        }
+    }
 #endif /* NVSHMEM_USE_NCCL */
     return status;
 fn_fail:
