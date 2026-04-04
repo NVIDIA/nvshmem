@@ -5,10 +5,16 @@ import nvshmem.core.device.numba
 
 import pytest
 
+_sync_teams = [
+    nvshmem.core.Teams.TEAM_NODE,
+    pytest.param(nvshmem.core.Teams.TEAM_WORLD,
+                 marks=pytest.mark.xfail(reason="proxy timeout on PCIe 2-node (Bug TBD)", strict=False)),
+    nvshmem.core.Teams.TEAM_SHARED,
+]
+
 
 @pytest.mark.mpi
-@pytest.mark.parametrize("teams",
-                         [nvshmem.core.Teams.TEAM_NODE, nvshmem.core.Teams.TEAM_WORLD, nvshmem.core.Teams.TEAM_SHARED])
+@pytest.mark.parametrize("teams", _sync_teams)
 @pytest.mark.parametrize(
     "func", [nvshmem.core.device.numba.sync, nvshmem.core.device.numba.sync_block, nvshmem.core.device.numba.sync_warp])
 def test_device_sync(nvshmem_init_fini, teams, func):

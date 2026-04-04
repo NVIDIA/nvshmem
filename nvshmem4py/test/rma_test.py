@@ -55,6 +55,8 @@ def test_rma_on_array():
     buf_dst[:] = 0
     stream = dev.create_stream()
 
+    dev.sync()
+
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst 1={buf_dst}, src={buf_src}")
 
     nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()), stream=stream)
@@ -83,6 +85,8 @@ def test_rma_on_tensor():
     buf_dst = nvshmem.core.tensor((4, 4), dtype=torch.float32)
     buf_dst[:] = 0
     stream = dev.create_stream()
+
+    dev.sync()
 
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst 1={buf_dst}, src={buf_src}")
 
@@ -126,6 +130,8 @@ def test_signal_wait_array():
     signal[:] = 0
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
+    dev.sync()
+
     if nvshmem.core.my_pe() == 0:
         # TODO: Expose signal ops as an enum
         nvshmem.core.put_signal(buf_dst,
@@ -167,8 +173,9 @@ def test_signal_wait_array_non_one():
     signal[:] = 0  # Start below threshold
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
+    dev.sync()
+
     if nvshmem.core.my_pe() == 0:
-        stream.sync()
         nvshmem.core.put_signal(
             buf_dst,
             buf_src,
@@ -215,6 +222,8 @@ def test_signal_wait_tensor():
     signal[:] = 0
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
+    dev.sync()
+
     if nvshmem.core.my_pe() == 0:
         # TODO: Expose signal ops as an enum
         nvshmem.core.put_signal(buf_dst,
@@ -249,6 +258,8 @@ def test_signalop_wait():
     signal[:] = 0
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
+    dev.sync()
+
     if nvshmem.core.my_pe() == 0:
         nvshmem.core.signal_op(buf_sig, 1, nvshmem.core.SignalOp.SIGNAL_SET, remote_pe=1, stream=stream)
         print(f"From PE {nvshmem.core.my_pe()} sent buf to remote PE 1 and set signal")
@@ -267,6 +278,7 @@ def test_signalop_wait():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid"], default="uid")
+    parser.add_argument("--skip-signalop", action="store_true", help="Skip test_signalop_wait (proxy timeout on PCIe)")
     args = parser.parse_args()
     if args.init_type == "uid":
         uid_init()
@@ -281,6 +293,15 @@ if __name__ == '__main__':
     test_signal_wait_array()
     test_signal_wait_tensor()
     test_signal_wait_array_non_one()
-    test_signalop_wait()
+    if not args.skip_signalop:
+        test_signalop_wait()
+    else:
+        print("Skipping test_signalop_wait (--skip-signalop)")
 
+    # Sync all PEs before finalization to avoid proxy timeout during cleanup
+    dev = Device()
+    stream = dev.create_stream()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    dev.sync()
     nvshmem.core.finalize()

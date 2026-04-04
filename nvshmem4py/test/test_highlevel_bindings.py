@@ -49,8 +49,8 @@ def test_highlevel_bindings(dev: Device):
 
     app_kernel[1, 1, 0](dest)
 
-    barrier_all()
     dev.sync()
+    barrier_all()
 
     nvshmem.core.free_array(dest)
     nvshmem.core.finalize()

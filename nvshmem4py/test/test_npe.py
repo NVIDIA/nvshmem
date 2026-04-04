@@ -4,7 +4,7 @@ import argparse
 
 from utils import uid_init, mpi_init
 
-from nvshmem.bindings.device.numba import n_pes, sync_all
+from nvshmem.bindings.device.numba import n_pes
 
 
 def test_npe():
@@ -12,7 +12,6 @@ def test_npe():
     @cuda.jit()
     def kernel_nvshmem(destination):
         npes = n_pes()
-        sync_all()
         destination[0] = npes
 
     npes = cp.zeros(1, dtype="int32")

@@ -19,6 +19,7 @@ def test_put_on_array(nvshmem_init_fini, dtype):
     buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
     buf_dst[:] = 0
 
+    cuda.synchronize()
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst={buf_dst}, src={buf_src}")
 
     @cuda.jit
@@ -52,6 +53,7 @@ def test_get_on_array(nvshmem_init_fini, dtype):
     buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
     buf_dst[:] = nvshmem.core.my_pe() + 1
 
+    cuda.synchronize()
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst={buf_dst}, src={buf_src}")
 
     @cuda.jit
@@ -91,6 +93,7 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
+    cuda.synchronize()
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst={buf_dst}, src={buf_src}")
 
     @cuda.jit
@@ -130,6 +133,7 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
+    cuda.synchronize()
     print(f"From PE {nvshmem.core.my_pe()} BEFORE dst={buf_dst}, src={buf_src}")
 
     @cuda.jit
@@ -164,6 +168,8 @@ def test_signal_op_signal_wait():
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
+    cuda.synchronize()
+
     @cuda.jit
     def test_signal_op_signal_wait(signal_var, signal_val, signal_op, pe):
         nvshmem.core.device.numba.signal_op(signal_var, 1, signal_op, pe)
@@ -188,6 +194,8 @@ def test_p(dtype):
     var = nvshmem.core.array((1, ), dtype=dtype)
     var[:] = 0
     val = 1
+
+    cuda.synchronize()
 
     @cuda.jit
     def test_p(var, val, pe):
@@ -219,6 +227,8 @@ def test_g(dtype):
     var[:] = 1
     dest = nvshmem.core.array((1, ), dtype=dtype)
     dest[:] = 0
+
+    cuda.synchronize()
 
     @cuda.jit
     def test_g(dest, var, pe):

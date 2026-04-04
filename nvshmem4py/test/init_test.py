@@ -13,7 +13,6 @@ import nvshmem.core
 import argparse
 import sys
 import os
-import platform
 
 import numpy as np
 from mpi4py import MPI
@@ -145,11 +144,17 @@ def test_module_init():
         )
         print("Skipping the module init test")
         return
-    cpu_arch = platform.machine()
+    cuda_include_path = os.environ.get("CUDA_HOME", "/usr/local/cuda") + "/include"
+    # CCCL headers (cuda/std/cstdint etc.) may come from the pip package
+    from cuda.pathfinder import find_nvidia_header_directory
+    cccl_include_path = find_nvidia_header_directory("cccl")
+    if cccl_include_path is None:
+        print("CCCL headers not found. Skipping the module init test")
+        return
     program_options = ProgramOptions(
-        std="c++11",
+        std="c++17",
         arch=f"sm_{arch}",
-        include_path=["/usr/local/cuda/include/", nvshmem_include_path, rdma_core_include_path],
+        include_path=[cuda_include_path, nvshmem_include_path, rdma_core_include_path, cccl_include_path],
         relocatable_device_code=True,
         link_time_optimization=True)
     prog = Program(code, code_type="c++", options=program_options)

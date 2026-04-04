@@ -20,8 +20,7 @@ import nvshmem.core.device.cute as nvshmem_cute
 
 from cuda.core import Device
 
-from test_device_rma import (
-    _compile_kernel, )
+from test_device_rma import (_compile_kernel, _nvshmem_stream)
 
 
 @pytest.mark.mpi
@@ -29,6 +28,7 @@ from test_device_rma import (
 def test_device_sync(nvshmem_init_fini, team):
     dev = Device()
     dev.set_current()
+    stream = _nvshmem_stream()
 
     @cute.kernel
     def test_sync_kernel(team: Int32):
@@ -42,13 +42,13 @@ def test_device_sync(nvshmem_init_fini, team):
             cooperative=True,
         )
 
-    nvshmem.core.barrier(team)
+    nvshmem.core.barrier(team, stream=stream)
     print(f"Before sync from {nvshmem.core.my_pe()}")
     compiled = _compile_kernel(test_sync_launcher, team)
     dev.sync()
     compiled(team)
     dev.sync()
-    nvshmem.core.barrier(team)
+    nvshmem.core.barrier(team, stream=stream)
 
 
 @pytest.mark.mpi
@@ -56,6 +56,7 @@ def test_device_sync(nvshmem_init_fini, team):
 def test_device_barrier(nvshmem_init_fini, team):
     dev = Device()
     dev.set_current()
+    stream = _nvshmem_stream()
 
     @cute.kernel
     def test_barrier_kernel(team: Int32):
@@ -69,10 +70,10 @@ def test_device_barrier(nvshmem_init_fini, team):
             cooperative=True,
         )
 
-    nvshmem.core.barrier(team)
+    nvshmem.core.barrier(team, stream=stream)
     dev.sync()
     compiled = _compile_kernel(test_barrier_launcher, team)
     compiled(team)
     dev.sync()
     print(f"After barrier from {nvshmem.core.my_pe()}")
-    nvshmem.core.barrier(team)
+    nvshmem.core.barrier(team, stream=stream)

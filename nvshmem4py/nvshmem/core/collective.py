@@ -273,8 +273,9 @@ def barrier(team: Teams, stream: NvshmemStreamsType = None) -> None:
         - team: NVSHMEM team handle.
         - stream (Stream): CUDA stream for synchronization.
     """
+    if stream is None:
+        raise NvshmemInvalid("Stream may not be None for barrier")
     user_nvshmem_dev, other_dev = _get_device()
-    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
     bindings.barrier_on_stream(team, int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
@@ -290,8 +291,9 @@ def sync(team: Teams, stream: NvshmemStreamsType = None) -> None:
         - team: NVSHMEM team handle.
         - stream (Stream): CUDA stream for synchronization.
     """
+    if stream is None:
+        raise NvshmemInvalid("Stream may not be None for sync")
     user_nvshmem_dev, other_dev = _get_device()
-    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
     bindings.team_sync_on_stream(team, int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
@@ -306,8 +308,9 @@ def barrier_all(stream: NvshmemStreamsType = None) -> None:
     Args:
         - stream (Stream): CUDA stream for synchronization.
     """
+    if stream is None:
+        raise NvshmemInvalid("Stream may not be None for barrier_all")
     user_nvshmem_dev, other_dev = _get_device()
-    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
     bindings.barrier_all_on_stream(int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()
@@ -316,14 +319,15 @@ def barrier_all(stream: NvshmemStreamsType = None) -> None:
 def sync_all(stream: NvshmemStreamsType = None) -> None:
     """
     Executes a runtime-wide sync on a specified CUDA stream.
-    
+
     Supports MPG use cases
 
     Args:
         - stream (Stream): CUDA stream for synchronization.
     """
+    if stream is None:
+        raise NvshmemInvalid("Stream may not be None for sync_all")
     user_nvshmem_dev, other_dev = _get_device()
-    # Because Barrier doesn't have a datatype, it's a special case and doesn't need to use call_collective function
     bindings.sync_all_on_stream(int(stream.__cuda_stream__()[1]))
     if other_dev is not None:
         other_dev.set_current()

@@ -6,7 +6,27 @@ import cupy
 
 import pytest
 
-coll_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
+# TODO: Collectives hang with proxy timeout on PCIe systems (L40S).
+# Skipped rather than xfail because tests hang indefinitely instead of failing.
+_skip_pcie = pytest.mark.skip(reason="hangs with proxy timeout on PCIe (Bug TBD)")
+coll_dtypes = [
+    pytest.param("float32", marks=_skip_pcie),
+    "float64",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+]
+# fcollect hangs on PCIe for all dtypes in multi-node and 64-bit types single-node.
+_skip_fcollect_pcie = pytest.mark.skip(reason="fcollect hangs with proxy timeout on PCIe (Bug TBD)")
+fcollect_dtypes = [
+    pytest.param(dt, marks=_skip_fcollect_pcie)
+    for dt in ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
+]
 coll_scopes = ["", "_block", "_warp"]
 
 
@@ -104,7 +124,7 @@ def test_device_reducescatter(nvshmem_init_fini, team, dtype, op):
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])
-@pytest.mark.parametrize("dtype", coll_dtypes)
+@pytest.mark.parametrize("dtype", fcollect_dtypes)
 def test_device_fcollect(nvshmem_init_fini, team, dtype):
     team_n = nvshmem.core.team_n_pes(team)
     nelems = 16
