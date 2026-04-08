@@ -2311,14 +2311,13 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     // for export/import. When the heap has a combined bitmask (FABRIC | POSIX_FILE_DESCRIPTOR),
     // get_effective_import_handle_type() resolves to the single type actually used at runtime.
     // The user buffer must support at least that type.
-    {
-        CUmemAllocationHandleType effective = get_effective_import_handle_type();
-        status = !(userAllocProp.requestedHandleTypes & effective);
-        NVSHMEMI_NZ_ERROR_JMP(
-            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+    if (!(userAllocProp.requestedHandleTypes & get_effective_import_handle_type())) {
+        NVSHMEMI_ERROR_PRINT(
             "user buffer %p requested handle type mask 0x%x doesn't include effective heap handle "
             "type 0x%x\n",
-            ptr, userAllocProp.requestedHandleTypes, effective);
+            ptr, userAllocProp.requestedHandleTypes, get_effective_import_handle_type());
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
     }
 
     // Get allocation granularity
