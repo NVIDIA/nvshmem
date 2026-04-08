@@ -2230,12 +2230,11 @@ out:
  * Validate a user buffer for symmetric registration via mmap.
  *
  * The buffer must have been allocated with cuMemCreate and its
- * requestedHandleTypes must include the heap's handle type. When the
- * heap uses a combined bitmask (e.g. FABRIC | POSIX_FILE_DESCRIPTOR),
- * the user buffer's mask is checked with bitwise AND — any allocation
- * whose mask includes the heap type is accepted. This allows buffers
- * allocated by external libraries (e.g. ncclMemAlloc on GB200) that
- * request a superset of handle types.
+ * requestedHandleTypes must include the effective handle type that
+ * NVSHMEM will use for export/import (resolved via
+ * get_effective_import_handle_type()). This allows buffers allocated
+ * by external libraries (e.g. ncclMemAlloc on GB200) that request a
+ * combined handle type mask (FABRIC | POSIX_FILE_DESCRIPTOR).
  */
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     void *ptr, size_t &size, unsigned int *ptr_mem_type) {
@@ -2308,17 +2307,19 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Failed to get allocation properties of user buffer %p\n", ptr);
 
-    // Check if requestedHandleTypes includes the handle type selected for the symmetric heap.
-    // External cuMem allocations (e.g. from ncclMemAlloc on GB200) may report a combined
-    // handle-type bitmask such as CU_MEM_HANDLE_TYPE_FABRIC |
-    // CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR.  NVSHMEM accepts any allocation whose mask
-    // includes the heap's selected handle type; export/import will use that specific type.
-    status = !(userAllocProp.requestedHandleTypes & get_mem_handle_type());
-    NVSHMEMI_NZ_ERROR_JMP(
-        status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-        "user buffer %p requested handle type mask 0x%x doesn't include symmetric heap handle "
-        "type 0x%x\n",
-        ptr, userAllocProp.requestedHandleTypes, get_mem_handle_type());
+    // Check if requestedHandleTypes includes the effective handle type that will be used
+    // for export/import. When the heap has a combined bitmask (FABRIC | POSIX_FILE_DESCRIPTOR),
+    // get_effective_import_handle_type() resolves to the single type actually used at runtime.
+    // The user buffer must support at least that type.
+    {
+        CUmemAllocationHandleType effective = get_effective_import_handle_type();
+        status = !(userAllocProp.requestedHandleTypes & effective);
+        NVSHMEMI_NZ_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "user buffer %p requested handle type mask 0x%x doesn't include effective heap handle "
+            "type 0x%x\n",
+            ptr, userAllocProp.requestedHandleTypes, effective);
+    }
 
     // Get allocation granularity
     status = CUPFN(nvshmemi_cuda_syms,
