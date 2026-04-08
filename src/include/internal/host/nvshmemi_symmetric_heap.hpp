@@ -66,10 +66,11 @@ class nvshmemi_symmetric_heap {
      * select FABRIC when the MNNVL fabric is active on this PE, otherwise POSIX_FILE_DESCRIPTOR.
      */
     CUmemAllocationHandleType get_effective_import_handle_type(void) const;
+    /** True when the effective (resolved) handle type is POSIX file descriptor (IPC). */
     bool is_cuda_mem_handle_type_ipc(void) const {
         return (get_effective_import_handle_type() == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
     }
-
+    /** True when the effective (resolved) handle type is MNNVL fabric. */
     bool is_cuda_mem_handle_type_fabric(void) const {
         return (get_effective_import_handle_type() == CU_MEM_HANDLE_TYPE_FABRIC);
     }

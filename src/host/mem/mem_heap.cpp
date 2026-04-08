@@ -2226,6 +2226,17 @@ out:
     return status;
 }
 
+/**
+ * Validate a user buffer for symmetric registration via mmap.
+ *
+ * The buffer must have been allocated with cuMemCreate and its
+ * requestedHandleTypes must include the heap's handle type. When the
+ * heap uses a combined bitmask (e.g. FABRIC | POSIX_FILE_DESCRIPTOR),
+ * the user buffer's mask is checked with bitwise AND — any allocation
+ * whose mask includes the heap type is accepted. This allows buffers
+ * allocated by external libraries (e.g. ncclMemAlloc on GB200) that
+ * request a superset of handle types.
+ */
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     void *ptr, size_t &size, unsigned int *ptr_mem_type) {
     int status = 0;
