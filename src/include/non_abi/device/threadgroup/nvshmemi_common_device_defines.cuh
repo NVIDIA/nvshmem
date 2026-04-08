@@ -17,6 +17,10 @@
 #elif defined(__clang__)
 // Plain Clang-to-NVPTX bitcode: use address_space(4) only
 #define EXTERN_CONSTANT extern __attribute__((address_space(4)))
+#elif defined(__CUDACC__)
+// Non-RDC nvcc: per-TU __constant__ copy (internal linkage is implicit).
+// Only functional with nvshmemx_cumodule_init / nvshmemx_culibrary_init.
+#define EXTERN_CONSTANT __constant__
 #endif
 
 #ifdef EXTERN_CONSTANT
