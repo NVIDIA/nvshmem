@@ -1705,6 +1705,10 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     void *qpc;
 
     const struct ibv_port_attr *port_attr = device->common_device.port_attr + (portid - 1);
+    struct ibv_ah_attr ah_attr;
+    struct ibv_ah *ah = NULL;
+    struct mlx5dv_obj dv;
+    struct mlx5dv_ah dah;
 
     assert(ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
 
@@ -1719,27 +1723,34 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     DEVX_SET(qpc, qpc, log_rra_max,
              IBGDA_ILOG2_OR0(device->common_device.device_attr.max_qp_rd_atom));
 
-    if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
-        DEVX_SET(qpc, qpc, primary_address_path.tclass, ibgda_state->options->IB_TRAFFIC_CLASS);
-        DEVX_SET(qpc, qpc, primary_address_path.rlid, peer_ep_handle->lid);
-        DEVX_SET(qpc, qpc, primary_address_path.mlid, 0);
-        DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->options->IB_SL);
-        DEVX_SET(qpc, qpc, primary_address_path.grh, false);
-    } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        struct ibv_ah_attr ah_attr;
-        struct ibv_ah *ah;
-        struct mlx5dv_obj dv;
-        struct mlx5dv_ah dah;
+    memset(&ah_attr, 0, sizeof(ah_attr));
 
-        const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
-        int roce_version = 0;
-
+    if (port_attr->lid == 0) {
         ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
                          (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
                          ibgda_state->log_level, ibgda_state->options);
         ftable.query_gid(device->common_device.context, portid,
                          device->common_device.gid_info[portid - 1].local_gid_index,
                          (ibv_gid *)&device->common_device.gid_info[portid - 1].local_gid);
+        ah_attr.is_global = 1;
+        ah_attr.grh.dgid.global.subnet_prefix = peer_ep_handle->spn;
+        ah_attr.grh.dgid.global.interface_id = peer_ep_handle->iid;
+        ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
+        ah_attr.grh.traffic_class = ibgda_state->options->IB_TRAFFIC_CLASS;
+        ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
+    } else {
+        // Only IB supports is_global = 0.
+        assert(port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND);
+        ah_attr.dlid = port_attr->lid;
+        ah_attr.is_global = 0;
+    }
+    ah_attr.sl = ibgda_state->options->IB_SL;
+    ah_attr.src_path_bits = 0;
+    ah_attr.port_num = portid;
+
+    if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
+        const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
+        int roce_version = 0;
 
         status = ib_roce_get_version_num(nic_device_name, portid,
                                          device->common_device.gid_info[portid - 1].local_gid_index,
@@ -1747,40 +1758,44 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Error in ib_roce_get_version_num\n");
 
-        memset(&ah_attr, 0, sizeof(ah_attr));
-        ah_attr.is_global = 1;
-        ah_attr.port_num = portid;
-        ah_attr.grh.dgid.global.subnet_prefix = peer_ep_handle->spn;
-        ah_attr.grh.dgid.global.interface_id = peer_ep_handle->iid;
-        ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
-        ah_attr.grh.traffic_class = ibgda_state->options->IB_TRAFFIC_CLASS;
-        ah_attr.sl = ibgda_state->options->IB_SL;
-        ah_attr.src_path_bits = 0;
-
         assert(roce_version == 1 || roce_version == 2);
         ah_attr.dlid = port_attr->lid | (roce_version == 1 ? IBGDA_ROCE_V1_UDP_SPORT_BASE
                                                            : IBGDA_ROCE_V2_UDP_SPORT_BASE);
+    }
 
-        ah = ftable.create_ah(device->common_device.pd, &ah_attr);
-        NVSHMEMI_NULL_ERROR_JMP(ah, status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to create ah.\n");
+    ah = ftable.create_ah(device->common_device.pd, &ah_attr);
+    NVSHMEMI_NULL_ERROR_JMP(ah, status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to create ah.\n");
 
-        dv.ah.in = ah;
-        dv.ah.out = &dah;
-        mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+    dv.ah.in = ah;
+    dv.ah.out = &dah;
+    mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
 
-        memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rmac_47_32), &dah.av->rmac,
-               sizeof(dah.av->rmac));
-        DEVX_SET(qpc, qpc, primary_address_path.hop_limit, IBGDA_GRH_HOP_LIMIT);
+    DEVX_SET(qpc, qpc, primary_address_path.mlid, 0);
+    DEVX_SET(qpc, qpc, primary_address_path.grh, ah_attr.is_global);
+    if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        DEVX_SET(qpc, qpc, primary_address_path.tclass,
+                 ibgda_state->options->IB_TRAFFIC_CLASS);
+        DEVX_SET(qpc, qpc, primary_address_path.rlid, peer_ep_handle->lid);
+        DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->options->IB_SL);
+    }
+    if (ah_attr.is_global) {
+        memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rgid_rip), &ah_attr.grh.dgid,
+               sizeof(ah_attr.grh.dgid));
+        DEVX_SET(qpc, qpc, primary_address_path.hop_limit, ah_attr.grh.hop_limit);
         DEVX_SET(qpc, qpc, primary_address_path.src_addr_index,
                  device->common_device.gid_info[portid - 1].local_gid_index);
+    }
+
+    if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
+        memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rmac_47_32), &dah.av->rmac,
+               sizeof(dah.av->rmac));
         DEVX_SET(qpc, qpc, primary_address_path.eth_prio, ibgda_state->options->IB_SL);
         DEVX_SET(qpc, qpc, primary_address_path.udp_sport, ah_attr.dlid);
-        DEVX_SET(qpc, qpc, primary_address_path.dscp, ibgda_state->options->IB_TRAFFIC_CLASS >> 2);
-
-        memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rgid_rip), &dah.av->rgid,
-               sizeof(dah.av->rgid));
-        ep->ah = ah;
+        DEVX_SET(qpc, qpc, primary_address_path.dscp,
+                 ibgda_state->options->IB_TRAFFIC_CLASS >> 2);
     }
+
+    ep->ah = ah;
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
