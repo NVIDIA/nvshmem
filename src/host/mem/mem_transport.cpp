@@ -230,8 +230,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     if (nvshmemi_options.CUMEM_HANDLE_TYPE_provided) {
         if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "FABRIC") == 0)
             nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_FABRIC;
-        else if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE,
-                                         "FABRIC+FILE_DESCRIPTOR") == 0)
+        else if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "ANY") == 0)
             nvshmemi_mem_handle_type_ = (CUmemAllocationHandleType)(
                 CU_MEM_HANDLE_TYPE_FABRIC | CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
         else
@@ -242,7 +241,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: Fabric Handle\n");
     } else if (nvshmemi_mem_handle_type_ ==
                (CU_MEM_HANDLE_TYPE_FABRIC | CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)) {
-        INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: Fabric+POSIX File Descriptor "
+        INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: ANY "
                           "(effective: Fabric when MNNVL active, POSIX otherwise)\n");
     } else {
         INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: POSIX File Descriptor\n");
