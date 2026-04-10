@@ -286,28 +286,45 @@ if(NVSHMEM_SHMEM_SUPPORT)
                              include/modules/common
   )
 
-  # Detect OpenSHMEM 1.5+ teams API with byte-level collectives.
-  # Note: some implementations (e.g. OpenMPI oshmem) define SHMEM_TEAM_WORLD
-  # but don't implement teams-based collectives. Check for the actual functions.
+  # Detect OpenSHMEM 1.5+ before enabling teams-based bootstrap support.
+  # OpenSHMEM 1.4 implementations such as OpenMPI oshmem expose incompatible
+  # teams signatures (e.g. shmem_team_sync returns void), so gate the teams path
+  # on the standard version macros first and only then verify the byte-level
+  # collectives used by the bootstrap are available.
   include(CheckCSourceCompiles)
   set(CMAKE_REQUIRED_INCLUDES ${SHMEM_INCLUDE})
   set(CMAKE_REQUIRED_LIBRARIES ${SHMEM_LIB})
   check_c_source_compiles("
     #include <shmem.h>
-    int main(void) {
-        shmem_team_t team = SHMEM_TEAM_WORLD;
-        /* Verify byte-level teams collectives are declared */
-        int (*f1)(shmem_team_t, uint8_t *, const uint8_t *, size_t) = shmem_uint8_fcollect;
-        int (*f2)(shmem_team_t, uint8_t *, const uint8_t *, size_t) = shmem_uint8_alltoall;
-        (void)team; (void)f1; (void)f2;
-        return 0;
-    }
-  " NVSHMEM_SHMEM_HAS_TEAMS)
+    #if !defined(SHMEM_MAJOR_VERSION) || !defined(SHMEM_MINOR_VERSION)
+    #error OpenSHMEM version macros are not defined
+    #endif
+    #if (SHMEM_MAJOR_VERSION < 1) || (SHMEM_MAJOR_VERSION == 1 && SHMEM_MINOR_VERSION < 5)
+    #error OpenSHMEM version is older than 1.5
+    #endif
+    int main(void) { return 0; }
+  " NVSHMEM_SHMEM_VERSION_AT_LEAST_1_5)
+
+  if(NVSHMEM_SHMEM_VERSION_AT_LEAST_1_5)
+    check_c_source_compiles("
+      #include <shmem.h>
+      int main(void) {
+          shmem_team_t team = SHMEM_TEAM_WORLD;
+          /* Verify byte-level teams collectives are declared */
+          int (*f1)(shmem_team_t, uint8_t *, const uint8_t *, size_t) = shmem_uint8_fcollect;
+          int (*f2)(shmem_team_t, uint8_t *, const uint8_t *, size_t) = shmem_uint8_alltoall;
+          (void)team; (void)f1; (void)f2;
+          return 0;
+      }
+    " NVSHMEM_SHMEM_HAS_TEAMS)
+  endif()
   if(NVSHMEM_SHMEM_HAS_TEAMS)
-    message(STATUS "OpenSHMEM teams byte-level collectives detected (>= 1.5)")
+    message(STATUS "OpenSHMEM >= 1.5 teams byte-level collectives detected")
     target_compile_definitions(nvshmem_bootstrap_shmem PRIVATE NVSHMEM_SHMEM_HAS_TEAMS)
+  elseif(NVSHMEM_SHMEM_VERSION_AT_LEAST_1_5)
+    message(STATUS "OpenSHMEM >= 1.5 detected, but required teams byte-level collectives were not found")
   else()
-    message(STATUS "OpenSHMEM teams byte-level collectives not found; checking for active-set collectives")
+    message(STATUS "OpenSHMEM < 1.5 detected; disabling teams-based bootstrap support")
   endif()
 
   # Detect deprecated OpenSHMEM active-set collectives (shmem_collect32, shmem_alltoall32).
