@@ -249,28 +249,6 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void IBGDA_MEMBAR() {
 #endif /* NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE */
 }
 
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_thread_id_in_warp() {
-    int myIdx;
-    asm volatile("mov.u32  %0,  %%laneid;" : "=r"(myIdx));
-    return myIdx;
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_warp_size() {
-    return ((blockDim.x * blockDim.y * blockDim.z) < warpSize)
-               ? (blockDim.x * blockDim.y * blockDim.z)
-               : warpSize;
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_warp_sync() { __syncwarp(); }
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_thread_id_in_block() {
-    return (threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y);
-}
-
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_block_size() {
-    return (blockDim.x * blockDim.y * blockDim.z);
-}
-
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint32_t ibgda_get_smid() {
     uint32_t smid;
     asm("mov.u32  %0, %%smid;" : "=r"(smid));
@@ -1779,7 +1757,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
     uint32_t id;
     uint32_t dev_offset;
     bool shared_among_ctas = false;
-    uint32_t warpid = nvshmemi_thread_id_in_block() / nvshmemi_warp_size();
+    uint32_t warpid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() / nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
 
     switch (state->dci_map_type) {
         case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_CTA:
@@ -1790,12 +1768,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
             shared_among_ctas = true;
             break;
         case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_WARP:
-            id = ibgda_get_ctaid() * nvshmemi_block_size() / nvshmemi_warp_size() + warpid;
+            id = ibgda_get_ctaid() * nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() / nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() + warpid;
             break;
         case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_DCT: {
             uint32_t dct_id;
             uint32_t group_id =
-                ibgda_get_ctaid() * nvshmemi_block_size() / nvshmemi_warp_size() + warpid;
+                ibgda_get_ctaid() * nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() / nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() + warpid;
 
             dct_id = ibgda_get_dct_id(pe, 0);
             id = (group_id % state->num_dct_groups) * state->ndcts_per_pe *
@@ -2215,7 +2193,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
         }
 
         if (can_coalesce_warp) {
-            nvshmemi_warp_sync();
+            nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
         }
 
         if (my_tid == tg_size - 1) {
@@ -2265,7 +2243,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
                 }
                 did_quiet |= do_coalesce_quiet;
             }
-            nvshmemi_warp_sync();
+            nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
         }
     }
 
@@ -2416,7 +2394,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
         }
     }
 
-    nvshmemi_warp_sync();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == chunk_idx - 1) {
         if (need_immediate_cst) {
@@ -2572,7 +2550,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma
             qp, ibgda_get_dct_id(dst_pe, qp->dev_idx), &value, raddr, rkey, sizeof(T), my_wqe_idx,
             fm_ce_se, wqe_ptrs);
 
-    if (is_full_warp) nvshmemi_warp_sync();
+    if (is_full_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == tg_size - 1) {
         if (need_additional_wqe) {
@@ -2587,7 +2565,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma
             ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
     }
 
-    if (is_full_warp) nvshmemi_warp_sync();
+    if (is_full_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 }
 
 template <typename T>
@@ -2735,7 +2713,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_ibgda_rma_g_impl(
             sizeof(T) * tg_size, my_wqe_idx, fm_ce_se, wqe_ptrs);
     }
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (need_additional_wqe && (my_tid == (tg_size - 1))) {
         my_wqe_idx += num_wqes_per_cmd;
@@ -2760,15 +2738,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_ibgda_rma_g_impl(
         ibgda_quiet(qp);
     }
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     ret = READ_ONCE(*(T *)laddr);
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == tg_size - 1) ibgda_release_ibuf(qp, base_ibuf_idx, num_ibuf_slots);
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     return ret;
 }
@@ -2917,7 +2895,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_amo_nonfetch_impl(
                                                 (uint64_t)qp->ibuf.buf, qp->ibuf.lkey, raddr, rkey,
                                                 sizeof(T), my_wqe_idx, op, fm_ce_se, wqe_ptrs);
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == tg_size - 1) {
         if (need_additional_wqe) {
@@ -2932,7 +2910,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_amo_nonfetch_impl(
             ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
     }
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 }
 
 template <typename T>
@@ -3027,7 +3005,7 @@ nvshmemi_ibgda_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
                                                 &compare, laddr, lkey, raddr, rkey, sizeof(T),
                                                 my_wqe_idx, op, fm_ce_se, wqe_ptrs);
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == tg_size - 1) {
         if (need_additional_wqe) {
@@ -3052,16 +3030,16 @@ nvshmemi_ibgda_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
         ibgda_quiet(qp);
     }
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     ret = READ_ONCE(*(T *)laddr);
     if (sizeof(T) == 4) ret = BSWAP32((uint32_t)ret);
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == tg_size - 1) ibgda_release_ibuf(qp, base_ibuf_idx, tg_size);
 
-    if (can_coalesce_warp) nvshmemi_warp_sync();
+    if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     return ret;
 }
@@ -3370,7 +3348,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
         }
     }
 
-    nvshmemi_warp_sync();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == chunk_idx) {
         // Require membar.sys to push data buffer to the point of consistency.
