@@ -285,6 +285,50 @@ if(NVSHMEM_SHMEM_SUPPORT)
                              modules/bootstrap/common
                              include/modules/common
   )
+
+  # Detect OpenSHMEM 1.5+ teams API with byte-level collectives.
+  # Note: some implementations (e.g. OpenMPI oshmem) define SHMEM_TEAM_WORLD
+  # but don't implement teams-based collectives. Check for the actual functions.
+  include(CheckCSourceCompiles)
+  set(CMAKE_REQUIRED_INCLUDES ${SHMEM_INCLUDE})
+  set(CMAKE_REQUIRED_LIBRARIES ${SHMEM_LIB})
+  check_c_source_compiles("
+    #include <shmem.h>
+    int main(void) {
+        shmem_team_t team = SHMEM_TEAM_WORLD;
+        /* Verify byte-level teams collectives are declared */
+        int (*f1)(shmem_team_t, uint8_t *, const uint8_t *, size_t) = shmem_uint8_fcollect;
+        int (*f2)(shmem_team_t, uint8_t *, const uint8_t *, size_t) = shmem_uint8_alltoall;
+        (void)team; (void)f1; (void)f2;
+        return 0;
+    }
+  " NVSHMEM_SHMEM_HAS_TEAMS)
+  if(NVSHMEM_SHMEM_HAS_TEAMS)
+    message(STATUS "OpenSHMEM teams byte-level collectives detected (>= 1.5)")
+    target_compile_definitions(nvshmem_bootstrap_shmem PRIVATE NVSHMEM_SHMEM_HAS_TEAMS)
+  else()
+    message(STATUS "OpenSHMEM teams byte-level collectives not found; checking for active-set collectives")
+  endif()
+
+  # Detect deprecated OpenSHMEM active-set collectives (shmem_collect32, shmem_alltoall32).
+  # These are the pre-1.5 APIs that require manual pSync scratch buffers.
+  check_c_source_compiles("
+    #include <shmem.h>
+    int main(void) {
+        long scratch[SHMEM_COLLECT_SYNC_SIZE];
+        scratch[0] = SHMEM_SYNC_VALUE;
+        shmem_collect32(scratch, scratch, 1, 0, 0, 1, scratch);
+        shmem_alltoall32(scratch, scratch, 1, 0, 0, 1, scratch);
+        return 0;
+    }
+  " NVSHMEM_SHMEM_HAS_ACTIVE_SET)
+  if(NVSHMEM_SHMEM_HAS_ACTIVE_SET)
+    message(STATUS "OpenSHMEM active-set collectives detected (runtime fallback available)")
+    target_compile_definitions(nvshmem_bootstrap_shmem PRIVATE NVSHMEM_SHMEM_HAS_ACTIVE_SET)
+  elseif(NOT NVSHMEM_SHMEM_HAS_TEAMS)
+    message(WARNING "OpenSHMEM implementation supports neither teams-based nor "
+            "active-set collectives. Skipping SHMEM bootstrap.")
+  endif()
 endif()
 
 # Always compile uid bootstrap as no dependency on external sources or libraries

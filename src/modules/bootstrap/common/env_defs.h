@@ -41,6 +41,10 @@ NVSHMEMI_ENV_DEF(BOOTSTRAP_UID_SOCK_FAMILY, string, "AF_INET", NVSHMEMI_ENV_CAT_
 NVSHMEMI_ENV_DEF(BOOTSTRAP_UID_SESSION_ID, string, "", NVSHMEMI_ENV_CAT_BOOTSTRAP,
                  "Name of the UID bootstrap session identifier")
 
+NVSHMEMI_ENV_DEF(BOOTSTRAP_SHMEM_MODE, string, "auto", NVSHMEMI_ENV_CAT_BOOTSTRAP,
+                 "Select the OpenSHMEM bootstrap collective path.\n"
+                 "Allowed values: auto, legacy, teams")
+
 /** Debugging **/
 NVSHMEMI_ENV_DEF(DEBUG_SUBSYS, string, "", NVSHMEMI_ENV_CAT_HIDDEN,
                  "Comma separated list of debugging message sources. Prefix with '^' to exclude.\n"
