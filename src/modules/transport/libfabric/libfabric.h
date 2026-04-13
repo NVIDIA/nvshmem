@@ -84,16 +84,6 @@ typedef struct {
 struct nvshmemt_libfabric_gdr_op_ctx;
 typedef struct nvshmemt_libfabric_gdr_op_ctx nvshmemt_libfabric_gdr_op_ctx_t;
 
-#define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT 28
-#define NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK \
-    ((1U << NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT) - 1)
-
-/**
- * The last sequence number is reserved for atomic-only operations.
- * This will not be returned by the sequence counter.
- */
-#define NVSHMEM_STAGED_AMO_SEQ_NUM NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK
-
 static constexpr size_t nvshmemt_libfabric_signal_queue_capacity = 1024;
 
 /**
@@ -104,7 +94,15 @@ static constexpr size_t nvshmemt_libfabric_signal_queue_capacity = 1024;
  * acks from the remote side.
  */
 struct nvshmemt_libfabric_endpoint_seq_counter_t {
-    constexpr static uint32_t num_sequence_bits = NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT;
+    constexpr static uint32_t num_sequence_bits = 16;
+    constexpr static uint32_t bit_shift = num_sequence_bits;
+    constexpr static uint32_t bit_mask = (1U << bit_shift) - 1;
+
+    /**
+     * The last sequence number is reserved for atomic-only operations.
+     * This will not be returned by the sequence counter.
+     */
+    constexpr static uint32_t last_seq_num = bit_mask;
 
     /**
      * Sequence counter is composed of:
@@ -132,7 +130,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
                   "Number of indexes should be >= 2 * put_ack_freq");
     constexpr static uint32_t category_mask = (1U << num_index_bits);
 
-    constexpr static uint32_t sequence_mask = NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
+    constexpr static uint32_t sequence_mask = bit_mask;
 
     /**
      * The "category" is the bits before the index bit(s). Returns the category
@@ -171,10 +169,10 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     }
 
     /**
-     * If seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM, increment by 1
+     * If seq_num == last_seq_num, increment by 1
      */
     static constexpr uint32_t seq_num_wrapup(uint32_t seq_num) {
-        if (seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM) {
+        if (seq_num == last_seq_num) {
             return (seq_num + 1) & sequence_mask;
         } else {
             return seq_num;
@@ -182,10 +180,10 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     }
 
     /**
-     * If seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM, decrement by 1
+     * If seq_num == last_seq_num, decrement by 1
      */
     static constexpr uint32_t seq_num_wrapdown(uint32_t seq_num) {
-        if (seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM) {
+        if (seq_num == last_seq_num) {
             return (seq_num - 1) & sequence_mask;
         } else {
             return seq_num;
@@ -234,16 +232,15 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
      */
     void return_acked_range(uint32_t end_seq, uint32_t count) {
         assert(count > 0);
-        assert(end_seq != NVSHMEM_STAGED_AMO_SEQ_NUM);
+        assert(end_seq != last_seq_num);
 
         uint32_t end_category = get_category(end_seq);
         uint32_t end_index = get_index(end_seq);
 
-        /* Note: in the wraparound case, the (start_seq, end_seq) range will
-           include NVSHMEM_STAGED_AMO_SEQ_NUM, which is not used. The logic
-           below handles this correctly, as long as `start_category` is correct
-           (which is true as long as the index space is sufficiently large that
-           we can only span two categories, as static-asserted above.) */
+        /* Note: in the wraparound case, the (start_seq, end_seq) range will include last_seq_num,
+           which is not used. The logic below handles this correctly, as long as `start_category`
+           is correct (which is true as long as the index space is sufficiently large that we can
+           only span two categories, as static-asserted above.) */
 
         if (end_index >= count - 1) {
             /* All sequence numbers within the same category */
@@ -296,6 +293,7 @@ struct nvshmemt_libfabric_signal_comp_entry {
 struct nvshmemt_libfabric_put_ack_entry {
     fi_addr_t src_addr;
     int ep_index;
+    uint8_t put_count;
 };
 
 using nvshmemt_libfabric_comp_entry_t =
@@ -376,7 +374,11 @@ typedef struct nvshmemt_libfabric_gdr_send_amo_op {
     void *ret_addr;
     union {
         uint64_t retflag;
-        uint32_t sequence_count;
+        struct {
+            uint16_t sequence_count;
+            uint8_t preceding_put_count;
+            uint8_t reserved;
+        };
     };
     uint64_t swap_add;
     uint64_t comp;
@@ -560,13 +562,14 @@ using cuda_device_ptr = std::unique_ptr<void, cuda_device_deleter>;
 struct signal_delivery_work_entry {
     nvshmemt_libfabric_gdr_op_ctx_t *op;
     nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
-    uint32_t sequence_count;
+    uint16_t sequence_count;
+    uint8_t preceding_put_count;
 };
 
 struct signal_delivery_done_entry {
     nvshmemt_libfabric_gdr_op_ctx_t *op;
     nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
-    uint32_t sequence_count;
+    uint16_t sequence_count;
     int src_pe;
     fi_addr_t src_addr;
     int ep_index;
@@ -574,6 +577,7 @@ struct signal_delivery_done_entry {
     uint64_t old_value;
     uint64_t ret_flags;
     void *ret_addr;
+    uint8_t preceding_put_count;
 };
 
 template <typename T, size_t Capacity = nvshmemt_libfabric_signal_queue_capacity>
@@ -711,7 +715,8 @@ static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_
 
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
- * | 4 type | 1 op | 1 elem_size | 2 num_writes | 8 signal | 8 target_addr | 4 sequence_count | 4 src_pe
+ * | 4 type | 1 op | 1 elem_size | 2 num_writes | 8 signal | 8 target_addr | 2 sequence_count
+ * | 1 preceding_put_count | 1 reserved | 4 src_pe
  */
 typedef struct nvshmemt_libfabric_gdr_signal_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
@@ -720,7 +725,9 @@ typedef struct nvshmemt_libfabric_gdr_signal_op {
     uint16_t num_writes;
     uint64_t sig_val;
     void *target_addr;
-    uint32_t sequence_count;
+    uint16_t sequence_count;
+    uint8_t  preceding_put_count;
+    uint8_t  reserved;
     uint32_t src_pe;
 } nvshmemt_libfabric_gdr_signal_op_t;
 /*  EFA's inline send size is 32 bytes */
@@ -731,12 +738,13 @@ static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) <=
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");
 
 /* Wire data for AMO ack sent via fi_send
- * | 4 type | 4 ack_type | 4 sequence_count |
+ * | 4 type | 4 ack_type | 2 sequence_count | 1 put_count
  */
 typedef struct nvshmemt_libfabric_gdr_amo_ack_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
     nvshmemt_libfabric_ack_t ack_type;
-    uint32_t sequence_count;
+    uint16_t sequence_count;
+    uint8_t put_count;
 } nvshmemt_libfabric_gdr_amo_ack_op_t;
 static_assert(sizeof(nvshmemt_libfabric_gdr_amo_ack_op_t) <= 32,
               "Must fit within EFA's inline send limit of 32 bytes");
