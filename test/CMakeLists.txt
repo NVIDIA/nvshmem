@@ -192,7 +192,7 @@ macro(nvshmem_add_test_prefix SOURCE PREFIX LINK_DEVICE)
 
   set_target_properties(${NAME} PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  CUDA_SEPARABLE_COMPILATION ON
+  CUDA_SEPARABLE_COMPILATION ${LINK_DEVICE}
   )
 
   target_compile_options(${NAME}

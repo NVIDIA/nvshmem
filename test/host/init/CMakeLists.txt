@@ -1,4 +1,5 @@
 nvshmem_add_test(cuobject_init.cpp)
+nvshmem_add_test_no_device(host_api_no_rdc.cu)
 nvshmem_add_test(nvrtc_api.cpp)
 nvshmem_add_test(nvrtc_numba_include.cpp)
 if(NOT CUDA_VERSION VERSION_LESS 12000)
