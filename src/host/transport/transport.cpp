@@ -28,10 +28,6 @@
 
 #define TRANSPORT_STRING_MAX_LENGTH 8
 #define NVSHMEM_TRANSPORT_COUNT 6
-#define IB_TRANSPORT_STRING "ibrc"
-#define UCX_TRANSPORT_STRING "ucx"
-#define DEVX_TRANSPORT_STRING "ibdevx"
-#define LIBFABRIC_TRANSPORT_STRING "libfabric"
 
 static void *transport_lib = nullptr;
 #ifdef NVSHMEM_IBGDA_SUPPORT
@@ -74,16 +70,15 @@ int nvshmemi_transport_show_info(nvshmemi_state_t *state) {
 int nvshmemi_transport_init(nvshmemi_state_t *state) {
     int status = 0;
     int index = 0;
-#if defined(NVSHMEM_IBRC_SUPPORT) || defined(NVSHMEM_UCX_SUPPORT) || \
-    defined(NVSHMEM_LIBFABRIC_SUPPORT) || defined(NVSHMEM_IBDEVX_SUPPORT)
-    int transport_skipped;
-#endif
     nvshmem_transport_t *transports = NULL;
     nvshmemi_transport_init_fn init_fn;
     const int transport_object_file_len = 100;
     char transport_object_file[transport_object_file_len];
-    bool transport_selected = false;
+    const char *transport_name = nullptr;
     nvshmem_local_buf_cache_t *tmp_cache_ptr = NULL;
+
+    std::call_once(transport_lib_atexit_flag,
+                   []() { atexit(nvshmemi_transport_lib_fini_wrapper); });
 
     if (!state->transports)
         state->transports =
@@ -112,6 +107,7 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
         } else {
             nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
             NVSHMEMI_ERROR_PRINT("init failed for transport: P2P");
+            /* non-fatal error, so changing to a warning */
             status = 0;
         }
     } else {
@@ -119,140 +115,84 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
     }
 
 #ifdef NVSHMEM_IBRC_SUPPORT
-    transport_skipped = strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, IB_TRANSPORT_STRING,
-                                    TRANSPORT_STRING_MAX_LENGTH);
-    if (transport_skipped) {
-        INFO(NVSHMEM_INIT, "IBRC transport skipped in favor of: %s\n",
-             nvshmemi_options.REMOTE_TRANSPORT);
-    } else {
-        status = snprintf(transport_object_file, transport_object_file_len,
-                          "nvshmem_transport_ibrc.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
-        if (status > 0 && status < transport_object_file_len) {
-            transport_selected = true;
-            goto transport_init;
-        } else {
-            NVSHMEMI_ERROR_PRINT("snprintf call failed in the transport.\n");
-        }
-    }
+    if (!transport_name &&
+        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ibrc", TRANSPORT_STRING_MAX_LENGTH) == 0)
+        transport_name = "ibrc";
 #endif
-
 #ifdef NVSHMEM_UCX_SUPPORT
-    transport_skipped = strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, UCX_TRANSPORT_STRING,
-                                    TRANSPORT_STRING_MAX_LENGTH);
-    if (transport_skipped) {
-        INFO(NVSHMEM_INIT, "UCX transport skipped in favor of: %s\n",
-             nvshmemi_options.REMOTE_TRANSPORT);
-    } else {
-        status = snprintf(transport_object_file, transport_object_file_len,
-                          "nvshmem_transport_ucx.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
-        if (status > 0 && status < transport_object_file_len) {
-            transport_selected = true;
-            goto transport_init;
-        } else {
-            NVSHMEMI_ERROR_PRINT("snprintf call failed in the transport.\n");
-        }
-    }
+    if (!transport_name &&
+        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ucx", TRANSPORT_STRING_MAX_LENGTH) == 0)
+        transport_name = "ucx";
 #endif
-
 #ifdef NVSHMEM_IBDEVX_SUPPORT
-    transport_skipped = strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, DEVX_TRANSPORT_STRING,
-                                    TRANSPORT_STRING_MAX_LENGTH);
-    if (transport_skipped) {
-        INFO(NVSHMEM_INIT, "IBDEVX transport skipped in favor of: %s\n",
-             nvshmemi_options.REMOTE_TRANSPORT);
-    } else {
-        status = snprintf(transport_object_file, transport_object_file_len,
-                          "nvshmem_transport_ibdevx.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
-        if (status > 0 && status < transport_object_file_len) {
-            transport_selected = true;
-            goto transport_init;
-        } else {
-            NVSHMEMI_ERROR_PRINT("snprintf call failed in the transport.\n");
-        }
-    }
+    if (!transport_name &&
+        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ibdevx", TRANSPORT_STRING_MAX_LENGTH) == 0)
+        transport_name = "ibdevx";
 #endif
-
 #ifdef NVSHMEM_LIBFABRIC_SUPPORT
-    transport_skipped = strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, LIBFABRIC_TRANSPORT_STRING,
-                                    TRANSPORT_STRING_MAX_LENGTH);
-    if (transport_skipped) {
-        INFO(NVSHMEM_INIT, "Libfabric transport skipped in favor of: %s\n",
-             nvshmemi_options.REMOTE_TRANSPORT);
-    } else {
+    if (!transport_name && strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "libfabric",
+                                       TRANSPORT_STRING_MAX_LENGTH) == 0)
+        transport_name = "libfabric";
+#endif
+
+    if (transport_name) {
+        INFO(NVSHMEM_INIT, "Selected remote transport: %s", transport_name);
+        snprintf(transport_object_file, transport_object_file_len, "nvshmem_transport_%s.so.%d",
+                 transport_name, NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
+
+        transport_lib = dlopen(transport_object_file, RTLD_NOW);
+        if (transport_lib == NULL) {
+            WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
+        }
+    }
+
+    if (transport_lib) {
+        init_fn = (nvshmemi_transport_init_fn)dlsym(transport_lib, "nvshmemt_init");
+        if (!init_fn) {
+            dlclose(transport_lib);
+            transport_lib = NULL;
+            WARN("Unable to get info from %s transport.\n", transport_object_file);
+        }
+    }
+
+    if (transport_lib) {
+        status = nvshmemi_local_mem_cache_init(&tmp_cache_ptr);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMI_INTERNAL_ERROR, out,
+                              "Unable to allocate transport mem cache.\n");
+
         status =
-            snprintf(transport_object_file, transport_object_file_len,
-                     "nvshmem_transport_libfabric.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
-        if (status > 0 && status < transport_object_file_len) {
-            transport_selected = true;
-            goto transport_init;
+            init_fn(&transports[index], nvshmemi_cuda_syms, NVSHMEM_TRANSPORT_INTERFACE_VERSION);
+        if (!status) {
+            assert(NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(transports[index]->api_version) <=
+                   NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(NVSHMEM_TRANSPORT_INTERFACE_VERSION));
+            transports[index]->boot_handle = &nvshmemi_boot_handle;
+            if (nvshmemi_device_state.enable_rail_opt == 1) {
+                transports[index]->heap_base = nvshmemi_state->heap_obj->get_global_base();
+            } else {
+                transports[index]->heap_base = state->heap_obj->get_base();
+            }
+
+            transports[index]->log2_cumem_granularity =
+                nvshmemi_state->heap_obj->get_log2_cumem_granularity();
+            transports[index]->cap = (int *)calloc(state->npes, sizeof(int));
+            transports[index]->index = index;
+            transports[index]->my_pe = nvshmemi_state->mype;
+            transports[index]->n_pes = nvshmemi_state->npes;
+            transports[index]->cache_handle = (void *)tmp_cache_ptr;
+            transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
+            transports[index]->egm_map = state->heap_obj->get_egm_map();
+            if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
+            state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
+            index++;
         } else {
-            NVSHMEMI_ERROR_PRINT("snprintf call failed in the transport.\n");
+            nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
+            dlclose(transport_lib);
+            transport_lib = NULL;
+            INFO(NVSHMEM_TRANSPORT, "init failed for remote transport: %s",
+                 nvshmemi_options.REMOTE_TRANSPORT);
+            status = 0;
         }
     }
-#endif
-
-#if defined(NVSHMEM_IBRC_SUPPORT) || defined(NVSHMEM_UCX_SUPPORT) || \
-    defined(NVSHMEM_LIBFABRIC_SUPPORT) || defined(NVSHMEM_IBDEVX_SUPPORT)
-transport_init:
-#endif
-
-    if (!transport_selected) {
-        goto transport_fail;
-    }
-
-    transport_lib = dlopen(transport_object_file, RTLD_NOW);
-    if (transport_lib == NULL) {
-        WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
-        goto transport_fail;
-    }
-    std::call_once(transport_lib_atexit_flag,
-                   []() { atexit(nvshmemi_transport_lib_fini_wrapper); });
-
-    init_fn = (nvshmemi_transport_init_fn)dlsym(transport_lib, "nvshmemt_init");
-    if (!init_fn) {
-        dlclose(transport_lib);
-        transport_lib = NULL;
-        WARN("Unable to get info from %s transport.\n", transport_object_file);
-        goto transport_fail;
-    }
-
-    status = nvshmemi_local_mem_cache_init(&tmp_cache_ptr);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMI_INTERNAL_ERROR, out,
-                          "Unable to allocate transport mem cache.\n");
-
-    status = init_fn(&transports[index], nvshmemi_cuda_syms, NVSHMEM_TRANSPORT_INTERFACE_VERSION);
-    if (!status) {
-        assert(NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(transports[index]->api_version) <=
-               NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(NVSHMEM_TRANSPORT_INTERFACE_VERSION));
-        transports[index]->boot_handle = &nvshmemi_boot_handle;
-        if (nvshmemi_device_state.enable_rail_opt == 1) {
-            transports[index]->heap_base = nvshmemi_state->heap_obj->get_global_base();
-        } else {
-            transports[index]->heap_base = state->heap_obj->get_base();
-        }
-
-        transports[index]->log2_cumem_granularity =
-            nvshmemi_state->heap_obj->get_log2_cumem_granularity();
-        transports[index]->cap = (int *)calloc(state->npes, sizeof(int));
-        transports[index]->index = index;
-        transports[index]->my_pe = nvshmemi_state->mype;
-        transports[index]->n_pes = nvshmemi_state->npes;
-        transports[index]->cache_handle = (void *)tmp_cache_ptr;
-        transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
-        transports[index]->egm_map = state->heap_obj->get_egm_map();
-        if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
-        state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
-        index++;
-    } else {
-        nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
-        dlclose(transport_lib);
-        transport_lib = NULL;
-        /* non-fatal error, so changing to a warning */
-        INFO(NVSHMEM_TRANSPORT, "init failed for remote transport: %s",
-             nvshmemi_options.REMOTE_TRANSPORT);
-        status = 0;
-    }
-transport_fail:
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) && defined(NVSHMEM_GPUNETIO_SUPPORT)
     if (nvshmemi_options.IB_ENABLE_IBGDA && nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
