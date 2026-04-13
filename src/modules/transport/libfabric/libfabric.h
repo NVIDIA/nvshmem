@@ -665,6 +665,10 @@ struct nvshmemt_libfabric_state_t {
     nvshmem_transport_t signal_delivery_transport = nullptr;
     std::atomic<int> signal_delivery_futex{0};
     std::atomic_flag signal_progress_lock = ATOMIC_FLAG_INIT;
+    /* signal_work_queue is SPSC (single consumer: delivery thread), but two
+     * threads can push (put_signal_completion and gdr_process_amos).
+     * Push-side serialization is provided by signal_work_queue_lock. */
+    std::atomic_flag signal_work_queue_lock = ATOMIC_FLAG_INIT;
     SPSCRing<signal_delivery_done_entry> signal_done_queue;
     SPSCRing<signal_delivery_work_entry> signal_work_queue;
 
