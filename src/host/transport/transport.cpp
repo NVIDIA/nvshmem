@@ -26,15 +26,12 @@
 #include "non_abi/nvshmem_version.h"                                       // for NVSHMEM_TRANS...
 #include "topo.h"                                                          // for nvshmemi_get_...
 
-#define TRANSPORT_STRING_MAX_LENGTH 8
+#define TRANSPORT_STRING_MAX_LENGTH 16
 #define NVSHMEM_TRANSPORT_COUNT 6
 
 static void *transport_lib = nullptr;
 #ifdef NVSHMEM_IBGDA_SUPPORT
 static void *transport_lib_IBGDA = nullptr;
-#endif
-#ifdef NVSHMEM_GPUNETIO_SUPPORT
-static void *transport_lib_GPUNETIO = nullptr;
 #endif
 
 static std::once_flag transport_lib_atexit_flag;
@@ -48,12 +45,6 @@ static void nvshmemi_transport_lib_fini_wrapper(void) {
     if (transport_lib_IBGDA) {
         dlclose(transport_lib_IBGDA);
         transport_lib_IBGDA = nullptr;
-    }
-#endif
-#ifdef NVSHMEM_GPUNETIO_SUPPORT
-    if (transport_lib_GPUNETIO) {
-        dlclose(transport_lib_GPUNETIO);
-        transport_lib_GPUNETIO = nullptr;
     }
 #endif
 }
@@ -134,6 +125,11 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
                                        TRANSPORT_STRING_MAX_LENGTH) == 0)
         transport_name = "libfabric";
 #endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (!transport_name && strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "gpunetio",
+                                       TRANSPORT_STRING_MAX_LENGTH) == 0)
+        transport_name = "gpunetio";
+#endif
 
     if (transport_name) {
         INFO(NVSHMEM_INIT, "Selected remote transport: %s", transport_name);
@@ -183,16 +179,37 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
             transports[index]->egm_map = state->heap_obj->get_egm_map();
             if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+            if (strncasecmp(transport_name, "gpunetio", TRANSPORT_STRING_MAX_LENGTH) == 0 &&
+                nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
+                nvshmemi_gpunetio_get_device_state(&transports[index]->type_specific_shared_state);
+                nvshmemi_device_state.selected_device_transport =
+                    NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI;
+                INFO(NVSHMEM_INIT, "GPUNetIO GDAKI enabled for device-side APIs over IB.");
+            }
+#endif
             index++;
         } else {
             nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
             dlclose(transport_lib);
             transport_lib = NULL;
+            /* non-fatal error, so changing to a warning */
             INFO(NVSHMEM_TRANSPORT, "init failed for remote transport: %s",
                  nvshmemi_options.REMOTE_TRANSPORT);
             status = 0;
         }
     }
+
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (nvshmemi_options.GPUNETIO_ENABLE_GDAKI &&
+        (!transport_name ||
+         strncasecmp(transport_name, "gpunetio", TRANSPORT_STRING_MAX_LENGTH) != 0)) {
+        NVSHMEMI_ERROR_PRINT(
+            "NVSHMEM_GPUNETIO_ENABLE_GDAKI=1 requires NVSHMEM_REMOTE_TRANSPORT=gpunetio.\n");
+        status = NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+#endif
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) && defined(NVSHMEM_GPUNETIO_SUPPORT)
     if (nvshmemi_options.IB_ENABLE_IBGDA && nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
@@ -267,71 +284,6 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
     }
 #endif
 
-#ifdef NVSHMEM_GPUNETIO_SUPPORT
-    if (nvshmemi_options.GPUNETIO_ENABLE_GDAKI) {
-        status =
-            snprintf(transport_object_file, transport_object_file_len,
-                     "nvshmem_transport_gpunetio.so.%d", NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
-        if (status < 0 || status > transport_object_file_len) {
-            WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
-            goto out;
-        }
-        transport_lib_GPUNETIO = dlopen(transport_object_file, RTLD_NOW);
-        if (transport_lib_GPUNETIO == NULL) {
-            WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
-            goto out;
-        }
-
-        init_fn = (nvshmemi_transport_init_fn)dlsym(transport_lib_GPUNETIO, "nvshmemt_init");
-        if (!init_fn) {
-            dlclose(transport_lib_GPUNETIO);
-            transport_lib_GPUNETIO = NULL;
-            WARN("Unable to get info from %s transport.\n", transport_object_file);
-            goto out;
-        }
-
-        status = nvshmemi_local_mem_cache_init(&tmp_cache_ptr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMI_INTERNAL_ERROR, out,
-                              "Unable to allocate transport mem cache.\n");
-
-        status =
-            init_fn(&transports[index], nvshmemi_cuda_syms, NVSHMEM_TRANSPORT_INTERFACE_VERSION);
-        if (!status) {
-            assert(NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(transports[index]->api_version) <=
-                   NVSHMEM_TRANSPORT_MAJOR_MINOR_VERSION(NVSHMEM_TRANSPORT_INTERFACE_VERSION));
-            transports[index]->boot_handle = &nvshmemi_boot_handle;
-            if (nvshmemi_device_state.enable_rail_opt == 1) {
-                transports[index]->heap_base = nvshmemi_state->heap_obj->get_global_base();
-            } else {
-                transports[index]->heap_base = state->heap_obj->get_base();
-            }
-            transports[index]->log2_cumem_granularity =
-                nvshmemi_state->heap_obj->get_log2_cumem_granularity();
-            transports[index]->cap = (int *)calloc(state->npes, sizeof(int));
-            transports[index]->index = index;
-            transports[index]->my_pe = nvshmemi_state->mype;
-            transports[index]->n_pes = nvshmemi_state->npes;
-            transports[index]->cache_handle = (void *)tmp_cache_ptr;
-            transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
-            transports[index]->egm_map = state->heap_obj->get_egm_map();
-            nvshmemi_gpunetio_get_device_state(&transports[index]->type_specific_shared_state);
-            if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
-            state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
-            nvshmemi_device_state.selected_device_transport =
-                NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI;
-            index++;
-        } else {
-            NVSHMEMI_ERROR_PRINT("init failed for transport: GPUNetIO");
-            nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
-            dlclose(transport_lib_GPUNETIO);
-            transport_lib_GPUNETIO = NULL;
-            status = 0;
-        }
-    } else {
-        INFO(NVSHMEM_INIT, "GPUNetIO Disabled by the environment.");
-    }
-#endif
-
     if (index == 0) {
         NVSHMEMI_ERROR_PRINT("Unable to initialize any transports. returning error.");
         status = NVSHMEMX_ERROR_INTERNAL;
@@ -353,13 +305,6 @@ out:
             INFO(NVSHMEM_INIT,
                  "Successfully initialized the transport: IBGDA. It will be used for device-side "
                  "APIs over IB.");
-        }
-#endif
-#ifdef NVSHMEM_GPUNETIO_SUPPORT
-        if (transport_lib_GPUNETIO) {
-            INFO(NVSHMEM_INIT,
-                 "Successfully initialized the transport: GPUNetIO. It will be used for GDAKI "
-                 "device-side APIs over IB.");
         }
 #endif
     }
