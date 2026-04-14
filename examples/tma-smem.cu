@@ -55,9 +55,7 @@ __global__ void tma_smem_put_kernel(int *send_data, int *recv_data, int num_elem
     /* Step 1: Allocate dynamic shared memory and give it to NVSHMEM */
     extern __shared__ char nvshmem_smem[];
     int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-    if (threadIdx.x == 0) {
-        nvshmemx_give_smem(nvshmem_smem, smem_size);
-    }
+    nvshmemx_give_smem(nvshmem_smem, smem_size);
     __syncthreads();
 
     /* Step 2: Initialize send data */

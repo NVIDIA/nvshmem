@@ -266,9 +266,11 @@ static_assert(sizeof(nvshmemi_selected_device_transport_t) == 4,
               "selected_device_transport enum type must be 4 bytes.");
 
 typedef enum {
-    NVSHMEMX_TMA_DISABLE = 0,
-    NVSHMEMX_TMA_ENABLE = 1,
-    NVSHMEMX_TMA_FORCE = 2,
+    NVSHMEMX_TMA_DISABLE = 0, /* Do not use TMA for transfers (default) */
+    NVSHMEMX_TMA_ENABLE = 1,  /* Use TMA opportunistically when shared memory is provided
+                                  and the architecture supports it; fall back to P2P otherwise */
+    NVSHMEMX_TMA_FORCE = 2,   /* Require TMA for transfers; fail if TMA is unavailable
+                                  (e.g. no shared memory given, or arch < sm_90) */
     NVSHMEMX_TMA_POLICY_MAX = INT_MAX
 } nvshmemx_tma_policy_t;
 
@@ -566,6 +568,9 @@ typedef struct {
     bool nvshmemi_is_nvshmem_bootstrapped;
     nvshmemi_selected_device_transport_t selected_device_transport;
 
+    /* TMA fields — ABI break: struct grew from 776 to 800 bytes.
+     * TODO: consider adding reserved padding for future growth, or
+     * introducing a v2 struct to preserve backwards compatibility. */
     int tma_policy;              /* nvshmemx_tma_policy_t: TMA usage policy */
     uintptr_t *tma_smem_bases;   /* Per-CTA shared memory base pointers for TMA */
     size_t tma_smem_bases_len;   /* Number of entries in tma_smem_bases */

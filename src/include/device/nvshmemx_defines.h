@@ -44,9 +44,9 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * nvshmemx_give_smem - Give a block of shared memory to the NVSHMEM runtime for
  * TMA-based transfers.
  *
- * Must be called once per CTA by exactly one thread (typically thread 0) in
- * EVERY CTA of the grid before issuing any TMA-backed puts.  CTAs that do not
- * call this function will fall back to P2P stores for all puts.
+ * Should be called by every CTA in the grid before issuing any TMA-backed puts.
+ * Only thread 0 performs the registration; other threads are no-ops.
+ * CTAs that do not call this function will fall back to P2P stores for all puts.
  *
  * After the call, the CTA must __syncthreads() before any thread issues a
  * TMA put, to ensure the registration is visible to all threads.
@@ -59,13 +59,18 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  */
 __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
 #ifdef __CUDA_ARCH__
+#if __CUDA_ARCH__ < 900
+#pragma message("nvshmemx_give_smem: TMA shared memory requires sm_90 or newer; call is a no-op on this architecture")
+#endif
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
 
     int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
     if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
-        bases[block_id] = (uintptr_t)smem;
+        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+            bases[block_id] = (uintptr_t)smem;
+        }
     }
 #endif
 }

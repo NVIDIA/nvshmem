@@ -69,19 +69,19 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
     asm volatile("cp.async.bulk.wait_group 0;\n" ::: "memory");
 }
 
-#endif /* __CUDA_ARCH__ >= 900 */
-
 /*
  * nvshmemi_memcpy_tma_shared_global - Copy data from local shared memory to
  * local or remote global memory via TMA bulk async copy.
  *
- * Templated on threadgroup scope:
- *   THREAD - Single calling thread issues the entire transfer.
- *   WARP   - Lane 0 of the calling warp issues the transfer; warp syncs.
- *   BLOCK  - Transfer is striped across warps; each warp's lane 0 issues
- *            a chunk. Achieves higher throughput for large transfers.
- *
- * This is the blocking variant: waits for completion before returning.
+ * Template parameters:
+ *   SCOPE   - Threadgroup scope for the operation:
+ *     THREAD - Single calling thread issues the entire transfer.
+ *     WARP   - Lane 0 of the calling warp issues the transfer; warp syncs.
+ *     BLOCK  - Transfer is striped across warps; each warp's lane 0 issues
+ *              a chunk. Achieves higher throughput for large transfers.
+ *   BLOCKING - When true, waits for full completion (smem read + global write)
+ *              before returning.  When false (NBI), returns immediately after
+ *              issuing the transfer.
  *
  * Requirements:
  *   - SM >= 90 (Hopper or newer)
@@ -92,29 +92,41 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
  *     function to make any prior shared-memory stores visible to the TMA async
  *     proxy engine.  Without this fence, the TMA engine may read stale data.
  *
- * Returns 0 on success, -1 if TMA is not available for this architecture.
+ * For the non-blocking variant (BLOCKING=false):
+ *   - To reuse the smem buffer for the next chunk before all remote writes
+ *     complete: call cp.async.bulk.wait_group.read 0 (warp-level; one thread
+ *     per warp suffices) followed by __syncthreads().  This waits only for the
+ *     smem READ phase to finish, leaving the remote write in flight.
+ *   - For full completion (smem read + remote write both done): call
+ *     nvshmemi_quiet<SCOPE>() or nvshmem_quiet() from the thread that issued
+ *     the transfer.  nvshmem_quiet() is THREAD scope — for a multi-warp CTA
+ *     using BLOCK-scope NBI, use nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>()
+ *     so that every warp's in-flight groups are drained.
+ *
+ * Returns 0 on success.
  */
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, bool BLOCKING>
 __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const void *smem_src,
                                                         size_t bytes) {
-#if __CUDA_ARCH__ >= 900
     if (bytes == 0) return 0;
-
-    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
 
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
         unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
         nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
         nvshmemi_tma_bulk_commit_group();
-        nvshmemi_tma_bulk_wait_group_0();
-        __threadfence_system();
+        if (BLOCKING) {
+            nvshmemi_tma_bulk_wait_group_0();
+            __threadfence_system();
+        }
     } else if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
         if (nvshmemi_tma_elect_warp()) {
             unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
             nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
             nvshmemi_tma_bulk_commit_group();
-            nvshmemi_tma_bulk_wait_group_0();
-            __threadfence_system();
+            if (BLOCKING) {
+                nvshmemi_tma_bulk_wait_group_0();
+                __threadfence_system();
+            }
         }
         nvshmemi_threadgroup_sync<SCOPE>();
     } else if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
@@ -138,8 +150,10 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
                 nvshmemi_tma_bulk_shared_to_global((char *)gmem_dst + offset, smem_addr,
                                                    (uint32_t)this_chunk);
                 nvshmemi_tma_bulk_commit_group();
-                nvshmemi_tma_bulk_wait_group_0();
-                __threadfence_system();
+                if (BLOCKING) {
+                    nvshmemi_tma_bulk_wait_group_0();
+                    __threadfence_system();
+                }
             }
         } else {
             /* Small transfer: elected leader of warp 0 handles everything */
@@ -147,98 +161,31 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
                 unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
                 nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
                 nvshmemi_tma_bulk_commit_group();
-                nvshmemi_tma_bulk_wait_group_0();
-                __threadfence_system();
+                if (BLOCKING) {
+                    nvshmemi_tma_bulk_wait_group_0();
+                    __threadfence_system();
+                }
             }
         }
         __syncthreads();
     }
 
     return 0;
-#else
-    (void)gmem_dst;
-    (void)smem_src;
-    (void)bytes;
-    return -1;
-#endif /* __CUDA_ARCH__ >= 900 */
 }
 
-/*
- * nvshmemi_memcpy_tma_shared_global_nbi - Non-blocking variant.
- *
- * Same scoping as nvshmemi_memcpy_tma_shared_global but does not wait for
- * the transfer to complete.
- *
- * Caller responsibilities:
- *   - fence.proxy.async.shared::cta must be issued before each call to make
- *     smem stores visible to the TMA async proxy (same as the blocking variant).
- *   - To reuse the smem buffer for the next chunk before all remote writes
- *     complete: call cp.async.bulk.wait_group.read 0 (warp-level; one thread
- *     per warp suffices) followed by __syncthreads().  This waits only for the
- *     smem READ phase to finish, leaving the remote write in flight.
- *   - For full completion (smem read + remote write both done): call
- *     nvshmemi_quiet<SCOPE>() or nvshmem_quiet() from the thread that issued
- *     the transfer.  nvshmem_quiet() is THREAD scope — for a multi-warp CTA
- *     using BLOCK-scope NBI, use nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>()
- *     so that every warp's in-flight groups are drained.
- *
- * Returns 0 on success, -1 if TMA is not available.
- */
+/* Convenience aliases matching the original two-function API. */
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const void *smem_src,
+                                                        size_t bytes) {
+    return nvshmemi_memcpy_tma_shared_global<SCOPE, true>(gmem_dst, smem_src, bytes);
+}
+
 template <threadgroup_t SCOPE>
 __device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, const void *smem_src,
                                                             size_t bytes) {
-#if __CUDA_ARCH__ >= 900
-    if (bytes == 0) return 0;
-
-    if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
-        unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
-        nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
-        nvshmemi_tma_bulk_commit_group();
-    } else if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
-        if (nvshmemi_tma_elect_warp()) {
-            unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
-            nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
-            nvshmemi_tma_bulk_commit_group();
-        }
-        nvshmemi_threadgroup_sync<SCOPE>();
-    } else if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
-        int block_size = blockDim.x * blockDim.y * blockDim.z;
-        int num_warps = (block_size + warpSize - 1) / warpSize;
-        int warp_id = tid / warpSize;
-
-        size_t base_chunk = (bytes / num_warps) & ~(size_t)15;
-
-        if (base_chunk >= 16) {
-            size_t offset = (size_t)warp_id * base_chunk;
-            size_t this_chunk =
-                (warp_id < num_warps - 1) ? base_chunk : (bytes - offset);
-
-            if (nvshmemi_tma_elect_warp() && offset < bytes) {
-                unsigned int smem_addr =
-                    nvshmemi_tma_cvta_to_shared((const char *)smem_src + offset);
-                nvshmemi_tma_bulk_shared_to_global((char *)gmem_dst + offset, smem_addr,
-                                                   (uint32_t)this_chunk);
-                nvshmemi_tma_bulk_commit_group();
-            }
-        } else {
-            if (tid < warpSize && nvshmemi_tma_elect_warp()) {
-                unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
-                nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
-                nvshmemi_tma_bulk_commit_group();
-            }
-        }
-        __syncthreads();
-    }
-
-    return 0;
-#else
-    (void)gmem_dst;
-    (void)smem_src;
-    (void)bytes;
-    return -1;
-#endif
+    return nvshmemi_memcpy_tma_shared_global<SCOPE, false>(gmem_dst, smem_src, bytes);
 }
 
+#endif /* __CUDA_ARCH__ >= 900 */
 #endif /* __CUDA_ARCH__ */
 #endif /* TMA_DEVICE_CUH */

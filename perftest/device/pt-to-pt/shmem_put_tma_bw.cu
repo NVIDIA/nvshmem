@@ -55,7 +55,7 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
     char  *block_dst       = dst + (size_t)bid * bytes_per_block;
 
     /* Register this CTA's smem with NVSHMEM for TMA (once per kernel launch) */
-    if (!tid) nvshmemx_give_smem(smem, smem_size);
+    nvshmemx_give_smem(smem, smem_size);
     __syncthreads();
 
     size_t chunk    = (size_t)smem_size;
@@ -72,7 +72,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
             __syncthreads();
 
             /* Make smem stores visible to the TMA async proxy before submitting */
+#if __CUDA_ARCH__ >= 900
             asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
+#endif
 
             /* Submit NBI: cp.async.bulk + commit_group inside, no wait yet */
             nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, this_bytes, peer);
@@ -81,7 +83,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
              * Called from all threads: non-issuing threads have no pending
              * groups so wait_group.read returns immediately for them. */
             if (c < n_chunks - 1) {
+#if __CUDA_ARCH__ >= 900
                 asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
+#endif
                 __syncthreads();
             }
         }
@@ -135,7 +139,10 @@ int main(int argc, char *argv[]) {
         h_bw       = (double   *)h_tables[1];
 
         dst = (char *)nvshmem_malloc(max_size);
-        assert(dst);
+        if (!dst) {
+            fprintf(stderr, "[PE %d] nvshmem_malloc failed for %zu bytes\n", mype, max_size);
+            goto finalize;
+        }
         CUDA_CHECK(cudaMemset(dst, 0, max_size));
         CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -200,7 +207,10 @@ int main(int argc, char *argv[]) {
             if (mype == 1) {
                 int  n_ints = (int)(verify_size / sizeof(int));
                 int *h_buf  = (int *)malloc(verify_size);
-                assert(h_buf);
+                if (!h_buf) {
+                    fprintf(stderr, "[PE %d] malloc failed for verify buffer\n", mype);
+                    goto finalize;
+                }
                 CUDA_CHECK(cudaMemcpy(h_buf, dst, verify_size, cudaMemcpyDeviceToHost));
 
                 int errors = 0;
