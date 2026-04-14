@@ -1695,24 +1695,38 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
 
     memset(&ah_attr, 0, sizeof(ah_attr));
 
-    if (port_attr->lid == 0) {
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
-                         (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
-                         ibgda_state->common.log_level, ibgda_state->common.options);
-        ftable.query_gid(device->common_device.context, portid,
-                         device->common_device.gid_info[portid - 1].local_gid_index,
-                         (ibv_gid *)&device->common_device.gid_info[portid - 1].local_gid);
+    /* GRH is needed for RoCE (lid == 0) or cross-subnet IB (different subnet prefix).
+     * Same-subnet IB peers share the same prefix and are LID-routable without GRH.
+     * NVSHMEM_IB_FORCE_GRH overrides automatic detection. */
+    if (ibgda_state->common.options->IB_FORCE_GRH || port_attr->lid == 0 ||
+        peer_ep_handle->spn != device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix) {
         ah_attr.is_global = 1;
         ah_attr.grh.dgid.global.subnet_prefix = peer_ep_handle->spn;
         ah_attr.grh.dgid.global.interface_id = peer_ep_handle->iid;
         ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
         ah_attr.grh.traffic_class = ibgda_state->common.options->IB_TRAFFIC_CLASS;
         ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
+        INFO(ibgda_state->common.log_level,
+             "IBGDA RC init2rtr (QPN %u): GRH enabled. "
+             "link_layer=%s lid=%u gid_index=%u "
+             "local_gid=%016llx:%016llx peer_gid(dgid)=%016llx:%016llx",
+             ep->qpn,
+             (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) ? "IB" : "Ethernet",
+             port_attr->lid,
+             device->common_device.gid_info[portid - 1].local_gid_index,
+             (unsigned long long)device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix,
+             (unsigned long long)device->common_device.gid_info[portid - 1].local_gid.global.interface_id,
+             (unsigned long long)peer_ep_handle->spn,
+             (unsigned long long)peer_ep_handle->iid);
     } else {
         // Only IB supports is_global = 0.
         assert(port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND);
         ah_attr.dlid = port_attr->lid;
         ah_attr.is_global = 0;
+        INFO(ibgda_state->common.log_level,
+             "IBGDA RC init2rtr (QPN %u): GRH disabled. "
+             "link_layer=IB local_lid=%u peer_lid=%u",
+             ep->qpn, port_attr->lid, peer_ep_handle->lid);
     }
     ah_attr.sl = ibgda_state->common.options->IB_SL;
     ah_attr.src_path_bits = 0;
@@ -2264,10 +2278,9 @@ static int ibgda_get_rc_handle(struct ibgda_rc_handle *rc_handle, const struct i
 
     rc_handle->qpn = ep->qpn;
     rc_handle->lid = port_attr->lid;
-    if (rc_handle->lid == 0) {
-        rc_handle->spn = gid->global.subnet_prefix;
-        rc_handle->iid = gid->global.interface_id;
-    }
+    /* Always store GID info so IB peers with GRH routing can exchange it. */
+    rc_handle->spn = gid->global.subnet_prefix;
+    rc_handle->iid = gid->global.interface_id;
 
     return 0;
 }
@@ -2373,13 +2386,10 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     NVSHMEMI_NULL_ERROR_JMP(recv_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "ibv_create_cq for recv_cq failed.\n");
 
-    if (port_attr->lid == 0) {
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
-                         (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
-                         ibgda_state->common.log_level, ibgda_state->common.options);
-        ftable.query_gid(device->common_device.context, portid,
-                         device->common_device.gid_info[portid - 1].local_gid_index,
-                         (ibv_gid *)&device->common_device.gid_info[portid - 1].local_gid);
+    /* GRH is needed for RoCE (lid == 0). For IB, the DCT self-AH uses LID routing;
+     * the connecting RC initiator independently determines GRH need via subnet comparison.
+     * NVSHMEM_IB_FORCE_GRH overrides automatic detection. */
+    if (ibgda_state->common.options->IB_FORCE_GRH || port_attr->lid == 0) {
         ah_attr.is_global = 1;
         ah_attr.grh.dgid.global.subnet_prefix =
             device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix;
@@ -2390,12 +2400,24 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
         ah_attr.grh.traffic_class = ibgda_state->common.options->IB_TRAFFIC_CLASS;
         ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
         support_half_av_seg = false;
+        INFO(ibgda_state->common.log_level,
+             "IBGDA DCT shared obj (port %d): GRH enabled. "
+             "link_layer=%s lid=%u gid_index=%u local_gid=%016llx:%016llx",
+             portid,
+             (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) ? "IB" : "Ethernet",
+             port_attr->lid,
+             device->common_device.gid_info[portid - 1].local_gid_index,
+             (unsigned long long)device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix,
+             (unsigned long long)device->common_device.gid_info[portid - 1].local_gid.global.interface_id);
     } else {
-        // Only IB supports is_global = 0.
+        /* Pure IB without GRH. */
         assert(port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND);
-        ah_attr.dlid = port_attr->lid;
+        ah_attr.dlid = port_attr->lid;  /* self-AH for DCT: local LID is correct here */
         ah_attr.is_global = 0;
         support_half_av_seg = hca_support_compact_address_vector;
+        INFO(ibgda_state->common.log_level,
+             "IBGDA DCT shared obj (port %d): GRH disabled. link_layer=IB lid=%u",
+             portid, port_attr->lid);
     }
     ah_attr.sl = ibgda_state->common.options->IB_SL;
     ah_attr.src_path_bits = 0;
