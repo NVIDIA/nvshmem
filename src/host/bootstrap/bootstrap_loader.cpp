@@ -22,7 +22,7 @@
 static void *plugin_hdl = nullptr;
 static char *plugin_name = nullptr;
 
-void _bootstrap_loader_fini_helper(void *plugin_hdl, char *plugin_name) {
+void _bootstrap_loader_fini_helper() {
     if (plugin_hdl != nullptr) {
         dlclose(plugin_hdl);
         plugin_hdl = nullptr;
@@ -67,7 +67,7 @@ static int _bootstrap_loader_init_helper(const char *plugin) {
     goto out;
 
 error:
-    _bootstrap_loader_fini_helper(plugin_hdl, plugin_name);
+    _bootstrap_loader_fini_helper();
 out:
     return status;
 }
@@ -85,7 +85,7 @@ int bootstrap_loader_preinit(const char *plugin, bootstrap_handle_t *handle) {
                           "Bootstrap plugin preinit failed for '%s'\n", plugin);
     goto out;
 error:
-    _bootstrap_loader_fini_helper(plugin_hdl, plugin_name);
+    _bootstrap_loader_fini_helper();
 out:
     return (status);
 }
@@ -111,7 +111,7 @@ int bootstrap_loader_init(const char *plugin, void *arg, bootstrap_handle_t *han
     }
     goto out;
 error:
-    _bootstrap_loader_fini_helper(plugin_hdl, plugin_name);
+    _bootstrap_loader_fini_helper();
 out:
     return (status);
 }
