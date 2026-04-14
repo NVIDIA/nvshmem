@@ -349,6 +349,9 @@ static int gpunetio_create_qp_attr(nvshmemt_gpunetio_state_t *gpunetio_state, ib
 
     doca_verbs_device_attr *verbs_device_attr;
     DOCA_CHECK(doca_verbs_query_device(context, &verbs_device_attr));
+    auto dev_attr_deleter = [](doca_verbs_device_attr *p) { doca_verbs_device_attr_free(p); };
+    std::unique_ptr<doca_verbs_device_attr, decltype(dev_attr_deleter)> dev_attr_uptr(
+        verbs_device_attr, dev_attr_deleter);
     uint8_t max_rd_atomic = doca_verbs_device_attr_get_max_qp_rd_atom(verbs_device_attr);
     uint8_t max_dest_rd_atomic = doca_verbs_device_attr_get_max_qp_init_rd_atom(verbs_device_attr);
 
@@ -1129,7 +1132,7 @@ int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
         ret = doca_gpu_verbs_destroy_qp_hl(device->qp_local_backup);
         if (ret) {
             NVSHMEMI_WARN_PRINT(
-                "doca_gpu_verbs_destroy_qp_hl failed for device %d qp_local_backup \n", dev_id);
+                "doca_gpu_verbs_destroy_qp_hl failed for device %d qp_local_backup\n", dev_id);
             if (!status) status = ret;
         }
     }
@@ -1137,6 +1140,15 @@ int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
     // Free all devices, not just ones we used.
     for (size_t i = 0; i < gpunetio_state->dev_ids.size(); ++i) {
         gpunetio_device *device = &gpunetio_state->devices[gpunetio_state->dev_ids[i]];
+        if (device->net_dev) {
+            ret = doca_verbs_dev_close(device->net_dev);
+            if (ret) {
+                NVSHMEMI_WARN_PRINT("doca_verbs_dev_close failed for device %d\n",
+                                    gpunetio_state->dev_ids[i]);
+                if (!status) status = ret;
+            }
+            device->net_dev = nullptr;
+        }
         if (device->common_device.pd) {
             ret = gpunetio_state->ftable.dealloc_pd(device->common_device.pd);
             if (ret) {
