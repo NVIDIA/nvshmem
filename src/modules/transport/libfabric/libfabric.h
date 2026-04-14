@@ -418,11 +418,14 @@ typedef enum {
 
 typedef enum {
     NVSHMEMT_LIBFABRIC_IMM_PUT_SIGNAL_SEQ = 0,
-    NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK,
     NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT,
     NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ,
-    NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_ACK,
 } nvshmemt_libfabric_imm_cq_data_hdr_t;
+
+typedef enum {
+    NVSHMEMT_LIBFABRIC_IMM_STAGED_ATOMIC_ACK,
+    NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_ACK,
+} nvshmemt_libfabric_ack_t;
 
 class threadSafeOpQueue {
    private:
@@ -731,11 +734,11 @@ static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) <=
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");
 
 /* Wire data for AMO ack sent via fi_send
- * | 4 type | 4 ack_header | 4 sequence_count |
+ * | 4 type | 4 ack_type | 4 sequence_count |
  */
 typedef struct nvshmemt_libfabric_gdr_amo_ack_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
-    nvshmemt_libfabric_imm_cq_data_hdr_t ack_header;
+    nvshmemt_libfabric_ack_t ack_type;
     uint32_t sequence_count;
 } nvshmemt_libfabric_gdr_amo_ack_op_t;
 static_assert(sizeof(nvshmemt_libfabric_gdr_amo_ack_op_t) <= 32,
