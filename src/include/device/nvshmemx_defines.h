@@ -59,9 +59,6 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  */
 __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
 #ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ < 900
-#pragma message("nvshmemx_give_smem: TMA shared memory requires sm_90 or newer; call is a no-op on this architecture")
-#endif
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
 

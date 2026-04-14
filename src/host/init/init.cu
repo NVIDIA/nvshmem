@@ -1814,6 +1814,8 @@ out:
 int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     int status = CUDA_SUCCESS;
     int warp_size = 0;
+    int cuda_dev_cap_major = 0;
+    int cuda_dev_cap_minor = 0;
     unsigned long long *test_wait_any_start_idx_ptr = NULL;
 
     CUDA_RUNTIME_CHECK_GOTO(
@@ -1904,6 +1906,34 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                                  nvshmemi_options.TMA_POLICY);
         }
     }
+
+    if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
+        CUDA_RUNTIME_CHECK_GOTO(cudaDeviceGetAttribute(&cuda_dev_cap_major,
+                                                       cudaDevAttrComputeCapabilityMajor,
+                                                       state->device_id),
+                                status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaDeviceGetAttribute(&cuda_dev_cap_minor,
+                                                       cudaDevAttrComputeCapabilityMinor,
+                                                       state->device_id),
+                                status, out);
+
+        if (cuda_dev_cap_major < 9) {
+            if (nvshmemi_device_state.tma_policy == NVSHMEMX_TMA_FORCE) {
+                NVSHMEMI_ERROR_PRINT(
+                    "NVSHMEM_TMA_POLICY=FORCE requires sm_90 or newer. Device %d is sm_%d%d.\n",
+                    state->device_id, cuda_dev_cap_major, cuda_dev_cap_minor);
+                status = NVSHMEMX_ERROR_NOT_SUPPORTED;
+                goto out;
+            }
+
+            WARN("NVSHMEM_TMA_POLICY=%s requires sm_90 or newer. Device %d is sm_%d%d; "
+                 "disabling TMA.\n",
+                 nvshmemi_options.TMA_POLICY, state->device_id, cuda_dev_cap_major,
+                 cuda_dev_cap_minor);
+            nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
+        }
+    }
+
     INFO(NVSHMEM_INIT, "NVSHMEM TMA policy = %d", nvshmemi_device_state.tma_policy);
 
     /* Allocate per-CTA shared memory tracking array for TMA */
