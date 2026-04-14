@@ -339,21 +339,7 @@ static_assert(sizeof(nvshmemi_ibgda_device_state_v2) == 8384,
 
 typedef nvshmemi_ibgda_device_state_v2 nvshmemi_ibgda_device_state_t;
 
-#if defined(__CUDACC_RDC__) || defined(__CUDACC_RTC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
-#define EXTERN_CONSTANT extern __constant__
-#elif defined(__clang__)
-#ifdef __CUDACC__
-// Clang CUDA mode: use __constant__ only (avoid address_space to fix LLVM21)
-#define EXTERN_CONSTANT extern __constant__
-#else
-// Plain Clang-to-NVPTX bitcode: use address_space(4) only
-#define EXTERN_CONSTANT extern __attribute__((address_space(4)))
-#endif
-#elif defined(__CUDACC__)
-// Non-RDC nvcc: per-TU __constant__ copy (internal linkage is implicit).
-// Only functional with nvshmemx_cumodule_init / nvshmemx_culibrary_init.
-#define EXTERN_CONSTANT __constant__
-#endif
+#include "device_host/nvshmemi_extern_constant.h"
 
 #ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;

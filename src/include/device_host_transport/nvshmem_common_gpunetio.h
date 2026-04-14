@@ -200,17 +200,7 @@ static_assert(sizeof(nvshmemi_gpunetio_device_state_v1) == 2256,
 
 typedef nvshmemi_gpunetio_device_state_v1 nvshmemi_gpunetio_device_state_t;
 
-#if defined(__CUDACC_RDC__) || defined(__CUDACC_RTC__) || defined(__NVSHMEM_NUMBA_SUPPORT__)
-#define EXTERN_CONSTANT extern __constant__
-#elif defined(__clang__)
-#ifdef __CUDACC__
-// Clang CUDA mode: use __constant__ only (avoid address_space to fix LLVM21)
-#define EXTERN_CONSTANT extern __constant__
-#else
-// Plain Clang-to-NVPTX bitcode: use address_space(4) only
-#define EXTERN_CONSTANT extern __attribute__((address_space(4)))
-#endif
-#endif
+#include "device_host/nvshmemi_extern_constant.h"
 
 #ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_gpunetio_device_state_t nvshmemi_gpunetio_device_state_d;

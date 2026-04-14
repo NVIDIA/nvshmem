@@ -973,6 +973,7 @@ set(INC_EXPORTS
     non_abi/device/pt-to-pt/tile.cuh
     non_abi/device/common/nvshmemi_tile_utils.cuh
     device_host/nvshmem_common.cuh
+    device_host/nvshmemi_extern_constant.h
     device_host/nvshmem_tensor.h
     device_host_transport/nvshmem_common_ibgda.h
     device_host_transport/nvshmem_common_gpunetio.h

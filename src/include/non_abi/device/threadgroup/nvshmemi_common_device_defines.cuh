@@ -8,20 +8,13 @@
 #include "device_host/nvshmem_common.cuh"
 
 #if defined(__CUDACC_RTC__) && defined(__NVSHMEM_NUMBA_SUPPORT__)
-// NVRTC + Numba: local definition for host to write device state at runtime
-#define EXTERN_CONSTANT __constant__
-#elif defined(__CUDACC_RDC__) || defined(__CUDACC_RTC__) || \
-    (defined(__clang__) && defined(__CUDACC__))
-// RDC, NVRTC, or Clang CUDA: resolved by device linker
-#define EXTERN_CONSTANT extern __constant__
-#elif defined(__clang__)
-// Plain Clang-to-NVPTX bitcode: use address_space(4) only
-#define EXTERN_CONSTANT extern __attribute__((address_space(4)))
-#elif defined(__CUDACC__)
-// Non-RDC nvcc: per-TU __constant__ copy (internal linkage is implicit).
-// Only functional with nvshmemx_cumodule_init / nvshmemx_culibrary_init.
+// NVRTC + Numba: Numba does not device-link against libnvshmem_device, so
+// extern __constant__ would leave the symbol unresolved.  Instead, use a
+// per-module __constant__ (no extern) that the host populates at runtime
+// via cuModuleGetGlobal + cuMemcpyHtoD on the single NVRTC-compiled module.
 #define EXTERN_CONSTANT __constant__
 #endif
+#include "device_host/nvshmemi_extern_constant.h"
 
 #ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_device_host_state_t nvshmemi_device_state_d;
