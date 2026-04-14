@@ -1084,16 +1084,7 @@ int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
             CUDA_RUNTIME_ERROR_STRING(err);
             gpunetio_device_state_h->globalmem.qps = nullptr;
         }
-        if (gpunetio_device_state_h->globalmem.lkeys) {
-            cudaError_t err = cudaFree(gpunetio_device_state_h->globalmem.lkeys);
-            CUDA_RUNTIME_ERROR_STRING(err);
-            gpunetio_device_state_h->globalmem.lkeys = nullptr;
-        }
-        if (gpunetio_device_state_h->globalmem.rkeys) {
-            cudaError_t err = cudaFree(gpunetio_device_state_h->globalmem.rkeys);
-            CUDA_RUNTIME_ERROR_STRING(err);
-            gpunetio_device_state_h->globalmem.rkeys = nullptr;
-        }
+
         if (gpunetio_device_state_h->globalmem.qp_group_switches) {
             cudaError_t err = cudaFree(gpunetio_device_state_h->globalmem.qp_group_switches);
             CUDA_RUNTIME_ERROR_STRING(err);
