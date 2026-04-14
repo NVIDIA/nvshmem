@@ -28,13 +28,19 @@ EXTERN_CONSTANT nvshmemi_device_host_state_t nvshmemi_device_state_d;
 #undef EXTERN_CONSTANT
 #endif
 
+#if defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    (defined(__CUDACC__) && !defined(__CUDACC_RDC__) && !defined(__CUDACC_RTC__) && !defined(__clang__))
+// Non-RDC / Numba: emit a per-TU version symbol for nvshmemx_cumodule_init;
+// __CUDACC__ ensures this is never reached by a plain host compiler.
+__constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {
+    NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
+#endif
+
 #ifdef __NVSHMEM_NUMBA_SUPPORT__
 /* disable device-side asserts for Numba builds */
 #ifdef assert
 #undef assert
 #endif
-static __constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {
-    NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
 #define assert(x) ((void)0)
 #endif
 

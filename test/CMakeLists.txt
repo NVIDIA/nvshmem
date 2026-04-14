@@ -457,6 +457,35 @@ if (NVSHMEM_TEST_RELEASE_PREFIX)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/host/init")
 endif()
 add_custom_target(kernel_nvshmem_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin)
+if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
+  add_dependencies(kernel_nvshmem_dummy gpunetio_build)
+endif()
+
+# Non-RDC fatbin: compiled without -rdc=true, with all device functions inlined.
+# Single-stage compilation — no device-link step needed.
+if(NOT SubBuild)
+  set(KERNEL_NVSHMEM_NO_RDC_INCLUDE_DIR "${NVSHMEM_PREFIX}/include")
+else()
+  set(KERNEL_NVSHMEM_NO_RDC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/include")
+endif()
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin
+                   COMMAND ${CMAKE_CUDA_COMPILER}
+                   -I${KERNEL_NVSHMEM_NO_RDC_INCLUDE_DIR} -I${CUDA_HOME}/include ${KERNEL_NVSHMEM_EXTRA_INCLUDES} ${NVCC_GENCODE}
+                   -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING
+                   ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem_no_rdc.cu
+                   -c --fatbin -Xcompiler -fPIC --std=${TEST_CXX_ARG}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin
+                   MAIN_DEPENDENCY ${CMAKE_CURRENT_SOURCE_DIR}/host/init/kernel_nvshmem_no_rdc.cu
+                   COMMAND_EXPAND_LISTS)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin
+        DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/host/init")
+if (NVSHMEM_TEST_RELEASE_PREFIX)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/host/init")
+endif()
+add_custom_target(kernel_nvshmem_no_rdc_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin)
+if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
+  add_dependencies(kernel_nvshmem_no_rdc_dummy gpunetio_build)
+endif()
 
 add_subdirectory(apps)
 add_subdirectory(device)

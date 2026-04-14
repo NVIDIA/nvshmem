@@ -1,4 +1,10 @@
 nvshmem_add_test(cuobject_init.cpp)
+# cuobject_init_no_rdc needs full NVSHMEM init (nvshmem_init) for cumodule_init,
+# which requires nvshmem_device for host symbols. Allow unresolved RDC
+# registration symbols since there is no device-link step for this .cpp target.
+nvshmem_add_test(cuobject_init_no_rdc.cpp)
+target_link_options(host_cuobject_init_no_rdc PRIVATE
+  "LINKER:--unresolved-symbols=ignore-in-object-files")
 nvshmem_add_test_no_device(host_api_no_rdc.cu)
 nvshmem_add_test(nvrtc_api.cpp)
 nvshmem_add_test(nvrtc_numba_include.cpp)
