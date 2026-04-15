@@ -138,6 +138,15 @@ template <threadgroup_t SCOPE, bool BLOCKING>
 __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const void *smem_src,
                                                         size_t bytes) {
     if (bytes == 0) return 0;
+    /* Validate cp.async.bulk requirements.  Fall back to 0/error rather than
+     * invoking undefined hardware behavior.
+     * TODO: handle head/tail of unaligned messages with ld/st so that callers
+     * with arbitrary alignment and size can still use the TMA fast path for the
+     * aligned middle portion. */
+    if ((uintptr_t)gmem_dst % 16 != 0) return -1;
+    if ((uintptr_t)smem_src % 16 != 0) return -1;
+    if (bytes % 16 != 0) return -1;
+    if (bytes > (size_t)UINT32_MAX) return -1;
 
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
         unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);

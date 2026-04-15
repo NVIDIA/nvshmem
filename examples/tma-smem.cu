@@ -124,6 +124,10 @@ int main(int c, char *v[]) {
     tma_smem_put_kernel<<<1, NUM_ELEMS, smem_size>>>(recv_data, NUM_ELEMS, mype, npes);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
+    /* Barrier ensures all PEs have completed their puts before any PE validates.
+     * cudaDeviceSynchronize() only guarantees the LOCAL kernel finished;
+     * the sending PE may still be in flight without this barrier. */
+    nvshmem_barrier_all();
 
     /* Validate: recv_data should contain values from the previous PE */
     int *host = new int[NUM_ELEMS];
