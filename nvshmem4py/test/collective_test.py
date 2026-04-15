@@ -6,6 +6,7 @@ try:
     from torch import float32
     _torch_enabled = True
 except:
+    torch = None
     float32 = None
     _torch_enabled = False
 
@@ -26,7 +27,7 @@ from cuda.core import Device, system
 from mpi4py import MPI
 
 all_types_cupy = ["float16", "float32", "float64", "uint8", "int8", "int16", "int32", "int64", "bool"]
-all_types_torch = [
+all_types_torch = [] if not _torch_enabled else [
     torch.float16, torch.bfloat16, torch.float32, torch.uint8, torch.int16, torch.int32, torch.int64, torch.bool
 ]
 all_types_nvshmem = ["half", "bfloat16", "uint8", "int8", "int16", "int32", "int64", "double", "float"]
@@ -151,6 +152,7 @@ def test_alltoall_cupy():
         arr_src[:] = my_pe + 1
         arr_dst[:] = 0
 
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
         # Print dst, src before
@@ -159,6 +161,7 @@ def test_alltoall_cupy():
 
         nvshmem.core.alltoall(nvshmem.core.Teams.TEAM_WORLD, arr_dst, arr_src, stream=stream)
         # Explicit sync because we didn't set a CuPy stream
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
         if dtype == "bool":
@@ -207,6 +210,7 @@ def test_fcollect_cupy():
         # as usual, local_rank_per_node + 1 so there's no zeroes
         arr_src[:] = nvshmem.core.my_pe() + 1
 
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
         # Print dst, src before
@@ -266,7 +270,7 @@ def test_reduce_cupy():
     dev = Device()
     local_rank_per_node = dev.device_id
     print("Rank:", local_rank_per_node)
-    stream = nvshmem.core.NvshmemStream(torch.cuda.current_stream())
+    stream = dev.create_stream()
 
     for dtype in all_types_cupy:
         for op in all_ops:
@@ -277,6 +281,7 @@ def test_reduce_cupy():
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = nvshmem.core.my_pe() + 1
 
+            dev.sync()  # Flush default-stream init before distributed barrier
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
             dev.sync()
             # Print dst, src before
@@ -351,6 +356,7 @@ def test_reducescatter_cupy():
             arr_dst[:] = 0
             arr_src[:] = nvshmem.core.my_pe() + 1
 
+            dev.sync()  # Flush default-stream init before distributed barrier
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
             dev.sync()
             # Print dst, src before
@@ -447,6 +453,7 @@ def test_broadcast_cupy():
         arr_dst[:] = 0
         arr_src[:] = nvshmem.core.my_pe() + 1
 
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
         # Print dst, src before
@@ -510,6 +517,7 @@ def test_alltoall_torch():
         arr_dst[:] = 0
         arr_src[:] = nvshmem.core.my_pe() + 1
 
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
         # Print dst, src before
@@ -518,6 +526,7 @@ def test_alltoall_torch():
 
         nvshmem.core.alltoall(nvshmem.core.Teams.TEAM_WORLD, arr_dst, arr_src, stream=stream)
         # Explicit sync because we didn't set a Torch stream
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
 
@@ -572,6 +581,7 @@ def test_fcollect_torch():
         arr_dst[:] = 0
         arr_src[:] = nvshmem.core.my_pe() + 1
 
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
         # Print dst, src before
@@ -580,6 +590,7 @@ def test_fcollect_torch():
 
         nvshmem.core.fcollect(nvshmem.core.Teams.TEAM_WORLD, arr_dst, arr_src, stream=stream)
         # Explicit sync because we didn't set a Torch stream
+        dev.sync()  # Flush default-stream init before distributed barrier
         nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
         dev.sync()
 
@@ -640,6 +651,7 @@ def test_reduce_torch():
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = nvshmem.core.my_pe() + 1
 
+            dev.sync()  # Flush default-stream init before distributed barrier
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
             dev.sync()
             # Print dst, src before
@@ -725,6 +737,7 @@ def test_reducescatter_torch():
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = nvshmem.core.my_pe() + 1
 
+            dev.sync()  # Flush default-stream init before distributed barrier
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
             dev.sync()
             # Print dst, src before
@@ -806,6 +819,7 @@ def test_broadcast_torch():
             # as usual, local_rank_per_node + 1 so there's no zeroes
             arr_src[:] = local_rank_per_node + 1
 
+            dev.sync()  # Flush default-stream init before distributed barrier
             nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
             dev.sync()
             # Print dst, src before

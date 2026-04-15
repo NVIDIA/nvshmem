@@ -80,7 +80,7 @@ def test_mc_buffer():
 
     # PE0 calls get_peer_buffer on the Buffer
     if local_rank_per_node == 0:
-        mc_buf = nvshmem.core.get_multicast_buffer(nvshmem.core.Teams.TEAM_SHARED, buf)
+        mc_buf = nvshmem.core.get_multicast_buffer(nvshmem.core.Teams.TEAM_NODE, buf)
         print(buf, buf.handle)
         if mc_buf:
             print(mc_buf, mc_buf.handle)
@@ -104,7 +104,7 @@ def test_mc_tensor():
 
     # PE0 calls get_peer_buffer on the Buffer
     if local_rank_per_node == 0:
-        mc_tensor = nvshmem.core.get_multicast_tensor(nvshmem.core.Teams.TEAM_SHARED, tensor)
+        mc_tensor = nvshmem.core.get_multicast_tensor(nvshmem.core.Teams.TEAM_NODE, tensor)
         print(tensor, tensor.data_ptr())
         if mc_tensor is not None:
             print(mc_tensor.data_ptr())
@@ -129,7 +129,7 @@ def test_mc_array():
 
     # PE0 calls get_peer_buffer on the Buffer
     if local_rank_per_node == 0:
-        mc_array = nvshmem.core.get_multicast_array(nvshmem.core.Teams.TEAM_SHARED, array)
+        mc_array = nvshmem.core.get_multicast_array(nvshmem.core.Teams.TEAM_NODE, array)
         print(array, array.data.ptr)
         if mc_array is not None:
             print(mc_array.data.ptr)
@@ -481,6 +481,7 @@ def test_external_buffer():
     tensor_src[:] = nvshmem.core.my_pe() + 1
     tensor_dst[:] = 0
 
+    dev.sync()  # Flush default-stream init before collective
     print("tensor_src before reduce:", tensor_src)
     print("tensor_dst before reduce:", tensor_dst)
 

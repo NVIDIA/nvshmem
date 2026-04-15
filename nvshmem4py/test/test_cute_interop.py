@@ -55,7 +55,7 @@ def test_mc_tensor():
 
     # PE0 calls get_peer_buffer on the Buffer
     if local_rank_per_node == 0:
-        mc_tensor = cute_interop.get_multicast_tensor(nvshmem.core.Teams.TEAM_SHARED, tensor)
+        mc_tensor = cute_interop.get_multicast_tensor(nvshmem.core.Teams.TEAM_NODE, tensor)
         print(tensor, tensor.data_ptr())
         if mc_tensor is not None:
             print(mc_tensor.data_ptr())

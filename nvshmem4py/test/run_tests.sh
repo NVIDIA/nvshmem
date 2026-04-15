@@ -217,7 +217,9 @@ export LD_LIBRARY_PATH="$NVSHMEM_LIB_DIR:$SITE_CUDA_LIB:$LD_LIBRARY_PATH"
 # that use NCCL (pip CUDA libs cause ABI conflicts with system NCCL).
 LD_LIBRARY_PATH_NO_PIP_CUDA="$NVSHMEM_LIB_DIR:$(echo "$LD_LIBRARY_PATH" | sed "s|$SITE_CUDA_LIB:||")"
 
-MPI_RUN="${MPI_RUN:-mpirun --oversubscribe --allow-run-as-root}"
+# The Python tests use MPI for bootstrap/control flow; forcing Open MPI off the
+# openib BTL avoids CI-only HCA init failures and cross-node hangs.
+MPI_RUN="${MPI_RUN:-mpirun --oversubscribe --allow-run-as-root --mca pml ob1 --mca btl self,tcp,vader --mca btl_openib_warn_no_device_params_found 0}"
 NP="${NP:-2}"
 NP_TEAM="${NP_TEAM:-$(( NP < 8 ? NP : 8 ))}"
 TEST_DIR="$PROJECT_DIR/nvshmem4py/test"

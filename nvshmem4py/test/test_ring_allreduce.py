@@ -131,6 +131,8 @@ dst[:] = 0
 for i in range(num_blocks):
     signal[i] = 0
 
+dev.sync()  # Flush default-stream init before kernel launch on user stream
+
 # Launch kernel
 ring_reduce[num_blocks, threads_per_block, stream, 0](dst, src, nreduce, signal, chunk_size)
 

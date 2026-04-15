@@ -6,6 +6,7 @@ try:
     from torch import float32
     _torch_enabled = True
 except:
+    torch = None
     float32 = None
     _torch_enabled = False
 
@@ -207,6 +208,9 @@ def test_signal_wait_array_non_one():
 
 def test_signal_wait_tensor():
     print("Testing put/signal on tensor")
+    if not _torch_enabled:
+        print("Skipping test_signal_wait_tensor because torch is not enabled")
+        return
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     dev = Device()
     local_rank_per_node = dev.device_id
