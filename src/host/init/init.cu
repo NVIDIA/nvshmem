@@ -1895,11 +1895,11 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     /* TMA policy */
     nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
     if (nvshmemi_options.TMA_POLICY_provided) {
-        if (strncasecmp(nvshmemi_options.TMA_POLICY, "ENABLE", 100) == 0) {
+        if (strcasecmp(nvshmemi_options.TMA_POLICY, "ENABLE") == 0) {
             nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_ENABLE;
-        } else if (strncasecmp(nvshmemi_options.TMA_POLICY, "FORCE", 100) == 0) {
+        } else if (strcasecmp(nvshmemi_options.TMA_POLICY, "FORCE") == 0) {
             nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_FORCE;
-        } else if (strncasecmp(nvshmemi_options.TMA_POLICY, "DISABLE", 100) == 0) {
+        } else if (strcasecmp(nvshmemi_options.TMA_POLICY, "DISABLE") == 0) {
             nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
         } else {
             NVSHMEMI_ERROR_PRINT("Invalid NVSHMEM_TMA_POLICY value: %s. Using DISABLE.\n",

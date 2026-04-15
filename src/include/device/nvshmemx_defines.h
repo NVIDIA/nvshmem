@@ -23,18 +23,26 @@
  * nvshmemx_give_smem() for TMA to be used.
  *
  * flag:
- *   NVSHMEMX_SMEM_RECOMMENDED  - Recommended amount for best performance (default)
- *   NVSHMEMX_SMEM_MINIMUM      - Minimum amount for TMA to function
- *   NVSHMEMX_SMEM_BARRIERS_ONLY - Only allocate space for barriers/sync objects
+ *   NVSHMEMX_SMEM_RECOMMENDED  - Recommended amount for best performance.
+ *                                 64 KiB: the maximum single cp.async.bulk
+ *                                 transfer size on Hopper/Blackwell, sized to
+ *                                 allow a full smem buffer for the gmem→gmem
+ *                                 double-buffering path (future MR).
+ *   NVSHMEMX_SMEM_MINIMUM      - Minimum for single-buffered TMA transfers.
+ *                                 32 KiB: half of RECOMMENDED; sufficient for
+ *                                 smem→gmem single-buffer puts.
+ *   NVSHMEMX_SMEM_BARRIERS_ONLY - Only space for barriers and TMA descriptors
+ *                                  (256 B); no data buffer. Useful when the
+ *                                  user manages buffering externally.
  */
 __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
     switch (flag) {
         case NVSHMEMX_SMEM_RECOMMENDED:
-            return 65536; /* 64 KiB - recommended for double-buffered TMA */
+            return 65536; /* 64 KiB */
         case NVSHMEMX_SMEM_MINIMUM:
-            return 32768; /* 32 KiB - minimum for single-buffered TMA */
+            return 32768; /* 32 KiB */
         case NVSHMEMX_SMEM_BARRIERS_ONLY:
-            return 256; /* Space for barriers and descriptors only */
+            return 256;
         default:
             return 65536;
     }
@@ -44,18 +52,30 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * nvshmemx_give_smem - Give a block of shared memory to the NVSHMEM runtime for
  * TMA-based transfers.
  *
- * Should be called by every CTA in the grid before issuing any TMA-backed puts.
- * Only thread 0 performs the registration; other threads are no-ops.
- * CTAs that do not call this function will fall back to P2P stores for all puts.
+ * Must be called by EVERY CTA in the grid, once per kernel launch, before
+ * issuing any TMA-backed puts.  CTAs that skip this call will fall back to
+ * P2P stores for all puts in that kernel.
  *
- * After the call, the CTA must __syncthreads() before any thread issues a
- * TMA put, to ensure the registration is visible to all threads.
+ * User contract: call give_smem in every kernel that wants TMA; do not rely
+ * on a previous kernel's registration persisting.  The smem base pointer is
+ * stored persistently (it is used as the data buffer in the future gmem→gmem
+ * TMA path), so stale entries from a prior kernel remain until overwritten.
+ * A CTA that skips give_smem but whose block_id slot was written by an earlier
+ * kernel will unexpectedly take the TMA path.
  *
- * The given shared memory region will be used by NVSHMEM for buffering TMA
- * transfers and storing synchronization objects.
+ * The registered smem region is used by NVSHMEM for:
+ *   - smem→gmem: as the source buffer (current MR)
+ *   - gmem→gmem: as the staging buffer for NVLink transfers (future MR)
  *
- * smem: Pointer to shared memory (must be within the CTA's shared memory)
- * size: Size of the shared memory region in bytes
+ * Note: grids larger than NVSHMEMI_TMA_MAX_BLOCKS CTAs are supported, but
+ * CTAs with block_id >= NVSHMEMI_TMA_MAX_BLOCKS cannot register and will
+ * silently fall back to P2P stores (a warning is printed for the first such
+ * block).
+ *
+ * After the call, the kernel must __syncthreads() before issuing TMA puts.
+ *
+ * smem: Pointer to shared memory (must be 16-byte aligned)
+ * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
  */
 __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -64,13 +84,22 @@ __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
 
     int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-    if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
-        /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
-         * warp_id broadcast — so the compiler sees a warp-uniform predicate and
-         * avoids inserting a peeling loop (which if(tid==0) would cause). */
-        if (nvshmemi_tma_block_is_elected()) {
-            bases[block_id] = (uintptr_t)smem;
-        }
+    if (bases == NULL || (size_t)block_id >= nvshmemi_device_state_d.tma_smem_bases_len) {
+        /* Grid is larger than NVSHMEMI_TMA_MAX_BLOCKS; this CTA cannot use TMA.
+         * Print a one-shot warning from block 0 thread 0 to avoid log spam. */
+        if (block_id == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
+            printf("NVSHMEM WARNING: grid has %d CTAs but TMA smem table only holds %zu entries; "
+                   "CTAs with block_id >= %zu will use P2P stores instead of TMA.\n",
+                   gridDim.x * gridDim.y * gridDim.z,
+                   nvshmemi_device_state_d.tma_smem_bases_len,
+                   nvshmemi_device_state_d.tma_smem_bases_len);
+        return;
+    }
+    /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
+     * warp_id broadcast — so the compiler sees a warp-uniform predicate and
+     * avoids inserting a peeling loop (which if(tid==0) would cause). */
+    if (nvshmemi_tma_block_is_elected()) {
+        bases[block_id] = (uintptr_t)smem;
     }
 #endif /* __CUDA_ARCH__ >= 900 */
 }

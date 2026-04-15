@@ -351,35 +351,48 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
     for (size_t i = myIdx; i < len; i += groupSize) dst_c[i] = src_c[i];
 }
 
+/*
+ * Returns true if this CTA has registered shared memory for TMA (via
+ * nvshmemx_give_smem) and TMA policy is not DISABLE.  Used to gate the
+ * TMA dispatch path in put and quiet.
+ */
+__device__ __forceinline__ bool nvshmemi_tma_smem_registered() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return false;
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+    return bases != NULL &&
+           (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
+           bases[block_id] != 0;
+#else
+    return false;
+#endif
+}
+
 /* qpair specific APIs */
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_PE_ALL,
                                                              nvshmemx_qp_handle_t *qp_handle = NULL,
                                                              int num_qps = NVSHMEMX_QP_ALL) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+
+    /* Drain TMA unconditionally BEFORE the connectivity-based quiet.  In a
+     * mixed topology (some peers via NVLink P2P, others via IB/transport),
+     * TMA ops to P2P peers are not covered by nvshmemi_transfer_quiet, so the
+     * drain must not be gated on job_connectivity. */
+    if (nvshmemi_tma_smem_registered()) {
+        nvshmemi_tma_bulk_commit_group();
+        nvshmemi_tma_bulk_wait_group_0();
+    }
+
     if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
         nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
-    } else {
-#if __CUDA_ARCH__ >= 900
-        /* Flush and wait for any in-flight TMA bulk async copies.
-         * commit_group seals any uncommitted ops, then wait_group 0 waits for
-         * both the smem read and the remote global write to complete. */
-        if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
-            int block_id =
-                blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-            uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-            if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
-                bases[block_id] != 0) {
-                nvshmemi_tma_bulk_commit_group();
-                nvshmemi_tma_bulk_wait_group_0();
-            }
-        }
-#endif
-        if (!myIdx)
-            __threadfence_system(); /* Use __threadfence_system instead of __threadfence
-                                     for data visibility in case of intra-node GPU transfers */
-        nvshmemi_threadgroup_sync<SCOPE>();
     }
+    /* __threadfence_system is required for both TMA (P2P NVLink) and regular
+     * P2P store visibility.  Issue unconditionally after all quiet paths. */
+    if (!myIdx)
+        __threadfence_system();
+    nvshmemi_threadgroup_sync<SCOPE>();
 }
 
 template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>(
@@ -487,19 +500,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-#if __CUDA_ARCH__ >= 900
-        if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
-            int block_id =
-                blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-            uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-            if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
-                bases[block_id] != 0 && __isShared(source)) {
-                nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>((void *)dest_actual,
-                                                             (const void *)source, nbytes);
-                return;
-            }
+        /* Use TMA if this CTA registered smem and source is in shared memory.
+         * Fall through to P2P stores on alignment/size failure (return != 0). */
+        if (nvshmemi_tma_smem_registered() && __isShared(source) &&
+            nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>((void *)dest_actual,
+                                                          (const void *)source, nbytes) == 0) {
+            return;
         }
-#endif
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
         nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
@@ -527,20 +534,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-#if __CUDA_ARCH__ >= 900
-        if (nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_DISABLE) {
-            int block_id =
-                blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-            uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-            if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
-                bases[block_id] != 0 && __isShared(source)) {
-                nvshmemi_memcpy_tma_shared_global<SCOPE>((void *)dest_actual,
-                                                        (const void *)source, nbytes);
-                nvshmemi_threadgroup_sync<SCOPE>();
-                return;
-            }
+        /* Use TMA if this CTA registered smem and source is in shared memory.
+         * Fall through to P2P stores on alignment/size failure (return != 0).
+         * nvshmemi_memcpy_tma_shared_global<BLOCK> includes __syncthreads(); the
+         * caller's exit sync is redundant for BLOCK scope but harmless. */
+        if (nvshmemi_tma_smem_registered() && __isShared(source) &&
+            nvshmemi_memcpy_tma_shared_global<SCOPE>((void *)dest_actual,
+                                                     (const void *)source, nbytes) == 0) {
+            nvshmemi_threadgroup_sync<SCOPE>();
+            return;
         }
-#endif
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
@@ -581,6 +584,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     if (peer_base_addr) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
+        /* TMA is intentionally not used for put_signal: the signal must be
+         * issued after the data write completes and is visible, requiring
+         * strict ordering that the TMA NBI path does not provide here.
+         * TMA support for put_signal is deferred to a future MR. */
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source,
                                            nelems * sizeof(T));
         nvshmemi_threadgroup_sync<SCOPE>();
