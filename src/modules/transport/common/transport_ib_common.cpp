@@ -21,6 +21,9 @@
 #include "non_abi/nvshmem_build_options.h"     // for NVSHMEM_USE_MLX5DV
 #include "transport_common.h"                  // for LOAD_SYM, INFO, MAXPAT...
 
+static void *ibv_lib_handle = nullptr;
+static void *mlx5_lib_handle = nullptr;
+
 int nvshmemt_ib_common_nv_peer_mem_available() {
     if (access("/sys/kernel/mm/memory_peers/nv_mem/version", F_OK) == 0) {
         return NVSHMEMX_SUCCESS;
@@ -524,12 +527,32 @@ out:
     return status;
 }
 
+static void nvshmemt_ibv_ftable_fini_wrapper(void) {
+    if (ibv_lib_handle) {
+        dlclose(ibv_lib_handle);
+        ibv_lib_handle = nullptr;
+    }
+}
+
+static void nvshmemt_mlx5dv_ftable_fini_wrapper(void) {
+    if (mlx5_lib_handle) {
+        dlclose(mlx5_lib_handle);
+        mlx5_lib_handle = nullptr;
+    }
+}
+
 int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_table *ftable,
                              int log_level) {
-    *ibv_handle = dlopen("libibverbs.so.1", RTLD_LAZY);
-    if (*ibv_handle == nullptr) {
-        INFO(log_level, "libibverbs not found on the system.");
-        return -1;
+    if (ibv_lib_handle != nullptr) {
+        *ibv_handle = ibv_lib_handle;
+    } else {
+        *ibv_handle = dlopen("libibverbs.so.1", RTLD_LAZY);
+        if (*ibv_handle == nullptr) {
+            INFO(log_level, "libibverbs not found on the system.");
+            return -1;
+        }
+        ibv_lib_handle = *ibv_handle;
+        atexit(nvshmemt_ibv_ftable_fini_wrapper);
     }
 
     LOAD_SYM(*ibv_handle, "ibv_fork_init", ftable->fork_init);
@@ -561,16 +584,22 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
 
 int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_function_table *ftable,
                                 int log_level) {
-    *mlx5dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
-    if (*mlx5dv_handle == nullptr) {
-        *mlx5dv_handle = dlopen("libmlx5.so.1", RTLD_LAZY);
-    }
-    if (*mlx5dv_handle == nullptr) {
-        INFO(log_level, "Failed to open libmlx5.so[.1]");
-        ftable->mlx5dv_internal_is_supported = nullptr;
-        ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-        ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
-        return -1;
+    if (mlx5_lib_handle != nullptr) {
+        *mlx5dv_handle = mlx5_lib_handle;
+    } else {
+        *mlx5dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
+        if (*mlx5dv_handle == nullptr) {
+            *mlx5dv_handle = dlopen("libmlx5.so.1", RTLD_LAZY);
+        }
+        if (*mlx5dv_handle == nullptr) {
+            INFO(log_level, "Failed to open libmlx5.so[.1]");
+            ftable->mlx5dv_internal_is_supported = nullptr;
+            ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+            ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+            return -1;
+        }
+        mlx5_lib_handle = *mlx5dv_handle;
+        atexit(nvshmemt_mlx5dv_ftable_fini_wrapper);
     }
     LOAD_SYM_VERSION(*mlx5dv_handle, "mlx5dv_is_supported", ftable->mlx5dv_internal_is_supported,
                      MLX5DV_VERSION);
@@ -583,24 +612,14 @@ int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_fun
 }
 
 void nvshmemt_ibv_ftable_fini(void **ibv_handle) {
-    int status;
-
     if (ibv_handle) {
-        status = dlclose(*ibv_handle);
-        if (status) {
-            NVSHMEMI_ERROR_PRINT("Unable to close libibverbs handle.");
-        }
+        *ibv_handle = nullptr;
     }
 }
 
 void nvshmemt_mlx5dv_ftable_fini(void **mlx5dv_handle) {
-    int status;
-
     if (mlx5dv_handle) {
-        status = dlclose(*mlx5dv_handle);
-        if (status) {
-            NVSHMEMI_ERROR_PRINT("Unable to close libmlx5dv handle.");
-        }
+        *mlx5dv_handle = nullptr;
     }
 }
 
