@@ -58,7 +58,7 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * size: Size of the shared memory region in bytes
  */
 __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
 
@@ -72,7 +72,7 @@ __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
             bases[block_id] = (uintptr_t)smem;
         }
     }
-#endif
+#endif /* __CUDA_ARCH__ >= 900 */
 }
 
 #ifdef __CUDA_ARCH__
