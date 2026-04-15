@@ -24,8 +24,7 @@ static void *ibv_lib_handle = nullptr;
 static void *mlx5_lib_handle = nullptr;
 
 /*
- * Dynamic GID detection for RoCE platforms
- * Adapted from NCCL: https://gitlab-master.nvidia.com/nccl/nccl/-/merge_requests/359
+ * Dynamic GID detection for RoCE platforms. Adapted from NCCL.
  */
 
 static sa_family_t env_ib_addr_family(int log_level, nvshmemi_options_s *options) {
@@ -219,7 +218,8 @@ static void update_gid_index(const struct nvshmemt_ibv_function_table *ftable,
             return;
         }
         int usrRoceVer = roceVer;
-        int gidRoceVerNum, gidRoceVerNumCandidate = -1;
+        int gidRoceVerNum = -1;
+        int gidRoceVerNumCandidate = -1;
         const char *deviceName = ftable->get_device_name(context->device);
         ib_roce_get_version_num(deviceName, portNum, *gidIndex, &gidRoceVerNum);
         ib_roce_get_version_num(deviceName, portNum, gidIndexCandidate, &gidRoceVerNumCandidate);

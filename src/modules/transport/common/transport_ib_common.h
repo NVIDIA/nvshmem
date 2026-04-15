@@ -268,7 +268,7 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
                                          struct ibv_device **dev_list, int num_devices);
 
 /* The following code is for dynamic GID detection for RoCE platforms.
-   It has been adapted from NCCL: https://gitlab-master.nvidia.com/nccl/nccl/-/merge_requests/359 */
+   It has been adapted from NCCL */
 int ib_roce_get_version_num(const char *deviceName, int portNum, int gidIndex, int *version);
 void ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct ibv_context *context,
                       uint8_t portNum, int gidTblLen, int *gidIndex, int log_level,
