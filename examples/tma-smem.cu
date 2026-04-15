@@ -25,8 +25,6 @@
  */
 
 #include <stdio.h>
-#include <assert.h>
-
 #include "bootstrap_helper.h"
 #include "nvshmem.h"
 #include "nvshmemx.h"

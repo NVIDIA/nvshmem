@@ -136,10 +136,14 @@ int main(int argc, char **argv) {
 
     {
         int *recv_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
+        if (!recv_data) {
+            printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
+            status = 1;
+            goto out;
+        }
         int *host = new int[NUM_ELEMS];
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
 
-        assert(recv_data);
         CUDA_CHECK(cudaFuncSetAttribute(test_put_from_smem,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
         CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * NUM_ELEMS));
@@ -166,10 +170,14 @@ int main(int argc, char **argv) {
         const int threads_per_block = 64;
         const int total_elems = num_blocks * threads_per_block;
         int *recv_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        if (!recv_data) {
+            printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
+            status = 1;
+            goto out;
+        }
         int *host = new int[total_elems];
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
 
-        assert(recv_data);
         CUDA_CHECK(cudaFuncSetAttribute(test_put_from_smem,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
         CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
