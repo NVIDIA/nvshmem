@@ -78,6 +78,12 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
 
     for (int i = 0; i < iter; i++) {
         for (size_t c = 0; c < n_chunks; c++) {
+            /* Clamp last chunk to the actual remaining bytes so the BW
+             * measurement is accurate when bytes_per_block < smem_size. */
+            size_t this_bytes = ((c + 1) * chunk <= bytes_per_block)
+                                    ? chunk
+                                    : (bytes_per_block - c * chunk);
+
             /* fence: makes smem writes visible to the TMA async proxy.
              * Required each chunk because in the real workload compute writes
              * new data to smem each iteration.  One fence per collective is
@@ -88,7 +94,7 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
 
             /* NBI put: elected leader issues cp.async.bulk from smem to
              * remote gmem; remote write proceeds asynchronously. */
-            nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, chunk, peer);
+            nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, this_bytes, peer);
 
             /* wait_group.read: waits for TMA to finish reading from smem so
              * smem can be safely overwritten for the next chunk.  The remote
