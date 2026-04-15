@@ -8,6 +8,7 @@
 #include <dlfcn.h>                                                         // for dlclose, dlerror
 #include <stdint.h>                                                        // for SIZE_MAX
 #include <stdio.h>                                                         // for snprintf, NULL
+#include <mutex>                                                           // for std::once_flag, std::call_once
 #include <stdlib.h>                                                        // for calloc
 #include <strings.h>                                                       // for strncasecmp
 #include "device_host/nvshmem_types.h"                                     // for nvshmemi_devi...
@@ -33,13 +34,34 @@
 #define DEVX_TRANSPORT_STRING "ibdevx"
 #define LIBFABRIC_TRANSPORT_STRING "libfabric"
 
-static void *transport_lib = NULL;
+static void *transport_lib = nullptr;
 #ifdef NVSHMEM_IBGDA_SUPPORT
-static void *transport_lib_IBGDA = NULL;
+static void *transport_lib_IBGDA = nullptr;
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
-static void *transport_lib_GPUNETIO = NULL;
+static void *transport_lib_GPUNETIO = nullptr;
 #endif
+
+static std::once_flag transport_lib_atexit_flag;
+
+static void nvshmemi_transport_lib_fini_wrapper(void) {
+    if (transport_lib) {
+        dlclose(transport_lib);
+        transport_lib = nullptr;
+    }
+#ifdef NVSHMEM_IBGDA_SUPPORT
+    if (transport_lib_IBGDA) {
+        dlclose(transport_lib_IBGDA);
+        transport_lib_IBGDA = nullptr;
+    }
+#endif
+#ifdef NVSHMEM_GPUNETIO_SUPPORT
+    if (transport_lib_GPUNETIO) {
+        dlclose(transport_lib_GPUNETIO);
+        transport_lib_GPUNETIO = nullptr;
+    }
+#endif
+}
 
 int nvshmemi_transport_show_info(nvshmemi_state_t *state) {
     int status = 0;
@@ -184,6 +206,8 @@ transport_init:
         WARN("Unable to open the %s transport. %s\n", transport_object_file, dlerror());
         goto transport_fail;
     }
+    std::call_once(transport_lib_atexit_flag,
+                   []() { atexit(nvshmemi_transport_lib_fini_wrapper); });
 
     init_fn = (nvshmemi_transport_init_fn)dlsym(transport_lib, "nvshmemt_init");
     if (!init_fn) {
@@ -439,24 +463,7 @@ int nvshmemi_transport_finalize(nvshmemi_state_t *state) {
         nvshmemi_transport_finalize_one(state, i);
     }
 
-    if (transport_lib) {
-        dlclose(transport_lib);
-        transport_lib = NULL;
-    }
-
-#ifdef NVSHMEM_IBGDA_SUPPORT
-    if (transport_lib_IBGDA) {
-        dlclose(transport_lib_IBGDA);
-        transport_lib_IBGDA = NULL;
-    }
-#endif
-
-#ifdef NVSHMEM_GPUNETIO_SUPPORT
-    if (transport_lib_GPUNETIO) {
-        dlclose(transport_lib_GPUNETIO);
-        transport_lib_GPUNETIO = NULL;
-    }
-#endif
+    // Transport library handles will be dlclosed in the atexit handler
 
     return status;
 }
