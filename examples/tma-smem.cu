@@ -46,34 +46,39 @@
 
 /*
  * Kernel that demonstrates giving shared memory to NVSHMEM and then
- * performing a put operation. When TMA is enabled and the architecture
- * supports it (SM90+), NVSHMEM can use the provided shared memory for
- * TMA-based transfers.
+ * performing a put operation from shared memory. When TMA is enabled and the
+ * architecture supports it (SM90+), NVSHMEM uses the provided shared memory as
+ * the source buffer for TMA-backed transfers to remote global memory.
  */
-__global__ void tma_smem_put_kernel(int *send_data, int *recv_data, int num_elems, int mype,
-                                    int npes) {
-    /* Step 1: Allocate dynamic shared memory and give it to NVSHMEM */
+__global__ void tma_smem_put_kernel(int *recv_data, int num_elems, int mype, int npes) {
     extern __shared__ char nvshmem_smem[];
-    int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-    nvshmemx_give_smem(nvshmem_smem, smem_size);
+    int *payload = (int *)nvshmem_smem;
+    int tid = threadIdx.x;
+
+    /* Step 1: Give shared memory to NVSHMEM for TMA-based transfers */
+    nvshmemx_give_smem(nvshmem_smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
     __syncthreads();
 
-    /* Step 2: Initialize send data */
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    /* Step 2: Fill shared memory with data to send */
     if (tid < num_elems) {
-        send_data[tid] = mype * 1000 + tid;
+        payload[tid] = mype * 1000 + tid;
     }
     __syncthreads();
 
-    /* Step 3: Put data to the next PE (ring pattern) */
+    /* Step 3: Fence to make smem stores visible to the TMA async proxy engine */
+#if __CUDA_ARCH__ >= 900
+    asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
+#endif
+
+    /* Step 4: Put from shared memory to remote PE's global memory */
     int peer = (mype + 1) % npes;
-    nvshmemx_int_put_nbi_block(recv_data, send_data, num_elems, peer);
+    nvshmemx_putmem_nbi_block(recv_data, nvshmem_smem, (size_t)num_elems * sizeof(int), peer);
     nvshmem_quiet();
 }
 
 int main(int c, char *v[]) {
     int mype, npes, mype_node;
-    int *send_data, *recv_data;
+    int *recv_data;
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     bool use_mpi = false;
@@ -100,10 +105,14 @@ int main(int c, char *v[]) {
     int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
     printf("[PE %d] NVSHMEM recommended shared memory: %d bytes\n", mype, smem_size);
 
-    /* Allocate symmetric memory */
-    send_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
+    /* Allocate symmetric memory for receive buffer */
     recv_data = (int *)nvshmem_malloc(sizeof(int) * NUM_ELEMS);
-    assert(send_data != NULL && recv_data != NULL);
+    if (!recv_data) {
+        fprintf(stderr, "[PE %d] nvshmem_malloc failed for %zu bytes\n", mype,
+                sizeof(int) * NUM_ELEMS);
+        nvshmem_finalize();
+        return 1;
+    }
 
     CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * NUM_ELEMS));
 
@@ -113,8 +122,8 @@ int main(int c, char *v[]) {
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
     }
 
-    /* Launch kernel with dynamic shared memory for NVSHMEM TMA */
-    tma_smem_put_kernel<<<1, NUM_ELEMS, smem_size>>>(send_data, recv_data, NUM_ELEMS, mype, npes);
+    /* Launch kernel: fill smem, give to NVSHMEM, put from smem to remote gmem */
+    tma_smem_put_kernel<<<1, NUM_ELEMS, smem_size>>>(recv_data, NUM_ELEMS, mype, npes);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -139,7 +148,6 @@ int main(int c, char *v[]) {
     }
 
     delete[] host;
-    nvshmem_free(send_data);
     nvshmem_free(recv_data);
     nvshmem_finalize();
 

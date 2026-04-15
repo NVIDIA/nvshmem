@@ -65,7 +65,10 @@ __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
     int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
     if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
-        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
+        /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
+         * warp_id broadcast — so the compiler sees a warp-uniform predicate and
+         * avoids inserting a peeling loop (which if(tid==0) would cause). */
+        if (nvshmemi_tma_block_is_elected()) {
             bases[block_id] = (uintptr_t)smem;
         }
     }

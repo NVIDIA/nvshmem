@@ -11,15 +11,24 @@
  */
 
 /*
- * Bandwidth benchmark for nvshmemx_putmem_nbi_block from CTA shared memory
- * to remote global memory, using NVSHMEM's TMA-backed NBI transfer path.
+ * Bandwidth benchmark for NVSHMEM TMA-backed NBI put from shared memory to
+ * remote global memory (smem -> remote gmem over NVLink).
  *
- * Source data is staged in shared memory (registered via nvshmemx_give_smem),
- * submitted in smem-sized chunks via nvshmemx_putmem_nbi_block, and completed
- * with nvshmem_quiet() at the end of each iteration.  Between chunks,
- * cp.async.bulk.wait_group.read 0 ensures smem is safe to reuse without
- * stalling the remote write pipeline.
+ * Models a warp-specialized kernel pattern where many threads fill smem with
+ * computed data, then a single elected leader issues a cp.async.bulk TMA put
+ * to ship it to the remote GPU.  The fill is amortized (done once before the
+ * timed loop) so the benchmark measures the irreducible per-chunk overhead:
  *
+ *   fence.proxy.async.shared::cta  -- make smem writes visible to TMA
+ *   nvshmemx_putmem_nbi_block      -- TMA reads smem, writes to remote gmem
+ *   cp.async.bulk.wait_group.read  -- wait for smem read to finish before reuse
+ *
+ * Both fence and wait_group.read are required each chunk:
+ *   fence:           needed whenever threads have written new data to smem
+ *   wait_group.read: needed to ensure TMA has read smem before it can be
+ *                    safely overwritten for the next chunk
+ *
+ * Speed-of-Light (SoL): ~55 GB/s per CTA (1 CTA, GB200 NVLink 5.0).
  * Requires NVSHMEM_TMA_POLICY=ENABLE and sm_90+ hardware.
  */
 
@@ -31,22 +40,23 @@
 #include "utils.h"
 
 /*
- * Each CTA independently fills its smem, issues NBI TMA puts for all
- * smem-sized chunks of its portion of the transfer, then quiets.
+ * Each CTA:
+ *   1. Registers its smem with NVSHMEM via give_smem (once per kernel launch).
+ *   2. Pre-fills smem (amortized; represents prior compute that produced data).
+ *   3. For each iteration and each smem-sized chunk of bytes_per_block:
+ *        a. fence.proxy.async.shared::cta  (make smem visible to TMA)
+ *        b. nvshmemx_putmem_nbi_block      (TMA: smem -> remote gmem, NBI)
+ *        c. cp.async.bulk.wait_group.read 0 (wait for smem read before reuse;
+ *                                            skipped after the last chunk)
+ *   4. nvshmem_quiet() + __syncthreads() to drain all in-flight remote writes.
  *
- * give_smem is called once before the iteration loop; the smem address is
- * stable across iterations within a single kernel invocation.
- *
- * cp.async.bulk group state is per-thread: only the thread that issued the
- * TMA op (the warp's elected leader via elect.sync) has a pending group.
- * nvshmem_quiet() is THREAD scope — it drains only the calling thread's
- * pending groups.  Calling it from every thread is safe: non-issuing threads
- * have no pending groups, so their commit_group + wait_group 0 are no-ops.
- * This avoids assuming that elect.sync always picks lane 0.
+ * The elected warp-0 leader (via elect.sync + __shfl_sync) issues all
+ * cp.async.bulk ops.  nvshmem_quiet() is called from all threads so the
+ * elected leader drains its own pending groups regardless of which lane
+ * elect.sync chose.
  */
 __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, int iter) {
     extern __shared__ char smem[];
-
     int tid     = threadIdx.x;
     int bid     = blockIdx.x;
     int nblocks = gridDim.x;
@@ -54,34 +64,35 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
     size_t bytes_per_block = bytes / nblocks;
     char  *block_dst       = dst + (size_t)bid * bytes_per_block;
 
-    /* Register this CTA's smem with NVSHMEM for TMA (once per kernel launch) */
+    /* Register smem with NVSHMEM for TMA (once per kernel launch) */
     nvshmemx_give_smem(smem, smem_size);
     __syncthreads();
 
-    size_t chunk    = (size_t)smem_size;
+    /* Pre-fill smem (amortized; simulates prior compute filling smem) */
+    size_t chunk = (size_t)smem_size;
+    for (int j = tid; j < (int)(chunk / sizeof(int)); j += blockDim.x)
+        ((int *)smem)[j] = tid;
+    __syncthreads();
+
     size_t n_chunks = (bytes_per_block + chunk - 1) / chunk;
 
     for (int i = 0; i < iter; i++) {
         for (size_t c = 0; c < n_chunks; c++) {
-            size_t this_bytes = (c < n_chunks - 1) ? chunk
-                                                   : (bytes_per_block - c * chunk);
-
-            /* Fill smem with identifiable data */
-            for (int j = tid; j < (int)(this_bytes / sizeof(int)); j += blockDim.x)
-                ((int *)smem)[j] = tid;
-            __syncthreads();
-
-            /* Make smem stores visible to the TMA async proxy before submitting */
+            /* fence: makes smem writes visible to the TMA async proxy.
+             * Required each chunk because in the real workload compute writes
+             * new data to smem each iteration.  One fence per collective is
+             * sufficient if smem is not modified between consecutive puts. */
 #if __CUDA_ARCH__ >= 900
             asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
 #endif
 
-            /* Submit NBI: cp.async.bulk + commit_group inside, no wait yet */
-            nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, this_bytes, peer);
+            /* NBI put: elected leader issues cp.async.bulk from smem to
+             * remote gmem; remote write proceeds asynchronously. */
+            nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, chunk, peer);
 
-            /* Between chunks: wait for smem READ to complete before reusing.
-             * Called from all threads: non-issuing threads have no pending
-             * groups so wait_group.read returns immediately for them. */
+            /* wait_group.read: waits for TMA to finish reading from smem so
+             * smem can be safely overwritten for the next chunk.  The remote
+             * write is still in flight.  Skipped after the last chunk. */
             if (c < n_chunks - 1) {
 #if __CUDA_ARCH__ >= 900
                 asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
@@ -90,10 +101,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
             }
         }
 
-        /* All chunks submitted; drain all warps' pending TMA groups.
-         * nvshmem_quiet() is THREAD scope; calling from every thread ensures
-         * each warp's elected leader drains its own groups, regardless of
-         * which lane elect.sync chose.  __syncthreads() orders the fence. */
+        /* Drain all in-flight remote writes.  Called from all threads so the
+         * elected leader (whichever lane elect.sync chose) drains its own
+         * pending cp.async.bulk groups. */
         nvshmem_quiet();
         __syncthreads();
     }
@@ -176,34 +186,29 @@ int main(int argc, char *argv[]) {
             print_table_basic("shmem_put_tma_smem_bw", "None", "size (Bytes)",
                               "BW", "GB/sec", '+', h_size_arr, h_bw, i);
         } else {
-            for (size_t size = min_size; size <= max_size; size *= step_factor) {
+            for (size_t size = min_size; size <= max_size; size *= step_factor)
                 nvshmem_barrier_all();
-            }
         }
 
         /* Optional correctness check: set NVSHMEM_PERFTEST_VERIFY=1 to enable.
-         * PE 0 sends one smem-sized chunk with a known pattern (element j gets
-         * value j % threads_per_block).  PE 1 checks its dst buffer against
-         * that pattern and prints PASS or FAIL. */
+         * PE 0 sends one smem-sized chunk (pre-filled: element j = j % threads).
+         * PE 1 checks the received buffer and reports PASS or FAIL. */
         if (getenv("NVSHMEM_PERFTEST_VERIFY")) {
-            size_t verify_size = (size_t)smem_size;  /* one chunk, no multi-chunk complexity */
+            size_t verify_size = (size_t)smem_size;
 
-            /* PE 1 fills its buffer with a canary so stale data can't mask failures */
             if (mype == 1)
                 CUDA_CHECK(cudaMemset(dst, 0xFF, verify_size));
             CUDA_CHECK(cudaDeviceSynchronize());
             nvshmem_barrier_all();
 
-            /* PE 0 transfers one chunk with the standard fill pattern */
             if (mype == 0) {
                 bw_smem_tma<<<1, max_threads, smem_size>>>(
                     dst, verify_size, smem_size, 1 /*peer*/, 1 /*iter*/);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaDeviceSynchronize());
             }
-            nvshmem_barrier_all();  /* ensure PE 1 has received the data */
+            nvshmem_barrier_all();
 
-            /* PE 1 copies and checks: element j should equal j % threads_per_block */
             if (mype == 1) {
                 int  n_ints = (int)(verify_size / sizeof(int));
                 int *h_buf  = (int *)malloc(verify_size);

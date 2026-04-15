@@ -17,6 +17,11 @@
 /*
  * Elect one leader from the active threads in the calling warp.
  * Returns true for exactly one thread.  Uses PTX elect.sync (sm_90+).
+ *
+ * NOTE: This elects a leader within the CALLING warp.  When used inside a
+ * multi-warp block, pair it with a warp_id == 0 guard (see
+ * nvshmemi_tma_block_is_elected below) to restrict the issue to one thread
+ * in the entire block.
  */
 __device__ __forceinline__ bool nvshmemi_tma_elect_warp() {
     uint32_t is_leader;
@@ -29,6 +34,29 @@ __device__ __forceinline__ bool nvshmemi_tma_elect_warp() {
         "}\n\t"
         : "=r"(is_leader));
     return (bool)is_leader;
+}
+
+/*
+ * Select exactly one thread across an entire CTA to issue a TMA operation.
+ * Matches the is_elected() pattern from the CUDA Programming Guide:
+ *
+ *   uint uniform_warp_id = __shfl_sync(0xffffffff, warp_id, 0);
+ *   return (uniform_warp_id == 0) && elect_sync(0xffffffff);
+ *
+ * The __shfl_sync broadcast makes the warp_id check compiler-visible as a
+ * warp-uniform value, preventing the compiler from inserting a peeling loop
+ * over all active threads (which causes warp serialization).  Using
+ * if (threadIdx.x == 0) alone is NOT sufficient for this reason.
+ *
+ * Call this from ALL threads in the block; returns true for exactly one.
+ */
+__device__ __forceinline__ bool nvshmemi_tma_block_is_elected() {
+    unsigned int tid = threadIdx.x + threadIdx.y * blockDim.x +
+                       threadIdx.z * blockDim.x * blockDim.y;
+    unsigned int warp_id = tid / warpSize;
+    /* Broadcast warp_id from lane 0 to make it a compiler-known uniform value */
+    unsigned int uniform_warp_id = __shfl_sync(0xffffffff, warp_id, 0);
+    return (uniform_warp_id == 0) && nvshmemi_tma_elect_warp();
 }
 
 /*
@@ -76,9 +104,11 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
  * Template parameters:
  *   SCOPE   - Threadgroup scope for the operation:
  *     THREAD - Single calling thread issues the entire transfer.
- *     WARP   - Lane 0 of the calling warp issues the transfer; warp syncs.
- *     BLOCK  - Transfer is striped across warps; each warp's lane 0 issues
- *              a chunk. Achieves higher throughput for large transfers.
+ *     WARP   - Elected leader of the calling warp issues the transfer; warp syncs.
+ *     BLOCK  - Elected leader of warp 0 issues the full transfer as a single
+ *              cp.async.bulk op; all threads sync via __syncthreads().
+ *              A single large op amortises per-op TMA latency better than
+ *              splitting the buffer across warps.
  *   BLOCKING - When true, waits for full completion (smem read + global write)
  *              before returning.  When false (NBI), returns immediately after
  *              issuing the transfer.
@@ -91,17 +121,16 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
  *   - The caller must issue fence.proxy.async.shared::cta before calling this
  *     function to make any prior shared-memory stores visible to the TMA async
  *     proxy engine.  Without this fence, the TMA engine may read stale data.
+ *     Note: a single fence before a sequence of puts is sufficient if smem is
+ *     not modified between puts (e.g. one fence per collective).
  *
  * For the non-blocking variant (BLOCKING=false):
  *   - To reuse the smem buffer for the next chunk before all remote writes
- *     complete: call cp.async.bulk.wait_group.read 0 (warp-level; one thread
- *     per warp suffices) followed by __syncthreads().  This waits only for the
- *     smem READ phase to finish, leaving the remote write in flight.
+ *     complete: call cp.async.bulk.wait_group.read 0 followed by
+ *     __syncthreads().  This waits only for the smem READ phase to finish,
+ *     leaving the remote write in flight.
  *   - For full completion (smem read + remote write both done): call
- *     nvshmemi_quiet<SCOPE>() or nvshmem_quiet() from the thread that issued
- *     the transfer.  nvshmem_quiet() is THREAD scope — for a multi-warp CTA
- *     using BLOCK-scope NBI, use nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>()
- *     so that every warp's in-flight groups are drained.
+ *     nvshmem_quiet() from every thread then __syncthreads().
  *
  * Returns 0 on success.
  */
@@ -130,41 +159,17 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
         }
         nvshmemi_threadgroup_sync<SCOPE>();
     } else if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
-        int block_size = blockDim.x * blockDim.y * blockDim.z;
-        int num_warps = (block_size + warpSize - 1) / warpSize;
-        int warp_id = tid / warpSize;
-
-        /* Divide transfer across warps, each chunk 16-byte aligned */
-        size_t base_chunk = (bytes / num_warps) & ~(size_t)15;
-
-        if (base_chunk >= 16) {
-            /* Multi-warp path: elected leader of each warp handles its chunk */
-            size_t offset = (size_t)warp_id * base_chunk;
-            size_t this_chunk =
-                (warp_id < num_warps - 1) ? base_chunk : (bytes - offset);
-
-            if (nvshmemi_tma_elect_warp() && offset < bytes) {
-                unsigned int smem_addr =
-                    nvshmemi_tma_cvta_to_shared((const char *)smem_src + offset);
-                nvshmemi_tma_bulk_shared_to_global((char *)gmem_dst + offset, smem_addr,
-                                                   (uint32_t)this_chunk);
-                nvshmemi_tma_bulk_commit_group();
-                if (BLOCKING) {
-                    nvshmemi_tma_bulk_wait_group_0();
-                    __threadfence_system();
-                }
-            }
-        } else {
-            /* Small transfer: elected leader of warp 0 handles everything */
-            if (tid < warpSize && nvshmemi_tma_elect_warp()) {
-                unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
-                nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
-                nvshmemi_tma_bulk_commit_group();
-                if (BLOCKING) {
-                    nvshmemi_tma_bulk_wait_group_0();
-                    __threadfence_system();
-                }
+        /* One elected thread across the entire block issues the full transfer
+         * as a single cp.async.bulk op.  nvshmemi_tma_block_is_elected() uses
+         * elect.sync + __shfl_sync so the compiler sees a warp-uniform predicate
+         * and does not insert a serialising peeling loop. */
+        if (nvshmemi_tma_block_is_elected()) {
+            unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
+            nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
+            nvshmemi_tma_bulk_commit_group();
+            if (BLOCKING) {
+                nvshmemi_tma_bulk_wait_group_0();
+                __threadfence_system();
             }
         }
         __syncthreads();
