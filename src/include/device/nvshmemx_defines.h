@@ -56,23 +56,22 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * issuing any TMA-backed puts.  CTAs that skip this call will fall back to
  * P2P stores for all puts in that kernel.
  *
- * User contract: call give_smem in every kernel that wants TMA; do not rely
- * on a previous kernel's registration persisting.  The smem base pointer is
- * stored persistently (it is used as the data buffer in the future gmem→gmem
- * TMA path), so stale entries from a prior kernel remain until overwritten.
- * A CTA that skips give_smem but whose block_id slot was written by an earlier
- * kernel will unexpectedly take the TMA path.
+ * User contract: every CTA that calls give_smem MUST call nvshmemx_release_smem()
+ * before the kernel returns.  Without this, the registration persists across
+ * kernel launches: a later kernel whose CTAs share block_ids with a prior kernel
+ * and omit give_smem will unexpectedly take the TMA path using a stale pointer.
  *
- * The registered smem region is used by NVSHMEM for:
- *   - smem→gmem: as the source buffer (current MR)
- *   - gmem→gmem: as the staging buffer for NVLink transfers (future MR)
+ * TODO: investigate automating the clear (e.g. via a pre-launch host helper or
+ * a CUDA graph epilogue) so users are not required to call release_smem manually.
+ *
+ * The registered smem base pointer is stored persistently because it will serve
+ * as the staging buffer in the upcoming gmem→gmem TMA path.  Until that path
+ * is implemented, it acts only as a presence gate (non-zero = TMA enabled for
+ * this CTA).
  *
  * Note: grids larger than NVSHMEMI_TMA_MAX_BLOCKS CTAs are supported, but
  * CTAs with block_id >= NVSHMEMI_TMA_MAX_BLOCKS cannot register and will
- * silently fall back to P2P stores (a warning is printed for the first such
- * block).
- *
- * After the call, the kernel must __syncthreads() before issuing TMA puts.
+ * fall back to P2P stores (a warning is printed by block 0 thread 0).
  *
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
@@ -100,6 +99,32 @@ __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
      * avoids inserting a peeling loop (which if(tid==0) would cause). */
     if (nvshmemi_tma_block_is_elected()) {
         bases[block_id] = (uintptr_t)smem;
+    }
+#endif /* __CUDA_ARCH__ >= 900 */
+}
+
+/*
+ * nvshmemx_release_smem - Deregister this CTA's shared memory from the NVSHMEM
+ * TMA runtime.
+ *
+ * Must be called by every CTA that previously called nvshmemx_give_smem(),
+ * before the kernel returns.  Zeroes the tma_smem_bases entry so that a later
+ * kernel whose CTAs share the same block_id does not inherit a stale pointer
+ * and unexpectedly take the TMA path.
+ *
+ * Call from all threads; only the elected warp-0 leader performs the write.
+ * Must be followed by __syncthreads() if any threads still need to observe
+ * the cleared state before proceeding.
+ */
+__device__ inline void nvshmemx_release_smem() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+    if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
+        if (nvshmemi_tma_block_is_elected()) {
+            bases[block_id] = 0;
+        }
     }
 #endif /* __CUDA_ARCH__ >= 900 */
 }

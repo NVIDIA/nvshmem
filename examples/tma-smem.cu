@@ -72,6 +72,9 @@ __global__ void tma_smem_put_kernel(int *recv_data, int num_elems, int mype, int
     int peer = (mype + 1) % npes;
     nvshmemx_putmem_nbi_block(recv_data, nvshmem_smem, (size_t)num_elems * sizeof(int), peer);
     nvshmem_quiet();
+
+    /* Step 5: Release smem registration so subsequent kernels start clean */
+    nvshmemx_release_smem();
 }
 
 int main(int c, char *v[]) {

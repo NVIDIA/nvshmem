@@ -107,6 +107,7 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
         nvshmem_quiet();
         __syncthreads();
     }
+    nvshmemx_release_smem();
 }
 
 int main(int argc, char *argv[]) {
