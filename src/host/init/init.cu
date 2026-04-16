@@ -17,8 +17,10 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <set>
+#include <algorithm>
 #include <list>
+#include <map>
+#include <set>
 
 #include "host/nvshmemx_api.h"
 #include "internal/host/nvmlwrap.h"
@@ -52,7 +54,7 @@
 extern __constant__ nvshmemi_device_host_state_t nvshmemi_device_state_d;
 struct nvshmemi_registered_state_info {
     int refcount;
-    size_t size;
+    size_t state_size;
 };
 
 static std::map<void *, nvshmemi_registered_state_info> registered_device_states;
@@ -132,20 +134,17 @@ static inline bool nvshmemi_is_version_compatible(const nvshmemi_version_t versi
 }
 
 static int register_state_ptr(void *common, size_t common_size, void *transport) {
-    if (registered_device_states.find(common) != registered_device_states.end()) {
-        auto it = registered_device_states.find(common);
+    auto it = registered_device_states.find(common);
+    if (it != registered_device_states.end()) {
         it->second.refcount++;
-        it->second.size = common_size;
     } else {
-        registered_device_states.emplace(
-            common, nvshmemi_registered_state_info{1, common_size});
+        registered_device_states.emplace(common, nvshmemi_registered_state_info{1, common_size});
     }
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
     if (transport != NULL) {
-        if (registered_transport_device_states.find(transport) !=
-            registered_transport_device_states.end()) {
-            auto it = registered_transport_device_states.find(transport);
+        auto it = registered_transport_device_states.find(transport);
+        if (it != registered_transport_device_states.end()) {
             it->second++;
         } else {
             registered_transport_device_states.emplace(transport, 1);
@@ -220,9 +219,12 @@ int nvshmemi_update_device_state() {
              ++it) {
             iter++;
             nvshmemi_device_host_state_t *device_state;
+            const auto &registered_state = it->second;
+            size_t copy_size =
+                std::min(registered_state.state_size, sizeof(nvshmemi_device_host_state_t));
             nvshmemi_get_device_state((void **)&device_state);
-            size_t copy_size = std::min(it->second.size, sizeof(nvshmemi_device_host_state_t));
-            status = cudaMemcpy((it->first), (void *)device_state, copy_size, cudaMemcpyHostToDevice);
+            status = cudaMemcpy(it->first, (void *)device_state, copy_size,
+                                cudaMemcpyHostToDevice);
             if (status) break;
         }
         num_initialized_device_states = iter;
@@ -260,20 +262,15 @@ static int unregister_state_ptr(void *common, void *transport) {
     nvshmemi_update_device_state();
 
     bool device_state_found = false;
-    for (auto it = registered_device_states.cbegin(); it != registered_device_states.cend();) {
-        auto tmp = registered_device_states.find(it->first);
-        if (it->first == common) {
-            if (tmp->second.refcount > 1) {
-                tmp->second.refcount--;
-            } else {
-                it = registered_device_states.erase(it);
-                num_initialized_device_states--;
-            }
-            device_state_found = true;
-            break;
+    auto device_state_it = registered_device_states.find(common);
+    if (device_state_it != registered_device_states.end()) {
+        if (device_state_it->second.refcount > 1) {
+            device_state_it->second.refcount--;
         } else {
-            ++it;
+            registered_device_states.erase(device_state_it);
+            num_initialized_device_states--;
         }
+        device_state_found = true;
     }
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
@@ -281,20 +278,14 @@ static int unregister_state_ptr(void *common, void *transport) {
     if (transport != NULL &&
         (nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA ||
          nvshmem_selected_device_transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI)) {
-        for (auto it = registered_transport_device_states.cbegin();
-             it != registered_transport_device_states.cend();) {
-            auto tmp = registered_transport_device_states.find(it->first);
-            if (tmp->first == transport) {
-                if (tmp->second > 1) {
-                    tmp->second--;
-                } else {
-                    it = registered_transport_device_states.erase(it);
-                }
-                transport_state_found = true;
-                break;
+        auto transport_state_it = registered_transport_device_states.find(transport);
+        if (transport_state_it != registered_transport_device_states.end()) {
+            if (transport_state_it->second > 1) {
+                transport_state_it->second--;
             } else {
-                ++it;
+                registered_transport_device_states.erase(transport_state_it);
             }
+            transport_state_found = true;
         }
         if (!transport_state_found && device_state_found) {
             NVSHMEMI_ERROR_PRINT(
