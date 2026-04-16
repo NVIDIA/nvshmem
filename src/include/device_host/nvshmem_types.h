@@ -568,9 +568,6 @@ typedef struct {
     bool nvshmemi_is_nvshmem_bootstrapped;
     nvshmemi_selected_device_transport_t selected_device_transport;
 
-    /* TMA fields — ABI break: struct grew from 776 to 800 bytes.
-     * TODO: consider adding reserved padding for future growth, or
-     * introducing a v2 struct to preserve backwards compatibility. */
     int tma_policy;              /* nvshmemx_tma_policy_t: TMA usage policy */
     uintptr_t *tma_smem_bases;   /* Per-CTA shared memory base pointers for TMA */
     size_t tma_smem_bases_len;   /* Number of entries in tma_smem_bases */

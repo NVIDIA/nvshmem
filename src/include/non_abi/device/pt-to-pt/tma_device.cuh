@@ -25,14 +25,13 @@
  */
 __device__ __forceinline__ bool nvshmemi_tma_elect_warp() {
     uint32_t is_leader;
-    asm volatile(
-        "{\n\t"
-        ".reg .pred elect_p;\n\t"
-        ".reg .u32  elect_id;\n\t"
-        "elect.sync elect_id|elect_p, 0xffffffff;\n\t"
-        "selp.u32 %0, 1, 0, elect_p;\n\t"
-        "}\n\t"
-        : "=r"(is_leader));
+    asm volatile(R"({
+.reg .pred elect_p;
+.reg .u32 elect_id;
+elect.sync elect_id|elect_p, 0xffffffff;
+selp.u32 %0, 1, 0, elect_p;
+})"
+                 : "=r"(is_leader));
     return (bool)is_leader;
 }
 
@@ -64,9 +63,11 @@ __device__ __forceinline__ bool nvshmemi_tma_block_is_elected() {
  */
 __device__ __forceinline__ unsigned int nvshmemi_tma_cvta_to_shared(const void *ptr) {
     unsigned int smem_addr;
-    asm("{ .reg .u64 smem_u64;"
-        "  cvta.to.shared.u64 smem_u64, %1;"
-        "  cvt.u32.u64 %0, smem_u64; }"
+    asm(R"({
+.reg .u64 smem_u64;
+cvta.to.shared.u64 smem_u64, %1;
+cvt.u32.u64 %0, smem_u64;
+})"
         : "=r"(smem_addr)
         : "l"((uint64_t)(uintptr_t)ptr));
     return smem_addr;
@@ -78,23 +79,23 @@ __device__ __forceinline__ unsigned int nvshmemi_tma_cvta_to_shared(const void *
 __device__ __forceinline__ void nvshmemi_tma_bulk_shared_to_global(void *gmem_dst,
                                                                    unsigned int smem_addr,
                                                                    uint32_t bytes) {
-    asm volatile("cp.async.bulk.global.shared::cta.bulk_group [%0], [%1], %2;\n"
+    asm volatile("cp.async.bulk.global.shared::cta.bulk_group [%0], [%1], %2;"
                  :
                  : "l"((uint64_t)(uintptr_t)gmem_dst), "r"(smem_addr), "r"(bytes)
                  : "memory");
 }
 
 __device__ __forceinline__ void nvshmemi_tma_bulk_commit_group() {
-    asm volatile("cp.async.bulk.commit_group;\n" ::: "memory");
+    asm volatile("cp.async.bulk.commit_group;" ::: "memory");
 }
 
 __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_read_0() {
-    asm volatile("cp.async.bulk.wait_group.read 0;\n" ::: "memory");
+    asm volatile("cp.async.bulk.wait_group.read 0;" ::: "memory");
 }
 
 /* Full completion wait: smem read AND global write both done. */
 __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
-    asm volatile("cp.async.bulk.wait_group 0;\n" ::: "memory");
+    asm volatile("cp.async.bulk.wait_group 0;" ::: "memory");
 }
 
 /*
@@ -148,8 +149,9 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
     if (bytes % 16 != 0) return -1;
     if (bytes > (size_t)UINT32_MAX) return -1;
 
+    const unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
+
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
-        unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
         nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
         nvshmemi_tma_bulk_commit_group();
         if (BLOCKING) {
@@ -158,7 +160,6 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
         }
     } else if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
         if (nvshmemi_tma_elect_warp()) {
-            unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
             nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
             nvshmemi_tma_bulk_commit_group();
             if (BLOCKING) {
@@ -173,7 +174,6 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
          * elect.sync + __shfl_sync so the compiler sees a warp-uniform predicate
          * and does not insert a serialising peeling loop. */
         if (nvshmemi_tma_block_is_elected()) {
-            unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
             nvshmemi_tma_bulk_shared_to_global(gmem_dst, smem_addr, (uint32_t)bytes);
             nvshmemi_tma_bulk_commit_group();
             if (BLOCKING) {
@@ -214,11 +214,9 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_read_0() {}
 __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {}
 
 template <threadgroup_t SCOPE, bool BLOCKING>
-__device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const void *smem_src,
-                                                        size_t bytes) {
-    (void)gmem_dst;
-    (void)smem_src;
-    (void)bytes;
+__device__ inline int nvshmemi_memcpy_tma_shared_global(void * /* gmem_dst */,
+                                                        const void * /* smem_src */,
+                                                        size_t /* bytes */) {
     return -1;
 }
 

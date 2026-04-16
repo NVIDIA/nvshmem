@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <vector>
 #include <cuda.h>
 #include "nvshmem.h"
 #include "nvshmemx.h"
@@ -142,7 +143,7 @@ int main(int argc, char **argv) {
             status = 1;
             goto out;
         }
-        int *host = new int[NUM_ELEMS];
+        std::vector<int> host(NUM_ELEMS);
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
 
         CUDA_CHECK(cudaFuncSetAttribute(test_put_from_smem,
@@ -155,14 +156,13 @@ int main(int argc, char **argv) {
         CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
-        CUDA_CHECK(cudaMemcpy(host, recv_data, sizeof(int) * NUM_ELEMS, cudaMemcpyDeviceToHost));
-        if (verify_recv_data(host, NUM_ELEMS, prev_pe) == 0) {
+        CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * NUM_ELEMS, cudaMemcpyDeviceToHost));
+        if (verify_recv_data(host.data(), NUM_ELEMS, prev_pe) == 0) {
             printf("[PE %d] PASS: single-block shared-memory put\n", mype);
         } else {
             status = 1;
         }
 
-        delete[] host;
         nvshmem_free(recv_data);
     }
 
@@ -176,7 +176,7 @@ int main(int argc, char **argv) {
             status = 1;
             goto out;
         }
-        int *host = new int[total_elems];
+        std::vector<int> host(total_elems);
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
 
         CUDA_CHECK(cudaFuncSetAttribute(test_put_from_smem,
@@ -190,14 +190,13 @@ int main(int argc, char **argv) {
         CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
-        CUDA_CHECK(cudaMemcpy(host, recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
-        if (verify_recv_data(host, total_elems, prev_pe) == 0) {
+        CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
+        if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
             printf("[PE %d] PASS: multi-block shared-memory put\n", mype);
         } else {
             status = 1;
         }
 
-        delete[] host;
         nvshmem_free(recv_data);
     }
 
