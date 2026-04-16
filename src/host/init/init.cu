@@ -50,7 +50,12 @@
 #include "internal/host/nvshmemi_mem_transport.hpp"
 
 extern __constant__ nvshmemi_device_host_state_t nvshmemi_device_state_d;
-static std::map<void *, int> registered_device_states;
+struct nvshmemi_registered_state_info {
+    int refcount;
+    size_t size;
+};
+
+static std::map<void *, nvshmemi_registered_state_info> registered_device_states;
 static std::set<nvshmemx_device_lib_init_cb> registered_device_state_cb;
 
 static void nvshmemi_init_debug(void);
@@ -126,12 +131,14 @@ static inline bool nvshmemi_is_version_compatible(const nvshmemi_version_t versi
     return 0;
 }
 
-static int register_state_ptr(void *common, void *transport) {
+static int register_state_ptr(void *common, size_t common_size, void *transport) {
     if (registered_device_states.find(common) != registered_device_states.end()) {
         auto it = registered_device_states.find(common);
-        it->second++;
+        it->second.refcount++;
+        it->second.size = common_size;
     } else {
-        registered_device_states.emplace(common, 1);
+        registered_device_states.emplace(
+            common, nvshmemi_registered_state_info{1, common_size});
     }
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
@@ -198,7 +205,8 @@ int nvshmemi_update_device_state() {
             continue;
         }
 
-        status = register_state_ptr(device_ptr, transport_device_ptr);
+        status = register_state_ptr(device_ptr, sizeof(nvshmemi_device_host_state_t),
+                                    transport_device_ptr);
 
         nvshmemi_init_counter++;
         device_ptr = NULL;
@@ -213,8 +221,8 @@ int nvshmemi_update_device_state() {
             iter++;
             nvshmemi_device_host_state_t *device_state;
             nvshmemi_get_device_state((void **)&device_state);
-            status = cudaMemcpy((it->first), (void *)device_state,
-                                sizeof(nvshmemi_device_host_state_t), cudaMemcpyHostToDevice);
+            size_t copy_size = std::min(it->second.size, sizeof(nvshmemi_device_host_state_t));
+            status = cudaMemcpy((it->first), (void *)device_state, copy_size, cudaMemcpyHostToDevice);
             if (status) break;
         }
         num_initialized_device_states = iter;
@@ -255,8 +263,8 @@ static int unregister_state_ptr(void *common, void *transport) {
     for (auto it = registered_device_states.cbegin(); it != registered_device_states.cend();) {
         auto tmp = registered_device_states.find(it->first);
         if (it->first == common) {
-            if (tmp->second > 1) {
-                tmp->second--;
+            if (tmp->second.refcount > 1) {
+                tmp->second.refcount--;
             } else {
                 it = registered_device_states.erase(it);
                 num_initialized_device_states--;
@@ -1172,7 +1180,8 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Unable to get device symbols.\n");
 
-    status = register_state_ptr(dev_state_ptr, transport_dev_state_ptr);
+    status = register_state_ptr(dev_state_ptr, sizeof(nvshmemi_device_host_state_t),
+                                transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Invalid context pointer passed to nvshmemid_hostlib_init_attr.\n");
 
@@ -1961,7 +1970,8 @@ out:
 }
 
 static int nvshmemi_cuobject_init_common(CUdeviceptr lib_dptr, size_t lib_size,
-                                         CUdeviceptr state_dptr, CUdeviceptr transport_dptr) {
+                                         CUdeviceptr state_dptr, size_t state_size,
+                                         CUdeviceptr transport_dptr) {
     int status = 0;
 
     nvshmemi_version_t module_nvshmem_version;
@@ -1985,7 +1995,7 @@ static int nvshmemi_cuobject_init_common(CUdeviceptr lib_dptr, size_t lib_size,
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    status = register_state_ptr((void *)state_dptr, (void *)transport_dptr);
+    status = register_state_ptr((void *)state_dptr, state_size, (void *)transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to register module/library state pointer. failed\n");
 
@@ -2018,7 +2028,8 @@ int nvshmemx_culibrary_init(CUlibrary library) {
         get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuLibraryGetGlobal), library);
 #endif
 
-    status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, transport_dptr);
+    status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, state_size,
+                                           transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize device state internal structures\n");
 out:
@@ -2042,7 +2053,8 @@ int nvshmemx_cumodule_init(CUmodule module) {
         get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuModuleGetGlobal), module);
 #endif
 
-    status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, transport_dptr);
+    status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, state_size,
+                                           transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize device state internal structures\n");
 out:

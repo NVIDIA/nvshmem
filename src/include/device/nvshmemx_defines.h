@@ -61,9 +61,6 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * kernel launches: a later kernel whose CTAs share block_ids with a prior kernel
  * and omit give_smem will unexpectedly take the TMA path using a stale pointer.
  *
- * TODO: investigate automating the clear (e.g. via a pre-launch host helper or
- * a CUDA graph epilogue) so users are not required to call release_smem manually.
- *
  * The registered smem base pointer is stored persistently because it will serve
  * as the staging buffer in the upcoming gmem→gmem TMA path.  Until that path
  * is implemented, it acts only as a presence gate (non-zero = TMA enabled for
