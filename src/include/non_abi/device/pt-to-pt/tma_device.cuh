@@ -200,6 +200,40 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, cons
     return nvshmemi_memcpy_tma_shared_global<SCOPE, false>(gmem_dst, smem_src, bytes);
 }
 
+#else
+
+/*
+ * Provide compile-time fallbacks for non-Hopper targets so call sites in the
+ * generic device path can be instantiated for the full arch matrix. Runtime
+ * gating in nvshmemi_tma_smem_registered() keeps these paths unreachable.
+ */
+__device__ __forceinline__ void nvshmemi_tma_bulk_commit_group() {}
+
+__device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_read_0() {}
+
+__device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {}
+
+template <threadgroup_t SCOPE, bool BLOCKING>
+__device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const void *smem_src,
+                                                        size_t bytes) {
+    (void)gmem_dst;
+    (void)smem_src;
+    (void)bytes;
+    return -1;
+}
+
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const void *smem_src,
+                                                        size_t bytes) {
+    return nvshmemi_memcpy_tma_shared_global<SCOPE, true>(gmem_dst, smem_src, bytes);
+}
+
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_shared_global_nbi(void *gmem_dst, const void *smem_src,
+                                                            size_t bytes) {
+    return nvshmemi_memcpy_tma_shared_global<SCOPE, false>(gmem_dst, smem_src, bytes);
+}
+
 #endif /* __CUDA_ARCH__ >= 900 */
 #endif /* __CUDA_ARCH__ */
 #endif /* TMA_DEVICE_CUH */
