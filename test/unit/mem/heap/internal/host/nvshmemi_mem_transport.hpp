@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #ifndef NVSHMEMI_MEM_TRANSPORT_HPP
 #define NVSHMEMI_MEM_TRANSPORT_HPP
 

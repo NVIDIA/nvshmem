@@ -1,4 +1,8 @@
 /*
+ * Copyright (c) 2020, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
  * OpenSHMEM shmem_team_translate example to verify the team formed by even
  * ranked PEs from SHMEM_TEAM_WORLD using the team created from
  * shmem_team_split_stride operation

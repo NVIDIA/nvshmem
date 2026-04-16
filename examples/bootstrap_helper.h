@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #ifndef _NVSHMEMI_EXAMPLES_BOOTSTRAP_HELPER_
 #define _NVSHMEMI_EXAMPLES_BOOTSTRAP_HELPER_
 

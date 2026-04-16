@@ -1,3 +1,5 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 """
 This is a Python implementation of the `reducescatter_on_stream` NVSHMEM Perftest
 

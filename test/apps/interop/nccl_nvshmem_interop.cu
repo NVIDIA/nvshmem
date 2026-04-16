@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include <stdio.h>
 #include <cuda.h>
 #include <nvshmem.h>

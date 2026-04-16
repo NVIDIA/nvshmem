@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #ifndef _NVSHMEMX_TILE_API_DEFINES_CUH_
 #define _NVSHMEMX_TILE_API_DEFINES_CUH_

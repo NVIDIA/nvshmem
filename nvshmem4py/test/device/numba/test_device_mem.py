@@ -1,3 +1,6 @@
+# Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import cupy as cp
 from cuda.core import Device
 import numba.cuda as cuda

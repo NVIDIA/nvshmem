@@ -1,3 +1,6 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 from numba import cuda
 import nvshmem.core
 from nvshmem.bindings.device.numba import my_pe, n_pes, put_signal_nbi, signal_wait_until

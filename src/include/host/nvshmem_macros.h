@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #ifndef _NVSHMEM_MACROS_H_
 #define _NVSHMEM_MACROS_H_

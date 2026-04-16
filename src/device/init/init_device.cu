@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 2017-2026, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
+ * Copyright (c) 2017-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef _NVSHMEM_INIT_DEVICE_CUH_
 #define _NVSHMEM_INIT_DEVICE_CUH_

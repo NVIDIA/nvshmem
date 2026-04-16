@@ -1,3 +1,6 @@
+# Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 from numba import cuda, int32
 from numba.core import types, cgutils
 from numba.np import arrayobj

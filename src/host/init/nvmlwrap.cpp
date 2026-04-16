@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #include "internal/host/nvmlwrap.h"
 #include <cuda.h>                                        // for CUDA_VERSION
 #include <dlfcn.h>                                       // for dlsym, dlclose, dlopen

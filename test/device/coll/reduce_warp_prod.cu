@@ -1,7 +1,6 @@
 /*
- *  Copyright (c) 2018, NVIDIA CORPORATION. All rights reserved.
- *
- *  See License.txt for license information
+ * Copyright (c) 2018, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 #define CUMODULE_NAME "reduce_warp_prod.cubin"
 

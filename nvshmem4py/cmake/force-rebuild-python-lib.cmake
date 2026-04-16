@@ -1,3 +1,6 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # When NVSHMEM_FORCE_REBUILD_PYTHON_LIB is ON, remove generated binding files
 # so that addCybind, addNumbast, and generateCuteBindings will run again.
 # This must run at configure time, before those modules are included.

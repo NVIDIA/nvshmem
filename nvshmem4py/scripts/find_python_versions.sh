@@ -1,3 +1,6 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 declare -A seen
 IFS=':' read -ra paths <<< "$PATH"
 for dir in "${paths[@]}"; do

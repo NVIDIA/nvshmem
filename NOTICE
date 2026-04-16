@@ -1,0 +1,28 @@
+NVSHMEM
+Copyright (c) 2016-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This product includes or references third-party components with their own
+license terms. See License.txt and any package-specific license files for
+additional third-party notices and attributions.
+
+The source tree includes third-party derived code and bundled headers from
+projects including:
+- Sandia OpenSHMEM / SOS
+- MPICH / PMI and PMI-2 code
+- MVAPICH2 PMI header material
+- rdma-core
+- DPDK
+- libfabric
+- dlmalloc
+
+Build-time, test-time, or optional runtime integrations referenced by this
+repository may also involve third-party components such as:
+- Open MPI / OpenSHMEM
+- PMIx
+- PMI-2 / Hydra
+- UCX
+- googletest
+
+Refer to License.txt and any package-specific license or copyright files for
+the corresponding notices and attribution text that apply to shipped source and
+binary artifacts.

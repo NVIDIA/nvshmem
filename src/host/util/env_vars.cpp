@@ -1,5 +1,6 @@
-/****
- * Copyright (c) 2016-2026, NVIDIA CORPORATION.  All rights reserved.
+/*
+ * Copyright (c) 2016-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Copyright 2011 Sandia Corporation. Under the terms of Contract
  * DE-AC04-94AL85000 with Sandia Corporation, the U.S.  Government
@@ -9,9 +10,7 @@
  * This software is available to you under the BSD license.
  *
  * Portions of this file are derived from Sandia OpenSHMEM.
- *
- * See License.txt for license information
- ****/
+ */
 
 #include <stdio.h>
 #include <stdlib.h>

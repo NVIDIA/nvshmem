@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #define CUMODULE_NAME "g_extended.cubin"
 #include <cstdio>
 #include <cuda.h>

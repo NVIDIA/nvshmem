@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2016-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #include <assert.h>                        // for assert
 #include <errno.h>                         // for errno
 #include <fcntl.h>                         // for O_RDWR, O_CREAT

@@ -1,3 +1,5 @@
+# Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 """
 This file is for init/fini tests for NVSHMEM4Py
 The reason it's separate from the basic sanity test is it needs to be launched in multiples.

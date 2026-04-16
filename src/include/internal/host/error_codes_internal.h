@@ -1,8 +1,7 @@
-/****
- * Copyright (c) 2017-2026, NVIDIA CORPORATION.  All rights reserved.
- *
- * See License.txt for license information
- ****/
+/*
+ * Copyright (c) 2017-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #ifndef NVSHMEM_ERROR_CODES_INTERNAL_H_
 #define NVSHMEM_ERROR_CODES_INTERNAL_H_

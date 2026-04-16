@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2020, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #ifndef TEST_TEAMS_H
 #define TEST_TEAMS_H
 

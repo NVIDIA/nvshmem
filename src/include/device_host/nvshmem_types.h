@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 #ifndef NVSHMEM_TYPES_H
 #define NVSHMEM_TYPES_H
 

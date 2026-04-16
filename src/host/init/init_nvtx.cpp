@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 2020-2026, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
+ * Copyright (c) 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "internal/host/nvshmem_nvtx.hpp"  // for nvtxOpt_t, ALLOC_OPT

@@ -3,7 +3,6 @@
  *  (C) 2001 by Argonne National Laboratory.
  *      See License.txt in top-level directory.
  */
-/*TODO: NVIDIA copyright*/
 
 #ifndef _SIMPLE_PMI_UTIL_H_
 #define _SIMPLE_PMI_UTIL_H_

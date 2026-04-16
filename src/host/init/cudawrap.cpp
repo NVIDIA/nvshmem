@@ -1,8 +1,7 @@
-/*************************************************************************
- * Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
- ************************************************************************/
+/*
+ * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #include <cuda.h>  // for CUresult
 #if CUDART_VERSION >= 11030

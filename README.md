@@ -25,6 +25,8 @@ Please see the following public links for information on building and working wi
 
 The maintainers of the NVSHMEM project can also be contacted by e-mail at nvshmem@nvidia.com
 
+Contributions use a DCO sign-off flow rather than a CLA. See CONTRIBUTING.md.
+
 Configuration file
 ******************
 

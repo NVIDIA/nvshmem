@@ -1,8 +1,7 @@
-/*************************************************************************
- * Copyright (c) 2016-2026, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
- ************************************************************************/
+/*
+ * Copyright (c) 2016-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #ifndef NCCL_SOCKET_UTILS_H_
 #define NCCL_SOCKET_UTILS_H_

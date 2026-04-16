@@ -1,8 +1,7 @@
-/****
- * Copyright (c) 2016-2021, NVIDIA Corporation.  All rights reserved.
- *
- * See COPYRIGHT for license information
- ****/
+/*
+ * Copyright (c) 2016-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 #include <cuda.h>
 #include <cuda_runtime.h>

@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 // This file should not depend on anything cuFFT-related / MPI / CUDA and should only rely on C++ +
 // STL
 #ifndef __TEST_CUFFTMPI_HELPERS_H__

@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef UTILS_INTERNAL

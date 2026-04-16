@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
- *
- * See COPYRIGHT for license information
+ * Copyright (c) 2016-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef __TILE_PT_TO_PT_CUH__
