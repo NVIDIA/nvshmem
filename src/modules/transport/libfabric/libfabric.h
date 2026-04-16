@@ -204,34 +204,23 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     }
 
     /**
-     * Mark a previously issued seq_num as complete, decremeting the pending
-     * acks counter for the category
-     */
-    void return_acked_seq_num(uint32_t seq_num) {
-        assert(seq_num != NVSHMEM_STAGED_AMO_SEQ_NUM);
-
-        uint32_t category = get_category(seq_num);
-
-        assert(pending_acks[category] > 0);
-        --pending_acks[category];
-    }
-
-    /**
-     * Mark a range of sequence numbers as complete, resulting from reciving a
-     * put ack. The sequence range ends with end_seq.
+     * Mark a range of sequence numbers as complete, resulting from reciving an
+     * ack. The sequence range ends with end_seq. Decrement pending_acks by
+     * count, ending at end_seq. Distributes the count across categories based
+     * on end_seq position.
      *
-     * We send an ack for every put_ack_freq puts. Therefore, a put ack for
-     * <end_seq> is an acknowledgement sequence numbers (end_seq - put_ack_freq + 1)
-     * to end_seq, inclusive. The wraparound case is also handled.
+     * The wraparound case is also handled.
      *
      * This code assumes the sequence range spans at most two categories. This
      * will be true as long as the index space is sufficiently larger than the
      * put ack frequency, as static asserted above.
      */
-    void return_acked_seq_num_range_for_put(uint32_t end_seq) {
+    void return_acked_range(uint32_t end_seq, uint32_t count) {
+        assert(count > 0);
         assert(end_seq != NVSHMEM_STAGED_AMO_SEQ_NUM);
 
-        uint32_t start_seq = (end_seq - put_ack_freq + 1) & sequence_mask;
+        uint32_t end_category = get_category(end_seq);
+        uint32_t end_index = get_index(end_seq);
 
         /* Note: in the wraparound case, the (start_seq, end_seq) range will
            include NVSHMEM_STAGED_AMO_SEQ_NUM, which is not used. The logic
@@ -239,26 +228,17 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
            (which is true as long as the index space is sufficiently large that
            we can only span two categories, as static-asserted above.) */
 
-        uint32_t start_category = get_category(start_seq);
-        uint32_t end_category = get_category(end_seq);
-
-        uint32_t num_indexes;
-        if (end_seq >= start_seq) {
-            num_indexes = end_seq - start_seq + 1;
+        if (end_index >= count - 1) {
+            /* All sequence numbers within the same category */
+            assert(pending_acks[end_category] >= count);
+            pending_acks[end_category] -= count;
         } else {
-            num_indexes = (NVSHMEM_STAGED_AMO_SEQ_NUM - start_seq + 1) + (end_seq + 1);
-        }
-
-        if (start_category == end_category) {
-            assert(pending_acks[start_category] >= num_indexes);
-            pending_acks[start_category] -= num_indexes;
-        } else {
-            uint32_t count_in_start_cat = (index_mask + 1) - get_index(start_seq);
-            uint32_t count_in_end_cat = get_index(end_seq) + 1;
-
+            /* Sequence numbers span two categories */
+            uint32_t count_in_end_cat = end_index + 1;
+            uint32_t count_in_start_cat = count - count_in_end_cat;
+            uint32_t start_category = (end_category - 1) & (num_categories - 1);
             assert(pending_acks[start_category] >= count_in_start_cat);
             assert(pending_acks[end_category] >= count_in_end_cat);
-
             pending_acks[start_category] -= count_in_start_cat;
             pending_acks[end_category] -= count_in_end_cat;
         }
