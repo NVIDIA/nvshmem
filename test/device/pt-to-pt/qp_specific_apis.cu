@@ -101,9 +101,8 @@ int main(int argc, char **argv) {
     }
     printf("qp indices are strided as expected\n");
 
-    finalize_wrapper();
-
 out:
+    finalize_wrapper();
     free(qp_handle_all);
     return status;
 }
