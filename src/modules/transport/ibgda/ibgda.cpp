@@ -80,30 +80,32 @@
 #define IBGDA_GPAGE_OFF (IBGDA_GPAGE_SIZE - 1)
 #define IBGDA_GPAGE_MASK (~(IBGDA_GPAGE_OFF))
 
-#define IBGDA_ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
-#define IBGDA_READ_ONCE(x) IBGDA_ACCESS_ONCE(x)
-#define IBGDA_WRITE_ONCE(x, v) (IBGDA_ACCESS_ONCE(x) = (v))
+static uint64_t ibgda_read_once(const uint64_t *p) {
+    return *static_cast<const volatile uint64_t *>(p);
+}
 
-#define IBGDA_MIN(x, y) ((x) < (y) ? (x) : (y))
-#define IBGDA_MAX(x, y) ((x) > (y) ? (x) : (y))
+static void ibgda_write_once(__be32 *p, uint32_t v) {
+    *static_cast<volatile __be32 *>(p) = v;
+}
 
-#define IBGDA_ROUND_UP(V, SIZE) (((V) + (SIZE) - 1) / (SIZE) * (SIZE))
+static void ibgda_write_once(__be64 *p, __be64 v) {
+    *static_cast<volatile __be64 *>(p) = v;
+}
 
-#define IBGDA_ROUND_UP_POW2(_n)                  \
-    ({                                           \
-        typeof(_n) pow2 = 0;                     \
-        assert((_n) >= 1);                       \
-        for (pow2 = 1; pow2 < (_n); pow2 <<= 1); \
-        pow2;                                    \
-    })
+static size_t ibgda_round_up(size_t v, size_t size) {
+    return ((v + size - 1) / size) * size;
+}
 
-#define IBGDA_ROUND_UP_POW2_OR_0(_n) (((_n) == 0) ? 0 : IBGDA_ROUND_UP_POW2(_n))
+static constexpr int ibgda_round_up_pow2(int n) {
+    assert(n >= 1);
+    int pow2 = 1;
+    while (pow2 < n) pow2 <<= 1;
+    return pow2;
+}
 
-#define IBGDA_ROUND_DOWN_POW2_OR_0(_n)                  \
-    ({                                                  \
-        typeof(_n) pow2 = IBGDA_ROUND_UP_POW2_OR_0(_n); \
-        (((_n) < pow2) ? pow2 / 2 : pow2);              \
-    })
+static constexpr int ibgda_round_up_pow2_or_0(int n) {
+    return (n == 0) ? 0 : ibgda_round_up_pow2(n);
+}
 
 template <typename T>
 inline T IBGDA_ILOG2(T _n) {
@@ -483,7 +485,7 @@ int ibgda_dci_progress(nvshmem_transport_t t) {
 #endif
             if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
             for (int i = 0; i < num_prod_idx_slots; ++i) {
-                prod_idx_snapshot[i] = IBGDA_READ_ONCE(prod_idx_array[i]);
+                prod_idx_snapshot[i] = ibgda_read_once(&prod_idx_array[i]);
             }
         } else {
             goto out;
@@ -505,9 +507,9 @@ int ibgda_dci_progress(nvshmem_transport_t t) {
                 ctrl_seg.qpn_ds = htobe32(ep->qpn << 8);
                 ctrl_seg.opmod_idx_opcode = htobe32(prod_idx << 8);
 
-                IBGDA_WRITE_ONCE(*dbrec, htobe32(prod_idx & 0xffff));
+                ibgda_write_once(dbrec, htobe32(prod_idx & 0xffff));
                 std::atomic_thread_fence(std::memory_order_release);
-                IBGDA_WRITE_ONCE(*bf, *((__be64 *)&ctrl_seg));
+                ibgda_write_once(bf, *((__be64 *)&ctrl_seg));
 
                 prod_idx_cache[i] = prod_idx;
             }
@@ -554,7 +556,7 @@ int ibgda_rc_progress(nvshmem_transport_t t) {
             } else
 #endif
                 if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
-                *prod_idx_snapshot = IBGDA_READ_ONCE(*prod_idx_buffer);
+                *prod_idx_snapshot = ibgda_read_once(prod_idx_buffer);
             } else {
                 goto out;
             }
@@ -567,9 +569,9 @@ int ibgda_rc_progress(nvshmem_transport_t t) {
                 ctrl_seg.qpn_ds = htobe32(ep->qpn << 8);
                 ctrl_seg.opmod_idx_opcode = htobe32(*prod_idx_snapshot << 8);
 
-                IBGDA_WRITE_ONCE(*dbrec, htobe32(*prod_idx_snapshot & 0xffff));
+                ibgda_write_once(dbrec, htobe32(*prod_idx_snapshot & 0xffff));
                 std::atomic_thread_fence(std::memory_order_release);
-                IBGDA_WRITE_ONCE(*bf, *((__be64 *)&ctrl_seg));
+                ibgda_write_once(bf, *((__be64 *)&ctrl_seg));
 
                 *prod_idx_cache = *prod_idx_snapshot;
             }
@@ -824,7 +826,7 @@ int nvshmemt_ibgda_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, s
 
         // Put lkeys in constant memory first for cache optimization
         memcpy(ibgda_device_state->constmem.lkeys, ibgda_device_lkeys.data(),
-               IBGDA_MIN(num_lkeys, NVSHMEMI_IBGDA_MAX_CONST_LKEYS) *
+               std::min<size_t>(num_lkeys, NVSHMEMI_IBGDA_MAX_CONST_LKEYS) *
                    sizeof(nvshmemi_ibgda_device_key_t));
 
         // If we have overflow, put the rest in global memory
@@ -925,7 +927,7 @@ static int ibgda_mobject_nic_map(struct ibgda_mem_object *mobject, struct ibv_co
         int fd = 0;
         struct mlx5dv_devx_umem_in umem_in = {};
         static const size_t host_page_size = sysconf(_SC_PAGESIZE);
-        size_t dmabuf_size = IBGDA_ROUND_UP(mobject->aligned.size, host_page_size);
+        size_t dmabuf_size = ibgda_round_up(mobject->aligned.size, host_page_size);
         CUCHECKGOTO(ibgda_cuda_syms,
                     cuMemGetHandleForAddressRange(&fd, (CUdeviceptr)addr, dmabuf_size,
                                                   CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
@@ -1033,7 +1035,7 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
 #ifdef NVSHMEM_USE_GDRCOPY
         if (use_gdrcopy) {
             status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)aligned_ptr,
-                                               IBGDA_ROUND_UP(size, IBGDA_GPAGE_SIZE), 0, 0,
+                                               ibgda_round_up(size, IBGDA_GPAGE_SIZE), 0, 0,
                                                &mobject->mh);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "gdrcopy pin_buffer failed \n");
@@ -1406,7 +1408,7 @@ static int ibgda_create_cq_mobjects(nvshmemt_ibgda_state_t *ibgda_state, struct 
     struct ibv_context *context = device->common_device.context;
 
     assert(ibgda_qp_depth > 0);
-    size_t num_cqe = IBGDA_ROUND_UP_POW2_OR_0(ibgda_qp_depth);
+    size_t num_cqe = ibgda_round_up_pow2_or_0(ibgda_qp_depth);
     size_t cq_buf_size = num_cqe * NVSHMEMI_IBGDA_CQE_SIZE;
 
     size_t dbr_buf_size = IBGDA_DBRSIZE;
@@ -1458,7 +1460,7 @@ static int ibgda_create_cq(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_cq 
         0,
     };
 
-    size_t num_cqe = IBGDA_ROUND_UP_POW2_OR_0(ibgda_qp_depth);
+    size_t num_cqe = ibgda_round_up_pow2_or_0(ibgda_qp_depth);
 
     struct ibgda_mem_object *cq_mobject;
     struct ibgda_mem_object *dbr_mobject;
@@ -1975,7 +1977,7 @@ static int ibgda_create_qp_shared_objects(struct ibgda_device *device) {
 
     struct ibv_context *context = device->common_device.context;
     struct ibv_pd *pd = device->common_device.pd;
-    size_t num_wqebb = IBGDA_ROUND_UP_POW2_OR_0(ibgda_qp_depth);
+    size_t num_wqebb = ibgda_round_up_pow2_or_0(ibgda_qp_depth);
     size_t wq_buf_size_per_qp = num_wqebb * MLX5_SEND_WQE_BB;  // num_wqebb is always a power of 2
 
     struct ibv_srq *srq = NULL;
@@ -2112,7 +2114,7 @@ static int ibgda_create_qp(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep 
 
     struct ibgda_cq *send_cq = NULL;
 
-    size_t num_wqebb = IBGDA_ROUND_UP_POW2_OR_0(ibgda_qp_depth);
+    size_t num_wqebb = ibgda_round_up_pow2_or_0(ibgda_qp_depth);
 
     int status = 0;
 
@@ -2688,7 +2690,7 @@ static int ibgda_copy_dct_gpu_data(nvshmemt_ibgda_state_t *ibgda_state,
 
     /* Cache DCTs in constant memory start */
     memcpy(ibgda_device_state_h->constmem.dcts, dct_h,
-           sizeof(*dct_h) * IBGDA_MIN(num_dct_handles, NVSHMEMI_IBGDA_MAX_CONST_DCTS));
+           sizeof(*dct_h) * std::min(num_dct_handles, NVSHMEMI_IBGDA_MAX_CONST_DCTS));
     /* Cache DCTs in constant memory end */
 
     /* Copy host side structs to device side structs start */
@@ -3363,7 +3365,7 @@ static int ibgda_setup_qp_groups_gpu_state(nvshmemt_ibgda_state_t *ibgda_state,
 
     /* Calculate QP groups start */
     if (num_rc_handles > 0) {
-        *num_qp_groups = IBGDA_MAX(num_rc_handles / n_devs_selected / n_pes, 2);
+        *num_qp_groups = std::max(num_rc_handles / n_devs_selected / n_pes, 2);
     } else {
         *num_qp_groups = num_dci_handles / n_devs_selected;
     }
@@ -3406,7 +3408,7 @@ static int ibgda_post_gpu_device_state(
     ibgda_device_state_h->num_exclusive_dcis = num_dci_handles - num_shared_dci_handles;
     ibgda_device_state_h->dci_map_type = dc_map_type;
     ibgda_device_state_h->ndcts_per_pe = num_dct_handles / n_devs_selected / n_pes;
-    ibgda_device_state_h->num_dct_groups = IBGDA_MAX(
+    ibgda_device_state_h->num_dct_groups = std::max<uint32_t>(
         ibgda_device_state_h->num_exclusive_dcis / (num_dct_handles / n_devs_selected), 1);
     ibgda_device_state_h->num_rc_per_pe = num_rc_handles / n_devs_selected / n_pes;
     ibgda_device_state_h->rc_map_type = rc_map_type;
@@ -4209,7 +4211,7 @@ int nvshmemt_ibgda_add_device_remote_mem_handles(nvshmem_transport_t t, int tran
     // For cache optimization, put rkeys in constant memory first.
     memcpy(
         ibgda_device_state->constmem.rkeys, ibgda_device_rkeys.data(),
-        IBGDA_MIN(num_rkeys, NVSHMEMI_IBGDA_MAX_CONST_RKEYS) * sizeof(nvshmemi_ibgda_device_key_t));
+        std::min<size_t>(num_rkeys, NVSHMEMI_IBGDA_MAX_CONST_RKEYS) * sizeof(nvshmemi_ibgda_device_key_t));
 
     // Put the rest that don't fit in constant memory in global memory
     if (num_rkeys > NVSHMEMI_IBGDA_MAX_CONST_RKEYS) {
@@ -4412,7 +4414,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     ibgda_qp_depth = options->QP_DEPTH;
     if (ibgda_qp_depth > 0) {
-        ibgda_qp_depth = IBGDA_ROUND_UP_POW2_OR_0(ibgda_qp_depth);
+        ibgda_qp_depth = ibgda_round_up_pow2_or_0(ibgda_qp_depth);
     }
     if (ibgda_qp_depth <= 0) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -4427,7 +4429,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     ibgda_num_requests_in_batch = options->IBGDA_NUM_REQUESTS_IN_BATCH;
     if (ibgda_num_requests_in_batch > 0) {
-        ibgda_num_requests_in_batch = IBGDA_ROUND_UP_POW2_OR_0(ibgda_num_requests_in_batch);
+        ibgda_num_requests_in_batch = ibgda_round_up_pow2_or_0(ibgda_num_requests_in_batch);
     }
     if (ibgda_num_requests_in_batch <= 0) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -4440,7 +4442,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     ibgda_num_fetch_slots_per_dci = options->IBGDA_NUM_FETCH_SLOTS_PER_DCI;
     if (ibgda_num_fetch_slots_per_dci > 0) {
-        ibgda_num_fetch_slots_per_dci = IBGDA_ROUND_UP_POW2_OR_0(ibgda_num_fetch_slots_per_dci);
+        ibgda_num_fetch_slots_per_dci = ibgda_round_up_pow2_or_0(ibgda_num_fetch_slots_per_dci);
     }
     if (ibgda_num_fetch_slots_per_dci <= 0) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -4449,7 +4451,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     ibgda_num_fetch_slots_per_rc = options->IBGDA_NUM_FETCH_SLOTS_PER_RC;
     if (ibgda_num_fetch_slots_per_rc > 0) {
-        ibgda_num_fetch_slots_per_rc = IBGDA_ROUND_UP_POW2_OR_0(ibgda_num_fetch_slots_per_rc);
+        ibgda_num_fetch_slots_per_rc = ibgda_round_up_pow2_or_0(ibgda_num_fetch_slots_per_rc);
     }
     if (ibgda_num_fetch_slots_per_rc <= 0) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,

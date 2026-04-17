@@ -233,7 +233,7 @@ int alltoall_calling_kernel(nvshmem_team_t team, void *dest, void *source, int m
 int main(int argc, char **argv) {
     int status = 0;
     int mype, array_size;
-    int __attribute__((unused)) npes;
+    [[maybe_unused]] int npes;
 
     read_args(argc, argv);
 
@@ -267,7 +267,6 @@ int main(int argc, char **argv) {
 
     mype = nvshmem_my_pe();
     npes = nvshmem_n_pes();
-    (void)npes;
     DEBUG_PRINT("SHMEM: [%d of %d] hello shmem world! \n", mype, npes);
     CUDA_CHECK(cudaStreamCreateWithFlags(&cstrm, cudaStreamNonBlocking));
 

@@ -341,7 +341,7 @@ static int test_bootstrap_preinit(char *plugin, bootstrap_handle_t *handle) {
     int status = 0;
     void *plugin_hdl = NULL;
     char *plugin_name = NULL;
-    int (*bootstrap_plugin_preinitops)(bootstrap_handle_t * handle, int nvshmem_version);
+    int (*bootstrap_plugin_preinitops)(bootstrap_handle_t *handle, int nvshmem_version);
     status = _test_bootstrap_init_helper(plugin, &plugin_hdl, &plugin_name);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
                           "Bootstrap library dlopen failed for %s\n", plugin);
@@ -752,24 +752,25 @@ int test_bootstrap(test_args_t *args) {
     }
 
     bootstrap_handle_t bstrap_handle = {};
-    nvshmemx_uniqueid_t *uid = nullptr;
     int is_initialized = 0;
 
     // Test for type = MPI, SHMEM, PMI, PMI2, PMIX, PLUGIN
-    NVSHMEM_TEST_API_CHECK(bstrap_dict.find(args->type) == bstrap_dict.end(),
-                           {
-                               status = TEST_BOOTSTRAP_INTERNAL_ERROR;
-                               return (status);
-                           },
-                           "Unsupported bootstrap method: %s\n", args->type.c_str());
+    NVSHMEM_TEST_API_CHECK(
+        bstrap_dict.find(args->type) == bstrap_dict.end(),
+        {
+            status = TEST_BOOTSTRAP_INTERNAL_ERROR;
+            return (status);
+        },
+        "Unsupported bootstrap method: %s\n", args->type.c_str());
 
     // Test for coll = ALLGATHER, ALLTOALL, BARRIER
-    NVSHMEM_TEST_API_CHECK(coll_dict.find(args->coll) == coll_dict.end(),
-                           {
-                               status = TEST_BOOTSTRAP_INTERNAL_ERROR;
-                               return (status);
-                           },
-                           "Unsupported collective: %s\n", args->coll.c_str());
+    NVSHMEM_TEST_API_CHECK(
+        coll_dict.find(args->coll) == coll_dict.end(),
+        {
+            status = TEST_BOOTSTRAP_INTERNAL_ERROR;
+            return (status);
+        },
+        "Unsupported collective: %s\n", args->coll.c_str());
 
     for (auto i = 0; i < args->test_iter; i++) {
         NVSHMEM_TEST_LOG_INFO("Running Test Iteration [%d/%ld] \n", i, args->test_iter);
@@ -878,8 +879,7 @@ int test_bootstrap(test_args_t *args) {
             case BOOTSTRAP_UID: {
                 bootstrap_attr_t type_args = {};
                 nvshmemx_uniqueid_args_t uid_args = NVSHMEMX_UNIQUEID_ARGS_INITIALIZER;
-                uid = (typeof(uid))calloc(1, sizeof(nvshmemx_uniqueid_t));
-                (*uid) = NVSHMEMX_UNIQUEID_INITIALIZER;
+                nvshmemx_uniqueid_t uid = NVSHMEMX_UNIQUEID_INITIALIZER;
                 char *plugin_lib = getenv("NVSHMEM_BOOTSTRAP_UID_PLUGIN");
                 const char *default_lib = "nvshmem_bootstrap_uid.so";
                 int root = 0; /* Use the first rank to be the root */
@@ -899,15 +899,15 @@ int test_bootstrap(test_args_t *args) {
                 MPI_Comm_size(MPI_COMM_WORLD, &(uid_args.nranks));
 #endif
                 if (uid_args.myrank == root) {
-                    status = bstrap_handle.pre_init_ops->get_unique_id((void *)uid);
+                    status = bstrap_handle.pre_init_ops->get_unique_id((void *)&uid);
                     NVSHMEMI_NZ_ERROR_JMP(status, -1, return_status,
                                           "Bootstrap Get UniqueID Failed\n");
                 }
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
-                MPI_Bcast(uid, sizeof(nvshmemx_uniqueid_t), MPI_UINT8_T, root, MPI_COMM_WORLD);
+                MPI_Bcast(&uid, sizeof(nvshmemx_uniqueid_t), MPI_UINT8_T, root, MPI_COMM_WORLD);
 #endif
-                uid_args.id = uid;
+                uid_args.id = &uid;
                 type_args.uid_args = (void *)&(uid_args);
                 if (plugin_lib) {
                     status |= test_bootstrap_all(plugin_lib, coll_dict[args->coll],
@@ -933,10 +933,6 @@ int test_bootstrap(test_args_t *args) {
 #endif
 
 return_status:
-    if (uid) {
-        free(uid);
-    }
-
     return (status);
 }
 
