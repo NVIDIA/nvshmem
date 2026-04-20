@@ -8,7 +8,6 @@
 
 #include <climits>
 #include <cstdlib>
-#include <cstdbool>
 #include <cuda.h>
 #include <memory>
 #include <tuple>

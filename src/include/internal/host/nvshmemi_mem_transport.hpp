@@ -7,7 +7,6 @@
 #define NVSHMEMI_MEM_TRANSPORT_HPP
 
 #include <cstdlib>
-#include <cstdbool>
 #include <climits>
 #include <memory>
 #include <map>
@@ -45,9 +44,7 @@ class nvshmemi_mem_p2p_transport final {
 
     void print_mem_handle(int pe_id, int transport_idx, nvshmemi_symmetric_heap &obj);
 
-    struct nvml_function_table *get_nvml_ftable(void) {
-        return &nvml_ftable_;
-    }
+    struct nvml_function_table *get_nvml_ftable(void) { return &nvml_ftable_; }
     CUmemAllocationHandleType get_mem_handle_type(void) const { return nvshmemi_mem_handle_type_; }
     bool is_mnnvl_fabric(void) const { return nvshmemi_has_mnnvl_fabric_; }
     bool is_initialized(void) const { return !errored_on_initialization_; }

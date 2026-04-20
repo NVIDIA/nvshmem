@@ -8,7 +8,6 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 #include <cstdlib>
-#include <cstdbool>
 #include <climits>
 #include <memory>
 #include <map>
@@ -84,7 +83,7 @@ class nvshmemi_mem_p2p_transport {
     static void *nvml_handle_;
     std::map<nvshmemi_symmetric_heap *, std::unique_ptr<int>> heap_base_storage_;
     std::map<nvshmemi_symmetric_heap *, std::unique_ptr<int>> peer_heap_base_p2p_storage_;
-    explicit nvshmemi_mem_p2p_transport(int mype, int npes){};
+    explicit nvshmemi_mem_p2p_transport(int mype, int npes) {};
     static nvshmemi_mem_p2p_transport *p2p_objref_;  // singleton instance
 };
 
@@ -124,7 +123,7 @@ class nvshmemi_mem_remote_transport {
                  int(nvshmem_mem_handle_t *handles, nvshmemi_symmetric_heap &obj));
 
    private:
-    explicit nvshmemi_mem_remote_transport(void){};
+    explicit nvshmemi_mem_remote_transport(void) {};
     static nvshmemi_mem_remote_transport *remote_objref_;  // singleton instance
 };
 
