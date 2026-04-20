@@ -210,8 +210,8 @@ int gdrcopy_amo_ack(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t
     do {
         status = fi_writedata(
             ep.endpoint, resp_op, 0, fi_mr_desc(libfabric_state->mrs[ep.domain_index]), imm_data,
-            dest_addr, (uint64_t)libfabric_state->remote_addr_staged_amo_ack[pe],
-            libfabric_state->rkey_staged_amo_ack[rkey_index], &resp_op->ofi_context);
+            dest_addr, static_cast<uint64_t>(libfabric_state->peer_amo_ack_addrs[pe]),
+            libfabric_state->peer_amo_ack_rkeys[rkey_index], &resp_op->ofi_context);
     } while (try_again(transport, &status, &num_retries,
                        NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDRCOPY_AMO_ACK, ep.qp_index,
                        progress_type::CompletionsOnly));
@@ -1947,51 +1947,43 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
     /* Exchange a pre-registered write w/imm target for staged_amo acks */
     if (state->use_staged_atomics) {
-        state->remote_addr_staged_amo_ack = (void **)calloc(sizeof(void *), t->n_pes);
-        NVSHMEMI_NULL_ERROR_JMP(state->remote_addr_staged_amo_ack, status,
-                                NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "Unable to allocate remote address array for staged atomic ack.\n");
+        state->peer_amo_ack_addrs.assign(t->n_pes, 0);
+        state->peer_amo_ack_rkeys.assign(
+            static_cast<size_t>(t->n_pes) * state->domains.size(), 0);
 
-        state->rkey_staged_amo_ack =
-            (uint64_t *)calloc(sizeof(uint64_t), t->n_pes * state->domains.size());
-        NVSHMEMI_NULL_ERROR_JMP(state->rkey_staged_amo_ack, status, NVSHMEMX_ERROR_OUT_OF_MEMORY,
-                                out, "Unable to allocate rkey array for staged atomic ack.\n");
-
-        status = cudaMalloc(&state->remote_addr_staged_amo_ack[t->my_pe], sizeof(int));
+        void *raw_ack_buf = nullptr;
+        status = cudaMalloc(&raw_ack_buf, sizeof(int));
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to allocate CUDA memory for staged atomic ack.\n");
+        state->local_amo_ack_dev_buf.reset(raw_ack_buf);
+        state->peer_amo_ack_addrs[t->my_pe] = reinterpret_cast<uintptr_t>(raw_ack_buf);
 
         for (size_t i = 0; i < state->domains.size(); i++) {
-            status = fi_mr_reg(state->domains[i], state->remote_addr_staged_amo_ack[t->my_pe],
-                               sizeof(int), FI_REMOTE_WRITE, 0, 0, 0, &mr, NULL);
+            status = fi_mr_reg(state->domains[i], state->local_amo_ack_dev_buf.get(), sizeof(int),
+                               FI_REMOTE_WRITE, 0, 0, 0, &mr, NULL);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "Failed to register EFA msg buffer: %d: %s\n", status,
                                   fi_strerror(status * -1));
-            state->rkey_staged_amo_ack[t->my_pe * state->domains.size() + i] = fi_mr_key(mr);
+            state->peer_amo_ack_rkeys[t->my_pe * state->domains.size() + i] = fi_mr_key(mr);
             state->mr_staged_amo_acks.push_back(mr);
         }
 
-        status = t->boot_handle->allgather(&state->remote_addr_staged_amo_ack[t->my_pe],
-                                           state->remote_addr_staged_amo_ack, sizeof(void *),
+        status = t->boot_handle->allgather(&state->peer_amo_ack_addrs[t->my_pe],
+                                           state->peer_amo_ack_addrs.data(), sizeof(uintptr_t),
                                            t->boot_handle);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Failed to gather remote addresses.\n");
 
         status = t->boot_handle->allgather(
-            &state->rkey_staged_amo_ack[t->my_pe * state->domains.size()],
-            state->rkey_staged_amo_ack, sizeof(uint64_t) * state->domains.size(), t->boot_handle);
+            &state->peer_amo_ack_rkeys[t->my_pe * state->domains.size()],
+            state->peer_amo_ack_rkeys.data(), sizeof(uint64_t) * state->domains.size(),
+            t->boot_handle);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Failed to gather remote keys.\n");
     }
 
 out:
     if (status != 0) {
-        if (state->remote_addr_staged_amo_ack) {
-            if (state->remote_addr_staged_amo_ack[t->my_pe])
-                cudaFree(state->remote_addr_staged_amo_ack[t->my_pe]);
-            free(state->remote_addr_staged_amo_ack);
-        }
-        if (state->rkey_staged_amo_ack) free(state->rkey_staged_amo_ack);
         for (size_t i = 0; i < state->mr_staged_amo_acks.size(); i++)
             fi_close(&state->mr_staged_amo_acks[i]->fid);
         for (size_t i = 0; i < state->eps.size(); i++) {
@@ -2020,12 +2012,15 @@ out_already_connected:
 }
 
 static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
-    nvshmemt_libfabric_state_t *libfabric_state;
     int status;
 
     assert(transport);
 
-    libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    /* Take ownership of the state so destruction runs automatically at function exit. */
+    std::unique_ptr<nvshmemt_libfabric_state_t> libfabric_state_owner(
+        static_cast<nvshmemt_libfabric_state_t *>(transport->state));
+    transport->state = nullptr;
+    nvshmemt_libfabric_state_t *libfabric_state = libfabric_state_owner.get();
 
     if (transport->device_pci_paths) {
         for (int i = 0; i < transport->n_devices; i++) {
@@ -2088,12 +2083,6 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
         }
     }
 
-    if (libfabric_state->remote_addr_staged_amo_ack) {
-        if (libfabric_state->remote_addr_staged_amo_ack[transport->my_pe])
-            cudaFree(libfabric_state->remote_addr_staged_amo_ack[transport->my_pe]);
-        free(libfabric_state->remote_addr_staged_amo_ack);
-    }
-    if (libfabric_state->rkey_staged_amo_ack) free(libfabric_state->rkey_staged_amo_ack);
     for (size_t i = 0; i < libfabric_state->mr_staged_amo_acks.size(); i++) {
         status = fi_close(&libfabric_state->mr_staged_amo_acks[i]->fid);
         if (status) {
@@ -2134,7 +2123,7 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
         }
     }
 
-    free(libfabric_state);
+    libfabric_state_owner.reset();
     free(transport);
 
     return 0;
@@ -2288,6 +2277,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     nvshmemt_libfabric_state_t *libfabric_state = NULL;
     nvshmem_transport_t transport = NULL;
     int status = 0;
+    std::unique_ptr<nvshmemt_libfabric_state_t> libfabric_state_owner;
 
     if (NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version) != NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION) {
         NVSHMEMI_ERROR_PRINT(
@@ -2301,11 +2291,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     NVSHMEMI_NULL_ERROR_JMP(transport, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate memory for libfabric transport.");
 
-    libfabric_state = (nvshmemt_libfabric_state_t *)calloc(1, sizeof(*libfabric_state));
-    NVSHMEMI_NULL_ERROR_JMP(libfabric_state, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for libfabric transport state.");
+    libfabric_state_owner = std::make_unique<nvshmemt_libfabric_state_t>();
+    libfabric_state = libfabric_state_owner.get();
     libfabric_state->table = table;
-    transport->state = libfabric_state;
+    /* Transfer ownership to transport; finalize() reclaims it via unique_ptr. */
+    transport->state = libfabric_state_owner.release();
 
     transport->host_ops.can_reach_peer = nvshmemt_libfabric_can_reach_peer;
     transport->host_ops.connect_endpoints = nvshmemt_libfabric_connect_endpoints;

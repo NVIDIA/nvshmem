@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <utility>
 #include <memory>
+#include <cuda_runtime.h>
 #include "rdma/fabric.h"
 
 // IWYU pragma: no_include <bits/stdint-uintn.h>
@@ -257,10 +258,15 @@ class threadSafeOpQueue {
        private:
         std::mutex mtx;
         bool should_lock;
+
        public:
         explicit conditional_mutex(bool locking_required) : should_lock(locking_required) {}
-        void lock() { if (should_lock) mtx.lock(); }
-        void unlock() noexcept { if (should_lock) mtx.unlock(); }
+        void lock() {
+            if (should_lock) mtx.lock();
+        }
+        void unlock() noexcept {
+            if (should_lock) mtx.unlock();
+        }
     };
 
     conditional_mutex send_mutex;
@@ -355,7 +361,8 @@ class threadSafeOpQueue {
         }
     }
 
-    void putToRecv(nvshmemt_libfabric_gdr_op_ctx_t *elem, nvshmemt_libfabric_recv_type_t recv_type) {
+    void putToRecv(nvshmemt_libfabric_gdr_op_ctx_t *elem,
+                   nvshmemt_libfabric_recv_type_t recv_type) {
         if (recv_type == NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK) {
             const std::lock_guard<conditional_mutex> lg{ack_recv_mutex};
             ack_recv.push_back(elem);
@@ -369,6 +376,13 @@ class threadSafeOpQueue {
     }
 };
 
+struct cuda_device_deleter {
+    void operator()(void *p) const noexcept {
+        if (p) cudaFree(p);
+    }
+};
+using cuda_device_ptr = std::unique_ptr<void, cuda_device_deleter>;
+
 /*
  * Each index of the vectors contain a domain-specific resource. Host domain resources are first,
  * proceeded by proxy domain resources. The number of each domain type is specified by
@@ -379,8 +393,10 @@ class threadSafeOpQueue {
  * in the future. That is, it may be the case that eps.size() != devices.size(). The domain index
  * of an endpoint is stored directly in nvshmemt_libfabric_endpoint_t (domain_index).
  */
-typedef struct {
-    struct fi_info *all_prov_info;
+struct nvshmemt_libfabric_state_t {
+    /* Copy and move are implicitly deleted by std::recursive_mutex/std::unique_ptr members. */
+
+    struct fi_info *all_prov_info = nullptr;
     std::vector<struct fi_info *> prov_infos;
     std::vector<struct fid_fabric *> fabrics;
     std::vector<struct fid_domain *> domains;
@@ -391,34 +407,39 @@ typedef struct {
     std::vector<struct fid_mr *> local_mrs;
     std::vector<uint64_t> local_mr_keys;
     std::vector<void *> local_mr_descs;
-    void *local_mem_ptr;
+    void *local_mem_ptr = nullptr;
 
     std::vector<nvshmemt_libfabric_domain_name_t> domain_names;
-    nvshmemt_libfabric_provider provider;
-    int log_level;
-    struct nvshmemi_cuda_fn_table *table;
-    struct transport_mem_handle_info_cache *cache;
+    nvshmemt_libfabric_provider provider{};
+    int log_level = 0;
+    struct nvshmemi_cuda_fn_table *table = nullptr;
+    struct transport_mem_handle_info_cache *cache = nullptr;
 
     /* Required for multi-rail */
-    int num_host_domains;
-    int num_proxy_domains;
-    int num_selected_devs;
-    int max_nic_per_pe;
-    uint32_t proxy_ep_cntr;
+    int num_host_domains = 0;
+    int num_proxy_domains = 0;
+    int num_selected_devs = 0;
+    int max_nic_per_pe = 0;
+    uint32_t proxy_ep_cntr = 0;
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;
     std::vector<std::vector<nvshmemt_libfabric_gdr_op_ctx_t>> recv_buf;
     std::vector<struct fid_mr *> mrs;
     std::vector<struct fid_mr *> mr_staged_amo_acks;
-    void **remote_addr_staged_amo_ack;
-    uint64_t *rkey_staged_amo_ack;
+
+    /* Local staged-amo ack device buffer (owning, sizeof(int) on device). */
+    cuda_device_ptr local_amo_ack_dev_buf;
+    /* Peer staged-amo ack remote addresses — one per PE (non-owning). */
+    std::vector<uintptr_t> peer_amo_ack_addrs;
+    /* Peer staged-amo ack rkeys — n_pes * domains.size() (non-owning). */
+    std::vector<uint64_t> peer_amo_ack_rkeys;
 
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
     std::recursive_mutex gdrRecvMutex;
-} nvshmemt_libfabric_state_t;
+};
 
 typedef struct {
     struct fid_mr *mr;
