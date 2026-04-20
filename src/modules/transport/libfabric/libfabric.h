@@ -394,7 +394,7 @@ using cuda_device_ptr = std::unique_ptr<void, cuda_device_deleter>;
  * of an endpoint is stored directly in nvshmemt_libfabric_endpoint_t (domain_index).
  */
 struct nvshmemt_libfabric_state_t {
-    /* Copy and move are implicitly deleted by std::recursive_mutex/std::unique_ptr members. */
+    /* Copy and move are implicitly deleted by std::mutex/std::unique_ptr members. */
 
     struct fi_info *all_prov_info = nullptr;
     std::vector<struct fi_info *> prov_infos;
@@ -438,7 +438,7 @@ struct nvshmemt_libfabric_state_t {
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
-    std::recursive_mutex gdrRecvMutex;
+    std::mutex gdrRecvMutex;
 };
 
 typedef struct {

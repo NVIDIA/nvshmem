@@ -104,8 +104,8 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
                                                     nvshmemt_libfabric_endpoint_t &ep,
                                                     const struct fi_cq_data_entry &entry,
                                                     const fi_addr_t &addr);
-static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index,
-                                       progress_type prog_type);
+static int drain_completions(nvshmem_transport_t transport, int qp_index);
+static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index);
 
 namespace {
 /* Internal functions */
@@ -180,7 +180,17 @@ int try_again(nvshmem_transport_t transport, int *status, uint64_t *num_retries,
             return 0;
         }
         (*num_retries)++;
-        *status = nvshmemt_libfabric_progress(transport, qp_index, prog_type);
+        /*
+         * CompletionsOnly is used by retries originating from inside
+         * nvshmemt_libfabric_gdr_process_amos, which already holds gdrRecvMutex.
+         * Those retries must not re-enter the top-level progress (would deadlock
+         * / hit try_lock UB on the non-recursive mutex).
+         */
+        if (prog_type == progress_type::All) {
+            *status = nvshmemt_libfabric_progress(transport, qp_index);
+        } else {
+            *status = drain_completions(transport, qp_index);
+        }
     }
 
     if (*status != 0) {
@@ -495,8 +505,13 @@ static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, 
     return 0;
 }
 
-static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index,
-                                       progress_type prog_type) {
+/*
+ * Drain CQ completions and (for EFA) any pending staged-amo acks.
+ * Does not acquire gdrRecvMutex; does not call nvshmemt_libfabric_progress.
+ * Safe to call while the current thread already holds gdrRecvMutex
+ * (this is the path used by try_again from inside gdr_process_amos).
+ */
+static int drain_completions(nvshmem_transport_t transport, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
     int ep_start_idx;
     int ep_end_idx;
@@ -530,24 +545,43 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
         status = nvshmemt_libfabric_gdr_process_amos_ack(transport, qp_index);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unable to process amo acks: %d.\n", status);
-
-        if (prog_type == progress_type::All) {
-            std::unique_lock<std::recursive_mutex> lock{libfabric_state->gdrRecvMutex, std::try_to_lock};
-            if (lock.owns_lock()) {
-                status = nvshmemt_libfabric_gdr_process_amos(transport, qp_index);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "Unable to process amos: %d.\n", status);
-            }
-        }
     }
 
 out:
     return status;
 }
 
+/*
+ * Top-level progress: drains completions, then opportunistically drains the
+ * staged-amo queue under gdrRecvMutex. Non-recursive.
+ *
+ * Precondition: the calling thread must NOT already hold gdrRecvMutex
+ * (std::mutex::try_lock is UB on a mutex the current thread owns).
+ * In practice, the mutex is only held inside nvshmemt_libfabric_gdr_process_amos;
+ * retries from there call drain_completions directly via try_again.
+ */
+static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index) {
+    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    int status = drain_completions(transport, qp_index);
+    if (status) return status;
+
+    if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+        int effective_qp = libfabric_state->use_auto_progress ? qp_index : NVSHMEMX_QP_ALL;
+        if (std::unique_lock<std::mutex> lock{libfabric_state->gdrRecvMutex, std::try_to_lock};
+            lock.owns_lock()) {
+            status = nvshmemt_libfabric_gdr_process_amos(transport, effective_qp);
+            if (status) {
+                NVSHMEMI_ERROR_PRINT("Unable to process amos: %d.\n", status);
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+        }
+    }
+    return 0;
+}
+
 static int nvshmemt_libfabric_proxy_progress(nvshmem_transport_t transport)
 {
-    return nvshmemt_libfabric_progress(transport, NVSHMEMX_QP_DEFAULT, progress_type::All);
+    return nvshmemt_libfabric_progress(transport, NVSHMEMX_QP_DEFAULT);
 }
 
 static int nvshmemt_libfabric_gdr_process_amo(nvshmem_transport_t transport,
@@ -795,7 +829,7 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/,
             }
             if (all_quieted) break;
 
-            if (nvshmemt_libfabric_progress(tcurr, qp_index, progress_type::All)) {
+            if (nvshmemt_libfabric_progress(tcurr, qp_index)) {
                 status = NVSHMEMX_ERROR_INTERNAL;
                 break;
             }
