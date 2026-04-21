@@ -3,17 +3,14 @@ cmake_minimum_required(VERSION 3.19)
 project(
   NVSHMEM
   LANGUAGES CXX C
-  VERSION 3.6.24.0
+  VERSION 3.6.25.0
 )
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED On)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
-set(CMAKE_CXX_EXTENSIONS Off)
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
+include(NVSHMEMCxxStandard)
 
 include(NVSHMEMEnv)
 include(CMakePackageConfigHelpers)
@@ -63,10 +60,6 @@ endif()
 
 # All CUDA prerequisites are now in place: enable the CUDA language.
 enable_language(CUDA)
-
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED On)
-set(CMAKE_CUDA_EXTENSIONS Off)
 
 if(NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang") OR
    NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))

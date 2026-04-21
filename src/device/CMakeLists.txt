@@ -45,11 +45,8 @@ project(
   VERSION ${PROJECT_VERSION}
 )
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
-
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED On)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake_config")
+include(NVSHMEMCxxStandard)
 
 find_package(CUDAToolkit)
 find_package(CCCL PATHS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl)
@@ -130,6 +127,8 @@ set_target_properties(nvshmem_device
 
 
 macro(nvshmem_library_set_base_config LIBNAME)
+  target_compile_features(${LIBNAME} PUBLIC cxx_std_17)
+
   target_compile_definitions(${LIBNAME}
     PRIVATE $<$<CONFIG:Debug>:_NVSHMEM_DEBUG;NVSHMEM_IBGDA_DEBUG>
     $<IF:$<STREQUAL:"${CMAKE_HOST_SYSTEM_PROCESSOR}","x86_64">,NVSHMEM_X86_64,>
