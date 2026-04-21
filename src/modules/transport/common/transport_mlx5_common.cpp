@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "transport_mlx5_common.h"
 #include <infiniband/mlx5dv.h>
 #include <stdint.h>
 
+#include "transport_mlx5_common.h"
 #include "mlx5_ifc.h"
 #include "non_abi/nvshmemx_error.h"
 
@@ -131,7 +131,7 @@ int nvshmemt_ib_common_check_nic_ext_atomic_support(struct ibv_context *context)
 
     if ((!(atomic_size_qp & MLX5_ATOMIC_CAP_SIZE_SUPPORT_8B)) ||
         (!(atomic_size_dc & MLX5_ATOMIC_CAP_SIZE_SUPPORT_8B))) {
-        NVSHMEMI_WARN_PRINT("device does not support 4B atomics\n");
+        NVSHMEMI_WARN_PRINT("device does not support 8B atomics\n");
         status = NVSHMEMX_ERROR_NOT_SUPPORTED;
         goto out;
     }
