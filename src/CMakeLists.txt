@@ -13,6 +13,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-Wno-vla-cxx-extension)
 endif()
 
+# Only forward CMAKE_CUDA_ARCHITECTURES when the user explicitly set it. Otherwise the
+# device sub-project picks its own default based on NVSHMEM_DEVICELIB_CUDA_HOME's CTK
+# version — which can legitimately differ from the host-side toolkit (same major, older
+# minor) for ABI stability across a major release series.
 if(NOT CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
     list(APPEND my_cmake_cache_args
         -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}

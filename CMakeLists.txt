@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.19)
 project(
   NVSHMEM
   LANGUAGES CXX C
-  VERSION 3.6.22.2
+  VERSION 3.6.23.0
 )
 
 set(CMAKE_C_STANDARD 11)
@@ -40,7 +40,8 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "debug" "release"
 
 ## CUDA Selection Start
 
-# Allow users to set the CUDA toolkit through the env.
+# Allow users to set the CUDA toolkit through the env. CUDA_HOME is a cache path
+# seeded by NVSHMEMEnv from $ENV{CUDA_HOME} or defaulted to /usr/local/cuda.
 if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
   message(STATUS "CUDA_HOME: ${CUDA_HOME}")
   set(CUDAToolkit_Root ${CUDA_HOME} CACHE PATH "Root of Cuda Toolkit." FORCE)
@@ -48,8 +49,10 @@ if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
 endif()
 
 # Save value of CMAKE_CUDA_ARCHITECTURES before enabling the CUDA language.
-# enable_language(CUDA) would otherwise overwrite it with a CMake default, but we
-# want to pick a default based on the CUDA Toolkit version (see below).
+# enable_language(CUDA) plants nvcc's compiler-default arch into the variable —
+# indistinguishable from a user-supplied value after the fact. We latch user intent
+# here so src/ can decide whether to propagate to the device sub-project, and the
+# fallback below can pick a version-appropriate default when nobody specified one.
 if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
 endif()

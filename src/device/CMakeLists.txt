@@ -1,18 +1,6 @@
 # Allow users to set the CUDA toolkit through the env.
 cmake_minimum_required(VERSION 3.19)
 
-project(
-  NVSHMEM_DEVICE
-  LANGUAGES CUDA CXX
-  VERSION ${PROJECT_VERSION}
-)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
-
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED On)
-
 include(CMakePackageConfigHelpers)
 
 set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/../.." CACHE PATH "..." FORCE)
@@ -25,6 +13,11 @@ else()
   set(NVSHMEM_DEVICELIB_CUDA_HOME_DEFAULT "/usr/local/cuda")
 endif()
 
+# Save value of CMAKE_CUDA_ARCHITECTURES before calling project().
+# project(LANGUAGES CUDA ...) calls enable_language(CUDA), which plants nvcc's
+# compiler-default arch into CMAKE_CUDA_ARCHITECTURES — indistinguishable from a
+# user-supplied value afterwards. Latch user intent here so the version-based
+# fallback below can fire when nobody supplied a value.
 if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES_UNDEFINED 1)
 endif()
@@ -46,6 +39,17 @@ if(NOT CUDAToolkit_Root AND NOT CMAKE_CUDA_COMPILER)
   set(CMAKE_CUDA_COMPILER "${NVSHMEM_DEVICELIB_CUDA_HOME}/bin/nvcc" CACHE PATH "Root of Cuda Toolkit." FORCE)
 endif()
 
+project(
+  NVSHMEM_DEVICE
+  LANGUAGES CUDA CXX
+  VERSION ${PROJECT_VERSION}
+)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED On)
 
 find_package(CUDAToolkit)
 find_package(CCCL PATHS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl)
@@ -72,6 +76,7 @@ if(DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
     endif()
   endif()
 endif()
+
 message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 message(STATUS "CMAKE_CUDA_COMPILER: ${CMAKE_CUDA_COMPILER}")
 message(STATUS "NVSHMEM_PREFIX: ${NVSHMEM_PREFIX}")
