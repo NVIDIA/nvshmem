@@ -1,11 +1,8 @@
 add_library(nvshmem_bootstrap_common STATIC bootstrap_util.cpp)
+target_compile_features(nvshmem_bootstrap_common PUBLIC cxx_std_17)
 
 set_target_properties(nvshmem_bootstrap_common PROPERTIES
   POSITION_INDEPENDENT_CODE ON
-  CXX_STANDARD_REQUIRED ON
-  CUDA_STANDARD_REQUIRED ON
-  CXX_STANDARD 11
-  CUDA_STANDARD 11
   CUDA_SEPARABLE_COMPILATION ON
 )
 

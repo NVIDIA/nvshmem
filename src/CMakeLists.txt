@@ -352,6 +352,10 @@ set_target_properties(${ACTIVE_BOOTSTRAPS}
                       VERSION ${BOOTSTRAP_VERSION_MAJOR}.${BOOTSTRAP_VERSION_MINOR}.${BOOTSTRAP_VERSION_PATCH}
                       SOVERSION ${BOOTSTRAP_VERSION_MAJOR})
 
+foreach(BOOTSTRAP ${ACTIVE_BOOTSTRAPS})
+  target_compile_features(${BOOTSTRAP} PUBLIC cxx_std_17)
+endforeach()
+
 # End bootstrap definitions
 
 # Start nvshmem lib definitions
@@ -928,6 +932,9 @@ set(BOOTSTRAP_CMAKE_EXPORTS
 foreach(SHARE ${BOOTSTRAP_CMAKE_EXPORTS})
   configure_file(modules/bootstrap/${SHARE}.in ${CMAKE_CURRENT_BINARY_DIR}/share/src/bootstrap-plugins/${SHARE} @ONLY)
 endforeach(SHARE ${BOOTSTRAP_CMAKE_EXPORTS})
+
+configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMCxxStandard.cmake
+               ${CMAKE_CURRENT_BINARY_DIR}/share/src/bootstrap-plugins/cmake_config/NVSHMEMCxxStandard.cmake COPYONLY)
 
 configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
                ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/nvshmem_transport.sym COPYONLY)

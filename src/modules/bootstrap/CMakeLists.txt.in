@@ -46,10 +46,14 @@ project(
   VERSION ${CUSTOM_BOOTSTRAP_VERSION_MAJOR}.${CUSTOM_BOOTSTRAP_VERSION_MINOR}.${CUSTOM_BOOTSTRAP_VERSION_PATCH}
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
+include(NVSHMEMCxxStandard)
+
 add_subdirectory(common)
 
 macro(nvshmem_add_bootstrap BOOTSTRAP_NAME SOURCE_LIST)
   add_library(${BOOTSTRAP_NAME} SHARED)
+  target_compile_features(${BOOTSTRAP_NAME} PUBLIC cxx_std_17)
   target_sources(${BOOTSTRAP_NAME} PRIVATE ${SOURCE_LIST})
   target_include_directories(${BOOTSTRAP_NAME} PRIVATE
                              ${CMAKE_SOURCE_DIR}/common
