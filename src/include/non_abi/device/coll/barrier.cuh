@@ -61,7 +61,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_pow2_t
             from_nbr_idx = teami->my_pe - shift;
             if (from_nbr_idx < 0) from_nbr_idx = size + from_nbr_idx;
             from_nbr = nvshmemi_team_translate_pe_to_team_world_wrap(teami, from_nbr_idx);
-            nvshmemi_wait_until_greater_than_equals<volatile long>(sync_arr + from_nbr, counter[0],
+            nvshmemi_wait_until_greater_than_equals<long>(sync_arr + from_nbr, counter[0],
                                                                    NVSHMEMI_CALL_SITE_BARRIER_WARP);
         }
         pow_k <<= logk;
@@ -69,7 +69,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_pow2_t
         phase_num++;
         nvshmemi_threadgroup_sync<SCOPE>();
     }
-    if (!myIdx) sync_counter[0] += 1;
+    if (!myIdx) sync_counter[0] = sync_counter[0] + 1;
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -116,13 +116,13 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
             from_nbr_idx = my_idx_in_active_set - shift;
             if (from_nbr_idx < 0) from_nbr_idx = size + from_nbr_idx;
             from_nbr = teami->pe_mapping[from_nbr_idx];
-            nvshmemi_wait_until_greater_than_equals<volatile long>(pSync + from_nbr, counter[0],
+            nvshmemi_wait_until_greater_than_equals<long>(pSync + from_nbr, counter[0],
                                                                    NVSHMEMI_CALL_SITE_BARRIER_WARP);
         }
         pow_k *= k;
         nvshmemi_threadgroup_sync<SCOPE>();
     }
-    if (!myIdx) sync_counter[0] += 1;
+    if (!myIdx) sync_counter[0] = sync_counter[0] + 1;
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -167,13 +167,13 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
             from_nbr_idx = my_idx_in_active_set - shift;
             if (from_nbr_idx < 0) from_nbr_idx = size + from_nbr_idx;
             from_nbr = start + from_nbr_idx * stride;
-            nvshmemi_wait_until_greater_than_equals<volatile long>(sync_arr + from_nbr, counter[0],
+            nvshmemi_wait_until_greater_than_equals<long>(sync_arr + from_nbr, counter[0],
                                                                    NVSHMEMI_CALL_SITE_BARRIER_WARP);
         }
         pow_k *= k;
         nvshmemi_threadgroup_sync<SCOPE>();
     }
-    if (!myIdx) sync_counter[0] += 1;
+    if (!myIdx) sync_counter[0] = sync_counter[0] + 1;
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 

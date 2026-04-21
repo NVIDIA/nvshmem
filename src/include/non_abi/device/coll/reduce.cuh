@@ -1139,7 +1139,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
                                           sync_counter[0]);
     }
     nvshmemi_threadgroup_sync<SCOPE>();
-    if (!myIdx) sync_counter[0] += 1;
+    if (!myIdx) sync_counter[0] = sync_counter[0] + 1;
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 

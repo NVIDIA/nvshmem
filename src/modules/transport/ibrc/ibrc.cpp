@@ -861,7 +861,7 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
 
         op_id = ep->common_ep.head_op_id &
                 IBRC_REQUEST_QUEUE_MASK(ibrc_state);  // ep->common_ep.head_op_id % ibrc_qp_depth
-        ep->common_ep.head_op_id++;
+        ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 
         sr = &(ep->req + op_id)->sr;
         bad_sr = &(ep->req + op_id)->bad_sr;
@@ -869,7 +869,8 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
 
         memset(sr, 0, sizeof(ibv_send_wr));
         if (op->op > NVSHMEMI_AMO_END_OF_NONFETCH) {
-            ret.data = ret.flag = 0;
+            ret.flag = 0;
+            ret.data = 0;
             ret.data = old_value;
             ret.flag = op->retflag;
 
@@ -930,19 +931,19 @@ int poll_recv(nvshmemt_ib_common_state_t ibrc_state) {
             assert(ne == 1);
             ibrc_buf_t *buf = (ibrc_buf_t *)wc.wr_id;
             if (wc.wc_flags & IBV_WC_WITH_IMM) {
-                atomics_acked++;
+                atomics_acked = atomics_acked + 1;
                 TRACE(ibrc_state->log_level, "[%d] atomic acked : %lu \n", getpid(), atomics_acked);
                 bpool_free.push_back((void *)buf);
             } else {
                 struct ibrc_atomic_op *op = (struct ibrc_atomic_op *)buf->buf;
                 if (op->op == NVSHMEMI_AMO_ACK) {
-                    atomics_acked++;
+                    atomics_acked = atomics_acked + 1;
                     TRACE(ibrc_state->log_level, "[%d] atomic acked : %lu \n", getpid(),
                           atomics_acked);
                     bpool_free.push_back((void *)buf);
                 } else {
                     buf->qp_num = wc.qp_num;
-                    atomics_received++;
+                    atomics_received = atomics_received + 1;
                     TRACE(ibrc_state->log_level, "[%d] atomic received, enqueued : %lu \n",
                           getpid(), atomics_received);
                     bqueue_toprocess.push_back((void *)buf);
@@ -984,7 +985,7 @@ int process_recv(nvshmem_transport_t t, nvshmemt_ib_common_state_t ibrc_state) {
                 NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                    "invalid element size encountered %u\n", op->elembytes);
         }
-        atomics_processed++;
+        atomics_processed = atomics_processed + 1;
         TRACE(ibrc_state->log_level, "[%d] atomic dequeued and processed : %lu \n", getpid(),
               atomics_processed);
 
@@ -1053,7 +1054,7 @@ int progress_send(nvshmemt_ib_common_state_t ibrc_state) {
             assert(ne == 1);
             if (wc.wr_id == NVSHMEMI_OP_AMO) {
 #ifdef NVSHMEM_USE_GDRCOPY
-                atomics_completed++;
+                atomics_completed = atomics_completed + 1;
                 TRACE(ibrc_state->log_level, "[%d] atomic completed : %lu \n", getpid(),
                       atomics_completed);
 #endif
@@ -1152,7 +1153,7 @@ int nvshmemt_ibrc_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
     status = ibv_post_send(ep->qp, sr, bad_sr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
 
-    ep->common_ep.head_op_id++;
+    ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 
     if (unlikely(!verb.is_nbi && verb.desc != NVSHMEMI_OP_P)) {
         nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL /*1*/);
@@ -1249,7 +1250,7 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
         sge->addr = (uintptr_t)&op;
         sge->lkey = 0;
 
-        atomics_issued++;
+        atomics_issued = atomics_issued + 1;
         TRACE(ibrc_state->log_level, "[%d] atomic issued : %lu \n", getpid(), atomics_issued);
         goto post_op;
     }
@@ -1295,7 +1296,7 @@ post_op:
     status = ibv_post_send(ep->qp, sr, bad_sr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
 
-    ep->common_ep.head_op_id++;
+    ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 
 out:
     return status;
@@ -1351,7 +1352,7 @@ int nvshmemt_ibrc_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
     status = ibv_post_send(ep->qp, sr, bad_sr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
 
-    ep->common_ep.head_op_id++;
+    ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 
     status = nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");

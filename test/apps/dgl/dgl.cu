@@ -43,7 +43,7 @@ __global__ void bw_nbi(double *data_d, double *ldata_d, volatile unsigned int *c
         counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
         if (counter == (gridDim.x - 1)) {
             nvshmem_quiet();
-            *(counter_d + 1) += 1;
+            *(counter_d + 1) = *(counter_d + 1) + 1;
         }
         while (*(counter_d + 1) != 1)
             ;

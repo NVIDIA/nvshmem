@@ -911,9 +911,9 @@ int progress_send(nvshmemt_ib_common_state_t ibdevx_state) {
                 if (likely((ntohl(cqe_vol->sop_drop_qpn) & NVSHMEMT_IBDEVX_MASK_LOWER_3_BYTES_32) !=
                            MLX5_OPCODE_ATOMIC_MASKED_CS << 24) ||
                     (ntohl(cqe_vol->byte_cnt) < 8)) {
-                    ep->common_ep.tail_op_id++;
+                    ep->common_ep.tail_op_id = ep->common_ep.tail_op_id + 1;
                 } else {
-                    ep->common_ep.tail_op_id += 2;
+                    ep->common_ep.tail_op_id = ep->common_ep.tail_op_id + 2;
                 }
                 device->scq.cur_idx++;
 
@@ -956,7 +956,7 @@ static inline void nvshmemt_ibdevx_post_send(struct ibdevx_ep *ep, void *bb,
     assert(bb != NULL);
     bf_reg = ((char *)ep->bf_reg + ep->bf_reg_offset);
     memcpy(bf_reg, bb, 8);
-    ep->common_ep.head_op_id += num_wqe_cons;
+    ep->common_ep.head_op_id = ep->common_ep.head_op_id + num_wqe_cons;
 }
 
 int nvshmemt_ibdevx_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,

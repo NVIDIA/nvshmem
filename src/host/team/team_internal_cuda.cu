@@ -64,7 +64,7 @@ __device__ void nvshmemi_team_creation_state_barrier(
     int mype = nvshmemi_device_state_d.mype;
 
     nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
-    pe_info[mype].state_idx |= state;
+    pe_info[mype].state_idx = pe_info[mype].state_idx | state;
     for (int i = 0; i < myteam->size; i++) {
         int remote_pe = myteam->pe_mapping[i];
         if (remote_pe == mype) {
