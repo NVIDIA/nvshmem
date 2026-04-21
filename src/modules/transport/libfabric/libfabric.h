@@ -759,23 +759,32 @@ static constexpr size_t NVSHMEMT_LIBFABRIC_MAX_DOMAINS_PER_PE =
 typedef struct nvshmemt_libfabric_mem_handle_t nvshmemt_libfabric_mem_handle_t;
 static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_handle_t::MAX_SIZE);
 
+/* Common ack payload embedded in both signal ops (piggybacked) and standalone ack ops */
+typedef struct nvshmemt_libfabric_ack_payload {
+    uint16_t ack_seq_num;  /* End (last seq num) of acked sequence number range */
+    uint8_t  ack_count;    /* Count of acked sequence numbers */
+    uint8_t  ack_num_ops;  /* Number of ack operations (for completed_staged_atomics) */
+} nvshmemt_libfabric_ack_payload_t;
+static_assert(sizeof(nvshmemt_libfabric_ack_payload_t) == 4);
+
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
- * | 1 type | 3 reserved | 1 op | 1 elem_size | 2 num_writes | 8 signal | 8 target_addr | 2 sequence_count
- * | 1 preceding_put_count | 1 reserved | 4 src_pe
+ * | 1 type | 1 op | 1 elem_size | 1 preceding_put_count | 2 num_writes | 2 src_pe
+ * | 8 sig_val | 8 target_addr
+ * | 2 sequence_count | 4 ack{2 ack_seq_num, 1 ack_count, 1 ack_num_ops} | 2 reserved
  */
 typedef struct nvshmemt_libfabric_gdr_signal_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
-    uint8_t reserved1[3];
     uint8_t op;
     uint8_t elem_size;
-    uint16_t num_writes;
-    uint64_t sig_val;
-    void *target_addr;
-    uint16_t sequence_count;
     uint8_t  preceding_put_count;
-    uint8_t  reserved;
-    uint32_t src_pe;
+    uint16_t num_writes;
+    uint16_t src_pe;
+    uint64_t sig_val;
+    void    *target_addr;
+    uint16_t sequence_count;
+    nvshmemt_libfabric_ack_payload_t ack;
+    uint16_t reserved;
 } nvshmemt_libfabric_gdr_signal_op_t;
 /*  EFA's inline send size is 32 bytes */
 static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) == 32);
@@ -785,16 +794,12 @@ static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) <=
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");
 
 /* Wire data for AMO ack sent via fi_send
- * | 1 type | (1 pad) | 2 range_end | 2 range_count | 2 amo_ack_count | 2 num_ack_ops
- * | 1 put_count |
+ * | 1 type | 1 pad | 4 ack{2 ack_seq_num, 1 ack_count, 1 ack_num_ops}
  */
 typedef struct nvshmemt_libfabric_gdr_amo_ack_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
-    uint16_t range_end;     /* End (last seq num) of signal sequence number range */
-    uint16_t range_count;   /* Count of acked sequence numbers */
-    uint16_t amo_ack_count; /* Count of AMO acks (NVSHMEM_STAGED_AMO_SEQ_NUM) */
-    uint16_t num_ack_ops;   /* Number of original ack operations (for completed_staged_atomics) */
-    uint8_t put_count;
+    uint8_t pad;
+    nvshmemt_libfabric_ack_payload_t ack;
 } nvshmemt_libfabric_gdr_amo_ack_op_t;
 static_assert(sizeof(nvshmemt_libfabric_gdr_amo_ack_op_t) <= 32,
               "Must fit within EFA's inline send limit of 32 bytes");
