@@ -300,7 +300,8 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
     cap = DEVX_ADDR_OF(query_hca_cap_out, cmd_cap_out, capability);
     DEVX_SET(query_hca_cap_in, cmd_cap_in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
     DEVX_SET(query_hca_cap_in, cmd_cap_in, op_mod,
-             MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE | HCA_CAP_OPMOD_GET_CUR);
+             static_cast<int>(MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE) |
+                 static_cast<int>(HCA_CAP_OPMOD_GET_CUR));
 
     status = mlx5dv_devx_general_cmd(context, cmd_cap_in, sizeof(cmd_cap_in), cmd_cap_out,
                                      sizeof(cmd_cap_out));
