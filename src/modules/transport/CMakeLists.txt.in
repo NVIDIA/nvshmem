@@ -68,6 +68,9 @@ project(
   VERSION ${CUSTOM_TRANSPORT_VERSION_MAJOR}.${CUSTOM_TRANSPORT_VERSION_MINOR}.${CUSTOM_TRANSPORT_VERSION_PATCH}
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
+include(NVSHMEMCxxStandard)
+
 find_package(CUDAToolkit)
 
 if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BUILD_GPUNETIO_TRANSPORT)
@@ -86,6 +89,7 @@ endif()
 add_subdirectory(common)
 
 macro(nvshmem_transport_set_base_config LIBNAME)
+  target_compile_features(${LIBNAME} PUBLIC cxx_std_17)
   target_compile_definitions(${LIBNAME}
     PRIVATE $<$<CONFIG:Debug>:_NVSHMEM_DEBUG;NVSHMEM_IBGDA_DEBUG>
     $<IF:$<STREQUAL:"${CMAKE_HOST_SYSTEM_PROCESSOR}","x86_64">,NVSHMEM_X86_64,>

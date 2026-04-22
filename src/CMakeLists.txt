@@ -999,6 +999,9 @@ set(TRANSPORT_CMAKE_EXPORTS
 foreach(SHARE ${TRANSPORT_CMAKE_EXPORTS})
   configure_file(modules/transport/${SHARE}.in ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/${SHARE} @ONLY)
 endforeach(SHARE ${TRANSPORT_CMAKE_EXPORTS})
+
+configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMCxxStandard.cmake
+               ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/cmake_config/NVSHMEMCxxStandard.cmake COPYONLY)
 # end share configuration
 
 # start custom builds for nvshmem packages
