@@ -23,3 +23,17 @@ BuildLibsWheel(
     "${NVSHMEM_BUILT_LIB_DIR}"
     "${CUDAToolkit_VERSION_MAJOR}"
 )
+
+# Include the libs wheel in the default build so `all`/`install` produce it
+# whenever NVSHMEM_BUILD_LIBS_WHEEL is enabled.
+add_custom_target(build_nvshmem_libs_wheels ALL
+    COMMENT "Build NVSHMEM libs-only wheel"
+    DEPENDS build_nvshmem_libs_wheel
+)
+
+# Include the libs wheel in the install/package output under lib/python/dist/.
+install(
+    DIRECTORY "${CMAKE_BINARY_DIR}/dist/"
+    DESTINATION "lib/python/dist"
+    FILES_MATCHING PATTERN "nvidia_nvshmem_cu*.whl"
+)
