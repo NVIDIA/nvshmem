@@ -1,11 +1,12 @@
 # Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import enum
 import logging
 import os
 import ctypes
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import nvshmem.core
 import nvshmem.bindings as bindings
@@ -49,8 +50,26 @@ def _import_mpi():
 
 __all__ = [
     'get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init',
-    'library_finalize', 'UniqueID', 'find_device_bitcode_library'
+    'library_finalize', 'UniqueID', 'DeviceLibLanguage', 'find_device_bitcode_library'
 ]
+
+
+class DeviceLibLanguage(enum.Enum):
+    """
+    Language/format of the NVSHMEM device library.
+
+    ``LTOIR`` maps to the installed ``libnvshmem_device.ltoir.fatbin`` entry point.
+    On CUDA 13+ that file is a multi-arch fatbin created with
+    ``fatbinary --image3=kind=nvvm``. On CUDA 12.8-12.x the install layout keeps
+    the same ``.ltoir.fatbin`` suffix for consistency, but the file is a renamed
+    single-arch ``sm_90`` LTOIR image rather than a true multi-arch fatbin.
+    Consumers that require per-arch LTOIR on CUDA 12 should use the installed
+    ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
+    """
+    LLVM_BITCODE = "bc"
+    LTOIR = "ltoir"
+    STATIC = "a"
+
 
 logger = logging.getLogger("nvshmem")
 
@@ -435,14 +454,46 @@ def library_finalize(lib: NvshmemKernelObject) -> None:
         raise NvshmemError("Failed to finalize CULibrary for NVSHMEM")
 
 
-def find_device_bitcode_library() -> str:
+def _normalize_device_library_arch(arch: Union[int, str]) -> str:
+    arch_str = str(arch).lower().strip()
+    if arch_str.startswith("sm_"):
+        arch_str = arch_str[3:]
+    elif arch_str.startswith("sm"):
+        arch_str = arch_str[2:]
+    return arch_str.replace(".", "")
+
+
+def find_device_bitcode_library(
+    *,
+    language: DeviceLibLanguage = DeviceLibLanguage.LLVM_BITCODE,
+    arch: Optional[Union[int, str]] = None,
+) -> str:
     """
-    Find the path to the libnvshmem_device.bc library.
+    Find the path to an NVSHMEM device library.
 
     Searches for the library in ../lib/ relative to the NVSHMEM header directory.
 
+    Args:
+        language: Library format to search for. ``DeviceLibLanguage.LLVM_BITCODE``
+            returns a ``.bc`` file (for use with ``llvm-link``).
+            ``DeviceLibLanguage.LTOIR`` returns the installed
+            ``libnvshmem_device.ltoir.fatbin`` entry point. On CUDA 13+ this is
+            a multi-arch fatbin; on CUDA 12.8-12.x the file keeps that suffix for
+            layout consistency but is a renamed single-arch ``sm_90`` LTOIR image.
+            CUDA 12 consumers that need per-arch LTOIR should use the installed
+            ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
+            ``DeviceLibLanguage.STATIC`` returns the ``.a`` static archive
+            (for use with standard device linking).
+        arch: SM architecture number (e.g. ``"90"``, ``"sm_90"``,
+            ``"80"``, ``"100"``). By default this helper returns the
+            backward-compatible ``libnvshmem_device.bc`` entry point.
+            For LLVM_BITCODE, selects the per-arch file
+            (e.g. ``libnvshmem_device_sm_90.bc``) when this value is set.
+            For LTOIR and STATIC, this helper returns the install-layout entry
+            point regardless of this value.
+
     Returns:
-        The path to the libnvshmem_device.bc library. (a string)
+        The path to the device library file. (a string)
     """
     header_path = find_nvidia_header_directory("nvshmem")
     if not header_path:
@@ -451,8 +502,18 @@ def find_device_bitcode_library() -> str:
     # Search in ../lib/ relative to the header path
     # TODO: Switch to cuda.pathfinder when it supports bitcode libraries (https://github.com/NVIDIA/cuda-python/issues/1421)
     header_path_obj = Path(header_path)
-    lib_path = header_path_obj.parent / "lib" / "libnvshmem_device.bc"
+    if language == DeviceLibLanguage.LTOIR:
+        filename = "libnvshmem_device.ltoir.fatbin"
+    elif language == DeviceLibLanguage.STATIC:
+        filename = "libnvshmem_device.a"
+    else:
+        if arch is None:
+            filename = "libnvshmem_device.bc"
+        else:
+            arch = _normalize_device_library_arch(arch)
+            filename = f"libnvshmem_device_sm_{arch}.bc"
+    lib_path = header_path_obj.parent / "lib" / filename
 
     if not lib_path.exists():
-        raise NvshmemInvalid(f"NVSHMEM device bitcode not found at {lib_path}")
+        raise NvshmemInvalid(f"NVSHMEM device library not found at {lib_path}")
     return str(lib_path)

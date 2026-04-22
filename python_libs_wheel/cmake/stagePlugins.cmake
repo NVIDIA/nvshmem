@@ -47,7 +47,25 @@ foreach(_f IN LISTS _plugins)
     endif()
 endforeach()
 
-# Stage device bitcode if it was built.
-if(EXISTS "${SOURCE_DIR}/libnvshmem_device.bc")
-    file(COPY "${SOURCE_DIR}/libnvshmem_device.bc" DESTINATION "${DEST_DIR}")
+# Stage per-arch device bitcode files. If the compatibility
+# libnvshmem_device.bc entry is a symlink, copy the target contents so the wheel
+# contains a regular file instead of a symlink.
+file(GLOB _bc_files "${SOURCE_DIR}/libnvshmem_device_sm_*.bc")
+foreach(_f IN LISTS _bc_files)
+    file(COPY "${_f}" DESTINATION "${DEST_DIR}")
+endforeach()
+
+set(_bc_compat "${SOURCE_DIR}/libnvshmem_device.bc")
+if(EXISTS "${_bc_compat}")
+    get_filename_component(_real "${_bc_compat}" REALPATH)
+    file(COPY "${_real}" DESTINATION "${DEST_DIR}")
+    get_filename_component(_real_name "${_real}" NAME)
+    if(NOT "${_real_name}" STREQUAL "libnvshmem_device.bc")
+        file(RENAME "${DEST_DIR}/${_real_name}" "${DEST_DIR}/libnvshmem_device.bc")
+    endif()
+endif()
+
+# Stage LTOIR fatbin if it was built.
+if(EXISTS "${SOURCE_DIR}/libnvshmem_device.ltoir.fatbin")
+    file(COPY "${SOURCE_DIR}/libnvshmem_device.ltoir.fatbin" DESTINATION "${DEST_DIR}")
 endif()

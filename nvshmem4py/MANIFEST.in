@@ -12,3 +12,4 @@ include nvshmem/bindings/*.pyx
 include nvshmem/bindings/_internal/*.cpp
 include nvshmem/core/*.py
 recursive-include nvshmem *
+exclude .style.yapf

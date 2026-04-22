@@ -182,26 +182,75 @@ def test_module_init():
 def test_find_device_bitcode_library():
     """
     Test for find_device_bitcode_library utility function.
-    It should find the library containing device bitcode,
-    typically needed for LTO or device linking.
+    Tests default arch ("90"), per-arch lookup, LTOIR, and static library formats.
     """
     print("Starting test for find_device_bitcode_library")
-    # Attempt to import the function under test
     try:
-        from nvshmem.core import find_device_bitcode_library
+        from nvshmem.core import find_device_bitcode_library, DeviceLibLanguage
     except ImportError:
         print("Could not import find_device_bitcode_library; skipping test.")
         return
+
+    import os
+
+    # Test 1: default returns the backward-compatible bitcode entry point.
     try:
         lib_path = find_device_bitcode_library()
     except Exception as e:
-        print(f"Exception raised calling find_device_bitcode_library: {e}")
-        assert False, "Exception in find_device_bitcode_library"
-
-    # Check the returned path
+        print(f"Exception raised calling find_device_bitcode_library(): {e}")
+        raise AssertionError(f"Exception in find_device_bitcode_library(): {e}")
     assert lib_path is not None, "Library path should not be None"
-    assert lib_path.endswith("libnvshmem_device.bc"), f"Unexpected library found: {lib_path}"
-    print(f"find_device_bitcode_library returned: {lib_path}")
+    assert lib_path.endswith("libnvshmem_device.bc"), f"Expected libnvshmem_device.bc, got: {lib_path}"
+    assert os.path.exists(lib_path), f"File does not exist: {lib_path}"
+    print(f"  default:   {lib_path}")
+
+    # Test 2: per-arch bitcode lookup (sm_90), when the package ships it.
+    lib_path_90_expected = os.path.join(os.path.dirname(lib_path), "libnvshmem_device_sm_90.bc")
+    if os.path.exists(lib_path_90_expected):
+        try:
+            lib_path_90 = find_device_bitcode_library(arch="90")
+        except Exception as e:
+            print(f"Exception raised calling find_device_bitcode_library(arch='90'): {e}")
+            raise AssertionError(f"Exception in find_device_bitcode_library(arch='90'): {e}")
+        assert lib_path_90 == lib_path_90_expected, f"Expected {lib_path_90_expected}, got: {lib_path_90}"
+        print(f"  arch=90:   {lib_path_90}")
+    else:
+        print(f"  arch=90:   not available (skipped): {lib_path_90_expected}")
+
+    # Test 3: LTOIR library (arch-independent fatbin)
+    try:
+        ltoir_path = find_device_bitcode_library(language=DeviceLibLanguage.LTOIR)
+    except Exception as e:
+        print(f"LTOIR lookup raised exception (may not be installed): {e}")
+        ltoir_path = None
+    if ltoir_path:
+        assert ltoir_path.endswith("libnvshmem_device.ltoir.fatbin"), f"Expected .ltoir, got: {ltoir_path}"
+        assert os.path.exists(ltoir_path), f"File does not exist: {ltoir_path}"
+        print(f"  LTOIR:     {ltoir_path}")
+    else:
+        print("  LTOIR:     not available (skipped)")
+
+    # Test 4: static library
+    try:
+        static_path = find_device_bitcode_library(language=DeviceLibLanguage.STATIC)
+    except Exception as e:
+        print(f"Static library lookup raised exception (may not be installed): {e}")
+        static_path = None
+    if static_path:
+        assert static_path.endswith("libnvshmem_device.a"), f"Expected .a, got: {static_path}"
+        assert os.path.exists(static_path), f"File does not exist: {static_path}"
+        print(f"  static:    {static_path}")
+    else:
+        print("  static:    not available (skipped)")
+
+    raised = False
+    try:
+        find_device_bitcode_library(arch="999")
+    except Exception:
+        raised = True
+    assert raised, "Expected exception for invalid arch=999"
+    print("  arch=999:  correctly raised exception")
+
     print("find_device_bitcode_library test passed")
 
 

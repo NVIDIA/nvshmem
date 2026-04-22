@@ -25,5 +25,5 @@ where = ["."]
 
 [tool.setuptools.package-data]
 # Include all shared libraries, static libraries, bitcode, and headers.
-"nvidia.nvshmem.lib" = ["*.so", "*.so.*", "*.a", "*.bc"]
+"nvidia.nvshmem.lib" = ["*.so", "*.so.*", "*.a", "*.bc", "*.ltoir*", "*.fatbin"]
 "nvidia.nvshmem.include" = ["**/*.h", "**/*.cuh", "**/*.cuh.in"]
