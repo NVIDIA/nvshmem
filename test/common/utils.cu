@@ -113,7 +113,7 @@ void init_cumodule(const char *str) {
     if (use_cubin == NVSHMEM_CUBIN_BC || use_cubin == NVSHMEM_CUBIN_LTOIR) {
         if (access(selected_path, R_OK) != 0) {
             fprintf(stderr,
-                    "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, 2=libnvshmem_device.ltoir] but cubin not found: %s\n",
+                    "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, 2=libnvshmem_device.ltoir.fatbin] but cubin not found: %s\n",
                     use_cubin, selected_path);
             exit(-1);
         }

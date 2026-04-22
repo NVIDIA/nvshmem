@@ -16,9 +16,15 @@ include_guard(GLOBAL)
 # --- Find Clang ----------------------------------------------------------------
 if(NOT Clang_FOUND)
   if(NVSHMEM_CLANG_DIR)
-    find_package(Clang CONFIG PATHS ${NVSHMEM_CLANG_DIR} NO_DEFAULT_PATH REQUIRED)
+    find_package(Clang CONFIG PATHS ${NVSHMEM_CLANG_DIR} NO_DEFAULT_PATH)
   else()
-    find_package(Clang CONFIG REQUIRED)
+    find_package(Clang CONFIG)
+  endif()
+  if(NOT Clang_FOUND)
+    message(WARNING "Clang/LLVM not found. Disabling bitcode library build. "
+            "Set NVSHMEM_CLANG_DIR or install Clang to enable.")
+    set(NVSHMEM_BUILD_BITCODE_LIBRARY OFF CACHE BOOL "" FORCE)
+    return()
   endif()
 endif()
 
@@ -29,6 +35,41 @@ if(NOT NVSHMEM_CLANG_EXECUTABLE)
       CACHE PATH "Clang executable used for bitcode library, tests, and perftests")
 endif()
 message(STATUS "NVSHMEM_CLANG_EXECUTABLE: ${NVSHMEM_CLANG_EXECUTABLE}")
+
+foreach(_tool opt llc llvm-link llvm-dis llvm-as)
+  string(TOUPPER "${_tool}" _TOOL_UC)
+  string(REPLACE "-" "_" _TOOL_UC "${_TOOL_UC}")
+  find_program(NVSHMEM_${_TOOL_UC}_EXECUTABLE ${_tool}
+               HINTS "${LLVM_TOOLS_BINARY_DIR}"
+               DOC "Path to ${_tool} used for bitcode/cubin builds")
+  set(_NVSHMEM_${_TOOL_UC}_CANDIDATE "")
+  if(NVSHMEM_${_TOOL_UC}_EXECUTABLE)
+    set(_NVSHMEM_${_TOOL_UC}_CANDIDATE "${NVSHMEM_${_TOOL_UC}_EXECUTABLE}")
+  elseif(TARGET llvm::${_tool} AND NOT "${_tool}" STREQUAL "llvm-link")
+    get_target_property(_NVSHMEM_${_TOOL_UC}_CANDIDATE
+                        llvm::${_tool} IMPORTED_LOCATION)
+  endif()
+  set(NVSHMEM_${_TOOL_UC}_AVAILABLE FALSE)
+  if(_NVSHMEM_${_TOOL_UC}_CANDIDATE)
+    execute_process(
+      COMMAND "${_NVSHMEM_${_TOOL_UC}_CANDIDATE}" --version
+      RESULT_VARIABLE _NVSHMEM_${_TOOL_UC}_RESULT
+      OUTPUT_QUIET
+      ERROR_QUIET)
+    if(_NVSHMEM_${_TOOL_UC}_RESULT EQUAL 0)
+      if(NOT TARGET llvm::${_tool})
+        add_executable(llvm::${_tool} IMPORTED GLOBAL)
+      endif()
+      set_target_properties(llvm::${_tool} PROPERTIES
+        IMPORTED_LOCATION "${_NVSHMEM_${_TOOL_UC}_CANDIDATE}")
+      set(NVSHMEM_${_TOOL_UC}_AVAILABLE TRUE)
+    else()
+      message(WARNING
+              "LLVM tool ${_tool} is not runnable: "
+              "${_NVSHMEM_${_TOOL_UC}_CANDIDATE}")
+    endif()
+  endif()
+endforeach()
 
 # --- Extra CXX flags (string -> list) ------------------------------------------
 if(NOT DEFINED NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST)

@@ -77,6 +77,7 @@ if(NOT SubBuild)
   set(SHMEM_HOME ${MPI_HOME} CACHE PATH "path to SHMEM installation")
 
   find_package(CUDAToolkit)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config/NVSHMEMCUDATools.cmake)
 
   if(DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
     if(NOT DEFINED CUDA_ARCHITECTURES_UNDEFINED)
@@ -98,6 +99,9 @@ if(NOT SubBuild)
 
   if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config/NVSHMEMClangSetup.cmake)
+    if(NOT NVSHMEM_LLVM_LINK_AVAILABLE)
+      message(WARNING "llvm-link not found — bitcode cubin test targets will be skipped")
+    endif()
   endif()
 
   include(CheckCompilerFlag)
@@ -158,6 +162,10 @@ endif()
 
 add_subdirectory(common)
 
+if(NOT DEFINED NVSHMEM_BUILD_BITCODE_CUBIN_TESTS)
+  set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS ON)
+endif()
+
 macro(nvshmem_add_test_prefix SOURCE PREFIX LINK_DEVICE)
   get_filename_component(NAME_ ${SOURCE} NAME_WE)
   get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
@@ -206,7 +214,7 @@ endmacro()
 
 macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
   # --ltoir requires CUDA 12.0 or later
-  if(CUDAToolkit_VERSION_MAJOR LESS 12)
+  if(CUDAToolkit_VERSION_MAJOR LESS 12 OR NOT TARGET cuda::nvcc)
     message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.0 or later, but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Skipping LTOIR cubin test.")
   else()
   get_filename_component(NAME_ ${SOURCE} NAME_WE)
@@ -216,21 +224,21 @@ macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
   set(CUBIN_NAME "${NAME_}_ltoir.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_TEST_TLD}/common" "-I${NVSHMEM_TEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include")
   if (NOT SubBuild)
-    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device.ltoir)
+    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
     # Note: The -DNVSHMEM_HOSTLIB_ONLY macro name is a misnomer: it's used in the testing framework so the unmangled symbols will appear in the LTOIR cubin (just adds "extern c" to all the tests).
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND ${CMAKE_CUDA_COMPILER} -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
+                      COMMAND cuda::nvcc -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
                               ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                      COMMAND ${CUDA_HOME}/bin/nvlink -nvvmpath=${CUDA_HOME}/nvvm -arch=${NVSHMEM_CLANG_ARCH} -dlto -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
+                      COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
                       COMMAND rm ${NAME_}.ltoir
                       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                       DEPENDS nvshmem_test_helper ${LTOIR_LIB_PATH})
   else()
-    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device.ltoir)
+    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND ${CMAKE_CUDA_COMPILER} -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
+                      COMMAND cuda::nvcc -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
                               ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                      COMMAND ${CUDA_HOME}/bin/nvlink -nvvmpath=${CUDA_HOME}/nvvm -arch=${NVSHMEM_CLANG_ARCH} -dlto -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
+                      COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
                       COMMAND rm ${NAME_}.ltoir
                       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                       DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
@@ -255,7 +263,16 @@ macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
   endif()
 endmacro()
 
-macro(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
+function(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
+  if(NOT NVSHMEM_BUILD_BITCODE_CUBIN_TESTS)
+    return()
+  endif()
+
+  if(NOT (NVSHMEM_LLVM_LINK_AVAILABLE AND NVSHMEM_OPT_AVAILABLE AND NVSHMEM_LLC_AVAILABLE
+      AND TARGET cuda::ptxas))
+    return()
+  endif()
+
   get_filename_component(NAME_ ${SOURCE} NAME_WE)
   get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
   string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
@@ -272,20 +289,20 @@ macro(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
   endif()
 
   if (NOT SubBuild)
-    set(BITCODE_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device.bc)
+    set(BITCODE_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.bc)
     set(CUBIN_EXTRA_DEPENDS nvshmem_test_helper ${BITCODE_LIB_PATH})
   else()
-    set(BITCODE_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device.bc)
+    set(BITCODE_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.bc)
     set(CUBIN_EXTRA_DEPENDS nvshmem_test_helper libnvshmem_device_bitcode)
   endif()
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
 	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                             --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
-                    COMMAND llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
-                    COMMAND opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
-                    COMMAND llc -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
-                    COMMAND ${CUDA_HOME}/bin/ptxas ${CUBIN_DEBUG_FLAGS} -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_NAME}
+                    COMMAND llvm::llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
+                    COMMAND llvm::opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
+                    COMMAND llvm::llc -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
+                    COMMAND cuda::ptxas ${CUBIN_DEBUG_FLAGS} -arch=${NVSHMEM_CLANG_ARCH} ${NAME_}.ptx -o ${CUBIN_NAME}
                     COMMAND rm ${NAME_}.bc.unoptimized ${NAME_}.bc.unoptimized.linked ${NAME_}.bc ${NAME_}.ptx
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     DEPENDS ${CUBIN_EXTRA_DEPENDS})
@@ -306,7 +323,7 @@ macro(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                         GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   endif()
-endmacro()
+endfunction()
 
 macro(nvshmem_add_unit_test_prefix SOURCE PREFIX)
   get_filename_component(NAME_ ${SOURCE} NAME_WE)

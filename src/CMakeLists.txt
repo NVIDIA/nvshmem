@@ -65,16 +65,48 @@ else()
   set(DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS "")
 endif()
 
-set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
+if(CMAKE_CXX_STANDARD)
+  set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
+else()
+  set(BITCODE_CXX_STD "c++17")
+endif()
+
+# Derive device library architectures from CMAKE_CUDA_ARCHITECTURES.
+# Strips -real/-virtual suffixes and prepends sm_ to each entry.
+set(DEVICE_LIB_ARCHS "")
+foreach(ARCH_ENTRY IN LISTS CMAKE_CUDA_ARCHITECTURES)
+  string(REGEX REPLACE "-(real|virtual)$" "" ARCH_NUM "${ARCH_ENTRY}")
+  if(NOT "${ARCH_NUM}" STREQUAL "")
+    list(APPEND DEVICE_LIB_ARCHS "sm_${ARCH_NUM}")
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES DEVICE_LIB_ARCHS)
+message(STATUS "DEVICE_LIB_ARCHS: ${DEVICE_LIB_ARCHS}")
 
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
     configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in llvm_lib/non_abi/device/pt-to-pt/transfer_device.cuh COPYONLY)
   endif()
-  if(CUDAToolkit_VERSION_MAJOR LESS 12)
-    set(BITCODE_LIB_ARCH "sm_70")
+
+  # Filter architectures to only those supported by the discovered Clang.
+  # Clang/LLVM 22+ supports SM 100+; older versions max out at SM 90.
+  set(BITCODE_LIB_ARCHS "")
+  if(LLVM_VERSION_MAJOR GREATER_EQUAL 22)
+    set(_CLANG_MAX_SM 100)
   else()
-    set(BITCODE_LIB_ARCH "sm_90")
+    set(_CLANG_MAX_SM 90)
+  endif()
+  foreach(ARCH IN LISTS DEVICE_LIB_ARCHS)
+    string(REGEX REPLACE "^sm_" "" _SM_NUM "${ARCH}")
+    if(_SM_NUM LESS_EQUAL ${_CLANG_MAX_SM})
+      list(APPEND BITCODE_LIB_ARCHS "${ARCH}")
+    else()
+      message(STATUS "Skipping bitcode for ${ARCH} (Clang/LLVM ${LLVM_VERSION_MAJOR} supports up to sm_${_CLANG_MAX_SM})")
+    endif()
+  endforeach()
+  if(NOT BITCODE_LIB_ARCHS)
+    message(WARNING "No bitcode architectures supported by Clang ${LLVM_VERSION_MAJOR}; skipping bitcode library")
+    set(NVSHMEM_BUILD_BITCODE_LIBRARY OFF)
   endif()
 
   # Note - today we do optimization to avoid having a too large bitcode file. There are, as of clang 18, some existing
@@ -85,12 +117,8 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   string(TOUPPER "${CMAKE_BUILD_TYPE}" _BITCODE_BUILD_TYPE_UPPER)
   if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
     set(BITCODE_OPT_LEVEL "-O0")
-    set(BITCODE_OPT_COMMAND cp libnvshmem_device.bc.unoptimized libnvshmem_device.bc)
   else()
     set(BITCODE_OPT_LEVEL "-O1")
-    set(BITCODE_OPT_COMMAND opt --passes='internalize,inline,globaldce'
-        -internalize-public-api-list='nvshmem_*,nvshmemx_*,nvshmemi_device_lib_version_d,nvshmemi_device_state_d'
-        libnvshmem_device.bc.unoptimized -o libnvshmem_device.bc)
   endif()
   if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG" OR _BITCODE_BUILD_TYPE_UPPER STREQUAL "RELWITHDEBINFO")
     set(BITCODE_DEBUG_FLAGS "-g")
@@ -104,70 +132,185 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     message(FATAL_ERROR "Bitcode library requires NVSHMEM_CLANG_EXECUTABLE (set by top-level find_package(Clang CONFIG)). Got: ${NVSHMEM_CLANG_EXECUTABLE}")
   endif()
 
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
-                    COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                    --cuda-gpu-arch=${BITCODE_LIB_ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
-                    -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
-                    ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
-                    -D__clang_llvm_bitcode_lib__ ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu -o libnvshmem_device.bc.unoptimized
-                    COMMAND ${BITCODE_OPT_COMMAND}
-                    COMMAND llvm-dis libnvshmem_device.bc
-                    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/bitcode_lib_cleanup.sh ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device.ll ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device.ll.new
-                    COMMAND llvm-as libnvshmem_device.ll.new -o ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
-                    COMMAND rm libnvshmem_device.bc.unoptimized libnvshmem_device.ll libnvshmem_device.ll.new libnvshmem_device.bc
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
-                    DEPENDS device/init/init_device.cu)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib)
+  file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 
-  add_custom_target(libnvshmem_device_bitcode ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc)
+  # Build per-arch bitcode files and install each one.
+  set(BITCODE_ARCH_BC_FILES "")
+  foreach(ARCH IN LISTS BITCODE_LIB_ARCHS)
+    string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
+    set(ARCH_BC_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.bc)
+
+    if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+      set(ARCH_OPT_COMMAND cp libnvshmem_device_${ARCH}.bc.unoptimized libnvshmem_device_${ARCH}.bc)
+    else()
+      set(ARCH_OPT_COMMAND llvm::opt --passes='internalize,inline,globaldce'
+          -internalize-public-api-list='nvshmem_*,nvshmemx_*,nvshmemi_device_lib_version_d,nvshmemi_device_state_d'
+          libnvshmem_device_${ARCH}.bc.unoptimized -o libnvshmem_device_${ARCH}.bc)
+    endif()
+
+    add_custom_command(OUTPUT ${ARCH_BC_FILE}
+                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                      --cuda-gpu-arch=${ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
+                      -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
+                      ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
+                      -D__clang_llvm_bitcode_lib__ ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu -o libnvshmem_device_${ARCH}.bc.unoptimized
+                      COMMAND ${ARCH_OPT_COMMAND}
+                      COMMAND llvm::llvm-dis libnvshmem_device_${ARCH}.bc
+                      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/bitcode_lib_cleanup.sh ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device_${ARCH}.ll ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device_${ARCH}.ll.new
+                      COMMAND llvm::llvm-as libnvshmem_device_${ARCH}.ll.new -o ${ARCH_BC_FILE}
+                      COMMAND rm libnvshmem_device_${ARCH}.bc.unoptimized libnvshmem_device_${ARCH}.ll libnvshmem_device_${ARCH}.ll.new libnvshmem_device_${ARCH}.bc
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
+                      DEPENDS device/init/init_device.cu)
+
+    list(APPEND BITCODE_ARCH_BC_FILES ${ARCH_BC_FILE})
+  endforeach()
+
+  add_custom_target(libnvshmem_device_bitcode ALL DEPENDS ${BITCODE_ARCH_BC_FILES})
   if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
     add_dependencies(libnvshmem_device_bitcode gpunetio_build)
   endif()
-  install(
-          FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.bc
-          DESTINATION lib/
-          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-                      GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-  )
+
+  # Install per-arch bitcode files.
+  foreach(ARCH IN LISTS BITCODE_LIB_ARCHS)
+    install(
+            FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.bc
+            DESTINATION lib/
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                        GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+    )
+  endforeach()
+
+  # Create a backward-compatible symlink: libnvshmem_device.bc -> libnvshmem_device_sm_90.bc
+  # (sm_90 was the previous default architecture for the bitcode library)
+  if("sm_90" IN_LIST BITCODE_LIB_ARCHS)
+    install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink \
+      libnvshmem_device_sm_90.bc \
+      \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/libnvshmem_device.bc)")
+  endif()
 endif()
 
 ## End bitcode library configurations
 ## Start ltoir library configurations
+#
+# LTOIR version compatibility:
+#   - CUDA 12.8+: nvcc --ltoir compiles per-arch .ltoir files
+#   - CUDA 13.0+: fatbinary --image3=kind=nvvm creates multi-arch fatbins
+#                  that nvcc -dlink can consume
+#   - CUDA 12.8-12.x: fatbinary --image3=kind=nvvm creates fatbins but
+#                  nvcc -dlink cannot extract from them (unresolved symbols).
+#                  Fall back to a single sm_90 .ltoir file.
+#
 if(NVSHMEM_BUILD_LTOIR_LIBRARY)
-  # --ltoir requires CUDA 12.0 or later
-  if(CUDAToolkit_VERSION_MAJOR LESS 12)
-    message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.0 or later, but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Disabling LTOIR library build.")
+  # nvcc --ltoir requires CUDA 12.8 or later
+  if(CUDAToolkit_VERSION_MAJOR LESS 12 OR
+     (CUDAToolkit_VERSION_MAJOR EQUAL 12 AND CUDAToolkit_VERSION_MINOR LESS 8))
+    message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.8 or later (nvcc --ltoir), but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Disabling LTOIR library build.")
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "Build the nvshmem_device LTOIR library and tests" FORCE)
   else()
-    # CUDA >= 12.0, so we can build LTOIR
-    set(LTOIR_LIB_ARCH sm_80)
+
+  if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13)
+    # CUDA 13+: build multi-arch LTOIR fatbin from all target architectures
+    set(LTOIR_LIB_ARCHS ${DEVICE_LIB_ARCHS})
+  else()
+    # CUDA 12.8-12.x: single-arch sm_90 only. Multi-arch fatbins created with
+    # fatbinary --image3=kind=nvvm cannot be consumed by nvcc -dlink on CUDA 12
+    # (unresolved symbols). Hardcoded to sm_90 to match pre-multi-arch behavior.
+    set(LTOIR_LIB_ARCHS "sm_90")
+    message(STATUS "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}: "
+            "LTOIR fatbin extraction requires CUDA 13+. Building single-arch sm_90 LTOIR.")
+  endif()
+
+  if(NOT LTOIR_LIB_ARCHS)
+    message(WARNING "No architectures for LTOIR library. Disabling LTOIR build.")
+    set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "" FORCE)
+  endif()
+
+  if(CUDAToolkit_VERSION_MAJOR LESS 13)
+    set(LTOIR_CXX_STD "c++11")
+  else()
+    set(LTOIR_CXX_STD "c++17")
+  endif()
 
   # ––– paths –––
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 
-  # ––– compile device object that retains LTO IR –––
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
-    # Generate LTO IR with all inline functions included
-    COMMAND nvcc -std=${BITCODE_CXX_STD} -arch=${LTOIR_LIB_ARCH} -dlto --ltoir
-            -I ${CMAKE_CURRENT_SOURCE_DIR}/include
-            ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
-            -DNVSHMEM_BUILD_LTOIR_LIBRARY
-            -o ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
-            ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu
-    DEPENDS device/init/init_device.cu
-    VERBATIM
-  )
+  # ––– compile per-arch LTOIR files –––
+  set(LTOIR_ARCH_FILES "")
+  set(FATBIN_LTOIR_IMAGE_ARGS "")
+  if(NOT TARGET cuda::nvcc)
+    message(FATAL_ERROR "nvcc not found in the selected CUDA Toolkit. Cannot build the LTOIR library.")
+  endif()
+  foreach(ARCH IN LISTS LTOIR_LIB_ARCHS)
+    string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
+    set(ARCH_LTOIR_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir)
+
+    add_custom_command(
+      OUTPUT ${ARCH_LTOIR_FILE}
+      COMMAND cuda::nvcc -std=${LTOIR_CXX_STD} -arch=${ARCH} -dlto --ltoir
+              -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+              ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
+              -DNVSHMEM_BUILD_LTOIR_LIBRARY
+              -o ${ARCH_LTOIR_FILE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu
+      DEPENDS device/init/init_device.cu
+      VERBATIM
+    )
+
+    list(APPEND LTOIR_ARCH_FILES ${ARCH_LTOIR_FILE})
+    list(APPEND FATBIN_LTOIR_IMAGE_ARGS "--image3=kind=nvvm,sm=${ARCH_NUM},file=${ARCH_LTOIR_FILE}")
+  endforeach()
+
+  if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13)
+    # CUDA 13+: combine per-arch LTOIR files into a multi-arch fatbin
+    if(NOT TARGET cuda::fatbinary)
+      message(FATAL_ERROR "fatbinary not found in the selected CUDA Toolkit. Cannot build the LTOIR fatbin.")
+    endif()
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
+      COMMAND cuda::fatbinary --64 --create=${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
+              ${FATBIN_LTOIR_IMAGE_ARGS}
+      DEPENDS ${LTOIR_ARCH_FILES}
+      COMMAND_EXPAND_LISTS
+    )
+  else()
+    # CUDA 12.x: copy the single-arch .ltoir as the "fatbin" (no actual bundling)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
+      COMMAND ${CMAKE_COMMAND} -E copy
+              ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_sm_90.ltoir
+              ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
+      DEPENDS ${LTOIR_ARCH_FILES}
+    )
+  endif()
+
+  if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND TARGET cuda::cuobjdump)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin.cuobjdump.stamp
+      COMMAND cuda::cuobjdump --dump-elf-symbols ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
+      COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin.cuobjdump.stamp
+      DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
+    )
+    set(LTOIR_VALIDATION_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin.cuobjdump.stamp)
+  else()
+    set(LTOIR_VALIDATION_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin)
+  endif()
 
   add_custom_target(libnvshmem_device_ltoir ALL
-                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir)
+                    DEPENDS ${LTOIR_VALIDATION_DEPENDS} ${LTOIR_ARCH_FILES})
   if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
     add_dependencies(libnvshmem_device_ltoir gpunetio_build)
   endif()
 
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
           DESTINATION lib/
           PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                       GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+  # Also install per-arch LTOIR files (needed by nvcc -dlink for test/perftest)
+  foreach(ARCH IN LISTS LTOIR_LIB_ARCHS)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir
+            DESTINATION lib/)
+  endforeach()
   endif()
   endif()
 ## End ltoir library configurations

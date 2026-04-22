@@ -128,8 +128,8 @@ nvshmem_add_default_off_option(NVSHMEM_BUILD_DEB_PACKAGE "Build DEB package")
 nvshmem_add_default_off_option(NVSHMEM_BUILD_TGZ_PACKAGE "Build TGZ package")
 nvshmem_add_default_off_option(NVSHMEM_BUILD_GPUNETIO_LIBRARY "Enable internal build of DOCA GPUNetIO library")
 if (NOT NVSHMEM_BUILD_PACKAGES)
-  nvshmem_add_default_off_option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library")
-  nvshmem_add_default_off_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
+  nvshmem_add_default_on_option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library")
+  nvshmem_add_default_on_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
 endif()
 message( "___________________________________________________________________________________________________\n\n")
 
@@ -139,9 +139,19 @@ nvshmem_add_default_on_option(NVSHMEM_BUILD_HYDRA_LAUNCHER "Enables Building the
 nvshmem_add_default_on_option(NVSHMEM_BUILD_TXZ_PACKAGE "Build TXZ package")
 if (NVSHMEM_BUILD_PACKAGES)
   nvshmem_add_default_on_option(NVSHMEM_BUILD_BITCODE_LIBRARY "Build the nvshmem_device bitcode library")
-  # TODO: Flip to default-ON when no longer experimental
-  nvshmem_add_default_off_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
+  nvshmem_add_default_on_option(NVSHMEM_BUILD_LTOIR_LIBRARY "Build the nvshmem_device LTOIR library")
 endif()
+if(DEFINED ENV{NVSHMEM_BUILD_BITCODE_CUBIN_TESTS})
+  set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS_DEFAULT $ENV{NVSHMEM_BUILD_BITCODE_CUBIN_TESTS})
+elseif(NVSHMEM_BUILD_PACKAGES)
+  set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS_DEFAULT OFF)
+else()
+  set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS_DEFAULT ON)
+endif()
+option(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS
+       "Build bitcode cubin test and perftest targets"
+       ${NVSHMEM_BUILD_BITCODE_CUBIN_TESTS_DEFAULT})
+message( "NVSHMEM_BUILD_BITCODE_CUBIN_TESTS: ${NVSHMEM_BUILD_BITCODE_CUBIN_TESTS}")
 message( "___________________________________________________________________________________________________\n\n")
 
 
