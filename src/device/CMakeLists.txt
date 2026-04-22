@@ -171,8 +171,15 @@ endmacro()
 
 set(NVSHMEM_DEVICE_SOURCES
     init/init_device.cu
+    init/init_host.cu
     launch/collective_launch.cpp
 )
+
+# init_host.cu is host-only code that provides nvshmemi_init_thread and
+# friends; compiling it non-RDC keeps init_host.o free of RDC registration
+# symbols so non-RDC user code can link against libnvshmem_device.a without
+# needing --unresolved-symbols=ignore-in-object-files.
+set_source_files_properties(init/init_host.cu PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
 
 target_include_directories(
   nvshmem_device
