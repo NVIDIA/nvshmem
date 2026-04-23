@@ -601,6 +601,7 @@ int nvshmemt_libfabric_ack_aggregator_t::record_ack(int pe, uint16_t seq_num,
                                                     uint8_t preceding_put_count) {
     int status = 0;
     auto &pending = pending_per_peer[pe];
+    pending.age = 0;
 
     uint16_t start_seq_num = nvshmemt_libfabric_endpoint_seq_counter_t::seq_num_wrapdown(
         (seq_num - preceding_put_count) & nvshmemt_libfabric_endpoint_seq_counter_t::sequence_mask);
@@ -643,6 +644,7 @@ int nvshmemt_libfabric_ack_aggregator_t::record_amo_ack(int pe, nvshmem_transpor
                                                         nvshmemt_libfabric_endpoint_t &ep,
                                                         fi_addr_t dest_addr) {
     auto &pending = pending_per_peer[pe];
+    pending.age = 0;
 
     pending.amo_ack_count++;
 
@@ -671,6 +673,61 @@ int nvshmemt_libfabric_ack_aggregator_t::flush_all(nvshmem_transport_t transport
     dirty_peers.clear();
 
     return status;
+}
+
+int nvshmemt_libfabric_ack_aggregator_t::flush_stale(nvshmem_transport_t transport,
+                                                     nvshmemt_libfabric_endpoint_t &ep) {
+    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    int status = 0;
+
+    for (size_t i = 0; i < dirty_peers.size(); ) {
+        int pe = dirty_peers[i];
+        auto &pending = pending_per_peer[pe];
+        if (pending.total_pending() == 0) {
+            /* Non-pending entry; remove from dirty_peers (swap-and-pop) */
+            pending.is_dirty = false;
+            dirty_peers[i] = dirty_peers.back();
+            dirty_peers.pop_back();
+            continue;
+        }
+        pending.age++;
+        if (pending.age >= max_age) {
+            fi_addr_t dest_addr =
+                static_cast<fi_addr_t>(pe * libfabric_state->eps.size() + ep.ep_index);
+            status = flush_peer(pe, transport, ep, dest_addr);
+            if (status) return status;
+            /* flush_peer clears pending; remove from dirty_peers (swap-and-pop) */
+            pending.is_dirty = false;
+            dirty_peers[i] = dirty_peers.back();
+            dirty_peers.pop_back();
+        } else {
+            i++;
+        }
+    }
+
+    return status;
+}
+
+bool nvshmemt_libfabric_ack_aggregator_t::try_extract_for_peer(int pe, uint16_t &range_end,
+                                                               uint16_t &range_count,
+                                                               uint16_t &signal_ack_count) {
+    auto &pending = pending_per_peer[pe];
+    if (pending.total_pending() == 0)
+        return false;
+    range_end = pending.range_end;
+    range_count = pending.range_count;
+    signal_ack_count = pending.signal_ack_count + pending.amo_ack_count;
+
+    /* Clear pending state */
+    pending.range_end = 0;
+    pending.range_count = 0;
+    pending.has_range = false;
+    pending.amo_ack_count = 0;
+    pending.signal_ack_count = 0;
+    pending.age = 0;
+
+    /* Leave in dirty_peers; flush_stale will clean up non-pending entries */
+    return true;
 }
 
 /* Private functions with external linkage (local symbols) */
