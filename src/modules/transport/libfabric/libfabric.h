@@ -259,13 +259,13 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     }
 };
 
-typedef enum {
+enum nvshmemt_libfabric_recv_t : uint8_t {
     NVSHMEMT_LIBFABRIC_SEND,
     NVSHMEMT_LIBFABRIC_ACK,
     NVSHMEMT_LIBFABRIC_MATCH,
     NVSHMEMT_LIBFABRIC_RMA,
     NVSHMEMT_LIBFABRIC_AMO_ACK_SEND,
-} nvshmemt_libfabric_recv_t;
+};
 
 typedef enum {
     NVSHMEMT_LIBFABRIC_RECV_TYPE_ACK,
@@ -756,11 +756,12 @@ static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_
 
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
- * | 4 type | 1 op | 1 elem_size | 2 num_writes | 8 signal | 8 target_addr | 2 sequence_count
+ * | 1 type | 3 reserved | 1 op | 1 elem_size | 2 num_writes | 8 signal | 8 target_addr | 2 sequence_count
  * | 1 preceding_put_count | 1 reserved | 4 src_pe
  */
 typedef struct nvshmemt_libfabric_gdr_signal_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
+    uint8_t reserved1[3];
     uint8_t op;
     uint8_t elem_size;
     uint16_t num_writes;
@@ -779,7 +780,7 @@ static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) <=
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");
 
 /* Wire data for AMO ack sent via fi_send
- * | 4 type | 2 range_end | 2 range_count | 2 amo_ack_count | 2 num_ack_ops
+ * | 1 type | (1 pad) | 2 range_end | 2 range_count | 2 amo_ack_count | 2 num_ack_ops
  * | 1 put_count |
  */
 typedef struct nvshmemt_libfabric_gdr_amo_ack_op {
