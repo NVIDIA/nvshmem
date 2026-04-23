@@ -455,4 +455,3 @@ add_custom_target(kernel_nvshmem_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/h
 add_subdirectory(apps)
 add_subdirectory(device)
 add_subdirectory(host)
-add_subdirectory(unit)
