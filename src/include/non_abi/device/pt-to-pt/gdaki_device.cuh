@@ -1044,7 +1044,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_gdaki_rma_g_impl(
     uint64_t raddr;
     size_t rchunk_size;
 
+#ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp = gdaki_can_coalesce_warp_pe(amask, proxy_pe);
+#else
+    bool can_coalesce_warp = false;
+#endif
     bool can_combine_data = false;
     int pred_contiguous = 0;
     int pred_rkey = 0;
@@ -1212,13 +1216,22 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma(
     void *rptr, void *lptr, size_t bytes, int dst_pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     int proxy_pe = gdaki_get_proxy_pe(dst_pe);
+#ifndef __clang_llvm_bitcode_lib__
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+#else
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
+#endif
         gdaki_rma_thread<channel_op, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe,
                                             qp_index);
+#ifndef __clang_llvm_bitcode_lib__
     } else {
         gdaki_rma<SCOPE, channel_op, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe,
                                             qp_index);
     }
+#else
+    }
+    nvshmemi_threadgroup_sync<SCOPE>();
+#endif
 }
 
 /**
