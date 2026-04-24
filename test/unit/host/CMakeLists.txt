@@ -5,3 +5,4 @@ endmacro()
 
 add_subdirectory(bootstrap)
 add_subdirectory(env)
+add_subdirectory(error)
