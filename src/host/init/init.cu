@@ -507,7 +507,7 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
 
     CUDA_RUNTIME_CHECK(cudaGetDevice(&cuda_dev));
     status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&current_dev, cuda_dev));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuDeviceGet failed \n");
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuDeviceGet failed \n");
 
     /* Skip multicast attribute query when NVLS is disabled: avoids driver quirks (e.g.
      * CUDA_ERROR_INVALID_VALUE on some GPU/driver combos) when the result would be unused. */
@@ -522,7 +522,7 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
         cuDeviceGetAttribute(
             &mc_support, static_cast<CUdevice_attribute>(CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED),
             current_dev));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cuDeviceGetAttribute failed \n");
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_INTERNAL, out, "cuDeviceGetAttribute failed \n");
 
     if (!mc_support) {
         INFO(NVSHMEM_INIT, "NVLS: cuMulticast is not supported on CUDA\n");
@@ -600,8 +600,9 @@ int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr =
         if (nvshmemi_options.BOOTSTRAP_TWO_STAGE) {
             TRACE(NVSHMEM_INIT, "Two-stage initialization requested");
             nvshmemi_options.BOOTSTRAP_TWO_STAGE = false;
-        } else
+        } else {
             TRACE(NVSHMEM_INIT, "GPU not selected, cuCtxGetDevice failed, err: %d", status);
+        }
 
         status = NVSHMEMX_ERROR_GPU_NOT_SELECTED;
         goto out;
@@ -1014,7 +1015,7 @@ static int nvshmemi_query_cuda_attributes() {
     CUdevice device;
 
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice)(&device);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuCtxGetDevice failed \n");
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuCtxGetDevice failed \n");
 
     curesult = CUPFN(nvshmemi_cuda_syms, cuDeviceGetAttribute)(
         &nvshmemi_can_use_cuda_64_bit_stream_memops,

@@ -133,7 +133,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                           "cudaGetDeviceCount failed \n");
 
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&cudevice));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuCtxGetDevice failed \n");
 
     cudev = (CUdevice *)std::malloc(sizeof(CUdevice) * ndev);
@@ -142,7 +142,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
 
     NVSHMEMU_FOR_EACH(i, ndev) {
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&cudev[i], i));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuDeviceGet failed \n");
         if (cudev[i] == cudevice) {
             device_id = i;

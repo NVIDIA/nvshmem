@@ -454,7 +454,7 @@ int nvshmemi_symmetric_heap_static::reserve_heap(void) {
     status = CUPFN(
         nvshmemi_cuda_syms,
         cuPointerSetAttribute(&data, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)(heap_base_)));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                           "cuPointerSetAttribute failed \n");
 
     INFO(NVSHMEM_MEM,
@@ -489,7 +489,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemGetAllocationGranularity(&mem_granularity_, &prop,
                                                  CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemGetAllocationGranularity failed \n");
     mem_granularity_ = std::max(nvshmemi_options.CUMEM_GRANULARITY, mem_granularity_);
     mem_granularity_ = mem_granularity_ < NVSHMEMI_MAX_HANDLE_LENGTH ? mem_granularity_
@@ -503,7 +503,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemAddressReserve((CUdeviceptr *)&global_heap_base_, p2p_npes * heap_size_,
                                        alignbytes, (CUdeviceptr)NULL, 0));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemAddressReserve failed \n");
     heap_base_ = (void *)((uintptr_t)global_heap_base_);
     mmap_base_ = (char *)heap_base_ + heap_size_;
@@ -553,7 +553,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
     if (heap_base_ != NULL) {
         status = CUPFN(nvshmemi_cuda_syms,
                        cuMemUnmap((CUdeviceptr)heap_base_, physical_internal_heap_size_));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "release memory failed for p2p on heap dynamic (my PE)\n");
     }
 
@@ -564,7 +564,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
             continue;
         }
         status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(std::get<0>(cumem_handles_[i])));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuMemRelease failed \n");
     }
     cumem_handles_.clear();
@@ -581,7 +581,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
 
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemAddressFree((CUdeviceptr)global_heap_base_, reserved_heap_size_));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemAddressFree failed \n");
 
     nvshmemi_mem_p2p_transport::destroy_instance();
@@ -1288,7 +1288,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::import_memory(nvshmem_mem_handle
     access.location.id = gpu_device_id;
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(peer_handle));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemRelease failed \n");
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemSetAccess((CUdeviceptr)*buf, size, (const CUmemAccessDesc *)&access, 1));
@@ -1317,7 +1317,7 @@ int nvshmemi_symmetric_heap_sysmem_static_shm::import_memory(nvshmem_mem_handle_
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::release_memory(void *buf, size_t size) {
     int status = 0;
     status = CUPFN(nvshmemi_cuda_syms, cuMemUnmap((CUdeviceptr)buf, size));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "cuMemUnmap failed with error %d \n", status);
 out:
     return (status);
@@ -1788,7 +1788,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_physical_memory_to_heap
     // creating handle for the entire size
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemCreate(&cumem_handle, size, (const CUmemAllocationProp *)&prop, 0));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemCreate failed \n");
 
     heap_offset = (off_t)(physical_internal_heap_size_);
@@ -1797,11 +1797,11 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_physical_memory_to_heap
 
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemMap((CUdeviceptr)buf_start, size, mmap_offset, cumem_handle, 0));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out, "cuMemMap failed \n");
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out, "cuMemMap failed \n");
 
     status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
                                                       (const CUmemAccessDesc *)&access, 1));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemSetAccess failed \n");
     status = nvls_bind_heap_memory((nvshmem_mem_handle_t *)&cumem_handle,
                                    (off_t)(heap_offset) /*global mc_offset*/, mmap_offset, size);
@@ -1907,11 +1907,11 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
         is_egm = true;
         access[0].location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&my_dev, state->device_id));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "cuDeviceGet failed\n");
         status = CUPFN(nvshmemi_cuda_syms,
                        cuDeviceGetAttribute(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, my_dev));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "cuDeviceGetAttribute NUMA ID failed\n");
         access[0].location.id = numa_id;
 
@@ -1920,7 +1920,8 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     }
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemGetAccess(&access_flags, &access[0].location, (CUdeviceptr)buf_ptr));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS,
+                             NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "cuMemGetAccess failed\n");
 
     access[0].flags = (CUmemAccess_flags_enum)access_flags;
@@ -2029,7 +2030,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     heap_offset = (off_t)(buf_start - (char *)heap_base_);
 
     status = CUPFN(nvshmemi_cuda_syms, cuMemRetainAllocationHandle(&userAllocHandle, buf_ptr));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Failed to get handle for buffer\n");
 
     // Track these handles, so that when new teams are created, we can bind them
@@ -2041,16 +2042,17 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
 
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemMap((CUdeviceptr)buf_start, size, mmap_offset, userAllocHandle, 0));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemMap user buffer failed \n");
     if (is_egm) {
         status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
-                    &access[0], 2));
+                                                          &access[0], 2));
     } else {
         status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
-                    &access[0], 1));
+                                                          &access[0], 1));
     }
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS,
+                             NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemSetAccess failed \n");
 
     status = nvls_bind_heap_memory((nvshmem_mem_handle_t *)&userAllocHandle,
@@ -2153,7 +2155,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
     }
 
     status = CUPFN(nvshmemi_cuda_syms, cuMemUnmap((CUdeviceptr)ptr, size));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuMemUnMap failed for user buffer\n");
 
     /* Release and Unmap memory for peer PE */
@@ -2171,7 +2173,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
     if (mmap_handle_idx_in_cumem_handles_.count(ptr)) {
         addr_idx = mmap_handle_idx_in_cumem_handles_[ptr];
         status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(std::get<0>(cumem_handles_[addr_idx])));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuMemRelease failed \n");
         // Mark cumem_handles_ entry as released
         cumem_handles_[addr_idx] = std::make_tuple(
@@ -2200,12 +2202,12 @@ int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr)
         buf_loc_id = state->device_id;
     } else {  // for same socket EGM case
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&gpu_dev, state->device_id));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "cuDeviceGet failed\n");
         status =
             CUPFN(nvshmemi_cuda_syms,
                   cuDeviceGetAttribute(&buf_loc_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, gpu_dev));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                               "cuDeviceGetAttribute failed\n");
     }
 
@@ -2264,7 +2266,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
 
     // check if buffer (ptr) is allocated from cuMemCreate
     status = CUPFN(nvshmemi_cuda_syms, cuMemRetainAllocationHandle(&userAllocHandle, ptr));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Failed to get user alloc handle for buffer %p. Please check if buffer "
                           "is allocated using CUDA VMM API\n",
                           ptr);
@@ -2273,7 +2275,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     status = CUPFN(nvshmemi_cuda_syms,
                    cuPointerGetAttribute((void *)&ptrAttr, CU_POINTER_ATTRIBUTE_MEMORY_TYPE,
                                          reinterpret_cast<CUdeviceptr>(ptr)));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Failed to get pointer attribute of user buffer\n");
     *ptr_mem_type = ptrAttr;
 
@@ -2287,7 +2289,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
         status = CUPFN(nvshmemi_cuda_syms,
                        cuPointerGetAttribute((void *)&ptrAttr, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
                                              reinterpret_cast<CUdeviceptr>(ptr)));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "Failed to get device ordinal of user buffer %p\n", ptr);
         status = (int(ptrAttr) != state->device_id);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -2306,7 +2308,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     // Get allocation properties
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemGetAllocationPropertiesFromHandle(&userAllocProp, userAllocHandle));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Failed to get allocation properties of user buffer %p\n", ptr);
 
     // Check if requestedHandleTypes includes the effective handle type that will be used
@@ -2326,14 +2328,14 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemGetAllocationGranularity(&userAllocGran, &userAllocProp,
                                                  CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Failed to get allocation granularity of user buffer %p\n", ptr);
 
 out:
     cuMemRelease_status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(userAllocHandle));
     if (!status) {
         status = cuMemRelease_status;
-        NVSHMEMI_NE_ERROR_JMP(cuMemRelease_status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, cuMemRelease_status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
                               return_out, "cuMemRelease failed \n");
     }
 return_out:

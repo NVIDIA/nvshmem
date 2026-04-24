@@ -191,9 +191,8 @@ static inline void nvshmemi_coll_p2p_sync(nvshmemi_team_t* teami, CUstream strea
                 nvshmemi_cuda_syms,
                 cuStreamWriteValue64(stream, (CUdeviceptr)nvshmemi_ptr(pWrk + teami->my_pe, i),
                                      seq_num, CU_STREAM_WRITE_VALUE_DEFAULT));
-            NVSHMEMI_NZ_EXIT(
-                status, "nvshmemi_coll_p2p_sync cuStreamWriteValue64() failed with status: %d\n",
-                status);
+            NVSHMEMI_CU_NZ_EXIT(
+                nvshmemi_cuda_syms, status, "nvshmemi_coll_p2p_sync cuStreamWriteValue64() failed\n");
         }
     }
     for (int i = 0; i < teami->size; i++) {
@@ -202,9 +201,8 @@ static inline void nvshmemi_coll_p2p_sync(nvshmemi_team_t* teami, CUstream strea
             int status =
                 CUPFN(nvshmemi_cuda_syms, cuStreamWaitValue64(stream, (CUdeviceptr)sync_addr,
                                                               seq_num, CU_STREAM_WAIT_VALUE_GEQ));
-            NVSHMEMI_NZ_EXIT(
-                status, "nvshmemi_coll_p2p_sync cuStreamWaitValue64() failed with status: %d\n",
-                status);
+            NVSHMEMI_CU_NZ_EXIT(
+                nvshmemi_cuda_syms, status, "nvshmemi_coll_p2p_sync cuStreamWaitValue64() failed\n");
         }
     }
 }

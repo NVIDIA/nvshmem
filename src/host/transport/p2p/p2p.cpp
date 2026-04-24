@@ -250,7 +250,7 @@ int nvshmemt_p2p_init(nvshmem_transport_t *t) {
                             "p2p state allocation failed \n");
 
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&p2p_state->cudevice));
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "cuCtxGetDevice failed \n");
 
     p2p_state->hostHash = nvshmemu_getHostHash();
@@ -273,7 +273,7 @@ int nvshmemt_p2p_init(nvshmem_transport_t *t) {
 
     for (int i = 0; i < p2p_state->ndev; i++) {
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&p2p_state->cudev[i], i));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuDeviceGet failed \n");
         p2p_state->devid[i] = i;
 

@@ -76,7 +76,7 @@ void nvshmemx_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp, uint64_t 
                       cuStreamWaitValue64(cstream, (CUdeviceptr)sig_addr, cmp_value,
                                           CU_STREAM_WAIT_VALUE_EQ | CU_STREAM_WAIT_VALUE_FLUSH));
         }
-        NVSHMEMI_NZ_EXIT(status, "cuStreamWaitValue64() failed\n");
+        NVSHMEMI_CU_NZ_EXIT(nvshmemi_cuda_syms, status, "cuStreamWaitValue64() failed\n");
     } else {
         call_nvshmemi_signal_wait_until_on_stream_kernel(sig_addr, cmp, cmp_value, cstream);
     }
@@ -102,7 +102,7 @@ void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_o
             nvshmemi_state->mype == pe) {
             status = CUPFN(nvshmemi_cuda_syms,
                            cuStreamWriteValue64(cstrm, (CUdeviceptr)peer_addr, signal, 0));
-            NVSHMEMI_NZ_EXIT(status, "cuStreamWriteValue64() failed\n");
+            NVSHMEMI_CU_NZ_EXIT(nvshmemi_cuda_syms, status, "cuStreamWriteValue64() failed\n");
         } else {
             status = cudaMemcpyAsync(peer_addr, (const void *)&signal, sizeof(uint64_t),
                                      cudaMemcpyHostToDevice, cstrm);
