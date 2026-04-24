@@ -195,11 +195,11 @@ out:
 static inline int convert_addr_to_pe(nvshmemt_libfabric_state_t *state,
                                      const nvshmemt_libfabric_endpoint_t &ep,
                                      const fi_addr_t &addr) {
-    // addr = pe * state->eps.size() + ep.domain_index
+    // addr = pe * state->eps.size() + ep.ep_index
     // so
-    // pe = (addr - ep.domain_index) / state->eps.size()
+    // pe = (addr - ep.ep_index) / state->eps.size()
     int num_eps = state->eps.size();
-    int base_ep_index = addr - ep.domain_index;
+    int base_ep_index = addr - ep.ep_index;
     assert((base_ep_index % num_eps) == 0);
 
     return base_ep_index / num_eps;
