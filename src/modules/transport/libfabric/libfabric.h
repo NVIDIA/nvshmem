@@ -171,16 +171,33 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     }
 
     /**
+     * If seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM, increment by 1
+     */
+    static constexpr uint32_t seq_num_wrapup(uint32_t seq_num) {
+        if (seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM) {
+            return (seq_num + 1) & sequence_mask;
+        } else {
+            return seq_num;
+        }
+    }
+
+    /**
+     * If seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM, decrement by 1
+     */
+    static constexpr uint32_t seq_num_wrapdown(uint32_t seq_num) {
+        if (seq_num == NVSHMEM_STAGED_AMO_SEQ_NUM) {
+            return (seq_num - 1) & sequence_mask;
+        } else {
+            return seq_num;
+        }
+    }
+
+    /**
      * Obtain the next sequence number.
      *
      * @return -1 if no sequence number available
      */
     int32_t next_seq_num() {
-        /* Skip this sequence number if reserved */
-        if (sequence_counter == NVSHMEM_STAGED_AMO_SEQ_NUM) {
-            sequence_counter = (sequence_counter + 1) & sequence_mask;
-        }
-
         uint32_t seq_num = sequence_counter;
 
         uint32_t category = get_category(seq_num);
@@ -199,7 +216,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
         ++pending_acks[category];
 
         /* Increment sequence counter */
-        sequence_counter = (sequence_counter + 1) & sequence_mask;
+        sequence_counter = seq_num_wrapup(sequence_counter + 1);
         return seq_num;
     }
 
