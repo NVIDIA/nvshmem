@@ -197,6 +197,9 @@ int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_fun
                                 int log_level);
 void nvshmemt_mlx5dv_ftable_fini(void **mlx5dv_handle);
 
+void nvshmemt_ib_common_sanitize_timeout(struct nvshmemi_options_s *options);
+void nvshmemt_ib_common_sanitize_retry_cnt(struct nvshmemi_options_s *options);
+
 int nvshmemt_ib_common_nv_peer_mem_available();
 
 int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable,

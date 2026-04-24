@@ -23,6 +23,41 @@
 static void *ibv_lib_handle = nullptr;
 static void *mlx5_lib_handle = nullptr;
 
+void nvshmemt_ib_common_sanitize_timeout(struct nvshmemi_options_s *options) {
+    /*
+     * The underlying timeout variable is uint8_t. The timeout value is computed as:
+     *   4.096us * 2 ^ timeout.
+     * Setting to 0 results in an infinite timeout value.
+     */
+    constexpr int min_timeout = 0;
+    constexpr int max_timeout = 31;
+
+    if (options->IB_TIMEOUT < min_timeout) {
+        NVSHMEMI_WARN_PRINT("NVSHMEM_IB_TIMEOUT=%d is below the supported range %d-%d; using %d.",
+                            options->IB_TIMEOUT, min_timeout, max_timeout, min_timeout);
+        options->IB_TIMEOUT = min_timeout;
+    } else if (options->IB_TIMEOUT > max_timeout) {
+        NVSHMEMI_WARN_PRINT("NVSHMEM_IB_TIMEOUT=%d is above the supported range %d-%d; using %d.",
+                            options->IB_TIMEOUT, min_timeout, max_timeout, max_timeout);
+        options->IB_TIMEOUT = max_timeout;
+    }
+}
+
+void nvshmemt_ib_common_sanitize_retry_cnt(struct nvshmemi_options_s *options) {
+    constexpr int min_retry = 0;
+    constexpr int max_retry = 7;
+
+    if (options->IB_RETRY_CNT < min_retry) {
+        NVSHMEMI_WARN_PRINT("NVSHMEM_IB_RETRY_CNT=%d is below the supported range %d-%d; using %d.",
+                            options->IB_RETRY_CNT, min_retry, max_retry, min_retry);
+        options->IB_RETRY_CNT = min_retry;
+    } else if (options->IB_RETRY_CNT > max_retry) {
+        NVSHMEMI_WARN_PRINT("NVSHMEM_IB_RETRY_CNT=%d is above the supported range %d-%d; using %d.",
+                            options->IB_RETRY_CNT, min_retry, max_retry, max_retry);
+        options->IB_RETRY_CNT = max_retry;
+    }
+}
+
 /*
  * Dynamic GID detection for RoCE platforms. Adapted from NCCL.
  */

@@ -59,8 +59,6 @@ constexpr int GPUNETIO_IBUF_RESERVED_SLOTS = 1;
 // QP connection parameters
 constexpr uint32_t GPUNETIO_QP_PSN = 0;
 constexpr uint32_t GPUNETIO_QP_PKEY_INDEX = 0;
-constexpr int GPUNETIO_QP_ACK_TIMEOUT = 20;
-constexpr int GPUNETIO_QP_RETRY_CNT = 7;
 constexpr int GPUNETIO_QP_RNR_RETRY = 7;
 constexpr int GPUNETIO_QP_MIN_RNR_TIMER = 12;
 constexpr int GPUNETIO_QP_HOP_LIMIT = 255;
@@ -359,8 +357,10 @@ static int gpunetio_create_qp_attr(nvshmemt_gpunetio_state_t *gpunetio_state, ib
     DOCA_CHECK(doca_verbs_qp_attr_set_pkey_index(verbs_qp_attr, GPUNETIO_QP_PKEY_INDEX));
     DOCA_CHECK(doca_verbs_qp_attr_set_path_mtu(verbs_qp_attr, DOCA_VERBS_MTU_SIZE_4K_BYTES));
     DOCA_CHECK(doca_verbs_qp_attr_set_port_num(verbs_qp_attr, portid));
-    DOCA_CHECK(doca_verbs_qp_attr_set_ack_timeout(verbs_qp_attr, GPUNETIO_QP_ACK_TIMEOUT));
-    DOCA_CHECK(doca_verbs_qp_attr_set_retry_cnt(verbs_qp_attr, GPUNETIO_QP_RETRY_CNT));
+    DOCA_CHECK(
+        doca_verbs_qp_attr_set_ack_timeout(verbs_qp_attr, gpunetio_state->options->IB_TIMEOUT));
+    DOCA_CHECK(
+        doca_verbs_qp_attr_set_retry_cnt(verbs_qp_attr, gpunetio_state->options->IB_RETRY_CNT));
     DOCA_CHECK(doca_verbs_qp_attr_set_rnr_retry(verbs_qp_attr, GPUNETIO_QP_RNR_RETRY));
     DOCA_CHECK(doca_verbs_qp_attr_set_min_rnr_timer(verbs_qp_attr, GPUNETIO_QP_MIN_RNR_TIMER));
     DOCA_CHECK(doca_verbs_qp_attr_set_next_state(verbs_qp_attr, DOCA_VERBS_QP_STATE_INIT));
@@ -1872,6 +1872,9 @@ int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api
     status = nvshmemi_env_options_init(options.get());
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
                           "Unable to initialize NVSHMEM options.\n");
+
+    nvshmemt_ib_common_sanitize_timeout(options.get());
+    nvshmemt_ib_common_sanitize_retry_cnt(options.get());
 
     // Allocate generic transport
     auto transport_del = [](nvshmem_transport *p) {

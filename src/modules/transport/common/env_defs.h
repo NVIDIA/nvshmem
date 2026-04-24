@@ -50,6 +50,10 @@ NVSHMEMI_ENV_DEF(IB_DISABLE_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable use of DMABUF in IBRC/IBDEVX/IBGDA Transports")
 NVSHMEMI_ENV_DEF(IB_GID_INDEX, int, -1, NVSHMEMI_ENV_CAT_TRANSPORT, "Source GID Index for ROCE")
 NVSHMEMI_ENV_DEF(IB_TRAFFIC_CLASS, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT, "Traffic calss for ROCE")
+NVSHMEMI_ENV_DEF(IB_TIMEOUT, int, 20, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "QP ack timeout for IB transports. Valid range: 0-31")
+NVSHMEMI_ENV_DEF(IB_RETRY_CNT, int, 7, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "QP retry count for IB transports. Valid range: 0-7")
 NVSHMEMI_ENV_DEF(IB_ADDR_FAMILY, string, "AF_INET", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "IP address family associated to IB GID "
                  "dynamically selected by NVSHMEM when NVSHMEM_IB_GID_INDEX is left unset")

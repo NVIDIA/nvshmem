@@ -383,8 +383,8 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
     attr.qp_state = IBV_QPS_RTS;
     attr.sq_psn = 0;
-    attr.timeout = 20;
-    attr.retry_cnt = 7;
+    attr.timeout = ibrc_state->options->IB_TIMEOUT;
+    attr.retry_cnt = ibrc_state->options->IB_RETRY_CNT;
     attr.rnr_retry = 7;
     attr.max_rd_atomic = nvshmemt_ibrc_max_rd_atomic;
     flags = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
@@ -1474,6 +1474,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = nvshmemi_env_options_init(ibrc_state->options);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize transport options.");
+
+    nvshmemt_ib_common_sanitize_timeout(ibrc_state->options);
+    nvshmemt_ib_common_sanitize_retry_cnt(ibrc_state->options);
 
     ibrc_state->log_level = nvshmemt_common_get_log_level(ibrc_state->options);
 

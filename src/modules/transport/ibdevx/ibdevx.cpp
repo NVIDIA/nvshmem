@@ -729,11 +729,11 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
     } else {
         DEVX_SET(qpc, qp_context, log_sra_max, (int)log2(nvshmemt_ibdevx_max_rd_atomic));
     }
-    DEVX_SET(qpc, qp_context, retry_count, 7);
+    DEVX_SET(qpc, qp_context, retry_count, ibdevx_state->options->IB_RETRY_CNT);
     DEVX_SET(qpc, qp_context, rnr_retry, 7);
     DEVX_SET(qpc, qp_context, next_send_psn, 0);
     DEVX_SET(qpc, qp_context, log_ack_req_freq, 0); /* ack every packet */
-    DEVX_SET(qpc, qp_context, primary_address_path.ack_timeout, 20);
+    DEVX_SET(qpc, qp_context, primary_address_path.ack_timeout, ibdevx_state->options->IB_TIMEOUT);
 
     status =
         mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in3, sizeof(cmd_in3), cmd_out3, sizeof(cmd_out3));
@@ -1554,6 +1554,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     status = nvshmemi_env_options_init(ibdevx_state->options);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to initialize options.\n");
+
+    nvshmemt_ib_common_sanitize_timeout(ibdevx_state->options);
+    nvshmemt_ib_common_sanitize_retry_cnt(ibdevx_state->options);
 
     ibdevx_state->log_level = nvshmemt_common_get_log_level(ibdevx_state->options);
 
