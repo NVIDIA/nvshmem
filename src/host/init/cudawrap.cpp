@@ -89,6 +89,18 @@ static int cudaPfnFuncLoader(struct nvshmemi_cuda_fn_table *table) {
     LOAD_SYM(table, cuStreamWaitValue64, 11070, _v2, 1);
     LOAD_SYM(table, cuMemRetainAllocationHandle, 11000, , 1);
     LOAD_SYM(table, cuLibraryGetGlobal, 12000, , 1);
+    LOAD_SYM(table, cuGetExportTable, 3000, , 1);
+    LOAD_SYM(table, cuLogicalEndpointIdReserve, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointIdRelease, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointCreate, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointAddDevice, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointDestroy, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointBindAddr, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointBindMem, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointUnbind, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointExport, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointImport, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointGetLimits, 13030, , 1);
     return NVSHMEMI_SUCCESS;
 }
 

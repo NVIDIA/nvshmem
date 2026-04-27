@@ -78,6 +78,81 @@ typedef CUresult(CUDAAPI *PFN_cuMulticastGetGranularity_v12010)(
     size_t *granularity, const CUmulticastObjectProp *prop, CUmulticastGranularity_flags option);
 #endif
 
+#if CUDART_VERSION < 13030
+
+/** An ID that represents a logical endpoint */
+typedef uint32_t CUlogicalEndpointId;
+
+/** Logical endpoint type */
+typedef enum CUlogicalEndpointType_enum {
+    CU_LOGICAL_ENDPOINT_TYPE_INVALID,
+    CU_LOGICAL_ENDPOINT_TYPE_UNICAST,
+    CU_LOGICAL_ENDPOINT_TYPE_MULTICAST
+} CUlogicalEndpointType;
+
+/** IPC handle types that can be requested/queried for a given logical endpoint */
+typedef enum CUlogicalEndpointIpcHandleType_enum {
+    CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_NONE,
+    CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC
+} CUlogicalEndpointIpcHandleType;
+
+/** Fabric handle for a logical endpoint */
+typedef struct CUlogicalEndpointFabricHandle_st {
+    unsigned char data[CU_IPC_HANDLE_SIZE];
+} CUlogicalEndpointFabricHandle;
+
+/** Properties of a logical endpoint */
+typedef struct CUlogicalEndpointProp_struct {
+    CUlogicalEndpointType type;
+    union {
+        struct {
+            CUdevice device;
+        } unicast;
+        struct {
+            unsigned int numDevices;
+        } multicast;
+    };
+    unsigned long long size;
+    CUlogicalEndpointIpcHandleType ipcHandleTypes;
+    unsigned int flags;  // Must be zero
+} CUlogicalEndpointProp;
+
+#define CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_UNICAST_SUPPORTED (CUdevice_attribute)153
+#define CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_MULTICAST_SUPPORTED (CUdevice_attribute)154
+
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointIdReserve_v13030)(CUlogicalEndpointId *leId,
+                                                                 cuuint32_t count);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointIdRelease_v13030)(CUlogicalEndpointId leId,
+                                                                 cuuint32_t count);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointCreate_v13030)(CUlogicalEndpointId leId,
+                                                              const CUlogicalEndpointProp *prop);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointAddDevice_v13030)(CUlogicalEndpointId leId,
+                                                                 CUdevice dev);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointDestroy_v13030)(CUlogicalEndpointId leId);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointBindAddr_v13030)(CUlogicalEndpointId leId,
+                                                                CUdevice dev, cuuint64_t offset,
+                                                                void *ptr, cuuint64_t size,
+                                                                unsigned long long flags);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointBindMem_v13030)(CUlogicalEndpointId leId,
+                                                            CUdevice dev, cuuint64_t offset,
+                                                            CUmemGenericAllocationHandle memHandle,
+                                                            cuuint64_t memOffset, cuuint64_t size,
+                                                            unsigned long long flags);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointUnbind_v13030)(CUlogicalEndpointId leId,
+                                                              CUdevice dev, cuuint64_t offset,
+                                                              cuuint64_t size);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointExport_v13030)(void *handle,
+                                                            const CUlogicalEndpointId leId,
+                                                            CUlogicalEndpointIpcHandleType handleType);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointImport_v13030)(CUlogicalEndpointId leId,
+                                                            const void *handle,
+                                                            CUlogicalEndpointIpcHandleType handleType);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointGetLimits_v13030)(cuuint64_t *bindAlignment,
+                                                                 cuuint64_t *maxSize,
+                                                                 const CUlogicalEndpointProp *prop);
+
+#endif
+
 #if CUDART_VERSION >= 11030
 #include <cudaTypedefs.h>
 #else
@@ -150,6 +225,8 @@ typedef CUresult(CUDAAPI *PFN_cuStreamWaitValue64_v11070)(CUstream stream, CUdev
                                                           cuuint64_t value, unsigned int flags);
 typedef CUresult(CUDAAPI *PFN_cuMemRetainAllocationHandle_v11000)(
     CUmemGenericAllocationHandle *handle, void *addr);
+
+typedef CUresult(CUDAAPI *PFN_cuGetExportTable_v3000)(const void **ppExportTable, const CUuuid *pExportTableId);
 #endif
 
 #define DEFINE_SYM(symbol, version) PFN_##symbol##_v##version pfn_##symbol;
@@ -191,10 +268,21 @@ struct nvshmemi_cuda_fn_table {
     DEFINE_SYM(cuStreamWaitValue64, 11070)
     DEFINE_SYM(cuMemRetainAllocationHandle, 11000)
     DEFINE_SYM(cuLibraryGetGlobal, 12000)
-
+    DEFINE_SYM(cuGetExportTable, 3000)
     /* CUDA Driver functions loaded with dlsym() */
     DEFINE_SYM(cuInit, 2000)
     DEFINE_SYM(cuGetProcAddress, 11030)
+    DEFINE_SYM(cuLogicalEndpointIdReserve, 13030)
+    DEFINE_SYM(cuLogicalEndpointIdRelease, 13030)
+    DEFINE_SYM(cuLogicalEndpointCreate, 13030)
+    DEFINE_SYM(cuLogicalEndpointAddDevice, 13030)
+    DEFINE_SYM(cuLogicalEndpointDestroy, 13030)
+    DEFINE_SYM(cuLogicalEndpointBindAddr, 13030)
+    DEFINE_SYM(cuLogicalEndpointBindMem, 13030)
+    DEFINE_SYM(cuLogicalEndpointUnbind, 13030)
+    DEFINE_SYM(cuLogicalEndpointExport, 13030)
+    DEFINE_SYM(cuLogicalEndpointImport, 13030)
+    DEFINE_SYM(cuLogicalEndpointGetLimits, 13030)
 };
 #undef DEFINE_SYM
 

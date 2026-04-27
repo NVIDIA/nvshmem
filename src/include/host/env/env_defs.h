@@ -190,6 +190,9 @@ NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)256 * (1 << 30)),
 NVSHMEMI_ENV_DEF(MAX_PEER_STREAMS, int, 16, NVSHMEMI_ENV_CAT_OTHER,
                  "Maximum number of cuda streams per node")
 
+NVSHMEMI_ENV_DEF(ENABLE_LOGICAL_ENDPOINT, bool, false, NVSHMEMI_ENV_CAT_OTHER,
+                 "Enable logical endpoint support")
+
 #if defined(NVSHMEM_PPC64LE)
 #define NVSHMEMI_ENV_DISABLE_CUDA_VMM_DEFAULT true
 #else
@@ -209,6 +212,14 @@ NVSHMEMI_ENV_DEF(DISABLE_P2P, bool, false, NVSHMEMI_ENV_CAT_OTHER,
 
 NVSHMEMI_ENV_DEF(DISABLE_MNNVL, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Disable MNNVL connectivity for GPUs even when available")
+
+NVSHMEMI_ENV_DEF(MNNVL_OVERRIDE_MC_CLIQUE_ID, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
+                 "Use rackIDs to determine NVLink domain for MNNVL")
+
+// Using a temporary env variable to limit pointer based P2P access to PEs within same rack
+// This is needed for testing purposes.
+NVSHMEMI_ENV_DEF(LIMIT_PTR_P2P_ACCESS, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
+                 "Limit pointer based P2P access to PEs within same rack")
 
 NVSHMEMI_ENV_DEF(IGNORE_CUDA_MPS_ACTIVE_THREAD_PERCENTAGE, bool, false, NVSHMEMI_ENV_CAT_OTHER,
                  "When doing Multi-Process Per GPU (MPG) run, full API support is available "

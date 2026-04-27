@@ -111,6 +111,10 @@ install(
   PUBLIC_HEADER DESTINATION include
 )
 
+if (NVSHMEM_ENABLE_CFT_HANDLES)
+    target_compile_definitions(nvshmem_device PRIVATE CFT_HANDLES_ENABLED)
+endif()
+
 if (NVSHMEM_BUILD_WITH_CUTLASS)
     target_compile_definitions(nvshmem_device PRIVATE CUTLASS_ENABLED)
     if ("${CUTLASS_HOME}" STREQUAL "")

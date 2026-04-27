@@ -33,6 +33,7 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
                                 -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
+                                -DNVSHMEM_ENABLE_CFT_HANDLES=${NVSHMEM_ENABLE_CFT_HANDLES}
                                 -DNVSHMEM_GPUNETIO_SUPPORT=${NVSHMEM_GPUNETIO_SUPPORT}
                                 -DGPUNETIO_INCLUDE=${GPUNETIO_INCLUDE}
                                 -DCUTLASS_HOME=${CUTLASS_HOME}
@@ -624,6 +625,11 @@ target_include_directories(
             $<INSTALL_INTERFACE:include>
 )
 
+if (NVSHMEM_ENABLE_CFT_HANDLES)
+    target_compile_definitions(nvshmem_host PUBLIC CFT_HANDLES_ENABLED)
+    target_compile_definitions(nvshmem_device INTERFACE CFT_HANDLES_ENABLED)
+endif()
+
 if (NVSHMEM_GPUNETIO_SUPPORT)
   target_include_directories(nvshmem_host PRIVATE ${GPUNETIO_INCLUDE})
   target_include_directories(nvshmem_host INTERFACE
@@ -952,6 +958,7 @@ set(INC_EXPORTS
     device/nvshmem_coll_defines.cuh
     device/nvshmem_defines.h
     device/nvshmem_device_macros.h
+    device/logical_endpoint_device.cuh
     device/nvshmemx_collective_launch_apis.h
     device/nvshmemx_coll_defines.cuh
     device/nvshmemx_defines.h
@@ -975,6 +982,7 @@ set(INC_EXPORTS
     non_abi/device/common/nvshmemi_tile_utils.cuh
     device_host/nvshmem_common.cuh
     device_host/nvshmemi_extern_constant.h
+    device_host/logical_endpoint_types.h
     device_host/nvshmem_tensor.h
     device_host_transport/nvshmem_common_ibgda.h
     device_host_transport/nvshmem_common_gpunetio.h

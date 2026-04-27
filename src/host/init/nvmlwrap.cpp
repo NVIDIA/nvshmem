@@ -49,6 +49,8 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
                  nvml_ftable->nvmlDeviceGetGpuFabricInfoV, 1, status);
         LOAD_SYM(*nvml_handle, "nvmlDeviceGetFieldValues", nvml_ftable->nvmlDeviceGetFieldValues, 0,
                  status);
+        LOAD_SYM(*nvml_handle, "nvmlDeviceGetPlatformInfo", nvml_ftable->nvmlDeviceGetPlatformInfo, 1,
+                 status);
     }
 
     if (status != NVSHMEMX_SUCCESS) {
