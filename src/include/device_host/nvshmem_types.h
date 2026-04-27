@@ -161,6 +161,7 @@
             {TEAM_SCALAR_INVALID},                                 /* team_dups */              \
             NULL,                                                  /* pe_mapping */             \
             TEAM_ULSCALAR_INVALID,                                 /* p2p_sync_on_stream_count */ \
+            false,                                                 /* are_gpus_nvls_connected */\
     }
 
 #define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                          \
@@ -387,6 +388,7 @@ typedef struct {
     nvshmem_team_t team_dups[128];
     int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
     uint64_t p2p_sync_on_stream_count;
+    bool are_gpus_nvls_connected;
 } nvshmemi_team_v4;
 
 typedef struct {
@@ -470,7 +472,7 @@ typedef struct {
                                     NVSHMEMX_TEAM_SAME_MYPE_NODE */
     nvshmem_team_t team_same_mype_node;
 } nvshmemi_team_v1;
-static_assert(sizeof(nvshmemi_team_v4) == 800, "team_v4 must be 800 bytes.");
+static_assert(sizeof(nvshmemi_team_v4) == 808, "team_v4 must be 808 bytes.");
 static_assert(sizeof(nvshmemi_team_v3) == 792, "team_v3 must be 792 bytes.");
 static_assert(sizeof(nvshmemi_team_v2) == 784, "team_v2 must be 784 bytes.");
 static_assert(sizeof(nvshmemi_team_v1) == 256, "team_v1 must be 256 bytes.");

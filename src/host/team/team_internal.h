@@ -23,11 +23,12 @@ enum nvshmemi_team_creation_pe_state {
     NVSHMEMI_TEAM_CREATION_PE_STATE_DONE = 0x00000004,
 };
 
-struct nvshmemi_team_creation_pe_info {
+struct alignas(16) nvshmemi_team_creation_pe_info {
     int pe_in_team;
-    int state_idx;
-    unsigned char *team_index_array;
+    alignas(16) int state_idx;
+    alignas(16) unsigned char *team_index_array;
 };
+
 typedef struct nvshmemi_team_creation_pe_info nvshmemi_team_creation_pe_info_t;
 
 __host__ __device__ inline size_t nvshmemi_bit_1st_nonzero(const unsigned char *ptr,
@@ -44,9 +45,9 @@ __host__ __device__ inline size_t nvshmemi_bit_1st_nonzero(const unsigned char *
     return (size_t)-1;
 }
 
-struct nvshmemi_team_creation_psync {
+struct alignas(16) nvshmemi_team_creation_psync {
     uint64_t uniqueid;
-    nvshmemi_team_creation_pe_info_t pe_info[];
+    alignas(16) nvshmemi_team_creation_pe_info_t pe_info[];
 };
 typedef struct nvshmemi_team_creation_psync nvshmemi_team_creation_psync_t;
 

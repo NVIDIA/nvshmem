@@ -31,6 +31,7 @@
 #include "internal/host/nvshmem_internal.h"              // for nvshmemi_free
 #include "internal/host/nvshmemi_coll.h"                 // for nvshmemi_barrier
 #include "internal/host/nvshmemi_symmetric_heap.hpp"     // for nvshmemi_symm...
+#include "internal/host/nvshmemi_mem_transport.hpp"      // for nvshmemi_mem_p2p_transport
 #include "internal/host/nvshmemi_team.h"                 // for N_PSYNC_BYTES
 #include "internal/host/nvshmemi_types.h"                // for nvshmemi_state
 #include "internal/host/util.h"                          // for CUDA_RUNTIME_...
@@ -76,6 +77,7 @@ static long N_PSYNC_BYTES = 32; /* N_PSYNC_BYTES * CHAR_NBIT == max_teams suppor
 
 nvshmemi_team_t *nvshmemi_team_world = nullptr;
 nvshmemi_team_t *nvshmemi_team_shared = nullptr;
+nvshmemi_team_t *nvshmemi_team_mc_shared = nullptr;
 nvshmemi_team_t *nvshmemi_team_node = nullptr;
 nvshmemi_team_t *nvshmemi_team_same_mype_node = nullptr;
 nvshmemi_team_t *nvshmemi_team_same_gpu = nullptr;
@@ -83,6 +85,7 @@ nvshmemi_team_t *nvshmemi_team_gpu_leaders = nullptr;
 
 nvshmemi_team_t *nvshmemi_device_team_world = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_shared = nullptr;
+nvshmemi_team_t *nvshmemi_device_team_mc_shared = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_node = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_same_mype_node = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_same_gpu = nullptr;
@@ -276,6 +279,8 @@ static void nvshmemi_team_update_device(void) {
     copy_team_to_device(nvshmemi_team_world, nvshmemi_device_team_world);
 
     copy_team_to_device(nvshmemi_team_shared, nvshmemi_device_team_shared);
+
+    copy_team_to_device(nvshmemi_team_mc_shared, nvshmemi_device_team_mc_shared);
 
     copy_team_to_device(nvshmemi_team_node, nvshmemi_device_team_node);
 
@@ -695,8 +700,12 @@ void nvshmemi_team_set_p2p_connectivity(nvshmemi_team_t *teami) {
     teami->are_gpus_p2p_connected = nvshmemi_team_is_subset(teami, nvshmemi_team_shared);
 }
 
+void nvshmemi_team_set_nvls_connectivity(nvshmemi_team_t *teami) {
+    teami->are_gpus_nvls_connected = nvshmemi_team_is_subset(teami, nvshmemi_team_mc_shared);
+}
+
 bool nvshmemi_team_support_nvls(nvshmemi_team_t *team) {
-    return ((team->are_gpus_p2p_connected) && (team->nvls_rsc != nullptr));
+    return ((team->are_gpus_nvls_connected) && (team->nvls_rsc != nullptr));
 }
 
 bool nvshmemi_team_is_owner_nvls(nvshmemi_team_t *team) {
@@ -707,7 +716,7 @@ bool nvshmemi_team_is_owner_nvls(nvshmemi_team_t *team) {
 }
 
 static bool nvshmemi_team_is_nvls_capable(nvshmemi_team_t *team) {
-    return (team->are_gpus_p2p_connected && team->size >= 2 && nvshmemi_state->is_platform_nvls);
+    return (team->are_gpus_nvls_connected && team->size >= 2 && nvshmemi_state->is_platform_nvls);
 }
 
 nvshmemi_team_t *nvshmemi_team_get_same_existing_nvls_team(nvshmemi_team_t *team) {
@@ -978,128 +987,165 @@ static int init_team_world() {
     return 0;
 }
 
-/* Check that P2P-connected PE lists are symmetric and form a constant stride pattern.
- * Returns true if the lists can form a valid NVSHMEM_TEAM_SHARED, false otherwise. */
-static bool validate_p2p_pe_lists(const std::vector<int> &p2p_pe_list,
-                                  const std::vector<int> &n_p2p_pes_all,
-                                  const std::vector<int> &p2p_pe_list_all, int n_p2p_pes,
-                                  int max_num_p2p_pes) {
-    /* Check for each p2p-connected remote PE that
-      (1) it has the same number of p2p-connected PEs, and
-      (2) the list of p2p-connected PEs is the same.
-      This verifies that the p2p-connected PE lists are symmetric for P2P-connected PE partitions.
+/* Check that peer connected PE lists are symmetric and form a constant stride pattern.
+ * Returns true if the lists can form a valid NVSHMEM_TEAM_SHARED/NVSHMEM_TEAM_MC_SHARED,
+ * false otherwise. */
+static bool validate_peer_pe_lists(const std::vector<int> &peer_pe_list,
+                                  const std::vector<int> &n_peer_pes_all,
+                                  const std::vector<int> &peer_pe_list_all, int n_peer_pes,
+                                  int max_num_peer_pes) {
+    /* Check for each peer-connected remote PE that
+      (1) it has the same number of peer-connected PEs, and
+      (2) the list of peer-connected PEs is the same.
+      This verifies that the peer-connected PE lists are symmetric for peer-connected PE partitions.
     */
-    for (const auto &peer_pe : p2p_pe_list) {
-        if (n_p2p_pes_all[peer_pe] != n_p2p_pes) {
+    for (const auto &peer_pe : peer_pe_list) {
+        if (n_peer_pes_all[peer_pe] != n_peer_pes) {
             INFO(NVSHMEM_INIT,
-                 "n_p2p_pes is not equal across P2P PEs, setting NVSHMEM_TEAM_SHARED to self");
+                 "n_peer_pes is not equal across Peer PEs, setting SHARED TEAM to self");
             return false;
         }
 
-        /* Check for equivalence of p2p-connected PE lists */
-        auto peer_list_start = p2p_pe_list_all.begin() + peer_pe * max_num_p2p_pes;
-        if (!std::equal(p2p_pe_list.begin(), p2p_pe_list.end(), peer_list_start)) {
-            INFO(NVSHMEM_INIT, "P2P lists are not symmetric, setting NVSHMEM_TEAM_SHARED to self");
+        /* Check for equivalence of peer-connected PE lists */
+        auto peer_list_start = peer_pe_list_all.begin() + peer_pe * max_num_peer_pes;
+        if (!std::equal(peer_pe_list.begin(), peer_pe_list.end(), peer_list_start)) {
+            INFO(NVSHMEM_INIT, "Peer lists are not symmetric, setting SHARED TEAM to self");
             return false;
         }
     }
 
-    /* Check if p2p-connected PE list is of the form (start, stride, size) */
-    for (int i = 2; i < n_p2p_pes; ++i) {
-        if (p2p_pe_list[i] - p2p_pe_list[i - 1] != p2p_pe_list[i - 1] - p2p_pe_list[i - 2]) {
+    /* Check if peer-connected PE list is of the form (start, stride, size) */
+    for (int i = 2; i < n_peer_pes; ++i) {
+        if (peer_pe_list[i] - peer_pe_list[i - 1] != peer_pe_list[i - 1] - peer_pe_list[i - 2]) {
             INFO(NVSHMEM_INIT,
-                 "P2P list is not of the form (start, stride, size). Cannot form "
-                 "NVSHMEM_TEAM_SHARED.");
+                 "Peer list is not of the form (start, stride, size). Cannot form "
+                 "SHARED TEAM.");
             return false;
         }
     }
-
     return true;
 }
 
-static int init_team_shared(void) {
+// Initialize NVSHMEM_TEAM_SHARED or NVSHMEM_TEAM_MC_SHARED
+static int init_team_shared(bool is_mc_shared) {
     /* Collect list of p2p connected PEs */
-    std::vector<int> p2p_pe_list;
-    p2p_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
+    std::vector<int> peer_pe_list;
+    nvshmemi_team_t *team_peer_shared_ptr = nullptr;
+    peer_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
 
-    int my_idx_in_p2p_list = 0;
-    for (int i = 0; i < nvshmemi_team_world->size; ++i) {
-        if (nvshmemi_state->heap_obj->get_local_pe_base()[i]) {
+    int my_idx_in_peer_list = 0;
+    bool use_mc_domain =
+        is_mc_shared && nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID;
+    for (int i = 0; i < nvshmemi_team_world->size; i++) {
+        bool is_peer_connected = false;
+        if (use_mc_domain) {
+            assert(nvshmemi_state->p2p_transport != nullptr);
+            is_peer_connected = nvshmemi_state->p2p_transport->is_nvls_connected_pe(i);
+        } else {
+            is_peer_connected = nvshmemi_state->heap_obj->get_local_pe_base()[i] != nullptr;
+        }
+
+        if (is_peer_connected) {
             if (i == nvshmemi_team_world->my_pe) {
-                my_idx_in_p2p_list = p2p_pe_list.size();
+                my_idx_in_peer_list = peer_pe_list.size();
             }
-            p2p_pe_list.push_back(i);
+            peer_pe_list.push_back(i);
         }
     }
-    const int n_p2p_pes = p2p_pe_list.size();
+    const int n_peer_pes = peer_pe_list.size();
 
     std::ostringstream ss;
-    for (const auto &pe : p2p_pe_list) {
+    for (const auto &pe : peer_pe_list) {
         ss << pe << " ";
     }
-    INFO(NVSHMEM_INIT, "P2P list: %s", ss.str().c_str());
-
-    /* allocate the team */
-    if (nvshmemi_team_allocate_team(&nvshmemi_team_shared, &nvshmemi_device_team_shared,
-                                    n_p2p_pes) != NVSHMEMX_SUCCESS) {
-        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    if (is_mc_shared) {
+        INFO(NVSHMEM_INIT, "MC connected list: %s", ss.str().c_str());
+        /* allocate the team */
+        if (nvshmemi_team_allocate_team(&nvshmemi_team_mc_shared, &nvshmemi_device_team_mc_shared,
+                    n_peer_pes) != NVSHMEMX_SUCCESS) {
+            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+        }
+        team_peer_shared_ptr = nvshmemi_team_mc_shared;
+    } else {
+        INFO(NVSHMEM_INIT, "P2P connected list: %s", ss.str().c_str());
+        /* allocate the team */
+        if (nvshmemi_team_allocate_team(&nvshmemi_team_shared, &nvshmemi_device_team_shared,
+                    n_peer_pes) != NVSHMEMX_SUCCESS) {
+            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+        }
+        team_peer_shared_ptr = nvshmemi_team_shared;
     }
-    nvshmemi_team_shared->team_idx = NVSHMEM_TEAM_SHARED_INDEX;
-    nvshmemi_team_init_dups(nvshmemi_team_shared, NVSHMEM_TEAM_SHARED_INDEX);
 
-    /* Exchange n_p2p_pes for all PEs */
-    std::vector<int> n_p2p_pes_all(nvshmemi_team_world->size);
-    nvshmemi_boot_handle.allgather(&n_p2p_pes, n_p2p_pes_all.data(), sizeof(int),
+    team_peer_shared_ptr->team_idx = is_mc_shared ? NVSHMEM_TEAM_MC_SHARED_INDEX : NVSHMEM_TEAM_SHARED_INDEX;
+    nvshmemi_team_init_dups(team_peer_shared_ptr, team_peer_shared_ptr->team_idx);
+
+    /* Exchange n_peer_pes for all PEs */
+    std::vector<int> n_peer_pes_all(nvshmemi_team_world->size);
+    nvshmemi_boot_handle.allgather(&n_peer_pes, n_peer_pes_all.data(), sizeof(int),
                                    &nvshmemi_boot_handle);
 
-    int max_num_p2p_pes = *std::max_element(n_p2p_pes_all.begin(), n_p2p_pes_all.end());
+    int max_num_peer_pes = *std::max_element(n_peer_pes_all.begin(), n_peer_pes_all.end());
 
-    /* Pad p2p PE local list with -1 for allgather to max_num_p2p_pes */
-    p2p_pe_list.resize(max_num_p2p_pes, -1);
+    /* Pad peer PE local list with -1 for allgather to max_num_peer_pes */
+    peer_pe_list.resize(max_num_peer_pes, -1);
 
-    /* Gather p2p lists of all PEs */
-    std::vector<int> p2p_pe_list_all(max_num_p2p_pes * nvshmemi_team_world->size);
-    nvshmemi_boot_handle.allgather(p2p_pe_list.data(), p2p_pe_list_all.data(),
-                                   sizeof(int) * max_num_p2p_pes, &nvshmemi_boot_handle);
+    /* Gather peer lists of all PEs */
+    std::vector<int> peer_pe_list_all(max_num_peer_pes * nvshmemi_team_world->size);
+    nvshmemi_boot_handle.allgather(peer_pe_list.data(), peer_pe_list_all.data(),
+                                   sizeof(int) * max_num_peer_pes, &nvshmemi_boot_handle);
 
     /* Shrink back local list to original size */
-    p2p_pe_list.resize(n_p2p_pes);
+    peer_pe_list.resize(n_peer_pes);
 
-    if (validate_p2p_pe_lists(p2p_pe_list, n_p2p_pes_all, p2p_pe_list_all, n_p2p_pes,
-                              max_num_p2p_pes)) {
-        /* Initialize NVSHMEM_TEAM_SHARED from P2P list */
-        nvshmemi_team_shared->my_pe = my_idx_in_p2p_list;
-        nvshmemi_team_shared->start = p2p_pe_list[0];
-        nvshmemi_team_shared->stride = n_p2p_pes > 1 ? (p2p_pe_list[1] - p2p_pe_list[0]) : 1;
-        nvshmemi_team_shared->size = n_p2p_pes;
-        nvshmemi_team_shared->is_team_same_mype_node = false;
+    if (n_peer_pes > 0 &&
+        validate_peer_pe_lists(peer_pe_list, n_peer_pes_all, peer_pe_list_all, n_peer_pes,
+                              max_num_peer_pes)) {
+        /* Initialize NVSHMEM_TEAM_SHARED/NVSHMEM_TEAM_MC_SHARED from peer list */
+        team_peer_shared_ptr->my_pe = my_idx_in_peer_list;
+        team_peer_shared_ptr->start = peer_pe_list[0];
+        team_peer_shared_ptr->stride = n_peer_pes > 1 ? (peer_pe_list[1] - peer_pe_list[0]) : 1;
+        team_peer_shared_ptr->size = n_peer_pes;
+        team_peer_shared_ptr->is_team_same_mype_node = false;
     } else {
+        if (is_mc_shared) {
+            INFO(NVSHMEM_INIT, "Setting NVSHMEM_TEAM_MC_SHARED to self");
+        } else {
+            INFO(NVSHMEM_INIT, "Setting NVSHMEM_TEAM_SHARED to self");
+        }
         /* Fall back to single-PE team */
-        nvshmemi_team_shared->my_pe = 0;
-        nvshmemi_team_shared->start = nvshmemi_state->mype;
-        nvshmemi_team_shared->stride = 1;
-        nvshmemi_team_shared->size = 1;
-        nvshmemi_team_shared->is_team_node = true;
-        nvshmemi_team_shared->is_team_same_mype_node = true;
+        team_peer_shared_ptr->my_pe = 0;
+        team_peer_shared_ptr->start = nvshmemi_state->mype;
+        team_peer_shared_ptr->stride = 1;
+        team_peer_shared_ptr->size = 1;
+        team_peer_shared_ptr->is_team_node = true;
+        team_peer_shared_ptr->is_team_same_mype_node = true;
     }
 
     /* Common setup for both paths */
-    nvshmemi_team_shared->rdxn_count = 0;
-    nvshmemi_team_shared->config_mask = 0;
-    nvshmemi_team_shared->ll_flag = 1;
-    nvshmemi_team_shared->alltoall_count = 0;
-    nvshmemi_team_shared->bcast_count = 0;
-    nvshmemi_team_shared->bcast_sync_offset = 0;
-    nvshmemi_team_shared->fcollect_count = 0;
-    nvshmemi_team_shared->p2p_sync_on_stream_count = 0;
-    nvshmemi_team_shared->are_gpus_p2p_connected = 1;
+    team_peer_shared_ptr->rdxn_count = 0;
+    team_peer_shared_ptr->config_mask = 0;
+    team_peer_shared_ptr->ll_flag = 1;
+    team_peer_shared_ptr->alltoall_count = 0;
+    team_peer_shared_ptr->bcast_count = 0;
+    team_peer_shared_ptr->bcast_sync_offset = 0;
+    team_peer_shared_ptr->fcollect_count = 0;
+    team_peer_shared_ptr->p2p_sync_on_stream_count = 0;
+    team_peer_shared_ptr->are_gpus_p2p_connected = 1;
 
-    nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_shared);
-    nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_shared);
+    nvshmemi_team_populate_pe_mappings_from_constant_stride(team_peer_shared_ptr);
+    nvshmemi_recexchalgo_get_neighbors(team_peer_shared_ptr);
 
-    INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SHARED: start=%d, stride=%d, size=%d",
-         nvshmemi_team_shared->start, nvshmemi_team_shared->stride, nvshmemi_team_shared->size);
-    nvshmemi_team_set_p2p_connectivity(nvshmemi_team_world);
+    if (is_mc_shared) {
+        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_MC_SHARED: start=%d, stride=%d, size=%d",
+             team_peer_shared_ptr->start, team_peer_shared_ptr->stride, team_peer_shared_ptr->size);
+        team_peer_shared_ptr->are_gpus_nvls_connected = 1;
+        nvshmemi_team_set_nvls_connectivity(nvshmemi_team_world);
+        nvshmemi_team_set_nvls_connectivity(nvshmemi_team_shared);
+    } else {
+        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SHARED: start=%d, stride=%d, size=%d",
+             team_peer_shared_ptr->start, team_peer_shared_ptr->stride, team_peer_shared_ptr->size);
+        nvshmemi_team_set_p2p_connectivity(nvshmemi_team_world);
+    }
 
     return 0;
 }
@@ -1157,9 +1203,13 @@ static int init_team_node() {
     if (nvshmemi_team_is_identical(nvshmemi_team_shared, nvshmemi_team_node)) {
         nvshmemi_team_shared->is_team_node = true;
     }
+    if (nvshmemi_team_is_identical(nvshmemi_team_mc_shared, nvshmemi_team_node)) {
+        nvshmemi_team_mc_shared->is_team_node = true;
+    }
 
     nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_node);
     nvshmemi_team_set_p2p_connectivity(nvshmemi_team_node);
+    nvshmemi_team_set_nvls_connectivity(nvshmemi_team_node);
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_node);
     nvshmemi_team_node->is_team_node = true;
     nvshmemi_team_node->is_team_same_mype_node = false;
@@ -1202,6 +1252,7 @@ static int init_team_same_mype_node() {
 
     nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_same_mype_node);
     nvshmemi_team_set_p2p_connectivity(nvshmemi_team_same_mype_node);
+    nvshmemi_team_set_nvls_connectivity(nvshmemi_team_same_mype_node);
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_same_mype_node);
 
     return 0;
@@ -1251,6 +1302,7 @@ static int init_team_same_gpu() {
 
     nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_same_gpu);
     nvshmemi_team_set_p2p_connectivity(nvshmemi_team_same_gpu);
+    nvshmemi_team_set_nvls_connectivity(nvshmemi_team_same_gpu);
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_same_gpu);
     /* All GPUs must have same number of processes (requires for us to form teams) */
 
@@ -1289,6 +1341,7 @@ static int init_team_gpu_leaders() {
 
         nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_gpu_leaders);
         nvshmemi_team_set_p2p_connectivity(nvshmemi_team_gpu_leaders);
+        nvshmemi_team_set_nvls_connectivity(nvshmemi_team_gpu_leaders);
         nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_gpu_leaders);
         int status = nvshmemi_boot_handle.allgather(
             &nvshmemi_team_gpu_leaders->my_pe, scratch.data(), sizeof(int), &nvshmemi_boot_handle);
@@ -1364,6 +1417,7 @@ static int init_team_pool_and_psync() {
 
     nvshmemi_team_pool[NVSHMEM_TEAM_WORLD_INDEX] = nvshmemi_team_world;
     nvshmemi_team_pool[NVSHMEM_TEAM_SHARED_INDEX] = nvshmemi_team_shared;
+    nvshmemi_team_pool[NVSHMEM_TEAM_MC_SHARED_INDEX] = nvshmemi_team_mc_shared;
     nvshmemi_team_pool[NVSHMEM_TEAM_NODE_INDEX] = nvshmemi_team_node;
     nvshmemi_team_pool[NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX] = nvshmemi_team_same_mype_node;
     nvshmemi_team_pool[NVSHMEM_TEAM_SAME_GPU_INDEX] = nvshmemi_team_same_gpu;
@@ -1425,6 +1479,7 @@ static int init_team_pool_and_psync() {
     /* Set the bits for NVSHMEM_TEAM_WORLD, NVSHMEM_TEAM_SHARED, NVSHMEMX_TEAM_NODE to 0: */
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_WORLD_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_SHARED_INDEX);
+    nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_MC_SHARED_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_NODE_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_SAME_GPU_INDEX);
@@ -1461,6 +1516,7 @@ static int finalize_team_init() {
         /* Setup NCCL usage */
         nvshmemi_team_init_nccl_comm(nvshmemi_team_world);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_shared);
+        nvshmemi_team_init_nccl_comm(nvshmemi_team_mc_shared);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_node);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_same_mype_node);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_same_gpu);
@@ -1476,7 +1532,7 @@ static int finalize_team_init() {
 
     /* Setup NVLS resources for all internal p2p connected teams */
     for (long i = 0; i < nvshmemi_max_teams; ++i) {
-        if (nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_p2p_connected) {
+        if (nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_nvls_connected) {
             int status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
             if (status != 0) {
                 NVSHMEMI_ERROR_PRINT("NVLS resource setup failed for team ID: %d\n",
@@ -1522,6 +1578,7 @@ static int finalize_team_init() {
 
     nvshmemi_duplicate_team(NVSHMEM_TEAM_WORLD_INDEX, nvshmemi_team_world);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_SHARED_INDEX, nvshmemi_team_shared);
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_MC_SHARED_INDEX, nvshmemi_team_mc_shared);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_NODE_INDEX, nvshmemi_team_node);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX, nvshmemi_team_same_mype_node);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_SAME_GPU_INDEX, nvshmemi_team_same_gpu);
@@ -1538,7 +1595,12 @@ int nvshmemi_team_init(void) {
     status = init_team_world();
     if (status) return status;
 
-    status = init_team_shared();
+    // Initialize NVSHMEM_TEAM_SHARED
+    status = init_team_shared(false);
+    if (status) return status;
+
+    // Initialize NVSHMEM_TEAM_MC_SHARED
+    status = init_team_shared(true);
     if (status) return status;
 
     status = init_team_node();
@@ -1552,6 +1614,7 @@ int nvshmemi_team_init(void) {
 
     status = init_team_gpu_leaders();
     if (status) return status;
+
 
     status = init_team_pool_and_psync();
     if (!status) {
@@ -1824,7 +1887,7 @@ int nvshmemi_team_set_team_idx_v2(nvshmemi_team_t *myteam, nvshmemi_team_t *myde
 
     if (nvshmemi_team_pool[team_idx] != NULL) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                           "Team index already in use\n");
+                           "Team index %d already in use\n", team_idx);
     }
 
     /* Set the selected psync bit to 0, reserving that slot */
@@ -1878,7 +1941,8 @@ int nvshmemi_team_allocate_resources(nvshmemi_team_t *myteam, nvshmemi_team_t *m
     }
 
     if (nvshmemi_team_set_team_idx(myteam, mydeviceteam, parent_team) != NVSHMEMX_SUCCESS) {
-        NVSHMEMI_ERROR_PRINT("Failed to set team index for team %d\n", myteam->team_idx);
+        NVSHMEMI_ERROR_PRINT("Failed to set team index for team %d is_dupl: %d\n",
+                             myteam->team_idx, is_dupl_team);
         status = NVSHMEMX_ERROR_INTERNAL;
         goto out;
     }
@@ -1887,6 +1951,7 @@ int nvshmemi_team_allocate_resources(nvshmemi_team_t *myteam, nvshmemi_team_t *m
 #endif
     /* Set Team Characteristics Start */
     nvshmemi_team_set_p2p_connectivity(myteam);
+    nvshmemi_team_set_nvls_connectivity(myteam);
     nvshmemi_recexchalgo_get_neighbors(myteam);
     /* Set Team Characteristics End */
 
@@ -2528,7 +2593,7 @@ void nvshmemi_team_destroy(nvshmemi_team_t *team) {
 #endif
     if (team != nvshmemi_team_world && team != nvshmemi_team_shared && team != nvshmemi_team_node &&
         team != nvshmemi_team_same_mype_node && team != nvshmemi_team_same_gpu &&
-        team != nvshmemi_team_gpu_leaders) {
+        team != nvshmemi_team_gpu_leaders && team != nvshmemi_team_mc_shared) {
         free(team);
     }
 }

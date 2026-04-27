@@ -98,12 +98,17 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     errored_on_initialization_ =
         true; /* By default, p2p is not initialized, so some features may be disabled */
 
+    nvshmemi_nvls_connected_pes_.resize(npes,0); //this is a bitmap
+    nvshmemi_nvl_connected_pes_.resize(npes,0);
+    nvshmemi_handle_accessible_pes_.resize(npes,0);
     cudaDeviceProp prop;
     int flag = false;
     nvmlDevice_t local_device;
     nvmlGpuFabricInfoV_t fabricInfo = {}, fabricInfo1 = {}, fabricInfo2 = {};
+    nvmlPlatformInfo_t platformInfo = {}, platformInfo1 = {}, platformInfo2 = {};
     const unsigned char zero[NVML_GPU_FABRIC_UUID_LEN] = {0};
     nvmlGpuFabricInfoV_t *pe_fabricInfo = nullptr;
+    std::vector<nvmlPlatformInfo_t> pe_platformInfo;
     fabricInfo.version = nvmlGpuFabricInfo_v2;
     fabricInfo1.version = nvmlGpuFabricInfo_v2;
     fabricInfo2.version = nvmlGpuFabricInfo_v2;
@@ -186,6 +191,30 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         NVSHMEMI_NULL_ERROR_JMP(pe_fabricInfo, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                                 "pe_fabricInfo array allocation failed\n");
 
+        if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
+            // Override the cliqueId to use rackIDs to determine NVLink domain
+            if (nvml_ftable_.nvmlDeviceGetPlatformInfo == nullptr) {
+                NVSHMEMI_ERROR_PRINT("nvmlDeviceGetPlatformInfo not found. Override of cliqueId will not be "
+                     "attempted\n");
+                status = NVSHMEMX_ERROR_INTERNAL;
+                goto out;
+            }
+
+            pe_platformInfo.resize(npes);
+
+            nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
+            NVSHMEMI_NE_ERROR_JMP(nvml_status, NVML_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "nvmlDeviceGetPlatformInfo failed \n");
+
+            pe_platformInfo[mype] = platformInfo;
+
+            status = nvshmemi_boot_handle.allgather((void *)&platformInfo, (void *)pe_platformInfo.data(),
+                                                    sizeof(nvmlPlatformInfo_t), &nvshmemi_boot_handle);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "allgather of pe_platformInfo failed \n");
+            platformInfo1 = pe_platformInfo[mype];
+        }
+
         pe_fabricInfo[mype] = fabricInfo;
         status =
             nvshmemi_boot_handle.allgather((void *)&fabricInfo, (void *)pe_fabricInfo,
@@ -211,13 +240,33 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                 ? static_cast<CUmemAllocationHandleType>(CU_MEM_HANDLE_TYPE_FABRIC)
                 : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
+        /* if OVERRIDE_CLIQUE_ID is enabled, then only PEs with same rackID will be considered
+         * as nvls_connected_pes, others will not be considered.
+         */
         for (int i = 0; i < npes && nvshmemi_has_mnnvl_fabric_; i++) {
             fabricInfo2 = pe_fabricInfo[i];
             if ((fabricInfo2.state == NVML_GPU_FABRIC_STATE_COMPLETED) &&
                 (memcmp(fabricInfo1.clusterUuid, fabricInfo2.clusterUuid,
                         NVML_GPU_FABRIC_UUID_LEN) == 0) &&
                 (fabricInfo1.cliqueId == fabricInfo2.cliqueId)) {
-                nvshmemi_nvl_connected_pes_.push_back(i);
+
+                // setup nvl_connected_pes initially to include all PEs
+                // that are connected via NVL. If there are VA mapping restrictions,
+                // then this will updated.
+                nvshmemi_nvl_connected_pes_[i] = 1;
+
+                nvshmemi_handle_accessible_pes_[i] = 1;
+
+                if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
+                    // group PEs with same rackID in multicast domain (a subset of nvl_connected_pes)
+                    platformInfo2 = pe_platformInfo[i];
+                    if (memcmp(platformInfo1.chassisSerialNumber, platformInfo2.chassisSerialNumber, sizeof(platformInfo1.chassisSerialNumber)) == 0) {
+                        nvshmemi_nvls_connected_pes_[i] = 1;
+                    }
+                } else {
+                    // track nvl_connected_pes
+                    nvshmemi_nvls_connected_pes_[i] = 1;
+                }
             }
         }
 
@@ -279,7 +328,9 @@ out:
 }
 
 int nvshmemi_mem_p2p_transport::get_num_p2p_connected_pes(nvshmemi_symmetric_heap &obj) {
-    return std::max(obj.get_state()->npes_node, (int)nvshmemi_nvl_connected_pes_.size());
+    return std::max(obj.get_state()->npes_node,
+                    static_cast<int>(std::count(nvshmemi_nvl_connected_pes_.begin(),
+                                                nvshmemi_nvl_connected_pes_.end(), uint8_t{1})));
 }
 
 nvshmemi_mem_p2p_transport::~nvshmemi_mem_p2p_transport() {
@@ -287,7 +338,7 @@ nvshmemi_mem_p2p_transport::~nvshmemi_mem_p2p_transport() {
     if (p2p_objref_ != nullptr) p2p_objref_ = nullptr;
 }
 
-/**
+/*
  * nvshmemi_mem_remote_transport specific functions
  */
 int nvshmemi_mem_remote_transport::gather_mem_handles(nvshmemi_symmetric_heap &obj,

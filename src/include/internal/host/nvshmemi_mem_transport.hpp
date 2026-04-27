@@ -11,6 +11,8 @@
 #include <memory>
 #include <map>
 #include <algorithm>
+#include <stdint.h>
+#include <vector>
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/util.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
@@ -53,10 +55,31 @@ class nvshmemi_mem_p2p_transport final {
     int get_num_p2p_connected_pes(nvshmemi_symmetric_heap &obj);
     bool is_nvl_connected_pe(int pe) {
         /* Check if the peer GPU is connected via the MNNVL fabric */
-        auto it =
-            std::find(nvshmemi_nvl_connected_pes_.begin(), nvshmemi_nvl_connected_pes_.end(), pe);
-        if (it != nvshmemi_nvl_connected_pes_.end()) return true;
-        return false;
+        return nvshmemi_nvl_connected_pes_.at(pe) != 0;
+    }
+    bool is_nvls_connected_pe(int pe) const noexcept {
+        /* Check if the peer GPU is connected via the MNNVL fabric
+         * and within same multicast domain
+         */
+        return nvshmemi_nvls_connected_pes_.at(pe) != 0;
+    }
+    bool is_handle_accessible_pe(int pe) {
+        /* Check if the peer GPU is accessible with handles */
+        return nvshmemi_handle_accessible_pes_.at(pe) != 0;
+    }
+
+    // This function allows to p2p connected PE list is all P2P PEs could not be mapped to VA
+    void update_p2p_connected_pes(const std::vector<uint8_t> &updated_connected_pes) {
+        nvshmemi_nvl_connected_pes_.clear();
+        nvshmemi_nvl_connected_pes_ = updated_connected_pes;
+    }
+
+    size_t get_nvls_connected_pes_count(void) const {
+        return std::count(nvshmemi_nvls_connected_pes_.begin(),
+                          nvshmemi_nvls_connected_pes_.end(), uint8_t{1});
+    }
+    const std::vector<uint8_t> &get_nvls_connected_pes(void) const {
+        return nvshmemi_nvls_connected_pes_;
     }
 
    private:
@@ -70,7 +93,13 @@ class nvshmemi_mem_p2p_transport final {
     static void nvshmemi_nvml_ftable_fini_wrapper(void);
 
     bool nvshmemi_has_mnnvl_fabric_ = false;
-    std::vector<int> nvshmemi_nvl_connected_pes_;
+    std::vector<uint8_t> nvshmemi_nvl_connected_pes_;
+
+    // list of PEs that can be accessed with handles
+    std::vector<uint8_t> nvshmemi_handle_accessible_pes_;
+
+    // this is a bitmap to track the PEs that are within the same multicast domain
+    std::vector<uint8_t> nvshmemi_nvls_connected_pes_;
     bool errored_on_initialization_ = true;
     CUmemAllocationHandleType nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 };

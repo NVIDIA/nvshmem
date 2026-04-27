@@ -409,12 +409,17 @@ typedef enum {
     NVSHMEM_TEAM_SAME_GPU_INDEX = 4,
     NVSHMEMI_TEAM_GPU_LEADERS = 5,
     NVSHMEM_TEAM_GPU_LEADERS_INDEX = 5,
-    NVSHMEM_TEAMS_MIN = 6,
+    NVSHMEM_TEAM_MC_SHARED = 6,
+    NVSHMEM_TEAM_MC_SHARED_INDEX = 6,
+    NVSHMEM_TEAMS_MIN = 7,
     NVSHMEM_TEAM_INDEX_MAX = INT_MAX
 } nvshmem_team_id_t;
 
 /* Start shared connectivity constants */
-#define SYNC_SIZE 27648 /*XXX:Number of GPUs on Summit; currently O(N), need to be O(1)*/
+// Reserving 2 long (16B) elements for every sync to enable ublk / fabric instructions usage
+// But we still use only 1 long (8B) element for sync operations rest is treated as padding.
+// Use GET_PE_SYNC_ADDR macro to get the address of the sync for a given PE.
+#define SYNC_SIZE 27648 * 2 /*XXX:Number of GPUs on Summit; currently O(N), need to be O(1)*/
 #define NVSHMEMI_SYNC_SIZE (2 * SYNC_SIZE)
 #define NVSHMEMI_BCAST_SYNC_SIZE (10 * SYNC_SIZE)
 #define NVSHMEMI_ALLTOALL_SYNC_SIZE SYNC_SIZE
@@ -423,6 +428,9 @@ typedef enum {
 #define NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT 16
 #define NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT 16
 #define NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT 32 /* # of GPUs x 4 CTA per GPU for DGX */
+
+// Helper macro to compute PE's sync address given PE and base pSync address
+#define GET_PE_SYNC_ADDR(sync_addr, pe) ((long *)((char*)(sync_addr) + (pe * 16)))
 
 #define NVSHMEMI_DECL_THREAD_IDX_warp() \
     ;                                   \

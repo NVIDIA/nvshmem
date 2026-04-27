@@ -51,10 +51,16 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
          p2p_state->ndev, peer_info->pcie_id.dev_id, p2p_state->cudevice, peer_info->hostHash,
          p2p_state->hostHash);
 
-    /* Check if the peer GPU is connected via the MNNVL fabric */
+    /* Check if the peer GPU is connected via the MNNVL fabric  and accessible via ptr */
     if (nvshmemi_state->p2p_transport->is_nvl_connected_pe(peer_info->pe)) {
         *access = NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST |
-                  NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS;
+                  NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS |
+                  NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT;
+        goto out;
+    }
+
+    if (nvshmemi_state->p2p_transport->is_handle_accessible_pe(peer_info->pe)) {
+        *access = NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT;
         goto out;
     }
 
