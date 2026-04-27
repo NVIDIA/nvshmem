@@ -99,6 +99,10 @@ void *heap_base_array_dptr = NULL;
 void *heap_base_actual_array_dptr = NULL;
 int nvshmemi_job_connectivity;
 
+#if defined(CFT_HANDLES_ENABLED)
+void *unicast_le_ids_dptr = NULL;
+#endif
+
 nvshmemi_device_host_state_t nvshmemi_device_state;
 
 void nvshmemi_get_device_state(void **state) { *state = &nvshmemi_device_state; }
@@ -1517,6 +1521,10 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
         if (nvshmemi_device_state.tma_smem_size)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
+#if defined(CFT_HANDLES_ENABLED)
+        if (nvshmemi_device_state.unicast_le_ids_)
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.unicast_le_ids_));
+#endif
 
         /* cleanup state */
         free(nvshmemi_state);
@@ -1740,6 +1748,9 @@ int set_job_connectivity(nvshmemi_state_t *state) {
                 } else if (state->transports[j]->cap[i] &
                            (NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST | NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD)) {
                     peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_LDST);
+                } else if (state->transports[j]->cap[i] & (NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
+                    // Treating handle accessible PEs as part of LDST connectivity
+                    peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_LDST);
                 }
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_GPUNETIO_SUPPORT)
                 else if (state->transports[j]->cap[i] &
@@ -1770,6 +1781,7 @@ int set_job_connectivity(nvshmemi_state_t *state) {
 
         // for the job, pick the weakest connecitivity to any remote PEs
         nvshmemi_job_connectivity = std::max(nvshmemi_job_connectivity, peer_connectivity);
+        INFO(NVSHMEM_INIT, "[%d] job_connectivity: %d", state->mype, nvshmemi_job_connectivity);
     }
 
     /* This case allows us to differentiate between cases where we only support LDST
@@ -1835,6 +1847,12 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     CUDA_RUNTIME_CHECK_GOTO(
         cudaMalloc(&heap_base_actual_array_dptr, (state->npes) * sizeof(void *)), status, out);
 
+#if defined(CFT_HANDLES_ENABLED)
+    /* maintain 8 bytes per PE for unicast LE id <valid-4bytes|leId-4bytes> */
+    CUDA_RUNTIME_CHECK_GOTO(
+        cudaMalloc(&unicast_le_ids_dptr, (state->npes) * sizeof(uint64_t)), status, out);
+#endif
+
     status = set_job_connectivity(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "set_job_connectivity failed \n");
 
@@ -1847,6 +1865,22 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                         (const void *)state->heap_obj->get_remote_pe_base(),
                         sizeof(void *) * state->npes, cudaMemcpyHostToDevice, state->my_stream),
         status, out);
+
+#if defined(CFT_HANDLES_ENABLED)
+    if (state->heap_obj->get_unicast_le_ids()) {
+        CUDA_RUNTIME_CHECK_GOTO(
+        cudaMemcpyAsync(unicast_le_ids_dptr,
+                        (const void *)state->heap_obj->get_unicast_le_ids(),
+                        sizeof(uint64_t) * state->npes, cudaMemcpyHostToDevice, state->my_stream),
+        status, out);
+    } else {
+        // if LE is not enabled, set all LE ids to 0 to indicate invalid LE ids
+        CUDA_RUNTIME_CHECK_GOTO(
+            cudaMemsetAsync(unicast_le_ids_dptr, 0, sizeof(uint64_t) * state->npes, state->my_stream),
+            status, out);
+    }
+
+#endif
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);
 
@@ -1885,6 +1919,10 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     nvshmemi_device_state.npes = state->npes;
     nvshmemi_device_state.node_mype = state->mype_node;
     nvshmemi_device_state.node_npes = state->npes_node;
+
+#if defined(CFT_HANDLES_ENABLED)
+    nvshmemi_device_state.unicast_le_ids_ = (void*)unicast_le_ids_dptr;
+#endif
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);
 
@@ -1964,6 +2002,9 @@ out:
         if (heap_base_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_array_dptr));
         if (heap_base_actual_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_actual_array_dptr));
         if (test_wait_any_start_idx_ptr) CUDA_RUNTIME_CHECK(cudaFree(test_wait_any_start_idx_ptr));
+#if defined(CFT_HANDLES_ENABLED)
+        if (unicast_le_ids_dptr) CUDA_RUNTIME_CHECK(cudaFree(unicast_le_ids_dptr));
+#endif
         if (nvshmemi_device_state.tma_smem_bases)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
         if (nvshmemi_device_state.tma_smem_size)

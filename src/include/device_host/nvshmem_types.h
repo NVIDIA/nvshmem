@@ -250,7 +250,8 @@
             0,                                            /* tma_policy (NVSHMEMX_TMA_DISABLE) */ \
             NULL,                                         /* tma_smem_bases */                    \
             0,                                            /* tma_smem_bases_len */                \
-            NULL                                          /* tma_smem_size */                     \
+            NULL,                                         /* tma_smem_size */                     \
+            NULL                                          /* unicast_le_ids_ */                   \
     }
 #else
 #include <cuda/std/cstddef>
@@ -587,9 +588,10 @@ typedef struct {
     uintptr_t *tma_smem_bases;   /* Per-CTA shared memory base pointers for TMA */
     size_t tma_smem_bases_len;   /* Number of entries in tma_smem_bases */
     size_t *tma_smem_size;       /* Shared memory size promised by all CTAs */
+    void *unicast_le_ids_;       /* LE IDs of PEs */
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 808,
-              "device_host_state_v1 must be 808 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 816,
+              "device_host_state_v1 must be 816 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 

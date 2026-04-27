@@ -19,6 +19,7 @@
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/cudawrap.h"
 #include "non_abi/nvshmemx_error.h"
+#include "device_host/logical_endpoint_types.h"
 
 /// Forward declarations for future friends
 class nvshmemi_mem_p2p_transport;
@@ -102,6 +103,22 @@ class nvshmemi_symmetric_heap {
     void *get_global_base() { return global_heap_base_; }
     void **get_remote_pe_base() { return peer_heap_base_remote_; }
     size_t get_size() { return heap_size_; }
+
+    uint64_t *get_unicast_le_ids() {
+        if (le_unicast_enabled_) {
+            return unicast_endpoint_ids_.data();
+        } else {
+            return nullptr;
+        }
+    }
+
+    uint64_t get_unicast_le_id(int pe) {
+        if (le_unicast_enabled_) {
+            return unicast_endpoint_ids_.at(pe);
+        } else {
+            return 0;
+        }
+    }
 
     /** Top-level public facing functions */
     virtual void *heap_malloc(size_t size);
@@ -222,6 +239,7 @@ class nvshmemi_symmetric_heap {
     nvshmemi_state_t *state_ = nullptr;  // store a reference of device state instance
     CUmemAllocationHandleType mem_handle_type_ = CU_MEM_HANDLE_TYPE_NONE;
     size_t mem_granularity_ = 0;
+    size_t le_granularity_ = 0; /* bind alignment of Logical Endpoint*/
     size_t log2_mem_granularity_ = 0;
     size_t physical_internal_heap_size_ = 0;
     size_t heap_size_ = 0;
@@ -250,6 +268,10 @@ class nvshmemi_symmetric_heap {
     // map heap addr -> user buffer addr
     std::unordered_map<void *, void *> alias_va_map_;
     std::unordered_map<void *, size_t> egm_map_;
+
+    bool le_unicast_enabled_ = false;
+    bool le_multicast_enabled_ = false;
+    std::vector<uint64_t> unicast_endpoint_ids_; // 4 bytes valid, 4 bytes for le id
 };
 
 inline nvshmem_mem_handle *nvshmemi_symmetric_heap::get_transport_mem_handle(void *addr,
@@ -415,6 +437,8 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
      */
     void *mmap_mem(void *ptr, size_t size, void *pref_addr, int flags);
     int unmap_mem(void *ptr, size_t size);
+    int reserve_unicast_endpoint(size_t size);
+    int exchange_endpoints();
 
    protected:
     CUmemGenericAllocationHandle get_cumem_handle_ptr(int i) {
@@ -463,6 +487,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int check_user_buffer_for_mmap(void *ptr, size_t &size, unsigned int *ptr_mem_type);
     std::vector<std::tuple<CUmemGenericAllocationHandle, off_t, off_t, size_t, bool>>
         cumem_handles_;
+    int check_logical_endpoint_support();
 };
 
 class nvshmemi_symmetric_heap_sysmem_static_shm final : public nvshmemi_symmetric_heap_static {
