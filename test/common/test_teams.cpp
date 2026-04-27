@@ -171,6 +171,10 @@ void init_test_teams() {
     set_team_mappings(teams[ctr], "NVSHMEM_TEAM_SHARED");
     ctr++;
 
+    teams[ctr] = NVSHMEM_TEAM_MC_SHARED;
+    set_team_mappings(teams[ctr], "NVSHMEM_TEAM_MC_SHARED");
+    ctr++;
+
     teams[ctr] = NVSHMEMX_TEAM_NODE;
     set_team_mappings(teams[ctr], "NVSHMEMX_TEAM_NODE");
     ctr++;
@@ -264,6 +268,7 @@ void finalize_test_teams() {
     for (int i = 0; i < num_teams; i++) {
         if (map_team_to_string[teams[i]] != "NVSHMEM_TEAM_WORLD" &&
             map_team_to_string[teams[i]] != "NVSHMEM_TEAM_SHARED" &&
+            map_team_to_string[teams[i]] != "NVSHMEM_TEAM_MC_SHARED" &&
             map_team_to_string[teams[i]] != "NVSHMEMX_TEAM_NODE")
             nvshmem_team_destroy(teams[i]);
     }

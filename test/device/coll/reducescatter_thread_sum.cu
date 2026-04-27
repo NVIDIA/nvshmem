@@ -15,8 +15,6 @@
 
 using namespace std;
 
-#define MAX_NPES 128
-
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif

@@ -314,7 +314,8 @@ static nvshmemi_cuda_fn_table initialize_CUDA_func_table() {
         .pfn_cuStreamWriteValue64 = NULL,
         .pfn_cuStreamWaitValue64 = NULL,
         .pfn_cuInit = NULL,
-        .pfn_cuGetProcAddress = NULL};
+        .pfn_cuGetProcAddress = NULL,
+        .pfn_cuGetExportTable = NULL};
 
     return new_cuda_fn_table;
 }

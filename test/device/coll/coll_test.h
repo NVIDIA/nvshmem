@@ -23,7 +23,7 @@
 #define NVSHM_TEST_NUM_TPB 32
 #undef MAX_ELEMS
 #define MAX_ELEMS (ELEMS_PER_THREAD * NVSHM_TEST_NUM_TPB)
-#define MAX_NPES 128
+#define MAX_NPES 576
 #define MAX_ITER 32
 #define LARGEST_DT uint64_t
 

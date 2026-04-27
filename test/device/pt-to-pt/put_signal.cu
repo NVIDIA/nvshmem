@@ -18,7 +18,7 @@
 
 __device__ int errors_d;
 
-#define MSG_SZ 10
+#define MSG_SZ 16
 
 #define TEST_NVSHMEM_PUT_CUBIN(FUNC, SC_SUFFIX)                                                \
     void *args_##FUNC##_##SC_SUFFIX[] = {(void *)&target, (void *)&source, (void *)&sig_addr,  \
