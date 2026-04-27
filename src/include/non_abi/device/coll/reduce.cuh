@@ -1065,12 +1065,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
         nvshmemi_put_nbi<TYPE, SCOPE>(pWrk + offset, source, nreduce, step1_sendto);
         if (!myIdx) {
             nvshmemi_fence<nvshmemi_threadgroup_thread>();
-            nvshmemi_signal_for_barrier<long>((long *)(pSync + rank), sync_counter[0],
+            nvshmemi_signal_for_barrier<long>(GET_PE_SYNC_ADDR(pSync, rank), sync_counter[0],
                                               step1_sendto);
         }
     } else if (step1_nrecvs != 0) {
         for (int i = 0; i < step1_nrecvs; i += 1) {
-            nvshmemi_wait_until<long>((long *)pSync + step1_recvfrom[i], NVSHMEM_CMP_GE,
+            nvshmemi_wait_until<long>(GET_PE_SYNC_ADDR(pSync, step1_recvfrom[i]), NVSHMEM_CMP_GE,
                                       sync_counter[0]);
             size_t offset = (rank - step1_recvfrom[i] - 1) * nreduce;
             gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(dst, (pWrk + offset), dst, nreduce);
@@ -1104,12 +1104,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
             if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
             nvshmemi_threadgroup_sync<SCOPE>();
             for (int i = myIdx; i < k - 1; i += groupSize) {
-                nvshmemi_signal_for_barrier<long>((long *)(pSync + rank), sync_counter[0],
+                nvshmemi_signal_for_barrier<long>(GET_PE_SYNC_ADDR(pSync, rank), sync_counter[0],
                                                   step2_nbrs[phase][i]);
             }
 
             for (int i = 0; i < k - 1; i += 1) {
-                nvshmemi_wait_until<uint64_t>((uint64_t *)(pSync + step2_nbrs[phase][i]),
+                nvshmemi_wait_until<uint64_t>(reinterpret_cast<uint64_t *>(GET_PE_SYNC_ADDR(pSync, step2_nbrs[phase][i])),
                                               NVSHMEM_CMP_GE, sync_counter[0]);
                 int offset = recv_offset + k * phase * nreduce;
                 if (step2_nbrs[phase][i] < rank)
@@ -1130,13 +1130,13 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
         if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
         nvshmemi_threadgroup_sync<SCOPE>();
         for (int i = myIdx; i < step1_nrecvs; i += groupSize) {
-            nvshmemi_signal_for_barrier<long>((long *)(pSync + rank), sync_counter[0],
+            nvshmemi_signal_for_barrier<long>(GET_PE_SYNC_ADDR(pSync, rank), sync_counter[0],
                                               step1_recvfrom[i]);
         }
     } else if (step1_sendto != -1) {
         if (!myIdx)
-            nvshmemi_wait_until<uint64_t>((uint64_t *)(pSync + step1_sendto), NVSHMEM_CMP_GE,
-                                          sync_counter[0]);
+            nvshmemi_wait_until<uint64_t>(reinterpret_cast<uint64_t *>(GET_PE_SYNC_ADDR(pSync, step1_sendto)),
+                                                                       NVSHMEM_CMP_GE, sync_counter[0]);
     }
     nvshmemi_threadgroup_sync<SCOPE>();
     if (!myIdx) sync_counter[0] = sync_counter[0] + 1;
@@ -1304,13 +1304,18 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
             for (int i = myIdx; i < nreduce; i += groupSize) *(dest + i) = 0;
             nvshmemi_threadgroup_sync<SCOPE>();
             auto block = cg::this_thread_block();
-            auto tile = cg::tiled_partition<32>(block);
+            auto tile = cg::tiled_partition<NVSHMEMI_WARP_SIZE>(block);
+            int max_tile_iter = ((teami_same_mype_node->size + groupSize-1) / groupSize);
             for (int j = 0; j < nreduce; j++) {
-                cg::reduce_update_async(
-                    tile, cuda::atomic_ref<TYPE, cuda::thread_scope_block>(dest[j]),
-                    (myIdx < teami_same_mype_node->size) ? *((TYPE *)pWrk + myIdx * nreduce + j)
-                                                         : (TYPE)0,
-                    cg::plus<TYPE>());
+                // tiles process the entire same_mype_node team is steps of groupSize
+                for (int _iter = 0; _iter < max_tile_iter; _iter++) {
+                    int _idx = myIdx + _iter * groupSize;
+                    cg::reduce_update_async(
+                            tile, cuda::atomic_ref<TYPE, cuda::thread_scope_block>(dest[j]),
+                            (_idx < teami_same_mype_node->size) ? *((TYPE *)pWrk + _idx * nreduce + j)
+                            : (TYPE)0,
+                            cg::plus<TYPE>());
+                }
             }
         } else
 #endif
@@ -1325,6 +1330,7 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
             }
         }
         nvshmemi_threadgroup_sync<SCOPE>();
+
     }
 }
 

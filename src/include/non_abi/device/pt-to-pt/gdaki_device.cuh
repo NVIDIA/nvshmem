@@ -8,7 +8,11 @@
 
 #include <cuda_runtime.h>
 #include <cuda/atomic>
+#if !defined __CUDACC_RTC__
 #include <limits.h>
+#else
+#include <cuda/std/climits>
+#endif
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host_transport/nvshmem_common_gpunetio.h"
 #include "device_host_transport/nvshmem_constants.h"
