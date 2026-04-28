@@ -540,6 +540,39 @@ out:
     return status;
 }
 
+/*
+ * Enqueue a work item into signal_work_queue with backpressure. Acquires signal_work_queue_lock,
+ * pushes `work`, and if the SPSC queue is full, drains done_queue via gdr_complete_amos to make
+ * room before retrying.
+ *
+ * The lock is released across the drain because gdr_complete_amos calls progress which can
+ * re-enter put_signal_completion and try to acquire this same non-reentrant lock; holding it
+ * across the drain would deadlock.
+ *
+ * Returns 0 on success, NVSHMEMX_ERROR_INTERNAL if the drain fails. The lock is always released
+ * before returning
+ */
+static inline int nvshmemt_libfabric_enqueue_signal_work(nvshmem_transport_t transport,
+                                                         const signal_delivery_work_entry &work) {
+    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    int status;
+
+    while (libfabric_state->signal_work_queue_lock.test_and_set(std::memory_order_acquire))
+        NVSHMEMT_LIBFABRIC_CPU_RELAX();
+    while (!libfabric_state->signal_work_queue.push(work)) {
+        libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
+        status = nvshmemt_libfabric_gdr_complete_amos(transport);
+        if (status) {
+            NVSHMEMI_WARN_PRINT("Failed call to nvshmemt_libfabric_gdr_complete_amos: %d", status);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        while (libfabric_state->signal_work_queue_lock.test_and_set(std::memory_order_acquire))
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+    }
+    libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
+    return 0;
+}
+
 nvshmemt_libfabric_gdr_op_ctx_t *inplace_copy_sig_op_to_gdr_op(
     nvshmemt_libfabric_gdr_signal_op *sig_op, int ep_index) {
     nvshmemt_libfabric_gdr_op_ctx_t *amo;
@@ -1124,20 +1157,8 @@ static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, in
                 work.send_elems[1] = send_elems[1];
                 work.sequence_count = nvshmemt_libfabric_endpoint_seq_counter_t::last_seq_num;
                 work.preceding_put_count = 0;
-                while (libfabric_state->signal_work_queue_lock.test_and_set(std::memory_order_acquire))
-                    NVSHMEMT_LIBFABRIC_CPU_RELAX();
-                while (!libfabric_state->signal_work_queue.push(work)) {
-                    /* Do not spin; drain done_queue so the signal delivery
-                       thread can consume work_queue and make space. */
-                    status = nvshmemt_libfabric_gdr_complete_amos(transport);
-                    if (status) {
-                        NVSHMEMI_WARN_PRINT("Failed call to nvshmemt_libfabric_gdr_complete_amos: %d",
-                                            status);
-                        libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
-                        return NVSHMEMX_ERROR_INTERNAL;
-                    }
-                }
-                libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
+                status = nvshmemt_libfabric_enqueue_signal_work(transport, work);
+                if (status) return status;
             }
         } while (op && ops_processed < max_ops);
     }
@@ -1266,18 +1287,8 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
                     work.send_elems[1] = NULL;
                     work.sequence_count = sig_op->send_amo.sequence_count;
                     work.preceding_put_count = sig_op->send_amo.preceding_put_count;
-                    while (libfabric_state->signal_work_queue_lock.test_and_set(std::memory_order_acquire))
-                        NVSHMEMT_LIBFABRIC_CPU_RELAX();
-                    while (!libfabric_state->signal_work_queue.push(work)) {
-                        status = nvshmemt_libfabric_gdr_complete_amos(transport);
-                        if (status) {
-                            NVSHMEMI_WARN_PRINT("Failed call to nvshmemt_libfabric_gdr_complete_amos: %d",
-                                                status);
-                            libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
-                            goto out;
-                        }
-                    }
-                    libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
+                    status = nvshmemt_libfabric_enqueue_signal_work(transport, work);
+                    if (status) goto out;
                 }
             } else if (auto *ack_entry = std::get_if<nvshmemt_libfabric_put_ack_entry>(it)) {
                 nvshmemt_libfabric_endpoint_t &ack_ep =
