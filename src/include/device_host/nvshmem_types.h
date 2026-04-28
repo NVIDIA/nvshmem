@@ -6,6 +6,18 @@
 #ifndef NVSHMEM_TYPES_H
 #define NVSHMEM_TYPES_H
 
+/*
+ * NVSHMEMI_TMA_BARRIER_REGION_BYTES - Static carve at the base of every
+ * nvshmemx_give_smem() buffer, reserved for NVSHMEM internal use: mbarriers
+ * for async-proxy completion tracking, TMA descriptors, etc.  User data for
+ * TMA staging starts at `smem + NVSHMEMI_TMA_BARRIER_REGION_BYTES`.
+ *
+ * Layout: 32 slots of 16 bytes each.  Slot 0 is at offset 0.  TMA functions
+ * reference slots by index via nvshmemi_tma_barrier_slot(int).
+ */
+#define NVSHMEMI_TMA_BARRIER_REGION_BYTES 512
+#define NVSHMEMI_TMA_NUM_BARRIER_SLOTS    32
+
 #define INIT_ARGS_V2_PADDING 92
 #define INIT_ARGS_PADDING 96
 #define INIT_ARGS_SCALAR_INVALID -1
@@ -236,7 +248,8 @@
             NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY,         /* selected_device_transport */         \
             0,                                            /* tma_policy (NVSHMEMX_TMA_DISABLE) */ \
             NULL,                                         /* tma_smem_bases */                    \
-            0                                             /* tma_smem_bases_len */                \
+            0,                                            /* tma_smem_bases_len */                \
+            NULL                                          /* tma_smem_size */                     \
     }
 #else
 #include <cuda/std/cstddef>
@@ -571,9 +584,10 @@ typedef struct {
     int tma_policy;              /* nvshmemx_tma_policy_t: TMA usage policy */
     uintptr_t *tma_smem_bases;   /* Per-CTA shared memory base pointers for TMA */
     size_t tma_smem_bases_len;   /* Number of entries in tma_smem_bases */
+    size_t *tma_smem_size;       /* Shared memory size promised by all CTAs */
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 800,
-              "device_host_state_v1 must be 800 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 808,
+              "device_host_state_v1 must be 808 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 

@@ -1514,6 +1514,8 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.test_wait_any_start_idx_ptr));
         if (nvshmemi_device_state.tma_smem_bases)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
+        if (nvshmemi_device_state.tma_smem_size)
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
 
         /* cleanup state */
         free(nvshmemi_state);
@@ -1936,14 +1938,21 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     INFO(NVSHMEM_INIT, "NVSHMEM TMA policy = %d", nvshmemi_device_state.tma_policy);
 
-    /* Allocate per-CTA shared memory tracking array for TMA */
+    /* Allocate the per-CTA smem base table and the shared smem size scalar for TMA. */
     if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
         uintptr_t *tma_smem_bases_dptr = NULL;
-        size_t tma_alloc_size = NVSHMEMI_TMA_MAX_BLOCKS * sizeof(uintptr_t);
-        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_bases_dptr, tma_alloc_size),
+        size_t *tma_smem_size_dptr = NULL;
+        size_t tma_bases_alloc_size = NVSHMEMI_TMA_MAX_BLOCKS * sizeof(uintptr_t);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_bases_dptr, tma_bases_alloc_size),
                                 status, out);
-        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_bases_dptr, 0, tma_alloc_size), status, out);
         nvshmemi_device_state.tma_smem_bases = tma_smem_bases_dptr;
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_bases_dptr, 0, tma_bases_alloc_size), status,
+                                out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_size_dptr, sizeof(size_t)),
+                                status, out);
+        nvshmemi_device_state.tma_smem_size = tma_smem_size_dptr;
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, sizeof(size_t)), status,
+                                out);
         nvshmemi_device_state.tma_smem_bases_len = NVSHMEMI_TMA_MAX_BLOCKS;
     }
 
@@ -1956,6 +1965,8 @@ out:
         if (test_wait_any_start_idx_ptr) CUDA_RUNTIME_CHECK(cudaFree(test_wait_any_start_idx_ptr));
         if (nvshmemi_device_state.tma_smem_bases)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
+        if (nvshmemi_device_state.tma_smem_size)
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
     }
     return status;
 }

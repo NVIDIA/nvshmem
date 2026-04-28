@@ -6,6 +6,7 @@
 #define _NVSHMEM_COMMON_DEVICE_CUH_
 
 #include <cuda_runtime.h>
+#include <cuda/std/array>
 #if !defined __CUDACC_RTC__
 #include <stdint.h>
 #include <stddef.h>
@@ -369,6 +370,298 @@ __device__ __forceinline__ bool nvshmemi_tma_smem_registered() {
 #endif
 }
 
+/*
+ * Drain all pending TMA outbound bulk ops issued by this thread.  Equivalent
+ * to commit_group + wait_group 0, gated on this CTA having registered smem.
+ * No-op if TMA is not in use.  Used by fence and quiet to enforce ordering
+ * of TMA-initiated puts relative to subsequent NVSHMEM operations.
+ */
+__device__ __forceinline__ void nvshmemi_tma_drain_if_registered() {
+    if (nvshmemi_tma_smem_registered()) {
+        nvshmemi_tma_bulk_commit_group();
+        nvshmemi_tma_bulk_wait_group_0();
+    }
+}
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+/*
+ * Access a barrier slot in this CTA's registered smem.  Layout is a static
+ * carve at the base of give_smem's buffer: NVSHMEMI_TMA_NUM_BARRIER_SLOTS
+ * slots of 16 bytes each.  Each 16B slot holds one 8B mbarrier with 8B
+ * padding to keep slot stride aligned with cp.async.bulk requirements.
+ *
+ * Slot assignments (must not collide across concurrently-running TMA paths):
+ *   0             : single-thread impl mbarrier
+ *   0, 1          : block impl ready_bar[0], ready_bar[1]
+ *   2, 3          : block impl done_bar[0], done_bar[1]
+ *   4..31         : reserved for future TMA paths (warpgroup, deeper pipes,
+ *                   reductions, counted signals, etc.)
+ *
+ * Precondition: nvshmemi_tma_smem_registered() returns true (i.e. give_smem
+ * succeeded with at least NVSHMEMI_TMA_BARRIER_REGION_BYTES).
+ */
+__device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(int slot) {
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    return reinterpret_cast<uint64_t *>(base + (uintptr_t)slot * 16);
+}
+
+enum class Blocking { No, Yes };
+#endif
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+
+/*
+ * Single-issuer global-to-global TMA copy for THREAD and WARP scope.
+ *
+ * The issuer stages each chunk through this CTA's registered shared-memory
+ * tile.  The inbound global-to-shared copy completes through the mbarrier;
+ * after the barrier wait, the same tile is issued as an outbound
+ * shared-to-global TMA copy.  Before reusing the tile for the next chunk, the
+ * issuer waits until the outbound operation has finished reading shared
+ * memory.  Blocking calls also wait for the outbound write to complete and
+ * publish that completion with a system fence.
+ *
+ * WARP scope still uses only one issuer; the remaining lanes wait at the end
+ * so callers observe normal warp-scoped completion semantics.
+ *
+ * Returns 0 on success; -1 if alignment, size, or smem registration fails.
+ */
+template <threadgroup_t SCOPE, Blocking BLOCKING>
+__device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
+                                                                const void *gmem_src,
+                                                                size_t bytes) {
+    static_assert(SCOPE == NVSHMEMI_THREADGROUP_THREAD || SCOPE == NVSHMEMI_THREADGROUP_WARP,
+                  "single impl is only for THREAD or WARP scope");
+    if (bytes == 0) return 0;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_dst)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
+
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    size_t smem_size =
+        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    if (base == 0 || smem_size == 0) return -1;
+
+    /* Barrier region (NVSHMEMI_TMA_BARRIER_REGION_BYTES) is reserved at the
+     * base by give_smem; data tile is the remainder.  This impl uses slot 0. */
+    constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+    if (smem_size <= kReserve) return -1;
+    uint64_t *mbar = nvshmemi_tma_barrier_slot(0);
+    char *data_buf = reinterpret_cast<char *>(base + kReserve);
+    size_t tile = nvshmemi_tma_align_down_16(smem_size - kReserve);
+    if (tile > (size_t)UINT32_MAX) tile = nvshmemi_tma_align_down_16((size_t)UINT32_MAX);
+    if (tile == 0) return -1;
+
+    bool is_leader = (SCOPE == NVSHMEMI_THREADGROUP_THREAD) ? true : nvshmemi_tma_elect_warp();
+
+    if (is_leader) {
+        const char *src = (const char *)gmem_src;
+        char *dst = (char *)gmem_dst;
+        size_t remaining = bytes;
+
+        nvshmemi_tma_mbarrier_init(mbar);
+        /* Make mbarrier init visible to the async proxy before cp.async.bulk. */
+        nvshmemi_tma_fence_proxy_async_shared_cta();
+        int phase = 0;
+
+        while (remaining > 0) {
+            uint32_t this_chunk =
+                remaining < tile ? (uint32_t)remaining : (uint32_t)tile;
+
+            /* Inbound TMA: arrive + expect_tx, issue load, wait for completion. */
+            nvshmemi_tma_mbarrier_arrive_expect_tx(mbar, this_chunk);
+            nvshmemi_tma_bulk_global_to_shared(data_buf, src, this_chunk, mbar);
+            nvshmemi_tma_mbarrier_try_wait(mbar, phase);
+            phase ^= 1;
+
+            /* Outbound TMA: smem -> remote gmem.  No fence needed between
+             * inbound and outbound TMA — both use the async proxy and the
+             * mbarrier release orders them. */
+            unsigned int data_addr = nvshmemi_tma_cvta_to_shared(data_buf);
+            nvshmemi_tma_bulk_shared_to_global(dst, data_addr, this_chunk);
+            nvshmemi_tma_bulk_commit_group();
+
+            remaining -= this_chunk;
+            src += this_chunk;
+            dst += this_chunk;
+
+            /* If more chunks remain, wait for outbound smem read before reuse. */
+            if (remaining > 0) nvshmemi_tma_bulk_wait_group_read_0();
+        }
+        if constexpr (BLOCKING == Blocking::Yes) {
+            nvshmemi_tma_bulk_wait_group_0();
+            __threadfence_system();
+        }
+    }
+
+    if (SCOPE == NVSHMEMI_THREADGROUP_WARP) nvshmemi_threadgroup_sync<SCOPE>();
+    return 0;
+}
+
+/*
+ * nvshmemi_memcpy_tma_global_global_block - Block-scoped, warp-specialized
+ * DOUBLE-BUFFERED local-gmem to remote-gmem TMA put.  Requires >= 2 warps.
+ *
+ * Combines warp specialization (load warp vs store warp) with smem
+ * double-buffering to overlap inbound TMA of buffer N+1 with outbound TMA of
+ * buffer N.
+ *
+ * Smem layout: [NVSHMEMI_TMA_BARRIER_REGION_BYTES reserved][buf0: tile][buf1: tile]
+ * where tile = (smem_size - NVSHMEMI_TMA_BARRIER_REGION_BYTES) / 2, 16B-aligned.
+ *
+ *   ready_bar[i]: load warp signals "buf[i] ready" via cp.async.bulk
+ *                 complete_tx + arrive_expect_tx.  Store warp try_waits.
+ *   done_bar[i]:  store warp signals "outbound read of buf[i] done, safe
+ *                 to reuse" via arrive_expect_tx(1) + complete_tx(1).
+ *                 Load warp try_waits before overwriting buf[i].
+ *
+ * Phase flips every full pipe cycle (2 iters): `phase = (i / 2) & 1`.
+ * Buffer index: `slot = i & 1`.  Load waits done_bar[slot] at phase^1,
+ * store waits ready_bar[slot] at phase.  No __syncthreads in hot loop.
+ *
+ * Returns 0 on success; -1 on alignment/size/registration failure.
+ */
+template <Blocking BLOCKING>
+__device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
+                                                       const void *gmem_src,
+                                                       size_t bytes) {
+    if (bytes == 0) return 0;
+    /* These are TMA routing constraints, not put API constraints.  The caller
+     * falls back to regular P2P stores when this helper returns -1. */
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_dst)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
+
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    size_t smem_size =
+        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    if (base == 0 || smem_size == 0) return -1;
+
+    /* Barrier region reserved at the base by give_smem.  This impl uses slots
+     * 0,1 for ready_bar[0,1] and slots 2,3 for done_bar[0,1].  Data tiles
+     * occupy the remainder, split in half. */
+    constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+    if (smem_size <= kReserve) return -1;
+    size_t tile = nvshmemi_tma_align_down_16((smem_size - kReserve) / 2);
+    if (tile > (size_t)UINT32_MAX) tile = nvshmemi_tma_align_down_16((size_t)UINT32_MAX);
+    if (tile == 0) return -1;
+
+    unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
+    if (block_threads < 64) return -1;
+
+    cuda::std::array<uint64_t *, 2> ready_bar = {nvshmemi_tma_barrier_slot(0),
+                                                 nvshmemi_tma_barrier_slot(1)};
+    cuda::std::array<uint64_t *, 2> done_bar = {nvshmemi_tma_barrier_slot(2),
+                                                nvshmemi_tma_barrier_slot(3)};
+    cuda::std::array<char *, 2> bufs = {reinterpret_cast<char *>(base + kReserve),
+                                        reinterpret_cast<char *>(base + kReserve + tile)};
+    cuda::std::array<unsigned int, 2> data_addrs = {
+        nvshmemi_tma_cvta_to_shared(bufs[0]), nvshmemi_tma_cvta_to_shared(bufs[1])};
+
+    unsigned int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    unsigned int warp_id = tid / warpSize;
+    unsigned int lane = tid % warpSize;
+    bool is_load = (warp_id == 0 && lane == 0);
+    bool is_store = (warp_id == 1 && lane == 0);
+
+    size_t n_chunks = (bytes + tile - 1) / tile;
+
+    /* Init all 4 barriers once.  Fence so async proxy sees init before any
+     * cp.async.bulk arrives. */
+    if (is_load) {
+        nvshmemi_tma_mbarrier_init(ready_bar[0]);
+        nvshmemi_tma_mbarrier_init(ready_bar[1]);
+        nvshmemi_tma_mbarrier_init(done_bar[0]);
+        nvshmemi_tma_mbarrier_init(done_bar[1]);
+        nvshmemi_tma_fence_proxy_async_shared_cta();
+    }
+    __syncthreads();
+
+    for (size_t i = 0; i < n_chunks; i++) {
+        int slot = (int)(i & 1);
+        int phase = (int)((i >> 1) & 1);
+        size_t off = i * tile;
+        uint32_t chunk = (uint32_t)min(bytes - off, tile);
+
+        if (is_load) {
+            /* First 2 iters (i=0,1): each slot's done_bar is fresh (parity 0),
+             * try_wait with phase^1=1 returns immediately.  After that the
+             * store warp has flipped done_bar[slot] and we wait for the next
+             * flip. */
+            if (i >= 2) nvshmemi_tma_mbarrier_try_wait(done_bar[slot], phase ^ 1);
+            const char *src_p = (const char *)gmem_src + off;
+            nvshmemi_tma_bulk_global_to_shared(bufs[slot], src_p, chunk, ready_bar[slot]);
+            nvshmemi_tma_mbarrier_arrive_expect_tx(ready_bar[slot], chunk);
+        }
+        if (is_store) {
+            nvshmemi_tma_mbarrier_try_wait(ready_bar[slot], phase);
+            char *dst_p = (char *)gmem_dst + off;
+            nvshmemi_tma_bulk_shared_to_global(dst_p, data_addrs[slot], chunk);
+            nvshmemi_tma_bulk_commit_group();
+            nvshmemi_tma_bulk_wait_group_read_0();
+            nvshmemi_tma_mbarrier_arrive_expect_tx(done_bar[slot], 1);
+            nvshmemi_tma_mbarrier_complete_tx(done_bar[slot], 1);
+        }
+    }
+
+    if constexpr (BLOCKING == Blocking::Yes) {
+        if (is_store) {
+            nvshmemi_tma_bulk_wait_group_0();
+            __threadfence_system();
+        }
+    }
+    __syncthreads();
+    return 0;
+}
+
+/*
+ * Dispatcher: routes THREAD and WARP scope to the single-thread impl, BLOCK
+ * scope to the double-buffered impl.
+ */
+template <threadgroup_t SCOPE, Blocking BLOCKING>
+__device__ inline int nvshmemi_memcpy_tma_global_global(void *gmem_dst, const void *gmem_src,
+                                                         size_t bytes) {
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
+        return nvshmemi_memcpy_tma_global_global_block<BLOCKING>(gmem_dst, gmem_src, bytes);
+    } else {
+        return nvshmemi_memcpy_tma_global_global_single<SCOPE, BLOCKING>(gmem_dst, gmem_src,
+                                                                          bytes);
+    }
+}
+
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_global_global_nbi(void *gmem_dst, const void *gmem_src,
+                                                             size_t bytes) {
+    return nvshmemi_memcpy_tma_global_global<SCOPE, Blocking::No>(gmem_dst, gmem_src, bytes);
+}
+
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_global_global(void *gmem_dst, const void *gmem_src,
+                                                         size_t bytes) {
+    return nvshmemi_memcpy_tma_global_global<SCOPE, Blocking::Yes>(gmem_dst, gmem_src, bytes);
+}
+
+#else  /* non-sm90: compile-time fallback returning -1 so call sites can instantiate. */
+
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_global_global_nbi(void * /*gmem_dst*/,
+                                                             const void * /*gmem_src*/,
+                                                             size_t /*bytes*/) {
+    return -1;
+}
+
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_global_global(void * /*gmem_dst*/,
+                                                        const void * /*gmem_src*/,
+                                                        size_t /*bytes*/) {
+    return -1;
+}
+
+#endif /* __CUDA_ARCH__ >= 900 */
+
 /* qpair specific APIs */
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_PE_ALL,
@@ -380,10 +673,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_P
      * mixed topology (some peers via NVLink P2P, others via IB/transport),
      * TMA ops to P2P peers are not covered by nvshmemi_transfer_quiet, so the
      * drain must not be gated on job_connectivity. */
-    if (nvshmemi_tma_smem_registered()) {
-        nvshmemi_tma_bulk_commit_group();
-        nvshmemi_tma_bulk_wait_group_0();
-    }
+    nvshmemi_tma_drain_if_registered();
 
     if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
         nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
@@ -408,6 +698,11 @@ template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_PE_ALL,
                                                              nvshmemx_qp_handle_t *qp_handle = NULL,
                                                              int num_qps = NVSHMEMX_QP_ALL) {
+    /* Drain prior TMA-initiated puts.  Like nvshmemi_quiet, this must not be
+     * gated on job_connectivity — in a mixed topology (some peers via NVLink
+     * P2P + TMA, others via network) a user calling fence after a TMA put
+     * expects the TMA op ordered relative to subsequent ops. */
+    nvshmemi_tma_drain_if_registered();
     if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST) {
         nvshmemi_transfer_fence<NVSHMEMI_THREADGROUP_THREAD>(pe, qp_handle, num_qps);
     }
@@ -500,12 +795,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        /* Use TMA if this CTA registered smem and source is in shared memory.
-         * Fall through to P2P stores on alignment/size failure (return != 0). */
-        if (nvshmemi_tma_smem_registered() && __isShared(source) &&
-            nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>((void *)dest_actual,
-                                                          (const void *)source, nbytes) == 0) {
-            return;
+        /* TMA routing when this CTA registered smem:
+         *   - source in smem: direct TMA smem -> remote gmem
+         *   - source in gmem: staged TMA gmem -> smem -> remote gmem
+         * Fall through to P2P stores on alignment/size/registration failure. */
+        if (nvshmemi_tma_smem_registered()) {
+            if (__isShared(source)) {
+                if (nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>(
+                        (void *)dest_actual, (const void *)source, nbytes) == 0)
+                    return;
+            } else {
+                if (nvshmemi_memcpy_tma_global_global_nbi<SCOPE>(
+                        (void *)dest_actual, (const void *)source, nbytes) == 0)
+                    return;
+            }
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
@@ -534,15 +837,25 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        /* Use TMA if this CTA registered smem and source is in shared memory.
-         * Fall through to P2P stores on alignment/size failure (return != 0).
-         * nvshmemi_memcpy_tma_shared_global<BLOCK> includes __syncthreads(); the
-         * caller's exit sync is redundant for BLOCK scope but harmless. */
-        if (nvshmemi_tma_smem_registered() && __isShared(source) &&
-            nvshmemi_memcpy_tma_shared_global<SCOPE>((void *)dest_actual,
-                                                     (const void *)source, nbytes) == 0) {
-            nvshmemi_threadgroup_sync<SCOPE>();
-            return;
+        /* TMA routing when this CTA registered smem:
+         *   - source in smem: direct TMA smem -> remote gmem
+         *   - source in gmem: staged TMA gmem -> smem -> remote gmem
+         * Both variants include internal syncs; the trailing sync below is
+         * redundant in the TMA path but harmless. */
+        if (nvshmemi_tma_smem_registered()) {
+            if (__isShared(source)) {
+                if (nvshmemi_memcpy_tma_shared_global<SCOPE>(
+                        (void *)dest_actual, (const void *)source, nbytes) == 0) {
+                    nvshmemi_threadgroup_sync<SCOPE>();
+                    return;
+                }
+            } else {
+                if (nvshmemi_memcpy_tma_global_global<SCOPE>(
+                        (void *)dest_actual, (const void *)source, nbytes) == 0) {
+                    nvshmemi_threadgroup_sync<SCOPE>();
+                    return;
+                }
+            }
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {

@@ -12,6 +12,21 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 #ifdef __CUDA_ARCH__
+
+__device__ constexpr size_t nvshmemi_tma_alignment_16() { return (size_t)1 << 4; }
+
+__device__ constexpr size_t nvshmemi_tma_alignment_mask_16() {
+    return nvshmemi_tma_alignment_16() - 1;
+}
+
+__device__ constexpr bool nvshmemi_tma_is_16b_aligned(size_t value) {
+    return (value & nvshmemi_tma_alignment_mask_16()) == 0;
+}
+
+__device__ constexpr size_t nvshmemi_tma_align_down_16(size_t value) {
+    return value & ~nvshmemi_tma_alignment_mask_16();
+}
+
 #if __CUDA_ARCH__ >= 900
 
 /*
@@ -99,6 +114,83 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
 }
 
 /*
+ * PTX helper: fence.proxy.async.shared::cta.  Must be issued after threads write
+ * to smem and before TMA reads that smem, so the async proxy engine sees the
+ * writes.  Issue once before a sequence of TMA reads from the same smem region.
+ */
+__device__ __forceinline__ void nvshmemi_tma_fence_proxy_async_shared_cta() {
+    asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
+}
+
+/*
+ * mbarrier helpers for pairing with cp.async.bulk gmem->smem (inbound TMA).
+ * Layout: mbarrier is an 8-byte object in shared memory, 8-byte aligned.
+ * Usage pattern for single-thread pipelined TMA load:
+ *   mbarrier_init(bar);                       // arrive count = 1
+ *   fence.proxy.async.shared::cta             // make init visible
+ *   for each chunk (phase toggles 0/1):
+ *     mbarrier_arrive_expect_tx(bar, bytes);  // arrive + expect N bytes
+ *     cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes ...
+ *     mbarrier_try_wait(bar, phase);          // spin until barrier releases
+ *
+ * All ops are issued from a single thread (the caller); mbarrier ops are
+ * thread-safe when the calling thread is the only arriver.
+ */
+__device__ __forceinline__ void nvshmemi_tma_mbarrier_init(uint64_t *mbar) {
+    unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
+    asm volatile("mbarrier.init.shared::cta.b64 [%0], 1;" ::"r"(addr));
+}
+
+__device__ __forceinline__ void nvshmemi_tma_mbarrier_arrive_expect_tx(uint64_t *mbar,
+                                                                        uint32_t bytes) {
+    unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
+    asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;" ::"r"(addr),
+                 "r"(bytes));
+}
+
+__device__ __forceinline__ void nvshmemi_tma_mbarrier_try_wait(uint64_t *mbar, int phase) {
+    unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
+    asm volatile(R"({
+.reg .pred p;
+waitL_%=:
+mbarrier.try_wait.parity.shared::cta.b64 p, [%0], %1;
+@!p bra waitL_%=;
+})" ::"r"(addr),
+                 "r"(phase)
+                 : "memory");
+}
+
+/*
+ * mbarrier.complete_tx: manually add `tx_count` to a barrier's tx counter.
+ * Paired with mbarrier.arrive.expect_tx to release a barrier that is not
+ * being fulfilled by a cp.async.bulk completion.
+ */
+__device__ __forceinline__ void nvshmemi_tma_mbarrier_complete_tx(uint64_t *mbar,
+                                                                    uint32_t tx_count) {
+    unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
+    asm volatile("mbarrier.complete_tx.relaxed.cta.shared::cta.b64 [%0], %1;" ::"r"(addr),
+                 "r"(tx_count)
+                 : "memory");
+}
+
+/*
+ * PTX helper: issue cp.async.bulk gmem -> smem with mbarrier completion tracking.
+ * The mbarrier's tx_count is incremented by `bytes` on completion.
+ */
+__device__ __forceinline__ void nvshmemi_tma_bulk_global_to_shared(void *smem_dst,
+                                                                    const void *gmem_src,
+                                                                    uint32_t bytes,
+                                                                    uint64_t *mbar) {
+    unsigned int dst_addr = nvshmemi_tma_cvta_to_shared(smem_dst);
+    unsigned int mbar_addr = nvshmemi_tma_cvta_to_shared(mbar);
+    asm volatile(
+        "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes "
+        "[%0], [%1], %2, [%3];" ::"r"(dst_addr),
+        "l"((uint64_t)(uintptr_t)gmem_src), "r"(bytes), "r"(mbar_addr)
+        : "memory");
+}
+
+/*
  * nvshmemi_memcpy_tma_shared_global - Copy data from local shared memory to
  * local or remote global memory via TMA bulk async copy.
  *
@@ -144,9 +236,9 @@ __device__ inline int nvshmemi_memcpy_tma_shared_global(void *gmem_dst, const vo
      * TODO: handle head/tail of unaligned messages with ld/st so that callers
      * with arbitrary alignment and size can still use the TMA fast path for the
      * aligned middle portion. */
-    if ((uintptr_t)gmem_dst % 16 != 0) return -1;
-    if ((uintptr_t)smem_src % 16 != 0) return -1;
-    if (bytes % 16 != 0) return -1;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_dst)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)smem_src)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
     if (bytes > (size_t)UINT32_MAX) return -1;
 
     const unsigned int smem_addr = nvshmemi_tma_cvta_to_shared(smem_src);
