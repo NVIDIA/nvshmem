@@ -61,8 +61,7 @@ __global__ void init_source_data(int *source_data, int nelems, int mype) {
     if (idx < nelems) source_data[idx] = mype * PATTERN_SCALE + idx;
 }
 
-__global__ void test_get_to_gmem(int *source_data, int *recv_data, int nelems, int mype,
-                                 int npes) {
+__global__ void test_get_to_gmem(int *source_data, int *recv_data, int nelems, int mype, int npes) {
     extern __shared__ char nvshmem_smem[];
     int peer = (mype + 1) % npes;
 
@@ -94,6 +93,46 @@ __global__ void test_get_to_smem(int *source_data, int *recv_data, int elems_per
     if (tid < elems_per_block) {
         recv_data[offset + tid] = payload[tid];
     }
+    __syncthreads();
+    nvshmemx_release_smem();
+}
+
+__global__ void test_put_signal_from_smem(int *recv_data, uint64_t *sig_addr, int elems_per_block,
+                                          int mype, int npes) {
+    extern __shared__ char nvshmem_smem[];
+    int *payload = (int *)nvshmem_smem;
+    int tid = threadIdx.x;
+    int offset = blockIdx.x * elems_per_block;
+    int peer = (mype + 1) % npes;
+
+    nvshmemx_give_smem(nvshmem_smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
+    __syncthreads();
+
+    if (tid < elems_per_block) {
+        payload[tid] = mype * PATTERN_SCALE + offset + tid;
+    }
+    __syncthreads();
+
+#if __CUDA_ARCH__ >= 900
+    asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
+#endif
+
+    nvshmemx_putmem_signal_nbi_block(recv_data + offset, payload,
+                                     (size_t)elems_per_block * sizeof(int), sig_addr, 1,
+                                     NVSHMEM_SIGNAL_ADD, peer);
+    nvshmemx_release_smem();
+}
+
+__global__ void test_put_signal_from_gmem(int *source_data, int *recv_data, uint64_t *sig_addr,
+                                          int nelems, int mype, int npes) {
+    extern __shared__ char nvshmem_smem[];
+    int peer = (mype + 1) % npes;
+
+    nvshmemx_give_smem(nvshmem_smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
+    __syncthreads();
+
+    nvshmemx_putmem_signal_nbi_block(recv_data, source_data, (size_t)nelems * sizeof(int), sig_addr,
+                                     1, NVSHMEM_SIGNAL_SET, peer);
     __syncthreads();
     nvshmemx_release_smem();
 }
@@ -131,8 +170,8 @@ int main(int argc, char **argv) {
     }
 
     if (prop.major < 9) {
-        printf("[PE %d] SKIP: TMA shared memory requires sm_90+, current device is sm_%d%d\n",
-               mype, prop.major, prop.minor);
+        printf("[PE %d] SKIP: TMA shared memory requires sm_90+, current device is sm_%d%d\n", mype,
+               prop.major, prop.minor);
         goto out;
     }
 
@@ -147,9 +186,10 @@ int main(int argc, char **argv) {
             goto out;
         }
         if (host_recommended < host_minimum || host_minimum < host_barriers) {
-            printf("[PE %d] FAIL: ask_smem size ordering violated: recommended=%d minimum=%d "
-                   "barriers=%d\n",
-                   mype, host_recommended, host_minimum, host_barriers);
+            printf(
+                "[PE %d] FAIL: ask_smem size ordering violated: recommended=%d minimum=%d "
+                "barriers=%d\n",
+                mype, host_recommended, host_minimum, host_barriers);
             status = 1;
             goto out;
         }
@@ -166,10 +206,11 @@ int main(int argc, char **argv) {
 
         if (h_results[0] != host_recommended || h_results[1] != host_minimum ||
             h_results[2] != host_barriers) {
-            printf("[PE %d] FAIL: ask_smem host/device mismatch: host=(%d,%d,%d) "
-                   "device=(%d,%d,%d)\n",
-                   mype, host_recommended, host_minimum, host_barriers, h_results[0], h_results[1],
-                   h_results[2]);
+            printf(
+                "[PE %d] FAIL: ask_smem host/device mismatch: host=(%d,%d,%d) "
+                "device=(%d,%d,%d)\n",
+                mype, host_recommended, host_minimum, host_barriers, h_results[0], h_results[1],
+                h_results[2]);
             status = 1;
             goto out;
         }
@@ -198,7 +239,8 @@ int main(int argc, char **argv) {
         CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
-        CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * NUM_ELEMS, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(
+            cudaMemcpy(host.data(), recv_data, sizeof(int) * NUM_ELEMS, cudaMemcpyDeviceToHost));
         if (verify_recv_data(host.data(), NUM_ELEMS, prev_pe) == 0) {
             printf("[PE %d] PASS: single-block shared-memory put\n", mype);
         } else {
@@ -232,7 +274,8 @@ int main(int argc, char **argv) {
         CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
-        CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(
+            cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
         if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
             printf("[PE %d] PASS: multi-block shared-memory put\n", mype);
         } else {
@@ -320,6 +363,105 @@ int main(int argc, char **argv) {
             status = 1;
         }
 
+        nvshmem_free(recv_data);
+        nvshmem_free(source_data);
+    }
+
+    {
+        const int num_blocks = 4;
+        const int threads_per_block = 64;
+        const int total_elems = num_blocks * threads_per_block;
+        int *recv_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        uint64_t *sig_addr = (uint64_t *)nvshmem_malloc(sizeof(uint64_t));
+        if (!recv_data || !sig_addr) {
+            printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
+            status = 1;
+            goto out;
+        }
+        std::vector<int> host(total_elems);
+        uint64_t host_sig = 0;
+        int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+
+        CUDA_CHECK(cudaFuncSetAttribute(test_put_signal_from_smem,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+        CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+        CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t)));
+
+        nvshmem_barrier_all();
+        test_put_signal_from_smem<<<num_blocks, threads_per_block, smem_size>>>(
+            recv_data, sig_addr, threads_per_block, mype, npes);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+        nvshmem_barrier_all();
+
+        CUDA_CHECK(
+            cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(&host_sig, sig_addr, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+
+        bool data_ok = (verify_recv_data(host.data(), total_elems, prev_pe) == 0);
+        bool sig_ok = (host_sig == (uint64_t)num_blocks);
+        if (!sig_ok) {
+            printf("[PE %d] FAIL: put_signal from smem signal mismatch: got %llu, expected %d\n",
+                   mype, (unsigned long long)host_sig, num_blocks);
+        }
+        if (data_ok && sig_ok) {
+            printf("[PE %d] PASS: put_signal from shared memory\n", mype);
+        } else {
+            status = 1;
+        }
+
+        nvshmem_free(sig_addr);
+        nvshmem_free(recv_data);
+    }
+
+    {
+        const int threads_per_block = 64;
+        const int total_elems = NUM_ELEMS;
+        int *source_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        int *recv_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        uint64_t *sig_addr = (uint64_t *)nvshmem_malloc(sizeof(uint64_t));
+        if (!source_data || !recv_data || !sig_addr) {
+            printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
+            status = 1;
+            goto out;
+        }
+        std::vector<int> host(total_elems);
+        uint64_t host_sig = 0;
+        int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+
+        CUDA_CHECK(cudaFuncSetAttribute(test_put_signal_from_gmem,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+        CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+        CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t)));
+        init_source_data<<<(total_elems + threads_per_block - 1) / threads_per_block,
+                           threads_per_block>>>(source_data, total_elems, mype);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        nvshmem_barrier_all();
+        test_put_signal_from_gmem<<<1, threads_per_block, smem_size>>>(
+            source_data, recv_data, sig_addr, total_elems, mype, npes);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+        nvshmem_barrier_all();
+
+        CUDA_CHECK(
+            cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(&host_sig, sig_addr, sizeof(uint64_t), cudaMemcpyDeviceToHost));
+
+        bool data_ok = (verify_recv_data(host.data(), total_elems, prev_pe) == 0);
+        bool sig_ok = (host_sig == 1);
+        if (!sig_ok) {
+            printf("[PE %d] FAIL: put_signal from gmem signal mismatch: got %llu, expected 1\n",
+                   mype, (unsigned long long)host_sig);
+        }
+        if (data_ok && sig_ok) {
+            printf("[PE %d] PASS: put_signal from global memory\n", mype);
+        } else {
+            status = 1;
+        }
+
+        nvshmem_free(sig_addr);
         nvshmem_free(recv_data);
         nvshmem_free(source_data);
     }

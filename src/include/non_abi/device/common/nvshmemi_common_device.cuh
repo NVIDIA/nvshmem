@@ -738,9 +738,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void * /*smem_dst*/,
 
 /*
  * Dispatcher:  TMA bulk copy based on source memory kind:
- *   __isShared(source) -> nvshmemi_memcpy_tma_shared_global
- *   otherwise          -> nvshmemi_memcpy_tma_global_global
- *
+ *   - source in smem: direct TMA smem -> remote gmem
+ *   - source in gmem: staged TMA gmem -> smem -> remote gmem
  * Returns the underlying rc (0 on success; -1 on alignment/size
  * mismatch or non-supported target).
  */
@@ -749,8 +748,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma(void *gmem_dst,
                                                                  size_t nbytes) {
     if (__isShared(source)) {
         return nvshmemi_memcpy_tma_shared_global<SCOPE>(gmem_dst, source, nbytes);
+    } else {
+        return nvshmemi_memcpy_tma_global_global<SCOPE>(gmem_dst, source, nbytes);
     }
-    return nvshmemi_memcpy_tma_global_global<SCOPE>(gmem_dst, source, nbytes);
 }
 
 template <threadgroup_t SCOPE>
@@ -1010,12 +1010,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     if (peer_base_addr) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
-        /* TMA is intentionally not used for put_signal: the signal must be
-         * issued after the data write completes and is visible, requiring
-         * strict ordering that the TMA NBI path does not provide here.
-         * TMA support for put_signal is deferred to a future MR. */
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source,
-                                           nelems * sizeof(T));
+        size_t nbytes = nelems * sizeof(T);
+        /* TMA fast path when this CTA registered smem.
+         * If the put route is via TMA, we need to ensure completion before we can issue the
+         * signal_op, so we use a blocking TMA put here.
+         */
+        if (nvshmemi_tma_smem_registered() &&
+            nvshmemi_memcpy_tma<SCOPE>((void *)dest_actual, (const void *)source, nbytes) == 0) {
+            nvshmemi_threadgroup_sync<SCOPE>();
+            if (!myIdx) {
+                __threadfence_system();
+                nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
+            }
+            return;
+        }
+        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
         nvshmemi_threadgroup_sync<SCOPE>();
         if (!myIdx) {
             __threadfence_system();
