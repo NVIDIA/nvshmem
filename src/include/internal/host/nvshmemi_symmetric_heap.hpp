@@ -106,7 +106,7 @@ class nvshmemi_symmetric_heap {
 
     uint64_t *get_unicast_le_ids() {
         if (le_unicast_enabled_) {
-            return unicast_endpoint_ids_.data();
+            return unicast_endpoint_ids_with_flag_.data();
         } else {
             return nullptr;
         }
@@ -114,7 +114,7 @@ class nvshmemi_symmetric_heap {
 
     uint64_t get_unicast_le_id(int pe) {
         if (le_unicast_enabled_) {
-            return unicast_endpoint_ids_.at(pe);
+            return unicast_endpoint_ids_with_flag_.at(pe);
         } else {
             return 0;
         }
@@ -271,7 +271,7 @@ class nvshmemi_symmetric_heap {
 
     bool le_unicast_enabled_ = false;
     bool le_multicast_enabled_ = false;
-    std::vector<uint64_t> unicast_endpoint_ids_; // 4 bytes valid, 4 bytes for le id
+    std::vector<uint64_t> unicast_endpoint_ids_with_flag_; // 4 bytes valid, 4 bytes for le id
 };
 
 inline nvshmem_mem_handle *nvshmemi_symmetric_heap::get_transport_mem_handle(void *addr,

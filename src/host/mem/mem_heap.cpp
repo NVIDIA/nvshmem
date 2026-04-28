@@ -518,13 +518,13 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_unicast_endpoint(size_t 
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
                           "size: %zu not aligned to le granularity %zu \n", size, le_granularity_);
 
-    // unicast_endpoint_ids_ should be empty
-    status = unicast_endpoint_ids_.size();
+    // unicast_endpoint_ids_with_flag_ should be empty
+    status = unicast_endpoint_ids_with_flag_.size();
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                          "unicast_endpoint_ids_ already allocated (size: %zu), "
+                          "unicast_endpoint_ids_with_flag_ already allocated (size: %zu), "
                           "reserve_unicast_endpoint called multiple times\n",
-                          unicast_endpoint_ids_.size());
-    unicast_endpoint_ids_.resize(state->npes, 0);
+                          unicast_endpoint_ids_with_flag_.size());
+    unicast_endpoint_ids_with_flag_.resize(state->npes, 0);
     le_id = 0;
     status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdReserve(&le_id, 1 /* count */));
     NVSHMEMI_NE_ERROR_RET(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
@@ -542,7 +542,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_unicast_endpoint(size_t 
         return status;
     }
     // track the unicast endpoint id to release on cleanup
-    unicast_endpoint_ids_[state->mype] = LE_ID_WITH_VALID_FLAG(le_id);
+    unicast_endpoint_ids_with_flag_[state->mype] = LE_ID_WITH_VALID_FLAG(le_id);
     INFO(NVSHMEM_MEM, "[%d] Reserved le id: %u", state->mype, le_id);
 
     return status;
@@ -576,7 +576,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
 
             // Export the logical endpoint to LE fabric handle
             status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointExport(&local_le_handles_[i],
-                PARSE_LE_ID(unicast_endpoint_ids_[state->mype]), LE_IPC_HANDLE_TYPE));
+                PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]), LE_IPC_HANDLE_TYPE));
             NVSHMEMI_NE_ERROR_RET(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
                                   "cuLogicalEndpointExport failed \n");
         });
@@ -617,7 +617,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
                 }
 
                 // Set leId valid flag, if import is successful
-                unicast_endpoint_ids_[k] = LE_ID_WITH_VALID_FLAG(le_id);
+                unicast_endpoint_ids_with_flag_[k] = LE_ID_WITH_VALID_FLAG(le_id);
                 imported_endpoint = true;
                 INFO(NVSHMEM_MEM, "[%d] heap type: %s imported LE pe: %d, peer: %d, le id: %u, transport: %d",
                  state->mype, typeid(decltype(this)).name(), state->mype, k, le_id, j);
@@ -741,31 +741,31 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
         INFO(NVSHMEM_MEM, "[%d] Releasing logical endpoints", state->mype);
 
         // Release all endpoints except the one of the current PE
-        NVSHMEMU_FOR_EACH(i, unicast_endpoint_ids_.size()) {
-            if ((i != state->mype) && IS_VALID_LE_ID(unicast_endpoint_ids_[i])) {
-            status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointDestroy(PARSE_LE_ID(unicast_endpoint_ids_[i])));
+        NVSHMEMU_FOR_EACH(i, unicast_endpoint_ids_with_flag_.size()) {
+            if ((i != state->mype) && IS_VALID_LE_ID(unicast_endpoint_ids_with_flag_[i])) {
+            status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointDestroy(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[i])));
                 NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                                       "cuLogicalEndpointDestroy failed for le id: %lu\n",
-                                      PARSE_LE_ID(unicast_endpoint_ids_[i]));
+                                      PARSE_LE_ID(unicast_endpoint_ids_with_flag_[i]));
             }
 
         }
 
         // TODO: find if there is a need to release my LEID after exported ones are released (as done in provided example)
-        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointDestroy(PARSE_LE_ID(unicast_endpoint_ids_[state->mype])));
+        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointDestroy(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype])));
 
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuLogicalEndpointDestroy failed \n");
 
         // release the logical endpoint id
-        NVSHMEMU_FOR_EACH(i, unicast_endpoint_ids_.size()) {
-            if (IS_VALID_LE_ID(unicast_endpoint_ids_[i])) {
-            status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdRelease(PARSE_LE_ID(unicast_endpoint_ids_[i]), 1 /* count */));
+        NVSHMEMU_FOR_EACH(i, unicast_endpoint_ids_with_flag_.size()) {
+            if (IS_VALID_LE_ID(unicast_endpoint_ids_with_flag_[i])) {
+            status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdRelease(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[i]), 1 /* count */));
 	        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
 			        "cuLogicalEndpointIdRelease failed\n");
             }
         }
-        unicast_endpoint_ids_.clear();
+        unicast_endpoint_ids_with_flag_.clear();
     }
     #endif
 
@@ -2055,7 +2055,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_physical_memory_to_heap
     // Bind Device Memory at unicast endpoint Offset.
 #ifdef CFT_HANDLES_ENABLED
     if (le_unicast_enabled_) {
-        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointBindMem(PARSE_LE_ID(unicast_endpoint_ids_[state->mype]),
+        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointBindMem(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]),
                         state->device_id, (unsigned long)(heap_offset),
                         cumem_handle, 0, size, /* flags = */ 0));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
@@ -2322,7 +2322,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
         status = is_egm; // EGM not supported currently with logical endpoints
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                 "Logical endpoint binding of EGM buffers for user buffer is not currently supported\n");
-        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointBindMem(PARSE_LE_ID(unicast_endpoint_ids_[state->mype]),
+        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointBindMem(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]),
                     state->device_id, (unsigned long)(heap_offset),
                     userAllocHandle, 0, size, /* flags = */ 0));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
@@ -2379,7 +2379,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
     // unbind memory from logical endpoint
 #ifdef CFT_HANDLES_ENABLED
     if (le_unicast_enabled_ && !is_egm(ptr)) {
-        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointUnbind(PARSE_LE_ID(unicast_endpoint_ids_[state->mype]),
+        status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointUnbind(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]),
                         state->device_id, (unsigned long)(heap_offset), size));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuLogicalEndpointUnbind failed at offset: %lu for size: %zu\n",
