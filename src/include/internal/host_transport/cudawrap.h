@@ -147,6 +147,8 @@ typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointExport_v13030)(void *handle,
 typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointImport_v13030)(CUlogicalEndpointId leId,
                                                             const void *handle,
                                                             CUlogicalEndpointIpcHandleType handleType);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointQuery_v13030)(CUlogicalEndpointId leId, cuuint32_t count,
+                                                             int *queryStatus);
 typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointGetLimits_v13030)(cuuint64_t *bindAlignment,
                                                                  cuuint64_t *maxSize,
                                                                  const CUlogicalEndpointProp *prop);
@@ -282,6 +284,7 @@ struct nvshmemi_cuda_fn_table {
     DEFINE_SYM(cuLogicalEndpointUnbind, 13030)
     DEFINE_SYM(cuLogicalEndpointExport, 13030)
     DEFINE_SYM(cuLogicalEndpointImport, 13030)
+    DEFINE_SYM(cuLogicalEndpointQuery, 13030)
     DEFINE_SYM(cuLogicalEndpointGetLimits, 13030)
 };
 #undef DEFINE_SYM

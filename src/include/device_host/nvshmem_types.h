@@ -10,13 +10,18 @@
  * NVSHMEMI_TMA_BARRIER_REGION_BYTES - Static carve at the base of every
  * nvshmemx_give_smem() buffer, reserved for NVSHMEM internal use: mbarriers
  * for async-proxy completion tracking, TMA descriptors, etc.  User data for
- * TMA staging starts at `smem + NVSHMEMI_TMA_BARRIER_REGION_BYTES`.
+ * TMA staging starts at `smem + NVSHMEMI_SMEM_DATA_REGION_OFFSET`.
  *
  * Layout: 32 slots of 16 bytes each.  Slot 0 is at offset 0.  TMA functions
  * reference slots by index via nvshmemi_tma_barrier_slot(int).
  */
 #define NVSHMEMI_TMA_BARRIER_REGION_BYTES 512
 #define NVSHMEMI_TMA_NUM_BARRIER_SLOTS    32
+#define NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS 32
+#define NVSHMEMI_HANDLE_BARRIER_BYTES (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS * 16)
+
+#define NVSHMEMI_SMEM_DATA_REGION_OFFSET \
+    (NVSHMEMI_TMA_BARRIER_REGION_BYTES + NVSHMEMI_HANDLE_BARRIER_BYTES)
 
 #define INIT_ARGS_V2_PADDING 92
 #define INIT_ARGS_PADDING 96

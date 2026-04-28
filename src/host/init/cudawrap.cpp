@@ -100,6 +100,7 @@ static int cudaPfnFuncLoader(struct nvshmemi_cuda_fn_table *table) {
     LOAD_SYM(table, cuLogicalEndpointUnbind, 13030, , 1);
     LOAD_SYM(table, cuLogicalEndpointExport, 13030, , 1);
     LOAD_SYM(table, cuLogicalEndpointImport, 13030, , 1);
+    LOAD_SYM(table, cuLogicalEndpointQuery, 13030, , 1);
     LOAD_SYM(table, cuLogicalEndpointGetLimits, 13030, , 1);
     return NVSHMEMI_SUCCESS;
 }
