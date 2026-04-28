@@ -400,10 +400,23 @@ __device__ __forceinline__ void nvshmemi_tma_drain_if_registered() {
  * Precondition: nvshmemi_tma_smem_registered() returns true (i.e. give_smem
  * succeeded with at least NVSHMEMI_TMA_BARRIER_REGION_BYTES).
  */
+__device__ __forceinline__ char *nvshmemi_tma_barrier_region(uintptr_t smem_base) {
+    return reinterpret_cast<char *>(smem_base);
+}
+
+__device__ __forceinline__ char *nvshmemi_tma_data_buffer(uintptr_t smem_base) {
+    return reinterpret_cast<char *>(smem_base + (uintptr_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES);
+}
+
+__device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(uintptr_t smem_base, int slot) {
+    return reinterpret_cast<uint64_t *>(nvshmemi_tma_barrier_region(smem_base) +
+                                        (uintptr_t)slot * 16);
+}
+
 __device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(int slot) {
     int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
     uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
-    return reinterpret_cast<uint64_t *>(base + (uintptr_t)slot * 16);
+    return nvshmemi_tma_barrier_slot(base, slot);
 }
 
 enum class Blocking { No, Yes };
@@ -448,8 +461,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
      * base by give_smem; data tile is the remainder.  This impl uses slot 0. */
     constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
     if (smem_size <= kReserve) return -1;
-    uint64_t *mbar = nvshmemi_tma_barrier_slot(0);
-    char *data_buf = reinterpret_cast<char *>(base + kReserve);
+    uint64_t *mbar = nvshmemi_tma_barrier_slot(base, 0);
+    char *data_buf = nvshmemi_tma_data_buffer(base);
     size_t tile = nvshmemi_tma_align_down_16(smem_size - kReserve);
     if (tile > (size_t)UINT32_MAX) tile = nvshmemi_tma_align_down_16((size_t)UINT32_MAX);
     if (tile == 0) return -1;
@@ -552,12 +565,12 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
     unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
     if (block_threads < 64) return -1;
 
-    cuda::std::array<uint64_t *, 2> ready_bar = {nvshmemi_tma_barrier_slot(0),
-                                                 nvshmemi_tma_barrier_slot(1)};
-    cuda::std::array<uint64_t *, 2> done_bar = {nvshmemi_tma_barrier_slot(2),
-                                                nvshmemi_tma_barrier_slot(3)};
-    cuda::std::array<char *, 2> bufs = {reinterpret_cast<char *>(base + kReserve),
-                                        reinterpret_cast<char *>(base + kReserve + tile)};
+    cuda::std::array<uint64_t *, 2> ready_bar = {nvshmemi_tma_barrier_slot(base, 0),
+                                                 nvshmemi_tma_barrier_slot(base, 1)};
+    cuda::std::array<uint64_t *, 2> done_bar = {nvshmemi_tma_barrier_slot(base, 2),
+                                                nvshmemi_tma_barrier_slot(base, 3)};
+    char *data_buf = nvshmemi_tma_data_buffer(base);
+    cuda::std::array<char *, 2> bufs = {data_buf, data_buf + tile};
     cuda::std::array<unsigned int, 2> data_addrs = {
         nvshmemi_tma_cvta_to_shared(bufs[0]), nvshmemi_tma_cvta_to_shared(bufs[1])};
 
