@@ -283,6 +283,7 @@ extern dir_t dir;
 extern bool use_graph;
 extern bool use_mmap;
 extern bool use_egm;
+extern bool use_smem;
 
 extern int use_cubin;
 

@@ -10,8 +10,40 @@
 #include <getopt.h>
 #include "utils.h"
 
+enum class SMEMToggle { DISABLE, ENABLE };
+
+template <SMEMToggle SMEM_MODE>
+class smem_registration_guard {
+   public:
+    __device__ smem_registration_guard(char *smem, int smem_size) {
+        if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+            nvshmemx_give_smem(smem, smem_size);
+            __syncthreads();
+        } else {
+            (void)smem;
+            (void)smem_size;
+        }
+    }
+
+    __device__ ~smem_registration_guard() {
+        if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+            __syncthreads();
+            nvshmemx_release_smem();
+        }
+    }
+};
+
+/* SMEMToggle::ENABLE opts this benchmark in to NVSHMEM's TMA path by registering
+ * shared memory at kernel entry and releasing it at kernel exit (and requires
+ * a matching dynamic smem allocation at launch).  SMEMToggle::DISABLE runs the
+ * original benchmark with no smem involvement; TMA stays off even if
+ * NVSHMEM_TMA_POLICY=ENABLE/FORCE, because the dispatch is gated on
+ * give_smem registration.  Selected at runtime via --use_smem (default: 1). */
+template <SMEMToggle SMEM_MODE>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
-                         int iter) {
+                         int iter, int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
@@ -53,8 +85,11 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
     __syncthreads();
 }
 
+template <SMEMToggle SMEM_MODE>
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
-                        int iter) {
+                        int iter, int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
@@ -102,8 +137,11 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t
     __syncthreads();
 }
 
+template <SMEMToggle SMEM_MODE>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
-                          int iter) {
+                          int iter, int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
@@ -150,7 +188,53 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
 }
 
 typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
-                        int iter);
+                        int iter, int smem_size);
+
+static SMEMToggle parse_smem_enabled() {
+    return use_smem ? SMEMToggle::ENABLE : SMEMToggle::DISABLE;
+}
+
+template <SMEMToggle SMEM_MODE>
+static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            *bw_fn = bw_thread<SMEM_MODE>;
+            DEBUG_PRINT("Using thread-scope put (smem=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            break;
+        case NVSHMEM_WARP:
+            *bw_fn = bw_warp<SMEM_MODE>;
+            DEBUG_PRINT("Using warp-scope put (smem=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            break;
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            *bw_fn = bw_block<SMEM_MODE>;
+            DEBUG_PRINT("Using block-scope put (smem=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            break;
+        default:
+            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
+            return false;
+    }
+
+    if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+        /* If smem opt-in: request dynamic smem of size RECOMMENDED so the kernel
+         * can call give_smem and the put API can take the TMA path. */
+        *smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        CUDA_CHECK(cudaFuncSetAttribute(bw_block<SMEM_MODE>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+        CUDA_CHECK(cudaFuncSetAttribute(bw_warp<SMEM_MODE>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+        CUDA_CHECK(cudaFuncSetAttribute(bw_thread<SMEM_MODE>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+    } else {
+        /* If opted out: launch with smem_size=0 and leave extern __shared__ unused. */
+        *smem_size = 0;
+    }
+
+    return true;
+}
 
 int main(int argc, char *argv[]) {
     int mype, npes;
@@ -166,7 +250,12 @@ int main(int argc, char *argv[]) {
     double *h_bw = NULL, *h_bw_total = NULL;
     double *d_bw = NULL, *d_bw_sum = NULL;
 
-    bw_fn_t bw_fn = bw_block;
+    bw_fn_t bw_fn = NULL;
+    /* Opt this benchmark into NVSHMEM's TMA path by registering smem at kernel
+     * boundaries.  Controlled by --use_smem so users can compare TMA-staged
+     * vs baseline P2P stores without rebuilding or flipping NVSHMEM_TMA_POLICY. */
+    const SMEMToggle smem_mode = parse_smem_enabled();
+    int smem_size = 0;
     int iter = iters;
     int skip = warmup_iters;
 
@@ -186,23 +275,13 @@ int main(int argc, char *argv[]) {
         goto finalize;
     }
 
-    switch (threadgroup_scope.type) {
-        case NVSHMEM_THREAD:
-            bw_fn = bw_thread;
-            DEBUG_PRINT("Using thread-scope put\n");
+    switch (smem_mode) {
+        case SMEMToggle::ENABLE:
+            if (!configure_bw_mode<SMEMToggle::ENABLE>(&bw_fn, &smem_size)) goto finalize;
             break;
-        case NVSHMEM_WARP:
-            bw_fn = bw_warp;
-            DEBUG_PRINT("Using warp-scope put\n");
+        case SMEMToggle::DISABLE:
+            if (!configure_bw_mode<SMEMToggle::DISABLE>(&bw_fn, &smem_size)) goto finalize;
             break;
-        case NVSHMEM_BLOCK:
-        case NVSHMEM_ALL_SCOPES:
-            bw_fn = bw_block;
-            DEBUG_PRINT("Using block-scope put\n");
-            break;
-        default:
-            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
-            goto finalize;
     }
 
     array_size = max_size_log;
@@ -243,15 +322,17 @@ int main(int argc, char *argv[]) {
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
             h_size_arr[i] = size;
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-            bw_fn<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype,
-                                               skip);
+            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d,
+                                                           size / sizeof(double), mype, skip,
+                                                           smem_size);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
 
             cudaEventRecord(start);
-            bw_fn<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype,
-                                               iter);
+            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d,
+                                                           size / sizeof(double), mype, iter,
+                                                           smem_size);
             cudaEventRecord(stop);
 
             CUDA_CHECK(cudaGetLastError());

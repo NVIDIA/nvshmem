@@ -4,9 +4,11 @@
  */
 
 #include "utils.h"
+#include <charconv>
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <sstream>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <tuple>
@@ -902,6 +904,7 @@ bool report_msgrate = false;
 bool use_graph = false;
 bool use_mmap = false;
 bool use_egm = false;
+bool use_smem = true;
 
 datatype_t datatype = {NVSHMEM_INT, 4, "int"};
 reduce_op_t reduce_op = {NVSHMEM_SUM, "sum"};
@@ -917,6 +920,20 @@ void *nvml_handle = nullptr;
 struct nvml_function_table nvml_ftable;
 const char *env_value = nullptr;
 
+static bool parse_bool_arg(const char *option, const char *arg, bool default_value) {
+    int value = 0;
+    std::string_view sv{arg};
+
+    const auto result = std::from_chars(sv.data(), sv.data() + sv.size(), value);
+    if (result.ec == std::errc{} && result.ptr == sv.data() + sv.size()) {
+        return value != 0;
+    }
+
+    fprintf(stderr, "Warning: invalid %s='%s'; defaulting to %s\n", option, arg,
+            default_value ? "enabled" : "disabled");
+    return default_value;
+}
+
 void read_args(int argc, char **argv) {
     int c;
     static struct option long_options[] = {{"bidir", no_argument, 0, 0},
@@ -926,6 +943,7 @@ void read_args(int argc, char **argv) {
                                            {"issue", required_argument, 0, 0},
                                            {"mmap", no_argument, 0, 0},
                                            {"egm", no_argument, 0, 0},
+                                           {"use_smem", required_argument, 0, 0},
                                            {"help", no_argument, 0, 'h'},
                                            {"min_size", required_argument, 0, 'b'},
                                            {"max_size", required_argument, 0, 'e'},
@@ -972,6 +990,7 @@ void read_args(int argc, char **argv) {
                     "--issue: <on_stream, host> (applicable in some host pt-to-pt tests) \n"
                     "--mmap (Use mmaped buffer) \n"
                     "--egm (Use EGM memory for mmaped buffer) \n"
+                    "--use_smem <0|1> (Enable shared-memory registration in TMA-capable tests) \n"
                     "-m, --mem_handle_type: <0:auto, 1:posix_fd, 2:fabric> (for mmaped buffer) \n"
                     "--cudagraph (Use CUDA graph to amortize launch overhead) \n");
                 exit(0);
@@ -1002,6 +1021,8 @@ void read_args(int argc, char **argv) {
                     use_mmap = true;
                 } else if (strcmp(long_options[option_index].name, "egm") == 0) {
                     use_egm = true;
+                } else if (strcmp(long_options[option_index].name, "use_smem") == 0) {
+                    use_smem = parse_bool_arg("--use_smem", optarg, true);
                 }
                 break;
             case 'b':
@@ -1079,11 +1100,11 @@ void read_args(int argc, char **argv) {
         "number of ctas: %zu, threads per cta: %zu "
         "stride: %zu, datatype: %s, reduce_op: %s, threadgroup_scope: %s, atomic_op: %s, dir: %s, "
         "report_msgrate: %d, bidirectional: %d, putget_issue :%s, use_graph: %d, use_mmap: %d, "
-        "mem_handle_type: %zu, use_egm: %d\n",
+        "mem_handle_type: %zu, use_egm: %d, use_smem: %d\n",
         min_size, max_size, step_factor, iters, warmup_iters, num_blocks, threads_per_block, stride,
         datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
         test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
-        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm);
+        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem);
     printf(
         "Note: Above is full list of options, any given test will use only a subset of these "
         "variables.\n");
