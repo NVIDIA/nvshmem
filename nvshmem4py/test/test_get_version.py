@@ -5,6 +5,7 @@ import cffi
 import argparse
 
 import numpy as np
+from mpi4py import MPI
 from numba import cuda
 
 from utils import uid_init, mpi_init
@@ -47,4 +48,5 @@ if __name__ == "__main__":
     try:
         test_get_version()
     finally:
+        MPI.COMM_WORLD.Barrier()
         finalize()

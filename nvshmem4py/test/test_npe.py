@@ -4,10 +4,12 @@
 from numba import cuda
 import cupy as cp
 import argparse
+from mpi4py import MPI
 
 from utils import uid_init, mpi_init
 
 from nvshmem.bindings.device.numba import n_pes
+from nvshmem.core import finalize
 
 
 def test_npe():
@@ -19,6 +21,7 @@ def test_npe():
 
     npes = cp.zeros(1, dtype="int32")
     kernel_nvshmem[1, 1](npes)
+    cuda.synchronize()
 
     assert npes[0] > 0
     print(f"{npes[0]=}")
@@ -33,4 +36,8 @@ if __name__ == "__main__":
     elif args.init_type == "mpi":
         mpi_init()
 
-    test_npe()
+    try:
+        test_npe()
+    finally:
+        MPI.COMM_WORLD.Barrier()
+        finalize()
