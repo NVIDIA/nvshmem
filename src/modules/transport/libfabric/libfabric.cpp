@@ -540,6 +540,13 @@ out:
     return status;
 }
 
+static inline void nvshmemt_libfabric_wake_signal_delivery_thread(
+        nvshmemt_libfabric_state_t *state) {
+    if (state->signal_delivery_futex.exchange(1, std::memory_order_release) == 0) {
+        syscall(SYS_futex, &state->signal_delivery_futex, FUTEX_WAKE, 1, NULL, NULL, 0);
+    }
+}
+
 /*
  * Enqueue a work item into signal_work_queue with backpressure. Acquires signal_work_queue_lock,
  * pushes `work`, and if the SPSC queue is full, drains done_queue via gdr_complete_amos to make
@@ -566,9 +573,11 @@ static inline int nvshmemt_libfabric_enqueue_signal_work(nvshmem_transport_t tra
             NVSHMEMI_WARN_PRINT("Failed call to nvshmemt_libfabric_gdr_complete_amos: %d", status);
             return NVSHMEMX_ERROR_INTERNAL;
         }
+        nvshmemt_libfabric_wake_signal_delivery_thread(libfabric_state);
         while (libfabric_state->signal_work_queue_lock.test_and_set(std::memory_order_acquire))
             NVSHMEMT_LIBFABRIC_CPU_RELAX();
     }
+    nvshmemt_libfabric_wake_signal_delivery_thread(libfabric_state);
     libfabric_state->signal_work_queue_lock.clear(std::memory_order_release);
     return 0;
 }
@@ -1074,10 +1083,7 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
         status = check_signal_delivery_status(libfabric_state);
         if (unlikely(status)) return status;
 
-        /* Wake Thread B only if it might be sleeping (futex was 0) */
-        if (libfabric_state->signal_delivery_futex.exchange(1, std::memory_order_release) == 0) {
-            syscall(SYS_futex, &libfabric_state->signal_delivery_futex, FUTEX_WAKE, 1, NULL, NULL, 0);
-        }
+        nvshmemt_libfabric_wake_signal_delivery_thread(libfabric_state);
     }
     return 0;
 }
