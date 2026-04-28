@@ -30,6 +30,7 @@
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/nvshmemi_bootstrap_library.h"
 #include "non_abi/nvshmem_build_options.h"
+#include "device_host/logical_endpoint_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"
@@ -1983,6 +1984,17 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                                  nvshmemi_options.TMA_POLICY);
         }
     }
+
+    // If CFT handles are enabled, we need to use TMA
+#if defined(CFT_HANDLES_ENABLED)
+    if ((nvshmemi_options.ENABLE_LOGICAL_ENDPOINT) &&
+        (nvshmemi_device_state.tma_policy == NVSHMEMX_TMA_DISABLE)) {
+        NVSHMEMI_ERROR_PRINT("Logical endpoint support needs TMA, "
+                             "Please enable TMA by setting NVSHMEM_TMA_POLICY=ENABLE\n");
+        status = NVSHMEMX_ERROR_NOT_SUPPORTED;
+        goto out;
+    }
+#endif
 
     if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
         CUDA_RUNTIME_CHECK_GOTO(cudaDeviceGetAttribute(&cuda_dev_cap_major,
