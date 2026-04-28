@@ -21,7 +21,7 @@
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM transfer APIs. 
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
     defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
@@ -34,6 +34,7 @@
 #endif
 #include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
+#include "device/logical_endpoint_device.cuh"
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
 
 #define _LL_MAX_UNROLL 4
@@ -128,6 +129,28 @@ template <>
 struct is_int16<int16_t> : cuda::std::true_type {};
 
 #endif
+
+// Fence instructions
+inline __device__ void fence_async_proxy() {
+   asm volatile ("fence.proxy.async.shared::cta;\n" ::: "memory");
+}
+
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+// forward declaration
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(
+    const void *src, void* dst, size_t len, int pe, bool is_blocking);
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(
+    const void *src, void* dst, size_t len, int pe, bool is_blocking);
+
+template <typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p(
+    void *__restrict__ dst, const T src, int pe);
+
+#endif // LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
 
 __device__ int nvshmemi_team_translate_pe(nvshmemi_team_t *src_team, int src_pe,
                                           nvshmemi_team_t *dest_team);
@@ -922,7 +945,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) &&
+        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
+         !IS_ADDR_OFFSET_ALIGNED(source, CFT_HANDLE_TX_SIZE))) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -941,6 +966,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
                                            nbytes);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+        nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
+#endif
     } else {
         nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
                                                           nelems * sizeof(T), pe, qp_index);
@@ -955,7 +984,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) &&
+        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
+         !IS_ADDR_OFFSET_ALIGNED(source, CFT_HANDLE_TX_SIZE))) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -978,6 +1009,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
                                            nbytes);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+        nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
+#endif
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
                                                       nelems * sizeof(T), pe, qp_index);
@@ -1005,7 +1040,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) &&
+        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
+        (!nvshmemi_tma_smem_registered()) ||
+        (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1017,6 +1055,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
             return;
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+        nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
+#endif
     } else {
         nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
                                                           nelems * sizeof(T), pe, qp_index);
@@ -1039,7 +1081,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) &&
+        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
+        (!nvshmemi_tma_smem_registered()) ||
+        (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1052,6 +1097,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
             return;
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+        nvshmemi_handle_put<SCOPE>((void *)source, (void *)dest, nelems * sizeof(T), pe, true);
+#endif
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
                                                       nelems * sizeof(T), pe, qp_index);
@@ -1069,6 +1118,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = signal;
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET &&
+               IS_ADDR_OFFSET_ALIGNED(sig_addr, CFT_HANDLE_TX_SIZE) &&
+               LD_AND_CHECK_VALID_LE_ID(pe)) {
+        nvshmemi_handle_p((void *)sig_addr, signal, pe);
+#endif
     } else if (nvshmemi_use_ldst_path()) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
@@ -1088,7 +1143,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) &&
+        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
+        (!nvshmemi_tma_smem_registered()) ||
+        (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1111,6 +1169,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
             __threadfence_system();
             nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+        nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
+        nvshmemi_threadgroup_sync<SCOPE>();
+        if (!myIdx) {
+            __threadfence_system();
+            // Ensure that signal operation is ordered with respect
+            // to earlier fabric / generic operations
+            fence_proxy_fabric2fabric_alias();
+            fence_proxy_generic2fabric_alias();
+
+            nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
+        }
+#endif
     } else {
         nvshmemi_transfer_put_signal<SCOPE>((void *)dest, (void *)source, nelems * sizeof(T),
                                             (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe,
@@ -1632,6 +1704,436 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_packLL(T *psync, const T 
         }
     }
 }
+
+/* CFT Handle specific functions */
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+
+// Function copies data from global to shared memory using TMA
+// Returns after the copy is completed
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tma_g2s_copy_thread(int myIdx,
+        void* smem_buf, __mbarrier_t *tma_bar_ptr, const void *src,
+        uint32_t byte_offset_src, uint32_t copy_bytes) {
+    if ((myIdx % warpSize) == 0) {
+        // async copy from global to shared only supports mbarrier completion mechanism
+        cp_async_bulk_global_to_shared(smem_buf, (char*)src + byte_offset_src, tma_bar_ptr, copy_bytes);
+
+        __mbarrier_token_t token_tma_g2s = barrier_arrive1_tx(tma_bar_ptr, copy_bytes);
+        // Wait for previous transfer. Retry in case of false. (waiting can fail)
+        while (!barrier_try_wait_token(tma_bar_ptr, token_tma_g2s)) {}
+    }
+}
+
+template <int outstanding_copy_count>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tma_s2g_copy_thread(int myIdx,
+        void *smem_buf, void *dst, uint32_t byte_offset_dst,
+        uint32_t copy_bytes) {
+    if ((myIdx % warpSize) == 0) {
+        cp_async_bulk_shared_to_global((char *)dst + byte_offset_dst,
+                                       smem_buf, copy_bytes);
+        nvshmemi_tma_bulk_commit_group();
+
+        // wait untill only 1 outstanding cp is pending
+        // This will ensure that copy of previous iteration is completed
+        if constexpr (outstanding_copy_count == 0) {
+            nvshmemi_tma_bulk_wait_group_0();
+        } else {
+            //wait till outstanding_copy_count copies are left
+            cp_async_bulk_wait_group_read<outstanding_copy_count>();
+        }
+
+    }
+}
+
+// Function issues try_put using fabric handles, it also handles wait if multiple
+// copies are being batched together and exceeds the max batch size
+// NOTE: It does not wait for the copy to be completed
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_put_wrapper_thread(
+    int myIdx, void* smem_buf, nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast> dst_handle, uint32_t byte_offset_dst,
+    handle_barrier_t *tma_bar_handle, uint32_t copy_bytes, uint32_t *pending_copy_bytes) {
+
+    // There is a upper limit on "tx_count" tracked by mbarrier, so
+    // if we are combining multiple copies, we need to wait before waiting on the barrier
+    // we need to make sure we don't exceed the limit (16MB)
+    if ((myIdx % warpSize) == 0) {
+        if ((pending_copy_bytes) && *pending_copy_bytes + copy_bytes >= TMA_COPY_MAX_BATCH_SIZE) {
+            uint64_t curr_state = tma_bar_handle->arrive_relaxed(*pending_copy_bytes); // arrives on SYNCS barrier for len BYTES
+            tma_bar_handle->try_wait_token(curr_state);
+            *pending_copy_bytes = 0;
+        }
+
+        fabric_try_put_async<le_fabric_handle_kind::Unicast>(dst_handle.id(), dst_handle.offset() + byte_offset_dst,
+                smem_buf, copy_bytes, tma_bar_handle);
+        fabric_submit();
+    }
+}
+
+// Function issues try_get using fabric handles and waits for the copy to be completed
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_get_wrapper_thread(
+    int myIdx, void* dst_smem_buf, nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast> src_handle, uint32_t byte_offset_src,
+    handle_barrier_t *tma_bar_handle, uint32_t copy_bytes) {
+
+    if ((myIdx % warpSize) == 0) {
+        fabric_try_get_async(src_handle.id(), src_handle.offset() + byte_offset_src,
+            dst_smem_buf, copy_bytes, tma_bar_handle);
+        fabric_submit();
+
+        // wait till the get is completed
+        uint64_t curr_state = tma_bar_handle->arrive_relaxed(copy_bytes);
+        tma_bar_handle->try_wait_token(curr_state);
+    }
+}
+
+
+/* From this function onwards, we should never move data using pointers
+ * Only handles should be used or raise error if not possible
+ * SCOPE : restricted to THREADGROUP_BLOCK
+ * Handle properties are emulated in blackwell. This is required until hardware
+ * support for handle features are available.
+ */
+template <threadgroup_t SCOPE, int SMEM_CHUNK_SIZE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
+    void *__restrict__ dst, const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id,
+    [[maybe_unused]] bool is_blocking) {
+
+    /* We restrict handle based memcpy to threadgroup block scope,
+     * mbarriers will be maintained one per threadblock
+     * warp and thread scope will require more mbarrier per block
+     */
+    static_assert(SCOPE == NVSHMEMI_THREADGROUP_BLOCK,
+                  "CFT handle operations are restricted to threadgroup block scope");
+
+    assert ((len % CFT_HANDLE_TX_SIZE) == 0);
+
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    int groupSize = nvshmemi_threadgroup_size<SCOPE>();
+    uint32_t curr_buf_idx = 0;
+    uint32_t byte_offset_src = 0;
+    uint32_t byte_offset_dst = 0;
+    uint32_t pending_copy_bytes = 0; // bytes on which try_put has been called but not yet completed (waited on)
+    uint32_t copy_bytes = SMEM_CHUNK_SIZE < len ? SMEM_CHUNK_SIZE : len;
+
+    // Note: if we support other SCOPEs and multiple mbarriers per block, we need to
+    // use threadIdx.x instead of myIdx
+    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uint32_t warp_idx_in_block = myIdx / warpSize;
+
+    if (!myIdx) {
+        //ensure generic proxy is visible to async proxy
+        fence_async_proxy();
+
+        uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
+        smem_data_buf[0] = reinterpret_cast<uint8_t *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
+        smem_data_buf[1] = smem_data_buf[0] + GET_SMEM_DATA_BUF_SIZE();
+        handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
+
+        /* We use mbarrier for 2 purposes,
+         * 1. Sync fabric handle operations using tma_bar_handle
+         * 2. Sync TMA transfers using tma_bar_ptr
+         */
+        tma_bar_handle[0] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+
+        // We may need one barrier per buffer for efficient pipelining.
+        // For now, both handles point to the same barrier slot.
+        tma_bar_handle[1] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES + 0));
+        __mbarrier_t *tma_bar_ptr = reinterpret_cast<__mbarrier_t *>(GET_SMEM_MBARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block));
+
+        tma_bar_handle[0]->init(1);
+        __mbarrier_init(tma_bar_ptr, 1);
+
+        nvshmemi_tma_g2s_copy_thread(myIdx, &(smem_data_buf[curr_buf_idx][0]), tma_bar_ptr, src, byte_offset_src, copy_bytes);
+        byte_offset_src += copy_bytes;
+
+        auto dst_handle =
+            nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Unicast>(dest_le_id, dst);
+        while (byte_offset_src < len) {
+
+            // move data from shared memory to destination global memory
+            copy_bytes = SMEM_CHUNK_SIZE < (len - byte_offset_dst) ? SMEM_CHUNK_SIZE : (len - byte_offset_dst);
+
+            nvshmemi_try_put_wrapper_thread(myIdx, &(smem_data_buf[curr_buf_idx][0]), dst_handle, byte_offset_dst,
+            tma_bar_handle[curr_buf_idx], copy_bytes, &pending_copy_bytes);
+
+            byte_offset_dst += copy_bytes;
+            pending_copy_bytes += copy_bytes;
+
+            // Skip this for first iteration, as curr_buf_idx^1 is yet to be written to
+            // ensure smem is read from before writing into smem buf later
+            if (byte_offset_src > SMEM_CHUNK_SIZE) {
+                // commit the group and wait till cur_buf_idx SMEM buf is read
+                tma_bar_handle[curr_buf_idx^1]->fabric_wait_sync_reads();
+            }
+
+            // load next chunk of source data into shared memory (curr_buf_idx^1)
+            copy_bytes = SMEM_CHUNK_SIZE < (len - byte_offset_src) ? SMEM_CHUNK_SIZE : (len - byte_offset_src);
+
+            nvshmemi_tma_g2s_copy_thread(myIdx, &(smem_data_buf[curr_buf_idx^1][0]), tma_bar_ptr, src, byte_offset_src, copy_bytes);
+            byte_offset_src += copy_bytes;
+
+            curr_buf_idx ^= 1;
+        }
+
+        copy_bytes = SMEM_CHUNK_SIZE < (len - byte_offset_dst) ? SMEM_CHUNK_SIZE : (len - byte_offset_dst);
+
+        nvshmemi_try_put_wrapper_thread(myIdx, &(smem_data_buf[curr_buf_idx][0]), dst_handle, byte_offset_dst,
+        tma_bar_handle[curr_buf_idx], copy_bytes, &pending_copy_bytes);
+
+        byte_offset_dst += copy_bytes;
+        pending_copy_bytes += copy_bytes;
+
+        assert(byte_offset_dst == len);
+        assert(byte_offset_src == len);
+
+        uint64_t curr_state = tma_bar_handle[curr_buf_idx]->arrive_relaxed(pending_copy_bytes); // arrives on SYNCS barrier for len BYTES
+        tma_bar_handle[curr_buf_idx]->try_wait_token(curr_state);
+        tma_bar_handle[0]->inval();
+        __mbarrier_inval(tma_bar_ptr);
+    }
+}
+
+// Function used for 1 single sub 16B data transfer
+template <threadgroup_t SCOPE, int SMEM_CHUNK_SIZE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
+    void *__restrict__ dst, const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id,
+    [[maybe_unused]] bool is_blocking) {
+
+    /* We restrict handle based memcpy to threadgroup block scope,
+     * mbarriers will be maintained one per threadblock
+     * warp and thread scope will require more mbarrier per block
+     */
+    static_assert(SCOPE == NVSHMEMI_THREADGROUP_BLOCK,
+                  "CFT handle operations are restricted to threadgroup block scope");
+
+    // This function is only used for sub 16B data transfers
+    // For larger transfers, use the regular nvshmemi_handle_put16B function
+    assert(len < CFT_HANDLE_TX_SIZE);
+
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    int groupSize = nvshmemi_threadgroup_size<SCOPE>();
+
+    // Note: if we support other SCOPEs and multiple mbarriers per block, we need to
+    // use threadIdx.x instead of myIdx
+    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    int warp_idx_in_block = threadIdx.x / warpSize;
+
+    // Copy data to shared memory using threads
+    uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
+
+    for (uint32_t i = myIdx; i < len; i += groupSize) {
+        smem_data_buf[i] = reinterpret_cast<const uint8_t *>(src)[i];
+    }
+
+    // Ensure generic proxy stores to shared memory are visible to fabric
+    fence_proxy_generic2fabric_release_system();
+    nvshmemi_threadgroup_sync<SCOPE>();
+
+    if (!myIdx) {
+        handle_barrier_t *tma_bar_handle;
+
+        tma_bar_handle = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+        tma_bar_handle->init(1);
+
+        auto dst_handle =
+            nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Unicast>(dest_le_id, dst);
+        nvshmemi_try_put_wrapper_thread(myIdx, smem_data_buf, dst_handle, 0, tma_bar_handle, len, nullptr);
+
+        uint64_t curr_state = tma_bar_handle->arrive_relaxed(len);
+        tma_bar_handle->try_wait_token(curr_state);
+        tma_bar_handle->inval();
+    }
+}
+
+/*
+ * this function is in threadscope, every thread can call this function
+ *
+ */
+template <typename T, int SMEM_CHUNK_SIZE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
+    void *__restrict__ dst, const T src, int pe) {
+
+    unsigned mask = __activemask();
+    unsigned active_threads = __popc(mask);
+
+    uint32_t gbl_thrd_idx = threadIdx.x + (blockIdx.x * blockDim.x)
+                            + (blockIdx.y * blockDim.x * blockDim.y)
+                            + (blockIdx.z * blockDim.x * blockDim.y * blockDim.z);
+    uint32_t thrd_idx_in_blk = gbl_thrd_idx % (blockDim.x * blockDim.y * blockDim.z);
+    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    int warp_idx_in_block = thrd_idx_in_blk / warpSize;
+
+    T * smem_ptr = reinterpret_cast<T *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
+
+    // threads from same warp share the same mbarrier
+    handle_barrier_t *tma_bar_handle = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+
+    if (thrd_idx_in_blk % warpSize == 0) {
+        tma_bar_handle->init(active_threads); //arrival count is number of active threads calling this function
+    }
+
+    // write the signal value to shared memory
+    // signal datatype is long but we reserve 16 bytes per thread in block for TMA/handle ops
+    // To compute correct offset, we multiply thread index by 2 (16 bytes per thread)
+
+    smem_ptr[thrd_idx_in_blk * (CFT_HANDLE_TX_SIZE/sizeof(T))] = src;
+
+    // Ensure generic proxy stores to shared memory are visible to fabric
+    fence_proxy_generic2fabric_release_system();
+
+    auto dst_handle = nvshmemi_fabric_handle_for_pe(pe, dst);
+
+    nvshmemi_try_put_wrapper_thread(thrd_idx_in_blk, smem_ptr + (thrd_idx_in_blk * (CFT_HANDLE_TX_SIZE/sizeof(T))), dst_handle, 0,
+                                    tma_bar_handle, (uint32_t)sizeof(T), nullptr);
+
+    uint64_t curr_state = tma_bar_handle->arrive_relaxed((uint32_t)sizeof(T));
+    tma_bar_handle->try_wait_token(curr_state);
+
+    if (thrd_idx_in_blk % warpSize == 0) {
+        tma_bar_handle->inval();
+    }
+}
+
+// TMA needs minimum 16 bytes of data for get() so no support for g() routine
+// with handles
+template <threadgroup_t SCOPE, int SMEM_CHUNK_SIZE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated(
+    void *__restrict__ dst, const void *__restrict__ src, size_t len, int pe,
+    [[maybe_unused]] bool is_blocking) {
+
+    /* We restrict handle based memcpy to threadgroup block scope,
+     * mbarriers will be maintained one per threadblock
+     * warp and thread scope will require more mbarrier per block
+     */
+    static_assert(SCOPE == NVSHMEMI_THREADGROUP_BLOCK,
+                  "CFT handle operations are restricted to threadgroup block scope");
+
+    assert ((len % CFT_HANDLE_TX_SIZE) == 0);
+
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    int groupSize = nvshmemi_threadgroup_size<SCOPE>();
+    uint32_t curr_buf_idx = 0;
+    uint32_t byte_offset_src = 0;
+    uint32_t byte_offset_dst = 0;
+    uint32_t copy_bytes = SMEM_CHUNK_SIZE < len ? SMEM_CHUNK_SIZE : len;
+
+    // Note: if we support other SCOPEs and multiple mbarriers per block, we need to
+    // use threadIdx.x instead of myIdx
+    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uint32_t warp_idx_in_block = myIdx / warpSize;
+
+    auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
+    if (!myIdx) {
+        uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
+        smem_data_buf[0] = reinterpret_cast<uint8_t *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
+        smem_data_buf[1] = smem_data_buf[0] + GET_SMEM_DATA_BUF_SIZE();
+        // Once we have fabric barriers, we may need 1 barrier per buffer to allow for efficient
+        // pipelining Fo now, we use 2 pointers pointing to the same barrier
+        handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
+        tma_bar_handle[0] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+        tma_bar_handle[1] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES + 0));
+
+        tma_bar_handle[0]->init(1);
+
+        nvshmemi_try_get_wrapper_thread(myIdx, (void*)&(smem_data_buf[curr_buf_idx][0]), src_handle, byte_offset_src,
+        tma_bar_handle[curr_buf_idx], copy_bytes);
+
+        byte_offset_src += copy_bytes;
+
+        while (byte_offset_src < len) {
+
+            // move data from shared memory to destination global memory
+            copy_bytes = SMEM_CHUNK_SIZE < (len - byte_offset_dst) ? SMEM_CHUNK_SIZE
+                                                                   : (len - byte_offset_dst);
+            nvshmemi_tma_s2g_copy_thread<1>(myIdx, &(smem_data_buf[curr_buf_idx][0]), dst, byte_offset_dst, copy_bytes);
+            byte_offset_dst += copy_bytes;
+
+            copy_bytes = SMEM_CHUNK_SIZE < (len - byte_offset_src) ? SMEM_CHUNK_SIZE
+                                                                   : (len - byte_offset_src);
+            // copy next chunk of data from peer global to shared memory
+            nvshmemi_try_get_wrapper_thread(myIdx, (void*)&(smem_data_buf[curr_buf_idx ^ 1][0]),
+                                            src_handle, byte_offset_src, tma_bar_handle[curr_buf_idx ^ 1],
+                                            copy_bytes);
+
+            byte_offset_src += copy_bytes;
+            curr_buf_idx ^= 1;
+        }
+
+        copy_bytes = SMEM_CHUNK_SIZE < (len - byte_offset_dst) ? SMEM_CHUNK_SIZE
+                                                               : (len - byte_offset_dst);
+        nvshmemi_tma_s2g_copy_thread<0>(myIdx, &(smem_data_buf[curr_buf_idx][0]), dst, byte_offset_dst, copy_bytes);
+        byte_offset_dst += copy_bytes;
+
+        assert(byte_offset_dst == len);
+        assert(byte_offset_src == len);
+
+        // invalidate the barrier
+        tma_bar_handle[0]->inval();
+
+    }  // end
+}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(
+    const void *src, void* dst, size_t len, int pe, [[maybe_unused]] bool is_blocking) {}
+
+/* Handle PUT is only supported for threadgroup block scope
+ * and is size is multiple of CFT_HANDLE_TX_SIZE (16B).
+ * The main challenge with supporting arbitrary size is address
+ * is expected to be 16B aligned. Relax the size constraint once
+ * we ensure address is 16B aligned within the code
+ */
+template <>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put<NVSHMEMI_THREADGROUP_BLOCK>(
+    const void *src, void* dst, size_t len, int pe, bool is_blocking) {
+    if (pe == nvshmemi_device_state_d.mype) {
+        nvshmemi_memcpy_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>(dst, src, len);
+        return;
+    }
+
+    //address must be aligned to CFT_HANDLE_TX_SIZE
+    assert((uint64_t)dst % CFT_HANDLE_TX_SIZE == 0);
+    assert(LD_AND_CHECK_VALID_LE_ID(pe));
+    CUlogicalEndpointId dest_le_id = LD_AND_GET_LE_ID((pe));
+    uint32_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
+    if (adjusted_size) {
+        nvshmemi_handle_put_TX_size<NVSHMEMI_THREADGROUP_BLOCK, NVSHMEMI_SMEM_BUF_SIZE>(dst, src, adjusted_size,
+                dest_le_id, is_blocking);
+    }
+
+    uint32_t remaining_size = len - adjusted_size;
+    if (remaining_size) {
+        nvshmemi_handle_put_sub_TX_size<NVSHMEMI_THREADGROUP_BLOCK, NVSHMEMI_SMEM_BUF_SIZE>(
+            (void*)((char*)dst + adjusted_size), (const void*)((const char*)src + adjusted_size),
+            remaining_size, dest_le_id, is_blocking);
+    }
+}
+
+template <typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p(
+    void *__restrict__ dst, const T src, int pe) {
+    if (pe == nvshmemi_device_state_d.mype) {
+        *reinterpret_cast<volatile T *>(dst) = src;
+        return;
+    }
+
+    nvshmemi_handle_p_emulated<T, NVSHMEMI_SMEM_BUF_SIZE>(dst, src, pe);
+}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(
+    const void *src, void* dst, size_t len, int pe, [[maybe_unused]] bool is_blocking) {}
+
+template <>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get<NVSHMEMI_THREADGROUP_BLOCK>(
+    const void *src, void* dst, size_t len, int pe, bool is_blocking) {
+    if (pe == nvshmemi_device_state_d.mype) {
+        nvshmemi_memcpy_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>(dst, src, len);
+        return;
+    }
+
+    nvshmemi_handle_get_emulated<NVSHMEMI_THREADGROUP_BLOCK, NVSHMEMI_SMEM_BUF_SIZE>(dst, src, len, pe, is_blocking);
+}
+
+
+#endif // LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
 
 #endif /* __CUDA__ARCH__ */
 #endif /* _NVSHMEM_COMMON_DEVICE_CUH_ */

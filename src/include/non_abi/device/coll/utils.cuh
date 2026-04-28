@@ -25,8 +25,11 @@
 #endif
 #include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
+#include "non_abi/device/common/nvshmemi_common_device.cuh"
+#include "device/logical_endpoint_device.cuh"
 
 #ifdef __CUDA_ARCH__
+
 /* This is signaling function used in barrier algorithm.
 nvshmem_<type>_signal function cannot be used in barrier because it uses a
 combination of P2P path and IB path depending on how the peer GPU is
@@ -45,10 +48,27 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_use_ldst_path()) {
-        volatile T *dest_actual =
-            (volatile T *)((char *)(peer_base_addr) +
-                           ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
-        *dest_actual = value;
+        if (nvshmemi_peer_reachable(peer_base_addr) &&
+            (!(IS_LE_PRIORITIZED(pe)) ||
+            (!nvshmemi_tma_smem_registered()) ||
+            (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
+            volatile T *dest_actual =
+                (volatile T *)((char *)(peer_base_addr) +
+                               ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
+            *dest_actual = value;
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+        } else if (LD_AND_CHECK_VALID_LE_ID(pe)) {
+            // It is more performant to use pointers for loopback to own memory
+            if (pe == nvshmemi_device_state_d.mype) {
+                *dest = value;
+            } else {
+                nvshmemi_handle_p<T>((void*)dest, value, pe);
+            }
+
+#endif
+        } else {
+            assert(0 && "signal for barrier failing both pointer and logical endpoint access");
+        }
     } else {
         nvshmemi_transfer_amo_nonfetch<T>((void *)dest, value, pe, NVSHMEMI_AMO_SIGNAL);
     }
