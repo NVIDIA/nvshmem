@@ -28,6 +28,7 @@ __device__ constexpr size_t nvshmemi_tma_align_down_16(size_t value) {
 }
 
 #if __CUDA_ARCH__ >= 900
+#include <cuda_awbarrier_primitives.h>
 
 /*
  * Elect one leader from the active threads in the calling warp.
@@ -111,6 +112,95 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_read_0() {
 /* Full completion wait: smem read AND global write both done. */
 __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
     asm volatile("cp.async.bulk.wait_group 0;" ::: "memory");
+}
+
+inline __device__ void barrier_expect_tx(__mbarrier_t *barrier, uint32_t txCount) {
+    asm("mbarrier.expect_tx.relaxed.cta.shared::cta.b64 [%0], %1;"
+        :
+        : "r"(static_cast<unsigned int>(__cvta_generic_to_shared(barrier))), "r"(txCount)
+        : "memory");
+}
+
+inline __device__ void cp_async_bulk_global_to_shared(void *dest, const void *src,
+                                                      __mbarrier_t *barrier, uint32_t size) {
+    uint32_t smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(dest));
+    uint64_t gmem_ptr = static_cast<uint64_t>(__cvta_generic_to_global(src));
+    uint32_t smem_barrier_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(barrier));
+
+    asm volatile(
+        "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1], %2, [%3];"
+        :
+        : "r"(smem_ptr), "l"(gmem_ptr), "r"(size), "r"(smem_barrier_ptr)
+        : "memory");
+}
+
+inline __device__ void cp_async_bulk_shared_to_global(void *dest, const void *src,
+                                                      uint32_t size) {
+    nvshmemi_tma_bulk_shared_to_global(dest, nvshmemi_tma_cvta_to_shared(src), size);
+}
+
+template <int n>
+inline __device__ void cp_async_bulk_wait_group_read() {
+    static_assert(n >= 0 && n <= 24, "n must be between 0 and 24");
+
+#define NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(N) \
+    if constexpr (n == N) {                            \
+        asm volatile("cp.async.bulk.wait_group.read " #N ";" ::: "memory"); \
+    }
+
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(0)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(1)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(2)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(3)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(4)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(5)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(6)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(7)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(8)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(9)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(10)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(11)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(12)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(13)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(14)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(15)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(16)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(17)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(18)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(19)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(20)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(21)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(22)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(23)
+    NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(24)
+
+#undef NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE
+}
+
+inline __device__ __mbarrier_token_t barrier_arrive1_tx(__mbarrier_t *barrier,
+                                                        uint32_t expected_tx_count) {
+    __mbarrier_token_t token;
+
+    asm volatile("mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 %0, [%1], %2;"
+                 : "=l"(token)
+                 : "r"(static_cast<unsigned int>(__cvta_generic_to_shared(barrier))),
+                   "r"(expected_tx_count)
+                 : "memory");
+    return token;
+}
+
+inline __device__ bool barrier_try_wait_token(__mbarrier_t *barrier, __mbarrier_token_t token) {
+    int ready;
+    asm volatile(
+        "{\n\t"
+        ".reg .pred p;\n\t"
+        "mbarrier.try_wait.acquire.cta.shared::cta.b64 p, [%1], %2;\n\t"
+        "selp.b32 %0, 1, 0, p;\n\t"
+        "}"
+        : "=r"(ready)
+        : "r"(static_cast<unsigned int>(__cvta_generic_to_shared(barrier))), "l"(token)
+        : "memory");
+    return ready;
 }
 
 /*
