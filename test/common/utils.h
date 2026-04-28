@@ -77,6 +77,17 @@
 
 #define MEM_GRANULARITY 536870912  // 512MB
 
+#define SMEM_SIZE_DISABLE 0
+#if defined(NVSHMEM_HOSTLIB_ONLY)
+#define SMEM_SIZE_RECOMMENDED ((size_t)0)
+#define SMEM_SIZE_MINIMUM ((size_t)0)
+#define SMEM_SIZE_BARRIERS_ONLY ((size_t)0)
+#else
+#define SMEM_SIZE_RECOMMENDED ((size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED))
+#define SMEM_SIZE_MINIMUM ((size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
+#define SMEM_SIZE_BARRIERS_ONLY ((size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY))
+#endif
+
 #ifdef __CUDACC__
 #if CUDA_VERSION < 12020
 static __device__ bool printed_error = false;
@@ -238,6 +249,43 @@ void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);
 #define TOSTRING(_var) ((std::to_string(_var)).c_str())
 #define MAX_ELEMS (1 * 1024 * 1024)
 
+#define CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(func, d_smem_size)                                     \
+    do {                                                                                         \
+        if (!use_cubin && d_smem_size > 48 * 1024) {                                             \
+            CUDA_CHECK(cudaFuncSetAttribute(func, cudaFuncAttributeMaxDynamicSharedMemorySize,   \
+                                           d_smem_size));                                        \
+        }                                                                                        \
+    } while (0)
+
+#if defined(NVSHMEM_HOSTLIB_ONLY)
+#define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size)                  \
+    do {                                                           \
+        (void)(dynamic_smem_size);                                 \
+    } while (0)
+
+#define NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size)               \
+    do {                                                           \
+        (void)(dynamic_smem_size);                                 \
+    } while (0)
+
+#else
+#define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size)                  \
+    do {                                                           \
+        if (dynamic_smem_size) {                                   \
+            extern __shared__ char nvshmem_smem[];                 \
+            nvshmemx_give_smem(nvshmem_smem, dynamic_smem_size);   \
+            __syncthreads();                                       \
+        }                                                          \
+    } while (0)
+
+#define NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size)               \
+    do {                                                           \
+        if (dynamic_smem_size) {                                   \
+            nvshmemx_release_smem();                               \
+        }                                                          \
+    } while (0)
+
+#endif
 
 extern int mype, mype_node;
 extern int npes, npes_node;
@@ -251,6 +299,7 @@ extern size_t _repeat;
 extern bool use_egm;
 extern bool use_mmap;
 extern size_t _mem_handle_type;
+extern size_t _dynamic_smem_size;
 extern bool _only_p2p;
 
 extern void *nvml_handle;

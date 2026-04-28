@@ -185,6 +185,7 @@ int test(launch_alltoall_ptr_t launch_alltoall, launch_ring_ptr_t launch_ring) {
 
             CUDA_CHECK(cudaGetLastError());
             if (cudaStreamSynchronize(strm)) {
+                CUDA_CHECK(cudaGetLastError());
                 ERROR_EXIT("[%d] cudaStreamSynchronize failed \n", mype);
             }
         }

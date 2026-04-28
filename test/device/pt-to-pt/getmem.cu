@@ -24,41 +24,50 @@
 
 #define TEST_NVSHMEM_ALL_G_CUBIN(GROUP)                                                \
     void *args_all_g[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&mype,  \
-                          (void *)&npes};                                              \
+                          (void *)&npes, (void *)&_dynamic_smem_size};                 \
     CUfunction test_all_cubin;                                                         \
     init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_##GROUP)); \
-    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, 0, cstrm, args_all_g, NULL));
+    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_all_g, NULL));
 
 #define TEST_NVSHMEM_RING_G_CUBIN(GROUP)                                                  \
-    void *args_ring_g[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&prevpe}; \
+    void *args_ring_g[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&prevpe,  \
+                           (void *)&_dynamic_smem_size};                                  \
     CUfunction test_ring_g_cubin;                                                         \
     init_test_case_kernel(&test_ring_g_cubin, NVSHMEMI_TEST_STRINGIFY(ring_##GROUP));     \
-    CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, 0, cstrm, args_ring_g, NULL));
+    CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_ring_g, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
 #define DEFINE_THREADGROUP_API(Group)                                                          \
-    __global__ void alltoall_##Group(int *src, int *dest, size_t len, int mype, int npes) {    \
+    __global__ void alltoall_##Group(int *src, int *dest, size_t len, int mype, int npes,      \
+                                     size_t dynamic_smem_size) {                               \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                             \
         for (int i = 0; i < npes; i++) {                                                       \
             nvshmemx_getmem_##Group((void *)(dest + (size_t)i * len),                          \
                                     (void *)(src + (size_t)mype * len), len * sizeof(int), i); \
         }                                                                                      \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                          \
     }                                                                                          \
                                                                                                \
-    __global__ void ring_##Group(int *src, int *dest, size_t len, int prevpe) {                \
+    __global__ void ring_##Group(int *src, int *dest, size_t len, int prevpe,                  \
+                                 size_t dynamic_smem_size) {                                   \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                             \
         nvshmemx_getmem_##Group((void *)dest, (void *)src, len * sizeof(int), prevpe);         \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                          \
     }                                                                                          \
                                                                                                \
     void launch_alltoall_##Group(void *src, void *dest, size_t len, int mype, int npes,        \
                                  cudaStream_t cstrm) {                                         \
         int *src_ = (int *)src;                                                                \
         int *dest_ = (int *)dest;                                                              \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(alltoall_##Group, _dynamic_smem_size);               \
         if (use_cubin) {                                                                       \
             TEST_NVSHMEM_ALL_G_CUBIN(Group);                                                   \
         } else {                                                                               \
-            alltoall_##Group<<<1, 1, 0, cstrm>>>(src_, dest_, len, mype, npes);                \
+            alltoall_##Group<<<1, 1, _dynamic_smem_size, cstrm>>>(src_, dest_, len, mype,      \
+                                                                  npes, _dynamic_smem_size);    \
         }                                                                                      \
     }                                                                                          \
                                                                                                \
@@ -66,10 +75,12 @@ extern "C" {
                              cudaStream_t cstrm) {                                             \
         int *src_ = (int *)src;                                                                \
         int *dest_ = (int *)dest;                                                              \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(ring_##Group, _dynamic_smem_size);                   \
         if (use_cubin) {                                                                       \
             TEST_NVSHMEM_RING_G_CUBIN(Group);                                                  \
         } else {                                                                               \
-            ring_##Group<<<1, 1, 0, cstrm>>>(src_, dest_, len, prevpe);                        \
+            ring_##Group<<<1, 1, _dynamic_smem_size, cstrm>>>(src_, dest_, len, prevpe,        \
+                                                              _dynamic_smem_size);             \
         }                                                                                      \
     }
 
@@ -114,6 +125,7 @@ void launch_ring(void *src, void *dest, size_t len, int nextpe, int prevpe, cuda
 int main(int c, char *v[]) {
     int status = 0;
 
+    read_args(c, v);
     status = setup(0, 1, MAX_MSG_SIZE, ITER, true);
     if (status) goto out;
 

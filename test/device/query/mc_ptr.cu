@@ -62,7 +62,7 @@ __global__ void check_mc_ptr_no_support(void *v_d) {
     mc_teams_d = 0;
 
     int me = nvshmem_my_pe();
-    void *mc_ptr = nvshmemx_mc_ptr(NVSHMEM_TEAM_SHARED, v_d);
+    void *mc_ptr = nvshmemx_mc_ptr(NVSHMEM_TEAM_MC_SHARED, v_d);
     if (mc_ptr != NULL) {
         printf("[%d] Device expected NULL mc ptr for %p on unsupported platforms.\n", me, v_d);
         ++errors_d;
@@ -120,7 +120,7 @@ int main(int argc, char **argv) {
     }
 
     if (!is_mc_platform()) {
-        void *mc_ptr = nvshmemx_mc_ptr(NVSHMEM_TEAM_SHARED, v_d);
+        void *mc_ptr = nvshmemx_mc_ptr(NVSHMEM_TEAM_MC_SHARED, v_d);
         if (mc_ptr != NULL) {
             printf("[%d] Host expected NULL mc ptr for %p on unsupported platforms.\n", me, v_d);
             ++errors;
@@ -136,16 +136,16 @@ int main(int argc, char **argv) {
     // conditionalize teams as per platform
     CUDA_CHECK(cudaGetDevice(&dev_id));
     if (!is_mnnvl_supported(dev_id)) {
-        // NVLS enabled team = NVSHMEM_TEAM_NODE, NVSHMEM_TEAM_SHARED on NVLD (single node)
+        // NVLS enabled team = NVSHMEM_TEAM_NODE, NVSHMEM_TEAM_MC_SHARED on NVLD (single node)
         team_count = 2;
         arr = (nvshmem_team_t *)malloc(sizeof(nvshmem_team_t) * team_count);
         arr[0] = NVSHMEMX_TEAM_NODE;
-        arr[1] = NVSHMEM_TEAM_SHARED;
+        arr[1] = NVSHMEM_TEAM_MC_SHARED;
     } else {
-        // NVLS enabled team = NVSHMEM_TEAM_SHARED on NVLD (single & multi node)
+        // NVLS enabled team = NVSHMEM_TEAM_MC_SHARED on NVLD (single & multi node)
         team_count = 1;
         arr = (nvshmem_team_t *)malloc(sizeof(nvshmem_team_t));
-        arr[0] = NVSHMEM_TEAM_SHARED;
+        arr[0] = NVSHMEM_TEAM_MC_SHARED;
     }
 
     for (int i = 0; i < team_count; i++) {

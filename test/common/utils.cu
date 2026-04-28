@@ -23,6 +23,7 @@ size_t _repeat = 1;
 bool use_egm = false;
 bool use_mmap = false;
 size_t _mem_handle_type = MEM_TYPE_AUTO;
+size_t _dynamic_smem_size = SMEM_SIZE_MINIMUM;
 bool _only_p2p = false;
 threadgroup_scope_t threadgroup_scope = {NVSHMEM_ALL_SCOPES, "all_scopes"};
 
@@ -264,11 +265,23 @@ nvshmemBootstrapUID::~nvshmemBootstrapUID() noexcept {
     }
 }
 
+static bool cubin_test_requested() {
+    char *test_mode = getenv("NVSHMEM_TEST_CUBIN_LIBRARY");
+    return (test_mode && atoi(test_mode)) || use_cubin != NVSHMEM_CUBIN_NONE;
+}
+
+static void disable_dynamic_smem_for_cubin_tests() {
+    if (cubin_test_requested()) {
+        _dynamic_smem_size = SMEM_SIZE_DISABLE;
+    }
+}
+
 static void check_for_cumodule_tests() {
     char *test_mode = getenv("NVSHMEM_TEST_CUBIN_LIBRARY");
     if (test_mode) {
         use_cubin = atoi(test_mode);
     }
+    disable_dynamic_smem_for_cubin_tests();
     if (use_cubin == 1) {
         printf("LLVM-IR Bitcode Library Testing Method Chosen.\n");
     } else if (use_cubin == 2) {
@@ -315,10 +328,11 @@ void read_args(int argc, char **argv) {
                                            {"repeat", required_argument, 0, 'r'},
                                            {"scope", required_argument, 0, 's'},
                                            {"mem_handle_type", required_argument, 0, 'm'},
+                                           {"dynamic_smem_mode", required_argument, 0, 'd'},
                                            {0, 0, 0, 0}};
     /* getopt_long stores the option index here. */
     int option_index = 0;
-    while ((c = getopt_long(argc, argv, "h:b:e:f:i:j:r:s:m:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "h:b:e:f:i:j:r:s:m:d:", long_options, &option_index)) != -1) {
         switch (c) {
             case 'h':
                 printf(
@@ -333,6 +347,7 @@ void read_args(int argc, char **argv) {
                     "--mmap (Use mmaped buffer) \n"
                     "--only_p2p (run P2P variant of test) \n"
                     "-m, --mem_handle_type <0:auto, 1:posix_fd, 2:fabric> (for mmaped buffer) \n"
+                    "-d, --dynamic_smem_mode <0:Disable, 1:Recommended, 2:Minimum, 3:Barriers only> (for TMA, handles) \n"
                     "--egm: use EGM memory buffers \n");
                 exit(0);
             case 0:
@@ -383,6 +398,22 @@ void read_args(int argc, char **argv) {
             case 'm':
                 atol_scaled(optarg, &_mem_handle_type);
                 break;
+            case 'd':
+                size_t smem_size_option;
+                atol_scaled(optarg, &smem_size_option);
+                if (smem_size_option == 0) {
+                    _dynamic_smem_size = SMEM_SIZE_DISABLE;
+                } else if (smem_size_option == 1) {
+                    _dynamic_smem_size = SMEM_SIZE_RECOMMENDED;
+                } else if (smem_size_option == 2) {
+                    _dynamic_smem_size = SMEM_SIZE_MINIMUM;
+                } else if (smem_size_option == 3) {
+                    _dynamic_smem_size = SMEM_SIZE_BARRIERS_ONLY;
+                } else {
+                    fprintf(stderr, "Invalid dynamic smem size: %zu. Valid options: 0, 1, 2, 3\n", smem_size_option);
+                    exit(-1);
+                }
+                break;
             case '?':
                 if (isprint(optopt))
                     fprintf(stderr, "Unknown option `-%c'.\n", optopt);
@@ -395,13 +426,14 @@ void read_args(int argc, char **argv) {
     }
 
     assert(_min_size <= _max_size);
+    disable_dynamic_smem_for_cubin_tests();
 
     printf("Runtime options after parsing command line arguments\n");
     printf(
         "min_size: %zu, max_size: %zu, step_factor: %zu, min_iters: %zu, max_iters: %zu, repeat: "
-        "%zu, threadgroup_scope: %s, mmap: %d, use_egm: %d, only_p2p: %d, mem_handle_type: %zu\n",
+        "%zu, threadgroup_scope: %s, mmap: %d, use_egm: %d, only_p2p: %d, mem_handle_type: %zu, dynamic_smem_size: %zu\n",
         _min_size, _max_size, _step_factor, _min_iters, _max_iters, _repeat, threadgroup_scope.name.c_str(), use_mmap, use_egm,
-        _only_p2p, _mem_handle_type);
+        _only_p2p, _mem_handle_type, _dynamic_smem_size);
     printf(
         "Note: Above is full list of options, any given test will use only a subset of these "
         "variables.\n");
