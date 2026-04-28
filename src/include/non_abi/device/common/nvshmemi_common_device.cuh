@@ -736,6 +736,33 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void * /*smem_dst*/,
 
 #endif /* __CUDA_ARCH__ >= 900 */
 
+/*
+ * Dispatcher:  TMA bulk copy based on source memory kind:
+ *   __isShared(source) -> nvshmemi_memcpy_tma_shared_global
+ *   otherwise          -> nvshmemi_memcpy_tma_global_global
+ *
+ * Returns the underlying rc (0 on success; -1 on alignment/size
+ * mismatch or non-supported target).
+ */
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma(void *gmem_dst, const void *source,
+                                                                 size_t nbytes) {
+    if (__isShared(source)) {
+        return nvshmemi_memcpy_tma_shared_global<SCOPE>(gmem_dst, source, nbytes);
+    }
+    return nvshmemi_memcpy_tma_global_global<SCOPE>(gmem_dst, source, nbytes);
+}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma_nbi(void *gmem_dst,
+                                                                     const void *source,
+                                                                     size_t nbytes) {
+    if (__isShared(source)) {
+        return nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>(gmem_dst, source, nbytes);
+    }
+    return nvshmemi_memcpy_tma_global_global_nbi<SCOPE>(gmem_dst, source, nbytes);
+}
+
 /* qpair specific APIs */
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_PE_ALL,
@@ -901,20 +928,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        /* TMA routing when this CTA registered smem:
-         *   - source in smem: direct TMA smem -> remote gmem
-         *   - source in gmem: staged TMA gmem -> smem -> remote gmem
-         * Fall through to P2P stores on alignment/size/registration failure. */
-        if (nvshmemi_tma_smem_registered()) {
-            if (__isShared(source)) {
-                if (nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>(
-                        (void *)dest_actual, (const void *)source, nbytes) == 0)
-                    return;
-            } else {
-                if (nvshmemi_memcpy_tma_global_global_nbi<SCOPE>(
-                        (void *)dest_actual, (const void *)source, nbytes) == 0)
-                    return;
-            }
+        /* TMA fast path when this CTA registered smem.  Fall through to P2P
+         * stores on alignment/size/registration failure. */
+        if (nvshmemi_tma_smem_registered() &&
+            nvshmemi_memcpy_tma_nbi<SCOPE>((void *)dest_actual, (const void *)source, nbytes) ==
+                0) {
+            return;
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
@@ -943,25 +962,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        /* TMA routing when this CTA registered smem:
-         *   - source in smem: direct TMA smem -> remote gmem
-         *   - source in gmem: staged TMA gmem -> smem -> remote gmem
+        /* TMA when this CTA registered smem:
          * Both variants include internal syncs; the trailing sync below is
          * redundant in the TMA path but harmless. */
-        if (nvshmemi_tma_smem_registered()) {
-            if (__isShared(source)) {
-                if (nvshmemi_memcpy_tma_shared_global<SCOPE>(
-                        (void *)dest_actual, (const void *)source, nbytes) == 0) {
-                    nvshmemi_threadgroup_sync<SCOPE>();
-                    return;
-                }
-            } else {
-                if (nvshmemi_memcpy_tma_global_global<SCOPE>(
-                        (void *)dest_actual, (const void *)source, nbytes) == 0) {
-                    nvshmemi_threadgroup_sync<SCOPE>();
-                    return;
-                }
-            }
+        if (nvshmemi_tma_smem_registered() &&
+            nvshmemi_memcpy_tma<SCOPE>((void *)dest_actual, (const void *)source, nbytes) == 0) {
+            nvshmemi_threadgroup_sync<SCOPE>();
+            return;
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
     } else {
