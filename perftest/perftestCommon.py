@@ -4,6 +4,7 @@ import os
 import re
 import time
 import signal
+import codecs
 
 from subprocess import Popen, PIPE
 from threading import Thread
@@ -13,6 +14,52 @@ failed_binary_cmdlines_list = []
 NVSHMEM_LAUNCHER = 0
 MPI_LAUNCHER = 1
 SHMEM_LAUNCHER = 2
+
+# Set by perftestRunner for --sleep; when unset, PERF_TEST_SLEEP_SEC in the environment is used.
+class _SleepAfterTestUnset:
+  pass
+
+
+_SLEEP_AFTER_TEST_UNSET = _SleepAfterTestUnset()
+_sleep_after_test_sec_override = _SLEEP_AFTER_TEST_UNSET
+
+
+def configure_sleep_after_each_test(seconds):
+  """
+  Runner-only: delay in seconds between test cases. Non-negative float.
+  Replaces setting PERF_TEST_SLEEP_SEC in the environment for this process.
+  """
+  global _sleep_after_test_sec_override
+  _sleep_after_test_sec_override = max(0.0, float(seconds))
+
+
+def _parse_perf_test_sleep_sec_from_env():
+  """Return non-negative float from PERF_TEST_SLEEP_SEC, or 0 if unset/invalid."""
+  sec = os.environ.get("PERF_TEST_SLEEP_SEC")
+  if sec is None:
+    return 0.0
+  try:
+    t = float(sec)
+    if t < 0:
+      print(
+        "perftestCommon: PERF_TEST_SLEEP_SEC %r is negative; using 0." % (sec,),
+        file=sys.stderr,
+      )
+      return 0.0
+    return t
+  except (TypeError, ValueError):
+    print(
+      "perftestCommon: invalid PERF_TEST_SLEEP_SEC value %r; using 0." % (sec,),
+      file=sys.stderr,
+    )
+    return 0.0
+
+
+def _resolved_sleep_after_test_sec():
+  if _sleep_after_test_sec_override is not _SLEEP_AFTER_TEST_UNSET:
+    return _sleep_after_test_sec_override
+  return _parse_perf_test_sleep_sec_from_env()
+
 
 def to_bytes(s):
   if type(s) is bytes:
@@ -32,7 +79,7 @@ def display_time(func):
   return wrapper
 
 def report_failure(cmd_line, test_path, ftesto, fteste):
-  global failed_tests_list
+  global failed_binary_cmdlines_list
   Popen(['echo', ' '.join([str(elem) for elem in cmd_line]) + ' failed\r\n'], stdout=fteste)
   failed_binary_cmdlines_list.append((test_path, str(cmd_line)))
   return
@@ -53,6 +100,9 @@ def get_args_combinations_pe_range(full_test_path, npe_start_end_step, max_pes):
   args_combs = []
   npe_range_ = list(npe_start_end_step)
   npe_range = [npe for npe in npe_range_ if npe <= max_pes]
+
+  if len(npe_range) == 0:
+    return (args_combs, npe_range)
 
   full_args_path = full_test_path + '.args'
   if 'pt-to-pt' in full_test_path:
@@ -234,7 +284,10 @@ def thread_func(cmd_line, ftesto, fteste):
     # Optionally print stdout data if SHOW_PERF_DATA is set to "Yes"
     show_perf_data = os.environ.get('SHOW_PERF_DATA', 'No')
     if show_perf_data == "Yes":
-        show_table_partial_data_only(stdout_data.decode('utf-8'))
+        try:
+          show_table_partial_data_only(stdout_data.decode('utf-8'))
+        except Exception as parse_err:
+          print("Warning: failed to parse perf output: %s" % str(parse_err))
 
     test_process.stderr_data = stderr_data
     test_process.stdout_data = stdout_data
@@ -243,42 +296,79 @@ def thread_func(cmd_line, ftesto, fteste):
     print(str(err))
     return 254
 
+def _sleep_between_tests_if_configured():
+  """Sleep after each run_cmd (between consecutive 'Running ...' lines) per runner or PERF_TEST_SLEEP_SEC."""
+  t = _resolved_sleep_after_test_sec()
+  if t > 0:
+    time.sleep(t)
+
+_pause_file_notice_printed = False
+
+def _wait_if_pause_file():
+  """
+  Block before starting the next test case while a sentinel file exists.
+  Does not run during the benchmark binary; only between runner invocations,
+  so per-case performance numbers are unaffected.
+  Path: NVSHMEM_PAUSE_FILE (default /tmp/NVSHMEM-PAUSE).
+  Poll interval: QA_NVSHMEM_PAUSE_POLL_SEC (default 0.5 seconds).
+  """
+  global _pause_file_notice_printed
+  pause_path = os.environ.get("NVSHMEM_PAUSE_FILE", "/tmp/NVSHMEM-PAUSE")
+  try:
+    poll = float(os.environ.get("QA_NVSHMEM_PAUSE_POLL_SEC", "0.5"))
+  except ValueError:
+    poll = 0.5
+  if poll <= 0:
+    poll = 0.5
+
+  while os.path.exists(pause_path):
+    if not _pause_file_notice_printed:
+      print("NVSHMEM perftest paused: remove '%s' to continue (runner idle, benchmark not started)." % pause_path, flush=True)
+      _pause_file_notice_printed = True
+    time.sleep(poll)
+  _pause_file_notice_printed = False
+
 @display_time
 def run_cmd(cmd_line, test_path, timeout, ftesto, fteste):
-  if 'PERF_TEST_CMD_AHEAD' in os.environ:
-    cmd_line = os.environ['PERF_TEST_CMD_AHEAD'].split() + cmd_line
+  try:
+    _wait_if_pause_file()
 
-  if 'PERF_TEST_CMD_LAST' in os.environ:
-    cmd_line = cmd_line + os.environ['PERF_TEST_CMD_LAST'].split()
+    if 'PERF_TEST_CMD_AHEAD' in os.environ:
+      cmd_line = os.environ['PERF_TEST_CMD_AHEAD'].split() + cmd_line
 
-  th = Thread(target=thread_func, args=(cmd_line, ftesto, fteste))
-  th.start()
-  th.join(timeout)
+    if 'PERF_TEST_CMD_LAST' in os.environ:
+      cmd_line = cmd_line + os.environ['PERF_TEST_CMD_LAST'].split()
 
-  if th.is_alive():
-    # Popen(['echo', 'Timed out ' + ' '.join([str(elem) for elem in cmd_line]) + '\r\n'], stdout=fteste)
-    fteste.write('Timed out ' + ' '.join([str(elem) for elem in cmd_line]) + '\r\n')
-    fteste.flush()
-    print("Timed out " + ' '.join([str(elem) for elem in cmd_line]))
-    os.killpg(os.getpgid(test_process.pid), signal.SIGTERM)
-    # test_process.terminate()
-    th.join()
-    report_failure(cmd_line, test_path, ftesto, fteste)
+    th = Thread(target=thread_func, args=(cmd_line, ftesto, fteste))
+    th.start()
+    th.join(timeout)
 
-  if test_process.returncode:
-    if hasattr(test_process, 'stderr_data'):
-      print(test_process.stderr_data.decode('utf-8'))
-    p = Popen(['echo', 'EXPECTING PASSED, GOT FAILURE'], stdout=PIPE)
-    print(to_bytes(p.communicate()[0]).decode('utf-8'))
-    report_failure(cmd_line, test_path, ftesto, fteste)
-  else:
-    p = Popen(['echo', 'PASSED'], stdout=PIPE)
-    print(to_bytes(p.communicate()[0]).decode('utf-8'))
+    if th.is_alive():
+      # Popen(['echo', 'Timed out ' + ' '.join([str(elem) for elem in cmd_line]) + '\r\n'], stdout=fteste)
+      fteste.write('Timed out ' + ' '.join([str(elem) for elem in cmd_line]) + '\r\n')
+      fteste.flush()
+      print("Timed out " + ' '.join([str(elem) for elem in cmd_line]))
+      os.killpg(os.getpgid(test_process.pid), signal.SIGTERM)
+      # test_process.terminate()
+      th.join()
+      report_failure(cmd_line, test_path, ftesto, fteste)
+      return
 
-  cmd = 'rm'
-  args = "%s*" % '/dev/shm/nvshmem-shm'
-  Popen("%s %s" % (cmd, args), shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=True)
-  return
+    if test_process.returncode:
+      if hasattr(test_process, 'stderr_data'):
+        print(test_process.stderr_data.decode('utf-8'))
+      p = Popen(['echo', 'EXPECTING PASSED, GOT FAILURE'], stdout=PIPE)
+      print(to_bytes(p.communicate()[0]).decode('utf-8'))
+      report_failure(cmd_line, test_path, ftesto, fteste)
+    else:
+      p = Popen(['echo', 'PASSED'], stdout=PIPE)
+      print(to_bytes(p.communicate()[0]).decode('utf-8'))
+
+    cmd = 'rm'
+    args = "%s*" % '/dev/shm/nvshmem-shm'
+    Popen("%s %s" % (cmd, args), shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, close_fds=True)
+  finally:
+    _sleep_between_tests_if_configured()
 
 def run_cmd_given_pes(cmd_line_prefix, cmd_line_suffix, test_install_path, full_test_path, npe_all, ppn, timeout, launcher_choice, ftesto, fteste):
   cmd_line = cmd_line_prefix[:]
@@ -341,6 +431,7 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
     pmix_install_lib = ":%s/lib" % os.environ['PMIX_HOME']
   else:
     pmix_install_lib = ""
+  mpi_install_lib = ":%s/lib:%s/lib64" % (mpi_install_path, mpi_install_path)
 
   if 'QA_BOOTSTRAP' in os.environ:
     QA_BOOTSTRAP = os.environ['QA_BOOTSTRAP']
@@ -375,7 +466,7 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
         for item in extra_parameters[::-1]:
           cmd_line_prefix.insert(first_e, "-genv=%s" % item)
 
-        for envidx in range(0, len(env_combs[0]), 2):
+        for envidx in range(0, len(env_combs[combidx]), 2):
           var = env_combs[combidx][envidx]
           val = env_combs[combidx][envidx + 1]
           cmd_line_prefix.append('-genv')
@@ -384,7 +475,7 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
         cmd_line_prefix.append('-n')
         run_cmd_vary_pes(cmd_line_prefix, cmd_line_suffix, test_install_path, full_test_path, npe_range, nhosts, timeout, launcher_choice, ftesto, fteste)
       if launcher_choice == MPI_LAUNCHER:
-        cmd_line_prefix = [mpi_install_path+'/bin/mpirun', '--mca', 'btl', '^uct', '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+':$LD_LIBRARY_PATH', '-x', bootstrap_str , '--host', hosts]
+        cmd_line_prefix = [mpi_install_path+'/bin/mpirun', '--mca', 'btl', '^uct', '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+mpi_install_lib+':$LD_LIBRARY_PATH', '-x', bootstrap_str , '--host', hosts]
         cmd_line_prefix[1:1] = MPIRUN_EXTRA_LIST
         extra_parameters = extra_parameters_string.split()
         first_x = cmd_line_prefix.index("-x")
@@ -392,7 +483,7 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
           cmd_line_prefix.insert(first_x, item)
           cmd_line_prefix.insert(first_x, "-x")
 
-        for envidx in range(0, len(env_combs[0]), 2):
+        for envidx in range(0, len(env_combs[combidx]), 2):
           var = env_combs[combidx][envidx]
           val = env_combs[combidx][envidx + 1]
           cmd_line_prefix.append('-x')
@@ -400,12 +491,13 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
         cmd_line_prefix.append('-n')
         run_cmd_vary_pes(cmd_line_prefix, cmd_line_suffix, test_install_path, full_test_path, npe_range, nhosts, timeout, launcher_choice, ftesto, fteste)
       if launcher_choice == SHMEM_LAUNCHER:
-        cmd_line_prefix = [mpi_install_path+'/bin/oshrun', '--mca', 'btl', '^uct',  '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+':$LD_LIBRARY_PATH', '-x', 'NVSHMEMTEST_USE_SHMEM_LAUNCHER=1' , '--host', hosts]
+        cmd_line_prefix = [mpi_install_path+'/bin/oshrun', '--mca', 'btl', '^uct',  '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+mpi_install_lib+':$LD_LIBRARY_PATH', '-x', 'NVSHMEMTEST_USE_SHMEM_LAUNCHER=1' , '--host', hosts]
+        extra_parameters = extra_parameters_string.split()
         first_x = cmd_line_prefix.index("-x")
         for item in extra_parameters[::-1]:
           cmd_line_prefix.insert(first_x, item)
           cmd_line_prefix.insert(first_x, "-x")        
-        for envidx in range(0, len(env_combs[0]), 2):
+        for envidx in range(0, len(env_combs[combidx]), 2):
           var = env_combs[combidx][envidx]
           val = env_combs[combidx][envidx + 1]
           cmd_line_prefix.append('-x')
@@ -421,7 +513,7 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
         cmd_line_prefix.insert(first_e, "-genv=%s" % item)
       run_cmd_vary_pes(cmd_line_prefix, cmd_line_suffix, test_install_path, full_test_path, npe_range, nhosts, timeout, launcher_choice, ftesto, fteste)
     if launcher_choice == MPI_LAUNCHER:
-      cmd_line_prefix = [mpi_install_path+'/bin/mpirun', '--mca', 'btl', '^uct', '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+':$LD_LIBRARY_PATH', '-x', bootstrap_str, '--host', hosts, '-n']
+      cmd_line_prefix = [mpi_install_path+'/bin/mpirun', '--mca', 'btl', '^uct', '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+mpi_install_lib+':$LD_LIBRARY_PATH', '-x', bootstrap_str, '--host', hosts, '-n']
       cmd_line_prefix[1:1] = MPIRUN_EXTRA_LIST
       extra_parameters = extra_parameters_string.split()
       first_x = cmd_line_prefix.index("-x")
@@ -430,7 +522,7 @@ def enumerate_env_lines(env_combs, cmd_line_suffix, nvshmem_install_path, test_i
         cmd_line_prefix.insert(first_x, "-x")
       run_cmd_vary_pes(cmd_line_prefix, cmd_line_suffix, test_install_path, full_test_path, npe_range, nhosts, timeout, launcher_choice, ftesto, fteste)
     if launcher_choice == SHMEM_LAUNCHER:
-      cmd_line_prefix = [mpi_install_path+'/bin/oshrun', '--mca', 'btl', '^uct', '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+':$LD_LIBRARY_PATH', '-x', 'NVSHMEMTEST_USE_SHMEM_LAUNCHER=1', '--host', hosts, '-n']
+      cmd_line_prefix = [mpi_install_path+'/bin/oshrun', '--mca', 'btl', '^uct', '--allow-run-as-root', '-oversubscribe', '--bind-to', QA_BIND_TO, '-x', 'LD_LIBRARY_PATH='+cuda_install_path+'/lib64:'+gdrcopy_install_path+nccl_install_lib+pmix_install_lib+':'+nvshmem_install_path+'/lib'+mpi_install_lib+':$LD_LIBRARY_PATH', '-x', 'NVSHMEMTEST_USE_SHMEM_LAUNCHER=1', '--host', hosts, '-n']
       extra_parameters = extra_parameters_string.split()
       first_x = cmd_line_prefix.index("-x")
       for item in extra_parameters[::-1]:

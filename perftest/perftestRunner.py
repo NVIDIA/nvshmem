@@ -48,11 +48,28 @@ def post_process(nvshmem_install_path, perftest_install_path, ftesto, fteste):
     time.sleep(5)
 
 
+def _apply_sleep_from_argv(argv):
+  """Apply '--sleep <seconds>' for non-argparse modes (e.g. --interact) via perftestCommon, not the environment."""
+  if "--sleep" not in argv:
+    return
+  try:
+    i = argv.index("--sleep")
+    if i + 1 >= len(argv):
+      return
+    s = float(argv[i + 1])
+    if s > 0:
+      perftestCommon.configure_sleep_after_each_test(s)
+    else:
+      perftestCommon.configure_sleep_after_each_test(0.0)
+  except (ValueError, IndexError):
+    pass
+
 if __name__ == '__main__':
   logging.basicConfig(level=logging.INFO)
   logger = logging.getLogger('[perftestRunner]')
 
   args_list = sys.argv[1:]
+  _apply_sleep_from_argv(args_list)
 
   if "--interact" in args_list or "--partial" in args_list:
     try:
@@ -143,15 +160,15 @@ if __name__ == '__main__':
     # CUDA_HOME
     try:
       cuda_home = os.environ["CUDA_HOME"]
-    except Exception as e:
+    except Exception:
       cuda_home = select_case("There is no CUDA_HOME. Please select:",\
-        ["/usr/loca/cuda", "/usr/loca/cuda-11.0", "/usr/loca/cuda-11.8", "/usr/loca/cuda-12.0", "/usr/loca/cuda-12.1", "/usr/loca/cuda-12.2", "/usr/loca/cuda-12.4"])[0]
+        ["/usr/local/cuda", "/usr/local/cuda-11.0", "/usr/local/cuda-11.8", "/usr/local/cuda-12.0", "/usr/local/cuda-12.1", "/usr/local/cuda-12.2", "/usr/local/cuda-12.4", "/usr/local/cuda-13.0", "/usr/local/cuda-13.1", "/usr/local/cuda-13.2", "/usr/local/cuda-13.3", "/usr/local/cuda-13.4"])[0]
       os.environ.update({"CUDA_HOME": cuda_home})
 
     # GDRCopy
     try:
       gdr_home = os.environ["GDRCOPY_HOME"]
-    except Exception as e:
+    except Exception:
       gdr_home = select_case("There is no GDRCOPY_HOME. Please select:",\
         ["/usr", "/usr/lib", "/usr/lib64", "/usr/local/nvshmem_gdrcopy", ""])[0]
       os.environ.update({"GDRCOPY_HOME": gdr_home})
@@ -159,7 +176,7 @@ if __name__ == '__main__':
     # MPI_HOME
     try:
       mpi_install_path = os.environ["MPI_HOME"]
-    except Exception as e:
+    except Exception:
       mpi_install_path = select_case("There is no MPI_HOME. Please select:",\
         ["/usr/local/openmpi_nvshmem", "/usr/local/openmpi"])[0]
       os.environ.update({"MPI_HOME": mpi_install_path})
@@ -173,10 +190,10 @@ if __name__ == '__main__':
       launcher_choice = 0
       launcher = "mpirun"
     elif launcher_choice == "nvshmem.hydra":
-      launcher_choice = 2
+      launcher_choice = 3
       launcher = "hydra"
     else:
-      launcher_choice = 3
+      launcher_choice = 2
       launcher = "oshrun"
 
     # PE
@@ -186,7 +203,7 @@ if __name__ == '__main__':
     # NVSHMEM_HOME
     try:
       nvshmem_home = os.environ['NVSHMEM_HOME']
-    except Exception as e:
+    except Exception:
       nvshmem_home = "%s/nvshmem" % os.getcwd()
 
     nvshmem_install_path = select_case("Please select NVSHMEM_HOME path:",["/usr/local/nvshmem", nvshmem_home])[0]
@@ -194,7 +211,7 @@ if __name__ == '__main__':
     # PERFTEST INSTALL
     try:
       perftest_install_p = os.environ['PERFTEST_INSTALL']
-    except Exception as e:
+    except Exception:
       perftest_install_p = "%s/../perftest/perftest_install" % nvshmem_home
 
     perftest_install_path = select_case("Please select PERFTEST_INSTALL path:", ["%s/perf/perf_install" % os.getcwd(), perftest_install_p])[0]
@@ -262,16 +279,17 @@ if __name__ == '__main__':
       logger.info("Run all perftest in the list file: %s" % test_list_name)
 
     logger.info("TEST LIST:")
-    os.system('cat %s' % test_list_name)
+    with open(test_list_name, 'r') as test_list_file:
+      print(test_list_file.read(), end="")
 
     try:
       LD_LP = os.environ["LD_LIBRARY_PATH"]
-    except Exception as e:
+    except Exception:
       LD_LP = ""
 
     try:
       nccl_home = os.environ["NCCL_HOME"]
-    except Exception as e:
+    except Exception:
       nccl_home = ""
 
     if nccl_home == "":
@@ -384,8 +402,19 @@ if __name__ == '__main__':
       "--cmd_last", nargs='?', dest="cmd_last",
       required=False, help='Additional parameters added after perftest commands, such as "--mmap --egm".')
 
+    parser.add_argument(
+      "--sleep", type=float, default=0.0,
+      required=False,
+      help="Seconds to sleep after each test case finishes before starting the next (default: 0, no delay). "
+           "Applies in-process; does not set PERF_TEST_SLEEP_SEC.")
+
     args = parser.parse_args()
     enable_skip = 0
+
+    if args.sleep > 0:
+      perftestCommon.configure_sleep_after_each_test(args.sleep)
+    else:
+      perftestCommon.configure_sleep_after_each_test(0.0)
 
     if args.mpirun_extra is not None:
       mpirun_extra = args.mpirun_extra
@@ -568,6 +597,7 @@ if __name__ == '__main__':
   
   try:
     # Try to remove tempfile.
-    os.remove(cases_f.namesen)
-  except Exception as e:
+    if 'cases_f' in locals() and os.path.exists(cases_f.name):
+      os.remove(cases_f.name)
+  except Exception:
     pass
