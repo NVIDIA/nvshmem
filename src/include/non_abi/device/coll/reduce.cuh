@@ -1065,12 +1065,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
         nvshmemi_put_nbi<TYPE, SCOPE>(pWrk + offset, source, nreduce, step1_sendto);
         if (!myIdx) {
             nvshmemi_fence<nvshmemi_threadgroup_thread>();
-            nvshmemi_signal_for_barrier<long>(GET_PE_SYNC_ADDR(pSync, rank), sync_counter[0],
+            nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(pSync, rank), sync_counter[0],
                                               step1_sendto);
         }
     } else if (step1_nrecvs != 0) {
         for (int i = 0; i < step1_nrecvs; i += 1) {
-            nvshmemi_wait_until<long>(GET_PE_SYNC_ADDR(pSync, step1_recvfrom[i]), NVSHMEM_CMP_GE,
+            nvshmemi_wait_until<long>(get_pe_sync_addr(pSync, step1_recvfrom[i]), NVSHMEM_CMP_GE,
                                       sync_counter[0]);
             size_t offset = (rank - step1_recvfrom[i] - 1) * nreduce;
             gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(dst, (pWrk + offset), dst, nreduce);
@@ -1104,12 +1104,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
             if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
             nvshmemi_threadgroup_sync<SCOPE>();
             for (int i = myIdx; i < k - 1; i += groupSize) {
-                nvshmemi_signal_for_barrier<long>(GET_PE_SYNC_ADDR(pSync, rank), sync_counter[0],
+                nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(pSync, rank), sync_counter[0],
                                                   step2_nbrs[phase][i]);
             }
 
             for (int i = 0; i < k - 1; i += 1) {
-                nvshmemi_wait_until<uint64_t>(reinterpret_cast<uint64_t *>(GET_PE_SYNC_ADDR(pSync, step2_nbrs[phase][i])),
+                nvshmemi_wait_until<uint64_t>(reinterpret_cast<uint64_t *>(get_pe_sync_addr(pSync, step2_nbrs[phase][i])),
                                               NVSHMEM_CMP_GE, sync_counter[0]);
                 int offset = recv_offset + k * phase * nreduce;
                 if (step2_nbrs[phase][i] < rank)
@@ -1130,12 +1130,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
         if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
         nvshmemi_threadgroup_sync<SCOPE>();
         for (int i = myIdx; i < step1_nrecvs; i += groupSize) {
-            nvshmemi_signal_for_barrier<long>(GET_PE_SYNC_ADDR(pSync, rank), sync_counter[0],
+            nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(pSync, rank), sync_counter[0],
                                               step1_recvfrom[i]);
         }
     } else if (step1_sendto != -1) {
         if (!myIdx)
-            nvshmemi_wait_until<uint64_t>(reinterpret_cast<uint64_t *>(GET_PE_SYNC_ADDR(pSync, step1_sendto)),
+            nvshmemi_wait_until<uint64_t>(reinterpret_cast<uint64_t *>(get_pe_sync_addr(pSync, step1_sendto)),
                                                                        NVSHMEM_CMP_GE, sync_counter[0]);
     }
     nvshmemi_threadgroup_sync<SCOPE>();
