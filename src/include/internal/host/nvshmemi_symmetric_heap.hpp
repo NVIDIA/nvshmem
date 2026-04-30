@@ -424,7 +424,6 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int nvls_unmap_heap_memory(off_t mc_offset, uint64_t size);
     void nvls_unbind_heap_memory_by_team(nvshmemi_team_t *team);
     int nvls_unbind_heap_memory_by_size(off_t mc_offset, size_t size);
-
     size_t get_mmap_allocated_range();
     bool is_egm(void *addr);
     std::map<void *, size_t> *get_mmapped_buf();
@@ -437,8 +436,16 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
      */
     void *mmap_mem(void *ptr, size_t size, void *pref_addr, int flags);
     int unmap_mem(void *ptr, size_t size);
+
+    /* Functions for logical endpoints */
     int reserve_unicast_endpoint(size_t size);
     int exchange_endpoints();
+    int nvls_setup_multicast_endpoint(nvshmemi_team_t *team, uint64_t mem_size);
+    int nvls_setup_multicast_endpoint_by_team(nvshmemi_team_t *team);
+    int nvls_bind_multicast_endpoint(nvshmemi_team_t *team, CUmemGenericAllocationHandle mem_handle,
+        off_t mc_offset, off_t mmap_offset, size_t mmap_size);
+    int nvls_unbind_multicast_endpoint(nvshmemi_team_t *team, off_t le_offset, size_t size);
+    int nvls_destroy_multicast_endpoint_by_team(nvshmemi_team_t *team);
 
    protected:
     CUmemGenericAllocationHandle get_cumem_handle_ptr(int i) {

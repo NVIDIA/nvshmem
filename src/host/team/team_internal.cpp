@@ -753,6 +753,7 @@ static void nvshmemi_team_destroy_nvls(nvshmemi_team_t *team) {
     if (nvls_obj->get_refcount() == 0) { /* Last reference */
         nvshmemi_state->vmm_heap->nvls_unmap_heap_memory_by_team(team);
         nvshmemi_state->vmm_heap->nvls_unbind_heap_memory_by_team(team);
+        nvshmemi_state->vmm_heap->nvls_destroy_multicast_endpoint_by_team(team);
         nvls_obj->free_group_mem();
         nvls_obj->release_owner();
         delete nvls_obj;
@@ -816,6 +817,12 @@ static int nvshmemi_team_create_nvls(nvshmemi_team_t *team) {
                           "Create multicast groups for UC heap failed for pe %d team ID %d\n",
                           team->my_pe, team->team_idx);
 
+    /* Make a MC endpoint as large as reserved heap size (VA range) */
+    status = nvshmemi_state->vmm_heap->nvls_setup_multicast_endpoint_by_team(team);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
+                          "Setup multicast endpoints for heap failed for pe %d team ID %d\n",
+                          team->my_pe, team->team_idx);
+
     status = nvshmemi_state->vmm_heap->nvls_map_heap_memory_by_team(team);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                           "Mapping multicast groups for UC heap failed for pe %d team ID %d\n",
@@ -826,6 +833,7 @@ static int nvshmemi_team_create_nvls(nvshmemi_team_t *team) {
     return (status);
 
 cleanup:
+    (void)nvshmemi_state->vmm_heap->nvls_destroy_multicast_endpoint_by_team(team);
     (void)nvls_obj->free_group_mem();
     delete nvls_obj;
     team->nvls_rsc = nullptr;
@@ -856,6 +864,7 @@ static int nvshmemi_team_setup_nvls(nvshmemi_team_t *team) {
     if (identical_team != nullptr) {
         team->nvls_rsc = identical_team->nvls_rsc;
         team->nvls_rsc_base_ptr = identical_team->nvls_rsc_base_ptr;
+        team->mc_leid_with_flag = identical_team->mc_leid_with_flag;
         assert(team->nvls_rsc != nullptr);
         assert(team->nvls_rsc_base_ptr != nullptr);
         nvshmemi_nvls_rsc *nvls = reinterpret_cast<nvshmemi_nvls_rsc *>(team->nvls_rsc);
@@ -1150,6 +1159,7 @@ static int init_team_shared(bool is_mc_shared) {
         team_peer_shared_ptr->are_gpus_nvls_connected = 1;
         nvshmemi_team_set_nvls_connectivity(nvshmemi_team_world);
         nvshmemi_team_set_nvls_connectivity(nvshmemi_team_shared);
+        team_peer_shared_ptr->are_gpus_nvls_connected = 1;
     } else {
         INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SHARED: start=%d, stride=%d, size=%d",
              team_peer_shared_ptr->start, team_peer_shared_ptr->stride, team_peer_shared_ptr->size);

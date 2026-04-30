@@ -300,4 +300,15 @@ out:
     return (status);
 }
 
+int nvshmemi_nvls_rsc::subscribe_multicast_endpoint(CUlogicalEndpointId le_mc_id) {
+    int status = 0;
+    status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointAddDevice(le_mc_id, current_dev_));
+    NVSHMEMI_NE_ERROR_RET(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                          "cuLogicalEndpointAddDevice for multicast id: %u failed on device %d\n",
+                          le_mc_id, current_dev_);
+
+    INFO(NVSHMEM_TEAM, "Adding multicast endpoint %u to GPU device %d\n", le_mc_id, current_dev_);
+    return (status);
+}
+
 }  // namespace nvls

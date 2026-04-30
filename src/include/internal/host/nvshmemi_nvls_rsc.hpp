@@ -71,6 +71,9 @@ class nvshmemi_nvls_rsc final {
     int unbind_group_mem(CUmemGenericAllocationHandle *mc_handle, off_t mc_offset, size_t mem_size);
     int unmap_group_mem(off_t mc_offset, size_t mem_size);
 
+    int subscribe_multicast_endpoint(CUlogicalEndpointId le_mc_id);
+    CUdevice get_current_dev(void) const { return current_dev_; }
+
    private:
     void invalidate_rsc(void);
     void set_group_prop(uint64_t mem_size);
