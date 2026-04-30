@@ -1463,6 +1463,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
 /*
  * Function: Performs a try_pullred to get data from peer global memory and waits for it to complete
  */
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
 template <typename TYPE, rdxn_ops_t RDX_OP>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_pullred_wrapper_thread(int myIdx,
     const nvshmemi_fabric_handle<le_fabric_handle_kind::Multicast> &src_handle, int byte_offset_src,
@@ -1657,6 +1658,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         tma_bar_handle->inval(myIdx);
     }
 }
+#endif
 
 template <typename TYPE, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_threadgroup(
@@ -1687,6 +1689,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_t
                     nvshmemi_tma_smem_registered() &&
                     !__isShared(dest_ptr) &&
                     !__isShared(source_ptr) &&
+                    ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
                     nvshmemi_is_addr_offset_aligned(dest_ptr, CFT_HANDLE_TX_SIZE) &&
                     nvshmemi_is_addr_offset_aligned(source_ptr, CFT_HANDLE_TX_SIZE)) {
                     nvshmemi_handle_reduce_mcast_threadroup<TYPE, SCOPE, RDXN_OPS_SUM, 0>(
@@ -1725,6 +1728,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_t
                     !__isShared(dest) &&
                     !__isShared(source) &&
                     nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+                    ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
                     nvshmemi_is_addr_offset_aligned(source, CFT_HANDLE_TX_SIZE)) {
                     nvshmemi_handle_reduce_mcast_threadroup<TYPE, SCOPE, RDXN_OPS_SUM, true>(
                         teami, dest, source, elems_per_pe);
@@ -1960,6 +1964,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 }
 
 // reducescatter handle variant
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
 template <typename TYPE, threadgroup_t SCOPE, rdxn_ops_t RDX_OP>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast_threadroup(
     nvshmemi_team_t *teami, TYPE *__restrict__ dst_ptr, const TYPE *__restrict__ src_ptr,
@@ -2077,6 +2082,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
         tma_bar_handle->inval(myIdx);
     }
 }
+#endif
 
 /******* Tile collective functions ********/
 

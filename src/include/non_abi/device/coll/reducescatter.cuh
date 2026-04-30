@@ -104,6 +104,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
                 !__isShared(dest) &&
                 !__isShared(source + source_offset) &&
                 nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+                ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
                 nvshmemi_is_addr_offset_aligned(source + source_offset, CFT_HANDLE_TX_SIZE)) {
 
                 nvshmemi_handle_local_reduce_mcast_threadroup<TYPE, SCOPE, OP>(
