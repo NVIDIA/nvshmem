@@ -475,6 +475,141 @@ fabric_try_get_async(CUlogicalEndpointId src_le_id, uint64_t src_data_off,
                       size_bytes - (size_bytes / CFT_HANDLE_TX_SIZE));
 }
 
+//  try_pullred
+
+// All threads in warp have to call this function with the
+// same member mask (0xFFFFFFFF)
+#define FABRIC_TRY_PULLRED_ASYNC_PTX(RDXN_OP, RDXN_TYPE )     \
+asm volatile("fabric.try_pullred.async.multimem.shared::cta." \
+    "mbarrier::complete_tx::bytes.mbarrier::report::fabric."  \
+    "relaxed.sys." #RDXN_OP "." #RDXN_TYPE ".sync "           \
+    "[%0], [%1, %2], %3, [%4], 0xffffffff;"                   \
+    :                                                         \
+    : "l"(dst_smem),                                          \
+      "r"(src_le_id),                                         \
+      "l"(src_data_off),                                      \
+      "r"(size_bytes),                                        \
+      "l"(bar_smem)                                           \
+    : "memory")
+
+/*
+ * // valid combinations for sm_100
+ * .op.ty = {
+ * {.and, .or, .xor} x {.b32, .b64},
+ * {.min, .max}      x {.u32, .s32, .u64, .s64, .f16, .bf16},
+ * {.add}            x {.u32, .u64, .bf16, .f16, .f32}, // No .f64
+ * }
+ *
+ * // Note: add these if applicable
+ * // sm_100a, sm_101a, sm_120a, sm_121a,
+ * // and sm_100f, sm_101f, sm_110f or higher in the same family:
+ * .op.ty = {
+ *   {.min, .max}      x {.e4m3, .e5m2},
+ *   {.add.acc::f16}   x {.e4m3, .e5m2},
+ *   {.add.acc::f32}   x {.f16, .bf16}
+ * }
+ */
+
+template <typename T, rdxn_ops_t RDXN_OP>
+__device__ constexpr inline bool is_handle_pullred_supported()
+{
+    if constexpr (((RDXN_OP == RDXN_OPS_AND) && std::is_same_v<T, uint32_t>) ||
+                ((RDXN_OP == RDXN_OPS_OR) && std::is_same_v<T, uint32_t>) ||
+                ((RDXN_OP == RDXN_OPS_XOR) && std::is_same_v<T, uint32_t>) ||
+                ((RDXN_OP == RDXN_OPS_AND) && std::is_same_v<T, uint64_t>) ||
+                ((RDXN_OP == RDXN_OPS_OR) && std::is_same_v<T, uint64_t>) ||
+                ((RDXN_OP == RDXN_OPS_XOR) && std::is_same_v<T, uint64_t>) ||
+                ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, uint32_t>) ||
+                ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, uint32_t>) ||
+                ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, int32_t>) ||
+                ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, int32_t>) ||
+                ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, uint64_t>) ||
+                ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, uint64_t>) ||
+                ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, int64_t>) ||
+                ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, int64_t>) ||
+                ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, half>) ||
+                ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, half>) ||
+                ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, __nv_bfloat16>) ||
+                ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, __nv_bfloat16>) ||
+                ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, uint32_t>) ||
+                ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, uint64_t>) ||
+                ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, __nv_bfloat16>) ||
+                ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, half>) ||
+                ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, float>)) {
+        return true;
+    }
+    return false;
+}
+
+template <typename T, rdxn_ops_t RDXN_OP>
+__device__ inline void
+fabric_try_pullred_async(CUlogicalEndpointId src_le_id, uint64_t src_data_off,
+                     void* dst_in_shared_memory, uint32_t  size_bytes,
+                     handle_barrier_t* hbar)
+{
+    // PTX requires a .shared address when .dst = .shared::cta
+    unsigned long long dst_smem =
+        static_cast<unsigned long long>(__cvta_generic_to_shared(dst_in_shared_memory));
+    const unsigned long long bar_smem =
+        static_cast<unsigned long long>(__cvta_generic_to_shared(
+            reinterpret_cast<void*>(&(hbar->bar))));
+
+    if constexpr ((RDXN_OP == RDXN_OPS_AND) && std::is_same_v<T, uint32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(and, b32); // and.b32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_OR) && std::is_same_v<T, uint32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(or, b32); // or.b32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_XOR) && std::is_same_v<T, uint32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(xor, b32); // xor.b32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_AND) && std::is_same_v<T, uint64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(and, b64); // and.b64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_OR) && std::is_same_v<T, uint64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(or, b64); // or.b64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_XOR) && std::is_same_v<T, uint64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(xor, b64); // xor.b64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, uint32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(min, u32); // min.u32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, uint32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(max, u32); // max.u32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, int32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(min, s32); // min.s32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, int32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(max, s32); // max.s32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, uint64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(min, u64); // min.u64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, uint64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(max, u64); // max.u64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, int64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(min, s64); // min.s64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, int64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(max, s64); // max.s64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, half>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(min, f16); // min.f16
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, half>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(max, f16); // max.f16
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MIN) && std::is_same_v<T, __nv_bfloat16>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(min, bf16); // min.bf16
+    } else if constexpr ((RDXN_OP == RDXN_OPS_MAX) && std::is_same_v<T, __nv_bfloat16>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(max, bf16); // max.bf16
+    } else if constexpr ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, uint32_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(add, u32);  // add.u32
+    } else if constexpr ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, uint64_t>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(add, u64);  // add.u64
+    } else if constexpr ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, __nv_bfloat16>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(add, bf16);  // add.bf16
+    } else if constexpr ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, half>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(add, f16);  // add.f16
+    } else if constexpr ((RDXN_OP == RDXN_OPS_SUM) && std::is_same_v<T, float>) {
+        FABRIC_TRY_PULLRED_ASYNC_PTX(add, f32);  // add.f32
+    } else {
+        assert(false && "Unsupported reduce operation");
+    }
+    // remainder expect_tx is done in arrive_relaxed()
+    if ((threadIdx.x % warpSize) == 0) {
+        barrier_expect_tx(&(hbar->bar),
+                      size_bytes - (size_bytes / CFT_HANDLE_TX_SIZE));
+    }
+}
+
 inline __device__ void fabric_submit() {
    asm volatile ("fabric.submit;\n" ::: "memory");
 }

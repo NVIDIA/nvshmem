@@ -95,6 +95,26 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
     nvshmem_team_t team, TYPE *dest, const TYPE *source, int source_offset, size_t nreduce) {
     if constexpr (nvshmemi_device_has_nvls_multimem) {
         nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+        if constexpr (is_handle_pullred_supported<TYPE, OP>()) {
+            if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
+                                                     nreduce * sizeof(TYPE), SCOPE) &&
+                nvshmemi_tma_smem_registered() &&
+                !__isShared(dest) &&
+                !__isShared(source + source_offset) &&
+                nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+                nvshmemi_is_addr_offset_aligned(source + source_offset, CFT_HANDLE_TX_SIZE)) {
+
+                nvshmemi_handle_local_reduce_mcast_threadroup<TYPE, SCOPE, OP>(
+                    teami, dest, source + source_offset, nreduce);
+
+                nvshmemi_sync_threadgroup<SCOPE>(team);
+                return;
+            }
+        }
+#endif
+
         TYPE *src_ptr = (TYPE *)nvshmemi_mc_ptr(teami, (void *)(source + source_offset));
         nvshmemi_threadgroup_sync<SCOPE>();
         nvshmemi_local_reduce_mcast_threadgroup<TYPE, OP, SCOPE>(dest, src_ptr, nreduce);

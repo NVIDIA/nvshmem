@@ -12,6 +12,7 @@
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
 #include "device_host/nvshmem_tensor.h"
+#include "device/logical_endpoint_device.cuh"
 #include "non_abi/nvshmem_build_options.h"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
@@ -1459,6 +1460,204 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
     return;
 }
 
+/*
+ * Function: Performs a try_pullred to get data from peer global memory and waits for it to complete
+ */
+template <typename TYPE, rdxn_ops_t RDX_OP>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_pullred_wrapper_thread(int myIdx,
+    const nvshmemi_fabric_handle<le_fabric_handle_kind::Multicast> &src_handle, int byte_offset_src,
+    void* smem_buf, int copy_bytes, handle_barrier_t *tma_bar_handle) {
+
+    /*
+     * tma_bar_handle should have been initialized with arrival count of 1 before calling this function
+     */
+
+    // all threads in warp do a try_pullred to get data from peer global memory
+    fabric_try_pullred_async<TYPE, RDX_OP>(src_handle.id(), src_handle.offset() + byte_offset_src,
+             smem_buf, copy_bytes, tma_bar_handle);
+
+    if (myIdx % warpSize == 0) {
+        // wait till the try_pullred is completed
+        fabric_submit();
+        uint64_t curr_state = tma_bar_handle->arrive_relaxed(copy_bytes);
+        tma_bar_handle->try_wait_token(curr_state);
+    }
+    __syncwarp();
+}
+
+/* Note: handles based pullred needs all threads from a warp to call this function with the
+ * same arguments
+ */
+template <typename TYPE, threadgroup_t SCOPE, rdxn_ops_t RDX_OP, bool ONESHOT>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threadroup(
+    nvshmemi_team_t *teami, TYPE *__restrict__ dst_ptr, const TYPE *__restrict__ src_ptr,
+    int nreduce) {
+
+    size_t len = nreduce * sizeof(TYPE);
+
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    int groupSize = nvshmemi_threadgroup_size<SCOPE>();
+
+    assert(groupSize % warpSize == 0);
+    assert(nvshmemi_is_addr_offset_aligned(src_ptr, CFT_HANDLE_TX_SIZE));
+    assert(nvshmemi_tma_smem_registered());
+    if constexpr (ONESHOT) {
+        assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst_ptr));
+    } else {
+        assert(nvshmemi_is_addr_offset_aligned(dst_ptr, CFT_HANDLE_TX_SIZE));
+    }
+
+    uint32_t curr_buf_idx = 0;
+    uint32_t byte_offset_src = 0;
+    uint32_t byte_offset_dst = 0;
+    uint32_t pending_bytes_copy = 0;
+    // for 2shot, each warp will use 2 barriers
+    uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / 2;
+    if constexpr (ONESHOT) {
+        max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS;
+    }
+    size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+    size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
+    max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
+
+    // each warp can send 32 * (sizeof(TYPE)) bytes at a time
+    uint32_t warpchunk_size = warpSize * (sizeof(TYPE));
+    uint32_t max_warps = (groupSize / warpSize) < max_mbarrier ? (groupSize / warpSize) : max_mbarrier;
+    uint32_t work_warps = len / warpchunk_size;
+    work_warps = work_warps ? work_warps : 1;
+    uint32_t num_warps = max_warps < work_warps ? max_warps : work_warps;
+    uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
+    uint32_t warpIdx = myIdx / warpSize;
+    size_t start_offset_warp = warpIdx * warpchunk_size * num_warpchunks_per_warp;
+    size_t bytes_per_warp = warpchunk_size * num_warpchunks_per_warp;
+    if (warpIdx == num_warps - 1) {
+        bytes_per_warp = len - start_offset_warp;
+    }
+
+    int copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < bytes_per_warp ? NVSHMEMI_SMEM_BUF_SIZE : bytes_per_warp;
+
+    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uintptr_t tma_smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+
+    // all threads in warp have to call this function with the
+    // same arguments
+    if (warpIdx < num_warps) {
+        CUlogicalEndpointId mc_le_id = PARSE_LE_ID(teami->mc_leid_with_flag);
+        auto src_handle =
+            nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
+                mc_le_id, (const char *)src_ptr + start_offset_warp);
+
+        uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
+        smem_data_buf[0] =
+            reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
+            (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+        smem_data_buf[1] =
+            reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
+            smem_data_buf_size + (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+
+        handle_barrier_t *tma_bar_handle =
+            nvshmemi_handle_barrier_slot(tma_smem_base, warpIdx * TMA_COPY_NUM_STAGES);
+
+        // only lane 0 in warp initializes the barrier
+        tma_bar_handle->init(1, myIdx);
+
+        __syncwarp();
+
+        // perform pullred and get data into curr_idx buffer
+        nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
+            smem_data_buf[curr_buf_idx], copy_bytes, tma_bar_handle);
+        byte_offset_src += copy_bytes;
+
+        while (byte_offset_src < bytes_per_warp) {
+
+            // move data from shared memory to destination global memory
+            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst) ? NVSHMEMI_SMEM_BUF_SIZE
+                                                                   : (bytes_per_warp - byte_offset_dst);
+            __syncwarp();
+            if (myIdx % warpSize == 0) {
+                if constexpr (ONESHOT) {
+                    // copy reduced data to local global memory
+                    nvshmemi_tma_s2g_copy_thread<1>(myIdx, smem_data_buf[curr_buf_idx],
+                                                    (char*)dst_ptr + start_offset_warp + byte_offset_dst,
+                                                    copy_bytes);
+                    byte_offset_dst += copy_bytes;
+
+                } else {
+                    // Do a multimem put for 2shot
+                    // use only 1 thread so reinitialize arrival count to 1
+                    auto dst_handle =
+                        nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
+                            mc_le_id, (char *)dst_ptr + start_offset_warp);
+                    nvshmemi_try_put_wrapper_thread<le_fabric_handle_kind::Multicast>(myIdx, smem_data_buf[curr_buf_idx],
+                                                    dst_handle, byte_offset_dst, tma_bar_handle, copy_bytes, &pending_bytes_copy);
+                    byte_offset_dst += copy_bytes;
+                    pending_bytes_copy += copy_bytes;
+
+                    /* We use 1 handle barrier for both pullred and try_put multimem
+                     * so we wait till the entire mbarrier is done and we can reinit the
+                     * arrival count
+                     */
+                    uint64_t curr_state = tma_bar_handle->arrive_relaxed(pending_bytes_copy);
+                    tma_bar_handle->try_wait_token(curr_state);
+                    pending_bytes_copy = 0;
+                }
+            }
+
+            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_src) ? NVSHMEMI_SMEM_BUF_SIZE
+                                                                   : (bytes_per_warp - byte_offset_src);
+            // sync entire warp
+            __syncwarp();
+            // copy next chunk of data from peer global to shared memory
+            nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
+                smem_data_buf[curr_buf_idx ^ 1], copy_bytes, tma_bar_handle);
+            byte_offset_src += copy_bytes;
+            curr_buf_idx ^= 1;
+        }
+
+        copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst) ? NVSHMEMI_SMEM_BUF_SIZE : (bytes_per_warp - byte_offset_dst);
+        __syncwarp();
+        if (myIdx % warpSize == 0) {
+            if constexpr (ONESHOT) {
+                // copy reduced data to local global memory
+                nvshmemi_tma_s2g_copy_thread<0>(myIdx, smem_data_buf[curr_buf_idx],
+                                                (char*)dst_ptr + start_offset_warp + byte_offset_dst, copy_bytes);
+                byte_offset_dst += copy_bytes;
+
+            } else {
+                // Do a multimem put for 2shot
+                auto dst_handle =
+                    nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
+                        mc_le_id, (char *)dst_ptr + start_offset_warp);
+                nvshmemi_try_put_wrapper_thread<le_fabric_handle_kind::Multicast>(myIdx, smem_data_buf[curr_buf_idx],
+                                                dst_handle, byte_offset_dst,
+                                                tma_bar_handle, copy_bytes, &pending_bytes_copy);
+                byte_offset_dst += copy_bytes;
+                pending_bytes_copy += copy_bytes;
+
+                /* We use 1 handle barrier for both pullred and try_put multimem
+                 * so we wait till the entire mbarrier is done and we can reinit the
+                 * arrival count
+                 */
+                if (myIdx % warpSize == 0) {
+                    uint64_t curr_state = tma_bar_handle->arrive_relaxed(pending_bytes_copy);
+                    tma_bar_handle->try_wait_token(curr_state);
+                    pending_bytes_copy = 0;
+                }
+            }
+        }
+        // sync entire warp
+        __syncwarp();
+
+        if (myIdx % warpSize == 0) {
+            assert(byte_offset_dst == bytes_per_warp);
+        }
+        assert(byte_offset_src == bytes_per_warp);
+
+        // invalidate the barrier
+        tma_bar_handle->inval(myIdx);
+    }
+}
+
 template <typename TYPE, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
@@ -1477,11 +1676,28 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_t
         if (my_idx_in_active_set == (teami->size - 1)) {
             my_nelems = elems_per_pe + elems_remain;
         }
+        TYPE *dest_ptr = dest + elems_per_pe * my_idx_in_active_set;
+        const TYPE *source_ptr = source + elems_per_pe * my_idx_in_active_set;
 
         if (my_nelems > 0) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+            if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
+                if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
+                                                         my_nelems * sizeof(TYPE), SCOPE) &&
+                    nvshmemi_tma_smem_registered() &&
+                    !__isShared(dest_ptr) &&
+                    !__isShared(source_ptr) &&
+                    nvshmemi_is_addr_offset_aligned(dest_ptr, CFT_HANDLE_TX_SIZE) &&
+                    nvshmemi_is_addr_offset_aligned(source_ptr, CFT_HANDLE_TX_SIZE)) {
+                    nvshmemi_handle_reduce_mcast_threadroup<TYPE, SCOPE, RDXN_OPS_SUM, 0>(
+                        teami, dest_ptr, source_ptr, my_nelems);
+                    nvshmemi_barrier_threadgroup<SCOPE>(team);
+                    return;
+                }
+            }
+#endif
             nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 0>(
-                teami, dest + elems_per_pe * my_idx_in_active_set,
-                source + elems_per_pe * my_idx_in_active_set, my_nelems);
+                teami, dest_ptr, source_ptr, my_nelems);
         }
 
         nvshmemi_barrier_threadgroup<SCOPE>(team);
@@ -1501,6 +1717,22 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_t
         // Case 1: elems_per_pe == 0 => no GPUs do any work.
         // Case 2: elems_per_pe != 0 => all GPUs do work for elems_per_pe
         if (elems_per_pe > 0) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+            if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
+                if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
+                                                         elems_per_pe * sizeof(TYPE), SCOPE) &&
+                    nvshmemi_tma_smem_registered() &&
+                    !__isShared(dest) &&
+                    !__isShared(source) &&
+                    nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+                    nvshmemi_is_addr_offset_aligned(source, CFT_HANDLE_TX_SIZE)) {
+                    nvshmemi_handle_reduce_mcast_threadroup<TYPE, SCOPE, RDXN_OPS_SUM, true>(
+                        teami, dest, source, elems_per_pe);
+                    nvshmemi_sync_threadgroup<SCOPE>(team);
+                    return;
+                }
+            }
+#endif
             nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 1>(teami, dest, source, elems_per_pe);
         }
 
@@ -1725,6 +1957,125 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
     }
 #undef SCOPE
     return 0;
+}
+
+// reducescatter handle variant
+template <typename TYPE, threadgroup_t SCOPE, rdxn_ops_t RDX_OP>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast_threadroup(
+    nvshmemi_team_t *teami, TYPE *__restrict__ dst_ptr, const TYPE *__restrict__ src_ptr,
+    int nreduce) {
+
+    size_t len = nreduce * sizeof(TYPE);
+
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    int groupSize = nvshmemi_threadgroup_size<SCOPE>();
+
+    assert(groupSize % warpSize == 0);
+
+    assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst_ptr));
+    assert(nvshmemi_is_addr_offset_aligned(src_ptr, CFT_HANDLE_TX_SIZE));
+    assert(nvshmemi_tma_smem_registered());
+
+    int curr_buf_idx = 0;
+    int byte_offset_src = 0;
+    int byte_offset_dst = 0;
+
+    uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / 2; //each warp use 2 barriers
+    size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+    size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
+    max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
+
+    // each warp can send 32 * (sizeof(TYPE)) bytes at a time
+    uint32_t warpchunk_size = warpSize * (sizeof(TYPE));
+    uint32_t max_warps = (groupSize / warpSize) < max_mbarrier ? (groupSize / warpSize) : max_mbarrier;
+    uint32_t work_warps = len / warpchunk_size;
+    work_warps = work_warps ? work_warps : 1;
+    uint32_t num_warps = max_warps < work_warps ? max_warps : work_warps;
+    uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
+    uint32_t warpIdx = myIdx / warpSize;
+    size_t start_offset_warp = warpIdx * warpchunk_size * num_warpchunks_per_warp;
+    size_t bytes_per_warp = warpchunk_size * num_warpchunks_per_warp;
+    if (warpIdx == num_warps - 1) {
+        bytes_per_warp = len - start_offset_warp;
+    }
+
+    int copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < bytes_per_warp ? NVSHMEMI_SMEM_BUF_SIZE : bytes_per_warp;
+
+    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uintptr_t tma_smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+
+    // all threads in warp have to call this function with the
+    // same arguments
+    if (warpIdx < num_warps) {
+        CUlogicalEndpointId mc_le_id = PARSE_LE_ID(teami->mc_leid_with_flag);
+        auto src_handle =
+            nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
+                mc_le_id, (const char *)src_ptr + start_offset_warp);
+
+        uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
+        smem_data_buf[0] =
+            reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
+            (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+        smem_data_buf[1] =
+            reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
+            smem_data_buf_size + (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+
+        handle_barrier_t *tma_bar_handle =
+            nvshmemi_handle_barrier_slot(tma_smem_base, warpIdx * TMA_COPY_NUM_STAGES);
+
+        // only lane 0 in warp initializes the barrier
+        tma_bar_handle->init(1, myIdx);
+        __syncwarp();
+
+        nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
+            smem_data_buf[curr_buf_idx], copy_bytes, tma_bar_handle);
+        byte_offset_src += copy_bytes;
+
+        while (byte_offset_src < bytes_per_warp) {
+
+            // move data from shared memory to destination global memory
+            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst) ? NVSHMEMI_SMEM_BUF_SIZE
+                                                                   : (bytes_per_warp - byte_offset_dst);
+            if (myIdx % warpSize == 0) {
+                // copy reduced data to local global memory
+                nvshmemi_tma_s2g_copy_thread<1>(myIdx, smem_data_buf[curr_buf_idx],
+                                                (char*)dst_ptr + start_offset_warp + byte_offset_dst,
+                                                copy_bytes);
+                byte_offset_dst += copy_bytes;
+
+            }
+            __syncwarp();
+
+            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_src) ? NVSHMEMI_SMEM_BUF_SIZE
+                                                                   : (bytes_per_warp - byte_offset_src);
+
+            // copy next chunk of data from peer global to shared memory
+            nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
+                smem_data_buf[curr_buf_idx ^ 1], copy_bytes, tma_bar_handle);
+            byte_offset_src += copy_bytes;
+
+            curr_buf_idx ^= 1;
+        }
+
+        copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst) ? NVSHMEMI_SMEM_BUF_SIZE : (bytes_per_warp - byte_offset_dst);
+        if (myIdx % warpSize == 0) {
+            // copy reduced data to local global memory
+            nvshmemi_tma_s2g_copy_thread<0>(myIdx, smem_data_buf[curr_buf_idx],
+                                                (char*)dst_ptr + start_offset_warp + byte_offset_dst,
+                                                copy_bytes);
+            byte_offset_dst += copy_bytes;
+        }
+        // sync entire warp
+        __syncwarp();
+
+        if (myIdx % warpSize == 0) {
+            assert(byte_offset_dst == bytes_per_warp);
+        }
+        assert(byte_offset_src == bytes_per_warp);
+
+        // invalidate the barrier
+        tma_bar_handle->inval(myIdx);
+    }
 }
 
 /******* Tile collective functions ********/
