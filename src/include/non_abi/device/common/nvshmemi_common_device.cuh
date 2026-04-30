@@ -1952,6 +1952,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
 
     unsigned mask = __activemask();
     unsigned active_threads = __popc(mask);
+    int lane_idx = threadIdx.x % warpSize;
+    int leader_lane = __ffs(mask) - 1;
 
     uint32_t gbl_thrd_idx = threadIdx.x + (blockIdx.x * blockDim.x)
                             + (blockIdx.y * blockDim.x * blockDim.y)
@@ -1965,9 +1967,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
     // threads from same warp share the same mbarrier
     handle_barrier_t *tma_bar_handle = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
 
-    if (thrd_idx_in_blk % warpSize == 0) {
-        tma_bar_handle->init(active_threads); //arrival count is number of active threads calling this function
+    if (lane_idx == leader_lane) {
+        tma_bar_handle->init(1);
     }
+    __syncwarp(mask);
 
     // write the signal value to shared memory
     // signal datatype is long but we reserve 16 bytes per thread in block for TMA/handle ops
@@ -1980,15 +1983,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
 
     auto dst_handle = nvshmemi_fabric_handle_for_pe(pe, dst);
 
-    nvshmemi_try_put_wrapper_thread(thrd_idx_in_blk, smem_ptr + (thrd_idx_in_blk * (CFT_HANDLE_TX_SIZE/sizeof(T))), dst_handle, 0,
-                                    tma_bar_handle, (uint32_t)sizeof(T), nullptr);
+    fabric_try_put_async<le_fabric_handle_kind::Unicast>(
+        dst_handle.id(), dst_handle.offset(),
+        smem_ptr + (thrd_idx_in_blk * (CFT_HANDLE_TX_SIZE / sizeof(T))),
+        (uint32_t)sizeof(T), tma_bar_handle);
+    fabric_submit();
 
-    uint64_t curr_state = tma_bar_handle->arrive_relaxed((uint32_t)sizeof(T));
-    tma_bar_handle->try_wait_token(curr_state);
+    __syncwarp(mask);
 
-    if (thrd_idx_in_blk % warpSize == 0) {
+    if (lane_idx == leader_lane) {
+        uint64_t curr_state = tma_bar_handle->arrive_relaxed(active_threads * CFT_HANDLE_TX_SIZE);
+        tma_bar_handle->try_wait_token(curr_state);
+    }
+    __syncwarp(mask);
+
+    if (lane_idx == leader_lane) {
         tma_bar_handle->inval();
     }
+    __syncwarp(mask);
 }
 
 // TMA needs minimum 16 bytes of data for get() so no support for g() routine
