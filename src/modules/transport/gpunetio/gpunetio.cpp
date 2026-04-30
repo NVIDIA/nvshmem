@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <algorithm>
 #include <vector>
 
@@ -66,18 +67,26 @@ constexpr bool GPUNETIO_QP_ALLOW_REMOTE_WRITE = true;
 constexpr bool GPUNETIO_QP_ALLOW_REMOTE_READ = true;
 
 // Memory objects and internal buffers
-struct gpunetio_mem_object {
-    enum doca_gpu_mem_type mem_type;
-    struct {
-        void *cpu_ptr;
-        void *gpu_ptr;
-        size_t size;
-    } aligned;
-};
+struct gpunetio_device;
+struct nvshmemt_gpunetio_state_t;
 
+// DOCA-allocated GPU buffer + IB memory handle registered
 struct gpunetio_internal_buffer {
-    gpunetio_mem_object *mem_object;
-    nvshmemt_ib_common_mem_handle *mem_handle;
+    static std::pair<std::unique_ptr<gpunetio_internal_buffer>, nvshmemx_status> make(
+        nvshmemt_gpunetio_state_t *state, gpunetio_device *device, size_t size);
+    ~gpunetio_internal_buffer();
+
+    enum doca_gpu_mem_type mem_type = DOCA_GPU_MEM_TYPE_GPU;
+    struct {
+        void *cpu_ptr = nullptr;
+        void *gpu_ptr = nullptr;
+        size_t size = 0;
+    } aligned;
+    nvshmemt_ib_common_mem_handle mem_handle{};
+
+   private:
+    gpunetio_internal_buffer() = default;
+    nvshmemt_gpunetio_state_t *state_ = nullptr;
 };
 
 // Memory handles (registration / remote access)
@@ -92,14 +101,6 @@ struct gpunetio_device_local_only_mhandle_cache {
 };
 
 // Endpoint and exchange info
-struct gpunetio_ep {
-    doca_gpu_verbs_qp_hl *qp;
-    uint32_t qpn;
-    int portid;
-    uint32_t user_index;
-    gpunetio_internal_buffer internal_buf;
-};
-
 struct gpunetio_exch_info {
     int lid;
     int qpn;
@@ -107,8 +108,45 @@ struct gpunetio_exch_info {
     doca_verbs_gid vgid;
 };
 
+// Endpoint (= QP + metadata)
+struct gpunetio_ep {
+    static std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> make(
+        nvshmem_transport_t t, nvshmemt_gpunetio_state_t *gpunetio_state,
+        doca_gpu_verbs_qp_init_attr_hl *qp_init_attr, gpunetio_device *device, int portid,
+        uint32_t qp_idx);
+    ~gpunetio_ep();
+
+    int connect(nvshmemt_gpunetio_state_t *gpunetio_state, gpunetio_exch_info *remote_exch_info);
+    gpunetio_exch_info create_exch_info() const;
+    bool requires_cpu_proxy() const;
+    int progress();
+
+    gpunetio_device *device_ = nullptr;
+    doca_gpu_verbs_qp_hl *qp = nullptr;
+    uint32_t qpn = 0;
+    int portid = 0;
+    uint32_t user_index = 0;
+    std::unique_ptr<gpunetio_internal_buffer> internal_buf;
+
+   private:
+    gpunetio_ep() = default;
+};
+
 // Device (single IB NIC)
 struct gpunetio_device {
+    static std::unique_ptr<gpunetio_device> make(nvshmemt_gpunetio_state_t *state);
+    ~gpunetio_device();
+
+    int open_net_dev();
+    int create_ah(int portid);
+    int create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, uint32_t dest_qp_num,
+                       int portid) const;
+    int transition_qp_to_rts(doca_verbs_qp_t *qp, doca_verbs_qp_attr_t *verbs_qp_attr) const;
+    int add_endpoints(nvshmem_transport_t t, int portid, int num_rc_eps_per_pe);
+    int connect_self_loop(int portid, doca_gpu_verbs_qp_hl *qp_local);
+    int progress(int n_pes);
+    bool cst_is_required() const;
+
     // Flags
     int num_eps_per_pe = 0;
     // Common device information
@@ -116,19 +154,30 @@ struct gpunetio_device {
     // GPUNetIO-specific device information
     doca_dev_t *net_dev = nullptr;
     // Local RC endpoints for this device
-    std::vector<gpunetio_ep *> rc_eps;
+    std::vector<std::unique_ptr<gpunetio_ep>> rc_eps;
     // This mutex is required to avoid a race with the progress thread and the QP-specific API
     // reallocating and modifying rc_eps.
     std::unique_ptr<std::mutex> rc_eps_mtx{new std::mutex()};
     doca_verbs_ah_attr_t *ah = nullptr;
     doca_gpu_verbs_qp_hl *qp_local_backup = nullptr;
     doca_gpu_dev_verbs_nic_handler nic_handler_request = {};
+
+   private:
+    gpunetio_device() = default;
+    nvshmemt_gpunetio_state_t *state_ = nullptr;
 };
 
 // Transport instance state
 struct nvshmemt_gpunetio_state_t {
+    static std::pair<std::unique_ptr<nvshmemt_gpunetio_state_t>, nvshmemx_status> make(
+        nvshmem_transport *transport, nvshmemi_options_s *options, nvshmemi_cuda_fn_table *table);
+    ~nvshmemt_gpunetio_state_t();
+
+    int connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids, int num_selected_devs,
+                          int *out_qp_indices, int num_qps);
+
     // Per-instance transport state
-    std::vector<gpunetio_device> devices;
+    std::vector<std::unique_ptr<gpunetio_device>> devices;
     std::vector<int> dev_ids;
     std::vector<int> port_ids;
     std::vector<int> selected_dev_ids;
@@ -165,14 +214,23 @@ struct nvshmemt_gpunetio_state_t {
     void *mlx5dv_handle = nullptr;
 #endif
     nvshmemi_cuda_fn_table *cuda_syms = nullptr;
+
+   private:
+    nvshmemt_gpunetio_state_t() = default;
+
+    int init_populate_state(nvshmemi_options_s *options);
+    int init_ftables(nvshmemi_options_s *options, nvshmemi_cuda_fn_table *table);
+    int init_gpu(nvshmemi_options_s *options);
+    int init_nic_devices(nvshmem_transport *transport, nvshmemi_options_s *options);
+
+    void initialize_cache_state();
+    int get_cuda_device_id(CUdevice *out);
+    int connect_global_setup(int num_selected_devs, int *selected_dev_ids);
+    int setup_gpu_state(nvshmem_transport_t t);
+    int connect_qps_only(nvshmem_transport_t t, int *out_qp_indices, int num_qps);
 };
 
-// Forward declarations
-static bool gpunetio_qp_requires_cpu_proxy(doca_gpu_verbs_qp_hl *qp);
-static void gpunetio_activate_progress_function(nvshmem_transport_t t);
-int nvshmemt_gpunetio_progress(nvshmem_transport_t t);
-
-// *** Utility functions ***
+// Utility functions
 static inline int gpunetio_round_up_pow2(int n) {
     int pow2 = 0;
     for (pow2 = 1; pow2 < n; pow2 <<= 1)
@@ -184,168 +242,250 @@ static constexpr int gpunetio_round_up_pow2_or_0(int n) {
     return (n == 0) ? 0 : gpunetio_round_up_pow2(n);
 }
 
-// Internal buffer
-static int gpunetio_destroy_internal_buffer(gpunetio_internal_buffer *internal_buf,
-                                            nvshmemt_gpunetio_state_t *gpunetio_state) {
-    int status = 0;
-
-    if (internal_buf->mem_handle) {
-        nvshmemt_ib_common_release_mem_handle(
-            &gpunetio_state->ftable,
-            reinterpret_cast<nvshmem_mem_handle_t *>(internal_buf->mem_handle),
-            gpunetio_state->log_level);
-        delete internal_buf->mem_handle;
-        internal_buf->mem_handle = nullptr;
+// Parse and cache
+static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *out_loc,
+                                              std::string_view str) {
+    auto start = str.find_first_not_of(' ');
+    if (start == std::string_view::npos) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
     }
+    auto req = str.substr(start, str.find_last_not_of(' ') - start + 1);
 
-    if (internal_buf->mem_object) {
-        if (internal_buf->mem_object->aligned.gpu_ptr) {
-            doca_gpu_mem_free(gpunetio_state->gpu_device,
-                              internal_buf->mem_object->aligned.gpu_ptr);
-        }
-        delete internal_buf->mem_object;
-        internal_buf->mem_object = nullptr;
+    if (req == "auto") {
+        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO;
+    } else if (req == "gpu") {
+        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB;
+    } else if (req == "gpu_sm_bf") {
+        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_BF;
+    } else if (req == "cpu") {
+        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+    } else {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
     }
-
-    return status;
+    return NVSHMEMX_SUCCESS;
 }
 
-static int gpunetio_create_internal_buffer(gpunetio_internal_buffer *internal_buf,
-                                           nvshmemt_gpunetio_state_t *gpunetio_state,
-                                           gpunetio_device *device, size_t size) {
-    int status = 0;
-    auto guard =
-        make_scope_guard([&]() { gpunetio_destroy_internal_buffer(internal_buf, gpunetio_state); });
+// Progress
+static bool gpunetio_qp_requires_cpu_proxy(doca_gpu_verbs_qp_hl *qp) {
+    return qp->qp_gverbs->qp_cpu->nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+}
 
-    internal_buf->mem_object = new gpunetio_mem_object();
-    internal_buf->mem_object->mem_type = DOCA_GPU_MEM_TYPE_GPU;
-    internal_buf->mem_object->aligned.cpu_ptr = nullptr;
-    internal_buf->mem_object->aligned.size = size;
+static int nvshmemt_gpunetio_progress(nvshmem_transport_t t) {
+    nvshmemt_gpunetio_state_t *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
+    int n_pes = t->n_pes;
 
-    status = doca_gpu_mem_alloc(gpunetio_state->gpu_device, internal_buf->mem_object->aligned.size,
-                                GPUNETIO_GPAGE_SIZE, DOCA_GPU_MEM_TYPE_GPU,
-                                &internal_buf->mem_object->aligned.gpu_ptr, nullptr);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "cannot allocate internal buffer.\n");
+    // Iterate over all devices and their EPs and progress QPs
+    for (int dev_idx : gpunetio_state->selected_dev_ids) {
+        gpunetio_state->devices[dev_idx]->progress(n_pes);
+    }
 
-    internal_buf->mem_handle = new nvshmemt_ib_common_mem_handle();
+    return NVSHMEMX_SUCCESS;
+}
+
+static void gpunetio_activate_progress_function(nvshmem_transport_t t) {
+    t->host_ops.progress = nvshmemt_gpunetio_progress;
+    t->no_proxy = false;
+}
+
+// gpunetio_internal_buffer implementation
+std::pair<std::unique_ptr<gpunetio_internal_buffer>, nvshmemx_status>
+gpunetio_internal_buffer::make(nvshmemt_gpunetio_state_t *state, gpunetio_device *device,
+                               size_t size) {
+    std::unique_ptr<gpunetio_internal_buffer> buf(new gpunetio_internal_buffer());
+    buf->state_ = state;
+    buf->mem_type = DOCA_GPU_MEM_TYPE_GPU;
+    buf->aligned.cpu_ptr = nullptr;
+    buf->aligned.size = size;
+
+    int status = doca_gpu_mem_alloc(state->gpu_device, buf->aligned.size, GPUNETIO_GPAGE_SIZE,
+                                    DOCA_GPU_MEM_TYPE_GPU, &buf->aligned.gpu_ptr, nullptr);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("cannot allocate internal buffer.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
 
     status = nvshmemt_ib_common_reg_mem_handle(
-        &gpunetio_state->ftable, &gpunetio_state->mlx5dv_ftable, device->common_device.pd,
-        reinterpret_cast<nvshmem_mem_handle_t *>(internal_buf->mem_handle),
-        internal_buf->mem_object->aligned.gpu_ptr, internal_buf->mem_object->aligned.size, false,
-        gpunetio_state->dmabuf_support_for_data_buffers, gpunetio_state->cuda_syms,
-        gpunetio_state->log_level, gpunetio_state->options->IB_ENABLE_RELAXED_ORDERING,
+        &state->ftable, &state->mlx5dv_ftable, device->common_device.pd,
+        reinterpret_cast<nvshmem_mem_handle_t *>(&buf->mem_handle), buf->aligned.gpu_ptr,
+        buf->aligned.size, false, state->dmabuf_support_for_data_buffers, state->cuda_syms,
+        state->log_level, state->options->IB_ENABLE_RELAXED_ORDERING,
         device->common_device.data_direct);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                          "Unable to register memory for DOCA transport.\n");
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Unable to register memory for DOCA transport.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
 
-    guard.dismiss();
-    return NVSHMEMX_SUCCESS;
+    return {std::move(buf), NVSHMEMX_SUCCESS};
 }
 
-// Endpoint lifecycle
-static int gpunetio_destroy_ep(gpunetio_ep *ep, nvshmemt_gpunetio_state_t *gpunetio_state) {
-    int status = 0;
+gpunetio_internal_buffer::~gpunetio_internal_buffer() {
+    if (!state_) return;
+    if (mem_handle.mr) {
+        nvshmemt_ib_common_release_mem_handle(&state_->ftable,
+                                              reinterpret_cast<nvshmem_mem_handle_t *>(&mem_handle),
+                                              state_->log_level);
+    }
+    if (aligned.gpu_ptr) {
+        doca_gpu_mem_free(state_->gpu_device, aligned.gpu_ptr);
+    }
+}
 
-    if (!ep) {
-        return status;
+// gpunetio_ep lifecycle
+std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> gpunetio_ep::make(
+    nvshmem_transport_t t, nvshmemt_gpunetio_state_t *gpunetio_state,
+    doca_gpu_verbs_qp_init_attr_hl *qp_init_attr, gpunetio_device *device, int portid_in,
+    uint32_t qp_idx) {
+    std::unique_ptr<gpunetio_ep> ep(new gpunetio_ep());
+
+    int status = doca_gpu_verbs_create_qp_hl(qp_init_attr, &ep->qp);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("doca_gpu_verbs_create_qp_hl failed.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
     }
 
-    if (ep->qp) {
-        status = doca_gpu_verbs_destroy_qp_hl(ep->qp);
-        if (status) {
-            NVSHMEMI_WARN_PRINT("doca_gpu_verbs_destroy_qp_hl failed for ep %p \n", ep);
+    ep->device_ = device;
+    ep->portid = portid_in;
+    ep->user_index = qp_idx;
+    {
+        doca_error_t doca_ret = doca_verbs_qp_get_qpn(ep->qp->qp, &ep->qpn);
+        if (doca_ret != DOCA_SUCCESS) {
+            INFO(gpunetio_state->log_level, "gpunetio error: %d", doca_ret);
+            return {nullptr, NVSHMEMX_ERROR_INTERNAL};
         }
     }
 
-    if (ep->internal_buf.mem_handle) {
-        status = gpunetio_destroy_internal_buffer(&ep->internal_buf, gpunetio_state);
-        if (status) {
-            NVSHMEMI_WARN_PRINT("gpunetio_destroy_internal_buffer failed for ep %p \n", ep);
-        }
+    auto [ibuf, ibuf_status] = gpunetio_internal_buffer::make(
+        gpunetio_state, device,
+        NVSHMEMI_GPUNETIO_IBUF_SLOT_SIZE *
+            (gpunetio_state->num_fetch_slots_per_rc + GPUNETIO_IBUF_RESERVED_SLOTS));
+    if (ibuf_status) {
+        NVSHMEMI_ERROR_PRINT("gpunetio_internal_buffer::make failed.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
+    ep->internal_buf = std::move(ibuf);
+
+    TRACE(gpunetio_state->log_level, "Created QP: qp_idx=%d, qpn=%d", qp_idx, ep->qpn);
+
+    if (ep->requires_cpu_proxy()) {
+        gpunetio_activate_progress_function(t);
     }
 
-    delete ep;
+    return {std::move(ep), NVSHMEMX_SUCCESS};
+}
 
+int gpunetio_ep::connect(nvshmemt_gpunetio_state_t *gpunetio_state,
+                         gpunetio_exch_info *remote_exch_info) {
+    DOCA_CHECK(doca_verbs_ah_attr_set_gid(device_->ah, remote_exch_info->vgid));
+    DOCA_CHECK(doca_verbs_ah_attr_set_dlid(device_->ah, remote_exch_info->lid));
+
+    doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
+    int rc = device_->create_qp_attr(&verbs_qp_attr, remote_exch_info->qpn, portid);
+    if (rc) return rc;
+
+    rc = device_->transition_qp_to_rts(qp->qp, verbs_qp_attr);
+    doca_verbs_qp_attr_destroy(verbs_qp_attr);
+    return rc;
+}
+
+gpunetio_exch_info gpunetio_ep::create_exch_info() const {
+    const auto &gid = device_->common_device.gid_info[portid - 1].local_gid;
+    gpunetio_exch_info info{};
+    info.lid = device_->common_device.port_attr[portid - 1].lid;
+    info.qpn = qpn;
+    info.gid = gid;
+    std::copy(std::begin(gid.raw), std::end(gid.raw), info.vgid.raw);
+    return info;
+}
+
+bool gpunetio_ep::requires_cpu_proxy() const { return gpunetio_qp_requires_cpu_proxy(qp); }
+
+int gpunetio_ep::progress() {
+    int status = doca_gpu_verbs_cpu_proxy_progress(qp->qp_gverbs, nullptr);
+    if (status) {
+        NVSHMEMI_WARN_PRINT("doca_gpu_verbs_cpu_proxy_progress failed for ep %p \n",
+                            static_cast<void *>(this));
+    }
     return status;
 }
 
-// Device and exchange info
-static int gpunetio_fill_exch_info(gpunetio_exch_info *exch_info, const gpunetio_ep *ep,
-                                   const gpunetio_device *device) {
-    const ibv_port_attr *port_attr = &device->common_device.port_attr[ep->portid - 1];
-    const union ibv_gid *gid = &device->common_device.gid_info[ep->portid - 1].local_gid;
-
-    exch_info->lid = port_attr->lid;
-    exch_info->qpn = ep->qpn;
-
-    memcpy(exch_info->gid.raw, gid->raw, sizeof(union ibv_gid));
-    memcpy(exch_info->vgid.raw, gid->raw, sizeof(union ibv_gid));
-    return NVSHMEMX_SUCCESS;
-}
-
-static int gpunetio_get_cuda_device_id(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                       CUdevice *gpu_device_id) {
-    if (CUPFN(gpunetio_state->cuda_syms, cuCtxGetDevice(gpu_device_id))) {
-        NVSHMEMI_ERROR_PRINT("cuCtxGetDevice failed.\n");
-        return NVSHMEMX_ERROR_INTERNAL;
+gpunetio_ep::~gpunetio_ep() {
+    if (qp) {
+        int status = doca_gpu_verbs_destroy_qp_hl(qp);
+        if (status) {
+            NVSHMEMI_WARN_PRINT("doca_gpu_verbs_destroy_qp_hl failed for ep %p \n",
+                                static_cast<void *>(this));
+        }
     }
+}
+
+// gpunetio_device
+std::unique_ptr<gpunetio_device> gpunetio_device::make(nvshmemt_gpunetio_state_t *state) {
+    std::unique_ptr<gpunetio_device> dev(new gpunetio_device());
+    dev->state_ = state;
+    return dev;
+}
+
+int gpunetio_device::open_net_dev() {
+    int status = doca_verbs_dev_open(common_device.pd, &net_dev);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "Failed to open DOCA net device\n");
     return NVSHMEMX_SUCCESS;
 }
 
-static bool gpunetio_cst_is_required(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                     gpunetio_device *device, CUdevice dev_id) {
+bool gpunetio_device::cst_is_required() const {
     bool rval = true;
 
     int order = 0;
-    if (CUPFN(gpunetio_state->cuda_syms,
+    if (CUPFN(state_->cuda_syms,
               cuDeviceGetAttribute(
                   &order, (CUdevice_attribute)CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WRITES_ORDERING,
-                  dev_id))) {
+                  state_->cached_gpu_device_id))) {
         NVSHMEMI_WARN_PRINT("Cannot query dev attr. Assuming no GDR write ordering\n");
     } else {
         // GPU guarantees incoming PCIe write ordering. No need to do CST.
         if (order >= CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER) rval = false;
     }
-    rval = rval || device->common_device.data_direct;
+    rval = rval || common_device.data_direct;
     return rval;
 }
 
 // QP connection logic
-static int gpunetio_create_ah(nvshmemt_gpunetio_state_t *gpunetio_state, gpunetio_device *device,
-                              int portid) {
-    DOCA_CHECK(doca_verbs_ah_attr_create(device->net_dev, &device->ah));
+int gpunetio_device::create_ah(int portid) {
+    // DOCA_CHECK macro captures `gpunetio_state` from the enclosing scope.
+    nvshmemt_gpunetio_state_t *gpunetio_state = state_;
+
+    doca_verbs_ah_attr_t *local_ah = nullptr;
+    DOCA_CHECK(doca_verbs_ah_attr_create(net_dev, &local_ah));
     auto ah_deleter = [](doca_verbs_ah_attr_t *p) { doca_verbs_ah_attr_destroy(p); };
-    std::unique_ptr<doca_verbs_ah_attr_t, decltype(ah_deleter)> ah_guard(device->ah, ah_deleter);
+    std::unique_ptr<doca_verbs_ah_attr_t, decltype(ah_deleter)> ah_guard(local_ah, ah_deleter);
 
-    DOCA_CHECK(doca_verbs_ah_attr_set_sl(device->ah, gpunetio_state->options->IB_SL));
-    DOCA_CHECK(doca_verbs_ah_attr_set_traffic_class(device->ah,
-                                                    gpunetio_state->options->IB_TRAFFIC_CLASS));
+    DOCA_CHECK(doca_verbs_ah_attr_set_sl(local_ah, state_->options->IB_SL));
+    DOCA_CHECK(doca_verbs_ah_attr_set_traffic_class(local_ah, state_->options->IB_TRAFFIC_CLASS));
 
-    if (device->common_device.port_attr[portid - 1].link_layer == 1) {
-        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(device->ah, DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
+    if (common_device.port_attr[portid - 1].link_layer == 1) {
+        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(local_ah, DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
     } else {
-        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(device->ah, DOCA_VERBS_ADDR_TYPE_IPv4));
-        DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(device->ah, GPUNETIO_QP_HOP_LIMIT));
+        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(local_ah, DOCA_VERBS_ADDR_TYPE_IPv4));
+        DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(local_ah, GPUNETIO_QP_HOP_LIMIT));
     }
 
     DOCA_CHECK(doca_verbs_ah_attr_set_sgid_index(
-        device->ah, device->common_device.gid_info[portid - 1].local_gid_index));
+        local_ah, common_device.gid_info[portid - 1].local_gid_index));
 
-    ah_guard.release();
+    ah = ah_guard.release();
     return NVSHMEMX_SUCCESS;
 }
 
-static int gpunetio_create_qp_attr(nvshmemt_gpunetio_state_t *gpunetio_state, ibv_context *context,
-                                   doca_verbs_qp_attr_t **out_verbs_qp_attr,
-                                   doca_verbs_ah_attr_t *ah, int portid, uint32_t dest_qp_num) {
+int gpunetio_device::create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, uint32_t dest_qp_num,
+                                    int portid) const {
+    nvshmemt_gpunetio_state_t *gpunetio_state = state_;
+
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
     DOCA_CHECK(doca_verbs_qp_attr_create(&verbs_qp_attr));
     auto deleter = [](doca_verbs_qp_attr_t *p) { doca_verbs_qp_attr_destroy(p); };
     std::unique_ptr<doca_verbs_qp_attr_t, decltype(deleter)> attr_uptr(verbs_qp_attr, deleter);
 
     doca_verbs_device_attr *verbs_device_attr;
-    DOCA_CHECK(doca_verbs_query_device(context, &verbs_device_attr));
+    DOCA_CHECK(doca_verbs_query_device(common_device.context, &verbs_device_attr));
     auto dev_attr_deleter = [](doca_verbs_device_attr *p) { doca_verbs_device_attr_free(p); };
     std::unique_ptr<doca_verbs_device_attr, decltype(dev_attr_deleter)> dev_attr_uptr(
         verbs_device_attr, dev_attr_deleter);
@@ -379,8 +519,10 @@ static int gpunetio_create_qp_attr(nvshmemt_gpunetio_state_t *gpunetio_state, ib
     return NVSHMEMX_SUCCESS;
 }
 
-static int gpunetio_transition_qp_to_rts(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                         doca_verbs_qp_t *qp, doca_verbs_qp_attr_t *verbs_qp_attr) {
+int gpunetio_device::transition_qp_to_rts(doca_verbs_qp_t *qp,
+                                          doca_verbs_qp_attr_t *verbs_qp_attr) const {
+    nvshmemt_gpunetio_state_t *gpunetio_state = state_;
+
     DOCA_CHECK(
         doca_verbs_qp_modify(qp, verbs_qp_attr,
                              DOCA_VERBS_QP_ATTR_NEXT_STATE | DOCA_VERBS_QP_ATTR_ALLOW_REMOTE_WRITE |
@@ -406,174 +548,582 @@ static int gpunetio_transition_qp_to_rts(nvshmemt_gpunetio_state_t *gpunetio_sta
     return NVSHMEMX_SUCCESS;
 }
 
-static int gpunetio_connect_qps(nvshmemt_gpunetio_state_t *gpunetio_state, gpunetio_ep *ep,
-                                gpunetio_device *device, int portid,
-                                gpunetio_exch_info *remote_exch_info) {
-    DOCA_CHECK(doca_verbs_ah_attr_set_gid(device->ah, remote_exch_info->vgid));
-    DOCA_CHECK(doca_verbs_ah_attr_set_dlid(device->ah, remote_exch_info->lid));
-
-    doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
-    int rc = gpunetio_create_qp_attr(gpunetio_state, device->common_device.context, &verbs_qp_attr,
-                                     device->ah, portid, remote_exch_info->qpn);
-    if (rc) return rc;
-
-    rc = gpunetio_transition_qp_to_rts(gpunetio_state, ep->qp->qp, verbs_qp_attr);
-    doca_verbs_qp_attr_destroy(verbs_qp_attr);
-    return rc;
-}
-
-static int gpunetio_connect_self_loop_qp(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                         gpunetio_device *device, int portid,
-                                         doca_gpu_verbs_qp_hl *qp_local,
-                                         doca_gpu_verbs_qp_hl *qp_local_backup) {
+int gpunetio_device::connect_self_loop(int portid, doca_gpu_verbs_qp_hl *qp_local) {
+    nvshmemt_gpunetio_state_t *gpunetio_state = state_;
     ibv_port_attr port_attr;
-    const union ibv_gid *gid = &device->common_device.gid_info[portid - 1].local_gid;
+    const union ibv_gid *gid = &common_device.gid_info[portid - 1].local_gid;
     doca_verbs_gid vgid;
     uint32_t dest_qp_num;
-    ibv_query_port(device->common_device.context, portid, &port_attr);
+    ibv_query_port(common_device.context, portid, &port_attr);
 
     memcpy(vgid.raw, gid->raw, sizeof(union ibv_gid));
 
-    DOCA_CHECK(doca_verbs_ah_attr_set_gid(device->ah, vgid));
-    if (port_attr.link_layer == 1)
-        DOCA_CHECK(doca_verbs_ah_attr_set_dlid(device->ah, port_attr.lid));
+    DOCA_CHECK(doca_verbs_ah_attr_set_gid(ah, vgid));
+    if (port_attr.link_layer == 1) DOCA_CHECK(doca_verbs_ah_attr_set_dlid(ah, port_attr.lid));
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_local_backup->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
-    int rc = gpunetio_create_qp_attr(gpunetio_state, device->common_device.context, &verbs_qp_attr,
-                                     device->ah, portid, dest_qp_num);
+    int rc = create_qp_attr(&verbs_qp_attr, dest_qp_num, portid);
     if (rc) return rc;
     auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_local->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr_backup = nullptr;
-    rc = gpunetio_create_qp_attr(gpunetio_state, device->common_device.context,
-                                 &verbs_qp_attr_backup, device->ah, portid, dest_qp_num);
+    rc = create_qp_attr(&verbs_qp_attr_backup, dest_qp_num, portid);
     if (rc) return rc;
     auto qp_attr_backup_guard =
         make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr_backup); });
 
-    rc = gpunetio_transition_qp_to_rts(gpunetio_state, qp_local->qp, verbs_qp_attr);
+    rc = transition_qp_to_rts(qp_local->qp, verbs_qp_attr);
     if (rc) return rc;
 
-    rc = gpunetio_transition_qp_to_rts(gpunetio_state, qp_local_backup->qp, verbs_qp_attr_backup);
+    rc = transition_qp_to_rts(qp_local_backup->qp, verbs_qp_attr_backup);
     return rc;
 }
 
-static int gpunetio_create_qp(nvshmem_transport_t t, nvshmemt_gpunetio_state_t *gpunetio_state,
-                              doca_gpu_verbs_qp_init_attr_hl *qp_init_attr, gpunetio_ep **ep_ptr,
-                              gpunetio_device *device, int portid, uint32_t qp_idx) {
+// Per-device endpoint setup
+int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc_eps_per_pe) {
     int status = 0;
-    gpunetio_ep *ep = new gpunetio_ep();
-    auto guard = make_scope_guard([&]() { gpunetio_destroy_ep(ep, gpunetio_state); });
+    int mype = t->my_pe;
+    int n_pes = t->n_pes;
+    int new_num_rc_eps = num_rc_eps_per_pe * n_pes;
+    doca_gpu_verbs_qp_init_attr_hl qp_init_attr;
 
-    status = doca_gpu_verbs_create_qp_hl(qp_init_attr, &ep->qp);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "doca_gpu_verbs_create_qp_hl failed.\n");
+    // exch_info structures
+    std::vector<gpunetio_exch_info> local_exch_info(new_num_rc_eps);
+    std::vector<gpunetio_exch_info> peer_exch_info(new_num_rc_eps);
 
-    ep->portid = portid;
-    ep->user_index = qp_idx;
-    DOCA_CHECK(doca_verbs_qp_get_qpn(ep->qp->qp, &ep->qpn));
+    // get first index of additional RC endpoints
+    int rc_first_index = num_eps_per_pe * n_pes;
 
-    status = gpunetio_create_internal_buffer(
-        &ep->internal_buf, gpunetio_state, device,
-        NVSHMEMI_GPUNETIO_IBUF_SLOT_SIZE *
-            (gpunetio_state->num_fetch_slots_per_rc + GPUNETIO_IBUF_RESERVED_SLOTS));
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                          "gpunetio_create_internal_buffer failed.\n");
-
-    *ep_ptr = ep;
-    TRACE(gpunetio_state->log_level, "Created QP: qp_idx=%d, qpn=%d", qp_idx, ep->qpn);
-
-    if (gpunetio_qp_requires_cpu_proxy(ep->qp)) {
-        gpunetio_activate_progress_function(t);
+    if (new_num_rc_eps <= 0) {
+        return NVSHMEMX_SUCCESS;
     }
 
-    guard.dismiss();
+    {
+        std::lock_guard<std::mutex> lk(*rc_eps_mtx);
+        rc_eps.resize(rc_eps.size() + new_num_rc_eps);
+    }
+
+    auto ep_cleanup_guard = make_scope_guard([&]() {
+        // Reset EP vector to original size on failure, destructors will be called on shrinking
+        std::lock_guard<std::mutex> lk(*rc_eps_mtx);
+        rc_eps.resize(rc_first_index);
+
+        // If we created the local backup QP, destroy it
+        if (rc_first_index == 0 && qp_local_backup) {
+            doca_gpu_verbs_destroy_qp_hl(qp_local_backup);
+            qp_local_backup = nullptr;
+        }
+    });
+
+    if (!common_device.pd) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                           "common_device.pd is NULL for device\n");
+    }
+    if (!common_device.context) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                           "common_device.context is NULL for device\n");
+    }
+
+    if (!state_->gpu_device) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "state_->gpu_device is NULL\n");
+    }
+
+    memset(&qp_init_attr, 0, sizeof(qp_init_attr));
+    qp_init_attr.gpu_dev = state_->gpu_device;
+    qp_init_attr.ibpd = common_device.pd;
+    qp_init_attr.sq_nwqe = state_->qp_depth;
+    qp_init_attr.nic_handler = nic_handler_request;
+    qp_init_attr.mreg_type = DOCA_GPUNETIO_VERBS_MEM_REG_TYPE_DEFAULT;
+    qp_init_attr.cq_collapsed = true;
+    qp_init_attr.net_dev = net_dev;
+
+    if (state_->options->GPUNETIO_ENABLE_ORDERING_SEMANTIC) {
+        INFO(state_->log_level, "Ordering semantic for DDP will be enabled via GPUNetIO\n");
+        qp_init_attr.ordering_semantic = DOCA_VERBS_QP_ORDERING_SEMANTIC_OOO_ALL;
+    }
+
+    INFO(state_->log_level, "Creating %d RC QPs", num_rc_eps_per_pe);
+    for (int i = 0; i < num_rc_eps_per_pe; i++) {
+        for (int j = 0; j < n_pes; j++) {
+            int dst_pe = (i * n_pes + 1 + mype + j) % n_pes;
+            int mapped_i = rc_first_index + i * n_pes + dst_pe;
+            int local_mapped_i = i + num_rc_eps_per_pe * dst_pe;
+
+            // Skip self-loop QP
+            if (dst_pe == mype) continue;
+
+            TRACE(state_->log_level, "dst_pe: %d, mapped_i: %d, local_mapped_i: %d", dst_pe,
+                  mapped_i, local_mapped_i);
+
+            auto [ep, ep_status] =
+                gpunetio_ep::make(t, state_, &qp_init_attr, this, portid, mapped_i);
+
+            if (ep_status != NVSHMEMX_SUCCESS) {
+                if (state_->options->GPUNETIO_ENABLE_ORDERING_SEMANTIC) {
+                    NVSHMEMI_ERROR_PRINT(
+                        "gpunetio_ep::make with ordering semantic enabled failed, please retry "
+                        "with "
+                        "NVSHMEM_GPUNETIO_ENABLE_ORDERING_SEMANTIC=0\n");
+                }
+                NVSHMEMI_ERROR_PRINT("gpunetio_ep::make failed on RC #%d.", mapped_i);
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+
+            local_exch_info[local_mapped_i] = ep->create_exch_info();
+            rc_eps[mapped_i] = std::move(ep);
+        }
+    }
+
+    status =
+        t->boot_handle->alltoall(local_exch_info.data(), peer_exch_info.data(),
+                                 sizeof(gpunetio_exch_info) * num_rc_eps_per_pe, t->boot_handle);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "alltoall of exch_info failed.\n");
+
+    for (int i = 0; i < num_rc_eps_per_pe; ++i) {
+        for (int j = 0; j < n_pes; ++j) {
+            int ep_index = rc_first_index + i * n_pes + j;
+            int peer_handle_index = num_rc_eps_per_pe * j + i;
+            // No loopback to self
+            if (j == mype) {
+                continue;
+            }
+            TRACE(state_->log_level, "Resetting and initializing RC #%d with qp_idx #%d QPN: %d",
+                  ep_index, rc_eps[ep_index]->user_index, rc_eps[ep_index]->qpn);
+            TRACE(state_->log_level, "local QPN: %d, remote handle QPN: %d", rc_eps[ep_index]->qpn,
+                  peer_exch_info[peer_handle_index].qpn);
+
+            status = rc_eps[ep_index]->connect(state_, &peer_exch_info[peer_handle_index]);
+            NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                                  "gpunetio_ep::connect failed on RC #%d.", ep_index);
+
+            TRACE(state_->log_level, "DONE RC #%d", ep_index);
+        }
+    }
+
+    // We have a single loopback QP for each device (at the same slot the regular loop skips)
+    int mype_ep_index = rc_first_index + mype;
+    if (rc_eps[mype_ep_index] == nullptr) {
+        auto [loopback_ep, lb_status] =
+            gpunetio_ep::make(t, state_, &qp_init_attr, this, portid, mype_ep_index);
+        NVSHMEMI_NZ_ERROR_RET(lb_status, NVSHMEMX_ERROR_INTERNAL,
+                              "gpunetio_ep::make failed on loopback QP.\n");
+        rc_eps[mype_ep_index] = std::move(loopback_ep);
+
+        // Dummy backup QP to have matching local QP
+        status = doca_gpu_verbs_create_qp_hl(&qp_init_attr, &qp_local_backup);
+        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                              "doca_gpu_verbs_create_qp_hl failed.");
+        if (gpunetio_qp_requires_cpu_proxy(qp_local_backup)) {
+            gpunetio_activate_progress_function(t);
+        }
+
+        // Connect self-loop QP RC to backup local QP
+        status = connect_self_loop(portid, rc_eps[mype_ep_index]->qp);
+        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                              "gpunetio_device::connect_self_loop failed on loopback QP.\n");
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(*rc_eps_mtx);
+        num_eps_per_pe += num_rc_eps_per_pe;
+    }
+    state_->cur_qp_index += new_num_rc_eps;
+    // Set global state to skip_cst as soon as one device requires CST
+    state_->skip_cst &= (!cst_is_required());
+
+    ep_cleanup_guard.dismiss();
+    return status;
+}
+
+int gpunetio_device::progress(int n_pes) {
+    {
+        std::lock_guard<std::mutex> lk(*rc_eps_mtx);
+        int num_eps = num_eps_per_pe * n_pes;
+        for (int j = 0; j < num_eps; j++) {
+            if (!rc_eps[j]) continue;
+            rc_eps[j]->progress();
+        }
+    }
+    if (qp_local_backup && qp_local_backup->qp_gverbs) {
+        int status = doca_gpu_verbs_cpu_proxy_progress(qp_local_backup->qp_gverbs, nullptr);
+        if (status) {
+            NVSHMEMI_WARN_PRINT("doca_gpu_verbs_cpu_proxy_progress failed for qp_local_backup\n");
+        }
+    }
     return NVSHMEMX_SUCCESS;
 }
 
-// Phase 1: One-time global setup
-static int gpunetio_connect_global_setup(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                         int num_selected_devs, int *selected_dev_ids) {
+gpunetio_device::~gpunetio_device() {
+    // Destroy endpoints
+    rc_eps.clear();
+
+    if (ah) {
+        int ret = doca_verbs_ah_attr_destroy(ah);
+        if (ret) {
+            NVSHMEMI_WARN_PRINT("doca_verbs_ah_attr_destroy failed: %d\n", ret);
+        }
+    }
+    if (qp_local_backup) {
+        int ret = doca_gpu_verbs_destroy_qp_hl(qp_local_backup);
+        if (ret) {
+            NVSHMEMI_WARN_PRINT("doca_gpu_verbs_destroy_qp_hl failed for qp_local_backup\n");
+        }
+    }
+    if (net_dev) {
+        int ret = doca_verbs_dev_close(net_dev);
+        if (ret) {
+            NVSHMEMI_WARN_PRINT("doca_verbs_dev_close failed: %d\n", ret);
+        }
+    }
+    if (state_) {
+        if (common_device.pd) {
+            int ret = state_->ftable.dealloc_pd(common_device.pd);
+            if (ret) {
+                INFO(state_->log_level, "ibv_dealloc_pd failed Err: %d:%s.\n", errno,
+                     strerror(errno));
+            }
+        }
+        if (common_device.context) {
+            int ret = state_->ftable.close_device(common_device.context);
+            if (ret) {
+                NVSHMEMI_WARN_PRINT("ibv_close_device failed Err: %d:%s.\n", errno,
+                                    strerror(errno));
+            }
+        }
+    }
+}
+
+// nvshmemt_gpunetio_state_t
+int nvshmemt_gpunetio_state_t::init_populate_state(nvshmemi_options_s *options) {
+    int status = 0;
+    log_level = nvshmemt_common_get_log_level(options);
+    skip_cst = true;  // will be set to false if multiple devices are selected or if
+                      // CST is required for a device
+    initialize_cache_state();
+
+    qp_depth = options->QP_DEPTH;
+    if (qp_depth > 0) {
+        qp_depth = gpunetio_round_up_pow2_or_0(qp_depth);
+    }
+    if (qp_depth <= 0) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "NVSHMEM_QP_DEPTH must be a positive number.\n");
+    } else if (qp_depth < NVSHMEMI_GPUNETIO_MIN_QP_DEPTH) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "NVSHMEM_QP_DEPTH must be at least %d.\n",
+                           NVSHMEMI_GPUNETIO_MIN_QP_DEPTH);
+    } else if (qp_depth > NVSHMEMI_GPUNETIO_MAX_QP_DEPTH) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "NVSHMEM_QP_DEPTH can be at most %d.\n", NVSHMEMI_GPUNETIO_MAX_QP_DEPTH);
+    }
+
+    num_requests_in_batch = options->GPUNETIO_NUM_REQUESTS_IN_BATCH;
+    if (num_requests_in_batch > 0) {
+        num_requests_in_batch = gpunetio_round_up_pow2_or_0(num_requests_in_batch);
+    }
+    if (num_requests_in_batch <= 0) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "NVSHMEM_GPUNETIO_NUM_REQUESTS_IN_BATCH must be a positive number.\n");
+    } else if (num_requests_in_batch > qp_depth) {
+        NVSHMEMI_ERROR_RET(
+            status, NVSHMEMX_ERROR_INVALID_VALUE,
+            "NVSHMEM_GPUNETIO_NUM_REQUESTS_IN_BATCH must not be larger than QP depth.\n");
+    }
+
+    num_fetch_slots_per_rc = options->GPUNETIO_NUM_FETCH_SLOTS_PER_RC;
+    if (num_fetch_slots_per_rc > 0)
+        num_fetch_slots_per_rc = gpunetio_round_up_pow2(num_fetch_slots_per_rc);
+    if (num_fetch_slots_per_rc <= 0) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "NVSHMEM_GPUNETIO_NUM_FETCH_SLOTS_PER_RC must be a positive number.\n");
+    }
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemt_gpunetio_state_t::init_ftables(nvshmemi_options_s *options,
+                                            nvshmemi_cuda_fn_table *table) {
     int status = 0;
 
-    status = gpunetio_get_cuda_device_id(gpunetio_state, &gpunetio_state->cached_gpu_device_id);
-    if (status) {
+    cuda_syms = table;
+    if (nvshmemt_ibv_ftable_init(&ibv_handle, &ftable, log_level)) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                           "Unable to dlopen libibverbs. Skipping DOCA transport.\n");
+    }
+
+#ifdef NVSHMEM_USE_MLX5DV
+    if (!options->DISABLE_DATA_DIRECT) {
+        if (nvshmemt_mlx5dv_ftable_init(&mlx5dv_handle, &mlx5dv_ftable, log_level)) {
+            NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.\n");
+            mlx5dv_ftable.mlx5dv_internal_is_supported = nullptr;
+            mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+            mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = nullptr;
+        }
+    } else {
+        mlx5dv_ftable.mlx5dv_internal_is_supported = nullptr;
+        mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+        mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = nullptr;
+        INFO(log_level, "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
+    }
+#else
+    INFO(log_level, "directNIC features are disabled\n");
+#endif
+
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemt_gpunetio_state_t::init_gpu(nvshmemi_options_s *options) {
+    CUdevice gpu_device_id;
+    int status = 0;
+    int lowest_stream_priority;
+    int highest_stream_priority;
+
+    status = CUPFN(cuda_syms, cuCtxGetDevice(&gpu_device_id));
+    if (status != CUDA_SUCCESS) {
+        status = NVSHMEMX_ERROR_INTERNAL;
         return status;
     }
 
+    char pci_bus_id[MAX_GPU_PCI_ADDRESS_LEN];
+    CUDA_RUNTIME_CHECK_RET(
+        cudaDeviceGetPCIBusId(pci_bus_id, MAX_GPU_PCI_ADDRESS_LEN, gpu_device_id),
+        NVSHMEMX_ERROR_INTERNAL);
+    INFO(log_level, "Creating DOCA GPU device handler for GPU with bus ID: %s\n", pci_bus_id);
+    status = doca_gpu_create(pci_bus_id, &gpu_device);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                          "doca_gpu_create failed to create handler for GPU with bus ID: %s\n",
+                          pci_bus_id);
+
+    status = nvshmemt_ib_common_check_dmabuf_support(dmabuf_support_for_data_buffers, cuda_syms,
+                                                     options->IB_DISABLE_DMABUF);
+    if (status) return status;
+
+    CUDA_RUNTIME_CHECK_RET(
+        cudaDeviceGetStreamPriorityRange(&lowest_stream_priority, &highest_stream_priority),
+        NVSHMEMX_ERROR_INTERNAL);
+    CUDA_RUNTIME_CHECK_RET(
+        cudaStreamCreateWithPriority(&my_stream, cudaStreamNonBlocking, highest_stream_priority),
+        NVSHMEMX_ERROR_INTERNAL);
+
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
+                                                nvshmemi_options_s *options) {
+    int num_devices = 0;
+    ibv_device **dev_list = nullptr;
+    int status = 0;
+    doca_gpu_dev_verbs_nic_handler nic_handler_request = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO;
+    uint32_t atomic_host_endian_size = 0;
+
+    status =
+        gpunetio_parse_nic_handler_request(&nic_handler_request, options->GPUNETIO_NIC_HANDLER);
+    NVSHMEMI_NZ_ERROR_RET(status, status, "NVSHMEM_GPUNETIO_NIC_HANDLER is not valid.\n");
+    INFO(log_level, "NVSHMEM_GPUNETIO_NIC_HANDLER requested: %d\n", nic_handler_request);
+
+    dev_list = ftable.get_device_list(&num_devices);
+    NVSHMEMI_NULL_ERROR_RET(dev_list, status, NVSHMEMX_ERROR_INTERNAL, "get_device_list failed \n");
+    INFO(log_level, "Found %d devices\n", num_devices);
+
+    struct nvshmemt_ib_hca_filter hca_filter = {};
+    struct nvshmemt_ib_common_state temp_state = {};
+    temp_state.options = options;
+    temp_state.log_level = log_level;
+    nvshmemt_ib_common_parse_hca_filter(hca_filter, temp_state);
+
+    struct nvshmemt_ib_common_device common_devs[MAX_NUM_HCAS] = {};
+    int temp_dev_ids[MAX_NUM_PES_PER_NODE];
+    int temp_port_ids[MAX_NUM_PES_PER_NODE];
+    temp_state.devices = common_devs;
+    temp_state.dev_ids = temp_dev_ids;
+    temp_state.port_ids = temp_port_ids;
+
+    status = nvshmemt_ib_common_enumerate_devices(
+        &ftable, temp_state, sizeof(nvshmemt_ib_common_device), hca_filter, dev_list, num_devices);
+    if (status) return status;
+
+    {
+        bool device_checked[MAX_NUM_HCAS] = {};
+        int write_idx = 0;
+        for (int i = 0; i < temp_state.n_dev_ids; i++) {
+            int dev_idx = temp_state.dev_ids[i];
+            struct nvshmemt_ib_common_device *dev = &common_devs[dev_idx];
+
+            if (!device_checked[dev_idx]) {
+                device_checked[dev_idx] = true;
+                const char *name = ftable.get_device_name(dev->dev);
+
+                if (!nvshmemt_ib_common_query_mlx5_caps(dev->context)) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s is not enumerated as an mlx5 device. Skipping...", name);
+                    ftable.close_device(dev->context);
+                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    dev->context = nullptr;
+                    dev->pd = nullptr;
+                    continue;
+                }
+
+                status = nvshmemt_ib_common_check_nic_ext_atomic_support(dev->context);
+                if (status) {
+                    NVSHMEMI_WARN_PRINT(
+                        "device %s does not support all necessary atomic operations. You may want "
+                        "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
+                        name);
+                    ftable.close_device(dev->context);
+                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    dev->context = nullptr;
+                    dev->pd = nullptr;
+                    continue;
+                }
+            }
+
+            if (!dev->context) continue;
+
+            temp_state.dev_ids[write_idx] = temp_state.dev_ids[i];
+            temp_state.port_ids[write_idx] = temp_state.port_ids[i];
+            write_idx++;
+        }
+        temp_state.n_dev_ids = write_idx;
+    }
+
+    nvshmemt_ib_common_warn_missing_hcas(hca_filter);
+    nvshmemt_ib_common_log_device_assignment(temp_state);
+
+    if (!temp_state.n_dev_ids) {
+        INFO(
+            log_level,
+            "no active IB device that supports GPU-initiated communication is found, exiting...\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    status = nvshmemt_ib_common_discover_pci_paths(
+        transport, temp_state, sizeof(nvshmemt_ib_common_device), &ftable, &mlx5dv_ftable);
+    if (status) return status;
+
+    // We need to copy the detected devices into the vector-based structures of gpunetio_state.
+    std::array<int, MAX_NUM_HCAS> dev_remap;
+    dev_remap.fill(-1);
+    for (int i = 0; i < temp_state.n_dev_ids; i++) {
+        int dev_id = temp_state.dev_ids[i];
+        if (dev_remap[dev_id] == -1) {
+            auto new_dev = gpunetio_device::make(this);
+            new_dev->common_device = common_devs[dev_id];
+            devices.push_back(std::move(new_dev));
+            dev_remap[dev_id] = static_cast<int>(devices.size() - 1);
+        }
+        dev_ids.push_back(dev_remap[dev_id]);
+        port_ids.push_back(temp_state.port_ids[i]);
+    }
+
+    for (int dev_id : dev_ids) {
+        auto &device = *devices[dev_id];
+        if (device.common_device.data_direct && !options->GPUNETIO_NUM_RC_PER_PE_provided) {
+            // Need 8 QPs for achieving bandwidth in data direct device
+            options->GPUNETIO_NUM_RC_PER_PE = 8;
+            INFO(log_level, "Setting GPUNETIO_NUM_RC_PER_PE = 8 as data direct device is detected");
+        }
+
+        // Report whether we need to do atomic endianness conversions on 8 byte operands.
+        status = nvshmemt_ib_common_query_endianness_conversion_size(&atomic_host_endian_size,
+                                                                     device.common_device.context);
+        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                              "nvshmemt_ib_common_query_endianness_conversion_size failed.\n");
+
+        device.nic_handler_request = nic_handler_request;
+    }
+
+    if (options->GPUNETIO_NUM_RC_PER_PE <= 0) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "GPUNETIO_NUM_RC_PER_PE must be greater than 0");
+    }
+
+    transport->atomic_host_endian_min_size = atomic_host_endian_size;
+
+    // Open NIC in GPUNetIO
+    for (auto &device : devices) {
+        status = device->open_net_dev();
+        if (status) return status;
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+std::pair<std::unique_ptr<nvshmemt_gpunetio_state_t>, nvshmemx_status>
+nvshmemt_gpunetio_state_t::make(nvshmem_transport *transport, nvshmemi_options_s *options,
+                                nvshmemi_cuda_fn_table *table) {
+    std::unique_ptr<nvshmemt_gpunetio_state_t> state(new nvshmemt_gpunetio_state_t());
+
+    int status = state->init_populate_state(options);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Failed while parsing options.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
+
+    status = state->init_ftables(options, table);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Failed to initialize ftables.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
+
+    status = state->init_gpu(options);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Failed to get and initialize GPU.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
+
+    status = state->init_nic_devices(transport, options);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("Failed to parse and select NICs.\n");
+        return {nullptr, NVSHMEMX_ERROR_INTERNAL};
+    }
+
+    return {std::move(state), NVSHMEMX_SUCCESS};
+}
+
+int nvshmemt_gpunetio_state_t::get_cuda_device_id(CUdevice *out) {
+    if (CUPFN(cuda_syms, cuCtxGetDevice(out))) {
+        NVSHMEMI_ERROR_PRINT("cuCtxGetDevice failed.\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    return NVSHMEMX_SUCCESS;
+}
+
+void nvshmemt_gpunetio_state_t::initialize_cache_state() {
+    connect_endpoints_first_call = true;
+    last_device_index = 0;
+    cur_qp_index = 0;
+    last_num_rcs = 0;
+    qp_h.clear();
+}
+
+// Phase 1: One-time global setup
+int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *selected_dev_ids) {
+    int status = get_cuda_device_id(&cached_gpu_device_id);
+    if (status) return status;
+
     // Populate selected device IDs if not already done
-    if (gpunetio_state->selected_dev_ids.empty()) {
-        gpunetio_state->selected_dev_ids.resize(num_selected_devs);
+    if (this->selected_dev_ids.empty()) {
+        this->selected_dev_ids.resize(num_selected_devs);
     }
 
     // Validate device IDs
     for (int i = 0; i < num_selected_devs; i++) {
-        if (selected_dev_ids[i] < 0 ||
-            selected_dev_ids[i] >= static_cast<int>(gpunetio_state->dev_ids.size())) {
+        if (selected_dev_ids[i] < 0 || selected_dev_ids[i] >= static_cast<int>(dev_ids.size())) {
             NVSHMEMI_ERROR_PRINT("Invalid device ID %d.\n", selected_dev_ids[i]);
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
-        gpunetio_state->selected_dev_ids[i] = gpunetio_state->dev_ids[selected_dev_ids[i]];
-    }
-
-    return NVSHMEMX_SUCCESS;
-}
-
-// Progress
-static bool gpunetio_qp_requires_cpu_proxy(doca_gpu_verbs_qp_hl *qp) {
-    return qp->qp_gverbs->qp_cpu->nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
-}
-
-static void gpunetio_activate_progress_function(nvshmem_transport_t t) {
-    t->host_ops.progress = nvshmemt_gpunetio_progress;
-    t->no_proxy = false;
-}
-
-int nvshmemt_gpunetio_progress(nvshmem_transport_t t) {
-    nvshmemt_gpunetio_state_t *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
-    int n_pes = t->n_pes;
-
-    // Iterate over all devices and their EPs and progress QPs
-    for (int dev_idx : gpunetio_state->selected_dev_ids) {
-        gpunetio_device *device = &gpunetio_state->devices[dev_idx];
-        {
-            std::lock_guard<std::mutex> lk(*device->rc_eps_mtx);
-            int num_eps = device->num_eps_per_pe * n_pes;
-            for (int j = 0; j < num_eps; j++) {
-                gpunetio_ep *ep = device->rc_eps[j];
-                if (ep == nullptr) continue;
-
-                int status = doca_gpu_verbs_cpu_proxy_progress(ep->qp->qp_gverbs, nullptr);
-                if (status) {
-                    NVSHMEMI_WARN_PRINT("doca_gpu_verbs_cpu_proxy_progress failed for ep %p \n",
-                                        ep);
-                }
-            }
-        }
-
-        // Progress local backup QP
-        if (device->qp_local_backup && device->qp_local_backup->qp_gverbs) {
-            int status =
-                doca_gpu_verbs_cpu_proxy_progress(device->qp_local_backup->qp_gverbs, nullptr);
-            if (status) {
-                NVSHMEMI_WARN_PRINT(
-                    "doca_gpu_verbs_cpu_proxy_progress failed for qp_local_backup\n");
-            }
-        }
+        this->selected_dev_ids[i] = dev_ids[selected_dev_ids[i]];
     }
 
     return NVSHMEMX_SUCCESS;
 }
 
 // Populate and copy over state to GPU
-static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
+int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     int status = 0;
 
-    nvshmemt_gpunetio_state_t *gpunetio_state;
-    gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
-    nvshmemi_gpunetio_device_state_t *gpunetio_device_state_h;
-    gpunetio_device_state_h =
+    auto *gpunetio_device_state_h =
         static_cast<nvshmemi_gpunetio_device_state_t *>(t->type_specific_shared_state);
     nvshmemi_gpunetio_device_qp_t *qp_d = gpunetio_device_state_h->globalmem.qps;
     nvshmemi_gpunetio_device_qp_t *qp_d_temp = nullptr;
@@ -587,17 +1137,15 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
 
     doca_gpu_dev_verbs_qp *qp_tmp;
     int num_rc_handles = 0;
-    int n_devs_selected = static_cast<int>(gpunetio_state->selected_dev_ids.size());
+    int n_devs_selected = static_cast<int>(selected_dev_ids.size());
 
     assert(gpunetio_device_state_h != nullptr);
-
     // Calculate total RC handle count across all devices
-    for (int dev_idx : gpunetio_state->selected_dev_ids) {
-        gpunetio_device *device = &gpunetio_state->devices[dev_idx];
+    for (int dev_idx : selected_dev_ids) {
+        gpunetio_device *device = devices[dev_idx].get();
         num_rc_handles += device->num_eps_per_pe * t->n_pes;
     }
-    INFO(gpunetio_state->log_level, "num_rc_handles: %d (last_num_rcs: %d)", num_rc_handles,
-         gpunetio_state->last_num_rcs);
+    INFO(log_level, "num_rc_handles: %d (last_num_rcs: %d)", num_rc_handles, last_num_rcs);
 
     if (num_rc_handles <= 0) {
         NVSHMEMI_WARN_PRINT("num_rc_handles is 0\n");
@@ -605,7 +1153,7 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
     }
 
     // Resize host-side QP array
-    gpunetio_state->qp_h.resize(num_rc_handles);
+    qp_h.resize(num_rc_handles);
 
     // Reallocate device-side QP array if it already exists
     if (qp_d != nullptr) {
@@ -619,26 +1167,23 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
             }
         });
         CUDA_RUNTIME_CHECK_RET(
-            cudaMemcpyAsync(qp_d_temp, qp_d,
-                            gpunetio_state->last_num_rcs * sizeof(nvshmemi_gpunetio_device_qp_t),
-                            cudaMemcpyDeviceToDevice, gpunetio_state->my_stream),
+            cudaMemcpyAsync(qp_d_temp, qp_d, last_num_rcs * sizeof(nvshmemi_gpunetio_device_qp_t),
+                            cudaMemcpyDeviceToDevice, my_stream),
             NVSHMEMX_ERROR_INTERNAL);
         CUDA_RUNTIME_CHECK_RET(
-            cudaMemcpyAsync(gpunetio_state->qp_h.data(), qp_d,
-                            gpunetio_state->last_num_rcs * sizeof(nvshmemi_gpunetio_device_qp_t),
-                            cudaMemcpyDeviceToHost, gpunetio_state->my_stream),
+            cudaMemcpyAsync(qp_h.data(), qp_d, last_num_rcs * sizeof(nvshmemi_gpunetio_device_qp_t),
+                            cudaMemcpyDeviceToHost, my_stream),
             NVSHMEMX_ERROR_INTERNAL);
-        CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(gpunetio_state->my_stream),
-                               NVSHMEMX_ERROR_INTERNAL);
+        CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream), NVSHMEMX_ERROR_INTERNAL);
         CUDA_RUNTIME_CHECK_RET(cudaFree(qp_d), NVSHMEMX_ERROR_INTERNAL);
         qp_d = qp_d_temp;
         qp_d_temp = nullptr;
     }
 
     // Populate QP host array with data from all devices and all eps
-    for (size_t i = 0; i < gpunetio_state->selected_dev_ids.size(); ++i) {
-        int dev_idx = gpunetio_state->selected_dev_ids[i];
-        gpunetio_device *device = &gpunetio_state->devices[dev_idx];
+    for (size_t i = 0; i < selected_dev_ids.size(); ++i) {
+        int dev_idx = selected_dev_ids[i];
+        gpunetio_device *device = devices[dev_idx].get();
         int device_num_eps_per_pe = device->num_eps_per_pe;
 
         for (int j = 0; j < device_num_eps_per_pe; ++j) {
@@ -657,7 +1202,7 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
                     static_cast<int>(i) * device_num_eps_per_pe * t->n_pes + device_ep_index;
                 assert(global_ep_index < num_rc_handles);
 
-                if (global_ep_index < gpunetio_state->last_num_rcs) {
+                if (global_ep_index < last_num_rcs) {
                     continue;
                 }
 
@@ -667,28 +1212,25 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
                     return status;
                 }
                 CUDA_RUNTIME_CHECK_RET(
-                    cudaMemcpyAsync(&(gpunetio_state->qp_h[global_ep_index].qp), qp_tmp,
-                                    sizeof(doca_gpu_dev_verbs_qp), cudaMemcpyDefault,
-                                    gpunetio_state->my_stream),
+                    cudaMemcpyAsync(&(qp_h[global_ep_index].qp), qp_tmp,
+                                    sizeof(doca_gpu_dev_verbs_qp), cudaMemcpyDefault, my_stream),
                     NVSHMEMX_ERROR_OUT_OF_MEMORY);
-                CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(gpunetio_state->my_stream),
+                CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream),
                                        NVSHMEMX_ERROR_OUT_OF_MEMORY);
 
                 TRACE(
-                    gpunetio_state->log_level,
+                    log_level,
                     "Exported handle %d for PE %d for device %d at global index %d, pointer is %p",
-                    device_ep_index, dst_pe, dev_idx, global_ep_index,
-                    &(gpunetio_state->qp_h[global_ep_index].qp));
+                    device_ep_index, dst_pe, dev_idx, global_ep_index, &(qp_h[global_ep_index].qp));
 
-                gpunetio_state->qp_h[global_ep_index].ibuf.buf =
-                    device->rc_eps[device_ep_index]->internal_buf.mem_object->aligned.gpu_ptr;
-                gpunetio_state->qp_h[global_ep_index].ibuf.nslots =
-                    gpunetio_state->num_fetch_slots_per_rc;
-                gpunetio_state->qp_h[global_ep_index].ibuf.lkey =
-                    htobe32(device->rc_eps[device_ep_index]->internal_buf.mem_handle->lkey);
-                gpunetio_state->qp_h[global_ep_index].ibuf.rkey =
-                    htobe32(device->rc_eps[device_ep_index]->internal_buf.mem_handle->rkey);
-                gpunetio_state->qp_h[global_ep_index].dev_idx = static_cast<uint32_t>(i);
+                qp_h[global_ep_index].ibuf.buf =
+                    device->rc_eps[device_ep_index]->internal_buf->aligned.gpu_ptr;
+                qp_h[global_ep_index].ibuf.nslots = num_fetch_slots_per_rc;
+                qp_h[global_ep_index].ibuf.lkey =
+                    htobe32(device->rc_eps[device_ep_index]->internal_buf->mem_handle.lkey);
+                qp_h[global_ep_index].ibuf.rkey =
+                    htobe32(device->rc_eps[device_ep_index]->internal_buf->mem_handle.rkey);
+                qp_h[global_ep_index].dev_idx = static_cast<uint32_t>(i);
             }
         }
     }
@@ -699,31 +1241,26 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
             cudaMalloc(&qp_d, num_rc_handles * sizeof(nvshmemi_gpunetio_device_qp_t)),
             NVSHMEMX_ERROR_OUT_OF_MEMORY);
     }
-    // Copy full QP array to GPU
-    CUDA_RUNTIME_CHECK_RET(cudaMemcpyAsync(qp_d, gpunetio_state->qp_h.data(),
-                                           num_rc_handles * sizeof(nvshmemi_gpunetio_device_qp_t),
-                                           cudaMemcpyDefault, gpunetio_state->my_stream),
-                           NVSHMEMX_ERROR_OUT_OF_MEMORY);
-    CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(gpunetio_state->my_stream),
-                           NVSHMEMX_ERROR_OUT_OF_MEMORY);
+    CUDA_RUNTIME_CHECK_RET(
+        cudaMemcpyAsync(qp_d, qp_h.data(), num_rc_handles * sizeof(nvshmemi_gpunetio_device_qp_t),
+                        cudaMemcpyDefault, my_stream),
+        NVSHMEMX_ERROR_OUT_OF_MEMORY);
+    CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream), NVSHMEMX_ERROR_OUT_OF_MEMORY);
 
     gpunetio_device_state_h->globalmem.qps = qp_d;
-    gpunetio_device_state_h->may_skip_cst = gpunetio_state->skip_cst;
+    gpunetio_device_state_h->may_skip_cst = skip_cst;
     gpunetio_device_state_h->num_devices_initialized = n_devs_selected;
     gpunetio_device_state_h->num_rc_per_pe = num_rc_handles / n_devs_selected / t->n_pes;
-    gpunetio_device_state_h->num_default_rc_per_pe =
-        gpunetio_state->options->GPUNETIO_NUM_RC_PER_PE;
+    gpunetio_device_state_h->num_default_rc_per_pe = options->GPUNETIO_NUM_RC_PER_PE;
     gpunetio_device_state_h->log2_cumem_granularity = t->log2_cumem_granularity;
-    gpunetio_device_state_h->num_requests_in_batch = gpunetio_state->num_requests_in_batch;
+    gpunetio_device_state_h->num_requests_in_batch = num_requests_in_batch;
 
-    INFO(gpunetio_state->log_level,
-         "num_rc_per_pe %d num_rc_handles %d n_devs_selected %d n_pes %d",
+    INFO(log_level, "num_rc_per_pe %d num_rc_handles %d n_devs_selected %d n_pes %d",
          gpunetio_device_state_h->num_rc_per_pe, num_rc_handles, n_devs_selected, t->n_pes);
 
     // QP group switches for load balancing (allocate only once)
     if (gpunetio_device_state_h->globalmem.qp_group_switches == nullptr) {
-        int default_num_rc_handles =
-            gpunetio_state->options->GPUNETIO_NUM_RC_PER_PE * n_devs_selected * t->n_pes;
+        int default_num_rc_handles = options->GPUNETIO_NUM_RC_PER_PE * n_devs_selected * t->n_pes;
         if (num_rc_handles == default_num_rc_handles) {
             int num_qp_groups = std::max(num_rc_handles / n_devs_selected / t->n_pes, 2);
             uint8_t *qp_group_switches_d;
@@ -731,283 +1268,74 @@ static int gpunetio_setup_gpu_state(nvshmem_transport_t t) {
                                               num_qp_groups * sizeof(uint8_t)),
                                    NVSHMEMX_ERROR_OUT_OF_MEMORY);
             CUDA_RUNTIME_CHECK_RET(
-                cudaMemsetAsync(qp_group_switches_d, 0, num_qp_groups * sizeof(uint8_t),
-                                gpunetio_state->my_stream),
+                cudaMemsetAsync(qp_group_switches_d, 0, num_qp_groups * sizeof(uint8_t), my_stream),
                 NVSHMEMX_ERROR_INTERNAL);
             gpunetio_device_state_h->globalmem.qp_group_switches = qp_group_switches_d;
         }
     }
 
-    gpunetio_state->last_num_rcs = num_rc_handles;
+    last_num_rcs = num_rc_handles;
 
-    CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(gpunetio_state->my_stream),
-                           NVSHMEMX_ERROR_INTERNAL);
+    CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream), NVSHMEMX_ERROR_INTERNAL);
 
     qp_d_guard.dismiss();
     return NVSHMEMX_SUCCESS;
 }
 
-// Phase 3: Per-device endpoint setup
-static int gpunetio_connect_device_endpoints(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                             gpunetio_device *device, int portid,
-                                             nvshmem_transport_t t, int num_rc_eps_per_pe) {
-    int status = 0;
-    int mype = t->my_pe;
-    int n_pes = t->n_pes;
-    int new_num_rc_eps = num_rc_eps_per_pe * n_pes;
-    doca_gpu_verbs_qp_init_attr_hl qp_init_attr;
-
-    // exch_info structures
-    std::vector<gpunetio_exch_info> local_exch_info(new_num_rc_eps);
-    std::vector<gpunetio_exch_info> peer_exch_info(new_num_rc_eps);
-
-    // get first index of additional RC endpoints
-    int rc_first_index = device->num_eps_per_pe * n_pes;
-
-    if (new_num_rc_eps <= 0) {
-        return NVSHMEMX_SUCCESS;
-    }
-
-    {
-        std::lock_guard<std::mutex> lk(*device->rc_eps_mtx);
-        try {
-            device->rc_eps.resize(device->rc_eps.size() + new_num_rc_eps, nullptr);
-        } catch (const std::bad_alloc &) {
-            status = NVSHMEMX_ERROR_OUT_OF_MEMORY;
-            NVSHMEMI_ERROR_PRINT("allocation of rc_eps failed.\n");
-            return status;
-        }
-    }
-
-    auto ep_cleanup_guard = make_scope_guard([&]() {
-        // Reset EP vector to original size on failure
-        std::lock_guard<std::mutex> lk(*device->rc_eps_mtx);
-        for (int i = rc_first_index; i < rc_first_index + new_num_rc_eps; ++i) {
-            if (device->rc_eps[i]) {
-                gpunetio_destroy_ep(device->rc_eps[i], gpunetio_state);
-                device->rc_eps[i] = nullptr;
-            }
-        }
-        device->rc_eps.resize(rc_first_index);
-
-        // If we created the local backup QP, destroy it
-        if (rc_first_index == 0 && device->qp_local_backup) {
-            doca_gpu_verbs_destroy_qp_hl(device->qp_local_backup);
-            device->qp_local_backup = nullptr;
-        }
-    });
-
-    if (!device->common_device.pd) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                           "device->common_device.pd is NULL for device\n");
-    }
-    if (!device->common_device.context) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                           "device->common_device.context is NULL for device\n");
-    }
-
-    if (!gpunetio_state->gpu_device) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "gpunetio_state->gpu_device is NULL\n");
-    }
-
-    memset(&qp_init_attr, 0, sizeof(qp_init_attr));
-    qp_init_attr.gpu_dev = gpunetio_state->gpu_device;
-    qp_init_attr.ibpd = device->common_device.pd;
-    qp_init_attr.sq_nwqe = gpunetio_state->qp_depth;
-    qp_init_attr.nic_handler = device->nic_handler_request;
-    qp_init_attr.mreg_type = DOCA_GPUNETIO_VERBS_MEM_REG_TYPE_DEFAULT;
-    qp_init_attr.cq_collapsed = true;
-    qp_init_attr.net_dev = device->net_dev;
-
-    if (gpunetio_state->options->GPUNETIO_ENABLE_ORDERING_SEMANTIC) {
-        INFO(gpunetio_state->log_level, "Ordering semantic for DDP will be enabled via GPUNetIO\n");
-        qp_init_attr.ordering_semantic = DOCA_VERBS_QP_ORDERING_SEMANTIC_OOO_ALL;
-    }
-
-    INFO(gpunetio_state->log_level, "Creating %d RC QPs", num_rc_eps_per_pe);
-    for (int i = 0; i < num_rc_eps_per_pe; i++) {
-        for (int j = 0; j < n_pes; j++) {
-            int dst_pe = (i * n_pes + 1 + mype + j) % n_pes;
-            int mapped_i = rc_first_index + i * n_pes + dst_pe;
-            int local_mapped_i = i + num_rc_eps_per_pe * dst_pe;
-
-            // Skip self-loop QP
-            if (dst_pe == mype) continue;
-
-            TRACE(gpunetio_state->log_level, "dst_pe: %d, mapped_i: %d, local_mapped_i: %d", dst_pe,
-                  mapped_i, local_mapped_i);
-
-            status = gpunetio_create_qp(t, gpunetio_state, &qp_init_attr, &device->rc_eps[mapped_i],
-                                        device, portid, mapped_i);
-
-            if (status != NVSHMEMX_SUCCESS) {
-                if (gpunetio_state->options->GPUNETIO_ENABLE_ORDERING_SEMANTIC) {
-                    NVSHMEMI_ERROR_PRINT(
-                        "gpunetio_create_qp with ordering semantic enabled failed, please retry "
-                        "with "
-                        "NVSHMEM_GPUNETIO_ENABLE_ORDERING_SEMANTIC=0\n");
-                }
-                NVSHMEMI_ERROR_PRINT("gpunetio_create_qp failed on RC #%d.", mapped_i);
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-
-            status = gpunetio_fill_exch_info(&local_exch_info[local_mapped_i],
-                                             device->rc_eps[mapped_i], device);
-            NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                                  "gpunetio_fill_exch_info failed on RC #%d.", mapped_i);
-        }
-    }
-
-    status =
-        t->boot_handle->alltoall(local_exch_info.data(), peer_exch_info.data(),
-                                 sizeof(gpunetio_exch_info) * num_rc_eps_per_pe, t->boot_handle);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "alltoall of exch_info failed.\n");
-
-    for (int i = 0; i < num_rc_eps_per_pe; ++i) {
-        for (int j = 0; j < n_pes; ++j) {
-            int ep_index = rc_first_index + i * n_pes + j;
-            int peer_handle_index = num_rc_eps_per_pe * j + i;
-            // No loopback to self
-            if (j == mype) {
-                continue;
-            }
-            TRACE(gpunetio_state->log_level,
-                  "Resetting and initializing RC #%d with qp_idx #%d QPN: %d", ep_index,
-                  device->rc_eps[ep_index]->user_index, device->rc_eps[ep_index]->qpn);
-            TRACE(gpunetio_state->log_level, "local QPN: %d, remote handle QPN: %d",
-                  device->rc_eps[ep_index]->qpn, peer_exch_info[peer_handle_index].qpn);
-
-            status = gpunetio_connect_qps(gpunetio_state, device->rc_eps[ep_index], device, portid,
-                                          &peer_exch_info[peer_handle_index]);
-            NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                                  "gpunetio_connect_qps failed on RC #%d.", ep_index);
-
-            TRACE(gpunetio_state->log_level, "DONE RC #%d", ep_index);
-        }
-    }
-
-    // We have a single loopback QP for each device (at the same slot the regular loop skips)
-    int mype_ep_index = rc_first_index + mype;
-    if (device->rc_eps[mype_ep_index] == nullptr) {
-        status = gpunetio_create_qp(t, gpunetio_state, &qp_init_attr,
-                                    &device->rc_eps[mype_ep_index], device, portid, mype_ep_index);
-        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                              "gpunetio_create_qp failed on loopback QP.\n");
-
-        // Dummy backup QP to have matching local QP
-        status = doca_gpu_verbs_create_qp_hl(&qp_init_attr, &device->qp_local_backup);
-        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                              "doca_gpu_verbs_create_qp_hl failed.");
-        if (gpunetio_qp_requires_cpu_proxy(device->qp_local_backup)) {
-            gpunetio_activate_progress_function(t);
-        }
-
-        // Connect self-loop QP RC to backup local QP
-        status = gpunetio_connect_self_loop_qp(gpunetio_state, device, portid,
-                                               device->rc_eps[mype_ep_index]->qp,
-                                               device->qp_local_backup);
-        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                              "gpunetio_connect_self_loop_qp failed on loopback QP.\n");
-    }
-
-    {
-        std::lock_guard<std::mutex> lk(*device->rc_eps_mtx);
-        device->num_eps_per_pe += num_rc_eps_per_pe;
-    }
-    gpunetio_state->cur_qp_index += new_num_rc_eps;
-    // Set global state to skip_cst as soon as one device requires CST
-    gpunetio_state->skip_cst &=
-        (!gpunetio_cst_is_required(gpunetio_state, device, gpunetio_state->cached_gpu_device_id));
-
-    ep_cleanup_guard.dismiss();
-    return status;
-}
-
-// Parse and cache
-static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *out_loc,
-                                              const char *str) {
-    std::string req = str;
-    req.erase(std::remove_if(req.begin(), req.end(), ::isspace), req.end());
-    std::for_each(req.begin(), req.end(), [](char &c) { c = ::tolower(c); });
-
-    if (req == "auto") {
-        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO;
-    } else if (req == "gpu") {
-        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB;
-    } else if (req == "gpu_sm_bf") {
-        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_BF;
-    } else if (req == "cpu") {
-        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
-    } else {
-        return NVSHMEMX_ERROR_INVALID_VALUE;
-    }
-    return NVSHMEMX_SUCCESS;
-}
-
-static void gpunetio_initialize_cache_state(nvshmemt_gpunetio_state_t *gpunetio_state) {
-    gpunetio_state->connect_endpoints_first_call = true;
-    gpunetio_state->last_device_index = 0;
-    gpunetio_state->cur_qp_index = 0;
-    gpunetio_state->last_num_rcs = 0;
-    gpunetio_state->qp_h.clear();
-}
-
-static int gpunetio_connect_qps_only(nvshmemt_gpunetio_state_t *gpunetio_state,
-                                     nvshmem_transport_t t, int *out_qp_indices, int num_qps) {
+int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_qp_indices,
+                                                int num_qps) {
     assert(out_qp_indices != nullptr);
 
     for (int i = 0; i < num_qps; i++) {
-        out_qp_indices[i] = gpunetio_state->cur_qp_index;
-        int n_devs_selected = static_cast<int>(gpunetio_state->selected_dev_ids.size());
-        int selected_dev_idx = gpunetio_state->last_device_index % n_devs_selected;
-        int dev_idx = gpunetio_state->selected_dev_ids[selected_dev_idx];
-        int portid = gpunetio_state->port_ids[selected_dev_idx];
-        gpunetio_device *device = &gpunetio_state->devices[dev_idx];
+        out_qp_indices[i] = cur_qp_index;
+        int n_devs_selected = static_cast<int>(selected_dev_ids.size());
+        int selected_dev_idx = last_device_index % n_devs_selected;
+        int dev_idx = selected_dev_ids[selected_dev_idx];
+        int portid = port_ids[selected_dev_idx];
+        gpunetio_device &device = *devices[dev_idx];
 
-        int status = gpunetio_connect_device_endpoints(gpunetio_state, device, portid, t, 1);
+        int status = device.add_endpoints(t, portid, 1);
         if (status) {
-            NVSHMEMI_ERROR_PRINT("gpunetio_connect_device_endpoints failed on QP #%d.\n", i);
+            NVSHMEMI_ERROR_PRINT("gpunetio_device::add_endpoints failed on QP #%d.\n", i);
             return NVSHMEMX_ERROR_INTERNAL;
         }
-        gpunetio_state->last_device_index++;
+        last_device_index++;
     }
 
-    return gpunetio_setup_gpu_state(t);
+    return setup_gpu_state(t);
 }
 
-// Public transport API functions
-int nvshmemt_gpunetio_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                        int num_selected_devs, int *out_qp_indices, int num_qps) {
-    nvshmemt_gpunetio_state_t *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
+int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
+                                                 int num_selected_devs, int *out_qp_indices,
+                                                 int num_qps) {
     int status = 0;
     int init_dev_cnt = 0;
 
-    if (!gpunetio_state->connect_endpoints_first_call) {
+    if (!connect_endpoints_first_call) {
         // Short path for subsequent calls (QP-specific API)
-        return gpunetio_connect_qps_only(gpunetio_state, t, out_qp_indices, num_qps);
+        return connect_qps_only(t, out_qp_indices, num_qps);
     }
 
     // Phase 1: Global setup (only on first call)
-    status = gpunetio_connect_global_setup(gpunetio_state, num_selected_devs, selected_dev_ids);
+    status = connect_global_setup(num_selected_devs, selected_dev_ids);
     if (status) {
-        NVSHMEMI_ERROR_PRINT("gpunetio_connect_global_setup failed.\n");
+        NVSHMEMI_ERROR_PRINT("connect_global_setup failed.\n");
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
     // Phase 2-3: Per-device processing (cached per device)
     for (int i = 0; i < num_selected_devs; i++) {
-        int dev_idx = gpunetio_state->dev_ids[selected_dev_ids[i]];
-        gpunetio_device *device = &gpunetio_state->devices[dev_idx];
-        int portid = gpunetio_state->port_ids[selected_dev_ids[i]];
+        int dev_idx = dev_ids[selected_dev_ids[i]];
+        gpunetio_device &device = *devices[dev_idx];
+        int portid = port_ids[selected_dev_ids[i]];
 
-        status = gpunetio_create_ah(gpunetio_state, device, portid);
+        status = device.create_ah(portid);
         if (status) {
-            NVSHMEMI_ERROR_PRINT("gpunetio_create_ah failed.\n");
+            NVSHMEMI_ERROR_PRINT("gpunetio_device::create_ah failed.\n");
             return NVSHMEMX_ERROR_INTERNAL;
         }
 
-        status = gpunetio_connect_device_endpoints(gpunetio_state, device, portid, t,
-                                                   gpunetio_state->options->GPUNETIO_NUM_RC_PER_PE);
+        status = device.add_endpoints(t, portid, options->GPUNETIO_NUM_RC_PER_PE);
         if (status) return status;
 
         init_dev_cnt++;
@@ -1015,24 +1343,69 @@ int nvshmemt_gpunetio_connect_endpoints(nvshmem_transport_t t, int *selected_dev
 
     // Multiple devices break our CST optimizations
     if (init_dev_cnt > 1) {
-        gpunetio_state->skip_cst = false;
+        skip_cst = false;
     }
 
     // Phase 4: GPU setup (only once)
-    gpunetio_setup_gpu_state(t);
+    setup_gpu_state(t);
 
-    // Set device flags
     if (init_dev_cnt < num_selected_devs) {
         NVSHMEMI_WARN_PRINT("Failed to initialize all selected devices. Perf may be limited.\n");
     }
 
-    gpunetio_state->connect_endpoints_first_call = false;
+    connect_endpoints_first_call = false;
 
     return status;
 }
 
-int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info * /*peer_info*/,
-                                     nvshmem_transport_t /*t*/) {
+nvshmemt_gpunetio_state_t::~nvshmemt_gpunetio_state_t() {
+    // Tear down devices
+    devices.clear();
+
+    if (device_lkeys_d) {
+        cudaError_t err = cudaFree(device_lkeys_d);
+        CUDA_RUNTIME_ERROR_STRING(err);
+        device_lkeys_d = nullptr;
+    }
+    if (device_rkeys_d) {
+        cudaError_t err = cudaFree(device_rkeys_d);
+        CUDA_RUNTIME_ERROR_STRING(err);
+        device_rkeys_d = nullptr;
+    }
+    if (my_stream) {
+        cudaError_t err = cudaStreamDestroy(my_stream);
+        CUDA_RUNTIME_ERROR_STRING(err);
+        my_stream = nullptr;
+    }
+    if (gpu_device) {
+        int ret = doca_gpu_destroy(gpu_device);
+        if (ret) {
+            NVSHMEMI_WARN_PRINT("doca_gpu_destroy failed for device %p\n",
+                                static_cast<void *>(gpu_device));
+        }
+        gpu_device = nullptr;
+    }
+    if (ibv_handle) {
+        nvshmemt_ibv_ftable_fini(&ibv_handle);
+    }
+#ifdef NVSHMEM_USE_MLX5DV
+    if (mlx5dv_handle) {
+        nvshmemt_mlx5dv_ftable_fini(&mlx5dv_handle);
+    }
+#endif
+}
+
+// Transport C wrappers
+static int nvshmemt_gpunetio_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
+                                               int num_selected_devs, int *out_qp_indices,
+                                               int num_qps) {
+    auto *state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
+    return state->connect_endpoints(t, selected_dev_ids, num_selected_devs, out_qp_indices,
+                                    num_qps);
+}
+
+static int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info * /*peer_info*/,
+                                            nvshmem_transport_t /*t*/) {
     int status = 0;
 
     *access = NVSHMEM_TRANSPORT_CAP_GPU_WRITE | NVSHMEM_TRANSPORT_CAP_GPU_READ |
@@ -1041,49 +1414,25 @@ int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info * /*
     return status;
 }
 
-int nvshmemt_gpunetio_show_info(nvshmem_transport * /*transport*/, int /*style*/) {
+static int nvshmemt_gpunetio_show_info(nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("gpunetio show info not implemented\n");
     return NVSHMEMX_SUCCESS;
 }
 
-int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
+static int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
     assert(transport != nullptr);
-    auto transport_guard = make_scope_guard([&]() { free(transport); });
-    nvshmemt_gpunetio_state_t *gpunetio_state =
-        static_cast<nvshmemt_gpunetio_state_t *>(transport->state);
-    nvshmemi_gpunetio_device_state_t *gpunetio_device_state_h;
 
-    int status = 0;
-    int ret = 0;
-
-    if (!gpunetio_state) {
-        return status;
-    }
-
-    gpunetio_state->device_lkeys.clear();
-    gpunetio_state->device_rkeys.clear();
-
-    if (gpunetio_state->device_lkeys_d) {
-        cudaError_t err = cudaFree(gpunetio_state->device_lkeys_d);
-        CUDA_RUNTIME_ERROR_STRING(err);
-        gpunetio_state->device_lkeys_d = nullptr;
-    }
-
-    if (gpunetio_state->device_rkeys_d) {
-        cudaError_t err = cudaFree(gpunetio_state->device_rkeys_d);
-        CUDA_RUNTIME_ERROR_STRING(err);
-        gpunetio_state->device_rkeys_d = nullptr;
-    }
-
-    gpunetio_device_state_h =
+    auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(transport->state);
+    auto *gpunetio_device_state_h =
         static_cast<nvshmemi_gpunetio_device_state_t *>(transport->type_specific_shared_state);
+
+    // GPU buffers are reachable only via transport->type_specific_shared_state, destroy them here
     if (gpunetio_device_state_h) {
         if (gpunetio_device_state_h->globalmem.qps) {
             cudaError_t err = cudaFree(gpunetio_device_state_h->globalmem.qps);
             CUDA_RUNTIME_ERROR_STRING(err);
             gpunetio_device_state_h->globalmem.qps = nullptr;
         }
-
         if (gpunetio_device_state_h->globalmem.qp_group_switches) {
             cudaError_t err = cudaFree(gpunetio_device_state_h->globalmem.qp_group_switches);
             CUDA_RUNTIME_ERROR_STRING(err);
@@ -1091,94 +1440,8 @@ int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
         }
     }
 
-    gpunetio_state->qp_h.clear();
-
-    for (int dev_id : gpunetio_state->selected_dev_ids) {
-        gpunetio_device *device = &gpunetio_state->devices[dev_id];
-
-        if (device->ah) {
-            ret = doca_verbs_ah_attr_destroy(device->ah);
-            if (ret) {
-                NVSHMEMI_WARN_PRINT("doca_verbs_ah_attr_destroy failed for device %d Err: %d:%s.\n",
-                                    dev_id, errno, strerror(errno));
-                if (!status) status = ret;
-            }
-            device->ah = nullptr;
-        }
-
-        {
-            std::lock_guard<std::mutex> lk(*device->rc_eps_mtx);
-            for (auto *ep : device->rc_eps) {
-                ret = gpunetio_destroy_ep(ep, gpunetio_state);
-                if (ret) {
-                    NVSHMEMI_WARN_PRINT("gpunetio_destroy_ep failed for device %d\n", dev_id);
-                    if (!status) status = ret;
-                }
-            }
-            device->rc_eps.clear();
-        }
-
-        // Clean up backup QP
-        ret = doca_gpu_verbs_destroy_qp_hl(device->qp_local_backup);
-        if (ret) {
-            NVSHMEMI_WARN_PRINT(
-                "doca_gpu_verbs_destroy_qp_hl failed for device %d qp_local_backup\n", dev_id);
-            if (!status) status = ret;
-        }
-    }
-
-    // Free all devices, not just ones we used.
-    for (size_t i = 0; i < gpunetio_state->dev_ids.size(); ++i) {
-        gpunetio_device *device = &gpunetio_state->devices[gpunetio_state->dev_ids[i]];
-        if (device->net_dev) {
-            ret = doca_verbs_dev_close(device->net_dev);
-            if (ret) {
-                NVSHMEMI_WARN_PRINT("doca_verbs_dev_close failed for device %d\n",
-                                    gpunetio_state->dev_ids[i]);
-                if (!status) status = ret;
-            }
-            device->net_dev = nullptr;
-        }
-        if (device->common_device.pd) {
-            ret = gpunetio_state->ftable.dealloc_pd(device->common_device.pd);
-            if (ret) {
-                INFO(gpunetio_state->log_level,
-                     "ibv_dealloc_pd failed for device %zu Err: %d:%s.\n", i, errno,
-                     strerror(errno));
-                if (!status) status = ret;
-            }
-        }
-        if (device->common_device.context) {
-            ret = gpunetio_state->ftable.close_device(device->common_device.context);
-            if (ret) {
-                NVSHMEMI_WARN_PRINT("ibv_close_device failed for device %zu Err: %d:%s.\n", i,
-                                    errno, strerror(errno));
-                if (!status) status = ret;
-            }
-        }
-    }
-
-    nvshmemt_ibv_ftable_fini(&gpunetio_state->ibv_handle);
-
-#ifdef NVSHMEM_USE_MLX5DV
-    if (gpunetio_state->mlx5dv_handle) {
-        nvshmemt_mlx5dv_ftable_fini(&gpunetio_state->mlx5dv_handle);
-    }
-#endif
-
-    if (gpunetio_state->my_stream) {
-        cudaError_t err = cudaStreamDestroy(gpunetio_state->my_stream);
-        CUDA_RUNTIME_ERROR_STRING(err);
-        gpunetio_state->my_stream = nullptr;
-    }
-
-    ret = doca_gpu_destroy(gpunetio_state->gpu_device);
-    if (ret) {
-        NVSHMEMI_WARN_PRINT("doca_gpu_destroy failed for device %p \n", gpunetio_state->gpu_device);
-        if (!status) status = ret;
-    }
-
     delete gpunetio_state;
+    transport->state = nullptr;
 
     if (transport->device_pci_paths) {
         for (int i = 0; i < transport->n_devices; i++) {
@@ -1186,13 +1449,14 @@ int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
         }
         free(transport->device_pci_paths);
     }
-
-    return status;
+    free(transport);
+    return NVSHMEMX_SUCCESS;
 }
 
-int nvshmemt_gpunetio_add_device_remote_mem_handles(nvshmem_transport_t t, int transport_stride,
-                                                    nvshmem_mem_handle_t *mem_handles,
-                                                    uint64_t heap_offset, size_t size) {
+static int nvshmemt_gpunetio_add_device_remote_mem_handles(nvshmem_transport_t t,
+                                                           int transport_stride,
+                                                           nvshmem_mem_handle_t *mem_handles,
+                                                           uint64_t heap_offset, size_t size) {
     nvshmemt_gpunetio_state_t *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
     int n_pes = t->n_pes;
 
@@ -1297,8 +1561,8 @@ int nvshmemt_gpunetio_add_device_remote_mem_handles(nvshmem_transport_t t, int t
 }
 
 // Memory handle management start
-int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, size_t length,
-                                     nvshmem_transport_t t, bool local_only) {
+static int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf,
+                                            size_t length, nvshmem_transport_t t, bool local_only) {
     int status = 0;
     nvshmem_transport_t transport = t;
     auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(transport->state);
@@ -1356,7 +1620,8 @@ int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf
     }
 
     for (int i = 0; i < n_devs_selected; ++i) {
-        gpunetio_device *device = &gpunetio_state->devices[gpunetio_state->selected_dev_ids[i]];
+        gpunetio_device *device =
+            gpunetio_state->devices[gpunetio_state->selected_dev_ids[i]].get();
         auto *dev_handle = reinterpret_cast<nvshmem_mem_handle_t *>(&handle->dev_mem_handles[i]);
 
         INFO(gpunetio_state->log_level, "[%d] DOCA: device used %s, data_direct support: %d",
@@ -1500,7 +1765,8 @@ int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf
     return NVSHMEMX_SUCCESS;
 }
 
-int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_transport_t t) {
+static int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle,
+                                                nvshmem_transport_t t) {
     int status = 0;
     nvshmemt_gpunetio_state_t *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
     nvshmemi_gpunetio_device_state_t *gpunetio_device_state =
@@ -1587,276 +1853,6 @@ int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshm
     return NVSHMEMX_SUCCESS;
 }
 
-static int gpunetio_init_ftables(std::unique_ptr<nvshmemt_gpunetio_state_t> &gpunetio_state,
-                                 std::unique_ptr<nvshmemi_options_s> &options,
-                                 nvshmemi_cuda_fn_table *table) {
-    int status = 0;
-
-    gpunetio_state->cuda_syms = table;
-    if (nvshmemt_ibv_ftable_init(&gpunetio_state->ibv_handle, &gpunetio_state->ftable,
-                                 gpunetio_state->log_level)) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                           "Unable to dlopen libibverbs. Skipping DOCA transport.\n");
-    }
-
-#ifdef NVSHMEM_USE_MLX5DV
-    if (!options->DISABLE_DATA_DIRECT) {
-        if (nvshmemt_mlx5dv_ftable_init(&gpunetio_state->mlx5dv_handle,
-                                        &gpunetio_state->mlx5dv_ftable,
-                                        gpunetio_state->log_level)) {
-            NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.\n");
-            gpunetio_state->mlx5dv_ftable.mlx5dv_internal_is_supported = nullptr;
-            gpunetio_state->mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-            gpunetio_state->mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = nullptr;
-        }
-    } else {
-        gpunetio_state->mlx5dv_ftable.mlx5dv_internal_is_supported = nullptr;
-        gpunetio_state->mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-        gpunetio_state->mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = nullptr;
-        INFO(gpunetio_state->log_level,
-             "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
-    }
-#else
-    INFO(gpunetio_state->log_level, "directNIC features are disabled\n");
-#endif
-
-    return NVSHMEMX_SUCCESS;
-}
-
-static int gpunetio_init_populate_state(std::unique_ptr<nvshmemt_gpunetio_state_t> &gpunetio_state,
-                                        std::unique_ptr<nvshmemi_options_s> &options) {
-    int status = 0;
-    gpunetio_state->log_level = nvshmemt_common_get_log_level(options.get());
-    gpunetio_state->skip_cst = true;  // will be set to false if multiple devices are selected or if
-                                      // CST is required for a device
-    gpunetio_initialize_cache_state(gpunetio_state.get());
-
-    gpunetio_state->qp_depth = options->QP_DEPTH;
-    if (gpunetio_state->qp_depth > 0) {
-        gpunetio_state->qp_depth = gpunetio_round_up_pow2_or_0(gpunetio_state->qp_depth);
-    }
-    if (gpunetio_state->qp_depth <= 0) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
-                           "NVSHMEM_QP_DEPTH must be a positive number.\n");
-    } else if (gpunetio_state->qp_depth < NVSHMEMI_GPUNETIO_MIN_QP_DEPTH) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
-                           "NVSHMEM_QP_DEPTH must be at least %d.\n",
-                           NVSHMEMI_GPUNETIO_MIN_QP_DEPTH);
-    } else if (gpunetio_state->qp_depth > NVSHMEMI_GPUNETIO_MAX_QP_DEPTH) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
-                           "NVSHMEM_QP_DEPTH can be at most %d.\n", NVSHMEMI_GPUNETIO_MAX_QP_DEPTH);
-    }
-
-    gpunetio_state->num_requests_in_batch = options->GPUNETIO_NUM_REQUESTS_IN_BATCH;
-    if (gpunetio_state->num_requests_in_batch > 0) {
-        gpunetio_state->num_requests_in_batch =
-            gpunetio_round_up_pow2_or_0(gpunetio_state->num_requests_in_batch);
-    }
-    if (gpunetio_state->num_requests_in_batch <= 0) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
-                           "NVSHMEM_GPUNETIO_NUM_REQUESTS_IN_BATCH must be a positive number.\n");
-    } else if (gpunetio_state->num_requests_in_batch > gpunetio_state->qp_depth) {
-        NVSHMEMI_ERROR_RET(
-            status, NVSHMEMX_ERROR_INVALID_VALUE,
-            "NVSHMEM_GPUNETIO_NUM_REQUESTS_IN_BATCH must not be larger than QP depth.\n");
-    }
-
-    gpunetio_state->num_fetch_slots_per_rc = options->GPUNETIO_NUM_FETCH_SLOTS_PER_RC;
-    if (gpunetio_state->num_fetch_slots_per_rc > 0)
-        gpunetio_state->num_fetch_slots_per_rc =
-            gpunetio_round_up_pow2(gpunetio_state->num_fetch_slots_per_rc);
-    if (gpunetio_state->num_fetch_slots_per_rc <= 0) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
-                           "NVSHMEM_GPUNETIO_NUM_FETCH_SLOTS_PER_RC must be a positive number.\n");
-    }
-    return NVSHMEMX_SUCCESS;
-}
-
-static int gpunetio_init_gpu(std::unique_ptr<nvshmemt_gpunetio_state_t> &gpunetio_state,
-                             std::unique_ptr<nvshmemi_options_s> &options) {
-    CUdevice gpu_device_id;
-    int status = 0;
-    int lowest_stream_priority;
-    int highest_stream_priority;
-
-    status = CUPFN(gpunetio_state->cuda_syms, cuCtxGetDevice(&gpu_device_id));
-    if (status != CUDA_SUCCESS) {
-        status = NVSHMEMX_ERROR_INTERNAL;
-        return status;
-    }
-
-    char pci_bus_id[MAX_GPU_PCI_ADDRESS_LEN];
-    CUDA_RUNTIME_CHECK_RET(
-        cudaDeviceGetPCIBusId(pci_bus_id, MAX_GPU_PCI_ADDRESS_LEN, gpu_device_id),
-        NVSHMEMX_ERROR_INTERNAL);
-    INFO(gpunetio_state->log_level, "Creating DOCA GPU device handler for GPU with bus ID: %s\n",
-         pci_bus_id);
-    status = doca_gpu_create(pci_bus_id, &gpunetio_state->gpu_device);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                          "doca_gpu_create failed to create handler for GPU with bus ID: %s\n",
-                          pci_bus_id);
-
-    status = nvshmemt_ib_common_check_dmabuf_support(
-        gpunetio_state->dmabuf_support_for_data_buffers, gpunetio_state->cuda_syms,
-        options->IB_DISABLE_DMABUF);
-    if (status) return status;
-
-    CUDA_RUNTIME_CHECK_RET(
-        cudaDeviceGetStreamPriorityRange(&lowest_stream_priority, &highest_stream_priority),
-        NVSHMEMX_ERROR_INTERNAL);
-    CUDA_RUNTIME_CHECK_RET(
-        cudaStreamCreateWithPriority(&gpunetio_state->my_stream, cudaStreamNonBlocking,
-                                     highest_stream_priority),
-        NVSHMEMX_ERROR_INTERNAL);
-
-    return NVSHMEMX_SUCCESS;
-}
-
-static int gpunetio_init_nic_devices(nvshmem_transport *transport,
-                                     std::unique_ptr<nvshmemt_gpunetio_state_t> &gpunetio_state,
-                                     std::unique_ptr<nvshmemi_options_s> &options) {
-    int num_devices = 0;
-    ibv_device **dev_list = nullptr;
-    int status = 0;
-    doca_gpu_dev_verbs_nic_handler nic_handler_request = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO;
-    uint32_t atomic_host_endian_size = 0;
-
-    status =
-        gpunetio_parse_nic_handler_request(&nic_handler_request, options->GPUNETIO_NIC_HANDLER);
-    NVSHMEMI_NZ_ERROR_RET(status, status, "NVSHMEM_GPUNETIO_NIC_HANDLER is not valid.\n");
-    INFO(gpunetio_state->log_level, "NVSHMEM_GPUNETIO_NIC_HANDLER requested: %d\n",
-         nic_handler_request);
-
-    dev_list = gpunetio_state->ftable.get_device_list(&num_devices);
-    NVSHMEMI_NULL_ERROR_RET(dev_list, status, NVSHMEMX_ERROR_INTERNAL, "get_device_list failed \n");
-    INFO(gpunetio_state->log_level, "Found %d devices\n", num_devices);
-
-    struct nvshmemt_ib_hca_filter hca_filter = {};
-    struct nvshmemt_ib_common_state temp_state = {};
-    temp_state.options = options.get();
-    temp_state.log_level = gpunetio_state->log_level;
-    nvshmemt_ib_common_parse_hca_filter(hca_filter, temp_state);
-
-    struct nvshmemt_ib_common_device common_devs[MAX_NUM_HCAS] = {};
-    int dev_ids[MAX_NUM_PES_PER_NODE];
-    int port_ids[MAX_NUM_PES_PER_NODE];
-    temp_state.devices = common_devs;
-    temp_state.dev_ids = dev_ids;
-    temp_state.port_ids = port_ids;
-
-    status = nvshmemt_ib_common_enumerate_devices(&gpunetio_state->ftable, temp_state,
-                                                  sizeof(nvshmemt_ib_common_device), hca_filter,
-                                                  dev_list, num_devices);
-    if (status) return status;
-
-    {
-        bool device_checked[MAX_NUM_HCAS] = {};
-        int write_idx = 0;
-        for (int i = 0; i < temp_state.n_dev_ids; i++) {
-            int dev_idx = temp_state.dev_ids[i];
-            struct nvshmemt_ib_common_device *dev = &common_devs[dev_idx];
-
-            if (!device_checked[dev_idx]) {
-                device_checked[dev_idx] = true;
-                const char *name = gpunetio_state->ftable.get_device_name(dev->dev);
-
-                if (!nvshmemt_ib_common_query_mlx5_caps(dev->context)) {
-                    NVSHMEMI_WARN_PRINT(
-                        "device %s is not enumerated as an mlx5 device. Skipping...", name);
-                    gpunetio_state->ftable.close_device(dev->context);
-                    if (dev->pd) gpunetio_state->ftable.dealloc_pd(dev->pd);
-                    dev->context = nullptr;
-                    dev->pd = nullptr;
-                    continue;
-                }
-
-                status = nvshmemt_ib_common_check_nic_ext_atomic_support(dev->context);
-                if (status) {
-                    NVSHMEMI_WARN_PRINT(
-                        "device %s does not support all necessary atomic operations. You may want "
-                        "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
-                        name);
-                    gpunetio_state->ftable.close_device(dev->context);
-                    if (dev->pd) gpunetio_state->ftable.dealloc_pd(dev->pd);
-                    dev->context = nullptr;
-                    dev->pd = nullptr;
-                    continue;
-                }
-            }
-
-            if (!dev->context) continue;
-
-            temp_state.dev_ids[write_idx] = temp_state.dev_ids[i];
-            temp_state.port_ids[write_idx] = temp_state.port_ids[i];
-            write_idx++;
-        }
-        temp_state.n_dev_ids = write_idx;
-    }
-
-    nvshmemt_ib_common_warn_missing_hcas(hca_filter);
-    nvshmemt_ib_common_log_device_assignment(temp_state);
-
-    if (!temp_state.n_dev_ids) {
-        INFO(
-            gpunetio_state->log_level,
-            "no active IB device that supports GPU-initiated communication is found, exiting...\n");
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
-    status = nvshmemt_ib_common_discover_pci_paths(
-        transport, temp_state, sizeof(nvshmemt_ib_common_device), &gpunetio_state->ftable,
-        &gpunetio_state->mlx5dv_ftable);
-    if (status) return status;
-
-    // We need to copy the detected devices into the vector-based structures of gpunetio_state.
-    std::array<int, MAX_NUM_HCAS> dev_remap;
-    dev_remap.fill(-1);
-    for (int i = 0; i < temp_state.n_dev_ids; i++) {
-        int dev_id = temp_state.dev_ids[i];
-        if (dev_remap[dev_id] == -1) {
-            gpunetio_device gpudev;
-            gpudev.common_device = common_devs[dev_id];
-            gpunetio_state->devices.push_back(std::move(gpudev));
-            dev_remap[dev_id] = static_cast<int>(gpunetio_state->devices.size() - 1);
-        }
-        gpunetio_state->dev_ids.push_back(dev_remap[dev_id]);
-        gpunetio_state->port_ids.push_back(temp_state.port_ids[i]);
-    }
-
-    for (int dev_id : gpunetio_state->dev_ids) {
-        auto *device = &gpunetio_state->devices[dev_id];
-        if (device->common_device.data_direct && !options->GPUNETIO_NUM_RC_PER_PE_provided) {
-            // Need 8 QPs for achieving bandwidth in data direct device
-            options->GPUNETIO_NUM_RC_PER_PE = 8;
-            INFO(gpunetio_state->log_level,
-                 "Setting GPUNETIO_NUM_RC_PER_PE = 8 as data direct device is detected");
-        }
-
-        // Report whether we need to do atomic endianness conversions on 8 byte operands.
-        status = nvshmemt_ib_common_query_endianness_conversion_size(&atomic_host_endian_size,
-                                                                     device->common_device.context);
-        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
-                              "nvshmemt_ib_common_query_endianness_conversion_size failed.\n");
-
-        device->nic_handler_request = nic_handler_request;
-    }
-
-    if (options->GPUNETIO_NUM_RC_PER_PE <= 0) {
-        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
-                           "GPUNETIO_NUM_RC_PER_PE must be greater than 0");
-    }
-
-    transport->atomic_host_endian_min_size = atomic_host_endian_size;
-
-    // Open NIC in GPUNetIO
-    for (auto &device : gpunetio_state->devices) {
-        status = doca_verbs_dev_open(device.common_device.pd, &device.net_dev);
-        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "Failed to open DOCA net device\n");
-    }
-
-    return NVSHMEMX_SUCCESS;
-}
-
 int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api_version) {
     int status = 0;
 
@@ -1888,20 +1884,10 @@ int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api
                             "Unable to allocate transport stuct for doca transport.\n");
 
     // Global state for GPUNetIO transport
-    std::unique_ptr<nvshmemt_gpunetio_state_t> gpunetio_state(new nvshmemt_gpunetio_state_t());
+    auto [gpunetio_state, state_status] =
+        nvshmemt_gpunetio_state_t::make(transport_owner.get(), options.get(), table);
+    if (state_status) return state_status;
     transport->state = gpunetio_state.get();
-
-    status = gpunetio_init_populate_state(gpunetio_state, options);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "Failed while parsing options.\n");
-
-    status = gpunetio_init_ftables(gpunetio_state, options, table);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "Failed to initialize ftables.\n");
-
-    status = gpunetio_init_gpu(gpunetio_state, options);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "Failed to get and initialize GPU.\n");
-
-    status = gpunetio_init_nic_devices(transport_owner.get(), gpunetio_state, options);
-    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "Failed to parse and select NICs.\n");
 
     transport->host_ops.can_reach_peer = nvshmemt_gpunetio_can_reach_peer;
     transport->host_ops.connect_endpoints = nvshmemt_gpunetio_connect_endpoints;
