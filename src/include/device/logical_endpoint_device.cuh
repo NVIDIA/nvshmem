@@ -83,11 +83,24 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, 
                                                            const void *le_addr,
                                                            const void *tma_addr) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    /* The handle path stages the local buffer with global<->shared TMA helpers. */
     return ((scope == NVSHMEMI_THREADGROUP_BLOCK) && nvshmemi_tma_smem_registered() &&
-            (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= CFT_HANDLE_TX_SIZE) &&
+            (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= NVSHMEMI_SMEM_BUF_SIZE) &&
             nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) &&
+            !__isShared(tma_addr) &&
             nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)tma_addr) &&
             nvshmemi_ld_and_check_valid_le_id(pe) && ((size % CFT_HANDLE_TX_SIZE) == 0));
+#else
+    return false;
+#endif
+}
+
+__device__ __forceinline__ bool nvshmemi_is_multicast_le_implemented(
+    uint64_t le_id_with_flag, size_t size, threadgroup_t scope) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    return ((scope == NVSHMEMI_THREADGROUP_BLOCK) && IS_VALID_LE_ID(le_id_with_flag) &&
+            (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= NVSHMEMI_SMEM_BUF_SIZE) &&
+            ((size % CFT_HANDLE_TX_SIZE) == 0));
 #else
     return false;
 #endif
@@ -200,6 +213,17 @@ struct handle_barrier_t {
                 :: "l"(smem_addr), "r"(arvCnt) : "memory");
     }
 
+    // only 1 thread in warp initializes the barrier
+    inline __device__ void init(int arvCnt, int myIdx) {
+        if (myIdx % warpSize == 0) {
+            // SMEM address for [%0]: use b64/"l" when PTX uses .address_size 64 (e.g. sm_100+).
+            const unsigned long long smem_addr =
+                static_cast<unsigned long long>(__cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
+            asm volatile ("mbarrier.init.shared.layout::v1.b64 [%0], %1;"
+                    :: "l"(smem_addr), "r"(arvCnt) : "memory");
+        }
+    }
+
     // track completion in complete_tx::16B
     inline __device__ uint64_t arrive_relaxed(uint32_t size_bytes) {
         uint64_t state;
@@ -281,6 +305,7 @@ struct handle_barrier_t {
     }
 
     inline __device__ void inval() { __mbarrier_inval(&bar); }
+    inline __device__ void inval(int myIdx) { if (myIdx % warpSize == 0) { __mbarrier_inval(&bar); } }
 
 };
 
@@ -360,6 +385,60 @@ fabric_try_put_async<le_fabric_handle_kind::Unicast>(CUlogicalEndpointId dst_le_
     }
 }
 
+template <>
+__device__ inline void
+fabric_try_put_async<le_fabric_handle_kind::Multicast>(CUlogicalEndpointId dst_le_id, uint64_t dst_data_off,
+                     const void* src_in_shared_memory, uint32_t  size_bytes, handle_barrier_t* hbar)
+{
+    // Issue single instruction for size_bytes multiple of 16B
+    uint32_t adjusted_size = (size_bytes / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
+
+    // .shared::cta operands need SMEM offsets from __cvta_generic_to_shared (generic ptr is wrong).
+    unsigned long long src_smem =
+        static_cast<unsigned long long>(__cvta_generic_to_shared(src_in_shared_memory));
+    const unsigned long long bar_smem =
+        static_cast<unsigned long long>(__cvta_generic_to_shared(
+            reinterpret_cast<void*>(&(hbar->bar))));
+    if (adjusted_size) {
+        asm volatile(
+            "fabric.try_put.async.multimem.shared::cta."
+            "mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys.b128 "
+            "[%0, %1], [%2], %3, [%4];\n"
+            :
+            : "r"(dst_le_id),             // %0: .b32 dstLeId
+              "l"(dst_data_off),          // %1: .b64 dstDataOff
+              "l"(src_smem),              // %2: .ptr .shared src
+              "r"(adjusted_size),         // %3: .b32 size
+              "l"(bar_smem)               // %4: .ptr .shared .b64 mbarrier
+            : "memory");
+    }
+
+    // Remainder is done using cp_mask variant
+    size_bytes -= adjusted_size;
+    dst_data_off += adjusted_size;
+    src_smem += adjusted_size;
+    assert(size_bytes <= CFT_HANDLE_TX_SIZE);
+    if (size_bytes) {
+        uint16_t bytemask = size_to_bytemask_low_first(size_bytes);
+        /* Note: completion is tracked in 16B units, so on using cp_mask
+         * we still specify size as 16B but only store based on bytemask
+         * which is essential for complete_tx tracking
+         */
+        asm volatile(
+            "fabric.try_put.async.multimem.shared::cta."
+            "mbarrier::complete_tx::16B.mbarrier::report::fabric.cp_mask.relaxed.sys.b128 "
+            "[%0, %1], [%2], %3, [%4], %5;\n"
+            :
+            : "r"(dst_le_id),
+              "l"(dst_data_off),
+              "l"(src_smem),
+              "r"(CFT_HANDLE_TX_SIZE),
+              "l"(bar_smem),
+              "h"(bytemask)
+            : "memory");
+    }
+}
+
 /* try_get here uses cp_async_bulk_global_to_shared to copy data from global to shared memory.
  * the completion mechanism is mbarrier. mbarrier.complete_tx is implicitly called which will
  * increment the tx_count of mbarrier by the number of BYTES copied.
@@ -395,7 +474,6 @@ fabric_try_get_async(CUlogicalEndpointId src_le_id, uint64_t src_data_off,
     barrier_expect_tx(&(hbar->bar),
                       size_bytes - (size_bytes / CFT_HANDLE_TX_SIZE));
 }
-
 
 inline __device__ void fabric_submit() {
    asm volatile ("fabric.submit;\n" ::: "memory");
