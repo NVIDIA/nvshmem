@@ -332,6 +332,9 @@ int gdrcopy_amo_ack(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t
     uint64_t rkey_index = pe * libfabric_state->domains.size() + ep.domain_index;
 
     resp_op = send_elems[0];
+    resp_op->type = (ack_header == NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_ACK)
+                        ? NVSHMEMT_LIBFABRIC_SIGNAL_ACK_WRITE
+                        : NVSHMEMT_LIBFABRIC_AMO_ACK_WRITE;
     imm_data = (ack_header << NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT) | sequence_count;
     do {
         status = fi_writedata(
@@ -1183,6 +1186,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
         NVSHMEMI_NULL_ERROR_JMP(gdr_ctx, status, NVSHMEMX_ERROR_INTERNAL, out,
                                 "Unable to get context buffer for put request.\n");
         context = &gdr_ctx->ofi_context;
+        gdr_ctx->type = NVSHMEMT_LIBFABRIC_RMA;
 
         /* local->handle may be NULL for small operations (P ops) sent by value/inline */
         if (likely(local->handle != NULL)) {
