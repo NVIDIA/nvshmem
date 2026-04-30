@@ -56,6 +56,48 @@ __global__ void test_put_from_smem(int *recv_data, int elems_per_block, int mype
     nvshmemx_release_smem();
 }
 
+__global__ void init_source_data(int *source_data, int nelems, int mype) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < nelems) source_data[idx] = mype * PATTERN_SCALE + idx;
+}
+
+__global__ void test_get_to_gmem(int *source_data, int *recv_data, int nelems, int mype,
+                                 int npes) {
+    extern __shared__ char nvshmem_smem[];
+    int peer = (mype + 1) % npes;
+
+    nvshmemx_give_smem(nvshmem_smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
+    __syncthreads();
+
+    nvshmemx_getmem_block(recv_data, source_data, (size_t)nelems * sizeof(int), peer);
+
+    __syncthreads();
+    nvshmemx_release_smem();
+}
+
+__global__ void test_get_to_smem(int *source_data, int *recv_data, int elems_per_block, int mype,
+                                 int npes) {
+    extern __shared__ char nvshmem_smem[];
+    int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+    int *payload = (int *)(nvshmem_smem + smem_offset);
+    int tid = threadIdx.x;
+    int offset = blockIdx.x * elems_per_block;
+    int peer = (mype + 1) % npes;
+
+    nvshmemx_give_smem(nvshmem_smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
+    __syncthreads();
+
+    nvshmemx_getmem_block(payload, source_data + offset, (size_t)elems_per_block * sizeof(int),
+                          peer);
+    __syncthreads();
+
+    if (tid < elems_per_block) {
+        recv_data[offset + tid] = payload[tid];
+    }
+    __syncthreads();
+    nvshmemx_release_smem();
+}
+
 static int verify_recv_data(const int *host, int nelems, int prev_pe) {
     for (int i = 0; i < nelems; i++) {
         int expected = prev_pe * PATTERN_SCALE + i;
@@ -198,6 +240,88 @@ int main(int argc, char **argv) {
         }
 
         nvshmem_free(recv_data);
+    }
+
+    {
+        const int threads_per_block = 64;
+        const int total_elems = NUM_ELEMS;
+        int *source_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        int *recv_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        if (!source_data || !recv_data) {
+            printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
+            status = 1;
+            goto out;
+        }
+        std::vector<int> host(total_elems);
+        int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        int peer = (mype + 1) % npes;
+
+        CUDA_CHECK(cudaFuncSetAttribute(test_get_to_gmem,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+        CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+        init_source_data<<<(total_elems + threads_per_block - 1) / threads_per_block,
+                           threads_per_block>>>(source_data, total_elems, mype);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        nvshmem_barrier_all();
+        test_get_to_gmem<<<1, threads_per_block, smem_size>>>(source_data, recv_data, total_elems,
+                                                              mype, npes);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+        nvshmem_barrier_all();
+
+        CUDA_CHECK(
+            cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
+        if (verify_recv_data(host.data(), total_elems, peer) == 0) {
+            printf("[PE %d] PASS: TMA get to global memory\n", mype);
+        } else {
+            status = 1;
+        }
+
+        nvshmem_free(recv_data);
+        nvshmem_free(source_data);
+    }
+
+    {
+        const int num_blocks = 4;
+        const int threads_per_block = 64;
+        const int total_elems = num_blocks * threads_per_block;
+        int *source_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        int *recv_data = (int *)nvshmem_malloc(sizeof(int) * total_elems);
+        if (!source_data || !recv_data) {
+            printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
+            status = 1;
+            goto out;
+        }
+        std::vector<int> host(total_elems);
+        int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        int peer = (mype + 1) % npes;
+
+        CUDA_CHECK(cudaFuncSetAttribute(test_get_to_smem,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+        CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+        init_source_data<<<num_blocks, threads_per_block>>>(source_data, total_elems, mype);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        nvshmem_barrier_all();
+        test_get_to_smem<<<num_blocks, threads_per_block, smem_size>>>(
+            source_data, recv_data, threads_per_block, mype, npes);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+        nvshmem_barrier_all();
+
+        CUDA_CHECK(
+            cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
+        if (verify_recv_data(host.data(), total_elems, peer) == 0) {
+            printf("[PE %d] PASS: TMA get to shared memory\n", mype);
+        } else {
+            status = 1;
+        }
+
+        nvshmem_free(recv_data);
+        nvshmem_free(source_data);
     }
 
 out:

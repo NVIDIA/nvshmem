@@ -355,7 +355,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
 /*
  * Returns true if this CTA has registered shared memory for TMA (via
  * nvshmemx_give_smem) and TMA policy is not DISABLE.  Used to gate the
- * TMA dispatch path in put and quiet.
+ * TMA dispatch path in put, get, and quiet.
  */
 __device__ __forceinline__ bool nvshmemi_tma_smem_registered() {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
@@ -371,10 +371,10 @@ __device__ __forceinline__ bool nvshmemi_tma_smem_registered() {
 }
 
 /*
- * Drain all pending TMA outbound bulk ops issued by this thread.  Equivalent
- * to commit_group + wait_group 0, gated on this CTA having registered smem.
+ * Drain all pending TMA bulk ops issued by this thread.  Equivalent to
+ * commit_group + wait_group 0, gated on this CTA having registered smem.
  * No-op if TMA is not in use.  Used by fence and quiet to enforce ordering
- * of TMA-initiated puts relative to subsequent NVSHMEM operations.
+ * of TMA-initiated puts and completion of TMA-initiated gets.
  */
 __device__ __forceinline__ void nvshmemi_tma_drain_if_registered() {
     if (nvshmemi_tma_smem_registered()) {
@@ -394,7 +394,8 @@ __device__ __forceinline__ void nvshmemi_tma_drain_if_registered() {
  *   0             : single-thread impl mbarrier
  *   0, 1          : block impl ready_bar[0], ready_bar[1]
  *   2, 3          : block impl done_bar[0], done_bar[1]
- *   4..31         : reserved for future TMA paths (warpgroup, deeper pipes,
+ *   4             : direct global-to-shared get mbarrier
+ *   5..31         : reserved for future TMA paths (warpgroup, deeper pipes,
  *                   reductions, counted signals, etc.)
  *
  * Precondition: nvshmemi_tma_smem_registered() returns true (i.e. give_smem
@@ -423,6 +424,59 @@ enum class Blocking { No, Yes };
 #endif
 
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+
+/*
+ * Direct global-to-shared TMA copy for get operations whose local destination
+ * is shared memory.  The source pointer is the peer-mapped remote global
+ * address.  The destination is local shared memory.
+ *
+ * Returns 0 on success; -1 if alignment, size, smem registration, or reserved
+ * mbarrier-region constraints are not met.  Callers fall back to regular P2P
+ * loads when this helper returns -1.
+ */
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_global_shared(void *smem_dst,
+                                                        const void *gmem_src,
+                                                        size_t bytes) {
+    if (bytes == 0) return 0;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)smem_dst)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
+    if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
+    if (bytes > (size_t)UINT32_MAX) return -1;
+
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    size_t smem_size =
+        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+    if (base == 0 || smem_size <= kReserve) return -1;
+
+    uintptr_t dst_start = (uintptr_t)smem_dst;
+    uintptr_t dst_end = dst_start + bytes;
+    uintptr_t reserve_end = base + kReserve;
+    if (dst_start < reserve_end && dst_end > base) return -1;
+
+    uint64_t *mbar = nvshmemi_tma_barrier_slot(4);
+    bool is_leader = (SCOPE == NVSHMEMI_THREADGROUP_THREAD)
+                         ? true
+                         : ((SCOPE == NVSHMEMI_THREADGROUP_WARP) ? nvshmemi_tma_elect_warp()
+                                                                  : nvshmemi_tma_block_is_elected());
+
+    if (is_leader) {
+        nvshmemi_tma_mbarrier_init(mbar);
+        nvshmemi_tma_fence_proxy_async_shared_cta();
+        nvshmemi_tma_mbarrier_arrive_expect_tx(mbar, (uint32_t)bytes);
+        nvshmemi_tma_bulk_global_to_shared(smem_dst, gmem_src, (uint32_t)bytes, mbar);
+        nvshmemi_tma_mbarrier_try_wait(mbar, 0);
+    }
+
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
+        __syncthreads();
+    } else if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
+        nvshmemi_threadgroup_sync<SCOPE>();
+    }
+    return 0;
+}
 
 /*
  * Single-issuer global-to-global TMA copy for THREAD and WARP scope.
@@ -673,6 +727,13 @@ __device__ inline int nvshmemi_memcpy_tma_global_global(void * /*gmem_dst*/,
     return -1;
 }
 
+template <threadgroup_t SCOPE>
+__device__ inline int nvshmemi_memcpy_tma_global_shared(void * /*smem_dst*/,
+                                                        const void * /*gmem_src*/,
+                                                        size_t /*bytes*/) {
+    return -1;
+}
+
 #endif /* __CUDA_ARCH__ >= 900 */
 
 /* qpair specific APIs */
@@ -756,8 +817,22 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     if (peer_base_addr) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
+        size_t nbytes = nelems * sizeof(T);
+        if (nvshmemi_tma_smem_registered()) {
+            if (__isShared(dest)) {
+                if (nvshmemi_memcpy_tma_global_shared<SCOPE>((void *)dest,
+                                                             (const void *)source_actual,
+                                                             nbytes) == 0)
+                    return;
+            } else {
+                if (nvshmemi_memcpy_tma_global_global<SCOPE>((void *)dest,
+                                                              (const void *)source_actual,
+                                                              nbytes) == 0)
+                    return;
+            }
+        }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
-                                           nelems * sizeof(T));
+                                           nbytes);
     } else {
         nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
                                                           nelems * sizeof(T), pe, qp_index);
@@ -775,8 +850,26 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     if (peer_base_addr) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
+        size_t nbytes = nelems * sizeof(T);
+        if (nvshmemi_tma_smem_registered()) {
+            if (__isShared(dest)) {
+                if (nvshmemi_memcpy_tma_global_shared<SCOPE>((void *)dest,
+                                                             (const void *)source_actual,
+                                                             nbytes) == 0) {
+                    nvshmemi_threadgroup_sync<SCOPE>();
+                    return;
+                }
+            } else {
+                if (nvshmemi_memcpy_tma_global_global<SCOPE>((void *)dest,
+                                                              (const void *)source_actual,
+                                                              nbytes) == 0) {
+                    nvshmemi_threadgroup_sync<SCOPE>();
+                    return;
+                }
+            }
+        }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
-                                           nelems * sizeof(T));
+                                           nbytes);
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
                                                       nelems * sizeof(T), pe, qp_index);

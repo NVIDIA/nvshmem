@@ -10,7 +10,36 @@
 #include <getopt.h>
 #include "utils.h"
 
+enum class SMEMToggle { DISABLE, ENABLE };
+
+template <SMEMToggle SMEM_MODE>
+class smem_registration_guard {
+   public:
+    __device__ smem_registration_guard(char *smem, int smem_size) {
+        if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+            nvshmemx_give_smem(smem, smem_size);
+            __syncthreads();
+        } else {
+            (void)smem;
+            (void)smem_size;
+        }
+    }
+
+    __device__ ~smem_registration_guard() {
+        if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+            __syncthreads();
+            nvshmemx_release_smem();
+        }
+    }
+};
+
+template <SMEMToggle SMEM_MODE>
 __global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter) {
+    extern __shared__ char nvshmem_smem[];
+    int smem_size = (SMEM_MODE == SMEMToggle::ENABLE)
+                        ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED)
+                        : 0;
+    smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
@@ -49,6 +78,9 @@ __global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, in
     }
 }
 
+typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe,
+                        int iter);
+
 int main(int argc, char *argv[]) {
     int mype, npes;
     double *data_d = NULL;
@@ -62,6 +94,8 @@ int main(int argc, char *argv[]) {
     double *h_bw = NULL, *h_bw_total = NULL;
     double *d_bw = NULL, *d_bw_sum = NULL;
 
+    bw_fn_t bw_fn = use_smem ? bw<SMEMToggle::ENABLE> : bw<SMEMToggle::DISABLE>;
+    int smem_size = use_smem ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED) : 0;
     int iter = iters;
     int skip = warmup_iters;
 
@@ -79,6 +113,10 @@ int main(int argc, char *argv[]) {
     if (npes != 2) {
         fprintf(stderr, "This test requires exactly two processes \n");
         goto finalize;
+    }
+    if (use_smem) {
+        CUDA_CHECK(cudaFuncSetAttribute(bw<SMEMToggle::ENABLE>,
+                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
     }
     if (use_mmap) {
         data_d = (double *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -119,12 +157,14 @@ int main(int argc, char *argv[]) {
         for (int size = min_size; size <= max_size; size *= step_factor) {
             h_size_arr[i] = size;
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-            bw<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype, skip);
+            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
+                                                          mype, skip);
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
 
             cudaEventRecord(start);
-            bw<<<max_blocks, max_threads>>>(data_d, counter_d, size / sizeof(double), mype, iter);
+            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
+                                                          mype, iter);
             cudaEventRecord(stop);
 
             CUDA_CHECK(cudaGetLastError());
