@@ -17,12 +17,13 @@
 using namespace std;
 
 #define DO_TEST_CUBIN()                                                                          \
-    void *args[] = {(void *)&team, (void *)&dest, (void *)&source, (void *)&nelems};             \
+    void *args[] = {(void *)&team, (void *)&dest, (void *)&source, (void *)&nelems,              \
+                    (void *)&_dynamic_smem_size};                                                \
     CUfunction test_double2_maxloc_reduce_kernel_block_cubin;                                    \
     init_test_case_kernel(&test_double2_maxloc_reduce_kernel_block_cubin,                        \
                           "test_double2_maxloc_reduce_kernel_block");                            \
     CU_CHECK(cuLaunchKernel(test_double2_maxloc_reduce_kernel_block_cubin, 1, 1, 1, num_threads, \
-                            1, 1, 0, cstrm, args, NULL));
+                            1, 1, _dynamic_smem_size, cstrm, args, NULL));
 
 __device__ void init_double2_maxloc_reduce_data_block(nvshmem_team_t team, double2 *source) {
     int team_my_pe = nvshmem_team_my_pe(team);
@@ -54,9 +55,11 @@ extern "C" {
 #endif
 
 __global__ void test_double2_maxloc_reduce_kernel_block(nvshmem_team_t team, double2 *dest,
-                                                        double2 *source, size_t nelems) {
+                                                        double2 *source, size_t nelems,
+                                                        size_t dynamic_smem_size) {
     int myIdx = nvshmtest_thread_id_in_block();
     int groupSize = nvshmtest_block_size();
+    NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);
     init_double2_maxloc_reduce_data_block(team, source);
     for (int j = 0; j < MAX_ITER; j++) {
         reset_double2_maxloc_reduce_data_block(team, dest);
@@ -67,6 +70,7 @@ __global__ void test_double2_maxloc_reduce_kernel_block(nvshmem_team_t team, dou
         // nvshmemx_double_broadcast_block(team, (double *)source, (const double *)source, nelems,
         // 0);
     }
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
@@ -77,8 +81,8 @@ __global__ void test_double2_maxloc_reduce_kernel_block(nvshmem_team_t team, dou
     if (use_cubin) {                                                           \
         DO_TEST_CUBIN();                                                       \
     } else {                                                                   \
-        test_double2_maxloc_reduce_kernel_block<<<1, num_threads, 0, cstrm>>>( \
-            team, (double2 *)dest, (double2 *)source, nelems);                 \
+        test_double2_maxloc_reduce_kernel_block<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+            team, (double2 *)dest, (double2 *)source, nelems, _dynamic_smem_size);            \
     }                                                                          \
     CUDA_RUNTIME_CHECK(cudaGetLastError());                                    \
     cudaStreamSynchronize(cstrm);

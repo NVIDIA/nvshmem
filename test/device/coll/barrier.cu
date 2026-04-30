@@ -15,37 +15,40 @@
 #define MAX_ITER 10
 
 #define DO_BARRIER_ALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX)                                    \
-    void *args_all_##SC_SUFFIX[] = {(void *)&buf};                                             \
+    void *args_all_##SC_SUFFIX[] = {(void *)&buf, (void *)&_dynamic_smem_size};                \
     CUfunction test_barrier_all_##SC_SUFFIX_cubin;                                             \
     init_test_case_kernel(&test_barrier_all_##SC_SUFFIX_cubin,                                 \
                           NVSHMEMI_TEST_STRINGIFY(test_barrier_all##SC_SUFFIX##_kernel));      \
-    CU_CHECK(cuLaunchKernel(test_barrier_all_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1, 0, \
-                            cstrm, args_all_##SC_SUFFIX, NULL));
+    CU_CHECK(cuLaunchKernel(test_barrier_all_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1,    \
+                            _dynamic_smem_size, cstrm, args_all_##SC_SUFFIX, NULL));
 
 #define DO_BARRIER_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX)                                           \
-    void *args_##SC_SUFFIX[] = {(void *)&team, (void *)&buf};                                     \
+    void *args_##SC_SUFFIX[] = {(void *)&team, (void *)&buf, (void *)&_dynamic_smem_size};        \
     CUfunction test_barrier_##SC_SUFFIX_cubin;                                                    \
     init_test_case_kernel(&test_barrier_##SC_SUFFIX_cubin,                                        \
                           NVSHMEMI_TEST_STRINGIFY(test_barrier##SC_SUFFIX##_kernel));             \
-    CU_CHECK(cuLaunchKernel(test_barrier_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1, 0, cstrm, \
-                            args_##SC_SUFFIX, NULL));
+    CU_CHECK(cuLaunchKernel(test_barrier_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1,           \
+                            _dynamic_smem_size, cstrm, args_##SC_SUFFIX, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
 #define DECL_TEST_BARRIER_ALL_KERNEL(SC, SC_SUFFIX, SC_PREFIX) \
-    __global__ void test_barrier_all##SC_SUFFIX##_kernel(int *buf);
+    __global__ void test_barrier_all##SC_SUFFIX##_kernel(int *buf, size_t dynamic_smem_size);
 NVSHMEMI_REPT_FOR_SCOPES2(DECL_TEST_BARRIER_ALL_KERNEL)
 #undef DECL_TEST_BARRIER_ALL_KERNEL
 
 #define DECL_TEST_BARRIER_KERNEL(SC, SC_SUFFIX, SC_PREFIX) \
-    __global__ void test_barrier##SC_SUFFIX##_kernel(nvshmem_team_t team, int *buf);
+    __global__ void test_barrier##SC_SUFFIX##_kernel(nvshmem_team_t team, int *buf, \
+                                                     size_t dynamic_smem_size);
 NVSHMEMI_REPT_FOR_SCOPES2(DECL_TEST_BARRIER_KERNEL)
 #undef DECL_TEST_BARRIER_KERNEL
 
-#define TEST_BARRIER_ALL_KERNEL(SC, SC_SUFFIX, SC_PREFIX)              \
-    __global__ void test_barrier_all##SC_SUFFIX##_kernel(int *buf) {   \
+#define TEST_BARRIER_ALL_KERNEL(SC, SC_SUFFIX, SC_PREFIX)                           \
+    __global__ void test_barrier_all##SC_SUFFIX##_kernel(int *buf,                  \
+                                                         size_t dynamic_smem_size) { \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                  \
         for (int iters = 0; iters < MAX_ITER; iters++) {               \
             init_barrier_data##SC_SUFFIX(NVSHMEM_TEAM_WORLD, buf);     \
             nvshmem##SC_PREFIX##_barrier_all##SC_SUFFIX();             \
@@ -53,11 +56,14 @@ NVSHMEMI_REPT_FOR_SCOPES2(DECL_TEST_BARRIER_KERNEL)
             reset_barrier_data##SC_SUFFIX(NVSHMEM_TEAM_WORLD, buf);    \
             nvshmem##SC_PREFIX##_barrier_all##SC_SUFFIX();             \
         }                                                              \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                               \
     }
 NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_ALL_KERNEL)
 
-#define TEST_BARRIER_KERNEL(SC, SC_SUFFIX, SC_PREFIX)                                 \
-    __global__ void test_barrier##SC_SUFFIX##_kernel(nvshmem_team_t team, int *buf) { \
+#define TEST_BARRIER_KERNEL(SC, SC_SUFFIX, SC_PREFIX)                                  \
+    __global__ void test_barrier##SC_SUFFIX##_kernel(nvshmem_team_t team, int *buf,    \
+                                                     size_t dynamic_smem_size) {       \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                     \
         for (int iters = 0; iters < MAX_ITER; iters++) {                              \
             init_barrier_data##SC_SUFFIX(team, buf);                                  \
             nvshmem##SC_PREFIX##_barrier##SC_SUFFIX(team);                            \
@@ -65,6 +71,7 @@ NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_ALL_KERNEL)
             reset_barrier_data##SC_SUFFIX(team, buf);                                 \
             nvshmem##SC_PREFIX##_barrier##SC_SUFFIX(team);                            \
         }                                                                             \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                  \
     }
 NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_KERNEL)
 
@@ -76,7 +83,8 @@ NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_KERNEL)
     if (use_cubin) {                                                             \
         DO_BARRIER_ALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX);                     \
     } else {                                                                     \
-        test_barrier_all##SC_SUFFIX##_kernel<<<1, num_threads, 0, cstrm>>>(buf); \
+        test_barrier_all##SC_SUFFIX##_kernel<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+            buf, _dynamic_smem_size);                                             \
     }                                                                            \
     CUDA_RUNTIME_CHECK(cudaGetLastError());                                      \
     cudaStreamSynchronize(cstrm);
@@ -85,7 +93,8 @@ NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_KERNEL)
     if (use_cubin) {                                                               \
         DO_BARRIER_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX);                           \
     } else {                                                                       \
-        test_barrier##SC_SUFFIX##_kernel<<<1, num_threads, 0, cstrm>>>(team, buf); \
+        test_barrier##SC_SUFFIX##_kernel<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+            team, buf, _dynamic_smem_size);                                      \
     }                                                                              \
     CUDA_RUNTIME_CHECK(cudaGetLastError());                                        \
     cudaStreamSynchronize(cstrm);

@@ -14,12 +14,13 @@
 
 #define DO_FCOLLECT_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                          \
     void *args_##TYPENAME##_##SC_SUFFIX[] = {(void *)&team, (void *)&dest, (void *)&source,       \
-                                             (void *)&nelems, (void *)&iters};                    \
+                                             (void *)&nelems, (void *)&iters,                     \
+                                             (void *)&_dynamic_smem_size};                        \
     CUfunction test_##TYPENAME##_fcollect##SC_SUFFIX_cubin;                                       \
     init_test_case_kernel(&test_##TYPENAME##_fcollect##SC_SUFFIX_cubin,                           \
                           NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_fcollect##SC_SUFFIX));        \
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_fcollect##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, \
-                            1, 0, cstrm, args_##TYPENAME##_##SC_SUFFIX, NULL));
+                            1, _dynamic_smem_size, cstrm, args_##TYPENAME##_##SC_SUFFIX, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
@@ -27,18 +28,20 @@ extern "C" {
 
 #define DECL_FCOLLECT_TEST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                \
     __global__ void test_##TYPENAME##_fcollect##SC_SUFFIX(nvshmem_team_t team, TYPE *dest, \
-                                                          TYPE *source, size_t nelems, int iters);
+                                                          TYPE *source, size_t nelems, int iters, \
+                                                          size_t dynamic_smem_size);
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DECL_FCOLLECT_TEST_KERNEL)
 #undef DECL_FCOLLECT_TEST_KERNEL
 
 #define DEFN_FCOLLECT_TEST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                    \
     __global__ void test_##TYPENAME##_fcollect##SC_SUFFIX(                                     \
-        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, int iters) {             \
+        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, int iters,               \
+        size_t dynamic_smem_size) {                                                            \
         int iter;                                                                              \
         int PE_size = nvshmem_team_n_pes(team);                                                \
         int myIdx = nvshmtest_thread_id_in_##SC();                                             \
         int groupSize = nvshmtest_##SC##_size();                                               \
-                                                                                               \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                             \
         init_##TYPENAME##_fcollect_data##SC_SUFFIX(team, source, nelems);                      \
         for (iter = 0; iter < iters; iter++) {                                                 \
             reset_##TYPENAME##_fcollect_data##SC_SUFFIX(team, dest, nelems);                   \
@@ -46,6 +49,7 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DECL_FCOLLECT_TEST_KERNEL)
             nvshmem##SC_PREFIX##_##TYPENAME##_fcollect##SC_SUFFIX(team, dest, source, nelems); \
             validate_##TYPENAME##_fcollect_data##SC_SUFFIX(team, dest, nelems);                \
         }                                                                                      \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                         \
     }
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DEFN_FCOLLECT_TEST_KERNEL)
@@ -58,8 +62,8 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DEFN_FCOLLECT_TEST_KERNEL)
     if (use_cubin) {                                                         \
         DO_FCOLLECT_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);    \
     } else {                                                                 \
-        test_##TYPENAME##_fcollect##SC_SUFFIX<<<1, num_threads, 0, cstrm>>>( \
-            team, (TYPE *)dest, (TYPE *)source, nelems, iters);              \
+        test_##TYPENAME##_fcollect##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+            team, (TYPE *)dest, (TYPE *)source, nelems, iters, _dynamic_smem_size);              \
     }                                                                        \
     CUDA_RUNTIME_CHECK(cudaGetLastError());                                  \
     cudaStreamSynchronize(cstrm);

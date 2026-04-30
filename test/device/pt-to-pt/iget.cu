@@ -38,6 +38,9 @@ int ldisp = 2;
     if (typeid(T) == typeid(int)) {                                                            \
         init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_int_##GROUP)); \
     }                                                                                          \
+    CU_CHECK(cuFuncSetAttribute(test_all_cubin,                                                 \
+                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,                 \
+                                (int)_dynamic_smem_size));                                       \
     CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_all_g, NULL));
 
 #define TEST_NVSHMEM_RING_G_CUBIN(GROUP)                                                      \
@@ -48,6 +51,9 @@ int ldisp = 2;
     if (typeid(T) == typeid(int)) {                                                           \
         init_test_case_kernel(&test_ring_g_cubin, NVSHMEMI_TEST_STRINGIFY(ring_int_##GROUP)); \
     }                                                                                         \
+    CU_CHECK(cuFuncSetAttribute(test_ring_g_cubin,                                            \
+                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,               \
+                                (int)_dynamic_smem_size));                                     \
     CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_ring_g, NULL));
 
 #define DEFINE_RMA_GET_WRAPPER(Group)                                                       \
