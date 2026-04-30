@@ -19,6 +19,7 @@
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host/nvshmem_tensor.h"
+#include "device/logical_endpoint_device.cuh"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
@@ -324,6 +325,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_nvls_allpush_thr
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
     if constexpr (nvshmemi_device_has_nvls_multimem) {
         nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+
+#if defined(CFT_HANDLES_ENABLED) && LE_HW_SW_REQUIREMENTS_MET
+        if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, nelems * sizeof(T),
+                                                 SCOPE) &&
+            nvshmemi_tma_smem_registered() &&
+            !__isShared(source) &&
+            !__isShared(dest + dest_offset) &&
+            nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)source) &&
+            nvshmemi_is_addr_offset_aligned(dest + dest_offset, CFT_HANDLE_TX_SIZE)) {
+            nvshmemi_threadgroup_sync<SCOPE>();
+            size_t leftover = nvshmemi_handle_mcast_memcpy_threadgroup<T, SCOPE>(
+                teami, (dest + dest_offset), source, nelems * sizeof(T));
+            assert(leftover == 0);
+            nvshmemi_barrier_threadgroup<SCOPE>(team);
+            return;
+        }
+#endif
+
         nvshmemi_threadgroup_sync<SCOPE>();
         T *dst_ptr = (T *)nvshmemi_mc_ptr(teami, (void *)(dest + dest_offset));
         nvshmemi_mcast_memcpy_threadgroup<T, SCOPE>(dst_ptr, source, nelems * sizeof(T));
