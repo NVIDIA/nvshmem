@@ -19,6 +19,11 @@
 #include <strings.h>                                 // for strcasecmp
 #include <list>                                      // for _List_iter...
 #include <vector>                                    // for vector
+#include <filesystem>                                // std::filesystem::path
+#include <fstream>                                   // std::ifstream
+#include <sstream>                                   // std::istringstream
+#include <string>                                    // std::string, std::getline
+#include <cstdint>                                   // uint32_t
 #include "non_abi/nvshmemx_error.h"                  // for NVSHMEMX_E...
 #include "internal/host/debug.h"                     // for INFO, NVSH...
 #include "internal/host/nvshmem_internal.h"          // for nvshmemi_s...
@@ -784,65 +789,92 @@ out:
     return status;
 }
 
-/* Read a sysfs file into a string buffer. Mirrors NCCL's ncclTopoGetStrFromSys. */
-static int read_sysfs_str(const char *path, char *buf, size_t len) {
-    FILE *f = fopen(path, "r");
-    if (!f) return -1;
-    size_t n = fread(buf, 1, len - 1, f);
-    fclose(f);
-    if (n == 0) return -1;
-    buf[n - 1] = '\0';
-    return 0;
-}
-
 /* Parse hex cpumap string (e.g. "0000ffff,0000ffff") into cpu_set_t. Mirrors NCCL's ncclStrToCpuset. */
-static void cpumap_to_cpuset(const char *mapStr, cpu_set_t *set) {
-    uint32_t masks[CPU_SETSIZE / 32] = {0};
-    int m = CPU_SETSIZE / 32;
-    char *str = strdup(mapStr);
-    char *tok = strtok(str, ",");
-    while (tok && m > 0) {
-        masks[--m] = strtoul(tok, NULL, 16);
-        tok = strtok(NULL, ",");
+static void cpumap_to_cpuset(const std::string &map_str, cpu_set_t *set) {
+    constexpr int mask_count = CPU_SETSIZE / 32;
+    std::array<uint32_t, mask_count> masks = {};
+    int m = mask_count;
+
+    std::istringstream ss(map_str);
+    std::string token;
+
+    while (std::getline(ss, token, ',') && m > 0) {
+        masks[--m] = static_cast<uint32_t>(std::stoul(token, nullptr, 16));
     }
-    free(str);
+
     CPU_ZERO(set);
-    for (int a = 0; (a + m) < CPU_SETSIZE / 32; a++)
-        for (int i = 0; i < 32; i++)
-            if (masks[a + m] & (1U << i))
+    for (int a = 0; (a + m) < mask_count; a++) {
+        for (int i = 0; i < 32; i++) {
+            if (masks[a + m] & (1U << i)) {
                 CPU_SET(i + a * 32, set);
+            }
+        }
+    }
 }
 
 int nvshmemi_set_cpu_affinity(nvshmemi_state_t *state) {
     CUdevice cudev;
+    cpu_set_t cur_set, numa_set, final_set;
     int numa_id = -1;
     int status;
 
     status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet)(&cudev, state->device_id);
-    if (status != CUDA_SUCCESS) return 0;
+    if (status != CUDA_SUCCESS) {
+        INFO(NVSHMEM_INIT, "cuDeviceGet failed: %d.\n", status);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
-    status = CUPFN(nvshmemi_cuda_syms, cuDeviceGetAttribute)(
-        &numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, cudev);
-    if (status != CUDA_SUCCESS || numa_id < 0) return 0;
+    status = CUPFN(nvshmemi_cuda_syms,
+                   cuDeviceGetAttribute)(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, cudev);
+    if (status != CUDA_SUCCESS || numa_id < 0) {
+        INFO(NVSHMEM_INIT, "cuDeviceGetAttribute failed: %d (numa_id: %d).\n", status, numa_id);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
     /* Get current process affinity */
-    cpu_set_t cur_set;
-    if (sched_getaffinity(0, sizeof(cur_set), &cur_set) != 0) return 0;
+    status = sched_getaffinity(0, sizeof(cur_set), &cur_set);
+    if (status != 0) {
+        INFO(NVSHMEM_INIT, "sched_getaffinity failed: %d.\n", status);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
     /* Read cpumap for this NUMA node */
-    char path[PATH_MAX], mapStr[1024];
-    snprintf(path, sizeof(path), "/sys/devices/system/node/node%d/cpumap", numa_id);
-    if (read_sysfs_str(path, mapStr, sizeof(mapStr)) != 0) return 0;
+    const auto cpumap_path = std::filesystem::path("/sys/devices/system/node") /
+                             ("node" + std::to_string(numa_id)) / "cpumap";
 
-    /* Parse and intersect with current affinity */
-    cpu_set_t numa_set, final_set;
-    cpumap_to_cpuset(mapStr, &numa_set);
+    std::ifstream cpumap_file{cpumap_path};
+    if (!cpumap_file) {
+        INFO(NVSHMEM_INIT, "unable to open cpumap path: %s.\n", cpumap_path.c_str());
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    std::string map_str{std::istreambuf_iterator<char>(cpumap_file),
+                        std::istreambuf_iterator<char>()};
+
+    if (map_str.empty()) {
+        INFO(NVSHMEM_INIT, "cpumap path is empty.\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    /* Strip newline if present */
+    if (map_str.back() == '\n') map_str.pop_back();
+
+    cpumap_to_cpuset(map_str, &numa_set);
     CPU_AND(&final_set, &cur_set, &numa_set);
 
-    if (CPU_COUNT(&final_set) == 0) return 0;
+    if (CPU_COUNT(&final_set) == 0) {
+        INFO(NVSHMEM_INIT, "target cpuset is empty.\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
-    sched_setaffinity(0, sizeof(final_set), &final_set);
+    status = sched_setaffinity(0, sizeof(final_set), &final_set);
+    if (status != 0) {
+        INFO(NVSHMEM_INIT, "sched_setaffinity failed: %d.\n", status);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
     INFO(NVSHMEM_INIT, "PE %d pinned to NUMA node %d (%d CPUs) for GPU %d",
          nvshmemi_boot_handle.pg_rank, numa_id, CPU_COUNT(&final_set), state->device_id);
-    return 0;
+
+    return NVSHMEMX_SUCCESS;
 }

@@ -1128,7 +1128,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
 
     /* Pin to NUMA-local CPUs for this GPU before heap allocation */
     if (!nvshmemi_options.DISABLE_CPU_AFFINITY) {
-        nvshmemi_set_cpu_affinity(state);
+        if (nvshmemi_set_cpu_affinity(state) != NVSHMEMX_SUCCESS) {
+            INFO(NVSHMEM_INIT, "Failed to bind to NUMA node - skipping.\n");
+        }
     }
 
     if (nvshmemi_options.DISABLE_CUDA_VMM == 0 && nvshmemi_is_vmm_supported &&
