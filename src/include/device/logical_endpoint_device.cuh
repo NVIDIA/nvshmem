@@ -28,7 +28,7 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *, si
 }
 
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int, size_t, threadgroup_t,
-                                                           const void *) {
+                                                           const void *, const void *) {
     return false;
 }
 
@@ -36,7 +36,7 @@ __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return false; 
 
 __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int, size_t,
                                                                          threadgroup_t,
-                                                                         const void *) {
+                                                                         const void *, const void *) {
     return false;
 }
 
@@ -68,6 +68,10 @@ __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int pe)
 }
 
 __device__ bool nvshmemi_tma_smem_registered();
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+__device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers);
+__device__ constexpr bool nvshmemi_tma_is_16b_aligned(size_t value);
+#endif
 
 __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *addr, size_t size) {
     if (addr == nullptr) return false;
@@ -76,10 +80,13 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *addr
 }
 
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, threadgroup_t scope,
-                                                           const void *addr) {
+                                                           const void *le_addr,
+                                                           const void *tma_addr) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
     return ((scope == NVSHMEMI_THREADGROUP_BLOCK) && nvshmemi_tma_smem_registered() &&
-            nvshmemi_is_addr_offset_aligned(addr, CFT_HANDLE_TX_SIZE) &&
+            (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= CFT_HANDLE_TX_SIZE) &&
+            nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) &&
+            nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)tma_addr) &&
             nvshmemi_ld_and_check_valid_le_id(pe) && ((size % CFT_HANDLE_TX_SIZE) == 0));
 #else
     return false;
@@ -97,10 +104,11 @@ __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
 
 __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe, size_t size,
                                                                          threadgroup_t scope,
-                                                                         const void *addr) {
+                                                                         const void *le_addr,
+                                                                         const void *tma_addr) {
 #if defined(CFT_HANDLES_ENABLED) && defined(PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
-    return nvshmemi_is_le_implemented(pe, size, scope, addr);
+    return nvshmemi_is_le_implemented(pe, size, scope, le_addr, tma_addr);
 #else
     return false;
 #endif

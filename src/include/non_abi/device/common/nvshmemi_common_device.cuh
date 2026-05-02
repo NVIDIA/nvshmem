@@ -971,8 +971,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
-         !IS_ADDR_OFFSET_ALIGNED(source, CFT_HANDLE_TX_SIZE))) {
+        !nvshmemi_is_le_supported_and_prioritized(
+                              pe, nelems * sizeof(T), SCOPE, source, dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -992,7 +992,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
                                            nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+    } else if (nvshmemi_is_le_implemented(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
@@ -1010,8 +1010,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
-         !IS_ADDR_OFFSET_ALIGNED(source, CFT_HANDLE_TX_SIZE))) {
+        !nvshmemi_is_le_supported_and_prioritized(
+                              pe, nelems * sizeof(T), SCOPE, source, dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1035,7 +1035,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual,
                                            nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+    } else if (nvshmemi_is_le_implemented(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
 #endif
     } else {
@@ -1066,9 +1066,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
-        (!nvshmemi_tma_smem_registered()) ||
-        (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
+        !nvshmemi_is_le_supported_and_prioritized(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1081,7 +1079,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+    } else if (nvshmemi_is_le_implemented(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
@@ -1107,9 +1105,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
-        (!nvshmemi_tma_smem_registered()) ||
-        (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
+        !nvshmemi_is_le_supported_and_prioritized(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1123,7 +1119,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+    } else if (nvshmemi_is_le_implemented(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>((void *)source, (void *)dest, nelems * sizeof(T), pe, true);
 #endif
     } else {
@@ -1138,15 +1134,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    const size_t required_smem_size =
+        static_cast<size_t>(CFT_HANDLE_TX_SIZE) * blockDim.x * blockDim.y * blockDim.z;
+    const bool can_use_handle = nvshmemi_ld_and_check_valid_le_id(pe) &&
+                                nvshmemi_tma_smem_registered() &&
+                                nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
+                                nvshmemi_is_addr_offset_aligned(sig_addr, CFT_HANDLE_TX_SIZE);
+#endif
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr)) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = signal;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET &&
-               IS_ADDR_OFFSET_ALIGNED(sig_addr, CFT_HANDLE_TX_SIZE) &&
-               LD_AND_CHECK_VALID_LE_ID(pe)) {
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
         nvshmemi_handle_p((void *)sig_addr, signal, pe);
 #endif
     } else if (nvshmemi_use_ldst_path()) {
@@ -1169,9 +1171,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!IS_LE_SUPPORTED_AND_PRIORITIZED(pe, nelems * sizeof(T), SCOPE) ||
-        (!nvshmemi_tma_smem_registered()) ||
-        (!IS_ADDR_OFFSET_ALIGNED(dest, CFT_HANDLE_TX_SIZE)))) {
+        !nvshmemi_is_le_supported_and_prioritized(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1195,7 +1195,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
             nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (IS_LE_IMPLEMENTED(pe, nelems * sizeof(T), SCOPE)) {
+    } else if (nvshmemi_is_le_implemented(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
         nvshmemi_threadgroup_sync<SCOPE>();
         if (!myIdx) {
@@ -2139,8 +2139,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put<NVSHMEMI_THREA
 
     //address must be aligned to CFT_HANDLE_TX_SIZE
     assert((uint64_t)dst % CFT_HANDLE_TX_SIZE == 0);
-    assert(LD_AND_CHECK_VALID_LE_ID(pe));
-    CUlogicalEndpointId dest_le_id = LD_AND_GET_LE_ID((pe));
+    assert(nvshmemi_ld_and_check_valid_le_id(pe));
+    CUlogicalEndpointId dest_le_id = nvshmemi_ld_and_get_le_id((pe));
     uint32_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
     if (adjusted_size) {
         nvshmemi_handle_put_TX_size<NVSHMEMI_THREADGROUP_BLOCK, NVSHMEMI_SMEM_BUF_SIZE>(dst, src, adjusted_size,
