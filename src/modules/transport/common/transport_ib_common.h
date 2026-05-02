@@ -91,7 +91,7 @@ struct nvshmemt_ib_common_ftable {
 struct nvshmemt_ib_common_ep_handle {
     uint32_t qpn;
     uint16_t lid;
-    // ROCE
+    // GID routing
     uint64_t spn;
     uint64_t iid;
 };
