@@ -10,6 +10,10 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#if CUDART_VERSION < 13030
+typedef uint32_t CUlogicalEndpointId;
+#endif
+
 // Update this to check CUDA, driver, version and architecture requirements for CFT handles
 #define LE_HW_SW_REQUIREMENTS_MET ((__CUDA_ARCH__ >= 1000) && (CUDART_VERSION >= 13030))
 
