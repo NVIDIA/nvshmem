@@ -432,7 +432,15 @@ __device__ __forceinline__ char *nvshmemi_tma_barrier_region(uintptr_t smem_base
 }
 
 __device__ __forceinline__ char *nvshmemi_tma_data_buffer(uintptr_t smem_base) {
-    return reinterpret_cast<char *>(smem_base + (uintptr_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES);
+    return reinterpret_cast<char *>(smem_base + (uintptr_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET);
+}
+
+__device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers) {
+    size_t smem_size =
+        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
+    if (num_buffers == 0 || smem_size <= kReserve) return 0;
+    return nvshmemi_tma_align_down_16((smem_size - kReserve) / num_buffers);
 }
 
 __device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(uintptr_t smem_base, int slot) {
@@ -445,6 +453,23 @@ __device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(int slot) {
     uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
     return nvshmemi_tma_barrier_slot(base, slot);
 }
+
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+__device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(uintptr_t smem_base,
+                                                                           int slot) {
+    assert(slot >= 0);
+    assert(slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS);
+    return reinterpret_cast<handle_barrier_t *>(
+        nvshmemi_tma_barrier_region(smem_base) + (uintptr_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES +
+        (uintptr_t)slot * 16);
+}
+
+__device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(int slot) {
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    return nvshmemi_handle_barrier_slot(base, slot);
+}
+#endif
 
 enum class Blocking { No, Yes };
 #endif
@@ -474,7 +499,7 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void *smem_dst,
     uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
     size_t smem_size =
         nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
-    constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+    constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (base == 0 || smem_size <= kReserve) return -1;
 
     uintptr_t dst_start = (uintptr_t)smem_dst;
@@ -537,9 +562,9 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
         nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
     if (base == 0 || smem_size == 0) return -1;
 
-    /* Barrier region (NVSHMEMI_TMA_BARRIER_REGION_BYTES) is reserved at the
-     * base by give_smem; data tile is the remainder.  This impl uses slot 0. */
-    constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+    /* Barrier regions are reserved at the base by give_smem; data tile is the
+     * remainder.  This impl uses TMA slot 0. */
+    constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (smem_size <= kReserve) return -1;
     uint64_t *mbar = nvshmemi_tma_barrier_slot(base, 0);
     char *data_buf = nvshmemi_tma_data_buffer(base);
@@ -605,8 +630,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
  * double-buffering to overlap inbound TMA of buffer N+1 with outbound TMA of
  * buffer N.
  *
- * Smem layout: [NVSHMEMI_TMA_BARRIER_REGION_BYTES reserved][buf0: tile][buf1: tile]
- * where tile = (smem_size - NVSHMEMI_TMA_BARRIER_REGION_BYTES) / 2, 16B-aligned.
+ * Smem layout: [NVSHMEMI_SMEM_DATA_REGION_OFFSET reserved][buf0: tile][buf1: tile]
+ * where tile = (smem_size - NVSHMEMI_SMEM_DATA_REGION_OFFSET) / 2, 16B-aligned.
  *
  *   ready_bar[i]: load warp signals "buf[i] ready" via cp.async.bulk
  *                 complete_tx + arrive_expect_tx.  Store warp try_waits.
@@ -640,7 +665,7 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
     /* Barrier region reserved at the base by give_smem.  This impl uses slots
      * 0,1 for ready_bar[0,1] and slots 2,3 for done_bar[0,1].  Data tiles
      * occupy the remainder, split in half. */
-    constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+    constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (smem_size <= kReserve) return -1;
     size_t tile_size = nvshmemi_tma_align_down_16((smem_size - kReserve) / 2);
     if (tile_size == 0) return -1;
@@ -1815,6 +1840,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
     // Note: if we support other SCOPEs and multiple mbarriers per block, we need to
     // use threadIdx.x instead of myIdx
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
     uint32_t warp_idx_in_block = myIdx / warpSize;
 
     if (!myIdx) {
@@ -1822,20 +1848,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
         fence_async_proxy();
 
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
-        smem_data_buf[0] = reinterpret_cast<uint8_t *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
-        smem_data_buf[1] = smem_data_buf[0] + GET_SMEM_DATA_BUF_SIZE();
+        smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
+        smem_data_buf[1] = smem_data_buf[0] + nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
         handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
 
         /* We use mbarrier for 2 purposes,
          * 1. Sync fabric handle operations using tma_bar_handle
          * 2. Sync TMA transfers using tma_bar_ptr
          */
-        tma_bar_handle[0] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+        tma_bar_handle[0] =
+            nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
         // We may need one barrier per buffer for efficient pipelining.
         // For now, both handles point to the same barrier slot.
-        tma_bar_handle[1] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES + 0));
-        __mbarrier_t *tma_bar_ptr = reinterpret_cast<__mbarrier_t *>(GET_SMEM_MBARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block));
+        tma_bar_handle[1] =
+            nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES + 0);
+        __mbarrier_t *tma_bar_ptr =
+            reinterpret_cast<__mbarrier_t *>(nvshmemi_tma_barrier_slot(smem_base,
+                                                                        warp_idx_in_block));
 
         tma_bar_handle[0]->init(1);
         __mbarrier_init(tma_bar_ptr, 1);
@@ -1913,10 +1943,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     // Note: if we support other SCOPEs and multiple mbarriers per block, we need to
     // use threadIdx.x instead of myIdx
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
     int warp_idx_in_block = threadIdx.x / warpSize;
 
     // Copy data to shared memory using threads
-    uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
+    uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
 
     for (uint32_t i = myIdx; i < len; i += groupSize) {
         smem_data_buf[i] = reinterpret_cast<const uint8_t *>(src)[i];
@@ -1929,7 +1960,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     if (!myIdx) {
         handle_barrier_t *tma_bar_handle;
 
-        tma_bar_handle = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+        tma_bar_handle =
+            nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         tma_bar_handle->init(1);
 
         auto dst_handle =
@@ -1960,12 +1992,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
                             + (blockIdx.z * blockDim.x * blockDim.y * blockDim.z);
     uint32_t thrd_idx_in_blk = gbl_thrd_idx % (blockDim.x * blockDim.y * blockDim.z);
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
     int warp_idx_in_block = thrd_idx_in_blk / warpSize;
 
-    T * smem_ptr = reinterpret_cast<T *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
+    T * smem_ptr = reinterpret_cast<T *>(nvshmemi_tma_data_buffer(smem_base));
 
     // threads from same warp share the same mbarrier
-    handle_barrier_t *tma_bar_handle = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
+    handle_barrier_t *tma_bar_handle =
+        nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
     if (lane_idx == leader_lane) {
         tma_bar_handle->init(1);
@@ -2029,18 +2063,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated(
     // Note: if we support other SCOPEs and multiple mbarriers per block, we need to
     // use threadIdx.x instead of myIdx
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
+    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
     uint32_t warp_idx_in_block = myIdx / warpSize;
 
     auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
     if (!myIdx) {
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
-        smem_data_buf[0] = reinterpret_cast<uint8_t *>(GET_SMEM_DATA_BUF(nvshmemi_device_state_d.tma_smem_bases[blkIdx]));
-        smem_data_buf[1] = smem_data_buf[0] + GET_SMEM_DATA_BUF_SIZE();
+        smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
+        smem_data_buf[1] = smem_data_buf[0] + nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
         // Once we have fabric barriers, we may need 1 barrier per buffer to allow for efficient
         // pipelining Fo now, we use 2 pointers pointing to the same barrier
         handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
-        tma_bar_handle[0] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES));
-        tma_bar_handle[1] = reinterpret_cast<handle_barrier_t *>(GET_SMEM_HANDLE_BARRIER(nvshmemi_device_state_d.tma_smem_bases[blkIdx], warp_idx_in_block * TMA_COPY_NUM_STAGES + 0));
+        tma_bar_handle[0] =
+            nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+        tma_bar_handle[1] =
+            nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES + 0);
 
         tma_bar_handle[0]->init(1);
 

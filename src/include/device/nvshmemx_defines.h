@@ -22,7 +22,7 @@
  * kernel launches. Each CTA must provide at least this much shared memory via
  * nvshmemx_give_smem() for TMA to be used.
  *
- * All returned values include NVSHMEMI_TMA_BARRIER_REGION_BYTES at the base
+ * All returned values include NVSHMEMI_SMEM_DATA_REGION_OFFSET at the base
  * of the user's buffer; TMA data tiles live in the remainder.
  *
  * flag:
@@ -35,7 +35,7 @@
  *                                 32 KiB: half of RECOMMENDED; sufficient for
  *                                 smem→gmem single-buffer puts.
  *   NVSHMEMX_SMEM_BARRIERS_ONLY - Only space for barriers and TMA descriptors
- *                                  (NVSHMEMI_TMA_BARRIER_REGION_BYTES); no
+ *                                  (NVSHMEMI_SMEM_DATA_REGION_OFFSET); no
  *                                  data tile.  The gmem→gmem staging path
  *                                  won't run, but smem→gmem puts still work
  *                                  if the user manages their own data in the
@@ -48,7 +48,7 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
         case NVSHMEMX_SMEM_MINIMUM:
             return 32768; /* 32 KiB */
         case NVSHMEMX_SMEM_BARRIERS_ONLY:
-            return NVSHMEMI_TMA_BARRIER_REGION_BYTES;
+            return NVSHMEMI_SMEM_DATA_REGION_OFFSET;
         default:
             return 65536;
     }
@@ -99,11 +99,11 @@ __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
         /* Grid is larger than NVSHMEMI_TMA_MAX_BLOCKS; this CTA cannot use TMA. */
         return;
     }
-    /* Size must be at least NVSHMEMI_TMA_BARRIER_REGION_BYTES — we reserve the
-     * first 512 bytes for mbarriers/TMA descriptors.  A smaller allocation
+    /* Size must be at least NVSHMEMI_SMEM_DATA_REGION_OFFSET — we reserve the
+     * initial bytes for mbarriers/TMA descriptors.  A smaller allocation
      * can't hold our barriers, so don't register this CTA; it falls back to
      * P2P stores for all puts. */
-    if (size < (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES) {
+    if (size < (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET) {
         return;
     }
     /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
