@@ -1723,21 +1723,6 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     DEVX_SET(qpc, qpc, log_rra_max,
              IBGDA_ILOG2_OR0(device->common_device.device_attr.max_qp_rd_atom));
 
-    auto log_grh_enabled = [&](const char *link_layer) {
-        INFO(ibgda_state->log_level,
-             "IBGDA RC init2rtr (QPN %u): GRH enabled. "
-             "link_layer=%s lid=%u gid_index=%u "
-             "local_gid=%016llx:%016llx peer_gid(dgid)=%016llx:%016llx",
-             ep->qpn, link_layer, port_attr->lid,
-             device->common_device.gid_info[portid - 1].local_gid_index,
-             (unsigned long long)device->common_device.gid_info[portid - 1]
-                 .local_gid.global.subnet_prefix,
-             (unsigned long long)device->common_device.gid_info[portid - 1]
-                 .local_gid.global.interface_id,
-             (unsigned long long)peer_ep_handle->spn,
-             (unsigned long long)peer_ep_handle->iid);
-    };
-
     auto set_grh_fields = [&]() {
         ah_attr.is_global = 1;
         ah_attr.grh.dgid.global.subnet_prefix = peer_ep_handle->spn;
@@ -1766,14 +1751,9 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
             peer_ep_handle->spn !=
                 device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix) {
             set_grh_fields();
-            log_grh_enabled("IB");
         } else {
             ah_attr.dlid = peer_ep_handle->lid;
             ah_attr.is_global = 0;
-            INFO(ibgda_state->log_level,
-                 "IBGDA RC init2rtr (QPN %u): GRH disabled. "
-                 "link_layer=IB local_lid=%u peer_lid=%u",
-                 ep->qpn, port_attr->lid, peer_ep_handle->lid);
         }
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
@@ -1786,7 +1766,6 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
                               "Error in ib_roce_get_version_num\n");
 
         set_grh_fields();
-        log_grh_enabled("Ethernet");
 
         assert(roce_version == 1 || roce_version == 2);
         ah_attr.dlid = port_attr->lid | (roce_version == 1 ? IBGDA_ROCE_V1_UDP_SPORT_BASE
@@ -2456,24 +2435,12 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
         ah_attr.grh.traffic_class = ibgda_state->options->IB_TRAFFIC_CLASS;
         ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
         support_half_av_seg = false;
-        INFO(ibgda_state->log_level,
-             "IBGDA DCT shared obj (port %d): GRH enabled. "
-             "link_layer=%s lid=%u gid_index=%u local_gid=%016llx:%016llx",
-             portid,
-             (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) ? "IB" : "Ethernet",
-             port_attr->lid,
-             device->common_device.gid_info[portid - 1].local_gid_index,
-             (unsigned long long)device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix,
-             (unsigned long long)device->common_device.gid_info[portid - 1].local_gid.global.interface_id);
     } else {
         /* Pure IB without GRH. */
         assert(port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND);
         ah_attr.dlid = port_attr->lid;  /* self-AH for DCT: local LID is correct here */
         ah_attr.is_global = 0;
         support_half_av_seg = hca_support_compact_address_vector;
-        INFO(ibgda_state->log_level,
-             "IBGDA DCT shared obj (port %d): GRH disabled. link_layer=IB lid=%u",
-             portid, port_attr->lid);
     }
     ah_attr.sl = ibgda_state->options->IB_SL;
     ah_attr.src_path_bits = 0;
