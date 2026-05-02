@@ -391,20 +391,6 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
     attr.dest_qp_num = ep_handle->qpn;
     attr.rq_psn = 0;
 
-    auto log_grh_enabled = [&](const char *link_layer) {
-        INFO(ibrc_state->log_level,
-             "IBRC ep_connect (QPN %u): GRH enabled. "
-             "link_layer=%s lid=%u gid_index=%d "
-             "local_gid=%016llx:%016llx peer_gid(dgid)=%016llx:%016llx",
-             ep->qp->qp_num, link_layer, (unsigned int)port_attr->lid,
-             device->common_device.gid_info[portid - 1].local_gid_index,
-             (unsigned long long)device->common_device.gid_info[portid - 1]
-                 .local_gid.global.subnet_prefix,
-             (unsigned long long)device->common_device.gid_info[portid - 1]
-                 .local_gid.global.interface_id,
-             (unsigned long long)ep_handle->spn, (unsigned long long)ep_handle->iid);
-    };
-
     auto set_grh_fields = [&]() {
         attr.ah_attr.is_global = 1;
         attr.ah_attr.grh.dgid.global.subnet_prefix = ep_handle->spn;
@@ -423,13 +409,8 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             ep_handle->spn !=
                 device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix) {
             set_grh_fields();
-            log_grh_enabled("IB");
         } else {
             attr.ah_attr.is_global = 0;
-            INFO(ibrc_state->log_level,
-                 "IBRC ep_connect (QPN %u): GRH disabled. "
-                 "link_layer=IB local_lid=%u peer_lid=%u",
-                 ep->qp->qp_num, (unsigned int)port_attr->lid, (unsigned int)ep_handle->lid);
         }
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
         ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
@@ -439,7 +420,6 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
                          device->common_device.gid_info[portid - 1].local_gid_index,
                          &device->common_device.gid_info[portid - 1].local_gid);
         set_grh_fields();
-        log_grh_enabled("Ethernet");
     }
     attr.max_dest_rd_atomic = nvshmemt_ibrc_max_rd_atomic;
     attr.min_rnr_timer = 12;
