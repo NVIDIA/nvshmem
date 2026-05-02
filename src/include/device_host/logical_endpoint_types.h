@@ -31,14 +31,6 @@ __host__ __device__ constexpr bool IS_VALID_LE_ID(std::uint64_t le_id) {
     return (le_id & LE_ID_VALID_MASK) != 0;
 }
 
-// Automatically prioritize logical endpoint over pointer based P2P for CFT handles
-// Just for facilitating testing. TODO: remove this once production code is ready
-#if defined(CFT_HANDLES_ENABLED)
-#define PRIORITIZE_LOGICAL_ENDPOINT 1
-#else
-#define PRIORITIZE_LOGICAL_ENDPOINT 0
-#endif  // CFT_HANDLES_ENABLED
-
 // MAX_BATCH_SIZE is 1MB for try_get, and 16MB for try_put
 inline constexpr int TMA_COPY_MAX_BATCH_SIZE = 1 << 24;  // 16MB
 

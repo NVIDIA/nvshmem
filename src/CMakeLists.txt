@@ -34,6 +34,7 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
                                 -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
                                 -DNVSHMEM_ENABLE_CFT_HANDLES=${NVSHMEM_ENABLE_CFT_HANDLES}
+                                -DNVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT=${NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT}
                                 -DNVSHMEM_GPUNETIO_SUPPORT=${NVSHMEM_GPUNETIO_SUPPORT}
                                 -DGPUNETIO_INCLUDE=${GPUNETIO_INCLUDE}
                                 -DCUTLASS_HOME=${CUTLASS_HOME}
@@ -628,6 +629,10 @@ target_include_directories(
 if (NVSHMEM_ENABLE_CFT_HANDLES)
     target_compile_definitions(nvshmem_host PUBLIC CFT_HANDLES_ENABLED)
     target_compile_definitions(nvshmem_device INTERFACE CFT_HANDLES_ENABLED)
+    if (NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+        target_compile_definitions(nvshmem_host PUBLIC NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+        target_compile_definitions(nvshmem_device INTERFACE NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+    endif()
 endif()
 
 if (NVSHMEM_GPUNETIO_SUPPORT)
