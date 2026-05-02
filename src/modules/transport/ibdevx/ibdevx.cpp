@@ -239,14 +239,16 @@ static int nvshmemt_ibdevx_mlx5_qp_destroy(struct ibdevx_ep *ep) {
     int status;
 
     status = mlx5dv_devx_obj_destroy(ep->devx_qp);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "mlx5dv_devx_obj_destroy failed.\n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "mlx5dv_devx_obj_destroy failed.\n");
 
     status = mlx5dv_devx_umem_dereg(ep->db_umem);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "mlx5dv_devx_umem_dereg failed.\n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "mlx5dv_devx_umem_dereg failed.\n");
 
     status = mlx5dv_devx_umem_dereg(ep->wq_umem);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "mlx5dv_devx_umem_dereg failed.\n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "mlx5dv_devx_umem_dereg failed.\n");
 
     mlx5dv_devx_free_uar(ep->uar);
 
@@ -305,8 +307,8 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
 
     status = mlx5dv_devx_general_cmd(context, cmd_cap_in, sizeof(cmd_cap_in), cmd_cap_out,
                                      sizeof(cmd_cap_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "mlx5dv_devx_general_cmd failed.\n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "mlx5dv_devx_general_cmd failed.\n");
 
     log_bf_reg_size = DEVX_GET(cmd_hca_cap, cap, log_bf_reg_size);
 
@@ -315,7 +317,7 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
 
     // Allocate UAR. This will be used as a DB/BF register).
     uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_BF);
-    NVSHMEMI_NULL_ERROR_JMP(uar, status, ENOMEM, out, "cannot allocate mlx5dv_devx_uar\n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(uar, status, ENOMEM, out, "cannot allocate mlx5dv_devx_uar\n");
 
     // Allocate WQ buffer.
     wq_buf_size = get_ibdevx_qp_depth(ibdevx_state) * MLX5_SEND_WQE_BB;
@@ -323,8 +325,8 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
     NVSHMEMI_NULL_ERROR_JMP(wq_buf, status, ENOMEM, out, "cannot allocate wq buf for qpair.\n");
 
     wq_umem = mlx5dv_devx_umem_reg(context, wq_buf, wq_buf_size, 0);
-    NVSHMEMI_NULL_ERROR_JMP(wq_umem, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "cannot register wq buf for qpair.\n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(wq_umem, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "cannot register wq buf for qpair.\n");
 
     // Allocate Doorbell Register buffer.
     status = posix_memalign(&dbr_buf, sysconf(_SC_PAGESIZE), NVSHMEMT_IBDEVX_DBSIZE);
@@ -458,22 +460,22 @@ static int device_destroy_shared_ep_resources(struct ibdevx_device *device) {
 
     if (device->recv_cq) {
         status = ftable.destroy_cq(device->recv_cq);
-        NVSHMEMI_NZ_ERROR_JMP(status, status, out, "Unable to destroy recv_cq.\n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out, "Unable to destroy recv_cq.\n");
     }
 
     if (device->send_cq) {
         status = ftable.destroy_cq(device->send_cq);
-        NVSHMEMI_NZ_ERROR_JMP(status, status, out, "Unable to destroy send_cq.\n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out, "Unable to destroy send_cq.\n");
     }
 
     if (device->srq) {
         status = ftable.destroy_srq(device->srq);
-        NVSHMEMI_NZ_ERROR_JMP(status, status, out, "Unable to destroy srq.\n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out, "Unable to destroy srq.\n");
     }
 
     if (device->common_device.pd) {
         status = ftable.dealloc_pd(device->common_device.pd);
-        NVSHMEMI_NZ_ERROR_JMP(status, status, out, "Unable to deallocate pd.\n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out, "Unable to deallocate pd.\n");
     }
 
 out:
@@ -494,17 +496,17 @@ static int device_create_shared_ep_resources(struct ibdevx_device *device,
     srq_init_attr.attr.max_sge = 1;
 
     device->srq = ftable.create_srq(pd, &srq_init_attr);
-    NVSHMEMI_NULL_ERROR_JMP(device->srq, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "srq creation failed \n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->srq, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "ibv_create_srq failed \n");
 
     device->recv_cq = ftable.create_cq(context, get_ibdevx_srq_depth(ibdevx_state), NULL, NULL, 0);
-    NVSHMEMI_NULL_ERROR_JMP(device->recv_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "cq creation failed \n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->recv_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "ibv_create_cq failed \n");
 
     device->send_cq =
         ftable.create_cq(context, device->common_device.device_attr.max_cqe, NULL, NULL, 0);
-    NVSHMEMI_NULL_ERROR_JMP(device->send_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "cq creation failed \n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->send_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "ibv_create_cq failed \n");
 
 out:
     return status;
@@ -514,13 +516,13 @@ static int ep_destroy(struct ibdevx_ep *ep) {
     int status = 0;
     if (ep->devx_qp) {
         status = nvshmemt_ibdevx_mlx5_qp_destroy(ep);
-        NVSHMEMI_NZ_ERROR_JMP(status, status, out,
-                              "Unable to destroy qpair for ep in ibdevx transport.\n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out,
+                                    "Unable to destroy qpair for ep in ibdevx transport.\n");
     }
 
     if (ep->ah) {
         status = ftable.destroy_ah(ep->ah);
-        NVSHMEMI_NZ_ERROR_JMP(status, status, out, "Unable to destroy ah.\n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out, "Unable to destroy ah.\n");
     }
 
     qp_map.erase(ep->qpid);

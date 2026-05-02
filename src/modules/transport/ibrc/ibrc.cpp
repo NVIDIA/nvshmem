@@ -193,6 +193,43 @@ ibrc_mem_handle_info_t *get_mem_handle_info(nvshmem_transport_t t, void *gpu_ptr
     return (ibrc_mem_handle_info_t *)nvshmemt_mem_handle_cache_get(t, ibrc_state->cache, gpu_ptr);
 }
 
+static const char *ibrc_wc_status_string(enum ibv_wc_status status) {
+    switch (status) {
+        case IBV_WC_SUCCESS:
+            return "success";
+        case IBV_WC_LOC_LEN_ERR:
+            return "local length error";
+        case IBV_WC_LOC_QP_OP_ERR:
+            return "local QP operation error";
+        case IBV_WC_LOC_PROT_ERR:
+            return "local protection error";
+        case IBV_WC_WR_FLUSH_ERR:
+            return "work request flushed error";
+        case IBV_WC_MW_BIND_ERR:
+            return "memory window bind error";
+        case IBV_WC_BAD_RESP_ERR:
+            return "bad response error";
+        case IBV_WC_LOC_ACCESS_ERR:
+            return "local access error";
+        case IBV_WC_REM_INV_REQ_ERR:
+            return "remote invalid request error";
+        case IBV_WC_REM_ACCESS_ERR:
+            return "remote access error";
+        case IBV_WC_REM_OP_ERR:
+            return "remote operation error";
+        case IBV_WC_RETRY_EXC_ERR:
+            return "transport retry counter exceeded";
+        case IBV_WC_RNR_RETRY_EXC_ERR:
+            return "RNR retry counter exceeded";
+        case IBV_WC_REM_ABORT_ERR:
+            return "remote aborted error";
+        case IBV_WC_GENERAL_ERR:
+            return "general error";
+        default:
+            return "unknown completion error";
+    }
+}
+
 inline int refill_srq(struct ibrc_device *device, nvshmemt_ib_common_state_t ibrc_state) {
     int status = 0;
 
@@ -209,7 +246,8 @@ inline int refill_srq(struct ibrc_device *device, nvshmemt_ib_common_state_t ibr
         buf->sge.lkey = device->bpool_mr->lkey;
 
         status = ibv_post_srq_recv(device->srq, &buf->rwr, &buf->bad_rwr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_srq_recv failed \n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "ibv_post_srq_recv failed \n");
 
         bpool_free.pop_back();
         device->srq_posted++;
@@ -223,7 +261,6 @@ int nvshmemt_ibrc_show_info(struct nvshmem_transport * /*transport*/, int /*styl
     NVSHMEMI_ERROR_PRINT("ibrc show info not implemented");
     return 0;
 }
-
 
 int nvshmemt_ibrc_can_reach_peer(int *access, struct nvshmem_transport_pe_info * /*peer_info*/,
                                  nvshmem_transport_t /*t*/) {
@@ -259,8 +296,8 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     if (!device->send_cq) {
         device->send_cq =
             ftable.create_cq(context, device->common_device.device_attr.max_cqe, NULL, NULL, 0);
-        NVSHMEMI_NULL_ERROR_JMP(device->send_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                "cq creation failed \n");
+        NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->send_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "ibv_create_cq failed \n");
     }
     assert(device->send_cq != NULL);
     ep->send_cq = device->send_cq;
@@ -273,12 +310,12 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
         srq_init_attr.attr.max_sge = 1;
 
         device->srq = ftable.create_srq(pd, &srq_init_attr);
-        NVSHMEMI_NULL_ERROR_JMP(device->srq, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                "srq creation failed \n");
+        NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->srq, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "ibv_create_srq failed \n");
 
         device->recv_cq = ftable.create_cq(context, get_ibrc_srq_depth(ibrc_state), NULL, NULL, 0);
-        NVSHMEMI_NULL_ERROR_JMP(device->recv_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                "cq creation failed \n");
+        NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->recv_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "ibv_create_cq failed \n");
     }
     assert(device->recv_cq != NULL);
     ep->recv_cq = device->recv_cq;
@@ -295,7 +332,8 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     init_attr.cap.max_inline_data = IBRC_MAX_INLINE_SIZE;
 
     ep->qp = ftable.create_qp(pd, &init_attr);
-    NVSHMEMI_NULL_ERROR_JMP(ep->qp, status, NVSHMEMX_ERROR_INTERNAL, out, "qp creation failed \n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(ep->qp, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "ibv_create_qp failed \n");
 
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
     attr.qp_state = IBV_QPS_INIT;
@@ -306,7 +344,7 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     flags = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
 
     status = ftable.modify_qp(ep->qp, &attr, flags);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
 
     ep->req =
         (struct ibrc_request *)malloc(sizeof(struct ibrc_request) * get_ibrc_qp_depth(ibrc_state));
@@ -378,7 +416,7 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             IBV_QP_MIN_RNR_TIMER | IBV_QP_MAX_DEST_RD_ATOMIC;
 
     status = ftable.modify_qp(ep->qp, &attr, flags);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
 
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
     attr.qp_state = IBV_QPS_RTS;
@@ -391,7 +429,7 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             IBV_QP_MAX_QP_RD_ATOMIC;
 
     status = ftable.modify_qp(ep->qp, &attr, flags);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
 
     // register and post receive buffer pool
     if (!device->bpool_mr) {
@@ -633,14 +671,16 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     if (state->ep) {
         for (int i = 0; i < state->ep_count; i++) {
             status = ftable.destroy_qp(((struct ibrc_ep *)state->ep[i])->qp);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_destroy_qp failed \n");
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_destroy_qp failed \n");
         }
         free(state->ep);
     }
 
     if (state->cst_ep) {
         status = ftable.destroy_qp(((struct ibrc_ep *)state->cst_ep)->qp);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_destroy_qp failed \n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "ibv_destroy_qp failed \n");
         free(state->cst_ep);
         state->cst_ep = NULL;
     }
@@ -678,7 +718,7 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
 
     if (dummy_local_mem) {
         status = ftable.dereg_mr(dummy_local_mem->mr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dereg_mr failed \n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dereg_mr failed \n");
         free(dummy_local_mem);
         dummy_local_mem = NULL;
     }
@@ -710,35 +750,35 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
             int dev_id = state->dev_ids[i];
             if (((struct ibrc_device *)state->devices)[dev_id].bpool_mr) {
                 status = ftable.dereg_mr(((struct ibrc_device *)state->devices)[dev_id].bpool_mr);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_dereg_mr failed \n");
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_dereg_mr failed \n");
             }
             if (((struct ibrc_device *)state->devices)[dev_id].send_cq) {
                 status = ftable.destroy_cq(((struct ibrc_device *)state->devices)[dev_id].send_cq);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_destroy_cq failed \n");
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_destroy_cq failed \n");
             }
             if (((struct ibrc_device *)state->devices)[dev_id].recv_cq) {
                 status = ftable.destroy_cq(((struct ibrc_device *)state->devices)[dev_id].recv_cq);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_destroy_cq failed \n");
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_destroy_cq failed \n");
             }
             if (((struct ibrc_device *)state->devices)[dev_id].srq) {
                 status = ftable.destroy_srq(((struct ibrc_device *)state->devices)[dev_id].srq);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_destroy_srq failed \n");
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_destroy_srq failed \n");
             }
             if (((struct ibrc_device *)state->devices)[dev_id].common_device.pd) {
                 status = ftable.dealloc_pd(
                     ((struct ibrc_device *)state->devices)[dev_id].common_device.pd);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_dealloc_pd failed \n");
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_dealloc_pd failed \n");
             }
             if (((struct ibrc_device *)state->devices)[dev_id].common_device.context) {
                 status = ftable.close_device(
                     ((struct ibrc_device *)state->devices)[dev_id].common_device.context);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_close_device failed \n");
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_close_device failed \n");
             }
         }
         free(state->devices);
@@ -904,7 +944,8 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
         }
 
         status = ibv_post_send(ep->qp, sr, bad_sr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "ibv_post_send failed \n");
     }
 
 out:
@@ -926,7 +967,8 @@ int poll_recv(nvshmemt_ib_common_state_t ibrc_state) {
         int ne = ibv_poll_cq(device->recv_cq, 1, &wc);
         if (ne < 0) {
             status = ne;
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_poll_cq failed \n");
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_poll_cq failed \n");
         } else if (ne) {
             assert(ne == 1);
             ibrc_buf_t *buf = (ibrc_buf_t *)wc.wr_id;
@@ -1043,12 +1085,14 @@ int progress_send(nvshmemt_ib_common_state_t ibrc_state) {
         int ne = ibv_poll_cq(device->send_cq, 1, &wc);
         if (ne < 0) {
             status = ne;
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_poll_cq failed \n");
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_poll_cq failed \n");
         } else if (ne) {
             if (wc.status) {
                 status = wc.status;
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "ibv_poll_cq failed, status: %d\n", wc.status);
+                NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                   "ibv_poll_cq failed, completion status: %d (%s)\n", wc.status,
+                                   ibrc_wc_status_string(wc.status));
             }
 
             assert(ne == 1);
@@ -1151,7 +1195,7 @@ int nvshmemt_ibrc_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
     TRACE(ibrc_state->log_level, "[%d] ibrc post_send dest handle %p rkey %x src handle %p lkey %x",
           getpid(), remote->handle, sr->wr.rdma.rkey, local->handle, sge->lkey);
     status = ibv_post_send(ep->qp, sr, bad_sr);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
 
     ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 
@@ -1294,7 +1338,7 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
 
 post_op:
     status = ibv_post_send(ep->qp, sr, bad_sr);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
 
     ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 
@@ -1350,7 +1394,7 @@ int nvshmemt_ibrc_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
     sge->lkey = mem_handle_info->mr->lkey;
 
     status = ibv_post_send(ep->qp, sr, bad_sr);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_post_send failed \n");
 
     ep->common_ep.head_op_id = ep->common_ep.head_op_id + 1;
 

@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "transport_mlx5_common.h"
+#include "transport_common.h"
 #include "mlx5_ifc.h"
 #include "non_abi/nvshmemx_error.h"
 
@@ -52,8 +53,8 @@ int nvshmemt_ib_common_query_endianness_conversion_size(uint32_t *endianness_mod
         MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE | (MLX5_CAP_ATOMIC << 1) | HCA_CAP_OPMOD_GET_CUR);
     status = mlx5dv_devx_general_cmd(context, cmd_cap_in, sizeof(cmd_cap_in), cmd_cap_out,
                                      sizeof(cmd_cap_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "mlx5dv_devx_general_cmd for atomic caps failed.\n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "mlx5dv_devx_general_cmd for atomic caps failed.\n");
 
     cap = DEVX_ADDR_OF(query_hca_cap_out, cmd_cap_out, capability);
     amo_endianness_mode_support =
@@ -90,8 +91,8 @@ int nvshmemt_ib_common_check_nic_ext_atomic_support(struct ibv_context *context)
 
     status = mlx5dv_devx_general_cmd(context, cmd_cap_in, sizeof(cmd_cap_in), cmd_cap_out,
                                      sizeof(cmd_cap_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "mlx5dv_devx_general_cmd for hca cap failed.\n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "mlx5dv_devx_general_cmd for hca cap failed.\n");
 
     cap = DEVX_ADDR_OF(query_hca_cap_out, cmd_cap_out, capability.atomic_caps);
     atomic_operations = DEVX_GET(atomic_caps, cap, atomic_operations);

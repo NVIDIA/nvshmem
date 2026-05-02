@@ -8,7 +8,9 @@
 
 #define __STDC_FORMAT_MACROS 1
 
+#include <errno.h>    // for errno
 #include <stdio.h>    // for fprintf, stderr
+#include <string.h>   // for strerror
 #include <strings.h>  // for strncasecmp
 #include <unordered_map>
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_opt...
@@ -57,6 +59,57 @@
         if (LOG_LEVEL >= TRANSPORT_LOG_TRACE) {                                    \
             fprintf(stderr, "%s %d " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
         }                                                                          \
+    } while (0)
+
+static inline int nvshmemt_errno_from_status(int status) {
+    if (status < 0) return -status;
+    if (status > 0) return status;
+    return 0;
+}
+
+static inline const char *nvshmemt_strerror_from_errno(int err) {
+    return (err != 0) ? strerror(err) : "errno unavailable";
+}
+
+static inline const char *nvshmemt_strerror_from_status(int status) {
+    return nvshmemt_strerror_from_errno(nvshmemt_errno_from_status(status));
+}
+
+#define NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, err, label, ...)                                \
+    do {                                                                                    \
+        if (unlikely((status) != 0)) {                                                      \
+            fprintf(stderr, "%s:%d: non-zero status: %d (%s) ", __FILE__, __LINE__, status, \
+                    nvshmemt_strerror_from_status(status));                                 \
+            fprintf(stderr, __VA_ARGS__);                                                   \
+            fprintf(stderr, "\n");                                                          \
+            status = err;                                                                   \
+            goto label;                                                                     \
+        }                                                                                   \
+    } while (0)
+
+#define NVSHMEMT_ERRNO_NULL_ERROR_JMP(var, status, err, label, ...)                          \
+    do {                                                                                     \
+        if (unlikely((var) == NULL)) {                                                       \
+            int saved_errno = errno;                                                         \
+            fprintf(stderr, "%s:%d: NULL value (errno: %d, %s) ", __FILE__, __LINE__,        \
+                    saved_errno, nvshmemt_strerror_from_errno(saved_errno));                  \
+            fprintf(stderr, __VA_ARGS__);                                                    \
+            fprintf(stderr, "\n");                                                           \
+            status = err;                                                                    \
+            goto label;                                                                      \
+        }                                                                                    \
+    } while (0)
+
+#define NVSHMEMT_ERRNO_NZ_ERROR_RET(status, err, ...)                                       \
+    do {                                                                                    \
+        if (unlikely((status) != 0)) {                                                      \
+            fprintf(stderr, "%s:%d: non-zero status: %d (%s) ", __FILE__, __LINE__, status, \
+                    nvshmemt_strerror_from_status(status));                                 \
+            fprintf(stderr, __VA_ARGS__);                                                   \
+            fprintf(stderr, "\n");                                                          \
+            status = err;                                                                   \
+            return status;                                                                  \
+        }                                                                                   \
     } while (0)
 
 #define LOAD_SYM(handle, symbol, funcptr)  \

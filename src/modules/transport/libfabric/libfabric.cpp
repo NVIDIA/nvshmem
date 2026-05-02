@@ -95,7 +95,19 @@ bool use_gdrcopy = false;
 #endif
 
 struct nvshmemi_options_s options;
-}
+}  // namespace
+
+#define NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, err, label, ...)                             \
+    do {                                                                                     \
+        if (unlikely((status) != 0)) {                                                       \
+            fprintf(stderr, "%s:%d: libfabric status: %d (%s) ", __FILE__, __LINE__, status, \
+                    fi_strerror((status) < 0 ? -(status) : (status)));                       \
+            fprintf(stderr, __VA_ARGS__);                                                    \
+            fprintf(stderr, "\n");                                                           \
+            status = err;                                                                    \
+            goto label;                                                                      \
+        }                                                                                    \
+    } while (0)
 
 /* Forward declarations */
 static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, int qp_index);
@@ -226,7 +238,8 @@ int gdrcopy_amo_ack(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t
                        NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDRCOPY_AMO_ACK, ep.qp_index,
                        progress_type::CompletionsOnly));
 
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to write atomic ack.\n");
+    NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "Unable to write atomic ack.\n");
     ep.submitted_ops++;
 
 out:
@@ -323,7 +336,8 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
     status =
         fi_recv(ep.endpoint, (void *)op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                 fi_mr_desc(libfabric_state->mrs[domain_idx]), FI_ADDR_UNSPEC, &op->ofi_context);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to re-post recv.\n");
+    NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "Unable to re-post recv.\n");
 
     if (is_fetch_amo) {
         resp_op = send_elems[send_elems_index];
@@ -338,10 +352,10 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
                              fi_mr_desc(libfabric_state->mrs[domain_idx]), src_addr,
                              &resp_op->ofi_context);
         } while (try_again(transport, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_PERFORM_GDRCOPY_AMO_SEND, ep.qp_index,
-                           progress_type::CompletionsOnly));
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to respond to atomic request.\n");
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_PERFORM_GDRCOPY_AMO_SEND,
+                           ep.qp_index, progress_type::CompletionsOnly));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to respond to atomic request.\n");
         ep.submitted_ops++;
         send_elems_index++;
     }
@@ -466,8 +480,7 @@ static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, 
         } else if (nerr == -FI_EAGAIN) {
             NVSHMEMI_WARN_PRINT("fi_cq_readerr returned -FI_EAGAIN\n");
         } else {
-            NVSHMEMI_WARN_PRINT("fi_cq_readerr returned %zd: %s\n", nerr,
-                                fi_strerror(-1 * nerr));
+            NVSHMEMI_WARN_PRINT("fi_cq_readerr returned %zd: %s\n", nerr, fi_strerror(-1 * nerr));
         }
         return err.err;
     }
@@ -479,11 +492,12 @@ static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, 
         if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
             /* Note - EFA provider does not support selective completions */
             do {
-                qstatus = fi_cq_readfrom(ep.cq, entry.data(), MAX_COMPLETIONS_PER_CQ_POLL, addr.data());
+                qstatus =
+                    fi_cq_readfrom(ep.cq, entry.data(), MAX_COMPLETIONS_PER_CQ_POLL, addr.data());
 
                 for (int j = 0; j < qstatus; j++) {
-                    status = nvshmemt_libfabric_gdr_process_completion(transport, ep, entry[j],
-                                                                       addr[j]);
+                    status =
+                        nvshmemt_libfabric_gdr_process_completion(transport, ep, entry[j], addr[j]);
                     if (status) return NVSHMEMX_ERROR_INTERNAL;
                 }
             } while (qstatus > 0);
@@ -579,8 +593,7 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
     return 0;
 }
 
-static int nvshmemt_libfabric_proxy_progress(nvshmem_transport_t transport)
-{
+static int nvshmemt_libfabric_proxy_progress(nvshmem_transport_t transport) {
     return nvshmemt_libfabric_progress(transport, NVSHMEMX_QP_DEFAULT);
 }
 
@@ -706,10 +719,10 @@ static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, in
             do {
                 status = libfabric_state->op_queue[i]->getNextAmoOps(
                     send_elems, &op, NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK);
-            } while (try_again(
-                transport, &status, &num_retries,
-                NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_PROCESS_AMOS_GET_NEXT_NOT_ACK, qp_index,
-                progress_type::CompletionsOnly));
+            } while (
+                try_again(transport, &status, &num_retries,
+                          NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_PROCESS_AMOS_GET_NEXT_NOT_ACK,
+                          qp_index, progress_type::CompletionsOnly));
             num_retries = 0;
 
             if (op) {
@@ -894,7 +907,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
         do {
             status = libfabric_state->op_queue[domain_idx]->getNextSends(&gdr_ctx, 1);
         } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_GET_NEXT_SENDS, ep.qp_index, progress_type::All));
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_GET_NEXT_SENDS,
+                           ep.qp_index, progress_type::All));
         NVSHMEMI_NULL_ERROR_JMP(gdr_ctx, status, NVSHMEMX_ERROR_INTERNAL, out,
                                 "Unable to get context buffer for put request.\n");
         context = &gdr_ctx->ofi_context;
@@ -921,7 +935,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                                   fi_mr_desc(libfabric_state->mrs[domain_idx]), target_ep,
                                   (uintptr_t)remote->ptr, remote_handle->key, context);
             } while (try_again(tcurr, &status, &num_retries,
-                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_EFA, ep.qp_index, progress_type::All));
+                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_EFA,
+                               ep.qp_index, progress_type::All));
         } else {
             p_op_msg.msg_iov = &p_op_l_iov;
             p_op_msg.desc = NULL;  // Local buffer is on the stack
@@ -946,7 +961,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
             do {
                 status = fi_writemsg(ep.endpoint, &p_op_msg, FI_INJECT);
             } while (try_again(tcurr, &status, &num_retries,
-                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_NON_EFA, ep.qp_index, progress_type::All));
+                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_P_NON_EFA,
+                               ep.qp_index, progress_type::All));
         }
     } else if (verb.desc == NVSHMEMI_OP_PUT) {
         uintptr_t remote_addr;
@@ -962,7 +978,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                 status = fi_write(ep.endpoint, local->ptr, op_size, local_mr_desc, target_ep,
                                   remote_addr, remote_handle->key, context);
         } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT, ep.qp_index, progress_type::All));
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT, ep.qp_index,
+                           progress_type::All));
     } else if (verb.desc == NVSHMEMI_OP_G || verb.desc == NVSHMEMI_OP_GET) {
         assert(
             !imm_data);  // Write w/ imm not suppored with NVSHMEMI_OP_G/GET on Libfabric transport
@@ -976,7 +993,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
             status = fi_read(ep.endpoint, local->ptr, op_size, local_mr_desc, target_ep,
                              remote_addr, remote_handle->key, context);
         } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_GET, ep.qp_index, progress_type::All));
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_GET, ep.qp_index,
+                           progress_type::All));
     } else {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                            "Invalid RMA operation specified.\n");
@@ -987,7 +1005,8 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
 
 out:
     if (status) {
-        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an RMA operation.\n");
+        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an RMA operation: %d (%s).\n",
+                             status, fi_strerror(status < 0 ? -status : status));
     }
 
     return status;
@@ -1041,7 +1060,8 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
             fi_send(ep.endpoint, (void *)amo, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                     fi_mr_desc(libfabric_state->mrs[domain_idx]), target_ep, &amo->ofi_context);
     } while (try_again(transport, &status, &num_retries,
-                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_AMO_SEND, qp_index, progress_type::All));
+                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_AMO_SEND, qp_index,
+                       progress_type::All));
 
     if (status) {
         NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation.\n");
@@ -1189,7 +1209,8 @@ static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, v
                                         &local_handle->local_desc, 1, FI_INJECT);
         }
     } while (try_again(transport, &status, &num_retries,
-                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_AMO_ATOMICMSG, qp_index, progress_type::All));
+                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_AMO_ATOMICMSG, qp_index,
+                       progress_type::All));
 
     if (status) goto out;  // Status set by try_again
 
@@ -1224,8 +1245,8 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
     do {
         status = libfabric_state->op_queue[domain_idx]->getNextSends(&context, 1);
     } while (try_again(transport, &status, &num_retries,
-                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_SIGNAL_GET_NEXT_SENDS, ep.qp_index,
-                       progress_type::All));
+                       NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_SIGNAL_GET_NEXT_SENDS,
+                       ep.qp_index, progress_type::All));
     NVSHMEMI_NULL_ERROR_JMP(context, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "Unable to retrieve signal operation buffer.");
 
@@ -1808,17 +1829,20 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
             elem_size = sizeof(nvshmemt_libfabric_gdr_op_ctx_t);
             num_recvs_per_ep = num_recvs;
 
-            state->recv_buf.push_back(std::vector<nvshmemt_libfabric_gdr_op_ctx_t>(num_sends + num_recvs));
+            state->recv_buf.push_back(
+                std::vector<nvshmemt_libfabric_gdr_op_ctx_t>(num_sends + num_recvs));
 
-            status = fi_mr_reg(domain, state->recv_buf[i].data(), (num_sends + num_recvs) * elem_size,
-                               FI_SEND | FI_RECV | FI_WRITE, 0, 0, 0, &mr, NULL);
+            status =
+                fi_mr_reg(domain, state->recv_buf[i].data(), (num_sends + num_recvs) * elem_size,
+                          FI_SEND | FI_RECV | FI_WRITE, 0, 0, 0, &mr, NULL);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "Failed to register EFA msg buffer: %d: %s\n", status,
                                   fi_strerror(status * -1));
             state->mrs.push_back(mr);
 
             /* Locking is not required for auto progress, required for manual progress */
-            state->op_queue.emplace_back(std::unique_ptr<threadSafeOpQueue>(new threadSafeOpQueue(!state->use_auto_progress)));
+            state->op_queue.emplace_back(std::unique_ptr<threadSafeOpQueue>(
+                new threadSafeOpQueue(!state->use_auto_progress)));
             NVSHMEMI_NULL_ERROR_JMP(state->op_queue[i], status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                                     "Unable to alloc thread-safe op queue struct.\n");
             state->op_queue.back()->putToSendBulk(&state->recv_buf[i][num_recvs], num_sends);
@@ -1982,8 +2006,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     /* Exchange a pre-registered write w/imm target for staged_amo acks */
     if (state->use_staged_atomics) {
         state->peer_amo_ack_addrs.assign(t->n_pes, 0);
-        state->peer_amo_ack_rkeys.assign(
-            static_cast<size_t>(t->n_pes) * state->domains.size(), 0);
+        state->peer_amo_ack_rkeys.assign(static_cast<size_t>(t->n_pes) * state->domains.size(), 0);
 
         void *raw_ack_buf = nullptr;
         status = cudaMalloc(&raw_ack_buf, sizeof(int));
@@ -2008,10 +2031,10 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Failed to gather remote addresses.\n");
 
-        status = t->boot_handle->allgather(
-            &state->peer_amo_ack_rkeys[t->my_pe * state->domains.size()],
-            state->peer_amo_ack_rkeys.data(), sizeof(uint64_t) * state->domains.size(),
-            t->boot_handle);
+        status =
+            t->boot_handle->allgather(&state->peer_amo_ack_rkeys[t->my_pe * state->domains.size()],
+                                      state->peer_amo_ack_rkeys.data(),
+                                      sizeof(uint64_t) * state->domains.size(), t->boot_handle);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Failed to gather remote keys.\n");
     }
@@ -2169,8 +2192,8 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
     int num_devices = 0;
     int status = 0;
 
-    auto deleter = [](fi_info* p){ fi_freeinfo(p); };
-    std::unique_ptr<fi_info, decltype(deleter)> hints{ fi_allocinfo(), deleter };
+    auto deleter = [](fi_info *p) { fi_freeinfo(p); };
+    std::unique_ptr<fi_info, decltype(deleter)> hints{fi_allocinfo(), deleter};
     NVSHMEMI_NULL_ERROR_JMP(hints, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "Unable to allocate memory for libfabric info hint.");
 

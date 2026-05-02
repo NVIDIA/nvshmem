@@ -393,8 +393,8 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
             INFO(log_level, "ibv_reg_mr handle %p mr %p", handle, mr);
         }
 
-        NVSHMEMI_NULL_ERROR_JMP(mr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "mem registration failed. Reason: %s\n", strerror(errno));
+        NVSHMEMT_ERRNO_NULL_ERROR_JMP(mr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                      "mem registration failed\n");
     }
 
     handle->buf = buf;
@@ -418,7 +418,7 @@ int nvshmemt_ib_common_release_mem_handle(struct nvshmemt_ibv_function_table *ft
         status = ftable->dereg_mr((struct ibv_mr *)handle->mr);
         if (handle->fd) close(handle->fd);
     }
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dereg_mr failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dereg_mr failed \n");
 
 out:
     return status;
@@ -430,7 +430,8 @@ bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
     int status = 0;
     int dev_fail = 0;
     struct ibv_pd *pd = ftable->alloc_pd(context);
-    NVSHMEMI_NULL_ERROR_JMP(pd, status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_alloc_pd failed \n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(pd, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "ibv_alloc_pd failed \n");
 
     if (mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr == nullptr) {
         errno = EOPNOTSUPP;
@@ -445,7 +446,7 @@ bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
     dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
 
     status = ftable->dealloc_pd(pd);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed \n");
     if (dev_fail) goto out;
     return true;
 out:
@@ -1034,11 +1035,10 @@ int nvshmemt_ib_common_check_dmabuf_support(bool &out_dmabuf_support,
     return 0;
 }
 
-int nvshmemt_ib_common_discover_pci_paths(nvshmem_transport_t t,
-                                          struct nvshmemt_ib_common_state &state,
-                                          size_t device_struct_size,
-                                          const struct nvshmemt_ibv_function_table *ftable,
-                                          const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable) {
+int nvshmemt_ib_common_discover_pci_paths(
+    nvshmem_transport_t t, struct nvshmemt_ib_common_state &state, size_t device_struct_size,
+    const struct nvshmemt_ibv_function_table *ftable,
+    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable) {
     int status = 0;
     struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
 
@@ -1111,7 +1111,8 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
         }
 
         status = ftable->query_device(device->context, &device->device_attr);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_query_device failed \n");
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "ibv_query_device failed \n");
 
         INFO(log_level,
              "Enumerated IB devices in the system - device id=%d (of %d), name=%s, num_ports=%d", i,
@@ -1149,12 +1150,12 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
             }
 
             status = ftable->query_port(device->context, p, &device->port_attr[p - 1]);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                    "ibv_port_query failed \n");
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_port_query failed \n");
 
             if ((device->port_attr[p - 1].state != IBV_PORT_ACTIVE) ||
                 (device->port_attr[p - 1].link_layer != IBV_LINK_LAYER_INFINIBAND &&
-                    device->port_attr[p - 1].link_layer != IBV_LINK_LAYER_ETHERNET)) {
+                 device->port_attr[p - 1].link_layer != IBV_LINK_LAYER_ETHERNET)) {
                 if (filter.user_selection) {
                     NVSHMEMI_WARN_PRINT(
                         "found inactive port or port with non-IB link layer protocol, "
@@ -1164,16 +1165,16 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
             }
 
             ib_get_gid_index(ftable, device->context, p, device->port_attr[p - 1].gid_tbl_len,
-                                &device->gid_info[p - 1].local_gid_index, log_level, options);
-            status =
-                ftable->query_gid(device->context, p, device->gid_info[p - 1].local_gid_index,
-                                    &device->gid_info[p - 1].local_gid);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "query_gid failed \n");
+                             &device->gid_info[p - 1].local_gid_index, log_level, options);
+            status = ftable->query_gid(device->context, p, device->gid_info[p - 1].local_gid_index,
+                                       &device->gid_info[p - 1].local_gid);
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "query_gid failed \n");
 
             if (!device->pd) {
                 device->pd = ftable->alloc_pd(device->context);
-                NVSHMEMI_NULL_ERROR_JMP(device->pd, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                        "ibv_alloc_pd failed \n");
+                NVSHMEMT_ERRNO_NULL_ERROR_JMP(device->pd, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                              "ibv_alloc_pd failed \n");
             }
 
             for (int k = 0; k < replicate_count; k++) {
@@ -1198,13 +1199,15 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
                 status = ftable->dealloc_pd(device->pd);
                 device->pd = nullptr;
             }
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed \n");
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_dealloc_pd failed \n");
 
             if (device->context) {
                 status = ftable->close_device(device->context);
                 device->context = nullptr;
             }
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_close_device failed \n");
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_close_device failed \n");
         }
     }
     INFO(log_level, "End - Enumerating IB devices in the system");
