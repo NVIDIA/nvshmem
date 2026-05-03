@@ -59,7 +59,7 @@ static inline const char *nvshmemx_status_string(int status) {
     return "NVSHMEMX_ERROR_<unknown>";
 }
 #else
-static inline const char *nvshmemx_status_string(int status) {
+static __device__ inline const char *nvshmemx_status_string(int status) {
     (void)status;
     return "";
 }

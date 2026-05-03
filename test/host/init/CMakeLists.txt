@@ -1,5 +1,6 @@
 nvshmem_add_test(cuobject_init.cpp)
 nvshmem_add_test(nvrtc_api.cpp)
+nvshmem_add_test(nvrtc_numba_include.cpp)
 if(NOT CUDA_VERSION VERSION_LESS 12000)
   # This test depends on NVJitLink which is not available in CUDA 11.x
   nvshmem_add_test(nvrtc_numba_ltoir.cpp)
