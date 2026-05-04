@@ -1,16 +1,6 @@
 nvshmem_add_test(cuobject_init.cpp)
 nvshmem_add_test(nvrtc_api.cpp)
 nvshmem_add_test(nvrtc_numba_include.cpp)
-if(SubBuild)
-  set(NVSHMEM_NUMBA_INCLUDE_NVSHMEM_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/include")
-else()
-  set(NVSHMEM_NUMBA_INCLUDE_NVSHMEM_INCLUDE_DIR "${NVSHMEM_PREFIX}/include")
-endif()
-target_compile_definitions(host_nvrtc_numba_include PRIVATE
-  NVSHMEM_TEST_CUDA_INCLUDE_DIR="${CUDA_HOME}/include"
-  NVSHMEM_TEST_CUDA_CCCL_INCLUDE_DIR="${CUDA_HOME}/include/cccl"
-  NVSHMEM_TEST_NVSHMEM_INCLUDE_DIR="${NVSHMEM_NUMBA_INCLUDE_NVSHMEM_INCLUDE_DIR}"
-)
 if(NOT CUDA_VERSION VERSION_LESS 12000)
   # This test depends on NVJitLink which is not available in CUDA 11.x
   nvshmem_add_test(nvrtc_numba_ltoir.cpp)

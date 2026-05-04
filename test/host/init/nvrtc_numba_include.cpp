@@ -8,18 +8,6 @@
 #include <string>
 #include <vector>
 
-#ifndef NVSHMEM_TEST_CUDA_INCLUDE_DIR
-#define NVSHMEM_TEST_CUDA_INCLUDE_DIR ""
-#endif
-
-#ifndef NVSHMEM_TEST_CUDA_CCCL_INCLUDE_DIR
-#define NVSHMEM_TEST_CUDA_CCCL_INCLUDE_DIR ""
-#endif
-
-#ifndef NVSHMEM_TEST_NVSHMEM_INCLUDE_DIR
-#define NVSHMEM_TEST_NVSHMEM_INCLUDE_DIR ""
-#endif
-
 namespace {
 
 const char *numba_include_kernel =
@@ -40,41 +28,28 @@ void print_compile_log(nvrtcProgram prog) {
     fprintf(stderr, "Compilation log.\n%s", compile_log.data());
 }
 
-std::string include_path_from_env_or_default(const char *env_name, const char *suffix,
-                                             const char *default_path) {
-    const char *env_value = getenv(env_name);
-    if (env_value) {
-        std::string include_path(env_value);
-        include_path.append(suffix);
-        return include_path;
-    }
-
-    return std::string(default_path);
-}
-
 }  // namespace
 
 int main() {
-    std::string cuda_include_arg = include_path_from_env_or_default(
-        "CUDA_HOME", "/include", NVSHMEM_TEST_CUDA_INCLUDE_DIR);
-    if (cuda_include_arg.empty()) {
-        fprintf(stderr, "This test requires CUDA_HOME or NVSHMEM_TEST_CUDA_INCLUDE_DIR.\n");
+    const char *cuda_home = getenv("CUDA_HOME");
+    if (!cuda_home) {
+        fprintf(stderr, "This test requires CUDA_HOME to be set in the environment.\n");
         return 1;
     }
 
-    std::string cuda_cccl_include_arg = include_path_from_env_or_default(
-        "CUDA_HOME", "/include/cccl", NVSHMEM_TEST_CUDA_CCCL_INCLUDE_DIR);
-    if (cuda_cccl_include_arg.empty()) {
-        fprintf(stderr, "This test requires CUDA_HOME or NVSHMEM_TEST_CUDA_CCCL_INCLUDE_DIR.\n");
+    const char *nvshmem_prefix = getenv("NVSHMEM_PREFIX");
+    if (!nvshmem_prefix) {
+        fprintf(stderr, "This test requires NVSHMEM_PREFIX to be set in the environment.\n");
         return 1;
     }
 
-    std::string nvshmem_include_arg = include_path_from_env_or_default(
-        "NVSHMEM_PREFIX", "/include", NVSHMEM_TEST_NVSHMEM_INCLUDE_DIR);
-    if (nvshmem_include_arg.empty()) {
-        fprintf(stderr, "This test requires NVSHMEM_PREFIX or NVSHMEM_TEST_NVSHMEM_INCLUDE_DIR.\n");
-        return 1;
-    }
+    std::string cuda_include_arg(cuda_home);
+    std::string cuda_cccl_include_arg(cuda_home);
+    std::string nvshmem_include_arg(nvshmem_prefix);
+
+    cuda_include_arg.append("/include");
+    cuda_cccl_include_arg.append("/include/cccl");
+    nvshmem_include_arg.append("/include");
 
     /* Match Numba/NVRTC behavior: do not use -default-device to paper over
      * unannotated functions in headers included by nvshmem4py kernels. */
