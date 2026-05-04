@@ -1056,10 +1056,19 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
     T *dest, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) &&
+        !nvshmemi_is_le_supported_and_prioritized(pe, dest)) {
         T *dest_actual = (T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = value;
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    } else if (nvshmemi_is_le_implemented(pe, dest)) {
+        if (pe == nvshmemi_device_state_d.mype) {
+            *dest = value;
+        } else {
+            nvshmemi_handle_p<T>((void*)dest, value, pe);
+        }
+#endif
     } else {
         nvshmemi_transfer_rma_p<T>((void *)dest, value, pe, qp_index);
     }
@@ -1141,14 +1150,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    const size_t required_smem_size =
-        static_cast<size_t>(CFT_HANDLE_TX_SIZE) * blockDim.x * blockDim.y * blockDim.z;
-    const bool can_use_handle = nvshmemi_ld_and_check_valid_le_id(pe) &&
-                                nvshmemi_tma_smem_registered() &&
-                                nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
-                                nvshmemi_is_addr_offset_aligned(sig_addr, CFT_HANDLE_TX_SIZE);
+    const bool can_use_handle = nvshmemi_is_le_implemented(pe, sig_addr);
 #endif
-    if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr)) {
+    if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr) &&
+        !nvshmemi_is_le_supported_and_prioritized(pe, sig_addr)) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
@@ -1157,7 +1162,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
         nvshmemi_handle_p((void *)sig_addr, signal, pe);
 #endif
-    } else if (nvshmemi_use_ldst_path()) {
+    } else if (nvshmemi_use_ldst_path() && nvshmemi_peer_reachable(peer_base_addr)) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));

@@ -47,22 +47,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
                                                                           int pe) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    const size_t required_smem_size =
-        static_cast<size_t>(CFT_HANDLE_TX_SIZE) * blockDim.x * blockDim.y * blockDim.z;
-    const bool can_use_handle = nvshmemi_ld_and_check_valid_le_id(pe) &&
-                                nvshmemi_tma_smem_registered() &&
-                                nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
-                                nvshmemi_is_addr_offset_aligned(dest, CFT_HANDLE_TX_SIZE);
-#endif
     if (nvshmemi_use_ldst_path()) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-        if (nvshmemi_peer_reachable(peer_base_addr)) {
+        if (nvshmemi_peer_reachable(peer_base_addr) &&
+            !nvshmemi_is_le_supported_and_prioritized(pe, dest)) {
             volatile T *dest_actual =
                 (volatile T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
             *dest_actual = value;
-        } else if (can_use_handle) {
+        } else if (nvshmemi_is_le_implemented(pe, dest)) {
             // It is more performant to use pointers for loopback to own memory
             if (pe == nvshmemi_device_state_d.mype) {
                 *dest = value;
