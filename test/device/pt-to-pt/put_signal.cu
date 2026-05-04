@@ -21,8 +21,14 @@ __device__ int errors_d;
 #define MSG_SZ 16
 
 #define TEST_NVSHMEM_PUT_CUBIN(FUNC, SC_SUFFIX)                                                \
-    void *args_##FUNC##_##SC_SUFFIX[] = {(void *)&target, (void *)&source, (void *)&sig_addr,  \
-                                         (void *)&me,     (void *)&npes,   (void *)&op};       \
+    size_t cubin_dynamic_smem_size = 0;                                                        \
+    void *args_##FUNC##_##SC_SUFFIX[] = {(void *)&target,                                      \
+                                         (void *)&source,                                      \
+                                         (void *)&sig_addr,                                    \
+                                         (void *)&me,                                          \
+                                         (void *)&npes,                                        \
+                                         (void *)&op,                                          \
+                                         (void *)&cubin_dynamic_smem_size};                    \
     CUfunction test_##FUNC##_cubin_##SC_SUFFIX;                                                \
     init_test_case_kernel(&test_##FUNC##_cubin_##SC_SUFFIX,                                    \
                           NVSHMEMI_TEST_STRINGIFY(test_##FUNC##_signal##SC_SUFFIX##_kernel));  \
@@ -34,12 +40,14 @@ extern "C" {
 #endif
 
 #define DEFINE_SIGNAL_PUT_SIZE(TYPE, FUNC, SCOPE, SC_SUFFIX, SC_PREFIX)                            \
-    __global__ void test_##FUNC##_signal##SC_SUFFIX##_kernel(                                      \
-        void *target, void *source, uint64_t *sig_addr, int me, int npes, int op) {                \
+    __global__ void test_##FUNC##_signal##SC_SUFFIX##_kernel(void *target, void *source,           \
+                                                             uint64_t *sig_addr, int me, int npes, \
+                                                             int op, size_t dynamic_smem_size) {   \
         int i;                                                                                     \
         int dest = (me + 1) % npes;                                                                \
         int myIdx = nvshmtest_thread_id_in_##SCOPE();                                              \
         int groupSize = nvshmtest_##SCOPE##_size();                                                \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                 \
                                                                                                    \
         *sig_addr = 0;                                                                             \
                                                                                                    \
@@ -67,6 +75,8 @@ extern "C" {
                 }                                                                                  \
             }                                                                                      \
         }                                                                                          \
+        nvshmtest_##SCOPE##_sync();                                                                \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                              \
     }                                                                                              \
                                                                                                    \
     static int run_##FUNC##_##SC_SUFFIX##_test(int me, int npes) {                                 \
@@ -101,12 +111,14 @@ extern "C" {
         else                                                                                       \
             num_threads = use_cubin ? 256 : 1024;                                                  \
         nvshmem_barrier_all();                                                                     \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##FUNC##_signal##SC_SUFFIX##_kernel,                \
+                                          _dynamic_smem_size);                                     \
         if (use_cubin) {                                                                           \
             int op = NVSHMEM_SIGNAL_SET;                                                           \
             TEST_NVSHMEM_PUT_CUBIN(FUNC, SC_SUFFIX);                                               \
         } else {                                                                                   \
-            test_##FUNC##_signal##SC_SUFFIX##_kernel<<<1, num_threads>>>(                          \
-                target, source, sig_addr, me, npes, NVSHMEM_SIGNAL_SET);                           \
+            test_##FUNC##_signal##SC_SUFFIX##_kernel<<<1, num_threads, _dynamic_smem_size>>>(      \
+                target, source, sig_addr, me, npes, NVSHMEM_SIGNAL_SET, _dynamic_smem_size);       \
         }                                                                                          \
         cudaDeviceSynchronize();                                                                   \
                                                                                                    \
@@ -117,12 +129,14 @@ extern "C" {
         }                                                                                          \
                                                                                                    \
         nvshmem_barrier_all();                                                                     \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##FUNC##_signal##SC_SUFFIX##_kernel,                \
+                                          _dynamic_smem_size);                                     \
         if (use_cubin) {                                                                           \
             int op = NVSHMEM_SIGNAL_ADD;                                                           \
             TEST_NVSHMEM_PUT_CUBIN(FUNC, SC_SUFFIX);                                               \
         } else {                                                                                   \
-            test_##FUNC##_signal##SC_SUFFIX##_kernel<<<1, num_threads>>>(                          \
-                target, source, sig_addr, me, npes, NVSHMEM_SIGNAL_ADD);                           \
+            test_##FUNC##_signal##SC_SUFFIX##_kernel<<<1, num_threads, _dynamic_smem_size>>>(      \
+                target, source, sig_addr, me, npes, NVSHMEM_SIGNAL_ADD, _dynamic_smem_size);       \
         }                                                                                          \
         cudaDeviceSynchronize();                                                                   \
                                                                                                    \

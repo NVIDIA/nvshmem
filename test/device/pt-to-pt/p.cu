@@ -37,47 +37,51 @@ __device__ void rma_inline_wrapper(unsigned long long int *src, unsigned long lo
     nvshmem_ulonglong_p(dest, *src, pe);
 }
 
-#define TEST_NVSHMEM_ALL_CUBIN(TYPENAME)                                                       \
-    void *args_all_##TYPENAME[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&mype, \
-                                   (void *)&npes};                                             \
-    CUfunction test_all_##TYPENAME##_cubin;                                                    \
-    if (typeid(T) == typeid(int)) {                                                            \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_int));                          \
-    }                                                                                          \
-    if (typeid(T) == typeid(unsigned int)) {                                                   \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_uint));                         \
-    }                                                                                          \
-    if (typeid(T) == typeid(long long int)) {                                                  \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_longlong));                     \
-    }                                                                                          \
-    if (typeid(T) == typeid(unsigned long long int)) {                                         \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_ulonglong));                    \
-    }                                                                                          \
-    if (typeid(T) == typeid(char)) {                                                           \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_char));                         \
-    }                                                                                          \
-    if (typeid(T) == typeid(unsigned char)) {                                                  \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_uchar));                        \
-    }                                                                                          \
-    if (typeid(T) == typeid(short)) {                                                          \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_short));                        \
-    }                                                                                          \
-    if (typeid(T) == typeid(unsigned short)) {                                                 \
-        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                    \
-                              NVSHMEMI_TEST_STRINGIFY(alltoall_ushort));                       \
-    }                                                                                          \
-    CU_CHECK(cuLaunchKernel(test_all_##TYPENAME##_cubin, 1, 1, 1, THREADS, 1, 1, 0, cstrm,     \
+#define TEST_NVSHMEM_ALL_CUBIN(TYPENAME)                                                   \
+    size_t cubin_dynamic_smem_size = 0;                                                    \
+    void *args_all_##TYPENAME[] = {                                                        \
+        (void *)&src_, (void *)&dest_, (void *)&len,                                       \
+        (void *)&mype, (void *)&npes,  (void *)&cubin_dynamic_smem_size};                  \
+    CUfunction test_all_##TYPENAME##_cubin;                                                \
+    if (typeid(T) == typeid(int)) {                                                        \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_int));                      \
+    }                                                                                      \
+    if (typeid(T) == typeid(unsigned int)) {                                               \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_uint));                     \
+    }                                                                                      \
+    if (typeid(T) == typeid(long long int)) {                                              \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_longlong));                 \
+    }                                                                                      \
+    if (typeid(T) == typeid(unsigned long long int)) {                                     \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_ulonglong));                \
+    }                                                                                      \
+    if (typeid(T) == typeid(char)) {                                                       \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_char));                     \
+    }                                                                                      \
+    if (typeid(T) == typeid(unsigned char)) {                                              \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_uchar));                    \
+    }                                                                                      \
+    if (typeid(T) == typeid(short)) {                                                      \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_short));                    \
+    }                                                                                      \
+    if (typeid(T) == typeid(unsigned short)) {                                             \
+        init_test_case_kernel(&test_all_##TYPENAME##_cubin,                                \
+                              NVSHMEMI_TEST_STRINGIFY(alltoall_ushort));                   \
+    }                                                                                      \
+    CU_CHECK(cuLaunchKernel(test_all_##TYPENAME##_cubin, 1, 1, 1, THREADS, 1, 1, 0, cstrm, \
                             args_all_##TYPENAME, NULL));
 
 #define TEST_NVSHMEM_RING_CUBIN(TYPENAME)                                                          \
-    void *args_ring_##TYPENAME[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&nextpe}; \
+    size_t cubin_dynamic_smem_size = 0;                                                            \
+    void *args_ring_##TYPENAME[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&nextpe,  \
+                                    (void *)&cubin_dynamic_smem_size};                             \
     CUfunction test_ring_##TYPENAME##_cubin;                                                       \
     if (typeid(T) == typeid(int)) {                                                                \
         init_test_case_kernel(&test_ring_##TYPENAME##_cubin, NVSHMEMI_TEST_STRINGIFY(ring_int));   \
@@ -109,28 +113,33 @@ __device__ void rma_inline_wrapper(unsigned long long int *src, unsigned long lo
     CU_CHECK(cuLaunchKernel(test_ring_##TYPENAME##_cubin, 1, 1, 1, THREADS, 1, 1, 0, cstrm,        \
                             args_ring_##TYPENAME, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined(NVSHMEM_HOSTLIB_ONLY)
 extern "C" {
-#endif
 
-#define DEFINE_Group(TYPENAME, TYPE)                                                             \
-    __global__ void alltoall_##TYPENAME(TYPE *src, TYPE *dest, size_t len, int mype, int npes) { \
-        int tid = threadIdx.x;                                                                   \
-        for (int i = 0; i < npes; i++) {                                                         \
-            for (int j = tid; j < len; j += THREADS) {                                           \
-                rma_inline_wrapper(src + i * len + j, dest + mype * len + j, len, i);            \
-            }                                                                                    \
-            __syncthreads();                                                                     \
-        }                                                                                        \
-        if (!tid) nvshmem_quiet();                                                               \
-    }                                                                                            \
-    __global__ void ring_##TYPENAME(TYPE *src, TYPE *dest, size_t len, int nextpe) {             \
-        int tid = threadIdx.x;                                                                   \
-        for (int j = tid; j < len; j += THREADS) {                                               \
-            rma_inline_wrapper(src + j, dest + j, len, nextpe);                                  \
-        }                                                                                        \
-        __syncthreads();                                                                         \
-        if (!tid) nvshmem_quiet();                                                               \
+#define DEFINE_Group(TYPENAME, TYPE)                                                           \
+    __global__ void alltoall_##TYPENAME(TYPE *src, TYPE *dest, size_t len, int mype, int npes, \
+                                        size_t dynamic_smem_size) {                            \
+        int tid = threadIdx.x;                                                                 \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                             \
+        for (int i = 0; i < npes; i++) {                                                       \
+            for (int j = tid; j < len; j += THREADS) {                                         \
+                rma_inline_wrapper(src + i * len + j, dest + mype * len + j, len, i);          \
+            }                                                                                  \
+            __syncthreads();                                                                   \
+        }                                                                                      \
+        if (!tid) nvshmem_quiet();                                                             \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                          \
+    }                                                                                          \
+    __global__ void ring_##TYPENAME(TYPE *src, TYPE *dest, size_t len, int nextpe,             \
+                                    size_t dynamic_smem_size) {                                \
+        int tid = threadIdx.x;                                                                 \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                             \
+        for (int j = tid; j < len; j += THREADS) {                                             \
+            rma_inline_wrapper(src + j, dest + j, len, nextpe);                                \
+        }                                                                                      \
+        __syncthreads();                                                                       \
+        if (!tid) nvshmem_quiet();                                                             \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                          \
     }
 
 DEFINE_Group(int, int);
@@ -141,15 +150,15 @@ DEFINE_Group(char, char);
 DEFINE_Group(uchar, unsigned char);
 DEFINE_Group(short, short);
 DEFINE_Group(ushort, unsigned short);
-
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 }
 #endif
 
 template <typename T>
-__global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes) {
+__global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes,
+                         size_t dynamic_smem_size) {
     int tid = threadIdx.x;
 
+    NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);
     for (int i = 0; i < npes; i++) {
         for (int j = tid; j < len; j += THREADS) {
             rma_inline_wrapper(src + i * len + j, dest + mype * len + j, len, i);
@@ -158,28 +167,33 @@ __global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes) {
     }
 
     if (!tid) nvshmem_quiet();
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
 template <typename T>
-__global__ void ring(T *src, T *dest, int len, int nextpe) {
+__global__ void ring(T *src, T *dest, int len, int nextpe, size_t dynamic_smem_size) {
     int tid = threadIdx.x;
 
+    NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);
     for (int j = tid; j < len; j += THREADS) {
         rma_inline_wrapper(src + j, dest + j, len, nextpe);
     }
     __syncthreads();
 
     if (!tid) nvshmem_quiet();
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
 template <typename T>
 void launch_alltoall(void *src, void *dest, size_t len, int mype, int npes, cudaStream_t cstrm) {
     T *src_ = (T *)src;
     T *dest_ = (T *)dest;
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(alltoall<T>, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_ALL_CUBIN(T);
     } else {
-        alltoall<T><<<1, THREADS, 0, cstrm>>>(src_, dest_, len, mype, npes);
+        alltoall<T><<<1, THREADS, _dynamic_smem_size, cstrm>>>(src_, dest_, len, mype, npes,
+                                                               _dynamic_smem_size);
     }
 }
 
@@ -187,10 +201,12 @@ template <typename T>
 void launch_ring(void *src, void *dest, size_t len, int nextpe, int prevpe, cudaStream_t cstrm) {
     T *src_ = (T *)src;
     T *dest_ = (T *)dest;
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(ring<T>, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_RING_CUBIN(T);
     } else {
-        ring<T><<<1, THREADS, 0, cstrm>>>(src_, dest_, len, nextpe);
+        ring<T><<<1, THREADS, _dynamic_smem_size, cstrm>>>(src_, dest_, len, nextpe,
+                                                           _dynamic_smem_size);
     }
 }
 

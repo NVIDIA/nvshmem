@@ -14,7 +14,8 @@
 __device__ int error_d;
 
 #define TEST_NVSHMEM_SIG_CUBIN()                                                    \
-    void *args_sig[] = {(void *)&remote};                                           \
+    size_t cubin_dynamic_smem_size = 0;                                             \
+    void *args_sig[] = {(void *)&remote, (void *)&cubin_dynamic_smem_size};         \
     CUfunction test_sig_cubin;                                                      \
     init_test_case_kernel(&test_sig_cubin,                                          \
                           NVSHMEMI_TEST_STRINGIFY(test_nvshmem_signal_add_kernel)); \
@@ -24,7 +25,8 @@ __device__ int error_d;
 extern "C" {
 #endif
 
-__global__ void test_nvshmem_signal_add_kernel(uint64_t *remote) {
+__global__ void test_nvshmem_signal_add_kernel(uint64_t *remote, size_t dynamic_smem_size) {
+    NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);
     const int mype = nvshmem_my_pe();
     const int npes = nvshmem_n_pes();
 
@@ -38,6 +40,7 @@ __global__ void test_nvshmem_signal_add_kernel(uint64_t *remote) {
         printf("PE %i observed error\n", mype);
         error_d = 1;
     }
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
@@ -58,10 +61,11 @@ int main(int argc, char *argv[]) {
 
     uint64_t *remote = (uint64_t *)nvshmem_calloc(1, sizeof(uint64_t));
     nvshmem_barrier_all();
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_signal_add_kernel, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_SIG_CUBIN();
     } else {
-        test_nvshmem_signal_add_kernel<<<1, 1>>>(remote);
+        test_nvshmem_signal_add_kernel<<<1, 1, _dynamic_smem_size>>>(remote, _dynamic_smem_size);
     }
     cudaDeviceSynchronize();
 

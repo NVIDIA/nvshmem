@@ -14,8 +14,10 @@ __device__ int errors_d;
 #define MSG_SZ 16
 
 #define TEST_NVSHMEM_PUT_CUBIN(SC_SUFFIX)                                                    \
-    void *args_put_##SC_SUFFIX[] = {(void *)&target, (void *)&source, (void *)&sig_addr,     \
-                                    (void *)&me, (void *)&npes};                             \
+    size_t cubin_dynamic_smem_size = 0;                                                      \
+    void *args_put_##SC_SUFFIX[] = {(void *)&target,   (void *)&source,                      \
+                                    (void *)&sig_addr, (void *)&me,                          \
+                                    (void *)&npes,     (void *)&cubin_dynamic_smem_size};    \
     CUfunction test_put_cubin_##SC_SUFFIX;                                                   \
     init_test_case_kernel(&test_put_cubin_##SC_SUFFIX,                                       \
                           NVSHMEMI_TEST_STRINGIFY(test_put_signal_nbi##SC_SUFFIX##_kernel)); \
@@ -27,11 +29,13 @@ extern "C" {
 #endif
 
 #define TEST_PUT_SIGNAL_NBI_SCOPE_KERNEL(SCOPE, SC_SUFFIX, SC_PREFIX)                             \
-    __global__ void test_put_signal_nbi##SC_SUFFIX##_kernel(                                      \
-        long *target, long *source, uint64_t *sig_addr, int me, int npes) {                       \
+    __global__ void test_put_signal_nbi##SC_SUFFIX##_kernel(long *target, long *source,           \
+                                                            uint64_t *sig_addr, int me, int npes, \
+                                                            size_t dynamic_smem_size) {           \
         int i;                                                                                    \
         int myIdx = nvshmtest_thread_id_in_##SCOPE();                                             \
         int groupSize = nvshmtest_##SCOPE##_size();                                               \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                \
                                                                                                   \
         for (i = myIdx; i < MSG_SZ; i += groupSize) source[i] = i;                                \
                                                                                                   \
@@ -116,6 +120,8 @@ extern "C" {
                 }                                                                                 \
             }                                                                                     \
         }                                                                                         \
+        nvshmtest_##SCOPE##_sync();                                                               \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                             \
     }
 
 TEST_PUT_SIGNAL_NBI_SCOPE_KERNEL(thread, , )
@@ -181,10 +187,12 @@ int main(int argc, char *argv[]) {
     /* test put_signal_nbi */
     nvshmem_barrier_all();
     num_threads = 1;
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_put_signal_nbi_kernel, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_PUT_CUBIN();
     } else {
-        test_put_signal_nbi_kernel<<<1, num_threads>>>(target, source, sig_addr, me, npes);
+        test_put_signal_nbi_kernel<<<1, num_threads, _dynamic_smem_size>>>(
+            target, source, sig_addr, me, npes, _dynamic_smem_size);
     }
     // test_put_signal_nbi_kernel<<<1, num_threads>>>(target, source, sig_addr, me, npes);
     cudaDeviceSynchronize();
@@ -192,10 +200,12 @@ int main(int argc, char *argv[]) {
     /* test put_signal_warp */
     nvshmem_barrier_all();
     num_threads = 32;
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_put_signal_nbi_warp_kernel, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_PUT_CUBIN(_warp);
     } else {
-        test_put_signal_nbi_warp_kernel<<<1, num_threads>>>(target, source, sig_addr, me, npes);
+        test_put_signal_nbi_warp_kernel<<<1, num_threads, _dynamic_smem_size>>>(
+            target, source, sig_addr, me, npes, _dynamic_smem_size);
     }
     // test_put_signal_nbi_warp_kernel<<<1, num_threads>>>(target, source, sig_addr, me, npes);
     cudaDeviceSynchronize();
@@ -203,11 +213,13 @@ int main(int argc, char *argv[]) {
     /* test put_signal_block */
     nvshmem_barrier_all();
     num_threads = 1024;
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_put_signal_nbi_block_kernel, _dynamic_smem_size);
     if (use_cubin) {
         num_threads = 256;
         TEST_NVSHMEM_PUT_CUBIN(_block);
     } else {
-        test_put_signal_nbi_block_kernel<<<1, num_threads>>>(target, source, sig_addr, me, npes);
+        test_put_signal_nbi_block_kernel<<<1, num_threads, _dynamic_smem_size>>>(
+            target, source, sig_addr, me, npes, _dynamic_smem_size);
     }
     // test_put_signal_nbi_block_kernel<<<1, num_threads>>>(target, source, sig_addr, me, npes);
     cudaDeviceSynchronize();
