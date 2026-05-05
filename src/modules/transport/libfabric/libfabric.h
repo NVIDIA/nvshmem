@@ -439,6 +439,9 @@ struct nvshmemt_libfabric_signal_state_t {
     std::vector<uint32_t> next_expected_seq;
     std::unique_ptr<nvshmemt_libfabric_ack_aggregator_t> ack_aggregator;
     uint64_t completed_staged_atomics;
+    /* Guards host_signal_state when accessed from both user and proxy threads.
+     * Used only for host_signal_state (proxy_signal_state is thread-local). */
+    std::recursive_mutex mtx;
 
     void clear() {
         put_signal_seq_counter.clear();
@@ -745,6 +748,9 @@ struct nvshmemt_libfabric_state_t {
     nvshmem_transport_t signal_delivery_transport = nullptr;
     std::atomic<int> signal_delivery_futex{0};
     std::atomic_flag signal_progress_lock = ATOMIC_FLAG_INIT;
+    /* Serializes host EP CQ progress between user thread (QP_HOST blocking) and
+     * proxy thread (try-lock, skip if user is already draining). */
+    std::atomic_flag host_ep_progress_lock = ATOMIC_FLAG_INIT;
     /* signal_work_queue is SPSC (single consumer: delivery thread), but two
      * threads can push (put_signal_completion and gdr_process_amos).
      * Push-side serialization is provided by signal_work_queue_lock. */
