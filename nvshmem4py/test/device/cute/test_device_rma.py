@@ -4,55 +4,55 @@
 import os
 
 import pytest
-from cuda.core import Device, Stream, system
-import numpy as np
+from cuda.core import Device
 import cutlass.cute as cute
-import cuda.bindings.driver as cudrv
+import torch
+from cutlass.cute.runtime import from_dlpack
 from cutlass.cute.typing import Int32
 from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
-from cutlass.base_dsl.env_manager import detect_gpu_arch
 
 import nvshmem.core
 import nvshmem.core.device.cute as nvshmem_cute
-import nvshmem.core.interop.cute as cute_interop
-import nvshmem.core.device.cute.rma as nvshmem_cute_rma
 
 _KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
 
 rma_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
 
-_CUTE_DTYPE_MAP = {
-    "float32": cute.Float32,
-    "float64": cute.Float64,
-    "int8": cute.Int8,
-    "int16": cute.Int16,
-    "int32": cute.Int32,
-    "int64": cute.Int64,
-    "uint8": cute.Uint8,
-    "uint16": cute.Uint16,
-    "uint32": cute.Uint32,
-    "uint64": cute.Uint64,
-}
-
-_NUMPY_DTYPE_MAP = {
-    "float32": np.float32,
-    "float64": np.float64,
-    "int8": np.int8,
-    "int16": np.int16,
-    "int32": np.int32,
-    "int64": np.int64,
-    "uint8": np.uint8,
-    "uint16": np.uint16,
-    "uint32": np.uint32,
-    "uint64": np.uint64,
+_TORCH_DTYPE_MAP = {
+    "float32": torch.float32,
+    "float64": torch.float64,
+    "int8": torch.int8,
+    "int16": torch.int16,
+    "int32": torch.int32,
+    "int64": torch.int64,
+    "uint8": torch.uint8,
+    "uint16": getattr(torch, "uint16", None),
+    "uint32": getattr(torch, "uint32", None),
+    "uint64": getattr(torch, "uint64", None),
 }
 
 
-def _cute_dtype(dtype_name):
-    dtype = _CUTE_DTYPE_MAP.get(dtype_name)
+def _torch_dtype(dtype_name):
+    dtype = _TORCH_DTYPE_MAP.get(dtype_name)
     if dtype is None:
-        pytest.skip(f"CuTe dtype not supported for CuTe test: {dtype_name}")
+        pytest.skip(f"Torch dtype not supported for CuTe test: {dtype_name}")
     return dtype
+
+
+def _make_torch_tensor(shape, dtype_name, value):
+    tensor = nvshmem.core.tensor(shape, dtype=_torch_dtype(dtype_name))
+    tensor.fill_(value)
+    Device().sync()
+    return tensor
+
+
+def _cute_from_torch(tensor):
+    return from_dlpack(tensor).mark_layout_dynamic()
+
+
+def _assert_torch_tensor(tensor, value):
+    expected = torch.full_like(tensor, value)
+    assert torch.equal(tensor, expected)
 
 
 def _nvshmem_device_bc():
@@ -92,38 +92,16 @@ def _finalize_kernels():
         nvshmem.core.library_finalize(_KERNEL_OBJECTS.pop())
 
 
-def _fill_cute_tensor(tensor, dtype_name, value):
-    np_dtype = _NUMPY_DTYPE_MAP[dtype_name]
-    host = np.full(tuple(tensor.shape), np_dtype(value), dtype=np_dtype)
-    buf, _, _ = cute_interop.tensor_get_buffer(tensor)
-    cudrv.cuMemcpyHtoD(buf.handle, host, host.nbytes)
-    dev = Device()
-    dev.sync()
-
-
-def _read_cute_tensor(tensor, dtype_name):
-    np_dtype = _NUMPY_DTYPE_MAP[dtype_name]
-    host = np.empty(tuple(tensor.shape), dtype=np_dtype)
-    buf, _, _ = cute_interop.tensor_get_buffer(tensor)
-    cudrv.cuMemcpyDtoH(host, buf.handle, host.nbytes)
-    dev = Device()
-    dev.sync()
-    return host
-
-
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", rma_dtypes)
 def test_put_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     dev = Device()
-    cute_dtype = _cute_dtype(dtype)
-    buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
-    buf_dst = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_dst, dtype, 0)
+    buf_src = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_dst = _make_torch_tensor((4, 4), dtype, 0)
 
-    dst_cute = buf_dst
-    src_cute = buf_src
+    dst_cute = _cute_from_torch(buf_dst)
+    src_cute = _cute_from_torch(buf_src)
 
     @cute.kernel
     def test_put(dst: cute.Tensor, src: cute.Tensor, pe: Int32):
@@ -148,11 +126,10 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
     stream.sync()
 
     expected = ((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()) + 1
-    expected_host = np.full((4, 4), _NUMPY_DTYPE_MAP[dtype](expected), dtype=_NUMPY_DTYPE_MAP[dtype])
-    assert (_read_cute_tensor(buf_dst, dtype) == expected_host).all()
+    _assert_torch_tensor(buf_dst, expected)
 
-    cute_interop.free_tensor(buf_dst)
-    cute_interop.free_tensor(buf_src)
+    nvshmem.core.free_tensor(buf_dst)
+    nvshmem.core.free_tensor(buf_src)
 
 
 @pytest.mark.mpi
@@ -160,14 +137,11 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
 def test_get_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     dev = Device()
-    cute_dtype = _cute_dtype(dtype)
-    buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_src, dtype, 0)
-    buf_dst = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_dst, dtype, nvshmem.core.my_pe() + 1)
+    buf_src = _make_torch_tensor((4, 4), dtype, 0)
+    buf_dst = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
 
-    dst_cute = buf_src
-    src_cute = buf_dst
+    dst_cute = _cute_from_torch(buf_src)
+    src_cute = _cute_from_torch(buf_dst)
 
     @cute.kernel
     def test_get(dst: cute.Tensor, src: cute.Tensor, pe: Int32):
@@ -189,11 +163,10 @@ def test_get_on_tensor(nvshmem_init_fini, dtype):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    expected_host = np.full((4, 4), _NUMPY_DTYPE_MAP[dtype](nvshmem.core.my_pe() + 1), dtype=_NUMPY_DTYPE_MAP[dtype])
-    assert (_read_cute_tensor(buf_dst, dtype) == expected_host).all()
+    _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
 
-    cute_interop.free_tensor(buf_dst)
-    cute_interop.free_tensor(buf_src)
+    nvshmem.core.free_tensor(buf_dst)
+    nvshmem.core.free_tensor(buf_src)
 
 
 @pytest.mark.mpi
@@ -201,19 +174,15 @@ def test_get_on_tensor(nvshmem_init_fini, dtype):
 def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     dev = Device()
-    cute_dtype = _cute_dtype(dtype)
-    buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
-    buf_dst = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_dst, dtype, 0)
-    signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
-    _fill_cute_tensor(signal_var, "int64", 0)
+    buf_src = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_dst = _make_torch_tensor((4, 4), dtype, 0)
+    signal_var = _make_torch_tensor((1, ), "int64", 0)
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
-    dst_cute = buf_dst
-    src_cute = buf_src
-    signal_cute = signal_var
+    dst_cute = _cute_from_torch(buf_dst)
+    src_cute = _cute_from_torch(buf_src)
+    signal_cute = _cute_from_torch(signal_var)
 
     @cute.kernel
     def test_put_signal(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32,
@@ -237,12 +206,11 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    expected_host = np.full((4, 4), _NUMPY_DTYPE_MAP[dtype](nvshmem.core.my_pe() + 1), dtype=_NUMPY_DTYPE_MAP[dtype])
-    assert (_read_cute_tensor(buf_dst, dtype) == expected_host).all()
+    _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
 
-    cute_interop.free_tensor(buf_dst)
-    cute_interop.free_tensor(buf_src)
-    cute_interop.free_tensor(signal_var)
+    nvshmem.core.free_tensor(buf_dst)
+    nvshmem.core.free_tensor(buf_src)
+    nvshmem.core.free_tensor(signal_var)
 
 
 @pytest.mark.mpi
@@ -250,19 +218,15 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
 def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     dev = Device()
-    cute_dtype = _cute_dtype(dtype)
-    buf_src = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_src, dtype, nvshmem.core.my_pe() + 1)
-    buf_dst = cute_interop.tensor((4, 4), dtype=cute_dtype)
-    _fill_cute_tensor(buf_dst, dtype, 0)
-    signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
-    _fill_cute_tensor(signal_var, "int64", 0)
+    buf_src = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_dst = _make_torch_tensor((4, 4), dtype, 0)
+    signal_var = _make_torch_tensor((1, ), "int64", 0)
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
-    dst_cute = buf_dst
-    src_cute = buf_src
-    signal_cute = signal_var
+    dst_cute = _cute_from_torch(buf_dst)
+    src_cute = _cute_from_torch(buf_src)
+    signal_cute = _cute_from_torch(signal_var)
 
     @cute.kernel
     def test_put_signal_with_wait(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_val: Int32,
@@ -288,26 +252,22 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
     stream.sync()
 
     if nvshmem.core.my_pe() == 1:
-        expected_host = np.full((4, 4),
-                                _NUMPY_DTYPE_MAP[dtype](nvshmem.core.my_pe() + 1),
-                                dtype=_NUMPY_DTYPE_MAP[dtype])
-        assert (_read_cute_tensor(buf_dst, dtype) == expected_host).all()
+        _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
 
-    cute_interop.free_tensor(buf_dst)
-    cute_interop.free_tensor(buf_src)
-    cute_interop.free_tensor(signal_var)
+    nvshmem.core.free_tensor(buf_dst)
+    nvshmem.core.free_tensor(buf_src)
+    nvshmem.core.free_tensor(signal_var)
 
 
 @pytest.mark.mpi
 def test_signal_op_signal_wait(nvshmem_init_fini):
     stream = _nvshmem_stream()
     dev = Device()
-    signal_var = cute_interop.tensor((1, ), dtype=cute.Int64)
-    _fill_cute_tensor(signal_var, "int64", 0)
+    signal_var = _make_torch_tensor((1, ), "int64", 0)
     signal_val = 1
     signal_op = nvshmem.core.SignalOp.SIGNAL_SET
 
-    signal_cute = signal_var
+    signal_cute = _cute_from_torch(signal_var)
 
     @cute.kernel
     def test_signal_op_signal_wait(signal_var: cute.Tensor, signal_val: Int32, signal_op: Int32, pe: Int32):
@@ -330,7 +290,7 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    cute_interop.free_tensor(signal_var)
+    nvshmem.core.free_tensor(signal_var)
 
 
 @pytest.mark.mpi
@@ -338,12 +298,10 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
 def test_p(dtype, nvshmem_init_fini):
     stream = _nvshmem_stream()
     dev = Device()
-    cute_dtype = _cute_dtype(dtype)
-    var = cute_interop.tensor((1, ), dtype=cute_dtype)
-    _fill_cute_tensor(var, dtype, 0)
+    var = _make_torch_tensor((1, ), dtype, 0)
     val = 1
 
-    var_cute = var
+    var_cute = _cute_from_torch(var)
 
     @cute.kernel
     def test_p_kernel(var: cute.Tensor, val: Int32, pe: Int32):
@@ -365,10 +323,9 @@ def test_p(dtype, nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    expected_host = np.full((1, ), _NUMPY_DTYPE_MAP[dtype](1), dtype=_NUMPY_DTYPE_MAP[dtype])
-    assert (_read_cute_tensor(var, dtype) == expected_host).all()
+    _assert_torch_tensor(var, 1)
 
-    cute_interop.free_tensor(var)
+    nvshmem.core.free_tensor(var)
 
 
 @pytest.mark.mpi
@@ -376,14 +333,11 @@ def test_p(dtype, nvshmem_init_fini):
 def test_g(dtype, nvshmem_init_fini):
     stream = _nvshmem_stream()
     dev = Device()
-    cute_dtype = _cute_dtype(dtype)
-    var = cute_interop.tensor((1, ), dtype=cute_dtype)
-    _fill_cute_tensor(var, dtype, 1)
-    dest = cute_interop.tensor((1, ), dtype=cute_dtype)
-    _fill_cute_tensor(dest, dtype, 0)
+    var = _make_torch_tensor((1, ), dtype, 1)
+    dest = _make_torch_tensor((1, ), dtype, 0)
 
-    var_cute = var
-    dest_cute = dest
+    var_cute = _cute_from_torch(var)
+    dest_cute = _cute_from_torch(dest)
 
     @cute.kernel
     def test_g_kernel(dest: cute.Tensor, var: cute.Tensor, pe: Int32):
@@ -406,8 +360,7 @@ def test_g(dtype, nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    expected_host = np.full((1, ), _NUMPY_DTYPE_MAP[dtype](1), dtype=_NUMPY_DTYPE_MAP[dtype])
-    assert (_read_cute_tensor(dest, dtype) == expected_host).all()
+    _assert_torch_tensor(dest, 1)
 
-    cute_interop.free_tensor(dest)
-    cute_interop.free_tensor(var)
+    nvshmem.core.free_tensor(dest)
+    nvshmem.core.free_tensor(var)
