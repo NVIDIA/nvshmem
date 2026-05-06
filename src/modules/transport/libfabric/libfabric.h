@@ -797,7 +797,6 @@ struct nvshmemt_libfabric_state_t {
     std::atomic<int> signal_delivery_status{0};
     nvshmem_transport_t signal_delivery_transport = nullptr;
     std::atomic<int> signal_delivery_futex{0};
-    std::atomic_flag signal_progress_lock = ATOMIC_FLAG_INIT;
     /* Serializes host EP CQ progress between user thread (QP_HOST blocking) and
      * proxy thread (try-lock, skip if user is already draining). */
     std::recursive_mutex host_ep_progress_lock;

@@ -318,8 +318,8 @@ int try_again(nvshmem_transport_t transport, int *status, uint64_t *num_retries,
         }
         (*num_retries)++;
         /*
-         * CompletionsOnly is used by retries originating from paths that must not
-         * re-enter top-level progress while signal_progress_lock is held.
+         * CompletionsOnly is used by retries originating from paths inside the
+         * post-drain progress block to avoid re-entering top-level progress.
          */
         if (prog_type == progress_type::All) {
             *status = nvshmemt_libfabric_progress(transport, qp_index);
@@ -1117,67 +1117,59 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
     int status = drain_completions(transport, qp_index);
     if (unlikely(status)) return status;
 
+    /* Post-drain work (deferred ACKs, AMO processing, aggregator flushing) is done
+     * only by the proxy thread. The shared deferred_work_queue and signal_done_queue
+     * can contain items targeting any EP, and the host thread must not touch proxy
+     * EPs (FI_THREAD_COMPLETION). Host-EP touches from the proxy thread are
+     * serialized via host_ep_submit_guard. */
+    if (qp_index == NVSHMEMX_QP_HOST) return 0;
+
     status = nvshmemt_libfabric_drain_deferred_work(transport);
     if (unlikely(status)) return status;
 
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
-        int effective_qp = libfabric_state->use_auto_progress ? qp_index : NVSHMEMX_QP_ALL;
         status = check_signal_delivery_status(libfabric_state);
         if (unlikely(status)) return status;
 
-        /* Serialize access to SPSC rings; both host and proxy threads may enter here. */
-        while (libfabric_state->signal_progress_lock.test_and_set(std::memory_order_acquire)) {
-            NVSHMEMT_LIBFABRIC_CPU_RELAX();
-        }
-        status = check_signal_delivery_status(libfabric_state);
-        if (unlikely(status)) {
-            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
-            return status;
-        }
+        /* Proxy thread handles both host and proxy domains since host thread no
+         * longer does post-drain work. */
+        int effective_qp = NVSHMEMX_QP_ALL;
 
         /* Drain done_queue first: fi_recv + ACK, freeing space before new work. */
         status = nvshmemt_libfabric_gdr_complete_amos(transport);
-        if (unlikely(status)) {
-            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
-            return NVSHMEMX_ERROR_INTERNAL;
-        }
+        if (unlikely(status)) return NVSHMEMX_ERROR_INTERNAL;
         status = check_signal_delivery_status(libfabric_state);
-        if (unlikely(status)) {
-            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
-            return status;
-        }
+        if (unlikely(status)) return status;
 
         /* Dequeue from op_queue, push to work_queue for signal delivery thread */
         status = nvshmemt_libfabric_gdr_process_amos(transport, effective_qp);
-        if (unlikely(status)) {
-            libfabric_state->signal_progress_lock.clear(std::memory_order_release);
-            return NVSHMEMX_ERROR_INTERNAL;
+        if (unlikely(status)) return NVSHMEMX_ERROR_INTERNAL;
+        status = check_signal_delivery_status(libfabric_state);
+        if (unlikely(status)) return status;
+
+        /* Flush stale coalesced acks for both host and proxy aggregators.
+         * Host aggregator is also accessed concurrently by user threads (via
+         * try_extract_for_peer from gdr_signal), so lock host_signal_state.mtx
+         * through get_signal_state_locked. Proxy signal_state is proxy-thread-
+         * local, so its aggregator needs no additional lock.
+         *
+         * Lock order must be host_ep_progress_lock -> signal_state.mtx to match
+         * gdr_complete_amos/process_completion and user-thread paths. flush_peer
+         * -> gdrcopy_amo_ack uses the caller-held host_ep_progress_lock for host EPs. */
+        if (libfabric_state->host_signal_state.ack_aggregator) {
+            host_ep_submit_guard host_guard(libfabric_state, *libfabric_state->eps[0]);
+            auto [signal_state_p, sig_lk] =
+                get_signal_state_locked(libfabric_state, *libfabric_state->eps[0]);
+            status = signal_state_p->ack_aggregator->flush_stale(transport,
+                                                                 *libfabric_state->eps[0]);
+            if (status) return NVSHMEMX_ERROR_INTERNAL;
         }
 
-        /* Flush stale coalesced acks */
-        if (effective_qp == NVSHMEMX_QP_HOST || effective_qp == NVSHMEMX_QP_ALL) {
-            if (libfabric_state->host_signal_state.ack_aggregator) {
-                status = libfabric_state->host_signal_state.ack_aggregator->flush_stale(
-                    transport, *libfabric_state->eps[0]);
-                if (status) {
-                    libfabric_state->signal_progress_lock.clear(std::memory_order_release);
-                    return NVSHMEMX_ERROR_INTERNAL;
-                }
-            }
+        if (libfabric_state->proxy_signal_state.ack_aggregator) {
+            status = libfabric_state->proxy_signal_state.ack_aggregator->flush_stale(
+                transport, *libfabric_state->eps[libfabric_state->num_host_domains]);
+            if (status) return NVSHMEMX_ERROR_INTERNAL;
         }
-
-        if (effective_qp != NVSHMEMX_QP_HOST) {
-            if (libfabric_state->proxy_signal_state.ack_aggregator) {
-                status = libfabric_state->proxy_signal_state.ack_aggregator->flush_stale(
-                    transport, *libfabric_state->eps[libfabric_state->num_host_domains]);
-                if (status) {
-                    libfabric_state->signal_progress_lock.clear(std::memory_order_release);
-                    return NVSHMEMX_ERROR_INTERNAL;
-                }
-            }
-        }
-
-        libfabric_state->signal_progress_lock.clear(std::memory_order_release);
 
         status = check_signal_delivery_status(libfabric_state);
         if (unlikely(status)) return status;
@@ -1433,26 +1425,33 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/,
         ep_end_idx = libfabric_state->eps.size();
     }
 
-    const nvshmemt_libfabric_signal_state_t &signal_state =
-        (qp_index == NVSHMEMX_QP_HOST) ? libfabric_state->host_signal_state
-                                       : libfabric_state->proxy_signal_state;
-
     for (;;) {
-        /* Force-flush all pending ACKs so they get sent before checking quiescence */
-        if (signal_state.ack_aggregator) {
-            int ep_idx = (qp_index == NVSHMEMX_QP_HOST) ? 0 : libfabric_state->num_host_domains;
-            status = signal_state.ack_aggregator->flush_all(tcurr, *libfabric_state->eps[ep_idx]);
-            if (unlikely(status)) break;
-        }
-
         uint64_t total_submitted = 0;
         uint64_t total_completed = 0;
         {
-            /* The proxy thread may modify host EP counters via drain_deferred_work
-             * (gdrcopy_amo_ack -> submitted_ops++) while holding host_ep_progress_lock.
-             * Take the same lock to get a consistent snapshot. */
-            host_ep_submit_guard _quiet_guard(libfabric_state,
-                                              *libfabric_state->eps[ep_start_idx]);
+            /* Lock order: host_ep_progress_lock -> signal_state.mtx, matching
+             * gdr_complete_amos and user-thread paths. host_ep_submit_guard also
+             * gives a consistent snapshot of submitted_ops/completed_ops, since
+             * the proxy thread may mutate them via drain_deferred_work ->
+             * gdrcopy_amo_ack while holding host_ep_progress_lock. */
+            host_ep_submit_guard host_guard(libfabric_state,
+                                            *libfabric_state->eps[ep_start_idx]);
+            auto [signal_state_p, sig_lk] =
+                get_signal_state_locked(libfabric_state, *libfabric_state->eps[ep_start_idx]);
+            const nvshmemt_libfabric_signal_state_t &signal_state = *signal_state_p;
+
+            /* Force-flush all pending ACKs so they get sent before checking quiescence.
+             * flush_peer -> gdrcopy_amo_ack re-acquires host_ep_progress_lock
+             * recursively. */
+            if (signal_state.ack_aggregator) {
+                int ep_idx = (qp_index == NVSHMEMX_QP_HOST)
+                                 ? 0
+                                 : libfabric_state->num_host_domains;
+                status = signal_state.ack_aggregator->flush_all(
+                    tcurr, *libfabric_state->eps[ep_idx]);
+                if (unlikely(status)) break;
+            }
+
             for (int i = ep_start_idx; i < ep_end_idx; i++) {
                 total_submitted += libfabric_state->eps[i]->submitted_ops;
                 total_completed += libfabric_state->eps[i]->completed_ops;
@@ -1746,6 +1745,7 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
 
     /* Signal-only operations use gdr_signal path with num_writes=0 */
     if (is_signal_only_op(verb.desc)) {
+        host_ep_submit_guard host_guard(libfabric_state, ep);
         auto [signal_state, sig_lk] = get_signal_state_locked(libfabric_state, ep);
         auto &seq_counter = signal_state->put_signal_seq_counter[pe];
         uint32_t sequence_count = 0;
@@ -1758,11 +1758,8 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
         uint8_t ppc = seq_counter.put_count;
         seq_counter.put_count = 0;
 
-        {
-            host_ep_submit_guard host_guard(libfabric_state, ep);
-            status = nvshmemt_libfabric_gdr_signal(transport, pe, curetptr, verb, remote,
-                                                   bytesdesc, qp_index, sequence_count, 0, ep, ppc);
-        }
+        status = nvshmemt_libfabric_gdr_signal(transport, pe, curetptr, verb, remote,
+                                               bytesdesc, qp_index, sequence_count, 0, ep, ppc);
         goto out;
     }
 
