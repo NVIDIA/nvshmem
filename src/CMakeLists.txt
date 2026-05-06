@@ -48,11 +48,6 @@ ExternalProject_Add(nvshmem_device_project
                     BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a
                     )
 
-# Wait for gpunetio_build to complete before configuring nvshmem_device
-if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
-  ExternalProject_Add_StepDependencies(nvshmem_device_project configure gpunetio_build)
-endif()
-
 add_library(nvshmem_device STATIC IMPORTED)
 set_property(TARGET nvshmem_device PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a)
 
@@ -167,9 +162,6 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   endforeach()
 
   add_custom_target(libnvshmem_device_bitcode ALL DEPENDS ${BITCODE_ARCH_BC_FILES})
-  if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
-    add_dependencies(libnvshmem_device_bitcode gpunetio_build)
-  endif()
 
   # Install per-arch bitcode files.
   foreach(ARCH IN LISTS BITCODE_LIB_ARCHS)
@@ -298,9 +290,6 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
 
   add_custom_target(libnvshmem_device_ltoir ALL
                     DEPENDS ${LTOIR_VALIDATION_DEPENDS} ${LTOIR_ARCH_FILES})
-  if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
-    add_dependencies(libnvshmem_device_ltoir gpunetio_build)
-  endif()
 
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
           DESTINATION lib/
@@ -642,12 +631,8 @@ if (NVSHMEM_GPUNETIO_SUPPORT)
   target_include_directories(nvshmem_host PRIVATE ${GPUNETIO_INCLUDE})
   target_include_directories(nvshmem_host INTERFACE
     $<BUILD_INTERFACE:${GPUNETIO_INCLUDE}>
+    $<INSTALL_INTERFACE:include/gpunetio>
   )
-  if (NOT NVSHMEM_BUILD_GPUNETIO_LIBRARY)
-    target_include_directories(nvshmem_host INTERFACE
-      $<INSTALL_INTERFACE:include>
-    )
-  endif()
 endif()
 
 if (NVSHMEM_BUILD_WITH_CUTLASS)
@@ -842,12 +827,8 @@ if(NVSHMEM_GPUNETIO_SUPPORT)
 
   )
   target_link_libraries(nvshmem_transport_gpunetio PRIVATE ${MLX5_lib} CUDA::cudart_static)
-  target_link_libraries(nvshmem_transport_gpunetio PUBLIC gpunetio)
-  if (NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
-    add_dependencies(nvshmem_transport_gpunetio gpunetio_build)
-    # GPUNetIO library (when built from source) is installed in own subdirectory in lib, so we add it to RPATH
-    set_target_properties(nvshmem_transport_gpunetio PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/gpunetio")
-  endif()
+  target_link_libraries(nvshmem_transport_gpunetio PRIVATE doca_gpunetio)
+  target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GPUNETIO_INCLUDE})
   if(NVSHMEM_USE_GDRCOPY)
     target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_gpunetio PRIVATE
@@ -1089,6 +1070,7 @@ set(TRANSPORT_INC_EXPORTS
     device_host_transport/nvshmem_common_transport.h
     device_host_transport/nvshmem_constants.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
+    internal/host/scope_guard.h
     internal/host_transport/cudawrap.h
     internal/host_transport/nvshmemi_transport_defines.h
     internal/host_transport/transport.h
@@ -1142,6 +1124,12 @@ set(TRANSPORT_CMAKE_EXPORTS
 foreach(SHARE ${TRANSPORT_CMAKE_EXPORTS})
   configure_file(modules/transport/${SHARE}.in ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/${SHARE} @ONLY)
 endforeach(SHARE ${TRANSPORT_CMAKE_EXPORTS})
+
+# Copy vendored GPUNetIO Open sources into the transport-plugins share tarball
+file(COPY ${CMAKE_SOURCE_DIR}/externals/gpunetio/CMakeLists.txt
+          ${CMAKE_SOURCE_DIR}/externals/gpunetio/include
+          ${CMAKE_SOURCE_DIR}/externals/gpunetio/src
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/gpunetio/gpunetio_src)
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMCxxStandard.cmake
                ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/cmake_config/NVSHMEMCxxStandard.cmake COPYONLY)
@@ -1277,6 +1265,15 @@ install(
   DESTINATION include/
   PATTERN "modules" EXCLUDE
 )
+if(NVSHMEM_GPUNETIO_SUPPORT)
+  install(
+    DIRECTORY ${GPUNETIO_INCLUDE}/
+    DESTINATION include/gpunetio
+    FILES_MATCHING
+      PATTERN "*.h"
+      PATTERN "*.cuh"
+  )
+endif()
 install(
   DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../examples/
   DESTINATION share/src/examples/

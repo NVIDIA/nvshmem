@@ -1,3 +1,2 @@
 nvshmem_add_transport(nvshmem_transport_gpunetio gpunetio.cpp ON ON ON ON)
-target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GPUNETIO_INCLUDE})
-target_link_libraries(nvshmem_transport_gpunetio PRIVATE ${GPUNETIO_LIB})
+target_link_libraries(nvshmem_transport_gpunetio PRIVATE doca_gpunetio)
