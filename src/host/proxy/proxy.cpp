@@ -612,7 +612,8 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
 
     uint32_t pe = req_0->pe;
     uint64_t size = req_1->size;
-    nvshmemi_amo_t amo_op = (nvshmemi_amo_t)req_0->amo;
+    int is_float = (req_0->amo & NVSHMEMI_AMO_FLOAT_BIT) != 0;
+    nvshmemi_amo_t amo_op = (nvshmemi_amo_t)(req_0->amo & ~NVSHMEMI_AMO_FLOAT_BIT);
     uint64_t lvalue, cvalue = 0;
 
     lvalue = req_0->swap_add_low;
@@ -636,6 +637,7 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
         struct nvshmem_transport *tcurr = state->transport[pe];
 
         verb.desc = amo_op;
+        verb.is_float = is_float;
 
         memset(&memdesc, 0, sizeof(amo_memdesc_t));
         memdesc.remote_memdesc.ptr = remote_actual;
@@ -1203,6 +1205,7 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     /* build signal parameters */
     memset(&sig_target_desc, 0, sizeof(amo_memdesc_t));
     sig_verb.desc = (nvshmemi_amo_t)ps_req_3->sig_op;
+    sig_verb.is_float = 0;
     rsig_offset =
         (uint64_t)(((uint64_t)(ps_req_3->rsigoffset_high) << 8) | (ps_req_3->rsigoffset_low));
     rsig_ptr = (void *)((char *)(nvshmemi_device_state.heap_base) + rsig_offset);

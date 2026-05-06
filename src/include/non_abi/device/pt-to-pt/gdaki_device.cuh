@@ -1338,6 +1338,10 @@ template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_amo_nonfetch(
     void *rptr, const T value, int pe, nvshmemi_amo_t op,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    /* Float atomics are not supported by GPUNetIO GDAKI because the proxy path is
+       not available when GPUNetIO GDAKI is the active transport. */
+    assert(!nvshmemi_is_float_type<T>() ||
+           (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
     nvshmemi_gdaki_amo_nonfetch_impl<T>(rptr, value, pe, op, qp_index);
 }
 
@@ -1480,6 +1484,10 @@ template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
 nvshmemi_gdaki_amo_fetch(void *rptr, const T value, const T compare, int pe, nvshmemi_amo_t op,
                          nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    /* Float atomics are not supported by GPUNetIO GDAKI because the proxy path is
+       not available when GPUNetIO GDAKI is the active transport. */
+    assert(!nvshmemi_is_float_type<T>() ||
+           (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
     return nvshmemi_gdaki_amo_fetch_impl<T>(rptr, value, compare, pe, op, qp_index);
 }
 

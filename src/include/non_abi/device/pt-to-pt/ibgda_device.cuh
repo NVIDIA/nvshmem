@@ -2900,6 +2900,9 @@ template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_amo_nonfetch(
     void *rptr, const T value, int pe, nvshmemi_amo_t op,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    /* Float atomics are not supported by IBGDA — the proxy path is not
+       available when IBGDA is the active transport. */
+    assert(!nvshmemi_is_float_type<T>() || (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
 
     if (state->support_half_av_seg)
@@ -3031,6 +3034,9 @@ template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
 nvshmemi_ibgda_amo_fetch(void *rptr, const T value, const T compare, int pe, nvshmemi_amo_t op,
                          nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    /* Float atomics are not supported by IBGDA — the proxy path is not
+       available when IBGDA is the active transport. */
+    assert(!nvshmemi_is_float_type<T>() || (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
     T ret;
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
 

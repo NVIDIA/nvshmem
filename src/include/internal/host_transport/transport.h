@@ -98,6 +98,7 @@ typedef struct amo_verb {
     int is_fetch;
     int is_val;
     int is_cmp;
+    int is_float;
 } amo_verb_t;
 
 typedef struct amo_memdesc {

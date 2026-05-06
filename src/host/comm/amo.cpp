@@ -48,6 +48,27 @@ NVSHMEM_TYPE_ADD_NOT_IMPLEMENTED(longlong, long long) /*XXX:not implemented*/
 NVSHMEM_TYPE_ADD_NOT_IMPLEMENTED(size, size_t)
 NVSHMEM_TYPE_ADD_NOT_IMPLEMENTED(ptrdiff, ptrdiff_t) /*XXX:not implemented*/
 
+#define NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(Name, TYPE)                                  \
+    void nvshmemx_##Name##_atomic_add(TYPE * /*target*/, TYPE /*value*/, int /*pe*/) { \
+        NVSHMEMI_ERROR_PRINT("[%d] nvshmemx_" #Name "_atomic_add() not implemented",   \
+                             nvshmemi_state->mype);                                    \
+    }
+
+NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(float, float)
+NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(double, double)
+NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(half, __half)
+
+#define NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(Name, TYPE)                                 \
+    TYPE nvshmemx_##Name##_atomic_fetch_add(TYPE * /*target*/, TYPE /*value*/, int /*pe*/) { \
+        NVSHMEMI_ERROR_PRINT("[%d] nvshmemx_" #Name "_atomic_fetch_add() not implemented",   \
+                             nvshmemi_state->mype);                                         \
+        return (TYPE)0;                                                                     \
+    }
+
+NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(float, float)
+NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(double, double)
+NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(half, __half)
+
 #define NVSHMEM_TYPE_SET_NOT_IMPLEMENTED(Name, TYPE)                                  \
     void nvshmem_##Name##_atomic_set(TYPE * /*target*/, TYPE /*value*/, int /*pe*/) { \
         NVSHMEMI_ERROR_PRINT("[%d] nvshmem_" #Name "_atomic_set() not implemented",   \

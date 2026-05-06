@@ -10,11 +10,40 @@
 #define PROXY_DEVICE_CUH
 
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
 #include "utils_device.h"
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
 /* this file does not directly use the definitions from device_host/nvshmem_proxy_channel.h */
 /* But the way the requests are filled in directly represents those structures. */
 #include "device_host/nvshmem_proxy_channel.h"  // IWYU pragma: keep
+
+/* Type trait to identify floating-point types for AMO dispatch. */
+template <typename T>
+__host__ __device__ constexpr bool nvshmemi_is_float_type() {
+    return false;
+}
+template <>
+__host__ __device__ constexpr bool nvshmemi_is_float_type<__half>() {
+    return true;
+}
+template <>
+__host__ __device__ constexpr bool nvshmemi_is_float_type<float>() {
+    return true;
+}
+template <>
+__host__ __device__ constexpr bool nvshmemi_is_float_type<double>() {
+    return true;
+}
+
+/* Map float types to same-sized unsigned integer for CAS-based emulation. */
+template <typename T>
+struct nvshmemi_uint_for_float {};
+template <>
+struct nvshmemi_uint_for_float<__half> { typedef uint16_t type; };
+template <>
+struct nvshmemi_uint_for_float<float> { typedef uint32_t type; };
+template <>
+struct nvshmemi_uint_for_float<double> { typedef uint64_t type; };
 
 #ifdef __CUDA_ARCH__
 
@@ -570,7 +599,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
     uint64_t roffset = (uint64_t)((char *)rptr - (char *)base_ptr);
     uint64_t op;
-    uint64_t amo = amo_op;
+    uint64_t amo = amo_op | (nvshmemi_is_float_type<T>() ? NVSHMEMI_AMO_FLOAT_BIT : 0);
     uint16_t pe_u16 = pe;
     uint64_t size_u64 = sizeof(T);
     uint64_t swap_add_buffer;

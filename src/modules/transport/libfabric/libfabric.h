@@ -205,7 +205,7 @@ typedef struct nvshmemt_libfabric_gdr_send_p_op {
 } nvshmemt_libfabric_gdr_send_p_op_t;
 
 typedef struct nvshmemt_libfabric_gdr_send_amo_op {
-    nvshmemi_amo_t op;
+    nvshmemi_amo_t op;  /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
     void *target_addr;
     void *ret_addr;
     union {

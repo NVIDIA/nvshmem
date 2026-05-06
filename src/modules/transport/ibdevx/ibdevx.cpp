@@ -1391,6 +1391,13 @@ int nvshmemt_ibdevx_amo(struct nvshmem_transport *tcurr, int pe, void *curetptr,
                         amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc, int is_proxy) {
     int status = 0;
 
+    if (verb.is_float &&
+        (verb.desc == NVSHMEMI_AMO_ADD || verb.desc == NVSHMEMI_AMO_FETCH_ADD)) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
+                           "Floating-point atomic add is not supported by IBDevX. Use IBRC or an "
+                           "NVLink peer-access path.\n");
+    }
+
     if (bytesdesc.elembytes == 4) {
         return nvshmemt_ibdevx_amo_32(tcurr, pe, curetptr, verb, remote, bytesdesc, is_proxy);
     } else if (bytesdesc.elembytes == 8) {

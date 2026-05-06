@@ -15,6 +15,7 @@
 // IWYU pragma: no_include <mm_malloc.h>
 #include <string.h>
 #include <unistd.h>
+#include <atomic>
 #include <deque>
 #include <map>
 #include <string>
@@ -86,7 +87,7 @@ struct ibrc_request {
 };
 
 struct ibrc_atomic_op {
-    nvshmemi_amo_t op;
+    nvshmemi_amo_t op;  /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
     void *addr;
     void *retaddr;
     uint32_t retrkey;
@@ -132,8 +133,8 @@ typedef struct ibrc_mem_handle_info {
     struct ibv_mr *mr;
     void *ptr;
     size_t size;
+    void *cpu_ptr;  // CPU-accessible pointer: set via GDRCopy map or directly for SYSMEM
 #ifdef NVSHMEM_USE_GDRCOPY
-    void *cpu_ptr;
     void *cpu_ptr_base;
     gdr_mh_t mh;
 #endif
@@ -149,16 +150,17 @@ static int use_ib_native_atomics = 1;
 /* Maximum number of RDMA Read & Atomic operations that can be outstanding per QP */
 static int nvshmemt_ibrc_max_rd_atomic = INT_MAX;
 static bool use_gdrcopy = 0;
-#ifdef NVSHMEM_USE_GDRCOPY
-static gdr_t gdr_desc;
-static struct gdrcopy_function_table gdrcopy_ftable;
-static void *gdrcopy_handle = NULL;
+static std::atomic<bool> use_cpu_atomics{false};  // true when send-based atomics are possible (GDRCopy or SYSMEM)
 static volatile uint64_t atomics_received = 0;
 static volatile uint64_t atomics_processed = 0;
 static volatile uint64_t atomics_issued = 0;
 static volatile uint64_t atomics_completed = 0;
 static volatile uint64_t atomics_acked = 0;
 static bool is_egm = false;
+#ifdef NVSHMEM_USE_GDRCOPY
+static gdr_t gdr_desc;
+static struct gdrcopy_function_table gdrcopy_ftable;
+static void *gdrcopy_handle = NULL;
 #endif
 
 static struct nvshmemt_ibv_function_table ftable;
@@ -170,6 +172,7 @@ static void *mlx5dv_handle;
 #endif
 
 int progress_send(nvshmemt_ib_common_state_t ibrc_state);
+int progress_recv_wrapper(nvshmem_transport_t tcurr, nvshmemt_ib_wait_predicate_t wait_predicate);
 
 // Allocate memory to be potentially ibv_reg_mr'd. This needs to be
 // // allocated on separate pages as those pages will be marked DONTFORK
@@ -491,6 +494,7 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
                                   ibrc_state->dev_ids[ibrc_state->selected_dev_id]);
     struct ibrc_mem_handle_info *handle_info = NULL;
     struct nvshmemt_ib_common_mem_handle *handle;
+    bool is_sysmem = false;
 
     /*
      * In cases where same physical memory has been mapped to multiple VAs (say VA1 and VA2)
@@ -529,10 +533,26 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
         handle_info->size = length;
     }
 
+    /* For SYSMEM heap, the buffer is directly CPU-accessible without GDRCopy.
+     * Set cpu_ptr so the send-based atomic path can use it, and skip GDRCopy
+     * pin (which would fail on system memory). */
+    if (!local_only && handle_info) {
+        cudaPointerAttributes attrs;
+        if (cudaPointerGetAttributes(&attrs, buf) == cudaSuccess &&
+            attrs.type != cudaMemoryTypeDevice) {
+            handle_info->cpu_ptr = buf;
+            if (!use_cpu_atomics) {
+                use_cpu_atomics = true;
+                ibrc_state->ib_transport_ftable->progress_recv = progress_recv_wrapper;
+            }
+            is_sysmem = true;
+        }
+    }
+
 #ifdef NVSHMEM_USE_GDRCOPY
     /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
     is_egm = check_egm(buf, transport->egm_map);
-    if (use_gdrcopy && !local_only && !is_egm) {
+    if (use_gdrcopy && !local_only && !is_egm && !is_sysmem) {
         void *gdr_buf = buf;
 
         // if applicable, alias_va_ptr (VA1) is only used for pin_buffer() and
@@ -819,14 +839,14 @@ out:
     return status;
 }
 
-#ifdef NVSHMEM_USE_GDRCOPY
 int poll_recv(nvshmemt_ib_common_state_t ibrc_state);
 
+
 template <typename T>
-int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_op *op, void *ptr) {
+int perform_gdrcopy_amo(struct ibrc_ep *ep, struct ibrc_atomic_op *op, void *ptr) {
     int status = 0;
 
-    T old_value, new_value;
+    T old_value, new_value = {};
     // FIXME: gdrcopy causing duplicate copies for small transfers, using direct LD/ST until this
     // resolved
     // status = gdrcopy_ftable.copy_from_mapping(mh, &old_value, ptr, sizeof(T));
@@ -836,7 +856,10 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
     static_assert(sizeof(T) <= 8, "static_assert(sizeof(T) >= 8) failed");
     old_value = *((volatile T *)ptr);
 
-    switch (op->op) {
+    bool is_float = (op->op & NVSHMEMI_AMO_FLOAT_BIT) != 0;
+    nvshmemi_amo_t amo_op = (nvshmemi_amo_t)(op->op & ~NVSHMEMI_AMO_FLOAT_BIT);
+
+    switch (amo_op) {
         case NVSHMEMI_AMO_SIGNAL:
         case NVSHMEMI_AMO_SIGNAL_SET:
         case NVSHMEMI_AMO_SET:
@@ -849,7 +872,11 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
         case NVSHMEMI_AMO_ADD:
         case NVSHMEMI_AMO_SIGNAL_ADD:
         case NVSHMEMI_AMO_FETCH_ADD: {
-            new_value = old_value + static_cast<T>(op->swap_add);
+            if (is_float) {
+                new_value = nvshmemt_float_atomic_add<T>(old_value, op->swap_add);
+            } else {
+                new_value = old_value + static_cast<T>(op->swap_add);
+            }
             break;
         }
         case NVSHMEMI_AMO_OR:
@@ -921,9 +948,8 @@ int perform_gdrcopy_amo(struct ibrc_ep *ep, gdr_mh_t /*mh*/, struct ibrc_atomic_
         sge = &(ep->req + op_id)->sge;
 
         memset(sr, 0, sizeof(ibv_send_wr));
-        if (op->op > NVSHMEMI_AMO_END_OF_NONFETCH) {
-            ret.flag = 0;
-            ret.data = 0;
+        if (amo_op > NVSHMEMI_AMO_END_OF_NONFETCH) {
+            ret.data = ret.flag = 0;
             ret.data = old_value;
             ret.flag = op->retflag;
 
@@ -1028,13 +1054,13 @@ int process_recv(nvshmem_transport_t t, nvshmemt_ib_common_state_t ibrc_state) {
 
         switch (op->elembytes) {
             case 2:
-                perform_gdrcopy_amo<uint16_t>(ep, mem_handle_info->mh, op, ptr);
+                perform_gdrcopy_amo<uint16_t>(ep, op, ptr);
                 break;
             case 4:
-                perform_gdrcopy_amo<uint32_t>(ep, mem_handle_info->mh, op, ptr);
+                perform_gdrcopy_amo<uint32_t>(ep, op, ptr);
                 break;
             case 8:
-                perform_gdrcopy_amo<uint64_t>(ep, mem_handle_info->mh, op, ptr);
+                perform_gdrcopy_amo<uint64_t>(ep, op, ptr);
                 break;
             default:
                 NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1080,7 +1106,6 @@ out:
     pthread_mutex_unlock(&ibrc_mutex_recv_progress);
     return status;
 }
-#endif
 
 int progress_send(nvshmemt_ib_common_state_t ibrc_state) {
     int status = 0;
@@ -1110,11 +1135,9 @@ int progress_send(nvshmemt_ib_common_state_t ibrc_state) {
 
             assert(ne == 1);
             if (wc.wr_id == NVSHMEMI_OP_AMO) {
-#ifdef NVSHMEM_USE_GDRCOPY
-                atomics_completed = atomics_completed + 1;
+                atomics_completed++;
                 TRACE(ibrc_state->log_level, "[%d] atomic completed : %lu \n", getpid(),
                       atomics_completed);
-#endif
             }
 
             struct ibrc_ep *ep = (struct ibrc_ep *)qp_map.find((unsigned int)wc.qp_num)->second;
@@ -1134,12 +1157,10 @@ int nvshmemt_ibrc_progress(nvshmem_transport_t t) {
     status = progress_send(ibrc_state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "progress_send failed, \n");
 
-#ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gdrcopy || use_cpu_atomics) {
         status = progress_recv(t, ibrc_state, NVSHMEMT_IB_COMMON_WAIT_NONE);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "progress_recv failed, \n");
     }
-#endif
 
 out:
     return status;
@@ -1230,9 +1251,7 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
     struct ibv_send_wr *sr, **bad_sr;
     struct ibv_sge *sge;
     int op_id;
-#ifdef NVSHMEM_USE_GDRCOPY
     struct ibrc_atomic_op op;
-#endif
 
     ep = (struct ibrc_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
 
@@ -1273,20 +1292,19 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
         }
     }
 
-#ifdef NVSHMEM_USE_GDRCOPY
     /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
     is_egm = check_egm(remote->remote_memdesc.ptr, tcurr->egm_map);
     if (is_egm) {
         INFO(ibrc_state->log_level, "IBRC: buf: %p is egm, not using gdrcopy for atomics\n",
              remote->remote_memdesc.ptr);
     }
-    // if gdrcopy is available, use it for all atomics to guarantee
-    // atomicity across different ops
-    if (use_gdrcopy && !is_egm) {
+    // if gdrcopy or cpu-accessible memory is available, use send-based atomics
+    // to guarantee atomicity across different ops
+    if ((use_gdrcopy || use_cpu_atomics) && !is_egm) {
         ibrc_mem_handle_info_t *mem_handle_info;
 
         // assuming GDRCopy availability is uniform on all nodes
-        op.op = verb.desc;
+        op.op = (nvshmemi_amo_t)(verb.desc | (verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0));
         op.addr = remote->remote_memdesc.ptr;
         op.retaddr = remote->retptr;
         op.retflag = remote->retflag;
@@ -1311,7 +1329,6 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
         TRACE(ibrc_state->log_level, "[%d] atomic issued : %lu \n", getpid(), atomics_issued);
         goto post_op;
     }
-#endif
 
     if (use_ib_native_atomics) {
         if (verb.desc == NVSHMEMI_AMO_ADD) {
@@ -1487,12 +1504,10 @@ int nvshmemt_ibrc_ep_connect_wrapper(nvshmemt_ib_common_ep_ptr_t ep,
     return nvshmemt_ibrc_ep_connect((struct ibrc_ep *)ep, ep_handle);
 }
 
-#ifdef NVSHMEM_USE_GDRCOPY
 int progress_recv_wrapper(nvshmem_transport_t tcurr, nvshmemt_ib_wait_predicate_t wait_predicate) {
     nvshmemt_ib_common_state_t ibrc_state = (nvshmemt_ib_common_state_t)tcurr->state;
     return progress_recv(tcurr, ibrc_state, wait_predicate);
 }
-#endif
 
 int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, int api_version) {
     int status = 0;
@@ -1580,6 +1595,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         use_gdrcopy = nvshmemt_gdrcopy_ftable_init(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle,
                                                    ibrc_state->log_level);
     }
+    if (use_gdrcopy) {
+        use_cpu_atomics = true;
+    }
 #else
 #endif
 
@@ -1593,6 +1611,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibrc_state->ib_transport_ftable->ep_get_handle = nvshmemt_ibrc_ep_get_handle_wrapper;
     ibrc_state->ib_transport_ftable->ep_connect = nvshmemt_ibrc_ep_connect_wrapper;
     ibrc_state->ib_transport_ftable->progress = nvshmemt_ibrc_progress;
+    // progress_recv is registered when send-based atomics are available
+    // (GDRCopy or SYSMEM). For SYSMEM, this is set later in get_mem_handle.
     ibrc_state->ib_transport_ftable->progress_recv = NULL;
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gdrcopy) {

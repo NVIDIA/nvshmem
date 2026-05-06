@@ -10,8 +10,9 @@
 
 #include <errno.h>    // for errno
 #include <stdio.h>    // for fprintf, stderr
-#include <string.h>   // for strerror
+#include <string.h>   // for memcpy, strerror
 #include <strings.h>  // for strncasecmp
+#include <cuda_fp16.h>
 #include <unordered_map>
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_opt...
 #include "internal/host_transport/transport.h"           // for nvshmem_tran...
@@ -179,6 +180,44 @@ int nvshmemt_mem_handle_cache_remove(nvshmem_transport_t t,
 int nvshmemt_mem_handle_cache_fini(struct transport_mem_handle_info_cache *cache);
 
 bool check_egm(void *addr, std::unordered_map<void *, size_t> *egm_map);
+
+/* C++11-safe helpers: reinterpret integer bits as half/float/double, add, return result bits.
+ * Used by transport AMO handlers to implement software float atomic add.
+ * Primary template is unreachable (only uint16_t, uint32_t and uint64_t are valid). */
+template <typename T>
+static inline T nvshmemt_float_atomic_add(T /*old_bits*/, uint64_t /*add_bits*/) {
+    return T{};
+}
+template <>
+inline uint16_t nvshmemt_float_atomic_add<uint16_t>(uint16_t old_bits, uint64_t add_bits) {
+    uint16_t add_trunc = static_cast<uint16_t>(add_bits);
+    __half_raw h_old_raw = {old_bits};
+    __half_raw h_add_raw = {add_trunc};
+    __half h_new = __hadd(__half(h_old_raw), __half(h_add_raw));
+    return static_cast<__half_raw>(h_new).x;
+}
+template <>
+inline uint32_t nvshmemt_float_atomic_add<uint32_t>(uint32_t old_bits, uint64_t add_bits) {
+    float f_old, f_add, f_new;
+    uint32_t add_trunc = static_cast<uint32_t>(add_bits);
+    memcpy(&f_old, &old_bits, sizeof(float));
+    memcpy(&f_add, &add_trunc, sizeof(float));
+    f_new = f_old + f_add;
+    uint32_t result;
+    memcpy(&result, &f_new, sizeof(float));
+    return result;
+}
+template <>
+inline uint64_t nvshmemt_float_atomic_add<uint64_t>(uint64_t old_bits, uint64_t add_bits) {
+    double d_old, d_add, d_new;
+    memcpy(&d_old, &old_bits, sizeof(double));
+    memcpy(&d_add, &add_bits, sizeof(double));
+    d_new = d_old + d_add;
+    uint64_t result;
+    memcpy(&result, &d_new, sizeof(double));
+    return result;
+}
+
 extern "C" {
 int nvshmemt_init(nvshmem_transport_t *transport, struct nvshmemi_cuda_fn_table *table,
                   int api_version);

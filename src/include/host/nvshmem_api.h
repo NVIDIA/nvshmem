@@ -101,8 +101,16 @@ NVSHMEMI_HOSTDEVICE_PREFIX void *nvshmemx_mc_ptr(nvshmem_team_t team, const void
                 NVSHMEMI_DECL_TYPE_##OPGRPNAME(size, size_t, opname)    \
                     NVSHMEMI_DECL_TYPE_##OPGRPNAME(ptrdiff, ptrdiff_t, opname)
 
+#ifdef __cplusplus
+#define NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO_HALF(OPGRPNAME, opname) \
+    NVSHMEMI_DECL_TYPE_##OPGRPNAME(half, __half, opname)
+#else
+#define NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO_HALF(OPGRPNAME, opname)
+#endif
+
 #define NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(OPGRPNAME, opname) \
-    NVSHMEMI_DECL_TYPE_##OPGRPNAME(float, float, opname)          \
+    NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO_HALF(OPGRPNAME, opname) \
+    NVSHMEMI_DECL_TYPE_##OPGRPNAME(float, float, opname)            \
         NVSHMEMI_DECL_TYPE_##OPGRPNAME(double, double, opname)
 
 /* inc */
@@ -145,6 +153,26 @@ NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(FETCH, fetch)
 NVSHMEMI_REPT_OPGROUP_FOR_BITWISE_AMO(ADD_SET, add)
 NVSHMEMI_REPT_OPGROUP_FOR_STANDARD_AMO(ADD_SET, add)
 
+/**
+ * nvshmemx half/float/double atomic add and fetch_add (non-standard extension).
+ *
+ * \note The nvshmemx_{half,float,double}_atomic_{add,fetch_add} APIs are currently
+ * supported over GPU LD/ST atomics, such as NVLink peer access, and over the IBRC
+ * remote transport.
+ */
+#define NVSHMEMI_DECL_TYPE_XADD(type, TYPE, opname)                                          \
+    NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_##type##_atomic_##opname(TYPE *dest, TYPE value, \
+                                                                      int pe);
+#define NVSHMEMI_DECL_TYPE_XFADD(type, TYPE, opname)                                          \
+    NVSHMEMI_HOSTDEVICE_PREFIX TYPE nvshmemx_##type##_atomic_##opname(TYPE *dest, TYPE value,  \
+                                                                      int pe);
+
+NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(XADD, add)
+NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(XFADD, fetch_add)
+
+#undef NVSHMEMI_DECL_TYPE_XADD
+#undef NVSHMEMI_DECL_TYPE_XFADD
+
 NVSHMEMI_REPT_OPGROUP_FOR_BITWISE_AMO(ADD_SET, set)
 NVSHMEMI_REPT_OPGROUP_FOR_STANDARD_AMO(ADD_SET, set)
 NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(ADD_SET, set)
@@ -165,6 +193,7 @@ NVSHMEMI_REPT_OPGROUP_FOR_STANDARD_AMO(CSWAP, compare_swap)
 #undef NVSHMEMI_DECL_TYPE_ADD_SET
 #undef NVSHMEMI_DECL_TYPE_FADD_SWAP
 #undef NVSHMEMI_DECL_TYPE_CSWAP
+#undef NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO_HALF
 
 //////////////////// OpenSHMEM 1.4 Atomics ////////////////////
 

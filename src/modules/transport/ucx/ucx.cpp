@@ -652,17 +652,36 @@ int nvshmemt_ucx_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
     return 0;
 }
 
+static inline bool nvshmemt_ucx_is_unsupported_float_amo(nvshmemi_amo_t op, int is_float) {
+    return is_float && (op == NVSHMEMI_AMO_ADD || op == NVSHMEMI_AMO_FETCH_ADD ||
+                        op == NVSHMEMI_AMO_SIGNAL_ADD);
+}
+
+static inline int nvshmemt_ucx_check_unsupported_float_amo(nvshmemi_amo_t op, int is_float) {
+    if (nvshmemt_ucx_is_unsupported_float_amo(op, is_float)) {
+        NVSHMEMI_ERROR_PRINT(
+            "Floating-point atomic add is not supported by UCX. Use IBRC or an NVLink "
+            "peer-access path.\n");
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+
+    return 0;
+}
+
 #ifdef NVSHMEM_USE_GDRCOPY
 template <typename T>
 int nvshmemt_ucx_handle_amo(struct nvshmem_transport *transport, ucp_ep_h ep, nvshmemi_amo_t op,
                             void *ptr, uint64_t swap_add, uint64_t compare, void *retptr,
-                            uint64_t retflag, bool is_proxy) {
-    T old_value, new_value;
+                            uint64_t retflag, bool is_proxy, int is_float) {
+    T old_value, new_value = {};
     nvshmemt_ucx_am_header_t *header = NULL;
     ucs_status_ptr_t ucs_rc;
     ucp_request_param_t param;
     int status = 0;
     bool send_full_header = false;
+
+    status = nvshmemt_ucx_check_unsupported_float_amo(op, is_float);
+    if (status) goto out;
 
     old_value = *((volatile T *)ptr);
     switch (op) {
@@ -764,22 +783,27 @@ int nvshmemt_ucx_process_amos(struct nvshmem_transport *transport) {
         ptr = (void *)((char *)mem_handle_info->cpu_ptr +
                        ((char *)send_header->addr - (char *)mem_handle_info->ptr));
         status = 0;
+        int is_float = (send_header->op & NVSHMEMI_AMO_FLOAT_BIT) != 0;
+        nvshmemi_amo_t amo_op = (nvshmemi_amo_t)(send_header->op & ~NVSHMEMI_AMO_FLOAT_BIT);
 
         switch (send_header->op_size) {
             case 2:
                 status = nvshmemt_ucx_handle_amo<uint16_t>(
-                    transport, send_header->ep, send_header->op, ptr, send_header->value,
-                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy);
+                    transport, send_header->ep, amo_op, ptr, send_header->value,
+                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy,
+                    is_float);
                 break;
             case 4:
                 status = nvshmemt_ucx_handle_amo<uint32_t>(
-                    transport, send_header->ep, send_header->op, ptr, send_header->value,
-                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy);
+                    transport, send_header->ep, amo_op, ptr, send_header->value,
+                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy,
+                    is_float);
                 break;
             case 8:
                 status = nvshmemt_ucx_handle_amo<uint64_t>(
-                    transport, send_header->ep, send_header->op, ptr, send_header->value,
-                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy);
+                    transport, send_header->ep, amo_op, ptr, send_header->value,
+                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy,
+                    is_float);
                 break;
             default:
                 NVSHMEMI_ERROR_PRINT("UCX bad size supplied for atomic.\n");
@@ -804,6 +828,9 @@ int nvshmemt_ucx_process_amos(struct nvshmem_transport *transport) {
 int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /*curetptr*/,
                            amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                            int is_proxy) {
+    int status = nvshmemt_ucx_check_unsupported_float_amo(verb.desc, verb.is_float);
+    if (status) return status;
+
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
     ucs_status_ptr_t ucs_rc;
@@ -825,7 +852,8 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /
         header->header.send_h.cmp = remote->cmp;
         header->header.send_h.retptr = remote->retptr;
         header->header.send_h.retflag = remote->retflag;
-        header->header.send_h.op = verb.desc;
+        header->header.send_h.op =
+            (nvshmemi_amo_t)(verb.desc | (verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0));
         header->is_proxy = is_proxy;
 
         param.op_attr_mask =
@@ -866,6 +894,9 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /
 int nvshmemt_ucx_remote_amo(struct nvshmem_transport *transport, int pe, void * /*curetptr*/,
                             amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                             int is_proxy) {
+    int status = nvshmemt_ucx_check_unsupported_float_amo(verb.desc, verb.is_float);
+    if (status) return status;
+
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
     ucp_ep_h ep;
     ucs_status_t ucs_rc;

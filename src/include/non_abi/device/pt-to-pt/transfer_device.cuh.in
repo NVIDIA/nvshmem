@@ -66,6 +66,7 @@
     FN_TEMPLATE(unsigned long long)
 
 #define TRANSFER_REPT_FOR_EXTENDED_AMO_TYPES(FN_TEMPLATE) \
+    FN_TEMPLATE(__half)                                   \
     FN_TEMPLATE(float)                                    \
     FN_TEMPLATE(double)
 

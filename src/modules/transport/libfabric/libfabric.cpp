@@ -249,7 +249,7 @@ out:
 template <typename T>
 int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op_ctx_t *op,
                         nvshmemt_libfabric_gdr_op_ctx_t **send_elems, uint32_t sequence_count) {
-    T old_value, new_value;
+    T old_value, new_value = {};
     uint64_t num_retries = 0;
     int send_elems_index = 0;
     nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
@@ -258,6 +258,9 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
     nvshmemt_libfabric_memhandle_info_t *handle_info;
     volatile T *ptr;
     int status = 0;
+    /* Decode float flag from op field */
+    bool is_float = (received_op->op & NVSHMEMI_AMO_FLOAT_BIT) != 0;
+    received_op->op = (nvshmemi_amo_t)(received_op->op & ~NVSHMEMI_AMO_FLOAT_BIT);
     /* Save op fields as registers to allow posting op as RX before TX */
     int src_pe = op->send_amo.src_pe;
     nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[op->ep_index]);
@@ -295,7 +298,11 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
         case NVSHMEMI_AMO_ADD:
         case NVSHMEMI_AMO_SIGNAL_ADD:
         case NVSHMEMI_AMO_FETCH_ADD: {
-            new_value = old_value + static_cast<T>(received_op->swap_add);
+            if (is_float) {
+                new_value = nvshmemt_float_atomic_add<T>(old_value, received_op->swap_add);
+            } else {
+                new_value = old_value + static_cast<T>(received_op->swap_add);
+            }
             break;
         }
         case NVSHMEMI_AMO_OR:
@@ -1044,7 +1051,8 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
     NVSHMEMI_NULL_ERROR_JMP(amo, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "Unable to retrieve AMO operation.");
 
-    amo->send_amo.op = verb.desc;
+    amo->send_amo.op =
+        (nvshmemi_amo_t)(verb.desc | (verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0));
     amo->send_amo.target_addr = remote->remote_memdesc.ptr;
     amo->send_amo.ret_addr = remote->retptr;
     amo->send_amo.retflag = remote->retflag;

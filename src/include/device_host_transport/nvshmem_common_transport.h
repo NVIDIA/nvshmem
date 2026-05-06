@@ -60,6 +60,10 @@ typedef enum {
     NVSHMEMI_AMO_OP_SENTINEL = INT_MAX,
 } nvshmemi_amo_t;
 
+/* Flag bit set in the proxy channel amo field to indicate floating-point type.
+ * The proxy handler strips this flag before extracting the amo_t op. */
+#define NVSHMEMI_AMO_FLOAT_BIT 0x80
+
 typedef struct {
     volatile uint64_t data;
     volatile uint64_t flag;
