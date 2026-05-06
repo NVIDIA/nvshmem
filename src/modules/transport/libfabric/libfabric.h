@@ -750,7 +750,7 @@ struct nvshmemt_libfabric_state_t {
     std::atomic_flag signal_progress_lock = ATOMIC_FLAG_INIT;
     /* Serializes host EP CQ progress between user thread (QP_HOST blocking) and
      * proxy thread (try-lock, skip if user is already draining). */
-    std::atomic_flag host_ep_progress_lock = ATOMIC_FLAG_INIT;
+    std::recursive_mutex host_ep_progress_lock;
     /* signal_work_queue is SPSC (single consumer: delivery thread), but two
      * threads can push (put_signal_completion and gdr_process_amos).
      * Push-side serialization is provided by signal_work_queue_lock. */

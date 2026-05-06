@@ -263,13 +263,12 @@ struct host_ep_submit_guard {
                          const nvshmemt_libfabric_endpoint_t &ep)
         : state(s), held(false) {
         if (ep.domain_index < state->num_host_domains) {
-            while (state->host_ep_progress_lock.test_and_set(std::memory_order_acquire))
-                NVSHMEMT_LIBFABRIC_CPU_RELAX();
+            state->host_ep_progress_lock.lock();
             held = true;
         }
     }
     ~host_ep_submit_guard() {
-        if (held) state->host_ep_progress_lock.clear(std::memory_order_release);
+        if (held) state->host_ep_progress_lock.unlock();
     }
     host_ep_submit_guard(const host_ep_submit_guard&) = delete;
     host_ep_submit_guard& operator=(const host_ep_submit_guard&) = delete;
@@ -368,6 +367,7 @@ int gdrcopy_amo_ack(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t
     nvshmemt_libfabric_gdr_amo_ack_op_t *ack_op;
     uint64_t num_retries = 0;
     int status;
+    host_ep_submit_guard host_guard(libfabric_state, ep);
 
     do {
         status = libfabric_state->op_queue[ep.domain_index]->getNextSends(&send_elem, 1);
@@ -523,6 +523,7 @@ static int nvshmemt_libfabric_gdr_complete_amos(nvshmem_transport_t transport) {
     }
 
     nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[done.ep_index]);
+    host_ep_submit_guard host_guard(libfabric_state, ep);
 
     /* Post recv before posting TX operations to avoid deadlocks */
     status =
@@ -995,9 +996,8 @@ static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, 
 static inline int progress_host_eps(nvshmem_transport_t transport, bool blocking) {
     nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)transport->state;
     if (blocking) {
-        while (state->host_ep_progress_lock.test_and_set(std::memory_order_acquire))
-            NVSHMEMT_LIBFABRIC_CPU_RELAX();
-    } else if (state->host_ep_progress_lock.test_and_set(std::memory_order_acquire)) {
+        state->host_ep_progress_lock.lock();
+    } else if (!state->host_ep_progress_lock.try_lock()) {
         return 0; /* user thread is draining; skip */
     }
     int status = 0;
@@ -1005,7 +1005,7 @@ static inline int progress_host_eps(nvshmem_transport_t transport, bool blocking
         status = nvshmemt_libfabric_process_completion(transport, i);
         if (unlikely(status)) break;
     }
-    state->host_ep_progress_lock.clear(std::memory_order_release);
+    state->host_ep_progress_lock.unlock();
     return status;
 }
 
@@ -1421,12 +1421,18 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/,
 
         uint64_t total_submitted = 0;
         uint64_t total_completed = 0;
-        for (int i = ep_start_idx; i < ep_end_idx; i++) {
-            total_submitted += libfabric_state->eps[i]->submitted_ops;
-            total_completed += libfabric_state->eps[i]->completed_ops;
+        {
+            /* The proxy thread may modify host EP counters via drain_deferred_work
+             * (gdrcopy_amo_ack -> submitted_ops++) while holding host_ep_progress_lock.
+             * Take the same lock to get a consistent snapshot. */
+            host_ep_submit_guard _quiet_guard(libfabric_state,
+                                              *libfabric_state->eps[ep_start_idx]);
+            for (int i = ep_start_idx; i < ep_end_idx; i++) {
+                total_submitted += libfabric_state->eps[i]->submitted_ops;
+                total_completed += libfabric_state->eps[i]->completed_ops;
+            }
+            total_completed += signal_state.completed_staged_atomics;
         }
-
-        total_completed += signal_state.completed_staged_atomics;
         if (total_submitted == total_completed) {
             break;
         }
@@ -1647,6 +1653,7 @@ static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, in
     nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[ep_idx]);
 
     // Generate sequence number for P and PUT operations when ordering is needed
+    host_ep_submit_guard host_guard(libfabric_state, ep);
     if (libfabric_state->use_staged_atomics &&
         (verb.desc == NVSHMEMI_OP_P || verb.desc == NVSHMEMI_OP_PUT)) {
 
@@ -1680,7 +1687,6 @@ static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, in
         imm_data = &imm_data_val;
     }
 
-    host_ep_submit_guard host_guard(libfabric_state, ep);
     return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index, attrs,
                                        imm_data, ep);
 }
@@ -1764,13 +1770,13 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
                         fi_mr_desc(libfabric_state->mrs[domain_idx]), target_ep, &amo->ofi_context);
         } while (try_again(transport, &status, &num_retries,
                            NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_GDR_AMO_SEND, qp_index, progress_type::All));
-    }
 
-    if (status) {
-        NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation.\n");
-        status = NVSHMEMX_ERROR_INTERNAL;
-    } else {
-        ep.submitted_ops += 2;
+        if (status) {
+            NVSHMEMI_ERROR_PRINT("Received an error when trying to post an AMO operation.\n");
+            status = NVSHMEMX_ERROR_INTERNAL;
+        } else {
+            ep.submitted_ops += 2;
+        }
     }
 
 out:
@@ -1803,6 +1809,7 @@ static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, v
 
     ep_idx = get_next_ep(libfabric_state, qp_index);
     nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[ep_idx]);
+    host_ep_submit_guard host_guard(libfabric_state, ep);
     domain_idx = ep.domain_index;
     target_ep = pe * libfabric_state->eps.size() + ep_idx;
 
