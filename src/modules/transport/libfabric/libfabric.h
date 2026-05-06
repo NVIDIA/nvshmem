@@ -661,6 +661,56 @@ struct signal_delivery_done_entry {
     uint8_t preceding_put_count;
 };
 
+/* Common ack payload embedded in both signal ops (piggybacked) and standalone ack ops */
+typedef struct nvshmemt_libfabric_ack_payload {
+    uint16_t ack_seq_num;  /* End (last seq num) of acked sequence number range */
+    uint8_t  ack_count;    /* Count of acked sequence numbers */
+    uint8_t  ack_num_ops;  /* Number of ack operations (for completed_staged_atomics) */
+} nvshmemt_libfabric_ack_payload_t;
+static_assert(sizeof(nvshmemt_libfabric_ack_payload_t) == 4);
+
+struct deferred_ack_entry {
+    nvshmemt_libfabric_endpoint_t *ep;
+    fi_addr_t src_addr;
+    nvshmemt_libfabric_ack_payload_t ack_payload;
+};
+
+using nvshmemt_libfabric_deferred_work_t =
+    std::variant<signal_delivery_work_entry, deferred_ack_entry>;
+
+class nvshmemt_libfabric_deferred_work_queue_t {
+    std::deque<nvshmemt_libfabric_deferred_work_t> queue;
+    std::atomic_flag lock = ATOMIC_FLAG_INIT;
+
+   public:
+    void push(const nvshmemt_libfabric_deferred_work_t &item) {
+        while (lock.test_and_set(std::memory_order_acquire))
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        queue.push_back(item);
+        lock.clear(std::memory_order_release);
+    }
+
+    bool pop(nvshmemt_libfabric_deferred_work_t &item) {
+        while (lock.test_and_set(std::memory_order_acquire))
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        if (queue.empty()) {
+            lock.clear(std::memory_order_release);
+            return false;
+        }
+        item = queue.front();
+        queue.pop_front();
+        lock.clear(std::memory_order_release);
+        return true;
+    }
+
+    void clear() {
+        while (lock.test_and_set(std::memory_order_acquire))
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        queue.clear();
+        lock.clear(std::memory_order_release);
+    }
+};
+
 template <typename T, size_t Capacity = nvshmemt_libfabric_signal_queue_capacity>
 class SPSCRing {
     std::array<T, Capacity> ring{};
@@ -761,6 +811,10 @@ struct nvshmemt_libfabric_state_t {
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
+
+    /* Deferred work queue (PR#19): holds signal ops and standalone acks that
+     * would otherwise cause recursion during completion processing. */
+    nvshmemt_libfabric_deferred_work_queue_t deferred_work_queue;
 };
 
 typedef struct {
@@ -801,13 +855,6 @@ static constexpr size_t NVSHMEMT_LIBFABRIC_MAX_DOMAINS_PER_PE =
 typedef struct nvshmemt_libfabric_mem_handle_t nvshmemt_libfabric_mem_handle_t;
 static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_handle_t::MAX_SIZE);
 
-/* Common ack payload embedded in both signal ops (piggybacked) and standalone ack ops */
-typedef struct nvshmemt_libfabric_ack_payload {
-    uint16_t ack_seq_num;  /* End (last seq num) of acked sequence number range */
-    uint8_t  ack_count;    /* Count of acked sequence numbers */
-    uint8_t  ack_num_ops;  /* Number of ack operations (for completed_staged_atomics) */
-} nvshmemt_libfabric_ack_payload_t;
-static_assert(sizeof(nvshmemt_libfabric_ack_payload_t) == 4);
 
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes

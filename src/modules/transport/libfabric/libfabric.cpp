@@ -1085,13 +1085,39 @@ static void *nvshmemt_libfabric_signal_delivery_thread(void *arg) {
     return NULL;
 }
 
+/* Drain deferred work queue: signal ops that would recurse from completion path,
+ * and standalone ack ops that would cause try_again -> progress -> completion
+ * re-entry. PR#19. */
+static int nvshmemt_libfabric_drain_deferred_work(nvshmem_transport_t transport) {
+    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_deferred_work_t item;
+    int status = 0;
+
+    while (libfabric_state->deferred_work_queue.pop(item)) {
+        if (auto *work = std::get_if<signal_delivery_work_entry>(&item)) {
+            status = nvshmemt_libfabric_enqueue_signal_work(transport, *work);
+        } else if (auto *ack = std::get_if<deferred_ack_entry>(&item)) {
+            status = gdrcopy_amo_ack(transport, *ack->ep, ack->src_addr,
+                                     ack->ack_payload.ack_seq_num,
+                                     ack->ack_payload.ack_count,
+                                     ack->ack_payload.ack_num_ops);
+        }
+        if (unlikely(status)) return status;
+    }
+    return 0;
+}
+
 /*
- * Top-level progress: drains completions, drains completed signal-delivery work,
- * then enqueues pending staged-AMOs for the signal delivery thread.
+ * Top-level progress: drains completions, drains deferred work (PR#19),
+ * drains completed signal-delivery work, then enqueues pending staged-AMOs.
  */
+
 static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     int status = drain_completions(transport, qp_index);
+    if (unlikely(status)) return status;
+
+    status = nvshmemt_libfabric_drain_deferred_work(transport);
     if (unlikely(status)) return status;
 
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
@@ -1358,8 +1384,9 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
                 if (signal_entry->progress_count != 0) break;
 
                 if (signal_entry->op != NULL) {
-                    /* Push signal directly to signal_work_queue, bypassing
-                     * op_queue to preserve per-PE sequence order. */
+                    /* Defer signal delivery to avoid recursion:
+                     * enqueue_signal_work -> try_again -> process_completions
+                     * -> put_signal_completion would re-enter this path. */
                     nvshmemt_libfabric_gdr_op_ctx_t *sig_op = signal_entry->op;
                     signal_delivery_work_entry work{};
                     work.op = sig_op;
@@ -1367,18 +1394,17 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
                     work.send_elems[1] = NULL;
                     work.sequence_count = sig_op->send_amo.sequence_count;
                     work.preceding_put_count = sig_op->send_amo.preceding_put_count;
-                    status = nvshmemt_libfabric_enqueue_signal_work(transport, work);
-                    if (status) goto out;
+                    libfabric_state->deferred_work_queue.push(work);
                 }
             } else if (auto *ack_entry = std::get_if<nvshmemt_libfabric_put_ack_entry>(it)) {
-                nvshmemt_libfabric_endpoint_t &ack_ep =
-                    *(libfabric_state->eps[ack_entry->ep_index]);
-                uint8_t range_count = ack_entry->put_count;
-
-                status = gdrcopy_amo_ack(transport, ack_ep, ack_entry->src_addr,
-                                         next_seq, range_count, 1 /* ack_num_ops */);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "gdrcopy_amo_ack failed\n");
+                /* Defer ACK send to avoid recursion (PR#19):
+                 * gdrcopy_amo_ack -> try_again -> process_completions
+                 * -> put_signal_completion would re-enter this path. */
+                deferred_ack_entry ack{};
+                ack.ep = libfabric_state->eps[ack_entry->ep_index].get();
+                ack.src_addr = ack_entry->src_addr;
+                ack.ack_payload = {(uint16_t)next_seq, ack_entry->put_count, 1};
+                libfabric_state->deferred_work_queue.push(ack);
             } else {
                 assert(false && "unexpected completion entry type");
             }
@@ -2414,6 +2440,7 @@ static void nvshmemt_libfabric_cleanup_signal_ordering_state(nvshmemt_libfabric_
     state->proxy_signal_state.put_signal_seq_counter.clear();
     state->proxy_signal_state.proxy_put_signal_comp_map.clear();
     state->proxy_signal_state.next_expected_seq.clear();
+    state->deferred_work_queue.clear();
 }
 
 static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
