@@ -1955,6 +1955,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
         CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, sizeof(size_t)), status,
                                 out);
         nvshmemi_device_state.tma_smem_bases_len = NVSHMEMI_TMA_MAX_BLOCKS;
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_bases_dptr, 0, tma_alloc_size), status, out);
     }
 
     nvshmemi_update_device_state();
