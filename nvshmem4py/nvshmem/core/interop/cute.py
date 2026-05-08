@@ -21,7 +21,7 @@ from cuda.core import Buffer
 from cuda.core import Device
 from cuda.core import Stream
 
-from typing import Tuple, Union
+from typing import Any, Tuple, Union
 
 __all__ = [
     "bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor",
@@ -32,7 +32,6 @@ try:
     from cutlass import cute
     from cutlass.cute.typing import Pointer, Boolean, Int32, Int64, Constexpr, Float32, Int8
     from cutlass.cute import Tensor
-    from cutlass.cute.typing import dtype
     from cutlass.cute.runtime import from_dlpack
     _cute_enabled = True
 except Exception as e:
@@ -326,7 +325,7 @@ def tensor_get_buffer(tensor: Tensor) -> Tuple[Buffer, int, str]:
     return buf, size, dtype
 
 
-def tensor(shape: Tuple[int], dtype: dtype = Float32, release=False, morder="C", except_on_del=True) -> Tensor:
+def tensor(shape: Tuple[int], dtype: Any = Float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a CuTe tensor view on NVSHMEM-allocated memory with the given shape and dtype.
 
@@ -356,7 +355,7 @@ def tensor(shape: Tuple[int], dtype: dtype = Float32, release=False, morder="C",
     return _make_tensor_from_buffer(buf, shape, strides, dtype)
 
 
-def bytetensor(shape: Tuple[int], dtype: dtype = Float32, release=False, morder="C", except_on_del=True) -> Tensor:
+def bytetensor(shape: Tuple[int], dtype: Any = Float32, release=False, morder="C", except_on_del=True) -> Tensor:
     """
     Create a CuTe tensor from NVSHMEM-allocated memory with the given shape and dtype.
     """
@@ -453,7 +452,7 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
     """
     Helper function to compile a CuTe DSL kernel function.
 
-    Finds the libnvshmem_device.bc library and compiles the kernel function with it.
+    Finds the current device's NVSHMEM bitcode library and compiles the kernel function with it.
 
     Runs nvshmem.core.library_init with the compiled kernel.
 

@@ -193,14 +193,18 @@ def test_find_device_bitcode_library():
 
     import os
 
-    # Test 1: default returns the backward-compatible bitcode entry point.
+    # Test 1: default prefers the current device's per-arch bitcode entry point,
+    # then falls back to the backward-compatible bitcode entry point.
     try:
         lib_path = find_device_bitcode_library()
     except Exception as e:
         print(f"Exception raised calling find_device_bitcode_library(): {e}")
         raise AssertionError(f"Exception in find_device_bitcode_library(): {e}")
     assert lib_path is not None, "Library path should not be None"
-    assert lib_path.endswith("libnvshmem_device.bc"), f"Expected libnvshmem_device.bc, got: {lib_path}"
+    lib_name = os.path.basename(lib_path)
+    assert lib_name == "libnvshmem_device.bc" or (
+        lib_name.startswith("libnvshmem_device_sm_")
+        and lib_name.endswith(".bc")), f"Expected NVSHMEM device bitcode, got: {lib_path}"
     assert os.path.exists(lib_path), f"File does not exist: {lib_path}"
     print(f"  default:   {lib_path}")
 

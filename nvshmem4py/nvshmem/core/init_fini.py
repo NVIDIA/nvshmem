@@ -5,6 +5,7 @@ import enum
 import logging
 import os
 import ctypes
+import re
 from pathlib import Path
 from typing import Optional, Union
 
@@ -454,13 +455,51 @@ def library_finalize(lib: NvshmemKernelObject) -> None:
         raise NvshmemError("Failed to finalize CULibrary for NVSHMEM")
 
 
-def _normalize_device_library_arch(arch: Union[int, str]) -> str:
+def _normalize_device_library_arch(arch: object) -> str:
+    if isinstance(arch, (tuple, list)) and len(arch) >= 2:
+        return f"{int(arch[0])}{int(arch[1])}"
+
+    major = getattr(arch, "major", None)
+    minor = getattr(arch, "minor", None)
+    if major is not None and minor is not None:
+        return f"{int(major)}{int(minor)}"
+
     arch_str = str(arch).lower().strip()
+    if arch_str.startswith("compute_"):
+        arch_str = arch_str[8:]
     if arch_str.startswith("sm_"):
         arch_str = arch_str[3:]
     elif arch_str.startswith("sm"):
         arch_str = arch_str[2:]
-    return arch_str.replace(".", "")
+    arch_str = arch_str.replace(".", "").rstrip("a")
+    if arch_str.isdigit():
+        return arch_str
+
+    parts = re.findall(r"\d+", arch_str)
+    if len(parts) == 2:
+        return f"{int(parts[0])}{int(parts[1])}"
+
+    raise ValueError(f"Could not normalize device library arch: {arch}")
+
+
+def _current_device_library_arch() -> Optional[str]:
+    try:
+        device = Device()
+    except Exception:
+        return None
+
+    for attr in ("compute_capability", "arch"):
+        try:
+            value = getattr(device, attr)
+        except Exception:
+            continue
+        if value is None:
+            continue
+        try:
+            return _normalize_device_library_arch(value)
+        except Exception:
+            continue
+    return None
 
 
 def find_device_bitcode_library(
@@ -485,9 +524,10 @@ def find_device_bitcode_library(
             ``DeviceLibLanguage.STATIC`` returns the ``.a`` static archive
             (for use with standard device linking).
         arch: SM architecture number (e.g. ``"90"``, ``"sm_90"``,
-            ``"80"``, ``"100"``). By default this helper returns the
-            backward-compatible ``libnvshmem_device.bc`` entry point.
-            For LLVM_BITCODE, selects the per-arch file
+            ``"80"``, ``"100"``). By default, LLVM_BITCODE lookup prefers
+            the current device's per-arch file when available, then falls back
+            to the backward-compatible ``libnvshmem_device.bc`` entry point.
+            For LLVM_BITCODE, selects the requested per-arch file
             (e.g. ``libnvshmem_device_sm_90.bc``) when this value is set.
             For LTOIR and STATIC, this helper returns the install-layout entry
             point regardless of this value.
@@ -508,12 +548,22 @@ def find_device_bitcode_library(
         filename = "libnvshmem_device.a"
     else:
         if arch is None:
-            filename = "libnvshmem_device.bc"
+            candidates = []
+            current_arch = _current_device_library_arch()
+            if current_arch is not None:
+                candidates.append(f"libnvshmem_device_sm_{current_arch}.bc")
+            candidates.append("libnvshmem_device.bc")
         else:
             arch = _normalize_device_library_arch(arch)
-            filename = f"libnvshmem_device_sm_{arch}.bc"
-    lib_path = header_path_obj.parent / "lib" / filename
+            candidates = [f"libnvshmem_device_sm_{arch}.bc"]
 
+        for filename in candidates:
+            lib_path = header_path_obj.parent / "lib" / filename
+            if lib_path.exists():
+                return str(lib_path)
+        raise NvshmemInvalid(f"NVSHMEM device library not found. Tried: {', '.join(candidates)}")
+
+    lib_path = header_path_obj.parent / "lib" / filename
     if not lib_path.exists():
         raise NvshmemInvalid(f"NVSHMEM device library not found at {lib_path}")
     return str(lib_path)
