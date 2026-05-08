@@ -16,7 +16,7 @@
 #   NVSHMEM_HOME=$PWD/build bash nvshmem4py/test/run_tests.sh [SUITE]
 #
 #   SUITE: fmt, core, numba, numba_high_level_1, numba_high_level_2,
-#          cutedsl, cutedsl_high_level, nvls, all (default: all)
+#          cutedsl, cutedsl_high_level_1, cutedsl_high_level_2, nvls, all (default: all)
 #
 # Environment:
 #   NVSHMEM_HOME                - path to nvshmem build/install directory (required)
@@ -73,12 +73,12 @@ fi
 ########################################
 TEST_SUITE="${1:-all}"
 case "$(echo "$TEST_SUITE" | tr '[:upper:]' '[:lower:]')" in
-    fmt|core|numba|numba_high_level_1|numba_high_level_2|cutedsl|cutedsl_high_level|nvls|all)
+    fmt|core|numba|numba_high_level_1|numba_high_level_2|cutedsl|cutedsl_high_level_1|cutedsl_high_level_2|nvls|all)
         TEST_SUITE="$(echo "$TEST_SUITE" | tr '[:upper:]' '[:lower:]')"
         ;;
     *)
         echo "Invalid test suite: $TEST_SUITE"
-        echo "Allowed: fmt, core, numba, numba_high_level_1, numba_high_level_2, cutedsl, cutedsl_high_level, nvls, all"
+        echo "Allowed: fmt, core, numba, numba_high_level_1, numba_high_level_2, cutedsl, cutedsl_high_level_1, cutedsl_high_level_2, nvls, all"
         exit 1
         ;;
 esac
@@ -235,7 +235,7 @@ TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
 pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
 pip install nvidia-cuda-nvcc-cu${CUDA_MAJOR}
 pip install pytest pytest-mpi
-pip install nvidia-cutlass-dsl
+pip install nvidia-cutlass-dsl==4.4.2
 pip install yapf
 
 # Some torch wheels can still pull incompatible CUDA component wheels into the
@@ -269,7 +269,7 @@ fi
 
 if [ -z "$NVSHMEM_DEVICE_BC" ]; then
     case "$TEST_SUITE" in
-        numba|numba_high_level_1|numba_high_level_2|cutedsl|cutedsl_high_level|nvls|all)
+        numba|numba_high_level_1|numba_high_level_2|cutedsl|cutedsl_high_level_1|cutedsl_high_level_2|nvls|all)
             echo "ERROR: No branch-matched libnvshmem_device*.bc found."
             echo "The local test harness would mix host libraries from this tree with the wheel's packaged device bitcode."
             echo "Build/install NVSHMEM with NVSHMEM_BUILD_BITCODE_LIBRARY=1 and point NVSHMEM_HOME at that install, or provide build/src/lib/libnvshmem_device*.bc."
@@ -572,26 +572,59 @@ if [ $? -ne 0 ]; then
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_coll.py -v -s
+if [ "${NVSHMEM4PY_SKIP_CUTEDSL_COLLECTIVES:-0}" = "1" ]; then
+    echo "Skipping CuTe DSL collective tests on this target"
+else
+    $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_coll.py -v -s
+    if [ $? -ne 0 ]; then
+        echo "Test failed: CuTe DSL Collective test"
+        EXIT_CODE=$((EXIT_CODE + 1))
+    fi
+fi
+
+popd || exit 1
+}
+
+run_cutedsl_high_level_tests_1() {
+echo "================================================"
+echo "CuTe DSL high level tests batch 1 (Collective/Sync)"
+echo "================================================"
+
+pushd "$TEST_DIR/device/cute/" || exit 1
+
+export NVSHMEM_BOOTSTRAP=MPI
+if [ "${NVSHMEM4PY_SKIP_CUTEDSL_COLLECTIVES:-0}" = "1" ]; then
+    echo "Skipping CuTe DSL high-level collective tests on this target"
+else
+    for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
+        $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
+        if [ $? -ne 0 ]; then
+            echo "Test failed: CuTe DSL high-level collective test (${coll_func})."
+            EXIT_CODE=$((EXIT_CODE + 1))
+        fi
+    done
+fi
+
+$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
 if [ $? -ne 0 ]; then
-    echo "Test failed: CuTe DSL Collective test"
+    echo "Test failed: CuTe DSL high-level sync test."
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 popd || exit 1
 }
 
-run_cutedsl_high_level_tests() {
+run_cutedsl_high_level_tests_2() {
 echo "================================================"
-echo "CuTe DSL high level tests"
+echo "CuTe DSL high level tests batch 2 (RMA)"
 echo "================================================"
 
 pushd "$TEST_DIR/device/cute/" || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi --ignore=test_device_mem.py --ignore=test_device_amo.py -v -s
+$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
 if [ $? -ne 0 ]; then
-    echo "Test failed: CuTe DSL high level tests"
+    echo "Test failed: CuTe DSL high-level RMA test."
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
@@ -710,8 +743,10 @@ elif [ "$TEST_SUITE" = "numba_high_level_2" ]; then
     run_numba_high_level_tests_2
 elif [ "$TEST_SUITE" = "cutedsl" ]; then
     run_cutedsl_tests
-elif [ "$TEST_SUITE" = "cutedsl_high_level" ]; then
-    run_cutedsl_high_level_tests
+elif [ "$TEST_SUITE" = "cutedsl_high_level_1" ]; then
+    run_cutedsl_high_level_tests_1
+elif [ "$TEST_SUITE" = "cutedsl_high_level_2" ]; then
+    run_cutedsl_high_level_tests_2
 elif [ "$TEST_SUITE" = "nvls" ]; then
     run_nvls_tests
 else
@@ -720,7 +755,8 @@ else
     run_numba_high_level_tests_1
     run_numba_high_level_tests_2
     run_cutedsl_tests
-    run_cutedsl_high_level_tests
+    run_cutedsl_high_level_tests_1
+    run_cutedsl_high_level_tests_2
     run_nvls_tests
 fi
 

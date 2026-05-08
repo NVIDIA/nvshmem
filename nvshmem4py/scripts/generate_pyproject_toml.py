@@ -71,7 +71,7 @@ numba = [
     "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.28.0",
 ]
 cute = [
-    "nvidia-cutlass-dsl>=4.4.2",
+    "nvidia-cutlass-dsl==4.4.2",
 ]
 
 [tool.black]
