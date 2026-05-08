@@ -48,6 +48,8 @@ bool nvshmemt_gdrcopy_ftable_init(struct gdrcopy_function_table *gdrcopy_ftable,
             use_gdrcopy = false;
             goto out;
         }
+        INFO(log_level, "GDRCopy library version: (%d, %d)", gdrapi_runtime_major_version,
+             gdrapi_runtime_minor_version);
         LOAD_SYM(local_gdrcopy_handle, "gdr_driver_get_version",
                  gdrcopy_ftable->driver_get_version);
         LOAD_SYM(local_gdrcopy_handle, "gdr_open", gdrcopy_ftable->open);
@@ -59,6 +61,19 @@ bool nvshmemt_gdrcopy_ftable_init(struct gdrcopy_function_table *gdrcopy_ftable,
         LOAD_SYM(local_gdrcopy_handle, "gdr_get_info", gdrcopy_ftable->get_info);
         LOAD_SYM(local_gdrcopy_handle, "gdr_copy_from_mapping", gdrcopy_ftable->copy_from_mapping);
         LOAD_SYM(local_gdrcopy_handle, "gdr_copy_to_mapping", gdrcopy_ftable->copy_to_mapping);
+
+        /* Optional GDRCopy 2.5+ v2 entry points. Resolve them with dlsym so
+         * binaries can still run when the runtime libgdrapi lacks these symbols.
+         * FORCE_PCIE capability is checked separately before use. */
+        LOAD_SYM(local_gdrcopy_handle, "gdr_pin_buffer_v2", gdrcopy_ftable->pin_buffer_v2);
+        LOAD_SYM(local_gdrcopy_handle, "gdr_map_v2", gdrcopy_ftable->map_v2);
+        LOAD_SYM(local_gdrcopy_handle, "gdr_get_attribute", gdrcopy_ftable->get_attribute);
+        if (gdrcopy_ftable->pin_buffer_v2 && gdrcopy_ftable->map_v2 &&
+            gdrcopy_ftable->get_attribute) {
+            INFO(log_level,
+                 "GDRCopy v2 symbols found "
+                 "(gdr_pin_buffer_v2, gdr_map_v2, gdr_get_attribute).");
+        }
     }
 
     *gdr_desc = gdrcopy_ftable->open();
