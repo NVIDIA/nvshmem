@@ -64,7 +64,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
             }
 
         } else {
-            assert(0 && "signal for barrier failing both pointer and logical endpoint access");
+            // If handles are not setup yet (e.g., tma_smem not registered during init)
+            // fallback to IB
+            nvshmemi_transfer_amo_nonfetch<T>((void *)dest, value, pe, NVSHMEMI_AMO_SIGNAL);
         }
 #else
         volatile T *dest_actual =
