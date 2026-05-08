@@ -27,6 +27,7 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *, si
     return false;
 }
 
+template <bool REQUIRE_TX_SIZE_MULTIPLE>
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int, size_t, threadgroup_t, const void *,
                                                            const void *) {
     return false;
@@ -36,6 +37,7 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int) { return false; 
 
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return false; }
 
+template <bool REQUIRE_TX_SIZE_MULTIPLE>
 __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int, size_t, threadgroup_t,
                                                                          const void *,
                                                                          const void *) {
@@ -75,6 +77,64 @@ __device__ bool nvshmemi_tma_smem_registered();
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
 __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers);
 __device__ constexpr bool nvshmemi_tma_is_16b_aligned(size_t value);
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ size_t nvshmemi_handle_smem_chunk_size() {
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        return 0;
+    } else if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
+        return nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+    } else {
+        size_t warps_per_threadgroup =
+            (nvshmemi_threadgroup_size<SCOPE>() + NVSHMEMI_WARP_SIZE - 1) / NVSHMEMI_WARP_SIZE;
+        return warps_per_threadgroup * NVSHMEMI_SMEM_BUF_SIZE;
+    }
+}
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(size_t smem_chunk_size) {
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        return false;
+    }
+
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP) {
+        const size_t threads_per_cta = blockDim.x * blockDim.y * blockDim.z;
+        if ((threads_per_cta % (4 * NVSHMEMI_WARP_SIZE)) != 0) return false;
+    }
+
+    if (smem_chunk_size == 0) return false;
+
+    size_t stage_bytes = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+    size_t max_thrdgrps_by_smem = stage_bytes / smem_chunk_size;
+    size_t max_thrdgrps_by_barrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES;
+    size_t max_thrdgrps = max_thrdgrps_by_smem < max_thrdgrps_by_barrier ? max_thrdgrps_by_smem
+                                                                         : max_thrdgrps_by_barrier;
+    uint32_t tid_in_block = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
+    uint32_t thrdgrp_idx = tid_in_block / nvshmemi_threadgroup_size<SCOPE>();
+
+    return thrdgrp_idx < max_thrdgrps;
+}
+
+template <threadgroup_t SCOPE, int SMEM_CHUNK_SIZE>
+__device__ __forceinline__ bool is_thrdgrp_smem_rsc_available() {
+    return is_thrdgrp_smem_rsc_available<SCOPE>((size_t)SMEM_CHUNK_SIZE);
+}
+
+__device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(threadgroup_t scope) {
+    switch (scope) {
+        case NVSHMEMI_THREADGROUP_BLOCK:
+            return is_thrdgrp_smem_rsc_available<NVSHMEMI_THREADGROUP_BLOCK>(
+                nvshmemi_handle_smem_chunk_size<NVSHMEMI_THREADGROUP_BLOCK>());
+        case NVSHMEMI_THREADGROUP_WARP:
+            return is_thrdgrp_smem_rsc_available<NVSHMEMI_THREADGROUP_WARP>(
+                nvshmemi_handle_smem_chunk_size<NVSHMEMI_THREADGROUP_WARP>());
+        case NVSHMEMI_THREADGROUP_WARPGROUP:
+            return is_thrdgrp_smem_rsc_available<NVSHMEMI_THREADGROUP_WARPGROUP>(
+                nvshmemi_handle_smem_chunk_size<NVSHMEMI_THREADGROUP_WARPGROUP>());
+        default:
+            return false;
+    }
+}
 #endif
 
 __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void* addr, size_t size) {
@@ -83,16 +143,21 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void* addr
     return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
+template <bool REQUIRE_TX_SIZE_MULTIPLE>
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, threadgroup_t scope,
                                                            const void* le_addr,
                                                            const void* tma_addr) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    if constexpr (REQUIRE_TX_SIZE_MULTIPLE) {
+        if (size == 0 || (size % CFT_HANDLE_TX_SIZE) != 0) return false;
+    }
+
     /* The handle path stages the local buffer with global<->shared TMA helpers. */
-    return ((scope == NVSHMEMI_THREADGROUP_BLOCK) && nvshmemi_tma_smem_registered() &&
-            (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= NVSHMEMI_SMEM_BUF_SIZE) &&
+    return ((scope != NVSHMEMI_THREADGROUP_THREAD) && nvshmemi_tma_smem_registered() &&
+            is_thrdgrp_smem_rsc_available(scope) &&
             nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) && !__isShared(tma_addr) &&
             nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)tma_addr) &&
-            nvshmemi_ld_and_check_valid_le_id(pe) && ((size % CFT_HANDLE_TX_SIZE) == 0));
+            nvshmemi_ld_and_check_valid_le_id(pe));
 #else
     return false;
 #endif
@@ -131,13 +196,14 @@ __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
 #endif
 }
 
+template <bool REQUIRE_TX_SIZE_MULTIPLE>
 __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe, size_t size,
                                                                          threadgroup_t scope,
                                                                          const void* le_addr,
                                                                          const void* tma_addr) {
 #if defined(CFT_HANDLES_ENABLED) && defined(PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
-    return nvshmemi_is_le_implemented(pe, size, scope, le_addr, tma_addr);
+    return nvshmemi_is_le_implemented<REQUIRE_TX_SIZE_MULTIPLE>(pe, size, scope, le_addr, tma_addr);
 #else
     return false;
 #endif
