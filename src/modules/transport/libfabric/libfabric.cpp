@@ -103,6 +103,98 @@ struct gdrcopy_function_table gdrcopy_ftable;
 void *gdrcopy_handle = NULL;
 gdr_t gdr_desc;
 bool use_gdrcopy = false;
+
+/* Probe whether the current CUDA device is a memory-coherent platform
+ * (e.g., Grace-Hopper / NVLink-C2C). Returns true iff the CUDA attribute
+ * CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES is
+ * supported and non-zero. Any probe failure is conservatively treated as
+ * non-coherent so we do not erroneously require GDRCopy v2/FORCE_PCIE. */
+bool libfabric_is_coherent_platform(struct nvshmemi_cuda_fn_table *table, int log_level) {
+    CUdevice dev;
+    constexpr auto coherent_platform_attribute = static_cast<CUdevice_attribute>(
+        CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES);
+    int attr = 0;
+    CUresult r;
+
+    r = CUPFN(table, cuCtxGetDevice(&dev));
+    if (r != CUDA_SUCCESS) {
+        INFO(log_level,
+             "Coherent-platform probe: cuCtxGetDevice failed (CUresult=%d); "
+             "treating as non-coherent.",
+             static_cast<int>(r));
+        return false;
+    }
+
+    r = CUPFN(table, cuDeviceGetAttribute(&attr, coherent_platform_attribute, dev));
+    if (r == CUDA_ERROR_INVALID_VALUE) {
+        INFO(log_level,
+             "Coherent-platform probe: CUDA does not know attribute %d "
+             "(old driver/runtime); treating as non-coherent.",
+             static_cast<int>(coherent_platform_attribute));
+        return false;
+    }
+    if (r != CUDA_SUCCESS) {
+        INFO(log_level,
+             "Coherent-platform probe failed (CUresult=%d); "
+             "treating as non-coherent.",
+             static_cast<int>(r));
+        return false;
+    }
+
+    return attr != 0;
+}
+
+/* Configure use_gdrcopy_v2 based on platform coherency and GDRCopy v2/FORCE_PCIE
+ * availability. On memory-coherent systems (e.g., Grace-Hopper / NVLink-C2C)
+ * GDRCopy's default pin path can bypass the BAR1/PCIe window that the libfabric
+ * staged-atomics protocol requires. GDRCopy 2.5+ exposes gdr_pin_buffer_v2 with
+ * GDR_PIN_FLAG_FORCE_PCIE to force a BAR1 mapping; when that capability is
+ * present we route pin/map through v2. When the platform is coherent but staged
+ * atomics are enabled and the required capability is missing, returns a
+ * non-zero status with an actionable diagnostic. Safe to call whether or not
+ * use_gdrcopy is set; returns 0 immediately if GDRCopy is disabled or the
+ * platform is non-coherent. */
+int libfabric_configure_gdrcopy_v2(nvshmemt_libfabric_state_t *libfabric_state) {
+    int status = 0;
+
+    if (!use_gdrcopy) return 0;
+
+    bool is_coherent =
+        libfabric_is_coherent_platform(libfabric_state->table, libfabric_state->log_level);
+    if (!is_coherent) return 0;
+
+    bool v2_available = (gdrcopy_ftable.pin_buffer_v2 && gdrcopy_ftable.map_v2 &&
+                         gdrcopy_ftable.get_attribute);
+    bool force_pcie_supported = false;
+    if (v2_available) {
+        int supported = 0;
+        int rc = gdrcopy_ftable.get_attribute(gdr_desc, GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE,
+                                              &supported);
+        force_pcie_supported = (rc == 0 && supported != 0);
+    }
+
+    if (v2_available && force_pcie_supported) {
+        libfabric_state->use_gdrcopy_v2 = true;
+        INFO(libfabric_state->log_level,
+             "Coherent platform detected; using GDRCopy v2 pin/map with "
+             "GDR_PIN_FLAG_FORCE_PCIE.");
+    } else if (libfabric_state->use_staged_atomics) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "Coherent platform with libfabric staged atomics requires GDRCopy "
+                           ">= 2.5 with GDR_PIN_FLAG_FORCE_PCIE support "
+                           "(v2_available=%d, force_pcie_supported=%d). "
+                           "Please use libgdrapi/gdrdrv >= 2.5 and a GPU driver with "
+                           "GDR_PIN_FLAG_FORCE_PCIE support.\n",
+                           static_cast<int>(v2_available), static_cast<int>(force_pcie_supported));
+    } else {
+        INFO(libfabric_state->log_level,
+             "Coherent platform detected but GDRCopy v2/FORCE_PCIE unavailable; "
+             "continuing with v1 pin/map path because use_staged_atomics is false.");
+    }
+
+out:
+    return status;
+}
 #endif
 
 struct nvshmemi_options_s options;
@@ -2355,15 +2447,31 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         if (!is_host) {
 #ifdef NVSHMEM_USE_GDRCOPY
             if (use_gdrcopy) {
-                status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)buf, length, 0, 0,
-                                                   &handle_info->mh);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "gdrcopy pin_buffer failed \n");
+                if (libfabric_state->use_gdrcopy_v2) {
+                    /* Coherent platform path: force a BAR1/PCIe mapping so the
+                     * staged-atomics protocol's ordering assumptions hold. */
+                    status = gdrcopy_ftable.pin_buffer_v2(gdr_desc, (unsigned long)buf, length,
+                                                          GDR_PIN_FLAG_FORCE_PCIE,
+                                                          &handle_info->mh);
+                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                          "gdrcopy pin_buffer_v2 failed \n");
 
-                status = gdrcopy_ftable.map(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base,
-                                            length);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "gdrcopy map failed \n");
+                    status = gdrcopy_ftable.map_v2(gdr_desc, handle_info->mh,
+                                                   &handle_info->cpu_ptr_base, length,
+                                                   GDR_MAP_FLAG_DEFAULT);
+                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                          "gdrcopy map_v2 failed \n");
+                } else {
+                    status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)buf, length, 0, 0,
+                                                       &handle_info->mh);
+                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                          "gdrcopy pin_buffer failed \n");
+
+                    status = gdrcopy_ftable.map(gdr_desc, handle_info->mh,
+                                                &handle_info->cpu_ptr_base, length);
+                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                          "gdrcopy map failed \n");
+                }
 
                 status = gdrcopy_ftable.get_info(gdr_desc, handle_info->mh, &info);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -3212,6 +3320,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     } else {
         transport->host_ops.amo = nvshmemt_libfabric_amo;
     }
+
+#ifdef NVSHMEM_USE_GDRCOPY
+    status = libfabric_configure_gdrcopy_v2(libfabric_state);
+    if (status != 0) goto out;
+#endif
 
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
         transport->host_ops.put_signal = nvshmemt_libfabric_put_signal_unordered;

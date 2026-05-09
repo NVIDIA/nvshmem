@@ -811,6 +811,10 @@ struct nvshmemt_libfabric_state_t {
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
+    /* True when the GDRCopy 2.5+ v2 pin/map path (with GDR_PIN_FLAG_FORCE_PCIE)
+     * is used. Only set on memory-coherent platforms when the required GDRCopy
+     * symbols and GPU/driver capability are present. See libfabric.cpp init. */
+    bool use_gdrcopy_v2 = false;
 
     /* Deferred work queue (PR#19): holds signal ops and standalone acks that
      * would otherwise cause recursion during completion processing. */
