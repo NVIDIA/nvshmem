@@ -243,6 +243,20 @@ void nvshmemx_getmem_nbi_on_stream(void *dest, const void *source, size_t bytes,
 //////////////////// Synchronization On Stream ////////////////////
 
 void nvshmemx_quiet_on_stream(cudaStream_t cstrm);
+/*
+ * nvshmemx_flush_on_stream - Stream-ordered flush.  Inserts work on cstrm that
+ * completes once all source buffers used by preceding put_nbi_on_stream calls
+ * on that stream are safe to reuse.  Does NOT guarantee remote visibility;
+ * callers must still use nvshmemx_quiet_on_stream() before the remote consumer
+ * reads the destination.
+ *
+ * For P2P-only deployments this is a lightweight stream ordering operation.
+ * For network transports the current implementation is conservatively
+ * equivalent to nvshmemx_quiet_on_stream(); callers must not rely on that
+ * stronger implementation detail.  A cheaper source-reuse-only path will be
+ * added once the proxy supports it.
+ */
+void nvshmemx_flush_on_stream(cudaStream_t cstrm);
 
 void nvshmemx_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                   cudaStream_t cstrm);

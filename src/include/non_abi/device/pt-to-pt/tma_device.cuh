@@ -116,7 +116,8 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {
 /*
  * PTX helper: fence.proxy.async.shared::cta.  Must be issued after threads write
  * to smem and before TMA reads that smem, so the async proxy engine sees the
- * writes.  Issue once before a sequence of TMA reads from the same smem region.
+ * writes.  Paired with cp.async.bulk.wait_group.read to establish source-buffer
+ * reuse ordering after an outbound TMA put.
  */
 __device__ __forceinline__ void nvshmemi_tma_fence_proxy_async_shared_cta() {
     asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
@@ -304,6 +305,8 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_commit_group() {}
 __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_read_0() {}
 
 __device__ __forceinline__ void nvshmemi_tma_bulk_wait_group_0() {}
+
+__device__ __forceinline__ void nvshmemi_tma_fence_proxy_async_shared_cta() {}
 
 template <threadgroup_t SCOPE, bool BLOCKING>
 __device__ inline int nvshmemi_memcpy_tma_shared_global(void * /* gmem_dst */,

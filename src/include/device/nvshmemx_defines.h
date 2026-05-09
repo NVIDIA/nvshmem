@@ -750,6 +750,37 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFINE_NVSHMEM_TYPE_PUT_SIGNAL_NBI_QP)
 #undef NVSHMEM_TYPE_PUT_SIGNAL_NBI_QP_THREADGROUP
 #undef NVSHMEM_TYPE_PUT_SIGNAL_NBI_QP
 
+/*
+ * nvshmemx_flush - Wait until all source buffers used by
+ * preceding non-blocking puts issued from this thread are safe to reuse.
+ *
+ * Guarantees reusability only: the source buffer may be overwritten or
+ * freed after this call returns.  Does NOT guarantee that the data is visible
+ * at the remote PE; callers must still use nvshmem_quiet() / nvshmem_fence()
+ * before the remote consumer reads the destination.
+ *
+ * For NVLink (P2P) puts: st.global stores are blocking at the instruction
+ * level, so the source is already consumed when put_nbi returns.  This call
+ * is a no-op on pure-P2P deployments.
+ *
+ * For network (IB/RoCE, EFA, proxy) puts: waits for the transport to confirm
+ * that the source buffer has been DMA'd.  Does not issue __threadfence_system.
+ */
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void
+nvshmemx_flush(void) {
+    nvshmemi_flush<NVSHMEMI_THREADGROUP_THREAD>();
+}
+
+/*
+ * nvshmemx_flush_warp - Warp-scoped variant of nvshmemx_flush().  One thread
+ * per warp issues the underlying flush; all threads in the warp participate in
+ * the implicit warp-level synchronization.
+ */
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void
+nvshmemx_flush_warp(void) {
+    nvshmemi_flush<NVSHMEMI_THREADGROUP_WARP>();
+}
+
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_qp_quiet(
     int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps) {
     nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>(pe, qp_handle, num_qps);

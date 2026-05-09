@@ -795,6 +795,55 @@ template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>(int pe,
                                                                     nvshmemx_qp_handle_t *qp_handle,
                                                                     int num_qps);
 
+/*
+ * nvshmemi_flush - Wait until all source buffers used by preceding
+ * non-blocking puts issued from this threadgroup are safe to reuse.
+ *
+ * Guarantees reusability only.  Does NOT guarantee that the data is
+ * visible at the remote PE.  Callers who need remote visibility must still
+ * use nvshmemi_quiet() / nvshmem_quiet().
+ *
+ * Transport behaviour:
+ *   NVLink via TMA: commit the pending bulk group, cp.async.bulk.wait_group.read 0
+ *     to stall until the TMA hardware has consumed the source smem, then
+ *     fence.proxy.async.shared::cta to order that drain against subsequent
+ *     generic accesses to the smem buffer.  Cheaper than membar.sys because
+ *     we do not need remote visibility, only source-buffer reusability.
+ *   NVLink via st.global (P2P): no-op - st.global puts block until the store
+ *     enters the memory subsystem, so the source is already consumed.  The
+ *     nvshmemi_tma_*() helpers below become no-ops when no TMA has been
+ *     issued by this thread, so they are safe to invoke unconditionally.
+ *   Network (IB/RoCE, EFA, proxy): drain send-side completions via
+ *     nvshmemi_transfer_quiet(use_membar=false) - no __threadfence_system.
+ */
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_flush(
+    int pe = NVSHMEMX_PE_ALL, nvshmemx_qp_handle_t *qp_handle = NULL,
+    int num_qps = NVSHMEMX_QP_ALL) {
+    /* TMA source-reuse drain.  Gated on smem registration so only CTAs that
+     * actually issued TMA ops pay the wait_group.read cost; other CTAs skip
+     * all three PTX instructions. */
+    if (nvshmemi_tma_smem_registered()) {
+        nvshmemi_tma_bulk_commit_group();
+        nvshmemi_tma_bulk_wait_group_read_0();
+        nvshmemi_tma_fence_proxy_async_shared_cta();
+    }
+    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST) {
+        /* Network path: drain send-side completions without issuing
+         * __threadfence_system() (use_membar = false). */
+        nvshmemi_transfer_quiet<SCOPE>(false, pe, qp_handle, num_qps);
+    }
+    /* P2P st.global path: no-op - source buffer already consumed. */
+    nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template __device__ void nvshmemi_flush<NVSHMEMI_THREADGROUP_THREAD>(
+    int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+template __device__ void nvshmemi_flush<NVSHMEMI_THREADGROUP_WARP>(
+    int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+template __device__ void nvshmemi_flush<NVSHMEMI_THREADGROUP_BLOCK>(
+    int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
+
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_PE_ALL,
                                                              nvshmemx_qp_handle_t *qp_handle = NULL,

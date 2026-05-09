@@ -20,6 +20,7 @@ void nvshmemi_call_proxy_quiet_entrypoint(cudaStream_t cstrm);
 extern "C" {
 #endif
 void nvshmemx_quiet_on_stream(cudaStream_t cstrm);
+void nvshmemx_flush_on_stream(cudaStream_t cstrm);
 #ifdef __cplusplus
 }
 #endif
@@ -107,4 +108,33 @@ void nvshmemx_quiet_on_stream(cudaStream_t cstrm) {
     }
 
     return;
+}
+
+void nvshmemx_flush_on_stream(cudaStream_t cstrm) {
+    NVTX_FUNC_RANGE_IN_GROUP(QUIET_ON_STREAM);
+    NVSHMEMI_CHECK_INIT_STATUS();
+
+    /* Ensure any internally-managed streams are ordered before cstrm. */
+    nvshmemi_quiesce_internal_streams(cstrm);
+
+    /* For P2P-only deployments (NVLink, no network transports), st.global
+     * puts have already consumed their source buffers when they retire.  No
+     * stream work is needed beyond the ordering above.
+     *
+     * For network transports: a lightweight source-reuse-only proxy entrypoint
+     * is not yet available.  Fall back to the full proxy quiet.  This may also
+     * guarantee remote visibility as an implementation detail; callers must
+     * still use quiet for visibility by contract. */
+    int tbitmap = nvshmemi_state->transport_bitmap;
+    for (int j = 0; j < nvshmemi_state->num_initialized_transports; j++) {
+        if (tbitmap & 1) {
+            struct nvshmem_transport *tcurr =
+                ((nvshmem_transport_t *)nvshmemi_state->transports)[j];
+            if (tcurr->attr & NVSHMEM_TRANSPORT_ATTR_CONNECTED) {
+                nvshmemi_call_proxy_quiet_entrypoint(cstrm);
+                break; /* one entrypoint covers all connected transports */
+            }
+        }
+        tbitmap >>= 1;
+    }
 }
