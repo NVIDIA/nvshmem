@@ -195,6 +195,88 @@ int libfabric_configure_gdrcopy_v2(nvshmemt_libfabric_state_t *libfabric_state) 
 out:
     return status;
 }
+
+/* Register a device-memory buffer with GDRCopy: pin, map, compute the
+ * user-visible CPU pointer (accounting for 64KB page alignment), and record
+ * the mapping info on handle_info. Uses the v2 pin/map path (with
+ * GDR_PIN_FLAG_FORCE_PCIE) when libfabric_state->use_gdrcopy_v2 is set, else
+ * the v1 path. Returns 0 on success, non-zero on failure (with the GDRCopy
+ * return code surfaced via an INFO/ERROR log). On failure the caller is
+ * responsible for freeing handle_info. */
+int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state,
+                                     nvshmemt_libfabric_memhandle_info_t *handle_info, void *buf,
+                                     size_t length) {
+    int status = 0;
+    gdr_info_t info;
+    const auto gdr_addr = static_cast<unsigned long>(reinterpret_cast<uintptr_t>(buf));
+    char *cpu_ptr_base = nullptr;
+    char *buf_ptr = nullptr;
+    char *info_va = nullptr;
+    bool pinned = false;
+    bool mapped = false;
+
+    if (libfabric_state->use_gdrcopy_v2) {
+        /* Coherent platform path: force a BAR1/PCIe mapping so the
+         * staged-atomics protocol's ordering assumptions hold. */
+        status = gdrcopy_ftable.pin_buffer_v2(gdr_desc, gdr_addr, length, GDR_PIN_FLAG_FORCE_PCIE,
+                                              &handle_info->mh);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "gdrcopy pin_buffer_v2 failed \n");
+        pinned = true;
+
+        status = gdrcopy_ftable.map_v2(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base,
+                                       length, GDR_MAP_FLAG_DEFAULT);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map_v2 failed \n");
+        mapped = true;
+    } else {
+        status = gdrcopy_ftable.pin_buffer(gdr_desc, gdr_addr, length, 0, 0, &handle_info->mh);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "gdrcopy pin_buffer failed \n");
+        pinned = true;
+
+        status = gdrcopy_ftable.map(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base, length);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map failed \n");
+        mapped = true;
+    }
+
+    status = gdrcopy_ftable.get_info(gdr_desc, handle_info->mh, &info);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy get_info failed \n");
+
+    /* Mappings start on a 64KB boundary, so calculate the offset from the
+     * head of the mapping to the beginning of the buffer. */
+    cpu_ptr_base = static_cast<char *>(handle_info->cpu_ptr_base);
+    buf_ptr = static_cast<char *>(buf);
+    info_va = reinterpret_cast<char *>(static_cast<uintptr_t>(info.va));
+    handle_info->cpu_ptr = static_cast<void *>(cpu_ptr_base + (buf_ptr - info_va));
+    handle_info->gdr_mapping_size = length;
+    handle_info->ptr = buf;
+    return 0;
+
+out:
+    /* Best-effort cleanup of any partially-established GDRCopy state so the
+     * pin does not leak. Unmap first (if mapped), then unpin (if pinned).
+     * Note: gdr_unmap and gdr_unpin_buffer are the same APIs for both v1 and
+     * v2 handles, so a single cleanup path covers both paths above.
+     * Cleanup errors are logged but do not overwrite the primary status. */
+    if (mapped) {
+        int rc = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
+                                      length);
+        if (rc != 0) {
+            INFO(libfabric_state->log_level,
+                 "gdrcopy unmap failed during error cleanup (rc=%d); primary status=%d", rc,
+                 status);
+        }
+    }
+    if (pinned) {
+        int rc = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
+        if (rc != 0) {
+            INFO(libfabric_state->log_level,
+                 "gdrcopy unpin_buffer failed during error cleanup (rc=%d); primary status=%d",
+                 rc, status);
+        }
+    }
+    return status;
+}
 #endif
 
 struct nvshmemi_options_s options;
@@ -2349,9 +2431,6 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     void *curr_ptr;
     CUdevice gpu_device_id;
     nvshmemt_libfabric_memhandle_info_t *handle_info = NULL;
-#ifdef NVSHMEM_USE_GDRCOPY
-    gdr_info_t info;
-#endif
 
     // for now, error out if mmap is used with libfabric
     // TODO : Add workaround for mmap with libfabric
@@ -2447,44 +2526,10 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         if (!is_host) {
 #ifdef NVSHMEM_USE_GDRCOPY
             if (use_gdrcopy) {
-                if (libfabric_state->use_gdrcopy_v2) {
-                    /* Coherent platform path: force a BAR1/PCIe mapping so the
-                     * staged-atomics protocol's ordering assumptions hold. */
-                    status = gdrcopy_ftable.pin_buffer_v2(gdr_desc, (unsigned long)buf, length,
-                                                          GDR_PIN_FLAG_FORCE_PCIE,
-                                                          &handle_info->mh);
-                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                          "gdrcopy pin_buffer_v2 failed \n");
+                status =
+                    libfabric_gdr_register_memhandle(libfabric_state, handle_info, buf, length);
+                if (status != 0) goto out;
 
-                    status = gdrcopy_ftable.map_v2(gdr_desc, handle_info->mh,
-                                                   &handle_info->cpu_ptr_base, length,
-                                                   GDR_MAP_FLAG_DEFAULT);
-                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                          "gdrcopy map_v2 failed \n");
-                } else {
-                    status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)buf, length, 0, 0,
-                                                       &handle_info->mh);
-                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                          "gdrcopy pin_buffer failed \n");
-
-                    status = gdrcopy_ftable.map(gdr_desc, handle_info->mh,
-                                                &handle_info->cpu_ptr_base, length);
-                    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                          "gdrcopy map failed \n");
-                }
-
-                status = gdrcopy_ftable.get_info(gdr_desc, handle_info->mh, &info);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "gdrcopy get_info failed \n");
-
-                // remember that mappings start on a 64KB boundary, so let's
-                // calculate the offset from the head of the mapping to the
-                // beginning of the buffer
-                handle_info->cpu_ptr =
-                    (void *)((char *)handle_info->cpu_ptr_base + ((char *)buf - (char *)info.va));
-
-                handle_info->gdr_mapping_size = length;
-                handle_info->ptr = buf;
                 curr_ptr = buf;
                 do {
                     status = nvshmemt_mem_handle_cache_add(t, libfabric_state->cache, curr_ptr,
