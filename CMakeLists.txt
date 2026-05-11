@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.19)
 project(
   NVSHMEM
   LANGUAGES CXX C
-  VERSION 3.6.37.0
+  VERSION 3.6.37.1
 )
 
 set(CMAKE_C_STANDARD 11)

@@ -155,6 +155,12 @@ else()
   set(NVSHMEM_PTX_ARCH "ptx86")
 endif()
 
+if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
+  list(GET CMAKE_CUDA_ARCHITECTURES 0 NVSHMEM_CLANG_ARCH)
+  string(REGEX REPLACE "-(real|virtual)$" "" NVSHMEM_CLANG_ARCH "${NVSHMEM_CLANG_ARCH}")
+  set(NVSHMEM_CLANG_ARCH "sm_${NVSHMEM_CLANG_ARCH}")
+endif()
+
 if (NOT SubBuild)
   configure_file(${NVSHMEM_TEST_TLD}/../src/include/non_abi/device/pt-to-pt/transfer_device.cuh.in
   ${NVSHMEM_TEST_TLD}/common/include/non_abi/device/pt-to-pt/transfer_device.cuh COPYONLY)
