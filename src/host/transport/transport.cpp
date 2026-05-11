@@ -506,7 +506,10 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                  selected_devices[0]);
             found_devices++;
         } else {
-            nvshmemi_get_devices_by_distance(selected_devices, max_devices_per_pe, tcurr);
+            current_status =
+                nvshmemi_get_devices_by_distance(selected_devices, max_devices_per_pe, tcurr);
+            NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
+                                  "get devices by distance failed \n");
             for (int i = 0; i < max_devices_per_pe; i++) {
                 if (selected_devices[i] == -1) {
                     break;
