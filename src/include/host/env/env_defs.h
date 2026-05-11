@@ -335,6 +335,13 @@ NVSHMEMI_ENV_DEF(ENABLE_NIC_PE_MAPPING, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "closest to it by distance. When set to 1, NVSHMEM either assigns NICs to "
                  "PEs on a round-robin basis or uses ``NVSHMEM_HCA_PE_MAPPING`` or "
                  "``NVSHMEM_HCA_LIST`` when they are specified.")
+NVSHMEMI_ENV_DEF(NETDEVS_POLICY, string, "AUTO", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Policy for automatic NIC assignment when ``NVSHMEM_ENABLE_NIC_PE_MAPPING`` "
+                 "is 0. ``AUTO`` preserves the default NVSHMEM behavior and balances over "
+                 "local NVSHMEM PEs. ``EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE`` balances "
+                 "over all node-local GPUs to avoid external NVSHMEM instances sharing "
+                 "PCIe-switch-local NICs when topology permits; NICs may still be shared when "
+                 "there are fewer NICs than GPUs.")
 NVSHMEMI_ENV_DEF(DISABLE_LOCAL_ONLY_PROXY, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "When running on an NVLink-only configuaration (No-IB, No-UCX), completely "
                  "disable the proxy thread. This will disable device side global exit and "

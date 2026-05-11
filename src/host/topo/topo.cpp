@@ -8,11 +8,16 @@
 #include <cuda.h>                                    // for CUDA_SUCCESS
 #include <cuda_runtime.h>                            // for cudaDevice...
 #include <driver_types.h>                            // for cudaDevice...
+#include <algorithm>                                 // for sort
+#include <array>                                     // for array
+#include <dirent.h>                                  // for opendir, readdir
 #include <limits.h>                                  // for PATH_MAX
 #include <stdio.h>                                   // for NULL, fclose
 #include <stdlib.h>                                  // for free, calloc
 #include <string.h>                                  // for strlen
+#include <strings.h>                                 // for strcasecmp
 #include <list>                                      // for _List_iter...
+#include <vector>                                    // for vector
 #include "non_abi/nvshmemx_error.h"                  // for NVSHMEMX_E...
 #include "internal/host/debug.h"                     // for INFO, NVSH...
 #include "internal/host/nvshmem_internal.h"          // for nvshmemi_s...
@@ -47,6 +52,13 @@ enum pci_distance {
 };
 static const int pci_distance_perf[PATH_COUNT] = {4, 4, 3, 2, 1};
 static const char *pci_distance_string[PATH_COUNT] = {"PIX", "PXB", "PHB", "NODE", "SYS"};
+
+#define NVIDIA_DRIVER_PATH "/sys/bus/pci/drivers/nvidia"
+
+enum netdevs_policy {
+    NETDEVS_POLICY_AUTO,
+    NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE,
+};
 
 static int get_cuda_bus_id(int cuda_dev, char *bus_id) {
     int status = NVSHMEMX_SUCCESS;
@@ -102,6 +114,140 @@ static int get_device_path(char *bus_id, char **path) {
     NVSHMEMI_NULL_ERROR_JMP(*path, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out, "realpath failed \n");
 
 out:
+    return status;
+}
+
+static int is_pci_addr(const char *name) {
+    // Match XXXX:XX:XX.X pattern
+    return strlen(name) == 12 && name[4] == ':' && name[7] == ':' && name[10] == '.';
+}
+
+static int get_nvidia_gpu_count(void) {
+    DIR *dir = opendir(NVIDIA_DRIVER_PATH);
+    if (!dir) return 0;
+    int count = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (is_pci_addr(ent->d_name)) count++;
+    }
+    closedir(dir);
+    return count;
+}
+
+static enum netdevs_policy get_netdevs_policy(void) {
+    if (strcasecmp(nvshmemi_options.NETDEVS_POLICY, "AUTO") == 0) {
+        return NETDEVS_POLICY_AUTO;
+    }
+
+    if (strcasecmp(nvshmemi_options.NETDEVS_POLICY,
+                   "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE") == 0) {
+        return NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE;
+    }
+
+    NVSHMEMI_WARN_PRINT("Invalid NVSHMEM_NETDEVS_POLICY value '%s'. Using AUTO.\n",
+                        nvshmemi_options.NETDEVS_POLICY);
+    return NETDEVS_POLICY_AUTO;
+}
+
+static const char *get_netdevs_policy_name(enum netdevs_policy policy) {
+    switch (policy) {
+        case NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE:
+            return "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE";
+        case NETDEVS_POLICY_AUTO:
+            return "AUTO";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+int nvshmemi_get_netdevs_policy_entity_count(nvshmemi_state_t *state) {
+    if (get_netdevs_policy() == NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE) {
+        int gpu_count = get_nvidia_gpu_count();
+        if (gpu_count > 0) return gpu_count;
+        if (state && state->npes_node > 0) return state->npes_node;
+        return 1;
+    }
+
+    if (!state || state->npes_node <= 0) return 1;
+    return state->npes_node;
+}
+
+static int get_all_physical_gpu_paths_and_index(int cuda_device_id, char ***cuda_device_paths,
+                                                int *out_ngpus, int *out_mygpu_index) {
+    int status = NVSHMEMX_SUCCESS;
+    char my_bus_id[MAX_BUSID_SIZE];
+    DIR *nvidia_dir = NULL;
+    std::vector<std::array<char, MAX_BUSID_SIZE>> gpu_bus_ids;
+
+    status = get_cuda_bus_id(cuda_device_id, my_bus_id);
+    if (status != NVSHMEMX_SUCCESS) return status;
+    for (int k = 0; k < MAX_BUSID_SIZE; k++)
+        my_bus_id[k] = tolower(my_bus_id[k]);
+
+    nvidia_dir = opendir(NVIDIA_DRIVER_PATH);
+    if (!nvidia_dir) {
+        NVSHMEMI_ERROR_PRINT("Failed to open " NVIDIA_DRIVER_PATH "\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    *cuda_device_paths = NULL;
+    *out_ngpus = 0;
+    *out_mygpu_index = -1;
+    struct dirent *ent;
+    while ((ent = readdir(nvidia_dir)) != NULL) {
+        if (!is_pci_addr(ent->d_name)) continue;
+        std::array<char, MAX_BUSID_SIZE> bus_id = {};
+        strncpy(bus_id.data(), ent->d_name, MAX_BUSID_SIZE - 1);
+        for (int k = 0; k < MAX_BUSID_SIZE; k++)
+            bus_id[k] = tolower(bus_id[k]);
+        gpu_bus_ids.push_back(bus_id);
+    }
+    closedir(nvidia_dir);
+
+    std::sort(gpu_bus_ids.begin(), gpu_bus_ids.end(),
+              [](const std::array<char, MAX_BUSID_SIZE> &lhs,
+                 const std::array<char, MAX_BUSID_SIZE> &rhs) {
+                  return strncmp(lhs.data(), rhs.data(), MAX_BUSID_SIZE) < 0;
+              });
+
+    *out_ngpus = gpu_bus_ids.size();
+    if (*out_ngpus <= 0) {
+        NVSHMEMI_ERROR_PRINT("No NVIDIA GPUs found in " NVIDIA_DRIVER_PATH "\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    *cuda_device_paths = (char **)calloc(*out_ngpus, sizeof(char *));
+    NVSHMEMI_NULL_ERROR_JMP(*cuda_device_paths, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for GPU/NIC Mapping.\n");
+
+    for (int gpu_id = 0; gpu_id < *out_ngpus; gpu_id++) {
+        status = get_device_path(gpu_bus_ids[gpu_id].data(), &((*cuda_device_paths)[gpu_id]));
+        if (status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT("get cuda path failed\n");
+            goto out;
+        }
+
+        if (strncmp(my_bus_id, gpu_bus_ids[gpu_id].data(), MAX_BUSID_SIZE) == 0)
+            *out_mygpu_index = gpu_id;
+    }
+
+    if (*out_mygpu_index < 0) {
+        NVSHMEMI_ERROR_PRINT("Could not find current GPU in sysfs\n");
+        status = NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+
+out:
+    if (status) {
+        if (*cuda_device_paths) {
+            for (int i = 0; i < *out_ngpus; i++) {
+                if ((*cuda_device_paths)[i]) free((*cuda_device_paths)[i]);
+            }
+            free(*cuda_device_paths);
+            *cuda_device_paths = NULL;
+        }
+        *out_ngpus = 0;
+    }
     return status;
 }
 
@@ -213,10 +359,16 @@ out:
     return status;
 }
 
+static int collect_all_physical_gpu_paths(char ***entity_paths, int *n_entities,
+                                          int *my_entity_index) {
+    return get_all_physical_gpu_paths_and_index(nvshmemi_state->device_id, entity_paths,
+                                                n_entities, my_entity_index);
+}
+
 static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
                                       struct nvshmem_transport *tcurr, char **entity_paths,
                                       int n_entities, int my_entity_index,
-                                      const char *entity_name) {
+                                      const char *entity_name, enum netdevs_policy policy) {
     struct dev_info {
         char *dev_path;
         int use_count;
@@ -241,6 +393,12 @@ static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
     if (ndev <= 0) {
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "transport devices (setup_connections) failed \n");
+    }
+
+    if (policy != NETDEVS_POLICY_AUTO &&
+        policy != NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "Unsupported NVSHMEM_NETDEVS_POLICY value %d.\n", policy);
     }
 
     /* Allocate data structures start */
@@ -367,8 +525,8 @@ static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
                 continue;
             }
 
-            /* Calculate entity index from nic_id. Each entity gets max_dev_per_entity assigned to
-             * it. If there are 8 NICs and 4 entities, the nic -> entity mapping looks like
+            /* Calculate entity index from nic_id. Each entity gets max_dev_per_entity assigned
+             * to it. If there are 8 NICs and 4 entities, the nic -> entity mapping looks like
              * nic_id:  0   1   2   3   4   5   6   7
              * entity:  0   0   1   1   2   2   3   3
              */
@@ -459,14 +617,27 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     int n_entities = 0;
     int my_entity_index = -1;
     int status;
-    const char *entity_name = "PE";
+    const char *entity_name;
+    enum netdevs_policy policy = get_netdevs_policy();
 
-    status = collect_local_pe_paths(&entity_paths, &n_entities, &my_entity_index);
+    if (policy == NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE) {
+        entity_name = "GPU";
+        status = collect_all_physical_gpu_paths(&entity_paths, &n_entities, &my_entity_index);
+    } else {
+        entity_name = "PE";
+        status = collect_local_pe_paths(&entity_paths, &n_entities, &my_entity_index);
+    }
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "failed to collect topology assignment entities\n");
 
+    INFO(NVSHMEM_TOPO,
+         "NVSHMEM_NETDEVS_POLICY=%s assignment_scope=%s n_entities=%d "
+         "my_entity_index=%d max_devices_per_entity=%d\n",
+         get_netdevs_policy_name(policy), entity_name, n_entities, my_entity_index,
+         max_dev_per_pe);
+
     status = select_devices_by_distance(device_arr, max_dev_per_pe, tcurr, entity_paths, n_entities,
-                                        my_entity_index, entity_name);
+                                        my_entity_index, entity_name, policy);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "failed to select devices by distance\n");
 

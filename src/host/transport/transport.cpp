@@ -482,7 +482,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
             continue;
         }
 
-        int devices_temp = tcurr->n_devices / state->npes_node;
+        int assignment_entity_count = nvshmemi_get_netdevs_policy_entity_count(state);
+        int devices_temp = tcurr->n_devices / assignment_entity_count;
         if (devices_temp == 0) devices_temp = 1;
         const int max_devices_per_pe = devices_temp;
         int selected_devices[max_devices_per_pe];
