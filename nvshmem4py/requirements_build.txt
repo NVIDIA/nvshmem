@@ -12,4 +12,4 @@ wheel
 auditwheel
 patchelf
 # The following are Numbast requirements for header search
-cuda-toolkit[cudart,nvcc,curand,cccl,nvvm]==13.*
+cuda-toolkit[cudart,nvcc,curand,cccl,nvvm]
