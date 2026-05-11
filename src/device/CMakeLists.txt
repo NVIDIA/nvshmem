@@ -49,8 +49,19 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake_config")
 include(NVSHMEMCxxStandard)
 
 find_package(CUDAToolkit)
-find_package(CCCL PATHS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl)
+# Force CCCL to come from the same toolkit as CUDAToolkit (i.e., NVSHMEM_DEVICELIB_CUDA_HOME).
+# Use NO_DEFAULT_PATH to prevent outer CMAKE_PREFIX_PATH / CCCL_ROOT from leaking a
+# different toolkit's CCCL into the device sub-build leading to a compiler error.
+find_package(CCCL
+  PATHS
+    ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl
+    ${NVSHMEM_DEVICELIB_CUDA_HOME}/lib64/cmake/cccl
+    ${NVSHMEM_DEVICELIB_CUDA_HOME}/lib/cmake/cccl
+  NO_DEFAULT_PATH
+)
+
 message(STATUS "CUDAToolkit_LIBRARY_DIR: ${CUDAToolkit_LIBRARY_DIR}")
+message(STATUS "CCCL_DIR: ${CCCL_DIR}")
 
 if(NVSHMEM_GPUNETIO_SUPPORT AND NOT GPUNETIO_INCLUDE)
   message(FATAL_ERROR "GPUNETIO_INCLUDE must be set when NVSHMEM_GPUNETIO_SUPPORT is ON")
