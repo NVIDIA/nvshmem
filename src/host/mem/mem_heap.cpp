@@ -2490,6 +2490,9 @@ void nvshmem_free(void *ptr) {
 }
 
 void *nvshmemi_ptr(const void *ptr, int pe) {
+    if (nvshmemi_state == NULL || nvshmemi_state->heap_obj == NULL) {
+        return NULL;
+    }
     if (pe >= 0 && pe < nvshmemi_state->npes && ptr >= nvshmemi_device_state.heap_base) {
         uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
 
