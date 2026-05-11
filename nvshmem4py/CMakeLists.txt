@@ -65,7 +65,7 @@ endif()
 if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba/_numbast.py"))
     include(cmake/addNumbast.cmake)
     AddNumbast(
-        VERSION "0.7.0"
+        VERSION "0.9.0"
     )
 endif()
 
