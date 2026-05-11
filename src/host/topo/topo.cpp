@@ -129,51 +129,118 @@ static enum pci_distance get_pci_distance(char *cuda_path, char *mlx_path) {
 }
 
 typedef struct nvshmemi_path_pair_info {
-    int pe_idx;
+    int entity_idx;
     int dev_idx;
     enum pci_distance pcie_distance;
 } nvshmemi_path_pair_info_t;
 
-int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
-                                     struct nvshmem_transport *tcurr) {
-    struct dev_info {
-        char *dev_path;
-        int use_count;
-    } *dev_info_all = NULL;
+static void free_entity_paths(char **entity_paths, int n_entities) {
+    if (!entity_paths) return;
 
-    struct gpu_info {
-        char gpu_bus_id[MAX_BUSID_SIZE];
-    } gpu_info, *gpu_info_all = NULL;
+    for (int i = 0; i < n_entities; i++) {
+        if (entity_paths[i]) free(entity_paths[i]);
+    }
+    free(entity_paths);
+}
 
-    std::list<nvshmemi_path_pair_info_t> pe_dev_pairs;
-    std::list<nvshmemi_path_pair_info_t>::iterator pairs_iter;
-
-    int ndev = tcurr->n_devices;
+static int collect_local_pe_paths(char ***entity_paths, int *n_entities, int *my_entity_index) {
+    int status = NVSHMEMX_ERROR_INTERNAL;
     int mype = nvshmemi_state->mype;
     int n_pes = nvshmemi_state->npes;
     int n_pes_node = nvshmemi_state->npes_node;
     CUdevice gpu_device_id;
 
-    char **cuda_device_paths = NULL;
-    int *pe_selected_devices = NULL;
-    enum pci_distance *pe_device_distance = NULL;
+    struct gpu_info {
+        char gpu_bus_id[MAX_BUSID_SIZE];
+    } gpu_info, *gpu_info_all = NULL;
+
+    *entity_paths = NULL;
+    *n_entities = 0;
+    *my_entity_index = -1;
+
+    status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
+    if (status != CUDA_SUCCESS) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    gpu_info_all = (struct gpu_info *)calloc(n_pes, sizeof(struct gpu_info));
+    NVSHMEMI_NULL_ERROR_JMP(gpu_info_all, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "gpu_info_all allocation failed \n");
+
+    *entity_paths = (char **)calloc(n_pes_node, sizeof(char *));
+    NVSHMEMI_NULL_ERROR_JMP(*entity_paths, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for PE/NIC Mapping.\n");
+
+    status = get_cuda_bus_id(gpu_device_id, gpu_info.gpu_bus_id);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get cuda busid failed \n");
+
+    status = nvshmemi_boot_handle.allgather((void *)&gpu_info, (void *)gpu_info_all,
+                                            sizeof(struct gpu_info), &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "allgather of gpu_info failed \n");
+
+    for (int i = 0; i < n_pes; i++) {
+        if (nvshmemi_state->pe_info[i].hostHash != nvshmemi_state->pe_info[mype].hostHash) {
+            continue;
+        }
+
+        status = get_device_path(gpu_info_all[i].gpu_bus_id, &((*entity_paths)[*n_entities]));
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get cuda path failed \n");
+
+        if (i == mype) {
+            *my_entity_index = *n_entities;
+        }
+
+        (*n_entities)++;
+        if (*n_entities == n_pes_node) {
+            break;
+        }
+    }
+
+    if (*n_entities != n_pes_node || *my_entity_index == -1) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "Number of PEs found doesn't match the PE node count.\n");
+    }
+
+    status = NVSHMEMX_SUCCESS;
+
+out:
+    if (gpu_info_all) free(gpu_info_all);
+    if (status) {
+        free_entity_paths(*entity_paths, *n_entities);
+        *entity_paths = NULL;
+        *n_entities = 0;
+    }
+    return status;
+}
+
+static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
+                                      struct nvshmem_transport *tcurr, char **entity_paths,
+                                      int n_entities, int my_entity_index,
+                                      const char *entity_name) {
+    struct dev_info {
+        char *dev_path;
+        int use_count;
+    } *dev_info_all = NULL;
+
+    std::list<nvshmemi_path_pair_info_t> entity_dev_pairs;
+    std::list<nvshmemi_path_pair_info_t>::iterator pairs_iter;
+
+    int ndev = tcurr->n_devices;
+
+    int *entity_selected_devices = NULL;
+    enum pci_distance *entity_device_distance = NULL;
     int *used_devs = NULL;
 
-    int mype_array_index = -1, mydev_index = -1;
-    int i, dev_id, pe_id, pe_pair_index;
+    int mydev_index = -1;
+    int i, dev_id, entity_id, entity_pair_index;
     int devices_assigned = 0;
-    int mype_device_count = 0;
+    int my_entity_device_count = 0;
     int status = NVSHMEMX_ERROR_INTERNAL;
+    int my_entity_array_index = my_entity_index * max_dev_per_entity;
 
     if (ndev <= 0) {
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "transport devices (setup_connections) failed \n");
-    }
-
-    status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
-    if (status != CUDA_SUCCESS) {
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
     }
 
     /* Allocate data structures start */
@@ -182,111 +249,70 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     NVSHMEMI_NULL_ERROR_JMP(dev_info_all, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "dev_info_all allocation failed \n");
 
-    /* Array of GPU bus IDs of size n_pes*/
-    gpu_info_all = (struct gpu_info *)calloc(n_pes, sizeof(struct gpu_info));
-    NVSHMEMI_NULL_ERROR_JMP(gpu_info_all, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "gpu_info_all allocation failed \n");
-
-    /* array linking each GPU on our node with it's pcie path */
-    cuda_device_paths = (char **)calloc(n_pes_node, sizeof(char *));
-    NVSHMEMI_NULL_ERROR_JMP(cuda_device_paths, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for PE/NIC Mapping.\n");
-
-    /* Array of size n_pes_node * max_dev_per_pe storing the accepted mappings of PE to Dev(s) */
-    pe_selected_devices = (int *)calloc(n_pes_node * max_dev_per_pe, sizeof(int));
-    NVSHMEMI_NULL_ERROR_JMP(pe_selected_devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for PE/NIC Mapping.\n");
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
-        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            pe_selected_devices[pe_id * max_dev_per_pe + dev_id] = -1;
-        }
-    }
-
-    pe_device_distance =
-        (enum pci_distance *)calloc(n_pes_node * max_dev_per_pe, sizeof(enum pci_distance));
-    NVSHMEMI_NULL_ERROR_JMP(pe_device_distance, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                            "Unable to allocate memory for PE/NIC Mapping.\n");
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
-        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            pe_device_distance[pe_id * max_dev_per_pe + dev_id] = PATH_SYS;
-        }
-    }
-
     used_devs = (int *)calloc(ndev, sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(used_devs, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate memory for PE/NIC Mapping.\n");
     /* Allocate data structures end */
 
-    /* Gather GPU and NIC paths start */
-    status = get_cuda_bus_id(gpu_device_id, gpu_info.gpu_bus_id);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get cuda busid failed \n");
-
-    status = nvshmemi_boot_handle.allgather((void *)&gpu_info, (void *)gpu_info_all,
-                                            sizeof(struct gpu_info), &nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "allgather of gpu_info failed \n");
-
-    pe_id = 0;
-    for (i = 0; i < n_pes; i++) {
-        if (nvshmemi_state->pe_info[i].hostHash != nvshmemi_state->pe_info[mype].hostHash) {
-            continue;
-        }
-
-        status = get_device_path(gpu_info_all[i].gpu_bus_id, &cuda_device_paths[pe_id]);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get cuda path failed \n");
-        /* to get back to our PE after the algorithm finishes. */
-        if (i == mype) {
-            mype_array_index = pe_id * max_dev_per_pe;
-        }
-
-        pe_id++;
-        if (pe_id == n_pes_node) {
-            break;
+    entity_selected_devices = (int *)calloc(n_entities * max_dev_per_entity, sizeof(int));
+    NVSHMEMI_NULL_ERROR_JMP(entity_selected_devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for NIC Mapping.\n");
+    for (entity_id = 0; entity_id < n_entities; entity_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_entity; dev_id++) {
+            entity_selected_devices[entity_id * max_dev_per_entity + dev_id] = -1;
         }
     }
 
-    if (pe_id != n_pes_node || mype_array_index == -1) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                           "Number of PEs found doesn't match the PE node count.\n");
+    entity_device_distance =
+        (enum pci_distance *)calloc(n_entities * max_dev_per_entity, sizeof(enum pci_distance));
+    NVSHMEMI_NULL_ERROR_JMP(entity_device_distance, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate memory for NIC Mapping.\n");
+    for (entity_id = 0; entity_id < n_entities; entity_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_entity; dev_id++) {
+            entity_device_distance[entity_id * max_dev_per_entity + dev_id] = PATH_SYS;
+        }
     }
 
     for (i = 0; i < ndev; i++) {
         dev_info_all[i].dev_path = tcurr->device_pci_paths[i];
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "get device path failed \n");
+        NVSHMEMI_NULL_ERROR_JMP(dev_info_all[i].dev_path, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                "get device path failed \n");
     }
-    /* Gather GPU and NIC paths end */
 
     /* Get path distances start */
-    /* construct a n_pes_node * ndev array of distance measurements */
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
+    /* construct a n_entities * ndev array of distance measurements */
+    for (entity_id = 0; entity_id < n_entities; entity_id++) {
         for (dev_id = 0; dev_id < ndev; dev_id++) {
             enum pci_distance distance_compare;
             distance_compare =
-                get_pci_distance(cuda_device_paths[pe_id], dev_info_all[dev_id].dev_path);
-            if (unlikely(pe_dev_pairs.empty())) {
-                pe_dev_pairs.push_front({pe_id, dev_id, distance_compare});
+                get_pci_distance(entity_paths[entity_id], dev_info_all[dev_id].dev_path);
+            if (unlikely(entity_dev_pairs.empty())) {
+                entity_dev_pairs.push_front({entity_id, dev_id, distance_compare});
             } else {
-                for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end();
+                for (pairs_iter = entity_dev_pairs.begin(); pairs_iter != entity_dev_pairs.end();
                      pairs_iter++) {
                     if (distance_compare < (*pairs_iter).pcie_distance) {
                         break;
                     }
                 }
-                INFO(NVSHMEM_TOPO, "PE %d: %s dev %d: %s distance: %d\n", pe_id,
-                     cuda_device_paths[pe_id], dev_id, dev_info_all[dev_id].dev_path,
+                INFO(NVSHMEM_TOPO, "%s %d: %s dev %d: %s distance: %d\n", entity_name,
+                     entity_id, entity_paths[entity_id], dev_id, dev_info_all[dev_id].dev_path,
                      distance_compare);
-                pe_dev_pairs.insert(pairs_iter, {pe_id, dev_id, distance_compare});
+                entity_dev_pairs.insert(pairs_iter, {entity_id, dev_id, distance_compare});
             }
         }
     }
     /* Get path distances end */
 
-    /* loop one, do initial assignments of NIC(s) to each GPU */
-    for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end(); pairs_iter++) {
+    /* loop one, do initial assignments of NIC(s) to each entity */
+    for (pairs_iter = entity_dev_pairs.begin(); pairs_iter != entity_dev_pairs.end();
+         pairs_iter++) {
         bool need_more_assignments = 0;
-        int pe_base_index = (*pairs_iter).pe_idx * max_dev_per_pe;
-        /* skip pairs where the GPU already has a partner in the first loop */
-        for (pe_pair_index = 0; pe_pair_index < max_dev_per_pe; pe_pair_index++)
-            if (pe_selected_devices[pe_base_index + pe_pair_index] == PE_DEVICE_NOT_ASSIGNED) {
+        int entity_base_index = (*pairs_iter).entity_idx * max_dev_per_entity;
+        /* skip pairs where the entity already has a partner in the first loop */
+        for (entity_pair_index = 0; entity_pair_index < max_dev_per_entity; entity_pair_index++)
+            if (entity_selected_devices[entity_base_index + entity_pair_index] ==
+                PE_DEVICE_NOT_ASSIGNED) {
                 need_more_assignments = 1;
                 break;
             }
@@ -296,13 +322,13 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
         }
 
         if (pci_distance_perf[(*pairs_iter).pcie_distance] <
-            pci_distance_perf[pe_device_distance[pe_base_index]]) {
+            pci_distance_perf[entity_device_distance[entity_base_index]]) {
             /* This NIC and all subsequent ones are less optimal than the already selected NICs
              * They can be safely ignored and we assign -2 to indicate that there are no more
-             * optimal NICs for this GPU.
+             * optimal NICs for this entity.
              */
-            for (; pe_pair_index < max_dev_per_pe; pe_pair_index++) {
-                pe_selected_devices[pe_base_index + pe_pair_index] =
+            for (; entity_pair_index < max_dev_per_entity; entity_pair_index++) {
+                entity_selected_devices[entity_base_index + entity_pair_index] =
                     PE_DEVICE_NO_OPTIMAL_ASSIGNMENT;
                 /* While not technically assigned, we need to account for these NICs to make
                  * forward progress.
@@ -310,127 +336,142 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
                 devices_assigned++;
             }
         } else {
-            /* This NIC is optimal for this GPU. */
-            INFO(NVSHMEM_TOPO, "Pairing PE %d with device %d at distance %d\n",
-                 (*pairs_iter).pe_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
-            pe_selected_devices[pe_base_index + pe_pair_index] = (*pairs_iter).dev_idx;
-            pe_device_distance[pe_base_index + pe_pair_index] = (*pairs_iter).pcie_distance;
+            /* This NIC is optimal for this entity. */
+            INFO(NVSHMEM_TOPO, "Pairing %s %d with device %d at distance %d\n", entity_name,
+                 (*pairs_iter).entity_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
+            entity_selected_devices[entity_base_index + entity_pair_index] =
+                (*pairs_iter).dev_idx;
+            entity_device_distance[entity_base_index + entity_pair_index] =
+                (*pairs_iter).pcie_distance;
             used_devs[(*pairs_iter).dev_idx]++;
             devices_assigned++;
         }
 
-        if (devices_assigned == n_pes_node * max_dev_per_pe) {
+        if (devices_assigned == n_entities * max_dev_per_entity) {
             break;
         }
     }
 
     /* loop two, load balance the NICs. */
-    for (pe_id = 0; pe_id < n_pes_node; pe_id++) {
-        for (dev_id = 0; dev_id < max_dev_per_pe; dev_id++) {
-            int pe_pair_idx = pe_id * max_dev_per_pe + dev_id;
+    for (entity_id = 0; entity_id < n_entities; entity_id++) {
+        for (dev_id = 0; dev_id < max_dev_per_entity; dev_id++) {
+            int entity_pair_idx = entity_id * max_dev_per_entity + dev_id;
             int nic_density;
-            if (pe_selected_devices[pe_pair_idx] < 0) {
+            if (entity_selected_devices[entity_pair_idx] < 0) {
                 continue;
             }
-            nic_density = used_devs[pe_selected_devices[pe_pair_idx]];
+            nic_density = used_devs[entity_selected_devices[entity_pair_idx]];
 
-            /* Can't find a less populated NIC if ours is only assigned to 1 gpu. */
+            /* Can't find a less populated NIC if ours is only assigned to one entity. */
             if (nic_density < 2) {
                 continue;
             }
 
-            /* Calculate PE Index from nic_id. Each PE gets max_dev_per_pe assigned to them.
-             * If there are 8 NIC's and 4 PE's, the nic -> PE mapping looks like
+            /* Calculate entity index from nic_id. Each entity gets max_dev_per_entity assigned to
+             * it. If there are 8 NICs and 4 entities, the nic -> entity mapping looks like
              * nic_id:  0   1   2   3   4   5   6   7
-             * pe_idx:  0   0   1   1   2   2   3   3
+             * entity:  0   0   1   1   2   2   3   3
              */
-            int pe_idx = (pe_pair_idx - (pe_pair_idx % max_dev_per_pe)) / max_dev_per_pe;
-            for (pairs_iter = pe_dev_pairs.begin(); pairs_iter != pe_dev_pairs.end();
+            int entity_idx =
+                (entity_pair_idx - (entity_pair_idx % max_dev_per_entity)) / max_dev_per_entity;
+            for (pairs_iter = entity_dev_pairs.begin(); pairs_iter != entity_dev_pairs.end();
                  pairs_iter++) {
                 /* Never change for a less optimal NIC. */
 
-                if ((*pairs_iter).pe_idx != pe_idx) {
+                if ((*pairs_iter).entity_idx != entity_idx) {
                     continue;
                 }
 
                 if (pci_distance_perf[(*pairs_iter).pcie_distance] <
-                    pci_distance_perf[pe_device_distance[pe_pair_idx]]) {
+                    pci_distance_perf[entity_device_distance[entity_pair_idx]]) {
                     break;
                 }
 
                 if ((nic_density - used_devs[(*pairs_iter).dev_idx]) >= 2) {
-                    INFO(NVSHMEM_TOPO, "Re-Pairing PE %d with device %d at distance %d\n",
-                         (*pairs_iter).pe_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
-                    used_devs[pe_selected_devices[pe_pair_idx]]--;
+                    INFO(NVSHMEM_TOPO, "Re-Pairing %s %d with device %d at distance %d\n",
+                         entity_name, (*pairs_iter).entity_idx, (*pairs_iter).dev_idx,
+                         (*pairs_iter).pcie_distance);
+                    used_devs[entity_selected_devices[entity_pair_idx]]--;
                     used_devs[(*pairs_iter).dev_idx]++;
                     nic_density = used_devs[(*pairs_iter).dev_idx];
-                    pe_selected_devices[pe_pair_idx] = (*pairs_iter).dev_idx;
-                    pe_device_distance[pe_pair_idx] = (*pairs_iter).pcie_distance;
+                    entity_selected_devices[entity_pair_idx] = (*pairs_iter).dev_idx;
+                    entity_device_distance[entity_pair_idx] = (*pairs_iter).pcie_distance;
                     if (nic_density < 2) {
                         break;
                     }
                 }
             }
         }
+    }
 
-        for (pe_pair_index = 0; pe_pair_index < max_dev_per_pe; pe_pair_index++) {
-            if (pe_selected_devices[mype_array_index + pe_pair_index] >= 0) {
-                mydev_index = pe_selected_devices[mype_array_index + pe_pair_index];
-                device_arr[pe_pair_index] = mydev_index;
-                mype_device_count++;
-                INFO(NVSHMEM_TOPO, "Our PE is sharing its NIC at index %d with %d other PEs.\n",
-                     used_devs[mydev_index], mype_device_count);
-            }
-        }
-
-        if (mype_device_count == 0) {
-            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                               "No NICs were assigned to our PE.\n");
-        }
-
-        /* No need to report this in a loop - All Devices will have the same perf characteristics.
-         */
-        if (pci_distance_perf[pe_device_distance[mype_array_index]] < pci_distance_perf[PATH_PIX]) {
-            nvshmemi_state->are_nics_ll128_compliant = false;
-            INFO(NVSHMEM_TOPO,
-                 "Our PE is connected to a NIC with pci distance %s."
-                 "this will provide less than optimal performance.\n",
-                 pci_distance_string[pe_device_distance[mype_array_index]]);
+    for (entity_pair_index = 0; entity_pair_index < max_dev_per_entity; entity_pair_index++) {
+        if (entity_selected_devices[my_entity_array_index + entity_pair_index] >= 0) {
+            mydev_index = entity_selected_devices[my_entity_array_index + entity_pair_index];
+            device_arr[entity_pair_index] = mydev_index;
+            my_entity_device_count++;
+            INFO(NVSHMEM_TOPO, "Our %s selected device %d, shared by %d %ss.\n", entity_name,
+                 mydev_index, used_devs[mydev_index], entity_name);
         }
     }
+
+    if (my_entity_device_count == 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "No NICs were assigned to our %s.\n", entity_name);
+    }
+
+    /* No need to report this in a loop - All Devices will have the same perf characteristics. */
+    if (pci_distance_perf[entity_device_distance[my_entity_array_index]] <
+        pci_distance_perf[PATH_PIX]) {
+        nvshmemi_state->are_nics_ll128_compliant = false;
+        INFO(NVSHMEM_TOPO,
+             "Our %s is connected to a NIC with pci distance %s."
+             " this will provide less than optimal performance.\n",
+             entity_name, pci_distance_string[entity_device_distance[my_entity_array_index]]);
+    }
+
+    status = NVSHMEMX_SUCCESS;
 
 out:
     if (dev_info_all) {
         free(dev_info_all);
     }
 
-    if (gpu_info_all) {
-        free(gpu_info_all);
-    }
+    entity_dev_pairs.clear();
 
-    if (cuda_device_paths) {
-        for (i = 0; i < n_pes_node; i++) {
-            if (cuda_device_paths[i]) {
-                free(cuda_device_paths[i]);
-            }
-        }
-        free(cuda_device_paths);
-    }
-
-    pe_dev_pairs.clear();
-
-    if (pe_selected_devices) {
-        free(pe_selected_devices);
+    if (entity_selected_devices) {
+        free(entity_selected_devices);
     }
 
     if (used_devs) {
         free(used_devs);
     }
 
-    if (pe_device_distance) {
-        free(pe_device_distance);
+    if (entity_device_distance) {
+        free(entity_device_distance);
     }
 
+    return status;
+}
+
+int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
+                                     struct nvshmem_transport *tcurr) {
+    char **entity_paths = NULL;
+    int n_entities = 0;
+    int my_entity_index = -1;
+    int status;
+    const char *entity_name = "PE";
+
+    status = collect_local_pe_paths(&entity_paths, &n_entities, &my_entity_index);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "failed to collect topology assignment entities\n");
+
+    status = select_devices_by_distance(device_arr, max_dev_per_pe, tcurr, entity_paths, n_entities,
+                                        my_entity_index, entity_name);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "failed to select devices by distance\n");
+
+out:
+    free_entity_paths(entity_paths, n_entities);
     return status;
 }
 
