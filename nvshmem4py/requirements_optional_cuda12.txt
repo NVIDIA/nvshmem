@@ -12,3 +12,5 @@ ml-dtypes
 # But older ones that pytorch pulls in will not.
 nvidia-cuda-nvcc-cu12
 nvidia-nvjitlink-cu12
+# CUDA 12 toolkit for numbast header search at runtime
+cuda-toolkit[cudart,nvcc,curand,cccl,nvvm]==12.*

@@ -10,3 +10,5 @@ ml-dtypes
 # These are cu13 packages
 nvidia-cuda-nvcc
 nvidia-nvjitlink
+# CUDA 13 toolkit for numbast header search at runtime
+cuda-toolkit[cudart,nvcc,curand,cccl,nvvm]==13.*
