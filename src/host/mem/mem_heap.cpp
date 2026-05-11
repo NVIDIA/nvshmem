@@ -2490,6 +2490,9 @@ void nvshmem_free(void *ptr) {
 }
 
 void *nvshmemi_ptr(const void *ptr, int pe) {
+    if (ptr == NULL) {
+        return NULL;
+    }
     /* nvshmem_ptr can be queried before init/finalize; return NULL instead of dereferencing
      * uninitialized global state. */
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_initialized || nvshmemi_state == NULL ||
