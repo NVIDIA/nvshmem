@@ -99,10 +99,14 @@ CUDA_NVCC="${CUDA_NVCC:-$CUDA_HOME/bin/nvcc}"
 if [ ! -x "$CUDA_NVCC" ]; then
     CUDA_NVCC="$(command -v nvcc 2>/dev/null || true)"
 fi
-CUDA_MAJOR=$("$CUDA_NVCC" --version 2>/dev/null | grep release | sed 's/.*release \([0-9]*\)\..*/\1/')
-if [ -z "$CUDA_MAJOR" ]; then
+CUDA_VERSION_SHORT=$("$CUDA_NVCC" --version 2>/dev/null | grep release | sed 's/.*release \([0-9]*\)\.\([0-9]*\).*/\1.\2/')
+CUDA_MAJOR="${CUDA_VERSION_SHORT%%.*}"
+CUDA_MINOR="${CUDA_VERSION_SHORT#*.}"
+if [ -z "$CUDA_VERSION_SHORT" ] || [ "$CUDA_MAJOR" = "$CUDA_VERSION_SHORT" ] || [ -z "$CUDA_MINOR" ]; then
     CUDA_MAJOR=12
-    echo "WARNING: Could not detect CUDA version, defaulting to $CUDA_MAJOR"
+    CUDA_MINOR=8
+    CUDA_VERSION_SHORT="${CUDA_MAJOR}.${CUDA_MINOR}"
+    echo "WARNING: Could not detect CUDA version, defaulting to $CUDA_VERSION_SHORT"
 fi
 
 ########################################
@@ -144,7 +148,7 @@ if [ -z "$WHEEL" ]; then
     done
 fi
 
-echo "Python: cp${PY_VER} ($PYTHON_BIN), CUDA: ${CUDA_MAJOR}"
+echo "Python: cp${PY_VER} ($PYTHON_BIN), CUDA: ${CUDA_VERSION_SHORT}"
 
 if [ -z "$WHEEL" ]; then
     echo "ERROR: No nvshmem4py wheel found for cp${PY_VER} cu${CUDA_MAJOR} in $DIST_DIR"
@@ -227,13 +231,15 @@ pip install cupy-cuda${CUDA_MAJOR}x
 pip install cffi
 pip install "numba-cuda[cu${CUDA_MAJOR}]>=0.28.0"
 pip install "cuda.core>=0.5.0"
-# Keep PyTorch on the CUDA 12 optional stack used by nvshmem4py.  The cu121
-# wheel hard-pins older CUDA runtime/NVRTC packages into the venv, which then
-# mix with CUDA 12.8 NVSHMEM bitcode and newer cuda-python packages.
-TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu129}"
+# Keep PyTorch and the CUDA component wheels on the same CUDA minor version
+# as the toolkit used to build the NVSHMEM bitcode.  Mixing CUDA 12.8 toolkit
+# libraries with CUDA 12.9 Torch dependencies can break torch import.
+CUDA_PKG_VERSION_SPEC="${CUDA_PKG_VERSION_SPEC:-${CUDA_VERSION_SHORT}.*}"
+TORCH_CUDA_FLAVOR="${TORCH_CUDA_FLAVOR:-cu${CUDA_MAJOR}${CUDA_MINOR}}"
+TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/${TORCH_CUDA_FLAVOR}}"
 TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
 pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
-pip install nvidia-cuda-nvcc-cu${CUDA_MAJOR}
+pip install "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
 pip install pytest pytest-mpi
 pip install nvidia-cutlass-dsl==4.4.2
 pip install yapf
@@ -241,14 +247,14 @@ pip install yapf
 # Some torch wheels can still pull incompatible CUDA component wheels into the
 # venv.  That mixes runtime/NVRTC/nvJitLink pieces across CUDA releases and
 # fails in the Numba/CuTe JIT path.  Force the versioned CUDA package family
-# back to the selected CUDA major after PyTorch is installed.
+# back to the selected CUDA minor after PyTorch is installed.
 pip uninstall -y nvidia-nvjitlink 2>/dev/null || true
 pip install --force-reinstall \
-    "nvidia-cuda-runtime-cu${CUDA_MAJOR}" \
-    "nvidia-cuda-nvrtc-cu${CUDA_MAJOR}" \
-    "nvidia-cuda-nvcc-cu${CUDA_MAJOR}" \
-    "nvidia-cuda-cccl-cu${CUDA_MAJOR}" \
-    "nvidia-nvjitlink-cu${CUDA_MAJOR}"
+    "nvidia-cuda-runtime-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
+    "nvidia-cuda-nvrtc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
+    "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
+    "nvidia-cuda-cccl-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
+    "nvidia-nvjitlink-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
 
 date
 

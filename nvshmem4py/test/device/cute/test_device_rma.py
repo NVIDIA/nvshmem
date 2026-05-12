@@ -18,22 +18,9 @@ _KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
 
 rma_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
 
-_TORCH_DTYPE_MAP = {
-    "float32": torch.float32,
-    "float64": torch.float64,
-    "int8": torch.int8,
-    "int16": torch.int16,
-    "int32": torch.int32,
-    "int64": torch.int64,
-    "uint8": torch.uint8,
-    "uint16": getattr(torch, "uint16", None),
-    "uint32": getattr(torch, "uint32", None),
-    "uint64": getattr(torch, "uint64", None),
-}
-
 
 def _torch_dtype(dtype_name):
-    dtype = _TORCH_DTYPE_MAP.get(dtype_name)
+    dtype = getattr(torch, dtype_name, None)
     if dtype is None:
         pytest.skip(f"Torch dtype not supported for CuTe test: {dtype_name}")
     return dtype
