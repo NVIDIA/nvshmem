@@ -549,8 +549,8 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
             status = fi_recv(ep.endpoint, (void *)op, NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                              fi_mr_desc(state->mrs[domain_idx]), FI_ADDR_UNSPEC,
                              &op->ofi_context);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "Unable to re-post recv.\n");
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Unable to re-post recv.\n");
         } else {
             state->op_queue[domain_idx]->putToRecv(op, NVSHMEMT_LIBFABRIC_RECV_TYPE_NOT_ACK);
         }
@@ -1672,18 +1672,17 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         if (libfabric_state->prov_infos[i]->domain_attr->mr_mode & FI_MR_ENDPOINT) {
             status =
                 fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &fabric_handle->hdls[i].mr);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "Error registering memory region: %s\n",
-                                  fi_strerror(status * -1));
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Error registering memory region.\n");
 
             status =
                 fi_mr_bind(fabric_handle->hdls[i].mr, &libfabric_state->eps[i]->endpoint->fid, 0);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "Error binding MR to EP %zu: %s\n", i, fi_strerror(status * -1));
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Error binding MR to EP %zu.\n", i);
 
             status = fi_mr_enable(fabric_handle->hdls[i].mr);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Error enabling MR: %s\n",
-                                  fi_strerror(status * -1));
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Error enabling MR.\n");
 
             fabric_handle->hdls[i].key = fi_mr_key(fabric_handle->hdls[i].mr);
             fabric_handle->hdls[i].local_desc = fi_mr_desc(fabric_handle->hdls[i].mr);
@@ -1691,9 +1690,8 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
             struct fid_mr *mr;
 
             status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &mr);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "Error registering memory region: %s\n",
-                                  fi_strerror(status * -1));
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Error registering memory region.\n");
 
             fabric_handle->hdls[i].mr = mr;
             fabric_handle->hdls[i].key = fi_mr_key(mr);
@@ -1952,15 +1950,13 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
             t->max_op_len = state->prov_infos[i]->ep_attr->max_msg_size;
 
         status = fi_fabric(state->prov_infos[i]->fabric_attr, &fabric, NULL);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Failed to allocate fabric: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Failed to allocate fabric.\n");
         state->fabrics.push_back(fabric);
 
         status = fi_domain(fabric, state->prov_infos[i], &domain, NULL);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Failed to allocate domain: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Failed to allocate domain.\n");
         state->domains.push_back(domain);
 
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
@@ -1975,9 +1971,8 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
             status =
                 fi_mr_reg(domain, state->recv_buf[i].data(), (num_sends + num_recvs) * elem_size,
                           FI_SEND | FI_RECV | FI_WRITE, 0, 0, 0, &mr, NULL);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "Failed to register EFA msg buffer: %d: %s\n", status,
-                                  fi_strerror(status * -1));
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Failed to register EFA msg buffer.\n");
             state->mrs.push_back(mr);
 
             /* Locking is not required for auto progress, required for manual progress */
@@ -1989,9 +1984,8 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         }
 
         status = fi_av_open(domain, &av_attr, &address, NULL);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Failed to allocate address vector: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Failed to allocate address vector.\n");
         state->addresses.push_back(address);
 
         /* Create endpoint resources */
@@ -2017,14 +2011,12 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         state->eps[i]->completed_ops = 0;
 
         status = fi_cq_open(domain, &cq_attr, &state->eps[i]->cq, NULL);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to open completion queue for endpoint: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to open completion queue for endpoint.\n");
 
         status = fi_endpoint(domain, state->prov_infos[i], &state->eps[i]->endpoint, NULL);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to allocate endpoint: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to allocate endpoint.\n");
 
         /* FI_OPT_CUDA_API_PERMITTED was introduced in libfabric 1.18.0 */
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
@@ -2037,17 +2029,16 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
                     "not implemented.\n Not setting. This is expected for libfabric "
                     "versions < 1.18.\n");
             } else if (status) {
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "Unable to set endpoint CUDA API status: %d: %s\n", status,
-                                      fi_strerror(status * -1));
+                NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(
+                    status, NVSHMEMX_ERROR_INTERNAL, out,
+                    "Unable to set endpoint CUDA API status.\n");
             }
         }
 
         /* Bind resources to EP */
         status = fi_ep_bind(state->eps[i]->endpoint, &state->addresses[i]->fid, 0);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to bind endpoint to address vector: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to bind endpoint to address vector.\n");
 
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_VERBS) {
             flags = FI_SELECTIVE_COMPLETION | FI_TRANSMIT | FI_RECV;
@@ -2065,31 +2056,27 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         }
 
         status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->cq->fid, flags);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to bind endpoint to completion queue: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to bind endpoint to completion queue.\n");
 
         status = fi_enable(state->eps[i]->endpoint);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to enable endpoint: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to enable endpoint.\n");
 
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
             std::vector<nvshmemt_libfabric_gdr_op_ctx_t> &op = state->recv_buf[i];
             for (size_t j = 0; j < num_recvs_per_ep; j++) {
                 status = fi_recv(state->eps[i]->endpoint, &op[j], NVSHMEM_STAGED_AMO_WIREDATA_SIZE,
                                  fi_mr_desc(state->mrs[i]), FI_ADDR_UNSPEC, &op[j].ofi_context);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "Unable to post recv to ep. Error: %d: %s\n", status,
-                                      fi_strerror(status * -1));
+                NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                                "Unable to post recv to ep.\n");
             }
         }
 
         status =
             fi_getname(&state->eps[i]->endpoint->fid, local_ep_names[i].name.data(), &ep_namelen);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Unable to get name for endpoint: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to get name for endpoint.\n");
         if (ep_namelen > NVSHMEMT_LIBFABRIC_EP_LEN) {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Name of EP is too long.");
         }
@@ -2114,10 +2101,12 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     for (size_t i = 0; i < state->domains.size(); i++) {
         for (size_t j = 0; j < total_num_eps; j++) {
             status = fi_av_insert(state->addresses[i], &all_ep_names[j], 1, NULL, 0, NULL);
-            if (status < 1) {
+            if (status < 0) {
+                NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                                "Unable to insert ep names in address vector.\n");
+            } else if (status == 0) {
                 NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                   "Unable to insert ep names in address vector: %d: %s\n", status,
-                                   fi_strerror(status * -1));
+                                   "Unable to insert ep names in address vector.\n");
             }
 
             status = NVSHMEMX_SUCCESS;
@@ -2139,9 +2128,8 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         for (size_t i = 0; i < state->domains.size(); i++) {
             status = fi_mr_reg(state->domains[i], state->local_amo_ack_dev_buf.get(), sizeof(int),
                                FI_REMOTE_WRITE, 0, 0, 0, &mr, NULL);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "Failed to register EFA msg buffer: %d: %s\n", status,
-                                  fi_strerror(status * -1));
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Failed to register EFA msg buffer.\n");
             state->peer_amo_ack_rkeys[t->my_pe * state->domains.size() + i] = fi_mr_key(mr);
             state->mr_staged_amo_acks.push_back(mr);
         }
@@ -2359,9 +2347,8 @@ static int nvshmemi_libfabric_init_state(nvshmem_transport_t t, nvshmemt_libfabr
         status = fi_getinfo(FI_VERSION(NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER),
                             NULL, NULL, 0, hints.get(), &all_infos);
 
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "No providers matched fi_getinfo query: %d: %s\n", status,
-                              fi_strerror(status * -1));
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "No providers matched fi_getinfo query.\n");
     }
 
     state->all_prov_info = all_infos;
