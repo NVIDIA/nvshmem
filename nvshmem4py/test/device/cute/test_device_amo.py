@@ -17,6 +17,8 @@ import nvshmem.core.interop.cute as cute_interop
 from test_device_rma import (
     _compile_kernel,
     _nvshmem_stream,
+)
+from utils import (
     _fill_cute_tensor,
     _read_cute_tensor,
     _cute_dtype,

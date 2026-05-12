@@ -28,19 +28,14 @@ try:
         torch.float64: np.float64,
         torch.int8: np.int8,
         torch.uint8: np.uint8,
+        torch.uint16: np.uint16,
+        torch.uint32: np.uint32,
+        torch.uint64: np.uint64,
         torch.int16: np.int16,
         torch.int32: np.int32,
         torch.int64: np.int64,
         torch.bool: np.bool_,
     }
-    for _torch_name, _np_dtype in (
-        ("uint16", np.uint16),
-        ("uint32", np.uint32),
-        ("uint64", np.uint64),
-    ):
-        _torch_dtype = getattr(torch, _torch_name, None)
-        if _torch_dtype is not None:
-            torch_to_numpy[_torch_dtype] = _np_dtype
     _torch_enabled = True
 except:
     torch_to_numpy = None
