@@ -987,6 +987,7 @@ set(INC_EXPORTS
     host/nvshmem_macros.h
     host/nvshmemx_api.h
     host/nvshmemx_coll_api.h
+    non_abi/nvshmemi_cccl_compat.h
     non_abi/nvshmemx_error.h
     non_abi/nvshmem_build_options.h
     non_abi/nvshmem_version.h
