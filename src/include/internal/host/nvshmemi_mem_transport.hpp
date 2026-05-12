@@ -68,8 +68,8 @@ class nvshmemi_mem_p2p_transport final {
         return nvshmemi_handle_accessible_pes_.at(pe) != 0;
     }
 
-    // This function allows to p2p connected PE list is all P2P PEs could not be mapped to VA
-    void update_p2p_connected_pes(const std::vector<uint8_t> &updated_connected_pes) {
+    // This function allows to modify the P2P-connected PE list if not all P2P PEs could be mapped to VA
+    void update_nvl_connected_pes(const std::vector<uint8_t> &updated_connected_pes) {
         nvshmemi_nvl_connected_pes_.clear();
         nvshmemi_nvl_connected_pes_ = updated_connected_pes;
     }

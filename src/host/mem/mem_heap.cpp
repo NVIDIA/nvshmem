@@ -679,7 +679,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
                 "Mapping PEs within rack (count: %ld) will exceed maximum VA space: %lld \n",
                 state_->p2p_transport->get_nvls_connected_pes_count(), NVSHMEMI_MAX_VA_SIZE);
 
-        state_->p2p_transport->update_p2p_connected_pes(
+        state_->p2p_transport->update_nvl_connected_pes(
             state_->p2p_transport->get_nvls_connected_pes());
 
         // Updating p2p_npes to reflect the PEs within rack
