@@ -19,6 +19,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <memory>
+#include <utility>
 #include <errno.h>
 #ifdef NVSHMEM_X86_64
 #include <immintrin.h>  // IWYU pragma: keep
@@ -88,6 +89,14 @@ enum class progress_type {
     All,
 };
 
+enum class completion_kind {
+    Invalid,
+    PutSignalWrite,
+    PutSignalSignal,
+    StandalonePut,
+    StandalonePutAckReq,
+};
+
 /* Internal global variables */
 #ifdef NVSHMEM_USE_GDRCOPY
 struct gdrcopy_function_table gdrcopy_ftable;
@@ -139,6 +148,23 @@ nvshmemt_libfabric_imm_cq_data_hdr_t get_write_with_imm_hdr(uint64_t imm_data) {
                                                   NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_SHIFT);
 }
 
+completion_kind classify_completion(const struct fi_cq_data_entry &entry) {
+    if (!(entry.flags & FI_REMOTE_CQ_DATA)) {
+        return completion_kind::PutSignalSignal;
+    }
+
+    switch (get_write_with_imm_hdr(entry.data)) {
+        case NVSHMEMT_LIBFABRIC_IMM_PUT_SIGNAL_SEQ:
+            return completion_kind::PutSignalWrite;
+        case NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT:
+            return completion_kind::StandalonePut;
+        case NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ:
+            return completion_kind::StandalonePutAckReq;
+        default:
+            return completion_kind::Invalid;
+    }
+}
+
 /*
  * TODO: Make the following more general by using fid_nic field in fi_info.
  */
@@ -180,6 +206,31 @@ static inline nvshmemt_libfabric_signal_state_t &get_signal_state(
         return state->host_signal_state;
     }
     return state->proxy_signal_state;
+}
+
+static std::pair<bool, int> accumulate_signal(signal_seq_map &completion_map, uint32_t seq,
+                                              nvshmemt_libfabric_gdr_op_ctx_t *op, int delta) {
+    int status = NVSHMEMX_SUCCESS;
+    bool drainable = false;
+    nvshmemt_libfabric_comp_entry_t fresh_entry =
+        nvshmemt_libfabric_signal_comp_entry{op, delta};
+
+    auto insert_result = completion_map.insert(seq, fresh_entry);
+    auto *signal_entry =
+        std::get_if<nvshmemt_libfabric_signal_comp_entry>(insert_result.first);
+
+    NVSHMEMI_NULL_ERROR_JMP(signal_entry, status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "unexpected ack entry while accumulating signal completion.\n");
+
+    if (!insert_result.second) {
+        if (op != nullptr) signal_entry->op = op;
+        signal_entry->progress_count += delta;
+    }
+
+    drainable = (signal_entry->progress_count == 0);
+
+out:
+    return {drainable, status};
 }
 
 int get_pci_path(int dev, char **pci_path, nvshmem_transport_t t) {
@@ -772,16 +823,17 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
                                                     const struct fi_cq_data_entry &entry,
                                                     const fi_addr_t &addr) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
-    nvshmemt_libfabric_gdr_signal_op *sig_op = NULL;
-    nvshmemt_libfabric_gdr_op_ctx_t *op = NULL;
-    bool is_write_comp = entry.flags & FI_REMOTE_CQ_DATA;
-    int status = 0, progress_count, pe;
+    int status = 0, pe;
     uint32_t map_seq;
-    bool is_standalone_put = false;
-    bool is_put_ack_req = false;
+    completion_kind kind = classify_completion(entry);
 
     nvshmemt_libfabric_signal_state_t &signal_state = get_signal_state(libfabric_state, ep);
     signal_seq_map *completion_map = nullptr;
+
+    if (unlikely(kind == completion_kind::Invalid)) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "Received staged completion with invalid header type.\n");
+    }
 
     if (unlikely(addr == FI_ADDR_NOTAVAIL)) {
         status = -1;
@@ -792,69 +844,71 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
     pe = convert_addr_to_pe(libfabric_state, ep, addr);
     completion_map = &signal_state.proxy_put_signal_comp_map[pe];
 
-    if (is_write_comp) {
-        nvshmemt_libfabric_imm_cq_data_hdr_t imm_header = get_write_with_imm_hdr(entry.data);
-        is_standalone_put = (imm_header == NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT ||
-                             imm_header == NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ);
-        is_put_ack_req = (imm_header == NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ);
-        map_seq =
-            static_cast<uint32_t>(entry.data) & NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
-        progress_count = -1;
-    } else {
-        sig_op = reinterpret_cast<nvshmemt_libfabric_gdr_signal_op *>(
-            container_of(entry.op_context, nvshmemt_libfabric_gdr_op_ctx_t, ofi_context));
-        map_seq = sig_op->sequence_count;
-        progress_count = static_cast<int>(sig_op->num_writes);
+    switch (kind) {
+        case completion_kind::StandalonePutAckReq: {
+            map_seq =
+                static_cast<uint32_t>(entry.data) & NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
 
-        /* The EFA provider has an inline send size of 32 bytes.
-         * The gdr atomic fi_send message is 72 bytes and does not
-         * fit inside the efa_provider's 32 byte inline send window.
-         * Hence, we send a 32 byte nvshmemt_libfabric_gdr_signal_op over the wire,
-         * and re-arrange the memory in-place to allow for re-use of the gdr atomic
-         * code.
-         */
-        op = inplace_copy_sig_op_to_gdr_op(sig_op, ep.ep_index);
-    }
-
-    if (is_write_comp && is_put_ack_req) {
-        nvshmemt_libfabric_comp_entry_t ack_comp_entry =
-            nvshmemt_libfabric_put_ack_entry{addr, ep.ep_index};
-        auto insert_result = completion_map->insert(map_seq, ack_comp_entry);
-        if (!insert_result.second) {
-            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                               "duplicate ack entry while processing put completion.\n");
-        }
-    } else {
-        auto *slot = completion_map->find(map_seq);
-        auto *signal_entry =
-            slot ? std::get_if<nvshmemt_libfabric_signal_comp_entry>(slot) : nullptr;
-        if (signal_entry) {
-            if (!is_write_comp) signal_entry->op = op;
-            signal_entry->progress_count += progress_count;
-        } else if (slot) {
-            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                               "unexpected ack entry while processing signal completion.\n");
-        } else {
-            nvshmemt_libfabric_signal_comp_entry sig_comp_entry;
-            if (is_standalone_put) {
-                sig_comp_entry.op = nullptr;
-                sig_comp_entry.progress_count = 0;
-            } else {
-                sig_comp_entry.op = op;
-                sig_comp_entry.progress_count = progress_count;
-            }
-            auto insert_result = completion_map->insert(map_seq, sig_comp_entry);
+            nvshmemt_libfabric_comp_entry_t ack_comp_entry =
+                nvshmemt_libfabric_put_ack_entry{addr, ep.ep_index};
+            auto insert_result = completion_map->insert(map_seq, ack_comp_entry);
             if (!insert_result.second) {
                 NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                   "duplicate signal entry while processing signal completion.\n");
+                                   "duplicate ack entry while processing put completion.\n");
             }
-            signal_entry = std::get_if<nvshmemt_libfabric_signal_comp_entry>(insert_result.first);
-            assert(signal_entry);
+            break;
         }
 
-        if (signal_entry->progress_count != 0) {
-            goto out;
+        case completion_kind::StandalonePut: {
+            map_seq =
+                static_cast<uint32_t>(entry.data) & NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
+            const auto [drainable, signal_status] =
+                accumulate_signal(*completion_map, map_seq, nullptr, 0);
+            status = signal_status;
+            if (status) goto out;
+            if (!drainable) goto out;
+            break;
         }
+
+        case completion_kind::PutSignalWrite: {
+            map_seq =
+                static_cast<uint32_t>(entry.data) & NVSHMEM_STAGED_AMO_PUT_SIGNAL_SEQ_CNTR_BIT_MASK;
+            const auto [drainable, signal_status] =
+                accumulate_signal(*completion_map, map_seq, nullptr, -1);
+            status = signal_status;
+            if (status) goto out;
+            if (!drainable) goto out;
+            break;
+        }
+
+        case completion_kind::PutSignalSignal: {
+            nvshmemt_libfabric_gdr_signal_op *sig_op =
+                reinterpret_cast<nvshmemt_libfabric_gdr_signal_op *>(
+                    container_of(entry.op_context, nvshmemt_libfabric_gdr_op_ctx_t, ofi_context));
+            map_seq = sig_op->sequence_count;
+
+            /* The EFA provider has an inline send size of 32 bytes.
+             * The gdr atomic fi_send message is 72 bytes and does not
+             * fit inside the efa_provider's 32 byte inline send window.
+             * Hence, we send a 32 byte nvshmemt_libfabric_gdr_signal_op over the wire,
+             * and re-arrange the memory in-place to allow for re-use of the gdr atomic
+             * code.
+             */
+            nvshmemt_libfabric_gdr_op_ctx_t *op =
+                inplace_copy_sig_op_to_gdr_op(sig_op, ep.ep_index);
+            const auto [drainable, signal_status] =
+                accumulate_signal(*completion_map, map_seq, op,
+                                  static_cast<int>(sig_op->num_writes));
+            status = signal_status;
+            if (status) goto out;
+            if (!drainable) goto out;
+            break;
+        }
+
+        case completion_kind::Invalid:
+            assert(false && "invalid completion kind should be handled before dispatch");
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                               "Received staged completion with invalid header type.\n");
     }
 
     {
