@@ -122,6 +122,10 @@ static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_ind
 
 namespace {
 /* Internal functions */
+static inline nvshmemt_libfabric_state_t *get_libfabric_state(nvshmem_transport_t transport) {
+    return static_cast<nvshmemt_libfabric_state_t *>(transport->state);
+}
+
 int get_next_ep(nvshmemt_libfabric_state_t *state, int qp_index) {
     if (qp_index == NVSHMEMX_QP_HOST) {
         return 0; /* Currently only 1 EP defined for the host */
@@ -181,7 +185,7 @@ static inline nvshmemt_libfabric_signal_state_t &get_signal_state(
 int get_pci_path(int dev, char **pci_path, nvshmem_transport_t t) {
     int status = NVSHMEMX_SUCCESS;
     const char *nic_name, *nic_class;
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)t->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
 
     if ((libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_VERBS) ||
         (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA)) {
@@ -262,7 +266,7 @@ int gdrcopy_amo_ack(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t
                     fi_addr_t dest_addr, uint32_t sequence_count, int pe,
                     nvshmemt_libfabric_gdr_op_ctx_t **send_elems,
                     nvshmemt_libfabric_imm_cq_data_hdr_t ack_header) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_gdr_op_ctx_t *resp_op = NULL;
     uint64_t num_retries = 0;
     int status;
@@ -294,7 +298,7 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
     T old_value, new_value = {};
     uint64_t num_retries = 0;
     int send_elems_index = 0;
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_gdr_send_amo_op_t *received_op = &(op->send_amo);
     nvshmemt_libfabric_gdr_op_ctx_t *resp_op = NULL;
     nvshmemt_libfabric_memhandle_info_t *handle_info;
@@ -471,7 +475,7 @@ static inline bool is_signal_only_op(nvshmemi_amo_t op) {
 static inline int nvshmemt_libfabric_gdr_process_ack(nvshmem_transport_t transport,
                                                      nvshmemt_libfabric_gdr_op_ctx_t *op) {
     nvshmemt_libfabric_gdr_ret_amo_op_t *ret = &op->ret_amo;
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_memhandle_info_t *handle_info;
     g_elem_t *elem;
     void *valid_cpu_ptr;
@@ -499,7 +503,7 @@ static int nvshmemt_libfabric_gdr_process_completion(nvshmem_transport_t transpo
                                                      const fi_addr_t &addr) {
     int status = 0;
     nvshmemt_libfabric_gdr_op_ctx_t *op;
-    nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *state = get_libfabric_state(transport);
     int domain_idx = ep.domain_index;
 
     /* Write w/imm doesn't have op->op_context, must be checked first */
@@ -560,7 +564,7 @@ out:
 }
 
 static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, int ep_idx) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[ep_idx]);
     int status = 0;
 
@@ -615,7 +619,7 @@ static int nvshmemt_libfabric_process_completion(nvshmem_transport_t transport, 
  * (this is the path used by try_again from inside gdr_process_amos).
  */
 static int drain_completions(nvshmem_transport_t transport, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     int ep_start_idx;
     int ep_end_idx;
     int status = 0;
@@ -658,7 +662,7 @@ out:
  * retries from there call drain_completions directly via try_again.
  */
 static int nvshmemt_libfabric_progress(nvshmem_transport_t transport, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     int status = drain_completions(transport, qp_index);
     if (status) return status;
 
@@ -706,7 +710,7 @@ out:
 }
 
 static int nvshmemt_libfabric_gdr_process_amos(nvshmem_transport_t transport, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_gdr_op_ctx_t *op;
     nvshmemt_libfabric_gdr_op_ctx_t *send_elems[2];
     size_t num_retries = 0;
@@ -767,7 +771,7 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
                                                     nvshmemt_libfabric_endpoint_t &ep,
                                                     const struct fi_cq_data_entry &entry,
                                                     const fi_addr_t &addr) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_gdr_signal_op *sig_op = NULL;
     nvshmemt_libfabric_gdr_op_ctx_t *op = NULL;
     bool is_write_comp = entry.flags & FI_REMOTE_CQ_DATA;
@@ -909,7 +913,7 @@ out:
 }
 
 static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     int ep_start_idx;
     int ep_end_idx;
     int status = 0;
@@ -960,7 +964,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
                                        uint32_t *imm_data, nvshmemt_libfabric_endpoint_t &ep) {
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle = NULL;
     void *local_mr_desc = NULL;
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     struct iovec p_op_l_iov;
     struct fi_msg_rma p_op_msg;
     struct fi_rma_iov p_op_r_iov;
@@ -1091,7 +1095,7 @@ out:
 static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                   rma_memdesc_t *remote, rma_memdesc_t *local,
                                   rma_bytesdesc_t bytesdesc, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     uint32_t imm_data_val = 0;
     uint32_t *imm_data = NULL;
     int status = 0;
@@ -1137,7 +1141,7 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
 static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int pe, void *curetptr,
                                       amo_verb_t verb, amo_memdesc_t *remote,
                                       amo_bytesdesc_t bytesdesc, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     uint64_t num_retries = 0;
     int target_ep, ep_idx, domain_idx;
     int status = 0;
@@ -1208,7 +1212,7 @@ out:
 static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, void * /*curetptr*/,
                                   amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                                   int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle = NULL, *local_handle = NULL;
     struct fi_msg_atomic amo_msg;
     struct fi_ioc fi_local_iov;
@@ -1360,7 +1364,7 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
                                          amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                                          int /*qp_index*/, uint32_t sequence_count,
                                          uint16_t num_writes, nvshmemt_libfabric_endpoint_t &ep) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)transport->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(transport);
     nvshmemt_libfabric_gdr_op_ctx_t *context;
     nvshmemt_libfabric_gdr_signal_op_t *signal;
     uint64_t num_retries = 0;
@@ -1418,7 +1422,7 @@ static int nvshmemt_libfabric_put_signal_unordered(struct nvshmem_transport *tcu
                                                    std::vector<rma_bytesdesc_t> &write_bytes_desc,
                                                    amo_verb_t sig_verb, amo_memdesc_t *sig_target,
                                                    amo_bytesdesc_t sig_bytes_desc, int qp_index) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     uint32_t sequence_count = 0;
     int status = 0;
 
@@ -1466,7 +1470,7 @@ out:
 }
 
 static int nvshmemt_libfabric_enforce_cst(struct nvshmem_transport *tcurr) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)tcurr->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     uint64_t num_retries = 0;
     int qp_index;
     int domain_idx;
@@ -1546,7 +1550,7 @@ skip:
 
 static int nvshmemt_libfabric_release_mem_handle(nvshmem_mem_handle_t *mem_handle,
                                                  nvshmem_transport_t t) {
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)t->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
     nvshmemt_libfabric_mem_handle_t *fabric_handle;
     void *curr_ptr;
     int status = 0;
@@ -1602,7 +1606,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
                                              size_t length, nvshmem_transport_t t,
                                              bool local_only) {
     nvshmemt_libfabric_mem_handle_t *fabric_handle;
-    nvshmemt_libfabric_state_t *libfabric_state = (nvshmemt_libfabric_state_t *)t->state;
+    nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
     cudaPointerAttributes attr = {};
     struct fi_mr_attr mr_attr;
     struct iovec mr_iovec;
@@ -1802,7 +1806,7 @@ static void nvshmemt_libfabric_cleanup_signal_ordering_state(nvshmemt_libfabric_
 static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
                                                 int num_selected_devs, int * /*out_qp_indices*/,
                                                 int /*num_qps*/) {
-    nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)t->state;
+    nvshmemt_libfabric_state_t *state = get_libfabric_state(t);
     std::vector<nvshmemt_libfabric_ep_name_t> all_ep_names;
     std::vector<nvshmemt_libfabric_ep_name_t> local_ep_names;
     struct fi_info *current_info;
@@ -2190,7 +2194,7 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
 
     /* Take ownership of the state so destruction runs automatically at function exit. */
     std::unique_ptr<nvshmemt_libfabric_state_t> libfabric_state_owner(
-        static_cast<nvshmemt_libfabric_state_t *>(transport->state));
+        get_libfabric_state(transport));
     transport->state = nullptr;
     nvshmemt_libfabric_state_t *libfabric_state = libfabric_state_owner.get();
 
