@@ -176,9 +176,14 @@ NVSHMEMI_ENV_DEF(GPUNETIO_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPOR
                  "- gpu: use GPU SMs, regular DB.\n"
                  "- gpu_sm_bf: use GPU SMs, BlueFlame DB.\n"
                  "- cpu: use CPU.")
-NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
-                 "Number of RC QPs per peer PE used in GPU-initiated communication transport. "
-                 "(default 2). ")
+NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_GPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of GPU-data-path RC QPs per peer PE in the GPUNetIO transport "
+                 "(default 2). Only takes effect when NVSHMEM_GPUNETIO_ENABLE_GDAKI=1. "
+                 "Otherwise, the GPU data path is disabled and this value is ignored.")
+NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_CPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of CPU-data-path RC QPs per peer PE in the GPUNetIO transport "
+                 "(default 2). The CPU data path is always active and does not require GDAKI. "
+                 "This value must be > 0.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_REQUESTS_IN_BATCH, int, 32, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of requests to be batched before submitting to the NIC. "
                  "It will be rounded up to the nearest power of 2. "
@@ -186,8 +191,9 @@ NVSHMEMI_ENV_DEF(GPUNETIO_NUM_REQUESTS_IN_BATCH, int, 32, NVSHMEMI_ENV_CAT_TRANS
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_FETCH_SLOTS_PER_RC, int, 1024, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of internal buffer slots for fetch operations for each RC QP. "
                  "It will be rounded up to the nearest power of 2.")
-NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_ORDERING_SEMANTIC, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
-                 "Set to enable ordering semantic for DDP (Direct Data Placement) mode for GPUNetIO.")
+NVSHMEMI_ENV_DEF(
+    GPUNETIO_ENABLE_ORDERING_SEMANTIC, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+    "Set to enable ordering semantic for DDP (Direct Data Placement) mode for GPUNetIO.")
 #endif
 
 #endif
