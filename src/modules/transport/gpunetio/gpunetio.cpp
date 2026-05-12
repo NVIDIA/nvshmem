@@ -278,6 +278,9 @@ struct gpunetio_device {
     // Local RC endpoints for this device, split by data-path kind.
     std::vector<std::unique_ptr<gpunetio_ep>> rc_eps_gpu;
     std::vector<std::unique_ptr<gpunetio_ep>> rc_eps_cpu;
+    // Stable global base for each per-device GPU QP slot, this is required when adding QPs to the
+    // end of the flattened GPU QP array.
+    std::vector<int> gpu_qp_handle_bases;
     // This mutex is required to avoid a race with the progress thread and the QP-specific API
     // reallocating and modifying the rc_eps vectors.
     std::unique_ptr<std::mutex> rc_eps_mtx{new std::mutex()};
@@ -338,7 +341,12 @@ struct nvshmemt_gpunetio_state_t {
     bool connect_endpoints_first_call = false;
     int last_device_index = 0;
     bool has_multiple_cpu_qps = false;
-    int cur_qp_index = 0;
+    int cur_gpu_qp_index = 0;
+    int cur_cpu_qp_index = 0;
+    // Index of the first user CPU QP (after the default QPs)
+    int first_user_cpu_qp = -1;
+    // QP-specific user QPs mapped to device and slot
+    std::vector<std::pair<int, int>> user_cpu_qps;
     int last_num_rcs = 0;
     int qp_depth = 0;
     int num_fetch_slots_per_rc = 0;
@@ -831,6 +839,10 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
     // get first index of additional RC endpoints (within this kind's vector)
     int rc_first_index = num_eps_per_pe * n_pes;
 
+    // Only the first device has a host QP, subsequent don't have one
+    const bool skip_host_slot = (kind == gpunetio_qp_kind::CPU) && (rc_first_index == 0) &&
+                                (this != state_->devices[state_->selected_dev_ids[0]].get());
+
     if (new_num_rc_eps <= 0) {
         return NVSHMEMX_SUCCESS;
     }
@@ -890,6 +902,8 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
 
     INFO(state_->log_level, "Creating %d %s-data-path RC QPs", num_rc_eps_per_pe, kind_str);
     for (int i = 0; i < num_rc_eps_per_pe; i++) {
+        // Only the first device has a host QP, subsequent don't have one
+        if (skip_host_slot && i == 0) continue;
         for (int j = 0; j < n_pes; j++) {
             int dst_pe = (i * n_pes + 1 + mype + j) % n_pes;
             int mapped_i = rc_first_index + i * n_pes + dst_pe;
@@ -926,6 +940,8 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "alltoall of exch_info failed.\n");
 
     for (int i = 0; i < num_rc_eps_per_pe; ++i) {
+        // Mirror the make loop: empty host slot on non-host devices has no EPs to connect.
+        if (skip_host_slot && i == 0) continue;
         for (int j = 0; j < n_pes; ++j) {
             int ep_index = rc_first_index + i * n_pes + j;
             int peer_handle_index = num_rc_eps_per_pe * j + i;
@@ -1002,10 +1018,13 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
         std::lock_guard<std::mutex> lk(*rc_eps_mtx);
         num_eps_per_pe += num_rc_eps_per_pe;
     }
-    // cur_qp_index enumerates slots in the device-visible qp_h/qp_d array, which only holds
-    // GPU-kind QPs. CPU-kind additions must not advance it.
     if (kind == gpunetio_qp_kind::GPU) {
-        state_->cur_qp_index += new_num_rc_eps;
+        for (int i = 0; i < num_rc_eps_per_pe; ++i) {
+            gpu_qp_handle_bases.push_back(state_->cur_gpu_qp_index + i * n_pes);
+        }
+        state_->cur_gpu_qp_index += new_num_rc_eps;
+    } else {
+        state_->cur_cpu_qp_index += new_num_rc_eps;
     }
     // Set global state to skip_cst as soon as one device requires CST
     state_->skip_cst &= (!cst_is_required());
@@ -1428,7 +1447,10 @@ int nvshmemt_gpunetio_state_t::get_cuda_device_id(CUdevice *out) {
 void nvshmemt_gpunetio_state_t::initialize_cache_state() {
     connect_endpoints_first_call = true;
     last_device_index = 0;
-    cur_qp_index = 0;
+    cur_gpu_qp_index = 0;
+    cur_cpu_qp_index = 0;
+    first_user_cpu_qp = -1;
+    user_cpu_qps.clear();
     last_num_rcs = 0;
     qp_h.clear();
 }
@@ -1456,6 +1478,20 @@ int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *
 }
 
 gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_ep(int pe, int qp_index, int n_pes, int mype) {
+    if (qp_index == NVSHMEMX_QP_HOST) {
+        // A single host EP per PE lives on selected_dev_ids[0]; skip the device round-robin
+        int dev_idx = selected_dev_ids[0];
+        return devices[dev_idx]->get_cpu_ep_from_qp_index(pe, qp_index, n_pes, mype);
+    }
+
+    if (qp_index > NVSHMEMX_QP_DEFAULT && first_user_cpu_qp >= 0 && qp_index >= first_user_cpu_qp &&
+        qp_index < cur_cpu_qp_index) {
+        int idx = (qp_index - first_user_cpu_qp) / n_pes;
+        auto [dev, slot] = user_cpu_qps[idx];
+        // Finally return the EP mapped to this index
+        return devices[dev]->rc_eps_cpu[slot * n_pes + pe].get();
+    }
+
     int n_devs = static_cast<int>(selected_dev_ids.size());
     int dev_idx = selected_dev_ids[cpu_dev_rr % n_devs];
     cpu_dev_rr++;
@@ -1474,6 +1510,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
         gpunetio_device *device = devices[dev_idx].get();
         num_rc_handles += device->num_gpu_eps_per_pe * t->n_pes;
     }
+    assert(num_rc_handles == cur_gpu_qp_index);
     INFO(log_level, "num_rc_handles: %d (last_num_rcs: %d)", num_rc_handles, last_num_rcs);
 
     if (num_rc_handles <= 0) {
@@ -1531,6 +1568,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
         int dev_idx = selected_dev_ids[i];
         gpunetio_device *device = devices[dev_idx].get();
         int device_num_eps_per_pe = device->num_gpu_eps_per_pe;
+        assert(static_cast<int>(device->gpu_qp_handle_bases.size()) >= device_num_eps_per_pe);
 
         for (int j = 0; j < device_num_eps_per_pe; ++j) {
             for (int k = 0; k < t->n_pes; ++k) {
@@ -1544,8 +1582,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
                 }
 
                 // Copy to the right index in the qp_h array holding *all* QPs for all devices
-                int global_ep_index =
-                    static_cast<int>(i) * device_num_eps_per_pe * t->n_pes + device_ep_index;
+                int global_ep_index = device->gpu_qp_handle_bases[j] + dst_pe;
                 assert(global_ep_index < num_rc_handles);
 
                 if (global_ep_index < last_num_rcs) {
@@ -1633,17 +1670,19 @@ int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_
                                                 int num_qps) {
     assert(out_qp_indices != nullptr);
 
-    const bool create_gpu = options->GPUNETIO_NUM_RC_PER_PE_GPU > 0;
+    const bool use_gdaki = options->GPUNETIO_ENABLE_GDAKI;
 
     for (int i = 0; i < num_qps; i++) {
-        out_qp_indices[i] = cur_qp_index;
+        out_qp_indices[i] = use_gdaki ? cur_gpu_qp_index : cur_cpu_qp_index;
+        if (!use_gdaki && first_user_cpu_qp < 0) first_user_cpu_qp = cur_cpu_qp_index;
+
         int n_devs_selected = static_cast<int>(selected_dev_ids.size());
         int selected_dev_idx = last_device_index % n_devs_selected;
         int dev_idx = selected_dev_ids[selected_dev_idx];
         int portid = port_ids[selected_dev_idx];
         gpunetio_device &device = *devices[dev_idx];
 
-        if (create_gpu) {
+        if (use_gdaki) {
             int status = device.add_endpoints(t, portid, 1, gpunetio_qp_kind::GPU);
             if (status) {
                 NVSHMEMI_ERROR_PRINT("gpunetio_device::add_endpoints (GPU) failed on QP #%d.\n", i);
@@ -1657,6 +1696,11 @@ int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_
                 return NVSHMEMX_ERROR_INTERNAL;
             }
         }
+
+        if (!use_gdaki) {
+            user_cpu_qps.push_back({dev_idx, device.num_cpu_eps_per_pe - 1});
+        }
+
         if (device.num_default_cpu_eps_per_pe > 1) has_multiple_cpu_qps = true;
         last_device_index++;
     }
@@ -1717,7 +1761,8 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
     }
 
     // Phase 4: GPU setup (only once)
-    setup_gpu_state(t);
+    status = setup_gpu_state(t);
+    if (status) return status;
 
     if (init_dev_cnt < num_selected_devs) {
         NVSHMEMI_WARN_PRINT("Failed to initialize all selected devices. Perf may be limited.\n");
@@ -1775,14 +1820,18 @@ static int nvshmemt_gpunetio_connect_endpoints(nvshmem_transport_t t, int *selec
 }
 
 static int nvshmemt_gpunetio_can_reach_peer(int *access, nvshmem_transport_pe_info * /*peer_info*/,
-                                            nvshmem_transport_t /*t*/) {
-    int status = 0;
+                                            nvshmem_transport_t t) {
+    auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
 
-    *access = NVSHMEM_TRANSPORT_CAP_GPU_WRITE | NVSHMEM_TRANSPORT_CAP_GPU_READ |
-              NVSHMEM_TRANSPORT_CAP_GPU_ATOMICS | NVSHMEM_TRANSPORT_CAP_CPU_WRITE |
-              NVSHMEM_TRANSPORT_CAP_CPU_READ | NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS;
+    *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
+              NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS;
 
-    return status;
+    if (gpunetio_state->options->GPUNETIO_ENABLE_GDAKI) {
+        *access |= NVSHMEM_TRANSPORT_CAP_GPU_WRITE | NVSHMEM_TRANSPORT_CAP_GPU_READ |
+                   NVSHMEM_TRANSPORT_CAP_GPU_ATOMICS;
+    }
+
+    return NVSHMEMX_SUCCESS;
 }
 
 static int nvshmemt_gpunetio_show_info(nvshmem_transport * /*transport*/, int /*style*/) {
@@ -2217,7 +2266,7 @@ static int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle
     return NVSHMEMX_SUCCESS;
 }
 
-// Host-side progress for CPU-proxy QPs
+// Host-side RMA functions: progress, quiet, fence, rma, amo
 
 static int nvshmemt_gpunetio_host_progress(nvshmem_transport_t t) {
     nvshmemt_gpunetio_state_t *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(t->state);
@@ -2232,6 +2281,505 @@ static int nvshmemt_gpunetio_host_progress(nvshmem_transport_t t) {
 static void gpunetio_activate_progress_function(nvshmem_transport_t t) {
     t->host_ops.progress = nvshmemt_gpunetio_host_progress;
     t->no_proxy = false;
+}
+
+static int nvshmemt_gpunetio_host_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
+    auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(tcurr->state);
+    int n_pes = tcurr->n_pes;
+
+    int pe_begin, pe_end;
+    if (pe == NVSHMEMX_PE_ANY) {
+        pe_begin = 0;
+        pe_end = n_pes;
+    } else {
+        pe_begin = pe;
+        pe_end = pe + 1;
+    }
+
+    // User QP: Drain only the specific slot mapped to this QP
+    if (qp_index > NVSHMEMX_QP_DEFAULT && gpunetio_state->first_user_cpu_qp >= 0 &&
+        qp_index >= gpunetio_state->first_user_cpu_qp &&
+        qp_index < gpunetio_state->cur_cpu_qp_index) {
+        // User QP: Calculate from QP index to the vector index of user_cpu_qps
+        int idx = (qp_index - gpunetio_state->first_user_cpu_qp) / n_pes;
+        auto [dev, slot] = gpunetio_state->user_cpu_qps[idx];
+        auto &device = gpunetio_state->devices[dev];
+        // Finally drain the EP mapped to this index
+        for (int pe_idx = pe_begin; pe_idx < pe_end; pe_idx++) {
+            auto &ep = device->rc_eps_cpu[slot * n_pes + pe_idx];
+            if (!ep) continue;
+            while (ep->head_op_id != ep->tail_op_id) {
+                device->cpu_progress_locked();
+            }
+        }
+        return NVSHMEMX_SUCCESS;
+    }
+
+    for (int dev_idx : gpunetio_state->selected_dev_ids) {
+        auto &device = gpunetio_state->devices[dev_idx];
+        int num_default = device->num_default_cpu_eps_per_pe;
+        int num_total = device->num_cpu_eps_per_pe;
+
+        int slot_begin = 0, slot_end = 0;
+        if (qp_index == NVSHMEMX_QP_HOST) {
+            slot_begin = 0;
+            slot_end = 1;
+        } else if (qp_index == NVSHMEMX_QP_DEFAULT) {
+            slot_begin = 1;
+            slot_end = 1 + num_default;
+        } else if (qp_index == NVSHMEMX_QP_ANY) {
+            slot_begin = 1;
+            slot_end = num_total;
+        } else if (qp_index == NVSHMEMX_QP_ALL) {
+            slot_begin = 0;
+            slot_end = num_total;
+        }
+
+        for (int pe_idx = pe_begin; pe_idx < pe_end; pe_idx++) {
+            for (int k = slot_begin; k < slot_end; k++) {
+                auto &ep = device->rc_eps_cpu[k * n_pes + pe_idx];
+                if (!ep) continue;
+                while (ep->head_op_id != ep->tail_op_id) {
+                    device->cpu_progress_locked();
+                }
+            }
+        }
+
+        // Host QP only lives on selected_dev_ids[0], exit early
+        if (qp_index == NVSHMEMX_QP_HOST) break;
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+static int nvshmemt_gpunetio_host_fence(struct nvshmem_transport *tcurr, int pe, int qp_index,
+                                        int is_multi) {
+    auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(tcurr->state);
+    bool fence_required = false;
+    int n_devs = static_cast<int>(gpunetio_state->selected_dev_ids.size());
+
+    if (qp_index == NVSHMEMX_QP_DEFAULT) {
+        fence_required = gpunetio_state->has_multiple_cpu_qps || n_devs > 1;
+    } else if (qp_index == NVSHMEMX_QP_ANY || qp_index == NVSHMEMX_QP_ALL) {
+        fence_required = gpunetio_state->has_multiple_cpu_qps || n_devs > 1 ||
+                         gpunetio_state->first_user_cpu_qp >= 0;
+    }
+
+    if (fence_required || is_multi) {
+        return nvshmemt_gpunetio_host_quiet(tcurr, pe, qp_index);
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
+                                      rma_memdesc_t *remote, rma_memdesc_t *local,
+                                      rma_bytesdesc_t bytesdesc, int qp_index) {
+    auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(tcurr->state);
+    int status = 0;
+
+    gpunetio_ep *ep = gpunetio_state->get_next_cpu_ep(pe, qp_index, tcurr->n_pes, tcurr->my_pe);
+    if (!ep) return NVSHMEMX_SUCCESS;
+
+    auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
+    uint16_t wqe_bb_idx = ep->wqe_bb_idx;
+
+    status = ep->check_poll_avail(false);
+    if (status) return status;
+
+    auto *wqe = reinterpret_cast<gpunetio_rw_wqe *>(
+        qp_cpu->sq_wqe_daddr +
+        (static_cast<uintptr_t>(wqe_bb_idx) & qp_cpu->sq_wqe_mask) * GPUNETIO_WQE_BB);
+    memset(wqe, 0, sizeof(gpunetio_rw_wqe));
+
+    wqe->ctrl.fm_ce_se = GPUNETIO_WQE_CTRL_CQ_UPDATE;
+    size_t wqe_size = sizeof(gpunetio_rw_wqe);
+    wqe->ctrl.qpn_ds = htobe32(static_cast<uint32_t>(wqe_size / GPUNETIO_WQE_DS) |
+                               (static_cast<uint32_t>(qp_cpu->sq_num) << 8));
+
+    if (verb.desc == NVSHMEMI_OP_GET || verb.desc == NVSHMEMI_OP_G) {
+        wqe->ctrl.opmod_idx_opcode = htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_RDMA_READ |
+                                             (static_cast<uint32_t>(wqe_bb_idx) << 8));
+    } else {
+        wqe->ctrl.opmod_idx_opcode = htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_RDMA_WRITE |
+                                             (static_cast<uint32_t>(wqe_bb_idx) << 8));
+    }
+
+    auto *remote_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->handle);
+    wqe->raddr.raddr = htobe64(reinterpret_cast<uintptr_t>(remote->ptr));
+    wqe->raddr.rkey = htobe32(remote_handle->rkey);
+
+    if (verb.desc != NVSHMEMI_OP_P) {
+        assert(bytesdesc.nelems < (UINT32_MAX / bytesdesc.elembytes));
+        wqe->data.data_seg.byte_count =
+            htobe32(static_cast<uint32_t>(bytesdesc.nelems * bytesdesc.elembytes));
+        auto *local_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(local->handle);
+        wqe->data.data_seg.lkey = htobe32(local_handle->lkey);
+        wqe->data.data_seg.addr = htobe64(reinterpret_cast<uintptr_t>(local->ptr));
+    } else {
+        uint32_t bytecount = static_cast<uint32_t>(bytesdesc.nelems * bytesdesc.elembytes);
+        wqe->data.data_inl.byte_count = htobe32(bytecount | 0x80000000);
+        switch (bytecount) {
+            case 8:
+                wqe->data.data_inl.data.data_64 = *static_cast<uint64_t *>(local->ptr);
+                break;
+            case 4:
+                wqe->data.data_inl.data.data_32 = *static_cast<uint32_t *>(local->ptr);
+                break;
+            case 2:
+                wqe->data.data_inl.data.data_16 = *static_cast<uint16_t *>(local->ptr);
+                break;
+            case 1:
+                wqe->data.data_inl.data.data_8 = *static_cast<uint8_t *>(local->ptr);
+                break;
+            default:
+                NVSHMEMI_ERROR_PRINT("Invalid length argument to p: %u\n", bytecount);
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+        }
+    }
+
+    assert(wqe_size <= GPUNETIO_WQE_BB);
+
+    ep->wqe_bb_idx++;
+    gpunetio_cpu_post_send(ep, 1);
+
+    if (!verb.is_nbi && verb.desc != NVSHMEMI_OP_P) {
+        status = ep->check_poll_avail(true);
+        if (status) return status;
+    }
+    return NVSHMEMX_SUCCESS;
+}
+
+// Host-side AMO helpers for CPU data-path QPs
+static int gpunetio_amo_32(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remote) {
+    gpunetio_device *device = ep->device_;
+    auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
+    uint16_t wqe_bb_idx = ep->wqe_bb_idx;
+    uint32_t swap_add_value = static_cast<uint32_t>(remote->val);
+    uint32_t compare = static_cast<uint32_t>(remote->cmp);
+
+    int status = ep->check_poll_avail(false);
+    if (status) return status;
+
+    auto *remote_handle =
+        reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->remote_memdesc.handle);
+
+    auto *wqe = reinterpret_cast<gpunetio_atomic_32_wqe *>(
+        qp_cpu->sq_wqe_daddr +
+        (static_cast<uintptr_t>(wqe_bb_idx) & qp_cpu->sq_wqe_mask) * GPUNETIO_WQE_BB);
+    memset(wqe, 0, sizeof(gpunetio_atomic_32_wqe));
+
+    size_t wqe_size = sizeof(gpunetio_atomic_32_wqe);
+    wqe->ctrl.fm_ce_se = GPUNETIO_WQE_CTRL_CQ_UPDATE;
+    wqe->ctrl.qpn_ds = htobe32(static_cast<uint32_t>(wqe_size / GPUNETIO_WQE_DS) |
+                               (static_cast<uint32_t>(qp_cpu->sq_num) << 8));
+    wqe->raddr.raddr = htobe64(reinterpret_cast<uintptr_t>(remote->remote_memdesc.ptr));
+    wqe->raddr.rkey = htobe32(remote_handle->rkey);
+
+    wqe->data.byte_count = htobe32(4);
+    if (verb.desc < NVSHMEMI_AMO_END_OF_NONFETCH) {
+        wqe->data.lkey = htobe32(device->dummy_mr_lkey);
+        wqe->data.addr = htobe64(reinterpret_cast<uintptr_t>(device->dummy_mr_buf));
+    } else {
+        auto *ret_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->ret_handle);
+        assert(ret_handle != nullptr);
+        wqe->data.lkey = htobe32(ret_handle->lkey);
+        wqe->data.addr = htobe64(reinterpret_cast<uintptr_t>(remote->retptr));
+    }
+
+    switch (verb.desc) {
+        case NVSHMEMI_AMO_FETCH_INC:
+        case NVSHMEMI_AMO_INC:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = htobe32(1U);
+            wqe->fa_seg.field_boundary = 0;
+            break;
+
+        case NVSHMEMI_AMO_SIGNAL:
+        case NVSHMEMI_AMO_SIGNAL_SET:
+        case NVSHMEMI_AMO_SWAP:
+        case NVSHMEMI_AMO_SET:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->cs_seg.swap_data = htobe32(swap_add_value);
+            wqe->cs_seg.compare_data = 0;
+            wqe->cs_seg.compare_mask = 0;
+            wqe->cs_seg.swap_mask = UINT32_MAX;
+            break;
+
+        case NVSHMEMI_AMO_SIGNAL_ADD:
+        case NVSHMEMI_AMO_ADD:
+        case NVSHMEMI_AMO_FETCH_ADD:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = htobe32(swap_add_value);
+            wqe->fa_seg.field_boundary = 0;
+            break;
+
+        case NVSHMEMI_AMO_FETCH_AND:
+        case NVSHMEMI_AMO_AND:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->cs_seg.swap_data = htobe32(swap_add_value);
+            wqe->cs_seg.compare_data = 0;
+            wqe->cs_seg.compare_mask = 0;
+            wqe->cs_seg.swap_mask = htobe32(~swap_add_value);
+            break;
+
+        case NVSHMEMI_AMO_FETCH_OR:
+        case NVSHMEMI_AMO_OR:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->cs_seg.swap_data = htobe32(swap_add_value);
+            wqe->cs_seg.compare_data = 0;
+            wqe->cs_seg.compare_mask = 0;
+            wqe->cs_seg.swap_mask = htobe32(swap_add_value);
+            break;
+
+        case NVSHMEMI_AMO_FETCH_XOR:
+        case NVSHMEMI_AMO_XOR:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = htobe32(swap_add_value);
+            wqe->fa_seg.field_boundary = UINT32_MAX;
+            break;
+
+        case NVSHMEMI_AMO_FETCH:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = 0;
+            wqe->fa_seg.field_boundary = 0;
+            break;
+
+        case NVSHMEMI_AMO_COMPARE_SWAP:
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_4_BYTE_EXT_AMO_OPMOD);
+            wqe->cs_seg.swap_data = htobe32(swap_add_value);
+            wqe->cs_seg.compare_data = htobe32(compare);
+            wqe->cs_seg.compare_mask = UINT32_MAX;
+            wqe->cs_seg.swap_mask = UINT32_MAX;
+            break;
+
+        default:
+            NVSHMEMI_ERROR_PRINT("gpunetio AMO 32: unsupported opcode %d\n", verb.desc);
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    assert(wqe_size <= GPUNETIO_WQE_BB);
+    ep->wqe_bb_idx++;
+    gpunetio_cpu_post_send(ep, 1);
+
+    // TODO: re-enable fetch-atomic completion wait (disabled to match IBDEVX behavior)
+    // if (verb.desc >= NVSHMEMI_AMO_END_OF_NONFETCH) {
+    //     status = ep->check_poll_avail(true);
+    //     if (status) return status;
+    // }
+    return NVSHMEMX_SUCCESS;
+}
+
+static int gpunetio_amo_64(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remote) {
+    gpunetio_device *device = ep->device_;
+    auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
+    uint16_t wqe_bb_idx = ep->wqe_bb_idx;
+
+    int status = ep->check_poll_avail(false, /*min_free_slots=*/2);
+    if (status) return status;
+
+    auto *remote_handle =
+        reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->remote_memdesc.handle);
+
+    doca_gpunetio_ib_mlx5_wqe_ctrl_seg *ctrl = nullptr;
+    doca_gpunetio_ib_mlx5_wqe_raddr_seg *raddr = nullptr;
+    doca_gpunetio_ib_mlx5_wqe_data_seg *data = nullptr;
+    size_t wqe_size = 0;
+
+    auto *wqe_1 = reinterpret_cast<void *>(
+        qp_cpu->sq_wqe_daddr +
+        (static_cast<uintptr_t>(wqe_bb_idx) & qp_cpu->sq_wqe_mask) * GPUNETIO_WQE_BB);
+    auto *wqe_2 = reinterpret_cast<void *>(
+        qp_cpu->sq_wqe_daddr +
+        (static_cast<uintptr_t>(wqe_bb_idx + 1) & qp_cpu->sq_wqe_mask) * GPUNETIO_WQE_BB);
+
+    memset(wqe_1, 0, GPUNETIO_WQE_BB);
+    memset(wqe_2, 0, GPUNETIO_WQE_BB);
+
+    ctrl = reinterpret_cast<doca_gpunetio_ib_mlx5_wqe_ctrl_seg *>(wqe_1);
+    raddr = reinterpret_cast<doca_gpunetio_ib_mlx5_wqe_raddr_seg *>(
+        static_cast<char *>(wqe_1) + sizeof(doca_gpunetio_ib_mlx5_wqe_ctrl_seg));
+
+    auto *cs_data = reinterpret_cast<gpunetio_atomic_64_masked_compare_swap_seg *>(
+        static_cast<char *>(wqe_1) + sizeof(doca_gpunetio_ib_mlx5_wqe_ctrl_seg) +
+        sizeof(doca_gpunetio_ib_mlx5_wqe_raddr_seg));
+    auto *cs_mask = reinterpret_cast<gpunetio_atomic_64_masked_compare_swap_seg *>(
+        reinterpret_cast<char *>(cs_data) + sizeof(gpunetio_atomic_64_masked_compare_swap_seg));
+
+    raddr->raddr = htobe64(reinterpret_cast<uintptr_t>(remote->remote_memdesc.ptr));
+    raddr->rkey = htobe32(remote_handle->rkey);
+
+    switch (verb.desc) {
+        case NVSHMEMI_AMO_FETCH_INC:
+        case NVSHMEMI_AMO_INC: {
+            auto *wqe = reinterpret_cast<gpunetio_atomic_64_masked_fa_wqe *>(wqe_1);
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = htobe64(1ULL);
+            wqe->fa_seg.field_boundary = 0;
+            data = &wqe->data;
+            wqe_size = sizeof(gpunetio_atomic_64_masked_fa_wqe);
+            break;
+        }
+
+        case NVSHMEMI_AMO_SIGNAL:
+        case NVSHMEMI_AMO_SIGNAL_SET:
+        case NVSHMEMI_AMO_SWAP:
+        case NVSHMEMI_AMO_SET:
+            ctrl->opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            cs_data->swap = htobe64(remote->val);
+            cs_data->compare = 0;
+            cs_mask->compare = 0;
+            cs_mask->swap = UINT64_MAX;
+            data = reinterpret_cast<doca_gpunetio_ib_mlx5_wqe_data_seg *>(wqe_2);
+            wqe_size = 80;
+            break;
+
+        case NVSHMEMI_AMO_SIGNAL_ADD:
+        case NVSHMEMI_AMO_ADD:
+        case NVSHMEMI_AMO_FETCH_ADD: {
+            auto *wqe = reinterpret_cast<gpunetio_atomic_64_masked_fa_wqe *>(wqe_1);
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = htobe64(remote->val);
+            wqe->fa_seg.field_boundary = 0;
+            data = &wqe->data;
+            wqe_size = sizeof(gpunetio_atomic_64_masked_fa_wqe);
+            break;
+        }
+
+        case NVSHMEMI_AMO_FETCH_AND:
+        case NVSHMEMI_AMO_AND:
+            ctrl->opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            cs_data->swap = htobe64(remote->val);
+            cs_data->compare = 0;
+            cs_mask->compare = 0;
+            cs_mask->swap = htobe64(~remote->val);
+            data = reinterpret_cast<doca_gpunetio_ib_mlx5_wqe_data_seg *>(wqe_2);
+            wqe_size = 80;
+            break;
+
+        case NVSHMEMI_AMO_FETCH_OR:
+        case NVSHMEMI_AMO_OR:
+            ctrl->opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            cs_data->swap = htobe64(remote->val);
+            cs_data->compare = 0;
+            cs_mask->compare = 0;
+            cs_mask->swap = htobe64(remote->val);
+            data = reinterpret_cast<doca_gpunetio_ib_mlx5_wqe_data_seg *>(wqe_2);
+            wqe_size = 80;
+            break;
+
+        case NVSHMEMI_AMO_FETCH_XOR:
+        case NVSHMEMI_AMO_XOR: {
+            auto *wqe = reinterpret_cast<gpunetio_atomic_64_masked_fa_wqe *>(wqe_1);
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = htobe64(remote->val);
+            wqe->fa_seg.field_boundary = UINT64_MAX;
+            data = &wqe->data;
+            wqe_size = sizeof(gpunetio_atomic_64_masked_fa_wqe);
+            break;
+        }
+
+        case NVSHMEMI_AMO_FETCH: {
+            auto *wqe = reinterpret_cast<gpunetio_atomic_64_masked_fa_wqe *>(wqe_1);
+            wqe->ctrl.opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_FA |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            wqe->fa_seg.add_data = 0;
+            wqe->fa_seg.field_boundary = 0;
+            data = &wqe->data;
+            wqe_size = sizeof(gpunetio_atomic_64_masked_fa_wqe);
+            break;
+        }
+
+        case NVSHMEMI_AMO_COMPARE_SWAP:
+            ctrl->opmod_idx_opcode =
+                htobe32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
+                        (static_cast<uint32_t>(wqe_bb_idx) << 8) | GPUNETIO_8_BYTE_EXT_AMO_OPMOD);
+            cs_data->swap = htobe64(remote->val);
+            cs_data->compare = htobe64(remote->cmp);
+            cs_mask->compare = UINT64_MAX;
+            cs_mask->swap = UINT64_MAX;
+            data = reinterpret_cast<doca_gpunetio_ib_mlx5_wqe_data_seg *>(wqe_2);
+            wqe_size = 80;
+            break;
+
+        default:
+            NVSHMEMI_ERROR_PRINT("gpunetio AMO 64: unsupported opcode %d\n", verb.desc);
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    data->byte_count = htobe32(8);
+    if (verb.desc < NVSHMEMI_AMO_END_OF_NONFETCH) {
+        data->lkey = htobe32(device->dummy_mr_lkey);
+        data->addr = htobe64(reinterpret_cast<uintptr_t>(device->dummy_mr_buf));
+    } else {
+        auto *ret_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->ret_handle);
+        assert(ret_handle != nullptr);
+        data->lkey = htobe32(ret_handle->lkey);
+        data->addr = htobe64(reinterpret_cast<uintptr_t>(remote->retptr));
+    }
+
+    ctrl->fm_ce_se = GPUNETIO_WQE_CTRL_CQ_UPDATE;
+    ctrl->qpn_ds = htobe32(static_cast<uint32_t>(wqe_size / GPUNETIO_WQE_DS) |
+                           (static_cast<uint32_t>(qp_cpu->sq_num) << 8));
+
+    if (wqe_size > GPUNETIO_WQE_BB) {
+        assert(wqe_size <= GPUNETIO_WQE_BB * 2);
+        ep->wqe_bb_idx += 2;
+        gpunetio_cpu_post_send(ep, 2);
+    } else {
+        ep->wqe_bb_idx++;
+        gpunetio_cpu_post_send(ep, 1);
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+static int nvshmemt_gpunetio_host_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr*/,
+                                      amo_verb_t verb, amo_memdesc_t *remote,
+                                      amo_bytesdesc_t bytesdesc, int qp_index) {
+    auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(tcurr->state);
+
+    gpunetio_ep *ep = gpunetio_state->get_next_cpu_ep(pe, qp_index, tcurr->n_pes, tcurr->my_pe);
+    if (!ep) return NVSHMEMX_SUCCESS;
+
+    if (bytesdesc.elembytes == 4) {
+        return gpunetio_amo_32(ep, verb, remote);
+    } else if (bytesdesc.elembytes == 8) {
+        return gpunetio_amo_64(ep, verb, remote);
+    } else {
+        NVSHMEMI_ERROR_PRINT("gpunetio AMO: invalid atomic length %d bytes.\n",
+                             bytesdesc.elembytes);
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 }
 
 int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api_version) {
@@ -2276,14 +2824,14 @@ int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api
     transport->host_ops.release_mem_handle = nvshmemt_gpunetio_release_mem_handle;
     transport->host_ops.show_info = nvshmemt_gpunetio_show_info;
     transport->host_ops.finalize = nvshmemt_gpunetio_finalize;
-    transport->host_ops.rma = nullptr;
-    transport->host_ops.amo = nullptr;
-    transport->host_ops.fence = nullptr;
-    transport->host_ops.quiet = nullptr;
+    transport->host_ops.rma = nvshmemt_gpunetio_host_rma;
+    transport->host_ops.amo = nvshmemt_gpunetio_host_amo;
+    transport->host_ops.fence = nvshmemt_gpunetio_host_fence;
+    transport->host_ops.quiet = nvshmemt_gpunetio_host_quiet;
     transport->host_ops.enforce_cst = nullptr;
     transport->host_ops.add_device_remote_mem_handles =
         nvshmemt_gpunetio_add_device_remote_mem_handles;
-    transport->host_ops.put_signal = nullptr;
+    transport->host_ops.put_signal = nvshmemt_put_signal;
     // We update the progress function in connect_endpoints when we get the NIC handlers from
     // GPUNetIO for the different QPs.
     transport->host_ops.progress = nullptr;
@@ -2291,7 +2839,9 @@ int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
     transport->is_successfully_initialized = true;
     transport->max_op_len = 1ULL << 30;
-    transport->type = NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO;
+    transport->type = options->GPUNETIO_ENABLE_GDAKI ? NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO
+                                                     : NVSHMEM_TRANSPORT_LIB_CODE_NONE;
+    transport->atomics_complete_on_quiet = true;
     transport->api_version = api_version < NVSHMEM_TRANSPORT_INTERFACE_VERSION
                                  ? api_version
                                  : NVSHMEM_TRANSPORT_INTERFACE_VERSION;
