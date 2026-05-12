@@ -6,9 +6,7 @@
 #define _NVSHMEM_TILE_UTILS_CUH_
 
 #include <cuda_runtime.h>
-#include "cuda/std/tuple"
-#include "cuda/std/type_traits"
-#include "cuda/std/utility"
+#include "non_abi/nvshmemi_cccl_compat.h"
 #include "host/nvshmem_macros.h"
 #include "device_host/nvshmem_tensor.h"
 #ifdef CUTLASS_ENABLED

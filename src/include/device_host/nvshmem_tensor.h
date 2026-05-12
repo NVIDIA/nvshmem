@@ -28,8 +28,7 @@
 #include "non_abi/nvshmemx_error.h"
 #include "device_host/nvshmem_types.h"
 #include "device_host_transport/nvshmem_constants.h"
-#include "cuda/std/tuple"
-#include "cuda/std/type_traits"
+#include "non_abi/nvshmemi_cccl_compat.h"
 
 template <int v>
 struct ConstInt : cuda::std::integral_constant<int, v> {
