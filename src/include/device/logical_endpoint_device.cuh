@@ -31,7 +31,7 @@ __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int pe)
 #endif
 }
 
-#if defined(CFT_HANDLES_ENABLED) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(CFT_HANDLES_ENABLED) && defined(PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
     return nvshmemi_ld_and_check_valid_le_id(pe);
