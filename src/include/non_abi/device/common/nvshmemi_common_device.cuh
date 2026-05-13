@@ -517,9 +517,10 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
     if (smem_size <= kReserve) return -1;
     uint64_t *mbar = nvshmemi_tma_barrier_slot(base, 0);
     char *data_buf = nvshmemi_tma_data_buffer(base);
-    size_t tile = nvshmemi_tma_align_down_16(smem_size - kReserve);
-    if (tile > (size_t)UINT32_MAX) tile = nvshmemi_tma_align_down_16((size_t)UINT32_MAX);
-    if (tile == 0) return -1;
+    size_t tile_size = nvshmemi_tma_align_down_16(smem_size - kReserve);
+    if (tile_size == 0) return -1;
+    /* CTA shared memory is far below 4 GiB; TMA byte counts are 32-bit. */
+    const uint32_t tile = (uint32_t)tile_size;
 
     bool is_leader = (SCOPE == NVSHMEMI_THREADGROUP_THREAD) ? true : nvshmemi_tma_elect_warp();
 
@@ -534,8 +535,7 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
         int phase = 0;
 
         while (remaining > 0) {
-            uint32_t this_chunk =
-                remaining < tile ? (uint32_t)remaining : (uint32_t)tile;
+            uint32_t this_chunk = remaining < (size_t)tile ? (uint32_t)remaining : tile;
 
             /* Inbound TMA: arrive + expect_tx, issue load, wait for completion. */
             nvshmemi_tma_mbarrier_arrive_expect_tx(mbar, this_chunk);
@@ -612,9 +612,10 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
      * occupy the remainder, split in half. */
     constexpr size_t kReserve = (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES;
     if (smem_size <= kReserve) return -1;
-    size_t tile = nvshmemi_tma_align_down_16((smem_size - kReserve) / 2);
-    if (tile > (size_t)UINT32_MAX) tile = nvshmemi_tma_align_down_16((size_t)UINT32_MAX);
-    if (tile == 0) return -1;
+    size_t tile_size = nvshmemi_tma_align_down_16((smem_size - kReserve) / 2);
+    if (tile_size == 0) return -1;
+    /* CTA shared memory is far below 4 GiB; TMA byte counts are 32-bit. */
+    const uint32_t tile = (uint32_t)tile_size;
 
     unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
     if (block_threads < 64) return -1;
@@ -634,7 +635,7 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
     bool is_load = (warp_id == 0 && lane == 0);
     bool is_store = (warp_id == 1 && lane == 0);
 
-    size_t n_chunks = (bytes + tile - 1) / tile;
+    size_t n_chunks = (bytes + (size_t)tile - 1) / (size_t)tile;
 
     /* Init all 4 barriers once.  Fence so async proxy sees init before any
      * cp.async.bulk arrives. */
@@ -650,8 +651,8 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
     for (size_t i = 0; i < n_chunks; i++) {
         int slot = (int)(i & 1);
         int phase = (int)((i >> 1) & 1);
-        size_t off = i * tile;
-        uint32_t chunk = (uint32_t)min(bytes - off, tile);
+        size_t off = i * (size_t)tile;
+        uint32_t chunk = bytes - off < (size_t)tile ? (uint32_t)(bytes - off) : tile;
 
         if (is_load) {
             /* First 2 iters (i=0,1): each slot's done_bar is fresh (parity 0),

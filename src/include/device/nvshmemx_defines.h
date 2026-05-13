@@ -79,7 +79,7 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  *
  * Note: grids larger than NVSHMEMI_TMA_MAX_BLOCKS CTAs are supported, but
  * CTAs with block_id >= NVSHMEMI_TMA_MAX_BLOCKS cannot register and will
- * fall back to P2P stores (a warning is printed by block 0 thread 0).
+ * fall back to P2P stores.
  *
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
@@ -93,26 +93,14 @@ __device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
     uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
     size_t *smem_size = nvshmemi_device_state_d.tma_smem_size;
     if (bases == NULL || (size_t)block_id >= nvshmemi_device_state_d.tma_smem_bases_len) {
-        /* Grid is larger than NVSHMEMI_TMA_MAX_BLOCKS; this CTA cannot use TMA.
-         * Print a one-shot warning from block 0 thread 0 to avoid log spam. */
-        if (block_id == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-            printf("NVSHMEM WARNING: grid has %d CTAs but TMA smem table only holds %zu entries; "
-                   "CTAs with block_id >= %zu will use P2P stores instead of TMA.\n",
-                   gridDim.x * gridDim.y * gridDim.z,
-                   nvshmemi_device_state_d.tma_smem_bases_len,
-                   nvshmemi_device_state_d.tma_smem_bases_len);
+        /* Grid is larger than NVSHMEMI_TMA_MAX_BLOCKS; this CTA cannot use TMA. */
         return;
     }
     /* Size must be at least NVSHMEMI_TMA_BARRIER_REGION_BYTES — we reserve the
      * first 512 bytes for mbarriers/TMA descriptors.  A smaller allocation
      * can't hold our barriers, so don't register this CTA; it falls back to
-     * P2P stores for all puts.  One-shot warning from block 0 thread 0. */
+     * P2P stores for all puts. */
     if (size < (size_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES) {
-        if (block_id == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-            printf("NVSHMEM WARNING: nvshmemx_give_smem called with %zu bytes, but TMA "
-                   "requires at least %d bytes for barriers.  TMA path will not be "
-                   "taken.  Use nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM) or larger.\n",
-                   size, NVSHMEMI_TMA_BARRIER_REGION_BYTES);
         return;
     }
     /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
