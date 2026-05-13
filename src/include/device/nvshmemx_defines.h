@@ -76,6 +76,9 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * pointers and a 16-byte multiple transfer size.  Operations that do not meet
  * those routing constraints preserve the regular put contract by falling back
  * to P2P stores.
+ * Block-scoped TMA puts from global-memory sources use a double-buffered
+ * staging path that additionally requires at least two full warps in the CTA;
+ * smaller CTAs fall back to P2P stores.
  *
  * Note: grids larger than NVSHMEMI_TMA_MAX_BLOCKS CTAs are supported, but
  * CTAs with block_id >= NVSHMEMI_TMA_MAX_BLOCKS cannot register and will

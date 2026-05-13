@@ -569,7 +569,11 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst,
 
 /*
  * nvshmemi_memcpy_tma_global_global_block - Block-scoped, warp-specialized
- * DOUBLE-BUFFERED local-gmem to remote-gmem TMA put.  Requires >= 2 warps.
+ * DOUBLE-BUFFERED local-gmem to remote-gmem TMA put.
+ *
+ * Requires at least two full warps (2 * warpSize threads).  Thread- and
+ * warp-scoped primitives must route to nvshmemi_memcpy_tma_global_global_single;
+ * only block-scoped primitives may use this helper.
  *
  * Combines warp specialization (load warp vs store warp) with smem
  * double-buffering to overlap inbound TMA of buffer N+1 with outbound TMA of
@@ -618,13 +622,14 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
     const uint32_t tile = (uint32_t)tile_size;
 
     unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
-    if (block_threads < 64) return -1;
+    if (block_threads < 2 * warpSize) return -1;
 
     unsigned int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
-    unsigned int warp_id = tid / warpSize;
-    unsigned int lane = tid % warpSize;
-    bool is_load = (warp_id == 0 && lane == 0);
-    bool is_store = (warp_id == 1 && lane == 0);
+    /* CUDA forms warps from the linear CTA rank, with threadIdx.x varying
+     * fastest. These fixed ranks are warp 0 lane 0 and warp 1 lane 0 for any
+     * CTA shape with at least two full warps. */
+    bool is_load = (tid == 0);
+    bool is_store = (tid == warpSize);
 
     /* Init all 4 barriers once.  Fence so async proxy sees init before any
      * cp.async.bulk arrives. */
