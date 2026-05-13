@@ -39,14 +39,16 @@ class smem_registration_guard {
  * original benchmark with no smem involvement; TMA stays off even if
  * NVSHMEM_TMA_POLICY=ENABLE/FORCE, because the dispatch is gated on
  * give_smem registration.  Selected at runtime via --use_smem (default: 1). */
+/* These kernels are launched with 1D grids and blocks.  Keep generic index
+ * flattening if that changes. */
 template <SMEMToggle SMEM_MODE>
-__global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+__global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int len, int pe,
                          int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    int tid = threadIdx.x;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
@@ -86,13 +88,13 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
 }
 
 template <SMEMToggle SMEM_MODE>
-__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe,
                         int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    int tid = threadIdx.x;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
     int nwarps_per_block = blockDim.x * blockDim.y * blockDim.z / warpSize;
@@ -138,16 +140,16 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t
 }
 
 template <SMEMToggle SMEM_MODE>
-__global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+__global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int len, int pe,
                           int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    int tid = threadIdx.x;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
-    int nthreads_per_block = blockDim.x * blockDim.y * blockDim.z;
+    int nthreads_per_block = blockDim.x;
     size_t put_size_per_block = len / nblocks;
     size_t put_size_per_thread = put_size_per_block / nthreads_per_block;
 
@@ -187,7 +189,7 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
     __syncthreads();
 }
 
-typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
+typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe,
                         int iter, int smem_size);
 
 static SMEMToggle parse_smem_enabled() {
