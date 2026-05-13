@@ -29,6 +29,7 @@ ExternalProject_Add(nvshmem_device_project
                     CMAKE_ARGS  -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                                 -DNVSHMEM_PREFIX=${NVSHMEM_PREFIX}
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
+                                -DNVSHMEM_VERBOSE=${NVSHMEM_VERBOSE}
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
                                 -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
