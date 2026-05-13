@@ -468,7 +468,9 @@ class threadSafeOpQueue {
                 return 0;
             }
             *recv_elem = other_recv.front();
-            if ((&((*recv_elem)->send_amo))->op > NVSHMEMI_AMO_END_OF_NONFETCH) {
+            nvshmemi_amo_t amo_op = static_cast<nvshmemi_amo_t>(
+                static_cast<int>((*recv_elem)->send_amo.op) & ~NVSHMEMI_AMO_FLOAT_BIT);
+            if (amo_op > NVSHMEMI_AMO_END_OF_NONFETCH) {
                 num_sends = 2;
             } else {
                 num_sends = 1;

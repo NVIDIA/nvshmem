@@ -1441,7 +1441,8 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
 
     signal = (nvshmemt_libfabric_gdr_signal_op_t *)context;
     signal->type = NVSHMEMT_LIBFABRIC_MATCH;
-    signal->op = static_cast<uint8_t>(verb.desc);
+    signal->op =
+        static_cast<uint8_t>(verb.desc | (verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0));
     signal->elem_size = static_cast<uint8_t>(bytesdesc.elembytes);
     signal->sequence_count = sequence_count;
     signal->target_addr = remote->remote_memdesc.ptr;
