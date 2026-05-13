@@ -620,58 +620,81 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst,
     unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
     if (block_threads < 64) return -1;
 
-    cuda::std::array<uint64_t *, 2> ready_bar = {nvshmemi_tma_barrier_slot(base, 0),
-                                                 nvshmemi_tma_barrier_slot(base, 1)};
-    cuda::std::array<uint64_t *, 2> done_bar = {nvshmemi_tma_barrier_slot(base, 2),
-                                                nvshmemi_tma_barrier_slot(base, 3)};
-    char *data_buf = nvshmemi_tma_data_buffer(base);
-    cuda::std::array<char *, 2> bufs = {data_buf, data_buf + tile};
-    cuda::std::array<unsigned int, 2> data_addrs = {
-        nvshmemi_tma_cvta_to_shared(bufs[0]), nvshmemi_tma_cvta_to_shared(bufs[1])};
-
     unsigned int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     unsigned int warp_id = tid / warpSize;
     unsigned int lane = tid % warpSize;
     bool is_load = (warp_id == 0 && lane == 0);
     bool is_store = (warp_id == 1 && lane == 0);
 
-    size_t n_chunks = (bytes + (size_t)tile - 1) / (size_t)tile;
-
     /* Init all 4 barriers once.  Fence so async proxy sees init before any
      * cp.async.bulk arrives. */
     if (is_load) {
-        nvshmemi_tma_mbarrier_init(ready_bar[0]);
-        nvshmemi_tma_mbarrier_init(ready_bar[1]);
-        nvshmemi_tma_mbarrier_init(done_bar[0]);
-        nvshmemi_tma_mbarrier_init(done_bar[1]);
+        nvshmemi_tma_mbarrier_init(nvshmemi_tma_barrier_slot(base, 0));
+        nvshmemi_tma_mbarrier_init(nvshmemi_tma_barrier_slot(base, 1));
+        nvshmemi_tma_mbarrier_init(nvshmemi_tma_barrier_slot(base, 2));
+        nvshmemi_tma_mbarrier_init(nvshmemi_tma_barrier_slot(base, 3));
         nvshmemi_tma_fence_proxy_async_shared_cta();
     }
     __syncthreads();
 
-    for (size_t i = 0; i < n_chunks; i++) {
-        int slot = (int)(i & 1);
-        int phase = (int)((i >> 1) & 1);
-        size_t off = i * (size_t)tile;
-        uint32_t chunk = bytes - off < (size_t)tile ? (uint32_t)(bytes - off) : tile;
+    if (is_load) {
+        uint64_t *ready0 = nvshmemi_tma_barrier_slot(base, 0);
+        uint64_t *ready1 = nvshmemi_tma_barrier_slot(base, 1);
+        uint64_t *done0 = nvshmemi_tma_barrier_slot(base, 2);
+        uint64_t *done1 = nvshmemi_tma_barrier_slot(base, 3);
+        char *buf0 = nvshmemi_tma_data_buffer(base);
+        char *buf1 = buf0 + tile;
+        const char *src = (const char *)gmem_src;
+        size_t remaining = bytes;
 
-        if (is_load) {
+        for (size_t i = 0; remaining > 0; i++) {
+            int slot = (int)(i & 1);
+            int phase = (int)((i >> 1) & 1);
+            uint32_t chunk = remaining < (size_t)tile ? (uint32_t)remaining : tile;
+            uint64_t *ready = slot ? ready1 : ready0;
+            uint64_t *done = slot ? done1 : done0;
+            char *buf = slot ? buf1 : buf0;
+
             /* First 2 iters (i=0,1): each slot's done_bar is fresh (parity 0),
              * try_wait with phase^1=1 returns immediately.  After that the
              * store warp has flipped done_bar[slot] and we wait for the next
              * flip. */
-            if (i >= 2) nvshmemi_tma_mbarrier_try_wait(done_bar[slot], phase ^ 1);
-            const char *src_p = (const char *)gmem_src + off;
-            nvshmemi_tma_bulk_global_to_shared(bufs[slot], src_p, chunk, ready_bar[slot]);
-            nvshmemi_tma_mbarrier_arrive_expect_tx(ready_bar[slot], chunk);
+            if (i >= 2) nvshmemi_tma_mbarrier_try_wait(done, phase ^ 1);
+            nvshmemi_tma_bulk_global_to_shared(buf, src, chunk, ready);
+            nvshmemi_tma_mbarrier_arrive_expect_tx(ready, chunk);
+
+            src += chunk;
+            remaining -= chunk;
         }
-        if (is_store) {
-            nvshmemi_tma_mbarrier_try_wait(ready_bar[slot], phase);
-            char *dst_p = (char *)gmem_dst + off;
-            nvshmemi_tma_bulk_shared_to_global(dst_p, data_addrs[slot], chunk);
+    } else if (is_store) {
+        uint64_t *ready0 = nvshmemi_tma_barrier_slot(base, 0);
+        uint64_t *ready1 = nvshmemi_tma_barrier_slot(base, 1);
+        uint64_t *done0 = nvshmemi_tma_barrier_slot(base, 2);
+        uint64_t *done1 = nvshmemi_tma_barrier_slot(base, 3);
+        char *buf0 = nvshmemi_tma_data_buffer(base);
+        char *buf1 = buf0 + tile;
+        unsigned int data_addr0 = nvshmemi_tma_cvta_to_shared(buf0);
+        unsigned int data_addr1 = nvshmemi_tma_cvta_to_shared(buf1);
+        char *dst = (char *)gmem_dst;
+        size_t remaining = bytes;
+
+        for (size_t i = 0; remaining > 0; i++) {
+            int slot = (int)(i & 1);
+            int phase = (int)((i >> 1) & 1);
+            uint32_t chunk = remaining < (size_t)tile ? (uint32_t)remaining : tile;
+            uint64_t *ready = slot ? ready1 : ready0;
+            uint64_t *done = slot ? done1 : done0;
+            unsigned int data_addr = slot ? data_addr1 : data_addr0;
+
+            nvshmemi_tma_mbarrier_try_wait(ready, phase);
+            nvshmemi_tma_bulk_shared_to_global(dst, data_addr, chunk);
             nvshmemi_tma_bulk_commit_group();
             nvshmemi_tma_bulk_wait_group_read_0();
-            nvshmemi_tma_mbarrier_arrive_expect_tx(done_bar[slot], 1);
-            nvshmemi_tma_mbarrier_complete_tx(done_bar[slot], 1);
+            nvshmemi_tma_mbarrier_arrive_expect_tx(done, 1);
+            nvshmemi_tma_mbarrier_complete_tx(done, 1);
+
+            dst += chunk;
+            remaining -= chunk;
         }
     }
 
