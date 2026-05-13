@@ -218,11 +218,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "" FORCE)
   endif()
 
-  if(CUDAToolkit_VERSION_MAJOR LESS 13)
-    set(LTOIR_CXX_STD "c++11")
-  else()
-    set(LTOIR_CXX_STD "c++17")
-  endif()
+  set(LTOIR_CXX_STD "c++17")
 
   # ––– paths –––
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
