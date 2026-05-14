@@ -213,6 +213,8 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
 int nvshmemt_ib_common_release_mem_handle(struct nvshmemt_ibv_function_table *ftable,
                                           nvshmem_mem_handle_t *mem_handle, int log_level);
 
+const char *nvshmemt_ib_common_link_layer_name(uint8_t link_layer);
+
 int nvshmemt_ib_common_setup_cst_loopback(int dev_id, nvshmem_transport_t t);
 
 int nvshmemt_ib_common_check_poll_avail(nvshmem_transport_t tcurr, nvshmemt_ib_common_ep_ptr_t ep,

@@ -58,6 +58,17 @@ void nvshmemt_ib_common_sanitize_retry_cnt(struct nvshmemi_options_s *options) {
     }
 }
 
+const char *nvshmemt_ib_common_link_layer_name(uint8_t link_layer) {
+    switch (link_layer) {
+        case IBV_LINK_LAYER_INFINIBAND:
+            return "InfiniBand";
+        case IBV_LINK_LAYER_ETHERNET:
+            return "Ethernet/RoCE";
+        default:
+            return "unknown";
+    }
+}
+
 /*
  * Dynamic GID detection for RoCE platforms. Adapted from NCCL.
  */

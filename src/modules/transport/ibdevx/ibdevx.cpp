@@ -416,8 +416,22 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
     DEVX_SET(qpc, qp_context, page_offset, 0);
 
     ep->devx_qp = mlx5dv_devx_obj_create(context, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
-    NVSHMEMI_NULL_ERROR_JMP(ep->devx_qp, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "cannot create devx object for qpair.\n");
+    NVSHMEMI_NULL_ERROR_JMP(
+        ep->devx_qp, status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBDEVX QP create failed: device %s port %d link_layer %s lid %u qp_depth %d "
+        "qpc_st %u rq_type %u log_sq_size %u log_rq_size %u pdn %d srqn %d scqn %u "
+        "rcqn %u wq_umem_id %u dbr_umem_id %u devx_status 0x%x syndrome 0x%x "
+        "errno %d (%s)\n",
+        device->common_device.dev->name, ep->portid,
+        nvshmemt_ib_common_link_layer_name(
+            device->common_device.port_attr[ep->portid - 1].link_layer),
+        device->common_device.port_attr[ep->portid - 1].lid,
+        get_ibdevx_qp_depth(ibdevx_state), DEVX_GET(qpc, qp_context, st),
+        DEVX_GET(qpc, qp_context, rq_type), DEVX_GET(qpc, qp_context, log_sq_size),
+        DEVX_GET(qpc, qp_context, log_rq_size), device->pdn, device->srqn, device->scq.cqn,
+        device->rcq.cqn, wq_umem->umem_id, db_umem->umem_id,
+        DEVX_GET(create_qp_out, cmd_out, status), DEVX_GET(create_qp_out, cmd_out, syndrome),
+        errno, strerror(errno));
 
     ep->qpid = DEVX_GET(create_qp_out, cmd_out, qpn);
     ep->uar = uar;
@@ -553,6 +567,7 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
         NVSHMEMI_NZ_ERROR_JMP(status, status, out,
                               "Unable to create shared qp resources for device.\n");
     }
+    ep->portid = portid;
     ep->send_cq = device->send_cq;
     ep->recv_cq = device->recv_cq;
 
@@ -563,7 +578,6 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     qp_map.insert(std::make_pair((unsigned int)ep->qpid, (long unsigned int)ep));
 
     ep->devid = ibdevx_state->dev_ids[devid];
-    ep->portid = portid;
     ep->ibdevx_state = ibdevx_state;
 
     /* Initialize common_ep fields */
@@ -584,6 +598,9 @@ out:
 
 static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle *ep_handle) {
     int status = 0;
+    int rst2init_errno = 0;
+    int init2rtr_errno = 0;
+    int rtr2rts_errno = 0;
     int devid = ep->devid;
     int portid = ep->portid;
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)ep->ibdevx_state;
@@ -625,8 +642,18 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
 
     status =
         mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in1, sizeof(cmd_in1), cmd_out1, sizeof(cmd_out1));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Unable to set qp to state INIT with errno %d.\n", status);
+    rst2init_errno = errno;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBDEVX QP modify RESET->INIT failed: device %s devid %d port %d "
+        "link_layer %s lid %u local_qpn %u pkey_index %u ret %d errno %d (%s) "
+        "devx_status 0x%x syndrome 0x%x\n",
+        device->common_device.dev->name, devid, portid,
+        nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpid,
+        DEVX_GET(qpc, qp_context, primary_address_path.pkey_index), status, rst2init_errno,
+        strerror(rst2init_errno),
+        DEVX_GET(rst2init_qp_out, cmd_out1, status),
+        DEVX_GET(rst2init_qp_out, cmd_out1, syndrome));
 
     DEVX_SET(init2rtr_qp_in, cmd_in2, opcode, MLX5_CMD_OP_INIT2RTR_QP);
     DEVX_SET(init2rtr_qp_in, cmd_in2, op_mod, 0x0);
@@ -647,10 +674,10 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
     DEVX_SET(qpc, qp_context, atomic_mode, NVSHMEMT_IBDEVX_MLX5_QPC_ATOMIC_MODE_UP_TO_64B);
 
     if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        struct ibv_ah_attr ah_attr;
+        struct ibv_ah_attr ah_attr = {};
         struct ibv_ah *ah;
-        struct mlx5dv_obj dv;
-        struct mlx5dv_ah dah;
+        struct mlx5dv_obj dv = {};
+        struct mlx5dv_ah dah = {};
 
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
         int roce_version = 0;
@@ -668,7 +695,6 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Error in ib_roce_get_version_num\n");
 
-        memset(&ah_attr, 0, sizeof(ah_attr));
         ah_attr.is_global = 1;
         ah_attr.port_num = portid;
         ah_attr.grh.dgid.global.subnet_prefix = ep_handle->spn;
@@ -683,11 +709,43 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
                                                            : ibdevx_ROCE_V2_UDP_SPORT_BASE);
 
         ah = ftable.create_ah(device->common_device.pd, &ah_attr);
-        NVSHMEMI_NULL_ERROR_JMP(ah, status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to create ah.\n");
+        NVSHMEMI_NULL_ERROR_JMP(
+            ah, status, NVSHMEMX_ERROR_INTERNAL, out,
+            "IBDEVX AH create failed during QP INIT->RTR setup: device %s devid %d port %d "
+            "link_layer %s lid %u local_qpn %u remote_qpn %u remote_gid 0x%llx:0x%llx "
+            "gid_index %d roce_version %d sl %d traffic_class %d udp_sport %u errno %d (%s)\n",
+            device->common_device.dev->name, devid, portid,
+            nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpid,
+            ep_handle->qpn, (unsigned long long)ep_handle->spn,
+            (unsigned long long)ep_handle->iid,
+            device->common_device.gid_info[portid - 1].local_gid_index, roce_version,
+            ibdevx_state->options->IB_SL, ibdevx_state->options->IB_TRAFFIC_CLASS,
+            ah_attr.dlid, errno, strerror(errno));
 
         dv.ah.in = ah;
         dv.ah.out = &dah;
-        mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+        status = mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+        if (status) {
+            int destroy_status = ftable.destroy_ah(ah);
+            if (destroy_status) {
+                NVSHMEMI_ERROR_PRINT(
+                    "IBDEVX AH destroy failed after mlx5dv initialization failure: device %s "
+                    "devid %d port %d local_qpn %u remote_qpn %u init_status %d (%s) "
+                    "destroy_status %d (%s)\n",
+                    device->common_device.dev->name, devid, portid, ep->qpid, ep_handle->qpn,
+                    status, strerror(status), destroy_status, strerror(destroy_status));
+            }
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBDEVX AH mlx5dv initialization failed during QP INIT->RTR setup: device %s "
+                "devid %d port %d local_qpn %u remote_qpn %u remote_gid 0x%llx:0x%llx "
+                "gid_index %d status %d (%s)\n",
+                device->common_device.dev->name, devid, portid, ep->qpid, ep_handle->qpn,
+                (unsigned long long)ep_handle->spn, (unsigned long long)ep_handle->iid,
+                device->common_device.gid_info[portid - 1].local_gid_index, status,
+                strerror(status));
+        }
+        ep->ah = ah;
 
         memcpy(DEVX_ADDR_OF(qpc, qp_context, primary_address_path.rmac_47_32), &dah.av->rmac,
                sizeof(dah.av->rmac));
@@ -718,8 +776,49 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
 
     status =
         mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in2, sizeof(cmd_in2), cmd_out2, sizeof(cmd_out2));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Unable to set qp to state R2R with errno %d.\n", status);
+    if (status) {
+        init2rtr_errno = errno;
+        if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBDEVX QP modify INIT->RTR failed: device %s devid %d port %d "
+                "link_layer %s local_qpn %u remote_qpn %u lid %u remote_lid %u "
+                "remote_gid 0x%llx:0x%llx gid_index %d mtu %d rq_psn %u min_rnr_timer %u "
+                "max_rd_atomic %d av_udp_sport %u av_src_addr_index %u av_hop_limit %u "
+                "sl %d traffic_class %d ret %d errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+                device->common_device.dev->name, devid, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ep->qpid,
+                ep_handle->qpn, port_attr->lid, ep_handle->lid,
+                (unsigned long long)ep_handle->spn, (unsigned long long)ep_handle->iid,
+                device->common_device.gid_info[portid - 1].local_gid_index, port_attr->active_mtu,
+                DEVX_GET(qpc, qp_context, next_rcv_psn), DEVX_GET(qpc, qp_context, min_rnr_nak),
+                nvshmemt_ibdevx_max_rd_atomic,
+                DEVX_GET(qpc, qp_context, primary_address_path.udp_sport),
+                DEVX_GET(qpc, qp_context, primary_address_path.src_addr_index),
+                DEVX_GET(qpc, qp_context, primary_address_path.hop_limit),
+                ibdevx_state->options->IB_SL, ibdevx_state->options->IB_TRAFFIC_CLASS, status,
+                init2rtr_errno, strerror(init2rtr_errno),
+                DEVX_GET(init2rtr_qp_out, cmd_out2, status),
+                DEVX_GET(init2rtr_qp_out, cmd_out2, syndrome));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBDEVX QP modify INIT->RTR failed: device %s devid %d port %d "
+                "link_layer %s local_qpn %u remote_qpn %u lid %u remote_lid %u mtu %d "
+                "rq_psn %u min_rnr_timer %u max_rd_atomic %d av_rlid %u sl %d traffic_class %d "
+                "ret %d errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+                device->common_device.dev->name, devid, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ep->qpid,
+                ep_handle->qpn, port_attr->lid, ep_handle->lid, port_attr->active_mtu,
+                DEVX_GET(qpc, qp_context, next_rcv_psn), DEVX_GET(qpc, qp_context, min_rnr_nak),
+                nvshmemt_ibdevx_max_rd_atomic,
+                DEVX_GET(qpc, qp_context, primary_address_path.rlid), ibdevx_state->options->IB_SL,
+                ibdevx_state->options->IB_TRAFFIC_CLASS, status, init2rtr_errno,
+                strerror(init2rtr_errno),
+                DEVX_GET(init2rtr_qp_out, cmd_out2, status),
+                DEVX_GET(init2rtr_qp_out, cmd_out2, syndrome));
+        }
+    }
 
     DEVX_SET(rtr2rts_qp_in, cmd_in3, opcode, MLX5_CMD_OP_RTR2RTS_QP);
     DEVX_SET(rtr2rts_qp_in, cmd_in3, opt_param_mask, 0x0);
@@ -739,8 +838,19 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
 
     status =
         mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in3, sizeof(cmd_in3), cmd_out3, sizeof(cmd_out3));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Unable to set qp to state R2S with errno %d.\n", status);
+    rtr2rts_errno = errno;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBDEVX QP modify RTR->RTS failed: device %s devid %d port %d local_qpn %u "
+        "remote_qpn %u max_rd_atomic %d retry_count %u rnr_retry %u ack_timeout %u "
+        "ret %d errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+        device->common_device.dev->name, devid, portid, ep->qpid, ep_handle->qpn,
+        nvshmemt_ibdevx_max_rd_atomic, DEVX_GET(qpc, qp_context, retry_count),
+        DEVX_GET(qpc, qp_context, rnr_retry),
+        DEVX_GET(qpc, qp_context, primary_address_path.ack_timeout), status, rtr2rts_errno,
+        strerror(rtr2rts_errno),
+        DEVX_GET(rtr2rts_qp_out, cmd_out3, status),
+        DEVX_GET(rtr2rts_qp_out, cmd_out3, syndrome));
 
     connected_qp_count++;
 out:

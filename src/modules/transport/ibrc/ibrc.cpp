@@ -87,7 +87,7 @@ struct ibrc_request {
 };
 
 struct ibrc_atomic_op {
-    nvshmemi_amo_t op;  /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
+    nvshmemi_amo_t op; /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
     void *addr;
     void *retaddr;
     uint32_t retrkey;
@@ -150,7 +150,8 @@ static int use_ib_native_atomics = 1;
 /* Maximum number of RDMA Read & Atomic operations that can be outstanding per QP */
 static int nvshmemt_ibrc_max_rd_atomic = INT_MAX;
 static bool use_gdrcopy = 0;
-static std::atomic<bool> use_cpu_atomics{false};  // true when send-based atomics are possible (GDRCopy or SYSMEM)
+static std::atomic<bool> use_cpu_atomics{
+    false};  // true when send-based atomics are possible (GDRCopy or SYSMEM)
 static volatile uint64_t atomics_received = 0;
 static volatile uint64_t atomics_processed = 0;
 static volatile uint64_t atomics_issued = 0;
@@ -336,8 +337,17 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     init_attr.cap.max_inline_data = IBRC_MAX_INLINE_SIZE;
 
     ep->qp = ftable.create_qp(pd, &init_attr);
-    NVSHMEMT_ERRNO_NULL_ERROR_JMP(ep->qp, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "ibv_create_qp failed \n");
+    NVSHMEMT_ERRNO_NULL_ERROR_JMP(
+        ep->qp, status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBRC QP create failed: pe %d device %s devid %d port %d link_layer %s lid %u "
+        "qp_type %d qp_depth %d srq_depth %d max_send_wr %u max_recv_wr %u "
+        "max_send_sge %u max_recv_sge %u max_inline_data %u\n",
+        t->my_pe, device->common_device.dev->name, ibrc_state->dev_ids[devid], portid,
+        nvshmemt_ib_common_link_layer_name(device->common_device.port_attr[portid - 1].link_layer),
+        device->common_device.port_attr[portid - 1].lid, init_attr.qp_type,
+        get_ibrc_qp_depth(ibrc_state), get_ibrc_srq_depth(ibrc_state), init_attr.cap.max_send_wr,
+        init_attr.cap.max_recv_wr, init_attr.cap.max_send_sge, init_attr.cap.max_recv_sge,
+        init_attr.cap.max_inline_data);
 
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
     attr.qp_state = IBV_QPS_INIT;
@@ -348,7 +358,15 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     flags = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
 
     status = ftable.modify_qp(ep->qp, &attr, flags);
-    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBRC QP modify RESET->INIT failed: pe %d device %s devid %d port %d "
+        "link_layer %s lid %u local_qpn %u pkey_index %u access_flags %d flags %d "
+        "\n",
+        t->my_pe, device->common_device.dev->name, ibrc_state->dev_ids[devid], portid,
+        nvshmemt_ib_common_link_layer_name(device->common_device.port_attr[portid - 1].link_layer),
+        device->common_device.port_attr[portid - 1].lid, ep->qp->qp_num, attr.pkey_index,
+        attr.qp_access_flags, flags);
 
     ep->req =
         (struct ibrc_request *)malloc(sizeof(struct ibrc_request) * get_ibrc_qp_depth(ibrc_state));
@@ -433,7 +451,37 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             IBV_QP_MIN_RNR_TIMER | IBV_QP_MAX_DEST_RD_ATOMIC;
 
     status = ftable.modify_qp(ep->qp, &attr, flags);
-    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
+    if (status) {
+        if (attr.ah_attr.is_global) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBRC QP modify INIT->RTR failed: pe %d device %s devid %d port %d link_layer %s "
+                "local_qpn %u remote_qpn %u lid %u remote_lid %u remote_gid 0x%llx:0x%llx "
+                "gid_index %d path_mtu %d rq_psn %u max_dest_rd_atomic %d min_rnr_timer %d "
+                "av_is_global %d av_hop_limit %u sl %d traffic_class %d flags %d status %d (%s)\n",
+                t->my_pe, device->common_device.dev->name, devid, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ep->qp->qp_num,
+                ep_handle->qpn, port_attr->lid, ep_handle->lid,
+                (unsigned long long)attr.ah_attr.grh.dgid.global.subnet_prefix,
+                (unsigned long long)attr.ah_attr.grh.dgid.global.interface_id,
+                device->common_device.gid_info[portid - 1].local_gid_index, attr.path_mtu,
+                attr.rq_psn, attr.max_dest_rd_atomic, attr.min_rnr_timer, attr.ah_attr.is_global,
+                attr.ah_attr.grh.hop_limit, attr.ah_attr.sl, attr.ah_attr.grh.traffic_class, flags,
+                status, strerror(status));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBRC QP modify INIT->RTR failed: pe %d device %s devid %d port %d link_layer %s "
+                "local_qpn %u remote_qpn %u lid %u remote_lid %u path_mtu %d rq_psn %u "
+                "max_dest_rd_atomic %d min_rnr_timer %d av_is_global %d av_dlid %u sl %d "
+                "flags %d status %d (%s)\n",
+                t->my_pe, device->common_device.dev->name, devid, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ep->qp->qp_num,
+                ep_handle->qpn, port_attr->lid, ep_handle->lid, attr.path_mtu, attr.rq_psn,
+                attr.max_dest_rd_atomic, attr.min_rnr_timer, attr.ah_attr.is_global,
+                attr.ah_attr.dlid, attr.ah_attr.sl, flags, status, strerror(status));
+        }
+    }
 
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
     attr.qp_state = IBV_QPS_RTS;
@@ -446,7 +494,13 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             IBV_QP_MAX_QP_RD_ATOMIC;
 
     status = ftable.modify_qp(ep->qp, &attr, flags);
-    NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_modify_qp failed \n");
+    NVSHMEMT_ERRNO_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBRC QP modify RTR->RTS failed: pe %d device %s devid %d port %d local_qpn %u "
+        "remote_qpn %u sq_psn %u timeout %d retry_cnt %d rnr_retry %d max_rd_atomic %d "
+        "flags %d\n",
+        t->my_pe, device->common_device.dev->name, devid, portid, ep->qp->qp_num, ep_handle->qpn,
+        attr.sq_psn, attr.timeout, attr.retry_cnt, attr.rnr_retry, attr.max_rd_atomic, flags);
 
     // register and post receive buffer pool
     if (!device->bpool_mr) {
@@ -476,10 +530,8 @@ int ep_get_handle(struct nvshmemt_ib_common_ep_handle *ep_handle, struct ibrc_ep
     ep_handle->lid = device->common_device.port_attr[ep->portid - 1].lid;
     ep_handle->qpn = ep->qp->qp_num;
     /* Always store GID info so IB peers with GRH routing can exchange it. */
-    ep_handle->spn =
-        device->common_device.gid_info[ep->portid - 1].local_gid.global.subnet_prefix;
-    ep_handle->iid =
-        device->common_device.gid_info[ep->portid - 1].local_gid.global.interface_id;
+    ep_handle->spn = device->common_device.gid_info[ep->portid - 1].local_gid.global.subnet_prefix;
+    ep_handle->iid = device->common_device.gid_info[ep->portid - 1].local_gid.global.interface_id;
 
     return status;
 }
@@ -840,7 +892,6 @@ out:
 }
 
 int poll_recv(nvshmemt_ib_common_state_t ibrc_state);
-
 
 template <typename T>
 int perform_gdrcopy_amo(struct ibrc_ep *ep, struct ibrc_atomic_op *op, void *ptr) {

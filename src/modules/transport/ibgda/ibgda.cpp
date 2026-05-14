@@ -80,21 +80,28 @@
 #define IBGDA_GPAGE_OFF (IBGDA_GPAGE_SIZE - 1)
 #define IBGDA_GPAGE_MASK (~(IBGDA_GPAGE_OFF))
 
+static const char *ibgda_qp_type_name(nvshmemi_ibgda_device_qp_type_t qp_type) {
+    switch (qp_type) {
+        case NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCI:
+            return "DCI";
+        case NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCT:
+            return "DCT";
+        case NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC:
+            return "RC";
+        default:
+            return "unknown";
+    }
+}
+
 static uint64_t ibgda_read_once(const uint64_t *p) {
     return *static_cast<const volatile uint64_t *>(p);
 }
 
-static void ibgda_write_once(__be32 *p, uint32_t v) {
-    *static_cast<volatile __be32 *>(p) = v;
-}
+static void ibgda_write_once(__be32 *p, uint32_t v) { *static_cast<volatile __be32 *>(p) = v; }
 
-static void ibgda_write_once(__be64 *p, __be64 v) {
-    *static_cast<volatile __be64 *>(p) = v;
-}
+static void ibgda_write_once(__be64 *p, __be64 v) { *static_cast<volatile __be64 *>(p) = v; }
 
-static size_t ibgda_round_up(size_t v, size_t size) {
-    return ((v + size - 1) / size) * size;
-}
+static size_t ibgda_round_up(size_t v, size_t size) { return ((v + size - 1) / size) * size; }
 
 static constexpr int ibgda_round_up_pow2(int n) {
     assert(n >= 1);
@@ -1564,6 +1571,7 @@ static void ibgda_get_device_cq(nvshmemi_ibgda_device_cq_t *dev_cq, const struct
 
 static int ibgda_qp_rst2init(struct ibgda_ep *ep, const struct ibgda_device *device, int portid) {
     int status = 0;
+    int rst2init_errno = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(rst2init_qp_in)] = {
         0,
@@ -1603,9 +1611,15 @@ static int ibgda_qp_rst2init(struct ibgda_ep *ep, const struct ibgda_device *dev
     DEVX_SET(qpc, qpc, counter_set_id, 0x0);  // Not connected to a counter set
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Error in mlx5dv_devx_obj_modify for RST2INIT_QP with syndrome %x\n",
-                          DEVX_GET(rst2init_qp_out, cmd_out, syndrome));
+    rst2init_errno = errno;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBGDA QP modify RESET->INIT failed: type %s device %s port %d link_layer %s "
+        "lid %u local_qpn %u ret %d errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+        ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
+        nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn, status,
+        rst2init_errno, strerror(rst2init_errno), DEVX_GET(rst2init_qp_out, cmd_out, status),
+        DEVX_GET(rst2init_qp_out, cmd_out, syndrome));
 
     ep->portid = portid;
 
@@ -1620,6 +1634,7 @@ out:
 static int ibgda_dci_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
                               const struct ibgda_device *device, int portid) {
     int status = 0;
+    int init2rtr_errno = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(init2rtr_qp_in)] = {
         0,
@@ -1652,9 +1667,34 @@ static int ibgda_dci_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_
     }
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Error in mlx5dv_devx_obj_modify for INIT2RTR_QP with syndrome %x\n",
-                          DEVX_GET(init2rtr_qp_out, cmd_out, syndrome));
+    if (status) {
+        init2rtr_errno = errno;
+        if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA QP modify INIT->RTR failed: type %s device %s port %d link_layer %s "
+                "lid %u local_qpn %u mtu %d eth_prio %d traffic_class %d dscp %d ret %d "
+                "errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+                ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn,
+                port_attr->active_mtu, ibgda_state->common.options->IB_SL,
+                ibgda_state->common.options->IB_TRAFFIC_CLASS,
+                ibgda_state->common.options->IB_TRAFFIC_CLASS >> 2, status, init2rtr_errno,
+                strerror(init2rtr_errno), DEVX_GET(init2rtr_qp_out, cmd_out, status),
+                DEVX_GET(init2rtr_qp_out, cmd_out, syndrome));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA QP modify INIT->RTR failed: type %s device %s port %d link_layer %s "
+                "lid %u local_qpn %u mtu %d sl %d ret %d errno %d (%s) devx_status 0x%x "
+                "syndrome 0x%x\n",
+                ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn,
+                port_attr->active_mtu, ibgda_state->common.options->IB_SL, status, init2rtr_errno,
+                strerror(init2rtr_errno), DEVX_GET(init2rtr_qp_out, cmd_out, status),
+                DEVX_GET(init2rtr_qp_out, cmd_out, syndrome));
+        }
+    }
 
 out:
     return status;
@@ -1664,6 +1704,7 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
                              const struct ibgda_device *device, int portid,
                              struct ibgda_rc_handle *peer_ep_handle) {
     int status = 0;
+    int init2rtr_errno = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(init2rtr_qp_in)] = {
         0,
@@ -1677,8 +1718,9 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     const struct ibv_port_attr *port_attr = device->common_device.port_attr + (portid - 1);
     struct ibv_ah_attr ah_attr;
     struct ibv_ah *ah = NULL;
-    struct mlx5dv_obj dv;
-    struct mlx5dv_ah dah;
+    struct mlx5dv_obj dv = {};
+    struct mlx5dv_ah dah = {};
+    int roce_version = 0;
 
     assert(ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
 
@@ -1720,7 +1762,6 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
         }
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
-        int roce_version = 0;
 
         ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
                          (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
@@ -1743,11 +1784,56 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     }
 
     ah = ftable.create_ah(device->common_device.pd, &ah_attr);
-    NVSHMEMI_NULL_ERROR_JMP(ah, status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to create ah.\n");
+    if (!ah) {
+        if (ah_attr.is_global) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA AH create failed during RC QP INIT->RTR setup: device %s port %d "
+                "link_layer %s lid %u local_qpn %u remote_qpn %u remote_gid 0x%llx:0x%llx "
+                "gid_index %d roce_version %d sl %d traffic_class %d udp_sport %u errno %d "
+                "(%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn,
+                peer_ep_handle->qpn, (unsigned long long)peer_ep_handle->spn,
+                (unsigned long long)peer_ep_handle->iid,
+                device->common_device.gid_info[portid - 1].local_gid_index, roce_version,
+                ibgda_state->common.options->IB_SL, ibgda_state->common.options->IB_TRAFFIC_CLASS,
+                ah_attr.dlid, errno, strerror(errno));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA AH create failed during RC QP INIT->RTR setup: device %s port %d "
+                "link_layer %s lid %u local_qpn %u remote_qpn %u remote_lid %u dlid %u sl %d "
+                "errno %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn,
+                peer_ep_handle->qpn, peer_ep_handle->lid, ah_attr.dlid,
+                ibgda_state->common.options->IB_SL, errno, strerror(errno));
+        }
+    }
 
     dv.ah.in = ah;
     dv.ah.out = &dah;
-    mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+    status = mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+    if (status) {
+        int destroy_status = ftable.destroy_ah(ah);
+        if (destroy_status) {
+            NVSHMEMI_ERROR_PRINT(
+                "IBGDA AH destroy failed after RC mlx5dv initialization failure: device %s "
+                "port %d local_qpn %u remote_qpn %u init_status %d (%s) "
+                "destroy_status %d (%s)\n",
+                device->common_device.dev->name, portid, ep->qpn, peer_ep_handle->qpn, status,
+                strerror(status), destroy_status, strerror(destroy_status));
+        }
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INTERNAL, out,
+            "IBGDA AH mlx5dv initialization failed during RC QP INIT->RTR setup: device %s "
+            "port %d local_qpn %u remote_qpn %u remote_gid 0x%llx:0x%llx gid_index %d "
+            "status %d (%s)\n",
+            device->common_device.dev->name, portid, ep->qpn, peer_ep_handle->qpn,
+            (unsigned long long)peer_ep_handle->spn, (unsigned long long)peer_ep_handle->iid,
+            device->common_device.gid_info[portid - 1].local_gid_index, status, strerror(status));
+    }
 
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
         DEVX_SET(qpc, qpc, primary_address_path.mlid, 0);
@@ -1780,9 +1866,30 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     ep->ah = ah;
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Error in mlx5dv_devx_obj_modify for INIT2RTR_QP with syndrome %x\n",
-                          DEVX_GET(init2rtr_qp_out, cmd_out, syndrome));
+    if (status) {
+        init2rtr_errno = errno;
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INTERNAL, out,
+            "IBGDA QP modify INIT->RTR failed: type %s device %s port %d link_layer %s "
+            "local_qpn %u remote_qpn %u lid %u remote_lid %u remote_gid 0x%llx:0x%llx "
+            "gid_index %d mtu %d rq_psn %u min_rnr_timer %u max_rd_atomic %d av_rlid %u "
+            "av_udp_sport %u av_src_addr_index %u av_hop_limit %u sl %d traffic_class %d "
+            "ret %d errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+            ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
+            nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ep->qpn, peer_ep_handle->qpn,
+            port_attr->lid, peer_ep_handle->lid, (unsigned long long)peer_ep_handle->spn,
+            (unsigned long long)peer_ep_handle->iid,
+            device->common_device.gid_info[portid - 1].local_gid_index, port_attr->active_mtu,
+            DEVX_GET(qpc, qpc, next_rcv_psn), DEVX_GET(qpc, qpc, min_rnr_nak),
+            device->common_device.device_attr.max_qp_rd_atom,
+            DEVX_GET(qpc, qpc, primary_address_path.rlid),
+            DEVX_GET(qpc, qpc, primary_address_path.udp_sport),
+            DEVX_GET(qpc, qpc, primary_address_path.src_addr_index),
+            DEVX_GET(qpc, qpc, primary_address_path.hop_limit), ibgda_state->common.options->IB_SL,
+            ibgda_state->common.options->IB_TRAFFIC_CLASS, status, init2rtr_errno,
+            strerror(init2rtr_errno), DEVX_GET(init2rtr_qp_out, cmd_out, status),
+            DEVX_GET(init2rtr_qp_out, cmd_out, syndrome));
+    }
 out:
     return status;
 }
@@ -1790,6 +1897,7 @@ out:
 static int ibgda_qp_rtr2rts(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
                             const struct ibgda_device *device) {
     int status = 0;
+    int rtr2rts_errno = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(rtr2rts_qp_in)] = {
         0,
@@ -1813,13 +1921,20 @@ static int ibgda_qp_rtr2rts(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
     DEVX_SET(qpc, qpc, next_send_psn, 0x0);
     DEVX_SET(qpc, qpc, retry_count, ibgda_state->common.options->IB_RETRY_CNT);
     DEVX_SET(qpc, qpc, rnr_retry, 7);
-    DEVX_SET(qpc, qpc, primary_address_path.ack_timeout,
-             ibgda_state->common.options->IB_TIMEOUT);
+    DEVX_SET(qpc, qpc, primary_address_path.ack_timeout, ibgda_state->common.options->IB_TIMEOUT);
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Error in mlx5dv_devx_obj_modify for RTR2RTS_QP with syndrome %x\n",
-                          DEVX_GET(rtr2rts_qp_out, cmd_out, syndrome));
+    rtr2rts_errno = errno;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBGDA QP modify RTR->RTS failed: type %s device %s port %d local_qpn %u "
+        "max_rd_atomic %d retry_count %u rnr_retry %u ack_timeout %u ret %d errno %d (%s) "
+        "devx_status 0x%x syndrome 0x%x\n",
+        ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, ep->portid, ep->qpn,
+        device->common_device.device_attr.max_qp_rd_atom, DEVX_GET(qpc, qpc, retry_count),
+        DEVX_GET(qpc, qpc, rnr_retry), DEVX_GET(qpc, qpc, primary_address_path.ack_timeout), status,
+        rtr2rts_errno, strerror(rtr2rts_errno), DEVX_GET(rtr2rts_qp_out, cmd_out, status),
+        DEVX_GET(rtr2rts_qp_out, cmd_out, syndrome));
 
 out:
     return status;
@@ -2235,8 +2350,22 @@ static int ibgda_create_qp(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep 
     DEVX_SET(qpc, qp_context, page_offset, 0);
 
     ep->devx_qp = mlx5dv_devx_obj_create(context, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
-    NVSHMEMI_NULL_ERROR_JMP(ep->devx_qp, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "Unable to create QP for EP.\n");
+    NVSHMEMI_NULL_ERROR_JMP(
+        ep->devx_qp, status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBGDA QP create failed: type %s qp_idx %u device %s port %d link_layer %s "
+        "lid %u qp_depth %zu qpc_st %u rq_type %u log_sq_size %u log_rq_size %u "
+        "pdn %d srqn %d scqn %u rcqn %d wq_umem_id %u dbr_umem_id %u wq_offset %ld "
+        "dbr_offset %ld devx_status 0x%x syndrome 0x%x errno %d (%s)\n",
+        ibgda_qp_type_name(qp_type), qp_idx, device->common_device.dev->name, portid,
+        nvshmemt_ib_common_link_layer_name(device->common_device.port_attr[portid - 1].link_layer),
+        device->common_device.port_attr[portid - 1].lid, num_wqebb, DEVX_GET(qpc, qp_context, st),
+        DEVX_GET(qpc, qp_context, rq_type), DEVX_GET(qpc, qp_context, log_sq_size),
+        DEVX_GET(qpc, qp_context, log_rq_size), device->qp_shared_object.pdn,
+        device->qp_shared_object.srqn, send_cq->cqn, device->qp_shared_object.rcqn,
+        ep->qp_ctrl.wq_mobject->umem->umem_id, ep->qp_ctrl.dbr_mobject->umem->umem_id,
+        (long)ep->qp_ctrl.wq_offset, (long)ep->qp_ctrl.dbr_offset,
+        DEVX_GET(create_qp_out, cmd_out, status), DEVX_GET(create_qp_out, cmd_out, syndrome), errno,
+        strerror(errno));
 
     ep->qpn = DEVX_GET(create_qp_out, cmd_out, qpn);
     ep->portid = portid;
@@ -2332,9 +2461,9 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     struct ibv_cq *recv_cq = NULL;
 
     struct ibv_ah *ah = NULL;
-    struct mlx5dv_ah dah;
+    struct mlx5dv_ah dah = {};
     struct ibv_ah_attr ah_attr;
-    struct mlx5dv_obj dv;
+    struct mlx5dv_obj dv = {};
 
     memset(&ah_attr, 0, sizeof(ah_attr));
 
@@ -2401,7 +2530,7 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     } else {
         /* Pure IB without GRH. */
         assert(port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND);
-        ah_attr.dlid = port_attr->lid;  /* self-AH for DCT: local LID is correct here */
+        ah_attr.dlid = port_attr->lid; /* self-AH for DCT: local LID is correct here */
         ah_attr.is_global = 0;
         support_half_av_seg = hca_support_compact_address_vector;
     }
@@ -2410,13 +2539,56 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     ah_attr.port_num = portid;
 
     ah = ftable.create_ah(device->common_device.pd, &ah_attr);
-    NVSHMEMI_NULL_ERROR_JMP(ah, status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to create ah.\n");
+    if (!ah) {
+        if (ah_attr.is_global) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA AH create failed during DCT setup: device %s port %d link_layer %s "
+                "lid %u local_gid 0x%llx:0x%llx gid_index %d sl %d traffic_class %d "
+                "errno %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid,
+                (unsigned long long)ah_attr.grh.dgid.global.subnet_prefix,
+                (unsigned long long)ah_attr.grh.dgid.global.interface_id,
+                device->common_device.gid_info[portid - 1].local_gid_index,
+                ibgda_state->common.options->IB_SL, ibgda_state->common.options->IB_TRAFFIC_CLASS,
+                errno, strerror(errno));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA AH create failed during DCT setup: device %s port %d link_layer %s "
+                "lid %u dlid %u sl %d errno %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid,
+                ah_attr.dlid, ibgda_state->common.options->IB_SL, errno, strerror(errno));
+        }
+    }
 
     dv.ah.in = ah;
     dv.ah.out = &dah;
-    mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "mlx5dv AH initialization failed.\n");
+    status = mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+    if (status) {
+        if (ah_attr.is_global) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA AH mlx5dv initialization failed during DCT setup: device %s port %d "
+                "link_layer %s lid %u local_gid 0x%llx:0x%llx gid_index %d status %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid,
+                (unsigned long long)ah_attr.grh.dgid.global.subnet_prefix,
+                (unsigned long long)ah_attr.grh.dgid.global.interface_id,
+                device->common_device.gid_info[portid - 1].local_gid_index, status,
+                strerror(status));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA AH mlx5dv initialization failed during DCT setup: device %s port %d "
+                "link_layer %s lid %u dlid %u status %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid,
+                ah_attr.dlid, status, strerror(status));
+        }
+    }
 
     device->dct.pd = pd;
     device->dct.srq = srq;
@@ -2428,9 +2600,11 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     device->support_half_av_seg = support_half_av_seg;
 out:
     if (status) {
+        if (ah) ftable.destroy_ah(ah);
         if (recv_cq) ftable.destroy_cq(recv_cq);
         if (send_cq) ftable.destroy_cq(send_cq);
         if (srq) ftable.destroy_srq(srq);
+        if (pd) ftable.dealloc_pd(pd);
     }
     return status;
 }
@@ -2438,6 +2612,7 @@ out:
 static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep **ep_ptr,
                             const struct ibgda_device *device, int portid) {
     int status = 0;
+    int flags;
 
     struct ibgda_ep *ep = NULL;
     struct ibv_qp *ib_qp = NULL;
@@ -2473,8 +2648,16 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
     ib_qp_attr_ex.cap.max_inline_data = NVSHMEMI_IBGDA_MAX_INLINE_SIZE;
 
     ib_qp = mlx5dv_create_qp(device->common_device.context, &ib_qp_attr_ex, &dv_init_attr);
-    NVSHMEMI_NULL_ERROR_JMP(ib_qp, status, NVSHMEMX_ERROR_INTERNAL, out,
-                            "mlx5dv_create_qp failed.\n");
+    NVSHMEMI_NULL_ERROR_JMP(
+        ib_qp, status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBGDA QP create failed: type DCT device %s port %d link_layer %s lid %u "
+        "qp_type %d qp_depth %d srq_depth %d max_send_wr %u max_recv_wr %u "
+        "max_send_sge %u max_recv_sge %u max_inline_data %u errno %d (%s)\n",
+        device->common_device.dev->name, portid,
+        nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid,
+        ib_qp_attr_ex.qp_type, ibgda_qp_depth, ibgda_srq_depth, ib_qp_attr_ex.cap.max_send_wr,
+        ib_qp_attr_ex.cap.max_recv_wr, ib_qp_attr_ex.cap.max_send_sge,
+        ib_qp_attr_ex.cap.max_recv_sge, ib_qp_attr_ex.cap.max_inline_data, errno, strerror(errno));
 
     // RST2INIT
     memset(&ib_qp_attr, 0, sizeof(ib_qp_attr));
@@ -2486,8 +2669,13 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
 
     status = ftable.modify_qp(ib_qp, &ib_qp_attr,
                               IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "ibv_modify_qp rst2init for dct failed.\n");
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INTERNAL, out,
+        "IBGDA QP modify RESET->INIT failed: type DCT device %s port %d link_layer %s "
+        "lid %u local_qpn %u pkey_index %u access_flags %d status %d (%s)\n",
+        device->common_device.dev->name, portid,
+        nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ib_qp->qp_num,
+        ib_qp_attr.pkey_index, ib_qp_attr.qp_access_flags, status, strerror(status));
 
     // INIT2RTR
     memset(&ib_qp_attr, 0, sizeof(ib_qp_attr));
@@ -2495,11 +2683,39 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
     ib_qp_attr.path_mtu = port_attr->active_mtu;
     ib_qp_attr.min_rnr_timer = 12;
     memcpy(&ib_qp_attr.ah_attr, &device->dct.ah_attr, sizeof(ib_qp_attr.ah_attr));
+    flags = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_MIN_RNR_TIMER;
 
-    status = ftable.modify_qp(ib_qp, &ib_qp_attr,
-                              IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_MIN_RNR_TIMER);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "ibv_modify_qp init2rtr for dct failed.\n");
+    status = ftable.modify_qp(ib_qp, &ib_qp_attr, flags);
+    if (status) {
+        if (ib_qp_attr.ah_attr.is_global) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA QP modify INIT->RTR failed: type DCT device %s port %d link_layer %s "
+                "local_qpn %u lid %u local_gid 0x%llx:0x%llx gid_index %d path_mtu %d "
+                "min_rnr_timer %d av_is_global %d av_hop_limit %u sl %d traffic_class %d "
+                "flags %d status %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ib_qp->qp_num,
+                port_attr->lid,
+                (unsigned long long)ib_qp_attr.ah_attr.grh.dgid.global.subnet_prefix,
+                (unsigned long long)ib_qp_attr.ah_attr.grh.dgid.global.interface_id,
+                device->common_device.gid_info[portid - 1].local_gid_index, ib_qp_attr.path_mtu,
+                ib_qp_attr.min_rnr_timer, ib_qp_attr.ah_attr.is_global,
+                ib_qp_attr.ah_attr.grh.hop_limit, ib_qp_attr.ah_attr.sl,
+                ib_qp_attr.ah_attr.grh.traffic_class, flags, status, strerror(status));
+        } else {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBGDA QP modify INIT->RTR failed: type DCT device %s port %d link_layer %s "
+                "local_qpn %u lid %u path_mtu %d min_rnr_timer %d av_is_global %d av_dlid %u "
+                "sl %d flags %d status %d (%s)\n",
+                device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), ib_qp->qp_num,
+                port_attr->lid, ib_qp_attr.path_mtu, ib_qp_attr.min_rnr_timer,
+                ib_qp_attr.ah_attr.is_global, ib_qp_attr.ah_attr.dlid, ib_qp_attr.ah_attr.sl, flags,
+                status, strerror(status));
+        }
+    }
 
     ep->qp_type = NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCT;
 
@@ -4232,9 +4448,9 @@ int nvshmemt_ibgda_add_device_remote_mem_handles(nvshmem_transport_t t, int tran
     num_rkeys = ibgda_device_rkeys.size();
 
     // For cache optimization, put rkeys in constant memory first.
-    memcpy(
-        ibgda_device_state->constmem.rkeys, ibgda_device_rkeys.data(),
-        std::min<size_t>(num_rkeys, NVSHMEMI_IBGDA_MAX_CONST_RKEYS) * sizeof(nvshmemi_ibgda_device_key_t));
+    memcpy(ibgda_device_state->constmem.rkeys, ibgda_device_rkeys.data(),
+           std::min<size_t>(num_rkeys, NVSHMEMI_IBGDA_MAX_CONST_RKEYS) *
+               sizeof(nvshmemi_ibgda_device_key_t));
 
     // Put the rest that don't fit in constant memory in global memory
     if (num_rkeys > NVSHMEMI_IBGDA_MAX_CONST_RKEYS) {
