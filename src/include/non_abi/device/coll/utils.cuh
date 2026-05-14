@@ -15,13 +15,15 @@
 #include "non_abi/nvshmem_build_options.h"
 #include "device/nvshmem_device_macros.h"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
-// transfer APIs.
+// transfer APIs. transfer_device.cuh internally short-circuits to an empty stub header in
+// P2P-only builds.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
-    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
 #endif
+#include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 
 #ifdef __CUDA_ARCH__
@@ -42,7 +44,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
                                                                           int pe) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST) {
+    if (nvshmemi_use_ldst_path()) {
         volatile T *dest_actual =
             (volatile T *)((char *)(peer_base_addr) +
                            ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));

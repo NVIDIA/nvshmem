@@ -10,6 +10,7 @@
 #include "non_abi/device/coll/utils.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
+#include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
 #include "team_internal.h"
 #include "internal/host/util.h"
 

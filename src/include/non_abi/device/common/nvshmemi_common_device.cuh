@@ -21,15 +21,18 @@
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
-// transfer APIs.
+// This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM transfer APIs. 
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
-    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
 #endif
+// proxy_device.cuh has no reachable call sites in P2P-only builds.
+#if !defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
+#endif
+#include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
 
@@ -805,7 +808,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_P
      * drain must not be gated on job_connectivity. */
     nvshmemi_tma_drain_if_registered();
 
-    if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
+    if (!nvshmemi_use_ldst_path()) {
         nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
     }
     /* __threadfence_system is required for both TMA (P2P NVLink) and regular
@@ -857,7 +860,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_flush(
         nvshmemi_tma_bulk_wait_group_read_0();
         nvshmemi_tma_fence_proxy_async_shared_cta();
     }
-    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST) {
+    if (!nvshmemi_use_ldst_path()) {
         /* Network path: drain send-side completions without issuing
          * __threadfence_system() (use_membar = false). */
         nvshmemi_transfer_quiet<SCOPE>(false, pe, qp_handle, num_qps);
@@ -882,7 +885,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_P
      * P2P + TMA, others via network) a user calling fence after a TMA put
      * expects the TMA op ordered relative to subsequent ops. */
     nvshmemi_tma_drain_if_registered();
-    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST) {
+    if (!nvshmemi_use_ldst_path()) {
         nvshmemi_transfer_fence<NVSHMEMI_THREADGROUP_THREAD>(pe, qp_handle, num_qps);
     }
     __threadfence_system(); /* Use __threadfence_system instead of __threadfence
@@ -903,7 +906,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
 nvshmemi_g(const T *source, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         T *source_actual = (T *)((char *)(peer_base_addr) +
                                  ((char *)source - (char *)(nvshmemi_device_state_d.heap_base)));
         return *source_actual;
@@ -919,7 +922,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -952,7 +955,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -987,7 +990,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
     T *dest, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         T *dest_actual = (T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = value;
@@ -1002,7 +1005,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1036,7 +1039,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     nvshmemi_threadgroup_sync<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1061,12 +1064,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && peer_base_addr != NULL) {
+    if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr)) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = signal;
-    } else if (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST) {
+    } else if (nvshmemi_use_ldst_path()) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
@@ -1085,7 +1088,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);

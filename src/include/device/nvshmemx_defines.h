@@ -187,7 +187,7 @@ template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal(T *dest, const T value, int pe) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (peer_base_addr != NULL) {
+    if (nvshmemi_peer_reachable(peer_base_addr)) {
         volatile T *dest_actual =
             (volatile T *)((char *)(peer_base_addr) +
                            ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
@@ -204,7 +204,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal(T *dest, const T v
         NVSHMEMI_DECL_THREAD_IDX##SC_SUFFIX();                                                 \
         void *peer_base_addr = (void *)__ldg(                                                  \
             (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);      \
-        if (peer_base_addr) {                                                                  \
+        if (nvshmemi_peer_reachable(peer_base_addr)) {                                         \
             nvshmemx_##TYPENAME##_put##SC_SUFFIX(dest, source, nelems, pe);                    \
             if (myIdx == 0) {                                                                  \
                 __threadfence_system();                                                        \

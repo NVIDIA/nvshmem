@@ -195,7 +195,7 @@ target_include_directories(
             $<INSTALL_INTERFACE:include>
 )
 
-if(NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
+if(NVSHMEM_ENABLE_ALL_DEVICE_INLINING OR NVSHMEM_BUILD_P2P_ONLY)
   configure_file(../include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CURRENT_SOURCE_DIR}/../include/non_abi/device/pt-to-pt/transfer_device.cuh COPYONLY)
 else()
   set(NVSHMEM_DEVICE_SOURCES

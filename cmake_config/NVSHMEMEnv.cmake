@@ -36,6 +36,20 @@ if (DEFINED ENV{${PATH_NAME}})
   message( "${PATH_NAME}: ${${PATH_NAME}}")
 endmacro()
 
+option(NVSHMEM_BUILD_P2P_ONLY
+       "Build for P2P-only mode, disabling all remote transports to reduce device register pressure"
+       $ENV{NVSHMEM_BUILD_P2P_ONLY})
+if (NVSHMEM_BUILD_P2P_ONLY)
+  message(STATUS "NVSHMEM_BUILD_P2P_ONLY is ON: forcing all remote transports OFF")
+  set(NVSHMEM_IBRC_SUPPORT OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_IBGDA_SUPPORT OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_GPUNETIO_SUPPORT OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_IBDEVX_SUPPORT OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_LIBFABRIC_SUPPORT OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_UCX_SUPPORT OFF CACHE BOOL "" FORCE)
+endif()
+
 message( "                                   **NVSHMEM OPTIONS OVERVIEW**                                   \n")
 message( "Options set to ON by Default")
 message( "___________________________________________________________________________________________________")
@@ -76,6 +90,7 @@ nvshmem_add_default_off_option(NVSHMEM_IBDEVX_SUPPORT "Enable compilation of the
 nvshmem_add_default_off_option(NVSHMEM_GPUNETIO_SUPPORT "Enable compilation of the DOCA GPUNetIO remote transport")
 nvshmem_add_default_off_option(NVSHMEM_LIBFABRIC_SUPPORT "Enable compilation of the libfabric remote transport")
 nvshmem_add_default_off_option(NVSHMEM_UCX_SUPPORT "Enable compilation of the UCX remote transport")
+message("NVSHMEM_BUILD_P2P_ONLY: ${NVSHMEM_BUILD_P2P_ONLY}")
 
 message( "\n__FUNCTIONALITY__\n")
 nvshmem_add_default_off_option(NVSHMEM_USE_DLMALLOC "Set dlmalloc as the NVSHMEM heap allocation method")
@@ -178,6 +193,7 @@ NVSHMEM_DEFAULT_PMI2=${NVSHMEM_DEFAULT_PMI2} \
 NVSHMEM_DEFAULT_PMIX=${NVSHMEM_DEFAULT_PMIX} \
 NVSHMEM_DEFAULT_UCX=${NVSHMEM_DEFAULT_UCX} \
 NVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING} \
+NVSHMEM_BUILD_P2P_ONLY=${NVSHMEM_BUILD_P2P_ONLY} \
 NVSHMEM_GPU_COLL_USE_LDST=${NVSHMEM_GPU_COLL_USE_LDST} \
 NVSHMEM_IBGDA_SUPPORT=${NVSHMEM_IBGDA_SUPPORT} \
 NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY=${NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY} \

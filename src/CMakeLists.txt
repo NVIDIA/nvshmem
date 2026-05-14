@@ -32,6 +32,7 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_VERBOSE=${NVSHMEM_VERBOSE}
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
                                 -DNVSHMEM_ENABLE_ALL_DEVICE_INLINING=${NVSHMEM_ENABLE_ALL_DEVICE_INLINING}
+                                -DNVSHMEM_BUILD_P2P_ONLY=${NVSHMEM_BUILD_P2P_ONLY}
                                 -DNVSHMEM_BUILD_WITH_CUTLASS=${NVSHMEM_BUILD_WITH_CUTLASS}
                                 -DNVSHMEM_ENABLE_CFT_HANDLES=${NVSHMEM_ENABLE_CFT_HANDLES}
                                 -DNVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT=${NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT}
@@ -918,8 +919,9 @@ configure_file(include/non_abi/device/pt-to-pt/transfer_device.cuh.in ${CMAKE_CU
 set(INC_EXPORTS
     ${INC_EXPORTS}
     non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh
+    non_abi/device/pt-to-pt/nvshmemi_transfer_api_stubs.cuh
 )
-if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
+if(NOT NVSHMEM_ENABLE_ALL_DEVICE_INLINING AND NOT NVSHMEM_BUILD_P2P_ONLY)
 set(NVSHMEM_DEVICE_SOURCES
     ${NVSHMEM_DEVICE_SOURCES}
     device/comm/transfer_device.cu
@@ -985,6 +987,7 @@ set(INC_EXPORTS
     non_abi/device/pt-to-pt/utils_device.h
     non_abi/device/pt-to-pt/tile.cuh
     non_abi/device/common/nvshmemi_tile_utils.cuh
+    non_abi/device/common/nvshmemi_path_predicates.cuh
     device_host/nvshmem_common.cuh
     device_host/nvshmemi_extern_constant.h
     device_host/logical_endpoint_types.h

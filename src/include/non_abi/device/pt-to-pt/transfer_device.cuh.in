@@ -6,8 +6,15 @@
 #ifndef TRANSFER_DEVICE_CUH
 #define TRANSFER_DEVICE_CUH
 
-#include <cuda_runtime.h>
 #include "non_abi/nvshmem_build_options.h"
+
+#if defined(NVSHMEM_BUILD_P2P_ONLY)
+// P2P-only builds replace every nvshmemi_transfer_* call site with a P2P
+// predicate that folds to a compile-time constant
+#include "non_abi/device/pt-to-pt/nvshmemi_transfer_api_stubs.cuh"
+#else
+
+#include <cuda_runtime.h>
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host/nvshmem_common.cuh"
 #include "device/nvshmem_device_macros.h"
@@ -410,5 +417,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE
     }
 }
 #endif /* __CUDA_ARCH__ */
+
+#endif /* NVSHMEM_BUILD_P2P_ONLY */
 
 #endif /* TRANSFER_DEVICE_CUH */

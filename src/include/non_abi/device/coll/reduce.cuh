@@ -7,7 +7,6 @@
 #define REDUCE_DEVICE_CUH
 
 #include <cuda_runtime.h>
-#include "non_abi/device/pt-to-pt/proxy_device.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
@@ -17,7 +16,7 @@
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
-    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -812,7 +811,6 @@ NVSHMEMI_MCAST_TILE_ALLREDUCE_THREADGROUP(uint32_t, bf16x2, MAX)
 #define NVSHMEMI_MCAST_MIN_MIXOP_bf16x2 "min.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_f16x2 "max.acc::f32"
 #define NVSHMEMI_MCAST_MAX_MIXOP_bf16x2 "max.acc::f32"
-
 
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadgroup(

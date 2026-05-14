@@ -1675,6 +1675,13 @@ static void nvshmemi_init_msg(void) {
     if (0 == nvshmemi_boot_handle.pg_rank) {
         if (nvshmemi_options.VERSION) printf("%s\n", NVSHMEM_VENDOR_STRING);
 
+#ifdef NVSHMEM_BUILD_P2P_ONLY
+        WARN(
+            "This NVSHMEM library was built with NVSHMEM_BUILD_P2P_ONLY=ON; "
+            "all remote transports and the device proxy are unavailable. "
+            "Only P2P peers are supported.");
+#endif
+
         if (nvshmemi_options.DEBUG_provided) {
             int runtimeVersion, driverVersion;
             cudaError_t err;
@@ -1814,6 +1821,18 @@ int set_job_connectivity(nvshmemi_state_t *state) {
     }
     free(job_connectivity_all);
     nvshmemi_device_state.job_connectivity = nvshmemi_job_connectivity;
+
+#ifdef NVSHMEM_BUILD_P2P_ONLY
+    if (nvshmemi_job_connectivity > NVSHMEMI_JOB_GPU_LDST_ATOMICS) {
+        NVSHMEMI_ERROR_PRINT(
+            "NVSHMEM was built with NVSHMEM_BUILD_P2P_ONLY=ON but the job "
+            "requires a remote transport or lacks native P2P GPU atomics. "
+            "Rebuild without NVSHMEM_BUILD_P2P_ONLY, or run on a P2P topology "
+            "with native GPU atomics support (e.g., NVLink).\n");
+        status = NVSHMEMX_ERROR_NOT_SUPPORTED;
+        goto out;
+    }
+#endif
 
     // check if all proxy ops are ordered
     for (int i = 0; i < state->num_initialized_transports; i++) {

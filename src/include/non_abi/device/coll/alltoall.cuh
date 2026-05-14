@@ -149,10 +149,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_threadgroup(nvsh
                                                                             T *dest,
                                                                             const T *source,
                                                                             size_t nelems) {
-    if (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS)
+    if (nvshmemi_use_ldst_remote_atomics_path()) {
         nvshmemi_alltoall_p2p_allpush_threadgroup<T, SCOPE>(team, dest, source, nelems);
-    else
+    } else {
         nvshmemi_alltoall_allpush_threadgroup<T, SCOPE>(team, dest, source, nelems);
+    }
 }
 
 #endif /* __CUDA_ARCH__ */

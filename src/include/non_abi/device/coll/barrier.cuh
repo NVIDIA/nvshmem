@@ -10,7 +10,7 @@
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
-    defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
 #else
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
@@ -237,7 +237,7 @@ template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_barrier_threadgroup(nvshmem_team_t team) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     nvshmemi_threadgroup_sync<SCOPE>();
-    if ((nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_LDST)) {
+    if (!nvshmemi_use_ldst_path()) {
         nvshmemi_transfer_quiet<SCOPE>(true, NVSHMEMX_PE_ANY, NULL, NVSHMEMX_QP_ALL);
     } else if (!myIdx) {
         __threadfence_system();
@@ -247,8 +247,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_barrier_threadgroup(nvshm
     nvshmemi_sync_algo_threadgroup<SCOPE>(team);
 
     if (!myIdx) {
-        if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY)
+        if (nvshmemi_needs_proxy_cst()) {
             nvshmemi_transfer_enforce_consistency_at_target(false);
+        }
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 }
