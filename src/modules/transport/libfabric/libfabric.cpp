@@ -1647,7 +1647,7 @@ static int nvshmemt_libfabric_gdr_amo(struct nvshmem_transport *transport, int p
         if (status) goto out;
         assert(sequence_count != nvshmemt_libfabric_endpoint_seq_counter_t::last_seq_num);
 
-        assert(seq_counter.put_count <= nvshmemt_libfabric_endpoint_seq_counter_t::put_ack_freq);
+        assert(seq_counter.put_count <= seq_counter.put_ack_freq);
         uint8_t ppc = seq_counter.put_count;
         seq_counter.put_count = 0;
 
@@ -1953,7 +1953,7 @@ static int nvshmemt_libfabric_put_signal_unordered(struct nvshmem_transport *tcu
         goto out;
     }
 
-    assert(seq_counter.put_count <= nvshmemt_libfabric_endpoint_seq_counter_t::put_ack_freq);
+    assert(seq_counter.put_count <= seq_counter.put_ack_freq);
     ppc = seq_counter.put_count;
     seq_counter.put_count = 0;
 
@@ -2456,16 +2456,67 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     /* Initialize state-level signal ordering state */
     {
         int npes = t->n_pes;
+
+        /* Compute ack high-water mark from NIC tx depth. Under a pure
+         * AMO burst, each signal generates an ack fi_send on the receiver.
+         * If the receiver's tx ring fills, ack fi_sends return EAGAIN and
+         * the proxy thread retries inside try_again, which polls the CQ
+         * and processes more incoming signals — each generating another
+         * ack that also hits EAGAIN. This recursive try_again loop
+         * prevents the ack backlog from ever draining, leading to
+         * deadlock. Capping the sender's outstanding signals below
+         * tx_attr.size limits the ack pressure on the receiver.
+         * TODO: fix try_again to not do sends during CQ processing. */
+        uint32_t min_tx_size = UINT32_MAX;
+        for (size_t i = 0; i < state->prov_infos.size(); i++) {
+            if (state->prov_infos[i]->tx_attr)
+                min_tx_size = std::min(min_tx_size, (uint32_t)state->prov_infos[i]->tx_attr->size);
+        }
+        /* Scale HWM by npes so aggregate receiver ack pressure is bounded.
+         * Per-peer HWM of (tx_size - 256) is a per-pair bound; with N senders
+         * targeting one receiver, aggregate pressure = N * HWM. Each inbound
+         * signal generates an ack fi_send needing a tx WQE; if aggregate >
+         * tx_size the receiver hits EAGAIN and try_again recursively re-enters
+         * CQ processing, triggering deadlock (see TODO in this function).
+         *
+         * Divide base by npes so aggregate = N * (base/N) = base <= tx_size.
+         * If base < npes the invariant is unsatisfiable — fail loudly rather
+         * than silently allow the deadlock precondition. Long-term fix is to
+         * make try_again not issue fi_sends during CQ processing. */
+        uint32_t base_hwm = (min_tx_size > 256) ? min_tx_size - 256 : min_tx_size / 2;
+        if ((uint32_t)npes > base_hwm) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                "tx_size=%u too small for npes=%d (base_hwm=%u < npes): aggregate ack pressure cannot be bounded below tx ring depth. Use a NIC with deeper tx ring, or enable the long-term try_again fix.\n",
+                min_tx_size, npes, base_hwm);
+        }
+        uint32_t hwm = std::max(1u, base_hwm / (uint32_t)npes);
+
+        /* Link put_ack_freq to hwm so the invariant put_ack_freq <= hwm holds by
+         * construction. At high npes (e.g. 64) hwm can drop below the static cap
+         * of 64; without this link sparse workloads deadlock because the sender
+         * blocks at hwm before put_count reaches put_ack_freq (no ack request is
+         * ever emitted). hwm/2 leaves headroom to avoid a race on the boundary. */
+        uint32_t put_ack_freq_u = std::max(1u, hwm / 2);
+        uint32_t put_ack_freq = std::min((uint32_t)nvshmemt_libfabric_endpoint_seq_counter_t::PUT_ACK_FREQ_CAP, put_ack_freq_u);
+
         state->host_signal_state.put_signal_seq_counter.resize(npes);
         state->host_signal_state.proxy_put_signal_comp_map.resize(npes);
         state->host_signal_state.next_expected_seq.resize(npes, 0);
         state->host_signal_state.ack_aggregator = std::make_unique<nvshmemt_libfabric_ack_aggregator_t>(npes);
         state->host_signal_state.completed_staged_atomics = 0;
+        for (int pe = 0; pe < npes; pe++) {
+            state->host_signal_state.put_signal_seq_counter[pe].ack_high_watermark = hwm;
+            state->host_signal_state.put_signal_seq_counter[pe].put_ack_freq = put_ack_freq;
+        }
         state->proxy_signal_state.put_signal_seq_counter.resize(npes);
         state->proxy_signal_state.proxy_put_signal_comp_map.resize(npes);
         state->proxy_signal_state.next_expected_seq.resize(npes, 0);
         state->proxy_signal_state.ack_aggregator = std::make_unique<nvshmemt_libfabric_ack_aggregator_t>(npes);
         state->proxy_signal_state.completed_staged_atomics = 0;
+        for (int pe = 0; pe < npes; pe++) {
+            state->proxy_signal_state.put_signal_seq_counter[pe].ack_high_watermark = hwm;
+            state->proxy_signal_state.put_signal_seq_counter[pe].put_ack_freq = put_ack_freq;
+        }
     }
 
     for (size_t i = 0; i < state->prov_infos.size(); i++) {
