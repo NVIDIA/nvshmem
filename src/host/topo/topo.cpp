@@ -789,7 +789,28 @@ out:
     return status;
 }
 
-/* Parse hex cpumap string (e.g. "0000ffff,0000ffff") into cpu_set_t. Mirrors NCCL's ncclStrToCpuset. */
+typedef enum {
+    NVSHMEMI_CPU_AFFINITY_AUTO,
+    NVSHMEMI_CPU_AFFINITY_OFF,
+} nvshmemi_cpu_affinity_mode_t;
+
+static nvshmemi_cpu_affinity_mode_t get_cpu_affinity_mode() {
+    const char *mode = nvshmemi_options.CPU_AFFINITY;
+
+    if (mode == nullptr || strcasecmp(mode, "AUTO") == 0) {
+        return NVSHMEMI_CPU_AFFINITY_AUTO;
+    }
+
+    if (strcasecmp(mode, "OFF") == 0) {
+        return NVSHMEMI_CPU_AFFINITY_OFF;
+    }
+
+    NVSHMEMI_WARN_PRINT("Invalid NVSHMEM_CPU_AFFINITY value '%s'. Using AUTO.", mode);
+    return NVSHMEMI_CPU_AFFINITY_AUTO;
+}
+
+/* Parse hex cpumap string (e.g. "0000ffff,0000ffff") into cpu_set_t.
+ * Mirrors NCCL's ncclStrToCpuset. */
 static void cpumap_to_cpuset(const std::string &map_str, cpu_set_t *set) {
     constexpr int mask_count = CPU_SETSIZE / 32;
     std::array<uint32_t, mask_count> masks = {};
@@ -812,7 +833,7 @@ static void cpumap_to_cpuset(const std::string &map_str, cpu_set_t *set) {
     }
 }
 
-int nvshmemi_set_cpu_affinity(nvshmemi_state_t *state) {
+static int set_cpu_affinity(nvshmemi_state_t *state) {
     CUdevice cudev;
     cpu_set_t cur_set, numa_set, final_set;
     int numa_id = -1;
@@ -877,4 +898,14 @@ int nvshmemi_set_cpu_affinity(nvshmemi_state_t *state) {
          nvshmemi_boot_handle.pg_rank, numa_id, CPU_COUNT(&final_set), state->device_id);
 
     return NVSHMEMX_SUCCESS;
+}
+
+void nvshmemi_apply_cpu_affinity(nvshmemi_state_t *state) {
+    if (get_cpu_affinity_mode() == NVSHMEMI_CPU_AFFINITY_OFF) {
+        return;
+    }
+
+    if (set_cpu_affinity(state) != NVSHMEMX_SUCCESS) {
+        INFO(NVSHMEM_INIT, "Failed to set CPU affinity - skipping.\n");
+    }
 }
