@@ -619,7 +619,7 @@ int nvshmemt_libfabric_ack_aggregator_t::flush_peer(int pe, nvshmem_transport_t 
 
     status =
         gdrcopy_amo_ack(transport, ep, dest_addr, pending.range_end, pending.range_count,
-                        pending.signal_ack_count + pending.amo_ack_count);
+                        pending.ack_op_count());
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to send coalesced ack.\n");
 
     /* Clear pending state */
@@ -644,10 +644,12 @@ int nvshmemt_libfabric_ack_aggregator_t::record_ack(int pe, uint16_t seq_num,
 
     uint16_t start_seq_num = nvshmemt_libfabric_endpoint_seq_counter_t::seq_num_wrapdown(
         (seq_num - preceding_put_count) & nvshmemt_libfabric_endpoint_seq_counter_t::sequence_mask);
+    uint16_t new_range_count = static_cast<uint16_t>(preceding_put_count) + 1;
+    assert(new_range_count <= UINT8_MAX);
 
     if (!pending.has_range) {
         pending.range_end = seq_num;
-        pending.range_count = preceding_put_count + 1;
+        pending.range_count = static_cast<uint8_t>(new_range_count);
         pending.has_range = true;
     } else {
         uint16_t next_expected = nvshmemt_libfabric_endpoint_seq_counter_t::seq_num_wrapup(
@@ -655,17 +657,20 @@ int nvshmemt_libfabric_ack_aggregator_t::record_ack(int pe, uint16_t seq_num,
             nvshmemt_libfabric_endpoint_seq_counter_t::sequence_mask
         );
         if (start_seq_num == next_expected) {
-            pending.range_count += (preceding_put_count + 1);
+            uint16_t range_count = static_cast<uint16_t>(pending.range_count) + new_range_count;
+            assert(range_count <= UINT8_MAX);
+            pending.range_count = static_cast<uint8_t>(range_count);
             pending.range_end = seq_num;
         } else {
             /* Non-contiguous: flush current range, start new one */
             status = flush_peer(pe, transport, ep, dest_addr);
             if (unlikely(status)) return status;
             pending.range_end = seq_num;
-            pending.range_count = preceding_put_count + 1;
+            pending.range_count = static_cast<uint8_t>(new_range_count);
             pending.has_range = true;
         }
     }
+    assert(static_cast<uint16_t>(pending.signal_ack_count) + pending.amo_ack_count < UINT8_MAX);
     pending.signal_ack_count++;
 
     if (!pending.is_dirty) {
@@ -685,6 +690,7 @@ int nvshmemt_libfabric_ack_aggregator_t::record_amo_ack(int pe, nvshmem_transpor
     auto &pending = pending_per_peer[pe];
     pending.age = 0;
 
+    assert(static_cast<uint16_t>(pending.signal_ack_count) + pending.amo_ack_count < UINT8_MAX);
     pending.amo_ack_count++;
 
     if (!pending.is_dirty) {
@@ -748,14 +754,14 @@ int nvshmemt_libfabric_ack_aggregator_t::flush_stale(nvshmem_transport_t transpo
 }
 
 bool nvshmemt_libfabric_ack_aggregator_t::try_extract_for_peer(int pe, uint16_t &range_end,
-                                                               uint16_t &range_count,
-                                                               uint16_t &signal_ack_count) {
+                                                               uint8_t &range_count,
+                                                               uint8_t &signal_ack_count) {
     auto &pending = pending_per_peer[pe];
     if (pending.total_pending() == 0)
         return false;
     range_end = pending.range_end;
     range_count = pending.range_count;
-    signal_ack_count = pending.signal_ack_count + pending.amo_ack_count;
+    signal_ack_count = pending.ack_op_count();
 
     /* Clear pending state */
     pending.range_end = 0;
@@ -1299,7 +1305,7 @@ static int nvshmemt_libfabric_put_signal_completion(nvshmem_transport_t transpor
             } else if (auto *ack_entry = std::get_if<nvshmemt_libfabric_put_ack_entry>(it)) {
                 nvshmemt_libfabric_endpoint_t &ack_ep =
                     *(libfabric_state->eps[ack_entry->ep_index]);
-                uint16_t range_count = ack_entry->put_count;
+                uint8_t range_count = ack_entry->put_count;
 
                 status = gdrcopy_amo_ack(transport, ack_ep, ack_entry->src_addr,
                                          next_seq, range_count, 1 /* ack_num_ops */);
@@ -1889,16 +1895,15 @@ static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, in
     /* Piggyback pending ACK for this destination PE if available */
     {
         nvshmemt_libfabric_signal_state_t &signal_state = get_signal_state(libfabric_state, ep);
-        uint16_t ack_range_end, ack_range_count, ack_signal_count;
+        uint16_t ack_range_end;
+        uint8_t ack_range_count, ack_signal_count;
 
         if (signal_state.ack_aggregator &&
             signal_state.ack_aggregator->try_extract_for_peer(
                 pe, ack_range_end, ack_range_count, ack_signal_count)) {
             signal->ack.ack_seq_num = ack_range_end;
-            assert(ack_range_count <= UINT8_MAX);
-            signal->ack.ack_count = static_cast<uint8_t>(ack_range_count);
-            assert(ack_signal_count <= UINT8_MAX);
-            signal->ack.ack_num_ops = static_cast<uint8_t>(ack_signal_count);
+            signal->ack.ack_count = ack_range_count;
+            signal->ack.ack_num_ops = ack_signal_count;
         } else {
             signal->ack.ack_seq_num = 0;
             signal->ack.ack_count = 0;
@@ -2497,7 +2502,9 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
          * blocks at hwm before put_count reaches put_ack_freq (no ack request is
          * ever emitted). hwm/2 leaves headroom to avoid a race on the boundary. */
         uint32_t put_ack_freq_u = std::max(1u, hwm / 2);
-        uint32_t put_ack_freq = std::min((uint32_t)nvshmemt_libfabric_endpoint_seq_counter_t::PUT_ACK_FREQ_CAP, put_ack_freq_u);
+        uint8_t put_ack_freq = static_cast<uint8_t>(
+            std::min<uint32_t>(nvshmemt_libfabric_endpoint_seq_counter_t::PUT_ACK_FREQ_CAP,
+                               put_ack_freq_u));
 
         state->host_signal_state.put_signal_seq_counter.resize(npes);
         state->host_signal_state.proxy_put_signal_comp_map.resize(npes);

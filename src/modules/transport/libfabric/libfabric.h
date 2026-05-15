@@ -125,8 +125,8 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     /* put_ack_freq: frequency of ack requests in the put path. Linked to
      * ack_high_watermark at init in connect_endpoints: put_ack_freq = min(64, hwm/2).
      * At high npes (hwm small), the 64 cap would exceed hwm and deadlock. */
-    constexpr static uint32_t PUT_ACK_FREQ_CAP = 64;
-    uint32_t put_ack_freq = PUT_ACK_FREQ_CAP;
+    constexpr static uint8_t PUT_ACK_FREQ_CAP = 64;
+    uint8_t put_ack_freq = PUT_ACK_FREQ_CAP;
 
     /* Assert that index_mask is large enough to simplify some ranged ack return
        logic. */
@@ -154,7 +154,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
 
     uint32_t sequence_counter;
     std::array<uint32_t, num_categories> pending_acks;
-    uint32_t put_count;
+    uint8_t put_count;
     /* High-water mark for total pending acks across all categories.
      * Set to tx_attr.size - 256 at init. Caps the sender's outstanding
      * signals so the receiver's ack fi_sends don't fill its tx ring
@@ -379,10 +379,11 @@ struct nvshmemt_libfabric_ack_aggregator_t {
     /* Per-peer pending ack state for the ack aggregator */
     struct nvshmemt_libfabric_peer_pending_acks_t {
         uint16_t range_end;
-        uint16_t range_count;
+        uint8_t range_count;
         bool has_range;
-        uint16_t amo_ack_count;
-        uint16_t signal_ack_count; /* Number of record_ack calls (signals/AMOs with submitted_ops+=2) */
+        uint8_t amo_ack_count;
+        /* Number of record_ack calls (signals/AMOs with submitted_ops+=2). */
+        uint8_t signal_ack_count;
         uint16_t age; /* Progress cycles since last record; used for age-based flushing */
         bool is_dirty; /* Whether this peer is in the dirty_peers vector */
 
@@ -391,12 +392,24 @@ struct nvshmemt_libfabric_ack_aggregator_t {
               age{0}, is_dirty{false} {}
 
         uint16_t total_pending() const {
-            return range_count + amo_ack_count;
+            return static_cast<uint16_t>(range_count) + amo_ack_count;
+        }
+
+        uint8_t ack_op_count() const {
+            uint16_t count = static_cast<uint16_t>(signal_ack_count) + amo_ack_count;
+            assert(count <= UINT8_MAX);
+            return static_cast<uint8_t>(count);
         }
     };
 
     /* Maximum accumulated acks before a flush is triggered */
-    static constexpr uint32_t flush_threshold = 64;
+    static constexpr uint8_t flush_threshold = 64;
+    static constexpr uint16_t max_new_range_count =
+        static_cast<uint16_t>(nvshmemt_libfabric_endpoint_seq_counter_t::PUT_ACK_FREQ_CAP) + 1;
+    static constexpr uint16_t max_aggregated_range_count =
+        static_cast<uint16_t>(flush_threshold - 1) + max_new_range_count;
+    static_assert(max_aggregated_range_count <= UINT8_MAX,
+                  "Aggregated ack ranges must fit in uint8_t wire fields");
     static constexpr uint32_t max_age = 64;
 
     std::vector<nvshmemt_libfabric_peer_pending_acks_t> pending_per_peer;
@@ -416,8 +429,8 @@ struct nvshmemt_libfabric_ack_aggregator_t {
                    nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr);
     int flush_all(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep);
     int flush_stale(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep);
-    bool try_extract_for_peer(int pe, uint16_t &range_end, uint16_t &range_count,
-                              uint16_t &signal_ack_count);
+    bool try_extract_for_peer(int pe, uint16_t &range_end, uint8_t &range_count,
+                              uint8_t &signal_ack_count);
 };
 
 struct nvshmemt_libfabric_signal_state_t {
