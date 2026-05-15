@@ -13,11 +13,21 @@ import pytest
 @pytest.mark.mpi
 def test_device_get_peer_array(nvshmem_init_fini):
     """
-    Test device-side get_peer_array for inter-PE access via Numba kernel
+    Test device-side get_peer_array for inter-PE access via Numba kernel.
+
+    ``get_peer_array`` is a thin wrapper over ``nvshmem_ptr``, which only
+    returns a valid VA when the peer PE is reachable over NVLink (i.e. lives
+    in the same NVLink domain as the local PE).  On multi-node testbeds that
+    are connected only via TCP/IB (no cross-node NVLink fabric), ``TEAM_NODE``
+    degenerates to a single PE per node and ``nvshmem_ptr`` is undefined for
+    any other PE.  Skip in that case to avoid issuing an illegal load/store
+    that would poison the CUDA context for every subsequent test.
     """
     # Only test when at least 2 PEs
     if nvshmem.core.n_pes() < 2:
         pytest.skip("Need at least 2 PEs for peer access")
+    if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
+        pytest.skip("Need >1 PE in NVLink domain (TEAM_NODE) for peer access test")
 
     nblocks = 1
     nthreads = 1
@@ -59,17 +69,22 @@ def test_device_get_multicast_array(nvshmem_init_fini):
     unsupported, while TEAM_NODE correctly identifies each NVLink domain.  On
     GB200/GB300 (aarch64, CUDA 13) all PEs are in a single NVLink domain so
     TEAM_NODE == TEAM_WORLD and behaviour is unchanged.
+
+    On testbeds without a cross-node NVLink fabric (e.g. dual-node TCP/IB
+    setups), TEAM_NODE collapses to a single PE per node and multicast is
+    inherently unavailable; skip cleanly in that case.  The skip gate is
+    evaluated before any CUDA work so that the test does not get tripped by
+    a poisoned context inherited from a previous failure.
     """
-    # Only test if multicast teams are available (skip if not supported)
     nblocks = 1
     nthreads = 1
 
     dev = Device()
+    if not dev.properties.multicast_supported:
+        pytest.skip("Multicast not supported on this platform")
+    if nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
+        pytest.skip("Need >1 PE in NVLink domain (TEAM_NODE) for multicast test")
     dev.sync()
-
-    if not dev.properties.multicast_supported or nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) == 1:
-        print("Skipping MC memory test because Multicast memory is not supported on this platform")
-        pytest.skip("Skipping MC memory test because Multicast memory is not supported on this platform")
 
     # CuPy array allocated with NVSHMEM backend
     arr = nvshmem.core.array((4, ), dtype="float32")
