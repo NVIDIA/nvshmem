@@ -12,18 +12,12 @@
 
 #include "gdrapi.h"
 
-/* GDRCopy 2.5+ values used with symbols resolved through dlsym. Keep these
- * fallbacks so binaries can be built against older gdrapi.h headers while
+/* GDRCopy 2.5+ values used with symbols resolved through dlsym. Keep local
+ * constants so binaries can be built against older gdrapi.h headers while
  * opportunistically using newer runtime libraries. */
-#ifndef GDR_PIN_FLAG_FORCE_PCIE
-#define GDR_PIN_FLAG_FORCE_PCIE 1U
-#endif
-#ifndef GDR_MAP_FLAG_DEFAULT
-#define GDR_MAP_FLAG_DEFAULT 0
-#endif
-#ifndef GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE
-#define GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE 2
-#endif
+static constexpr uint32_t NVSHMEMT_GDR_PIN_FLAG_FORCE_PCIE = 1U;
+static constexpr int NVSHMEMT_GDR_MAP_FLAG_DEFAULT = 0;
+static constexpr int NVSHMEMT_GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE = 2;
 
 struct gdrcopy_function_table {
     gdr_t (*open)();

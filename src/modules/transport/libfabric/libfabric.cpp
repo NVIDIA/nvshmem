@@ -163,13 +163,13 @@ int libfabric_configure_gdrcopy_v2(nvshmemt_libfabric_state_t *libfabric_state) 
         libfabric_is_coherent_platform(libfabric_state->table, libfabric_state->log_level);
     if (!is_coherent) return 0;
 
-    bool v2_available = (gdrcopy_ftable.pin_buffer_v2 && gdrcopy_ftable.map_v2 &&
-                         gdrcopy_ftable.get_attribute);
+    bool v2_available =
+        (gdrcopy_ftable.pin_buffer_v2 && gdrcopy_ftable.map_v2 && gdrcopy_ftable.get_attribute);
     bool force_pcie_supported = false;
     if (v2_available) {
         int supported = 0;
-        int rc = gdrcopy_ftable.get_attribute(gdr_desc, GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE,
-                                              &supported);
+        int rc = gdrcopy_ftable.get_attribute(
+            gdr_desc, NVSHMEMT_GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE, &supported);
         force_pcie_supported = (rc == 0 && supported != 0);
     }
 
@@ -218,14 +218,14 @@ int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state
     if (libfabric_state->use_gdrcopy_v2) {
         /* Coherent platform path: force a BAR1/PCIe mapping so the
          * staged-atomics protocol's ordering assumptions hold. */
-        status = gdrcopy_ftable.pin_buffer_v2(gdr_desc, gdr_addr, length, GDR_PIN_FLAG_FORCE_PCIE,
-                                              &handle_info->mh);
+        status = gdrcopy_ftable.pin_buffer_v2(gdr_desc, gdr_addr, length,
+                                              NVSHMEMT_GDR_PIN_FLAG_FORCE_PCIE, &handle_info->mh);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "gdrcopy pin_buffer_v2 failed \n");
         pinned = true;
 
         status = gdrcopy_ftable.map_v2(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base,
-                                       length, GDR_MAP_FLAG_DEFAULT);
+                                       length, NVSHMEMT_GDR_MAP_FLAG_DEFAULT);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map_v2 failed \n");
         mapped = true;
     } else {
