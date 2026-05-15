@@ -60,6 +60,20 @@ struct nvshmemi_registered_state_info {
 static std::map<void *, nvshmemi_registered_state_info> registered_device_states;
 static std::set<nvshmemx_device_lib_init_cb> registered_device_state_cb;
 
+static size_t nvshmemi_get_device_state_symbol_size() {
+    size_t state_size = sizeof(nvshmemi_device_host_state_t);
+    cudaError_t status = cudaGetSymbolSize(&state_size, nvshmemi_device_state_d);
+    if (status != cudaSuccess) {
+        state_size = sizeof(nvshmemi_device_host_state_t);
+        WARN("Unable to query nvshmemi_device_state_d symbol size: %s. Falling back to host "
+             "device state size %zu; compatibility with older device libraries may not be "
+             "guaranteed.",
+             cudaGetErrorString(status), state_size);
+    }
+
+    return state_size;
+}
+
 static void nvshmemi_init_debug(void);
 static void nvshmemi_init_msg(void);
 int set_job_connectivity(nvshmemi_state_t *);
@@ -208,7 +222,7 @@ int nvshmemi_update_device_state() {
             continue;
         }
 
-        status = register_state_ptr(device_ptr, sizeof(nvshmemi_device_host_state_t),
+        status = register_state_ptr(device_ptr, nvshmemi_get_device_state_symbol_size(),
                                     transport_device_ptr);
 
         nvshmemi_init_counter++;
@@ -1179,7 +1193,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Unable to get device symbols.\n");
 
-    status = register_state_ptr(dev_state_ptr, sizeof(nvshmemi_device_host_state_t),
+    status = register_state_ptr(dev_state_ptr, nvshmemi_get_device_state_symbol_size(),
                                 transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Invalid context pointer passed to nvshmemid_hostlib_init_attr.\n");
