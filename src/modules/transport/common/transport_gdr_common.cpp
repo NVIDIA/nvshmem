@@ -37,11 +37,10 @@ bool nvshmemt_gdrcopy_ftable_init(struct gdrcopy_function_table *gdrcopy_ftable,
         int gdrapi_runtime_major_version, gdrapi_runtime_minor_version;
         gdrcopy_ftable->runtime_get_version(&gdrapi_runtime_major_version,
                                             &gdrapi_runtime_minor_version);
-        if (gdrapi_runtime_major_version != nvshmemi_gdrapi_compile_time_major_version ||
-            gdrapi_runtime_minor_version < nvshmemi_gdrapi_compile_time_minor_version) {
+        if (gdrapi_runtime_major_version != nvshmemi_gdrapi_compile_time_major_version) {
             INFO(log_level,
-                 "GDRCopy library version is not compatible with gdrapi.h (%d.%d) used during "
-                 "compilation. "
+                 "GDRCopy library major version is not compatible with gdrapi.h (%d.%d) used "
+                 "during compilation. "
                  "Disabling GDRCopy.\n",
                  nvshmemi_gdrapi_compile_time_major_version,
                  nvshmemi_gdrapi_compile_time_minor_version);
@@ -50,6 +49,14 @@ bool nvshmemt_gdrcopy_ftable_init(struct gdrcopy_function_table *gdrcopy_ftable,
         }
         INFO(log_level, "GDRCopy library version: (%d, %d)", gdrapi_runtime_major_version,
              gdrapi_runtime_minor_version);
+        if (gdrapi_runtime_minor_version < nvshmemi_gdrapi_compile_time_minor_version) {
+            INFO(log_level,
+                 "GDRCopy runtime minor version is older than gdrapi.h (%d.%d) used during "
+                 "compilation; newer APIs will only be used when runtime symbols and capabilities "
+                 "are present.",
+                 nvshmemi_gdrapi_compile_time_major_version,
+                 nvshmemi_gdrapi_compile_time_minor_version);
+        }
         LOAD_SYM(local_gdrcopy_handle, "gdr_driver_get_version",
                  gdrcopy_ftable->driver_get_version);
         LOAD_SYM(local_gdrcopy_handle, "gdr_open", gdrcopy_ftable->open);
