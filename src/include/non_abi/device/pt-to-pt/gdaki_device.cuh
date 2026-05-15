@@ -580,6 +580,21 @@ __device__ static __forceinline__ void gdaki_submit_db(nvshmemi_gpunetio_device_
     }
 }
 
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
+gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
+    struct doca_gpu_dev_verbs_addr daddr;
+    doca_gpu_dev_verbs_ticket_t ticket;
+
+    daddr.addr = (uint64_t)qp->ibuf.buf;
+    daddr.key = qp->ibuf.lkey;
+
+    doca_gpu_dev_verbs_mcst<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(&(qp->qp), daddr,
+                                                                           &ticket);
+    doca_gpu_dev_verbs_wait<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(&(qp->qp), ticket);
+
+    return ticket;
+}
+
 template <nvshmemi_op_t channel_op, bool nbi>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
@@ -1922,7 +1937,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_fence(
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_enforce_consistency_at_target(
     bool use_membar) {
-    // TODO: Leftover from proxy implementation that can probably be removed.
+    CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
+
+    if (!state->may_skip_cst) {
+        int npes = nvshmemi_device_state_d.npes;
+
+        // Run CST on the local loopback QP for each initialized device.
+        for (int dev_idx = 0; dev_idx < state->num_devices_initialized; ++dev_idx) {
+            int qp_idx =
+                dev_idx * state->num_default_rc_per_pe * npes + nvshmemi_device_state_d.mype;
+            nvshmemi_gpunetio_device_qp_t *qp = &state->globalmem.qps[qp_idx];
+            gdaki_cst(qp);
+        }
+    }
+
     if (use_membar) {
         __threadfence_system();
     }
