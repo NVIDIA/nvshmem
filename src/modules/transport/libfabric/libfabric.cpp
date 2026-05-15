@@ -196,6 +196,33 @@ out:
     return status;
 }
 
+void libfabric_gdr_cleanup_mapping(nvshmemt_libfabric_state_t *libfabric_state,
+                                   nvshmemt_libfabric_memhandle_info_t *handle_info, bool mapped,
+                                   size_t mapping_size, bool pinned, int primary_status) {
+    if (handle_info == nullptr) return;
+
+    if (mapped) {
+        int rc = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
+                                      mapping_size);
+        if (rc != 0) {
+            INFO(libfabric_state->log_level,
+                 "gdrcopy unmap failed during cleanup (rc=%d); primary status=%d", rc,
+                 primary_status);
+        }
+    }
+
+    if (pinned) {
+        int rc = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
+        if (rc != 0) {
+            INFO(libfabric_state->log_level,
+                 "gdrcopy unpin_buffer failed during cleanup (rc=%d); primary status=%d", rc,
+                 primary_status);
+        }
+    }
+
+    if (mapped || pinned) handle_info->gdr_mapping_size = 0;
+}
+
 /* Register a device-memory buffer with GDRCopy: pin, map, compute the
  * user-visible CPU pointer (accounting for 64KB page alignment), and record
  * the mapping info on handle_info. Uses the v2 pin/map path (with
@@ -230,8 +257,7 @@ int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state
         mapped = true;
     } else {
         status = gdrcopy_ftable.pin_buffer(gdr_desc, gdr_addr, length, 0, 0, &handle_info->mh);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "gdrcopy pin_buffer failed \n");
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy pin_buffer failed \n");
         pinned = true;
 
         status = gdrcopy_ftable.map(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base, length);
@@ -253,28 +279,9 @@ int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state
     return 0;
 
 out:
-    /* Best-effort cleanup of any partially-established GDRCopy state so the
-     * pin does not leak. Unmap first (if mapped), then unpin (if pinned).
-     * Note: gdr_unmap and gdr_unpin_buffer are the same APIs for both v1 and
-     * v2 handles, so a single cleanup path covers both paths above.
-     * Cleanup errors are logged but do not overwrite the primary status. */
-    if (mapped) {
-        int rc = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
-                                      length);
-        if (rc != 0) {
-            INFO(libfabric_state->log_level,
-                 "gdrcopy unmap failed during error cleanup (rc=%d); primary status=%d", rc,
-                 status);
-        }
-    }
-    if (pinned) {
-        int rc = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
-        if (rc != 0) {
-            INFO(libfabric_state->log_level,
-                 "gdrcopy unpin_buffer failed during error cleanup (rc=%d); primary status=%d",
-                 rc, status);
-        }
-    }
+    /* Best-effort cleanup of partially-established GDRCopy state so the pin
+     * does not leak. Cleanup errors are logged but do not overwrite status. */
+    libfabric_gdr_cleanup_mapping(libfabric_state, handle_info, mapped, length, pinned, status);
     return status;
 }
 #endif
@@ -2429,6 +2436,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     int status;
     bool is_host = true;
     void *curr_ptr;
+    char *cached_ptr_end = static_cast<char *>(buf);
     CUdevice gpu_device_id;
     nvshmemt_libfabric_memhandle_info_t *handle_info = NULL;
 
@@ -2529,15 +2537,6 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
                 status =
                     libfabric_gdr_register_memhandle(libfabric_state, handle_info, buf, length);
                 if (status != 0) goto out;
-
-                curr_ptr = buf;
-                do {
-                    status = nvshmemt_mem_handle_cache_add(t, libfabric_state->cache, curr_ptr,
-                                                           (void *)handle_info);
-                    NVSHMEMI_NZ_ERROR_JMP(status, status, out,
-                                          "Unable to add key to mem handle info cache");
-                    curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
-                } while (curr_ptr < (char *)buf + length);
             } else
 #endif
             {
@@ -2558,6 +2557,9 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
             NVSHMEMI_NZ_ERROR_JMP(status, status, out,
                                   "Unable to add key to mem handle info cache");
             curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
+            if (static_cast<char *>(curr_ptr) > cached_ptr_end) {
+                cached_ptr_end = static_cast<char *>(curr_ptr);
+            }
         } while (curr_ptr < (char *)buf + length);
     }
 
@@ -2574,8 +2576,20 @@ out:
     if (status) {
         if (handle_info) {
             if (libfabric_state->cache) {
-                nvshmemt_mem_handle_cache_remove(t, libfabric_state->cache, buf);
+                curr_ptr = buf;
+                while (static_cast<char *>(curr_ptr) < cached_ptr_end) {
+                    nvshmemt_mem_handle_cache_remove(t, libfabric_state->cache, curr_ptr);
+                    curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
+                }
             }
+#ifdef NVSHMEM_USE_GDRCOPY
+            if (!is_host && use_gdrcopy) {
+                bool gdr_mapping_created = handle_info->gdr_mapping_size > 0;
+                libfabric_gdr_cleanup_mapping(libfabric_state, handle_info, gdr_mapping_created,
+                                              handle_info->gdr_mapping_size, gdr_mapping_created,
+                                              status);
+            }
+#endif
             free(handle_info);
         }
     }
