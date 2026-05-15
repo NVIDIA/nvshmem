@@ -4,11 +4,10 @@
 import importlib.util
 from pathlib import Path
 
-import cuda.bindings.driver as cudrv
 from cuda.core import Device
 import cutlass.cute as cute
-import numpy as np
 import pytest
+import torch
 
 import nvshmem.core.interop.cute as cute_interop
 
@@ -34,17 +33,17 @@ _CUTE_DTYPE_MAP = {
     "uint64": cute.Uint64,
 }
 
-_NUMPY_DTYPE_MAP = {
-    "float32": np.float32,
-    "float64": np.float64,
-    "int8": np.int8,
-    "int16": np.int16,
-    "int32": np.int32,
-    "int64": np.int64,
-    "uint8": np.uint8,
-    "uint16": np.uint16,
-    "uint32": np.uint32,
-    "uint64": np.uint64,
+_TORCH_DTYPE_MAP = {
+    "float32": torch.float32,
+    "float64": torch.float64,
+    "int8": torch.int8,
+    "int16": torch.int16,
+    "int32": torch.int32,
+    "int64": torch.int64,
+    "uint8": torch.uint8,
+    "uint16": torch.uint16,
+    "uint32": torch.uint32,
+    "uint64": torch.uint64,
 }
 
 
@@ -55,21 +54,28 @@ def _cute_dtype(dtype_name):
     return dtype
 
 
-def _fill_cute_tensor(tensor, dtype_name, value):
-    np_dtype = _NUMPY_DTYPE_MAP[dtype_name]
-    host = np.full(tuple(tensor.shape), np_dtype(value), dtype=np_dtype)
+def _torch_view_of_cute_tensor(tensor, dtype_name):
+    # Wrap the NVSHMEM-backed buffer behind a CuTe DSL tensor as a Torch view
+    # via DLPack -- the same path ``nvshmem.core.interop.torch.tensor()`` uses
+    # to expose NVSHMEM symmetric memory to Torch.  Routing host I/O through
+    # Torch instead of raw ``cuMemcpy{HtoD,DtoH}`` avoids segfaults on
+    # libcuda's VMM-mapped symmetric heap (NVBug 5983765); raw cuMemcpyDtoH
+    # against that region traps inside ``cuMemcpyDtoH_v2`` while libcuda walks
+    # its allocation table.
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
-    cudrv.cuMemcpyHtoD(buf.handle, host, host.nbytes)
+    torch_dtype = _TORCH_DTYPE_MAP[dtype_name]
+    return torch.utils.dlpack.from_dlpack(buf).view(torch_dtype).view(tuple(tensor.shape))
+
+
+def _fill_cute_tensor(tensor, dtype_name, value):
+    view = _torch_view_of_cute_tensor(tensor, dtype_name)
+    view.fill_(value)
     Device().sync()
 
 
 def _read_cute_tensor(tensor, dtype_name):
-    np_dtype = _NUMPY_DTYPE_MAP[dtype_name]
-    host = np.empty(tuple(tensor.shape), dtype=np_dtype)
-    buf, _, _ = cute_interop.tensor_get_buffer(tensor)
-    cudrv.cuMemcpyDtoH(host, buf.handle, host.nbytes)
-    Device().sync()
-    return host
+    view = _torch_view_of_cute_tensor(tensor, dtype_name)
+    return view.detach().cpu().numpy()
 
 
 __all__ = [
