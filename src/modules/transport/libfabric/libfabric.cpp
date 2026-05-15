@@ -223,6 +223,12 @@ void libfabric_gdr_cleanup_mapping(nvshmemt_libfabric_state_t *libfabric_state,
     if (mapped || pinned) handle_info->gdr_mapping_size = 0;
 }
 
+void *libfabric_gdr_cpu_ptr_from_mapping(void *cpu_ptr_base, void *buf, const gdr_info_t &info) {
+    const uintptr_t mapping_offset =
+        reinterpret_cast<uintptr_t>(buf) - static_cast<uintptr_t>(info.va);
+    return static_cast<void *>(static_cast<char *>(cpu_ptr_base) + mapping_offset);
+}
+
 /* Register a device-memory buffer with GDRCopy: pin, map, compute the
  * user-visible CPU pointer (accounting for 64KB page alignment), and record
  * the mapping info on handle_info. Uses the v2 pin/map path (with
@@ -236,9 +242,6 @@ int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state
     int status = 0;
     gdr_info_t info;
     const auto gdr_addr = static_cast<unsigned long>(reinterpret_cast<uintptr_t>(buf));
-    char *cpu_ptr_base = nullptr;
-    char *buf_ptr = nullptr;
-    char *info_va = nullptr;
     bool pinned = false;
     bool mapped = false;
 
@@ -270,10 +273,7 @@ int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state
 
     /* Mappings start on a 64KB boundary, so calculate the offset from the
      * head of the mapping to the beginning of the buffer. */
-    cpu_ptr_base = static_cast<char *>(handle_info->cpu_ptr_base);
-    buf_ptr = static_cast<char *>(buf);
-    info_va = reinterpret_cast<char *>(static_cast<uintptr_t>(info.va));
-    handle_info->cpu_ptr = static_cast<void *>(cpu_ptr_base + (buf_ptr - info_va));
+    handle_info->cpu_ptr = libfabric_gdr_cpu_ptr_from_mapping(handle_info->cpu_ptr_base, buf, info);
     handle_info->gdr_mapping_size = length;
     handle_info->ptr = buf;
     return 0;
