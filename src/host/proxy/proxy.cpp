@@ -155,6 +155,59 @@ inline void proxy_update_processed(proxy_channel_t *ch, int bytes, bool force_up
     }
 }
 
+static inline nvshmemi_op_t proxy_base_op(uint8_t op) {
+    if (static_cast<nvshmemi_op_t>(op) > NVSHMEMI_OP_QP_OP_OFFSET) {
+        return static_cast<nvshmemi_op_t>(op - NVSHMEMI_OP_QP_OP_OFFSET);
+    }
+    return static_cast<nvshmemi_op_t>(op);
+}
+
+static inline bool proxy_dma_more_follows(proxy_state_t *state, proxy_channel_t *ch,
+                                          int proxy_request_batch_idx,
+                                          struct nvshmem_transport *tcurr, int pe,
+                                          nvshmemx_qp_handle_t qp_index, rma_verb_t verb) {
+    if (verb.desc != NVSHMEMI_OP_PUT ||
+        proxy_request_batch_idx == nvshmemi_options.PROXY_REQUEST_BATCH_MAX - 1) {
+        return false;
+    }
+
+    int transport_batch_max_ops = nvshmemi_options.TRANSPORT_BATCH_MAX_OPS;
+    if (transport_batch_max_ops > 0 &&
+        (proxy_request_batch_idx % transport_batch_max_ops) == transport_batch_max_ops - 1) {
+        return false;
+    }
+
+    uint64_t next_ctr = ch->processed + PROXY_DMA_REQ_BYTES;
+    int next_flag = COUNTER_TO_FLAG(state, next_ctr);
+    base_request_t *next_req =
+        reinterpret_cast<base_request_t *>(WRAPPED_CHANNEL_BUF(state, ch, next_ctr));
+    uint8_t next_flag_val = __atomic_load_n(&next_req->flag, __ATOMIC_ACQUIRE) & 1;
+    if (next_flag_val != next_flag || proxy_base_op(next_req->op) != NVSHMEMI_OP_PUT) {
+        return false;
+    }
+
+    uint64_t next_req_2_ctr = next_ctr + 24;
+    int next_req_2_flag = COUNTER_TO_FLAG(state, next_req_2_ctr);
+    put_dma_request_2_t *next_dma_req_2 =
+        reinterpret_cast<put_dma_request_2_t *>(WRAPPED_CHANNEL_BUF(state, ch, next_req_2_ctr));
+    uint8_t next_req_2_flag_val =
+        __atomic_load_n(&next_dma_req_2->flag, __ATOMIC_ACQUIRE) & 1;
+    if (next_req_2_flag_val != next_req_2_flag) {
+        return false;
+    }
+
+    int next_pe = next_dma_req_2->pe;
+    if (next_pe < 0 || next_pe >= state->nvshmemi_state->npes) {
+        return false;
+    }
+    nvshmemx_qp_handle_t next_qp_index = NVSHMEMX_QP_DEFAULT;
+    if ((nvshmemi_op_t)next_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
+        next_qp_index = next_dma_req_2->qp_index;
+    }
+
+    return next_pe == pe && next_qp_index == qp_index && state->transport[next_pe] == tcurr;
+}
+
 int nvshmemi_proxy_create_channels(proxy_state_t *proxy_state) {
     int status = 0;
 
@@ -379,7 +432,8 @@ out:
     return status;
 }
 
-inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *is_processed) {
+inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *is_processed,
+                               int proxy_request_batch_idx) {
     int status = 0;
     base_request_t *base_req;
     put_dma_request_0_t *dma_req_0;
@@ -431,17 +485,22 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
     // issue transport DMA
     {
         rma_verb_t verb;
-        if (base_req->op > NVSHMEMI_OP_QP_OP_OFFSET) {
-            verb.desc = (nvshmemi_op_t)(base_req->op - NVSHMEMI_OP_QP_OP_OFFSET);
-        } else {
-            verb.desc = (nvshmemi_op_t)base_req->op;
-        }
+        verb.desc = proxy_base_op(base_req->op);
         verb.is_nbi = 1;
         verb.is_stream = 0;
         verb.cstrm = NULL;
+        struct nvshmem_transport *tcurr = state->transport[pe];
         void *rptr = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
-        nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                       rptr, (void *)laddr, size, qp_index);
+        if (tcurr->host_ops.rma_with_hints &&
+            proxy_dma_more_follows(state, ch, proxy_request_batch_idx, tcurr, pe, qp_index, verb)) {
+            nvshmem_transport_op_attrs_t attrs{};
+            attrs.flags = NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
+            nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
+                                           rptr, (void *)laddr, size, qp_index, &attrs);
+        } else {
+            nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
+                                           rptr, (void *)laddr, size, qp_index, nullptr);
+        }
     }
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
     __sync_synchronize();  // XXX: prevents complete_d store reordered to before return from
@@ -1253,7 +1312,9 @@ inline void progress_channels(proxy_state_t *proxy_state) {
         int flag;
         uint8_t flag_value;
 
-        for (int j = 0; j < nvshmemi_options.PROXY_REQUEST_BATCH_MAX; j++) {
+        for (int proxy_request_batch_idx = 0;
+             proxy_request_batch_idx < nvshmemi_options.PROXY_REQUEST_BATCH_MAX;
+             proxy_request_batch_idx++) {
             counter = ch->processed;
 
             if (likely(channel_req[i] == NULL)) {
@@ -1289,7 +1350,8 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                     case NVSHMEMI_OP_PUT_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received PUT \n");
                         is_processed = 0;
-                        status = process_channel_dma(proxy_state, ch, &is_processed);
+                        status = process_channel_dma(proxy_state, ch, &is_processed,
+                                                     proxy_request_batch_idx);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_dma<PUT>\n");
                         break;
                     case NVSHMEMI_OP_G:
@@ -1298,7 +1360,8 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                     case NVSHMEMI_OP_GET_QP:
                         TRACE(NVSHMEM_PROXY, "host proxy: received GET \n");
                         is_processed = 0;
-                        status = process_channel_dma(proxy_state, ch, &is_processed);
+                        status = process_channel_dma(proxy_state, ch, &is_processed,
+                                                     proxy_request_batch_idx);
                         if (likely(is_processed)) proxy_state->issued_get = 1;
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_dma<GET>\n");
                         break;

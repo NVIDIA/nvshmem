@@ -643,6 +643,10 @@ struct nvshmemt_libfabric_state_t {
     int num_selected_devs = 0;
     int max_nic_per_pe = 0;
     uint32_t proxy_ep_cntr = 0;
+    /* EP chosen for the FI_MORE-deferred op so batched ops use the same EP.
+     * Slot 0 = NVSHMEMX_QP_HOST, slot 1 = proxy. Each slot is SPSC.
+     * -1 = no pending batched ops. */
+    std::array<int, 2> pending_batch_ep;
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;

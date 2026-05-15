@@ -67,6 +67,20 @@ typedef enum {
     NVSHMEM_TRANSPORT_LIB_CODE_MAX = INT_MAX,
 } nvshmem_transport_inline_lib_code_type_t;
 
+typedef enum {
+    NVSHMEM_TRANSPORT_OP_FLAG_NONE = 0,
+    /*
+     * Advisory only: this operation is not the terminal operation in a compatible
+     * transport-defined batch domain. Transports may ignore this flag.
+     */
+    NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS = 1u << 0,
+    NVSHMEM_TRANSPORT_OP_FLAG_MAX = INT_MAX,
+} nvshmem_transport_op_flag_t;
+
+typedef struct nvshmem_transport_op_attrs {
+    uint32_t flags;
+} nvshmem_transport_op_attrs_t;
+
 typedef struct nvshmem_transport_pe_info {
     pcie_id_t pcie_id;
     int pe;
@@ -121,6 +135,10 @@ typedef struct amo_bytesdesc {
 typedef int (*rma_handle)(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                           rma_memdesc_t *remote, rma_memdesc_t *local, rma_bytesdesc_t bytesdesc,
                           int qp_index);
+typedef int (*rma_with_hints_handle)(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
+                                     rma_memdesc_t *remote, rma_memdesc_t *local,
+                                     rma_bytesdesc_t bytesdesc, int qp_index,
+                                     const nvshmem_transport_op_attrs_t *attrs);
 typedef int (*amo_handle)(struct nvshmem_transport *tcurr, int pe, void *curetptr, amo_verb_t verb,
                           amo_memdesc_t *target, amo_bytesdesc_t bytesdesc, int qp_index);
 typedef int (*fence_handle)(struct nvshmem_transport *tcurr, int pe, int qp_index, int is_multi);
@@ -155,6 +173,14 @@ struct nvshmem_transport_host_ops {
     int (*add_device_remote_mem_handles)(struct nvshmem_transport *transport, int transport_stride,
                                          nvshmem_mem_handle_t *mem_handles, uint64_t heap_offset,
                                          size_t size);
+    /*
+     * Optional: rma_with_hints accepts operation-local metadata. MORE_FOLLOWS describes the
+     * current operation only, and indicates that the caller expects another compatible operation
+     * in the same transport-defined batch domain. Transports may ignore attrs or define
+     * compatibility more narrowly by PE, QP, endpoint, op kind, or provider limits. Correctness
+     * must not depend on batching. Callers must fall back to rma when rma_with_hints is NULL.
+     */
+    rma_with_hints_handle rma_with_hints;
 };
 
 typedef struct nvshmem_transport {
@@ -189,6 +215,17 @@ typedef struct nvshmem_transport {
 } nvshmem_transport_v2;
 
 typedef nvshmem_transport_v2 *nvshmem_transport_t;
+
+static inline int nvshmemt_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
+                               rma_memdesc_t *remote, rma_memdesc_t *local,
+                               rma_bytesdesc_t bytesdesc, int qp_index,
+                               const nvshmem_transport_op_attrs_t *attrs) {
+    if (attrs && tcurr->host_ops.rma_with_hints) {
+        return tcurr->host_ops.rma_with_hints(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                              attrs);
+    }
+    return tcurr->host_ops.rma(tcurr, pe, verb, remote, local, bytesdesc, qp_index);
+}
 
 int nvshmemt_p2p_init(nvshmem_transport_t *transport);
 

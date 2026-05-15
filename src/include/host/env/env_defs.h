@@ -369,6 +369,11 @@ NVSHMEMI_ENV_DEF(PROXY_REQUEST_BATCH_MAX, int, 32, NVSHMEMI_ENV_CAT_OTHER,
                  "Maxmum number of requests that the proxy thread processes in a single iteration "
                  "of the progress loop.")
 
+NVSHMEMI_ENV_DEF(TRANSPORT_BATCH_MAX_OPS, int, 16, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Maximum number of consecutive proxy requests to mark with a transport batching "
+                 "hint before ending the current transport-level batch. Applies only to transports "
+                 "and operation types that implement batching hints.")
+
 /** NVTX instrumentation **/
 NVSHMEMI_ENV_DEF(NVTX, string, "off", NVSHMEMI_ENV_CAT_NVTX,
                  "Set to enable NVTX instrumentation. Accepts a comma separated list of "

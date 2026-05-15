@@ -279,7 +279,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
             }
         } else {
             nvshmemi_process_multisend_rma(tcurr, t, pe, verb, rptr, lptr, nelems * elembytes,
-                                           NVSHMEMX_QP_HOST);
+                                           NVSHMEMX_QP_HOST, nullptr);
         }
         goto out;
     }

@@ -1184,6 +1184,7 @@ static int nvshmemt_libfabric_show_info(struct nvshmem_transport * /*transport*/
 static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                        rma_memdesc_t *remote, rma_memdesc_t *local,
                                        rma_bytesdesc_t bytesdesc, int /*qp_index*/,
+                                       const nvshmem_transport_op_attrs_t *attrs,
                                        uint32_t *imm_data, nvshmemt_libfabric_endpoint_t &ep) {
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle, *local_handle = NULL;
     void *local_mr_desc = NULL;
@@ -1194,10 +1195,12 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
     int target_ep, ep_idx, domain_idx;
     void *context = NULL;
 
-
     ep_idx = ep.ep_index;
     domain_idx = ep.domain_index;
     target_ep = pe * libfabric_state->eps.size() + ep_idx;
+    int slot_impl = (ep.qp_index == NVSHMEMX_QP_HOST) ? 0 : 1;
+    bool put_more_follows = verb.desc == NVSHMEMI_OP_PUT && attrs &&
+                            (attrs->flags & NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS);
 
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
         nvshmemt_libfabric_gdr_op_ctx_t *gdr_ctx;
@@ -1229,18 +1232,51 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
         else
             remote_addr = (uintptr_t)remote->offset;
 
-        do {
-            if (likely(imm_data != NULL)) {
-                status =
-                    fi_writedata(ep.endpoint, local->ptr, op_size, local_mr_desc,
-                                 *imm_data, target_ep, remote_addr, remote_handle->key, context);
-            } else
-                status = fi_write(ep.endpoint, local->ptr, op_size, local_mr_desc, target_ep,
-                                  remote_addr, remote_handle->key, context);
-        } while (try_again(tcurr, &status, &num_retries,
-                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT,
-                           ep.qp_index, progress_type::All));
+        if (put_more_follows) {
+            struct iovec p_op_l_iov = {};
+            struct fi_msg_rma p_op_msg = {};
+            struct fi_rma_iov p_op_r_iov = {};
+            uint64_t msg_flags = FI_MORE;
 
+            if (imm_data) {
+                p_op_msg.data = *imm_data;
+                msg_flags |= FI_REMOTE_CQ_DATA;
+            }
+
+            p_op_msg.msg_iov = &p_op_l_iov;
+            p_op_msg.desc = &local_mr_desc;
+            p_op_msg.iov_count = 1;
+            p_op_msg.addr = target_ep;
+            p_op_msg.rma_iov = &p_op_r_iov;
+            p_op_msg.rma_iov_count = 1;
+            p_op_msg.context = context;
+
+            p_op_l_iov.iov_base = local->ptr;
+            p_op_l_iov.iov_len = op_size;
+
+            p_op_r_iov.addr = remote_addr;
+            p_op_r_iov.len = op_size;
+            p_op_r_iov.key = remote_handle->key;
+
+            do {
+                status = fi_writemsg(ep.endpoint, &p_op_msg, msg_flags);
+            } while (try_again(tcurr, &status, &num_retries,
+                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT,
+                               ep.qp_index, progress_type::All));
+            libfabric_state->pending_batch_ep[slot_impl] = status ? -1 : ep_idx;
+        } else {
+            do {
+                if (likely(imm_data != NULL)) {
+                    status =
+                        fi_writedata(ep.endpoint, local->ptr, op_size, local_mr_desc, *imm_data,
+                                     target_ep, remote_addr, remote_handle->key, context);
+                } else
+                    status = fi_write(ep.endpoint, local->ptr, op_size, local_mr_desc, target_ep,
+                                      remote_addr, remote_handle->key, context);
+            } while (try_again(tcurr, &status, &num_retries,
+                               NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT,
+                               ep.qp_index, progress_type::All));
+        }
     } else if (likely(verb.desc == NVSHMEMI_OP_P)) {
         if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
             nvshmemt_libfabric_gdr_op_ctx_t *p_buf =
@@ -1308,6 +1344,7 @@ static int nvshmemt_libfabric_rma_impl(struct nvshmem_transport *tcurr, int pe, 
     }
 
 out:
+    if (!put_more_follows) libfabric_state->pending_batch_ep[slot_impl] = -1;
     ep.submitted_ops++;
 
     if (unlikely(status)) {
@@ -1319,14 +1356,23 @@ out:
     return status;
 }
 
-static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
-                                  rma_memdesc_t *remote, rma_memdesc_t *local,
-                                  rma_bytesdesc_t bytesdesc, int qp_index) {
+static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, int pe,
+                                             rma_verb_t verb, rma_memdesc_t *remote,
+                                             rma_memdesc_t *local, rma_bytesdesc_t bytesdesc,
+                                             int qp_index,
+                                             const nvshmem_transport_op_attrs_t *attrs) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     uint32_t imm_data_val = 0;
     uint32_t *imm_data = NULL;
     int status = 0;
-    int ep_idx = get_next_ep(libfabric_state, qp_index);
+    /*
+     * Use the same EP while FI_MORE doorbell is deferred (RMA only). Slot by caller role so host
+     * and proxy do not interfere.
+     */
+    int slot = (qp_index == NVSHMEMX_QP_HOST) ? 0 : 1;
+    int ep_idx = (libfabric_state->pending_batch_ep[slot] >= 0)
+                     ? libfabric_state->pending_batch_ep[slot]
+                     : get_next_ep(libfabric_state, qp_index);
     nvshmemt_libfabric_endpoint_t &ep = *(libfabric_state->eps[ep_idx]);
 
     // Generate sequence number for P and PUT operations when ordering is needed
@@ -1363,7 +1409,15 @@ static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_v
         imm_data = &imm_data_val;
     }
 
-    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index, imm_data, ep);
+    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index, attrs,
+                                       imm_data, ep);
+}
+
+static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
+                                  rma_memdesc_t *remote, rma_memdesc_t *local,
+                                  rma_bytesdesc_t bytesdesc, int qp_index) {
+    return nvshmemt_libfabric_rma_with_hints(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                             nullptr);
 }
 
 static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,
@@ -1691,7 +1745,8 @@ static int nvshmemt_libfabric_put_signal_unordered(struct nvshmem_transport *tcu
     for (size_t i = 0; i < write_remote.size(); i++) {
         status =
             nvshmemt_libfabric_rma_impl(tcurr, pe, write_verb, &write_remote[i], &write_local[i],
-                                        write_bytes_desc[i], qp_index, &sequence_count, ep);
+                                        write_bytes_desc[i], qp_index, nullptr,
+                                        &sequence_count, ep);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT(
                 "Error in nvshmemt_put_signal_unordered, could not submit write #%lu\n", i);
@@ -2120,6 +2175,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     /* One-time initializations */
     t->max_op_len = UINT64_MAX;
     state->proxy_ep_cntr = 0;
+    state->pending_batch_ep = {-1, -1};
 
     memset(&cq_attr, 0, sizeof(struct fi_cq_attr));
     if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_SLINGSHOT) {
@@ -2676,6 +2732,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.get_mem_handle = nvshmemt_libfabric_get_mem_handle;
     transport->host_ops.release_mem_handle = nvshmemt_libfabric_release_mem_handle;
     transport->host_ops.rma = nvshmemt_libfabric_rma;
+    if (!options.LIBFABRIC_DISABLE_BATCH_RMA) {
+        transport->host_ops.rma_with_hints = nvshmemt_libfabric_rma_with_hints;
+    }
     transport->host_ops.fence = nvshmemt_libfabric_fence;
     transport->host_ops.quiet = nvshmemt_libfabric_quiet;
     transport->host_ops.finalize = nvshmemt_libfabric_finalize;

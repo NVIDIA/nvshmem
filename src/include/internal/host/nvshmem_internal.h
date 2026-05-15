@@ -167,7 +167,8 @@ static inline void nvshmemi_get_remote_mem_handle(rma_memdesc_t *handle, size_t 
    lptr is local address - either symmetric or not */
 static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcurr, int transport_id,
                                                   int pe, rma_verb_t verb, void *rptr, void *lptr,
-                                                  size_t size, nvshmemx_qp_handle_t qp_index) {
+                                                  size_t size, nvshmemx_qp_handle_t qp_index,
+                                                  const nvshmem_transport_op_attrs_t *attrs) {
     rma_memdesc_t localdesc, remotedesc;
     rma_bytesdesc_t bytes;
     bytes.srcstride = 1;
@@ -177,6 +178,7 @@ static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcur
     size_t chunk_size;
     size_remaining = size;
     int status;
+    const bool use_rma_hints = attrs && tcurr->host_ops.rma_with_hints;
 
     while (size_remaining) {
         localdesc.ptr = lptr;
@@ -188,12 +190,21 @@ static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcur
         nvshmemi_get_remote_mem_handle(&remotedesc, &remote_chunk_size, rptr, pe, transport_id);
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         bytes.nelems = chunk_size;
-        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index);
+        const size_t next_size_remaining = size_remaining - chunk_size;
+        if (use_rma_hints && next_size_remaining > 0) {
+            nvshmem_transport_op_attrs_t chunk_attrs = *attrs;
+            chunk_attrs.flags |= NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
+            status = nvshmemt_rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index,
+                                  &chunk_attrs);
+        } else {
+            status = nvshmemt_rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index,
+                                  use_rma_hints ? attrs : nullptr);
+        }
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
             exit(-1);
         }
-        size_remaining -= chunk_size;
+        size_remaining = next_size_remaining;
         lptr = (char *)lptr + chunk_size;
         rptr = (char *)rptr + chunk_size;
     }
