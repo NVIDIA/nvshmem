@@ -8,6 +8,7 @@ macro(nvshmem_add_test_no_device SOURCE)
 endmacro()
 
 add_subdirectory(coll)
+add_subdirectory(bootstrap)
 add_subdirectory(init)
 add_subdirectory(interop)
 add_subdirectory(mem)
