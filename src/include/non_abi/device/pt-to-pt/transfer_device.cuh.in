@@ -89,7 +89,7 @@ __device__ NVSHMEMI_TRANSFER_INLINE void nvshmemi_transfer_syncapi_update_mem() 
                         2. Needed to prevent reorder of instructions after sync api (when the
                         following if condition is false) */
     if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY) {
-        nvshmemi_proxy_enforce_consistency_at_target(true);
+        nvshmemi_transfer_enforce_consistency_at_target(true);
     }
 }
 
