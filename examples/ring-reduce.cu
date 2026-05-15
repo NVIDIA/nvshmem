@@ -79,7 +79,7 @@ size_t chunk_size = 262144;
 
 // perform Allreduce using ring
 __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *signal,
-                            size_t chunk_size) {
+                            size_t chunk_size, size_t signals_per_block, uint64_t phase) {
     int mype = nvshmem_my_pe();
     int npes = nvshmem_n_pes();
     int peer = (mype + 1) % npes;
@@ -96,7 +96,10 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
     src = src + block_idx * elems_per_block;
     dst = dst + block_idx * elems_per_block;
     nreduce = elems_per_block;
-    signal = signal + block_idx;
+    signal = signal + block_idx * signals_per_block;
+
+    uint64_t *reduce_signals = signal;
+    uint64_t *bcast_signals = signal + signals_per_block / 2;
 
     size_t chunk_elems = chunk_size / sizeof(int);
     size_t num_chunks = nreduce / chunk_elems;
@@ -104,7 +107,8 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
     // reduce phase
     for (size_t chunk = 0; chunk < num_chunks; chunk++) {
         if (mype != 0) {
-            if (thread_id == 0) nvshmem_signal_wait_until(signal, NVSHMEM_CMP_GE, chunk + 1);
+            if (thread_id == 0)
+                nvshmem_signal_wait_until(&reduce_signals[chunk], NVSHMEM_CMP_EQ, phase);
 
             __syncthreads();
             for (size_t i = thread_id; i < chunk_elems; i += num_threads) {
@@ -113,26 +117,25 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
             __syncthreads();
         }
         if (thread_id == 0)
-            nvshmem_int_put_signal_nbi(dst, (mype == 0) ? src : dst, chunk_elems, signal, 1,
-                                       NVSHMEM_SIGNAL_ADD, peer);
+            nvshmem_int_put_signal_nbi(dst, (mype == 0) ? src : dst, chunk_elems,
+                                       &reduce_signals[chunk], phase, NVSHMEM_SIGNAL_SET, peer);
         src = src + chunk_elems;
         dst = dst + chunk_elems;
     }
 
-    // Broadcast phase
+    // Broadcast phase: PE N-1 already has the full sum from reduce; PE 0 also received
+    // it via the ring. PEs 1..N-2 receive from PE 0 onward and forward down the chain.
     dst = dst - num_chunks * chunk_elems;
     if (thread_id == 0) {
         for (size_t chunk = 0; chunk < num_chunks; chunk++) {
-            if (mype < npes - 1) {  // Last pe already has the final result
-                nvshmem_signal_wait_until(signal, NVSHMEM_CMP_GE,
-                                          (mype == 0) ? chunk + 1 : num_chunks + chunk + 1);
-            }
+            // PEs 1..N-2 need to receive the broadcast; PE 0 and PE N-1 already have it.
+            if (mype >= 1 && mype < npes - 1)
+                nvshmem_signal_wait_until(&bcast_signals[chunk], NVSHMEM_CMP_EQ, phase);
             if (mype < npes - 2)
-                nvshmem_int_put_signal_nbi(dst, dst, chunk_elems, signal, 1, NVSHMEM_SIGNAL_ADD,
-                                           peer);
+                nvshmem_int_put_signal_nbi(dst, dst, chunk_elems, &bcast_signals[chunk], phase,
+                                           NVSHMEM_SIGNAL_SET, peer);
             dst = dst + chunk_elems;
         }
-        *signal = 0;  // reset for next iteration
     }
 }
 
@@ -195,7 +198,10 @@ int main(int argc, char **argv) {
     int *dst = (int *)nvshmem_malloc(max_size);
     int *src = (int *)nvshmem_malloc(max_size);
     int *data_h = (int *)malloc(max_size);
-    uint64_t *signal = (uint64_t *)nvshmem_calloc(num_blocks, sizeof(uint64_t));
+    size_t max_chunks_per_block = (max_size + num_blocks * chunk_size - 1) / (num_blocks * chunk_size);
+    size_t signals_per_block = 2 * max_chunks_per_block;
+    uint64_t *signal =
+        (uint64_t *)nvshmem_calloc(num_blocks * signals_per_block, sizeof(uint64_t));
     dim3 gridDim(num_blocks), blockDim(threads_per_block);
 
     for (size_t i = 0; i < max_ints; i++) data_h[i] = i;
@@ -203,12 +209,14 @@ int main(int argc, char **argv) {
     CUDA_CHECK(cudaMemcpyAsync(src, data_h, max_size, cudaMemcpyHostToDevice, stream));
     nvshmemx_barrier_all_on_stream(stream);
 
+    uint64_t phase = 0;
     for (size_t size = min_size; size <= max_size; size *= step_factor) {
         size_t num_ints = size / sizeof(int);
-        void *args[] = {&dst, &src, &num_ints, &signal, &chunk_size};
+        void *args[] = {&dst, &src, &num_ints, &signal, &chunk_size, &signals_per_block, &phase};
 
         // do warmup
         for (size_t i = 0; i < warmup_iters; i++) {
+            phase++;
             nvshmemx_collective_launch((const void *)ring_reduce, gridDim, blockDim, args, 0,
                                        stream);
             nvshmemx_barrier_all_on_stream(stream);
@@ -218,6 +226,7 @@ int main(int argc, char **argv) {
         // main loop
         CUDA_CHECK(cudaEventRecord(start, stream));
         for (size_t i = 0; i < iters; i++) {
+            phase++;
             nvshmemx_collective_launch((const void *)ring_reduce, gridDim, blockDim, args, 0,
                                        stream);
             nvshmemx_barrier_all_on_stream(stream);
