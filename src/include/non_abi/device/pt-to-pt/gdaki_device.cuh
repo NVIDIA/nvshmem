@@ -582,17 +582,25 @@ __device__ static __forceinline__ void gdaki_submit_db(nvshmemi_gpunetio_device_
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
-    struct doca_gpu_dev_verbs_addr daddr;
-    doca_gpu_dev_verbs_ticket_t ticket;
+    const int num_wqes = 1;
 
-    daddr.addr = (uint64_t)qp->ibuf.buf;
-    daddr.key = qp->ibuf.lkey;
+    uint64_t base_wqe_idx =
+        doca_gpu_dev_verbs_reserve_wq_slots<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
+            &(qp->qp), num_wqes, DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_SKIP_AVAILABILITY_CHECK);
+    gdaki_wait_for_slot_availability(qp, base_wqe_idx + num_wqes);
 
-    doca_gpu_dev_verbs_mcst<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(&(qp->qp), daddr,
-                                                                           &ticket);
-    doca_gpu_dev_verbs_wait<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(&(qp->qp), ticket);
+    struct doca_gpu_dev_verbs_wqe *wqe_ptr =
+        doca_gpu_dev_verbs_get_wqe_ptr(&(qp->qp), base_wqe_idx);
 
-    return ticket;
+    // DUMP causes the NIC to read GPU memory, which enforces target-side consistency.
+    doca_gpu_dev_verbs_wqe_prepare_dump(&(qp->qp), wqe_ptr, base_wqe_idx,
+                                        DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_UPDATE,
+                                        (uint64_t)qp->ibuf.buf, qp->ibuf.lkey, sizeof(char));
+
+    doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, base_wqe_idx);
+    gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+
+    return gdaki_quiet(qp);
 }
 
 template <nvshmemi_op_t channel_op, bool nbi>
