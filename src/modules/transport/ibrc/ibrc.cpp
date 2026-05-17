@@ -288,8 +288,20 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     struct ibrc_device *device =
         ((struct ibrc_device *)ibrc_state->devices + ibrc_state->dev_ids[devid]);
     int portid = ibrc_state->port_ids[devid];
+    const struct ibv_port_attr *port_attr = device->common_device.port_attr + (portid - 1);
+    const int pkey_index = ibrc_state->options->IB_PKEY_INDEX;
     struct ibv_context *context = device->common_device.context;
     struct ibv_pd *pd = device->common_device.pd;
+
+    if (pkey_index < 0 || pkey_index >= port_attr->pkey_tbl_len) {
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBRC QP: expected 0 <= "
+            "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); pe %d device %s devid %d port %d "
+            "link_layer %s lid %hu\n", pkey_index, port_attr->pkey_tbl_len, t->my_pe,
+            device->common_device.dev->name, ibrc_state->dev_ids[devid], portid,
+            nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
+    }
 
     // algining ep structure to prevent split tranactions when accessing head_op_id and
     // tail_op_id which can be used in inter-thread synchronization
@@ -351,7 +363,7 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
 
     memset(&attr, 0, sizeof(struct ibv_qp_attr));
     attr.qp_state = IBV_QPS_INIT;
-    attr.pkey_index = 0;
+    attr.pkey_index = static_cast<uint16_t>(pkey_index);
     attr.port_num = portid;
     attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
                            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_ATOMIC;

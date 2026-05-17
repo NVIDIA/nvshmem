@@ -606,6 +606,7 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)ep->ibdevx_state;
     struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices + devid);
     struct ibv_port_attr *port_attr = device->common_device.port_attr + (portid - 1);
+    const int pkey_index = ibdevx_state->options->IB_PKEY_INDEX;
 
     uint8_t cmd_in1[DEVX_ST_SZ_BYTES(rst2init_qp_in)] = {
         0,
@@ -628,13 +629,23 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
 
     void *qp_context;
 
+    if (pkey_index < 0 || pkey_index >= port_attr->pkey_tbl_len) {
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBDEVX QP: expected 0 <= "
+            "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); device %s devid %d port %d "
+            "link_layer %s lid %hu\n", pkey_index, port_attr->pkey_tbl_len,
+            device->common_device.dev->name, devid, portid,
+            nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
+    }
+
     DEVX_SET(rst2init_qp_in, cmd_in1, opcode, MLX5_CMD_OP_RST2INIT_QP);
     DEVX_SET(rst2init_qp_in, cmd_in1, qpn, ep->qpid);
 
     qp_context = DEVX_ADDR_OF(rst2init_qp_in, cmd_in1, qpc);
     DEVX_SET(qpc, qp_context, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
     DEVX_SET(qpc, qp_context, primary_address_path.vhca_port_num, ep->portid);
-    DEVX_SET(qpc, qp_context, primary_address_path.pkey_index, 0);
+    DEVX_SET(qpc, qp_context, primary_address_path.pkey_index, static_cast<uint16_t>(pkey_index));
 
     DEVX_SET(qpc, qp_context, wq_signature, 0x0);
     DEVX_SET(qpc, qp_context, counter_set_id, 0x0);

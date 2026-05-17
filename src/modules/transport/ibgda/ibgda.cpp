@@ -1569,7 +1569,8 @@ static void ibgda_get_device_cq(nvshmemi_ibgda_device_cq_t *dev_cq, const struct
     dev_cq->dbrec = (__be32 *)((uintptr_t)gcq->dbr_mobject->aligned.gpu_ptr);
 }
 
-static int ibgda_qp_rst2init(struct ibgda_ep *ep, const struct ibgda_device *device, int portid) {
+static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
+                             const struct ibgda_device *device, int portid) {
     int status = 0;
     int rst2init_errno = 0;
 
@@ -1604,8 +1605,20 @@ static int ibgda_qp_rst2init(struct ibgda_ep *ep, const struct ibgda_device *dev
 
     DEVX_SET(qpc, qpc, primary_address_path.vhca_port_num, portid);
 
-    if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND)
-        DEVX_SET(qpc, qpc, primary_address_path.pkey_index, 0);
+    if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        const int pkey_index = ibgda_state->common.options->IB_PKEY_INDEX;
+        if (pkey_index < 0 || pkey_index >= port_attr->pkey_tbl_len) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBGDA QP: expected 0 <= "
+                "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); type %s device %s port %d "
+                "link_layer %s lid %hu\n", pkey_index, port_attr->pkey_tbl_len,
+                ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
+        }
+
+        DEVX_SET(qpc, qpc, primary_address_path.pkey_index, static_cast<uint16_t>(pkey_index));
+    }
 
     DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
     DEVX_SET(qpc, qpc, counter_set_id, 0x0);  // Not connected to a counter set
@@ -2622,6 +2635,16 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
     struct ibv_qp_attr ib_qp_attr;
 
     const struct ibv_port_attr *port_attr = device->common_device.port_attr + (portid - 1);
+    const int pkey_index = ibgda_state->common.options->IB_PKEY_INDEX;
+
+    if (pkey_index < 0 || pkey_index >= port_attr->pkey_tbl_len) {
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBGDA DCT: expected 0 <= "
+            "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); device %s port %d link_layer %s "
+            "lid %hu\n", pkey_index, port_attr->pkey_tbl_len, device->common_device.dev->name,
+            portid, nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
+    }
 
     memset(&ib_qp_attr_ex, 0, sizeof(ib_qp_attr_ex));
     memset(&dv_init_attr, 0, sizeof(dv_init_attr));
@@ -2662,7 +2685,7 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
     // RST2INIT
     memset(&ib_qp_attr, 0, sizeof(ib_qp_attr));
     ib_qp_attr.qp_state = IBV_QPS_INIT;
-    ib_qp_attr.pkey_index = 0;
+    ib_qp_attr.pkey_index = static_cast<uint16_t>(pkey_index);
     ib_qp_attr.port_num = portid;
     ib_qp_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
                                  IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
@@ -3041,7 +3064,7 @@ static int ibgda_setup_dci_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
 
     // Transition DCI to RTS.
     for (int i = 0; i < device->dci.num_eps; ++i) {
-        status = ibgda_qp_rst2init(device->dci.eps[i], device, portid);
+        status = ibgda_qp_rst2init(ibgda_state, device->dci.eps[i], device, portid);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "ibgda_qp_rst2init failed on DCI #%d.", i);
 
@@ -3349,7 +3372,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
                   device->rc.eps[ep_index]->user_index, device->rc.eps[ep_index]->qpn);
             TRACE(ibgda_state->common.log_level, "local QPN: %d, remote handle QPN: %d",
                   device->rc.eps[ep_index]->qpn, peer_ep_handles[peer_handle_index].qpn);
-            status = ibgda_qp_rst2init(device->rc.eps[ep_index], device, portid);
+            status = ibgda_qp_rst2init(ibgda_state, device->rc.eps[ep_index], device, portid);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_qp_rst2init failed on RC #%d.", ep_index);
 
