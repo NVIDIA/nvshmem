@@ -640,7 +640,7 @@ if (NVSHMEM_GPUNETIO_SUPPORT)
   target_include_directories(nvshmem_host PRIVATE ${GPUNETIO_INCLUDE})
   target_include_directories(nvshmem_host INTERFACE
     $<BUILD_INTERFACE:${GPUNETIO_INCLUDE}>
-    $<INSTALL_INTERFACE:include/gpunetio>
+    $<INSTALL_INTERFACE:include>
   )
 endif()
 
@@ -1283,7 +1283,7 @@ install(
 if(NVSHMEM_GPUNETIO_SUPPORT)
   install(
     DIRECTORY ${GPUNETIO_INCLUDE}/
-    DESTINATION include/gpunetio
+    DESTINATION include
     FILES_MATCHING
       PATTERN "*.h"
       PATTERN "*.cuh"
