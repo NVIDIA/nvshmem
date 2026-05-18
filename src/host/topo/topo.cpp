@@ -19,11 +19,14 @@
 #include <strings.h>                                 // for strcasecmp
 #include <list>                                      // for _List_iter...
 #include <vector>                                    // for vector
-#include <filesystem>                                // std::filesystem::path
-#include <fstream>                                   // std::ifstream
-#include <sstream>                                   // std::istringstream
-#include <string>                                    // std::string, std::getline
+#include <cerrno>                                    // errno
+#include <cstddef>                                   // std::size_t
 #include <cstdint>                                   // uint32_t
+#include <fstream>                                   // std::ifstream
+#include <iterator>                                  // std::data, std::istreambuf_iterator
+#include <limits>                                    // std::numeric_limits
+#include <string>                                    // std::string
+#include <string_view>                               // std::string_view
 #include "non_abi/nvshmemx_error.h"                  // for NVSHMEMX_E...
 #include "internal/host/debug.h"                     // for INFO, NVSH...
 #include "internal/host/nvshmem_internal.h"          // for nvshmemi_s...
@@ -809,28 +812,67 @@ static nvshmemi_cpu_affinity_mode_t get_cpu_affinity_mode() {
     return NVSHMEMI_CPU_AFFINITY_AUTO;
 }
 
+static int parse_cpumap_mask(std::string_view token, uint32_t *mask) {
+    constexpr int cpumap_base = 16;
+    constexpr std::string_view hex_digits = "0123456789abcdefABCDEF";
+
+    if (token.empty() || token.find_first_not_of(hex_digits) != std::string_view::npos) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    std::string token_string{std::data(token), token.size()};
+    errno = 0;
+    unsigned long value = strtoul(token_string.c_str(), nullptr, cpumap_base);
+    if (errno != 0 || value > std::numeric_limits<uint32_t>::max()) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    *mask = static_cast<uint32_t>(value);
+    return NVSHMEMX_SUCCESS;
+}
+
 /* Parse hex cpumap string (e.g. "0000ffff,0000ffff") into cpu_set_t.
  * Mirrors NCCL's ncclStrToCpuset. */
-static void cpumap_to_cpuset(const std::string &map_str, cpu_set_t *set) {
-    constexpr int mask_count = CPU_SETSIZE / 32;
+static int cpumap_to_cpuset(std::string_view map_str, cpu_set_t *set) {
+    constexpr int cpus_per_mask = 32;
+    static_assert(CPU_SETSIZE % cpus_per_mask == 0, "CPU_SETSIZE must align with cpumap masks");
+    constexpr int mask_count = CPU_SETSIZE / cpus_per_mask;
     std::array<uint32_t, mask_count> masks = {};
     int m = mask_count;
 
-    std::istringstream ss(map_str);
-    std::string token;
+    std::size_t start = 0;
+    while (start < map_str.size()) {
+        if (m == 0) {
+            INFO(NVSHMEM_INIT, "cpumap contains more than %d %d-bit masks; CPU_SETSIZE is %d.\n",
+                 mask_count, cpus_per_mask, CPU_SETSIZE);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
 
-    while (std::getline(ss, token, ',') && m > 0) {
-        masks[--m] = static_cast<uint32_t>(std::stoul(token, nullptr, 16));
+        std::size_t end = map_str.find(',', start);
+        std::string_view token_view =
+            map_str.substr(start, end == std::string_view::npos ? std::string_view::npos
+                                                                : end - start);
+        uint32_t parsed_mask;
+        int status = parse_cpumap_mask(token_view, &parsed_mask);
+        if (status != NVSHMEMX_SUCCESS) {
+            return status;
+        }
+        masks[--m] = parsed_mask;
+
+        if (end == std::string_view::npos) break;
+        start = end + 1;
     }
 
     CPU_ZERO(set);
     for (int a = 0; (a + m) < mask_count; a++) {
-        for (int i = 0; i < 32; i++) {
+        for (int i = 0; i < cpus_per_mask; i++) {
             if (masks[a + m] & (1U << i)) {
-                CPU_SET(i + a * 32, set);
+                CPU_SET(i + a * cpus_per_mask, set);
             }
         }
     }
+
+    return NVSHMEMX_SUCCESS;
 }
 
 static int set_cpu_affinity(nvshmemi_state_t *state) {
@@ -860,12 +902,17 @@ static int set_cpu_affinity(nvshmemi_state_t *state) {
     }
 
     /* Read cpumap for this NUMA node */
-    const auto cpumap_path = std::filesystem::path("/sys/devices/system/node") /
-                             ("node" + std::to_string(numa_id)) / "cpumap";
+    std::array<char, PATH_MAX> cpumap_path{};
+    int written = snprintf(std::data(cpumap_path), cpumap_path.size(),
+                           "/sys/devices/system/node/node%d/cpumap", numa_id);
+    if (written < 0 || static_cast<std::size_t>(written) >= cpumap_path.size()) {
+        INFO(NVSHMEM_INIT, "cpumap path is too long for NUMA node %d.\n", numa_id);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
-    std::ifstream cpumap_file{cpumap_path};
+    std::ifstream cpumap_file{std::data(cpumap_path)};
     if (!cpumap_file) {
-        INFO(NVSHMEM_INIT, "unable to open cpumap path: %s.\n", cpumap_path.c_str());
+        INFO(NVSHMEM_INIT, "unable to open cpumap path: %s.\n", std::data(cpumap_path));
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
@@ -880,7 +927,11 @@ static int set_cpu_affinity(nvshmemi_state_t *state) {
     /* Strip newline if present */
     if (map_str.back() == '\n') map_str.pop_back();
 
-    cpumap_to_cpuset(map_str, &numa_set);
+    status = cpumap_to_cpuset(map_str, &numa_set);
+    if (status != NVSHMEMX_SUCCESS) {
+        INFO(NVSHMEM_INIT, "failed to parse cpumap path: %s.\n", std::data(cpumap_path));
+        return status;
+    }
     CPU_AND(&final_set, &cur_set, &numa_set);
 
     if (CPU_COUNT(&final_set) == 0) {
