@@ -187,7 +187,8 @@ option(NVSHMEM_TEST_STATIC_LIB "Force tests to link only against the combined nv
 # Set a variable for the nvshmem build information in NVSHMEM
 # TODO actually fill this variable with useful information.
 set(INFO_BUILD_VARS
-  "\"NVSHMEM_DEBUG=${NVSHMEM_DEBUG} \
+  "\"NVSHMEM_ARTIFACT_VERSION=${NVSHMEM_ARTIFACT_VERSION} \
+NVSHMEM_DEBUG=${NVSHMEM_DEBUG} \
 NVSHMEM_DEVEL=${NVSHMEM_DEVEL} \
 NVSHMEM_DEFAULT_PMI2=${NVSHMEM_DEFAULT_PMI2} \
 NVSHMEM_DEFAULT_PMIX=${NVSHMEM_DEFAULT_PMIX} \

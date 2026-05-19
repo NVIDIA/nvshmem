@@ -10,6 +10,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED On)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
+include(NVSHMEMVersioning)
 include(NVSHMEMCxxStandard)
 
 include(NVSHMEMEnv)
@@ -186,7 +187,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
   NVSHMEMVersion.cmake
-  VERSION ${PROJECT_VERSION}
+  VERSION ${NVSHMEM_BASE_VERSION}
   COMPATIBILITY AnyNewerVersion)
 
 add_subdirectory(src)

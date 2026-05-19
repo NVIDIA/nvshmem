@@ -1,5 +1,5 @@
 # pyproject.toml.in — CMake configure_file template.
-# @CUDA_MAJOR@ and @PROJECT_VERSION@ are substituted by CMake at configure time.
+# @CUDA_MAJOR@ and @NVSHMEM_ARTIFACT_VERSION@ are substituted by CMake at configure time.
 # The generated pyproject.toml is written to the build-tree staging directory
 # and is never committed to the source tree.
 
@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 # Package name follows the convention used by NVIDIA's published libs wheels,
 # e.g. nvidia-nvshmem-cu12 or nvidia-nvshmem-cu13.
 name = "nvidia-nvshmem-cu@CUDA_MAJOR@"
-version = "@PROJECT_VERSION@"
+version = "@NVSHMEM_ARTIFACT_VERSION@"
 description = "NVSHMEM C libraries (source build) for CUDA @CUDA_MAJOR@"
 readme = {text = "NVSHMEM C libraries built from source for CUDA @CUDA_MAJOR@.", content-type = "text/plain"}
 

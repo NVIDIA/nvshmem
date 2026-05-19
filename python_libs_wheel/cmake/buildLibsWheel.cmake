@@ -31,7 +31,7 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
 
     # ------------------------------------------------------------------
     # Configure pyproject.toml from the template into the staging area.
-    # PROJECT_VERSION comes from the top-level project() call (e.g. 3.6.3.1).
+    # NVSHMEM_ARTIFACT_VERSION is the PEP 440 package version (e.g. 3.7.0rc1).
     # ------------------------------------------------------------------
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml.in"

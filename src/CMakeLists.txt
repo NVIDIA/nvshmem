@@ -1151,15 +1151,27 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMCxxStandard.cmake
 # end share configuration
 
 # start custom builds for nvshmem packages
-add_custom_target(git_commit ALL COMMAND test -f git_commit.txt || git rev-parse HEAD > git_commit.txt || echo "not built from a git repo" > git_commit.txt
-                  COMMAND grep -q NVSHMEM_MAJOR git_commit.txt || echo "NVSHMEM_MAJOR := ${PROJECT_VERSION_MAJOR}" >> git_commit.txt
-                  COMMAND grep -q NVSHMEM_MINOR git_commit.txt || echo "NVSHMEM_MINOR := ${PROJECT_VERSION_MINOR}" >> git_commit.txt
-                  COMMAND grep -q NVSHMEM_PATCH git_commit.txt || echo "NVSHMEM_PATCH := ${PROJECT_VERSION_PATCH}" >> git_commit.txt
-                  COMMAND grep -q NVSHMEM_PACKAGE git_commit.txt || echo "NVSHMEM_PACKAGE := ${PROJECT_VERSION_TWEAK}" >> git_commit.txt
-                  COMMAND cp git_commit.txt version.txt
-                  BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/../git_commit.txt
-                             ${CMAKE_CURRENT_SOURCE_DIR}/../version.txt
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)
+add_custom_target(git_commit ALL
+                  COMMAND ${CMAKE_COMMAND}
+                          -DNVSHMEM_GIT_COMMIT_WORKDIR=${CMAKE_SOURCE_DIR}
+                          -DNVSHMEM_MAJOR=${PROJECT_VERSION_MAJOR}
+                          -DNVSHMEM_MINOR=${PROJECT_VERSION_MINOR}
+                          -DNVSHMEM_PATCH=${PROJECT_VERSION_PATCH}
+                          -DNVSHMEM_PACKAGE=${PROJECT_VERSION_TWEAK}
+                          -DNVSHMEM_BASE_VERSION=${NVSHMEM_BASE_VERSION}
+                          -DNVSHMEM_NUMERIC_VERSION=${NVSHMEM_NUMERIC_VERSION}
+                          -DNVSHMEM_ARTIFACT_VERSION=${NVSHMEM_ARTIFACT_VERSION}
+                          -DNVSHMEM_PACKAGE_VERSION=${NVSHMEM_PACKAGE_VERSION}
+                          -DNVSHMEM_PACKAGE_RELEASE=${NVSHMEM_PACKAGE_RELEASE}
+                          -DNVSHMEM_RPM_PACKAGE_VERSION=${NVSHMEM_RPM_PACKAGE_VERSION}
+                          -DNVSHMEM_RPM_PACKAGE_RELEASE=${NVSHMEM_RPM_PACKAGE_RELEASE}
+                          -DNVSHMEM_VERSION_STAGE=${NVSHMEM_VERSION_STAGE}
+                          -DNVSHMEM_VERSION_STAGE_NUMBER=${NVSHMEM_VERSION_STAGE_NUMBER}
+                          -P ${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMWriteGitCommit.cmake
+                  COMMAND ${CMAKE_COMMAND} -E copy git_commit.txt version.txt
+                  BYPRODUCTS ${CMAKE_SOURCE_DIR}/git_commit.txt
+                             ${CMAKE_SOURCE_DIR}/version.txt
+                  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 if(NVSHMEM_BUILD_PACKAGES AND NVSHMEM_BUILD_HYDRA_LAUNCHER)
   add_custom_target(hydra
@@ -1369,8 +1381,8 @@ set(CPACK_SOURCE_IGNORE_FILES
 /nvshmem4py/cmake/addNumbast.cmake;\
 /nvshmem4py/build_assets/;\
 /perftest/perftest_install/;\
-/test/test_install/;
-/scripts/cleanup_ignore_files.sh
+/test/test_install/;\
+/scripts/cleanup_ignore_files.sh;\
 /scripts/create_imex.sh;\
 /scripts/dependency_installer.sh;\
 /scripts/include_checker.sh;\
@@ -1382,7 +1394,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /src/build/;")
 
 if(NOT NVSHMEM_INSTALL_FUNCTIONAL_TESTS)
-  set(CPACK_SOURCE_IGNORE_FILES ${CPACK_SOURCE_IGNORE_FILES}"/test/;/docker/;/nvshmem4py/test/;")
+  list(APPEND CPACK_SOURCE_IGNORE_FILES "/test/" "/docker/" "/nvshmem4py/test/")
 endif()
 
 
@@ -1391,21 +1403,25 @@ set(CPACK_PACKAGE_VENDOR "NVIDIA")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://developer.nvidia.com/nvshmem")
 set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../pkg/nvshmem_package_description.txt")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "NVSHMEM - An implementation of OpenSHMEM for NVIDIA GPUs.")
+set(CPACK_PACKAGE_VERSION "${NVSHMEM_ARTIFACT_VERSION}")
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-set(CPACK_PACKAGE_FILE_NAME "libnvshmem_${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}-${PROJECT_VERSION_TWEAK}+cuda${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}_${PACKAGE_SUFFIX}")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME "nvshmem_src_${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}-${PROJECT_VERSION_TWEAK}")
+set(CPACK_PACKAGE_FILE_NAME "libnvshmem_${NVSHMEM_ARTIFACT_VERSION}-${NVSHMEM_PACKAGE_RELEASE}+cuda${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}_${PACKAGE_SUFFIX}")
+set(CPACK_SOURCE_PACKAGE_FILE_NAME "nvshmem_src_${NVSHMEM_ARTIFACT_VERSION}-${NVSHMEM_PACKAGE_RELEASE}")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../License.txt")
 set(CPACK_PACKAGE_CONTACT "nvshmem@nvidia.com")
 
 # RPM-Specific Configurations
 set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
 set(CPACK_RPM_PACKAGE_LICENSE "LICENSE AGREEMENT FOR NVIDIA SOFTWARE DEVELOPMENT KITS")
+set(CPACK_RPM_PACKAGE_VERSION "${NVSHMEM_RPM_PACKAGE_VERSION}")
+set(CPACK_RPM_PACKAGE_RELEASE "${NVSHMEM_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_PACKAGE_AUTOREQ 0)
 set(CPACK_RPM_PACKAGE_REQUIRES "/sbin/ldconfig")
 set(CPACK_RPM_PACKAGE_REQUIRES_PRE "/sbin/ldconfig")
 set(CPACK_RPM_PACKAGE_REQUIRES_PREUN "/sbin/ldconfig")
+set(CPACK_DEBIAN_PACKAGE_VERSION "${NVSHMEM_DEBIAN_PACKAGE_VERSION}")
 
 include(CPack)
 
