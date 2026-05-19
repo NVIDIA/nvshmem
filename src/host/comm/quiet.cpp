@@ -61,6 +61,14 @@ out:
     return;
 }
 
+void nvshmemx_flush(void) {
+    NVTX_FUNC_RANGE_IN_GROUP(MEMORDER);
+    NVSHMEMI_CHECK_INIT_STATUS();
+
+    /* Fallback to quiet for host op */
+    nvshmem_quiet();
+}
+
 void nvshmemi_quiesce_internal_streams(cudaStream_t cstrm) {
     if (nvshmemi_state->used_internal_streams) {
         for (int s = 0; s < nvshmemi_options.MAX_PEER_STREAMS; s++) {

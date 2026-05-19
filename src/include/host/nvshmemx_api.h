@@ -240,6 +240,10 @@ NVSHMEMI_REPT_FOR_SIZES(NVSHMEMX_DECL_SIZE_GET_NBI_ON_STREAM)
 void nvshmemx_getmem_nbi_on_stream(void *dest, const void *source, size_t bytes, int pe,
                                    cudaStream_t cstrm);
 
+//////////////////// Point-to-Point Synchronization ////////////////////
+
+NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_flush();
+
 //////////////////// Synchronization On Stream ////////////////////
 
 void nvshmemx_quiet_on_stream(cudaStream_t cstrm);
