@@ -17,5 +17,5 @@
 # -DNVSHMEM_VERSION_STAGE_NUMBER_OVERRIDE=.... CMake override values take
 # precedence over environment values when both are set.
 
-set(NVSHMEM_VERSION_STAGE_DEFAULT "dev")
-set(NVSHMEM_VERSION_STAGE_NUMBER_DEFAULT "")
+set(NVSHMEM_VERSION_STAGE_DEFAULT "rc")
+set(NVSHMEM_VERSION_STAGE_NUMBER_DEFAULT "1")
