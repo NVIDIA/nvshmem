@@ -47,7 +47,6 @@
 #include <cuda_runtime.h>
 #include <getopt.h>
 #include "utils.h"
-#include "non_abi/device/common/nvshmemi_common_device.cuh"
 
 /* smem layout when give_smem is in use: [barrier region 512 B][data].
  * When give_smem is NOT called, the barrier region is unused; we still
@@ -90,21 +89,10 @@ __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, siz
         nvshmemx_double_put_nbi_block(dst, src_smem, nelems, peer);
 
         if constexpr (USE_FLUSH) {
-            /* Inlined body of nvshmemx_flush() - TU
-             * visibility quirk on the public wrapper, but the PTX is the
-             * same.  Gated on TMA registration: for the st.global variant
-             * it's a true no-op (source was already consumed at put return);
-             * for the TMA variant it stalls on wait_group.read until the
-             * TMA engine has drained the source smem.
-             *
-             * No membar.sys anywhere on this path */
-#if __CUDA_ARCH__ >= 900
-            if (nvshmemi_tma_smem_registered()) {
-                asm volatile("cp.async.bulk.commit_group;" ::: "memory");
-                asm volatile("cp.async.bulk.wait_group.read 0;" ::: "memory");
-                asm volatile("fence.proxy.async.shared::cta;" ::: "memory");
-            }
-#endif
+            /* Flush waits only for source-buffer reusability.  For the
+             * st.global variant this is a no-op; for TMA it stalls until the
+             * engine has drained the source smem.  No membar.sys is issued. */
+            nvshmemx_flush();
         } else {
             /* Quiet every iter: __threadfence_system (membar.sys, ~300 ns)
              * plus waits for all prior outbound stores to be remotely
@@ -167,8 +155,8 @@ int main(int argc, char *argv[]) {
         int dev = 0;
         int max_dyn_smem = 0;
         CUDA_CHECK(cudaGetDevice(&dev));
-        CUDA_CHECK(cudaDeviceGetAttribute(&max_dyn_smem,
-                                           cudaDevAttrMaxSharedMemoryPerBlockOptin, dev));
+        CUDA_CHECK(
+            cudaDeviceGetAttribute(&max_dyn_smem, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev));
         smem_size = max_dyn_smem;
         size_t max_data_bytes = (size_t)smem_size - kSmemDataOffset;
         if (max_size > max_data_bytes) {
@@ -193,7 +181,9 @@ int main(int argc, char *argv[]) {
         printf("# shmem_flush_bench - pipelined put BW (source in smem)\n");
         printf("#   iters=%zu, threads=%d, CTAs=1\n", (size_t)iters, max_threads);
         printf("#   Columns: aggregate GB/s for each (transport, per-iter-sync) combo.\n");
-        printf("#   bytes   st.g+quiet  st.g+flush     TMA+quiet   TMA+flush     TMA-flush/st.g-flush\n");
+        printf(
+            "#   bytes   st.g+quiet  st.g+flush     TMA+quiet   TMA+flush     "
+            "TMA-flush/st.g-flush\n");
     }
 
     peer = !mype;
@@ -264,8 +254,8 @@ int main(int argc, char *argv[]) {
             double g_tma_q = bw_gbs(size, iters, ms_tma_quiet);
             double g_tma_f = bw_gbs(size, iters, ms_tma_flush);
             double speedup = (g_stg_f > 0.0) ? (g_tma_f / g_stg_f) : 0.0;
-            printf("  %6zu   %10.3f  %10.3f  %10.3f  %9.3f  %6.2fx\n",
-                   size, g_stg_q, g_stg_f, g_tma_q, g_tma_f, speedup);
+            printf("  %6zu   %10.3f  %10.3f  %10.3f  %9.3f  %6.2fx\n", size, g_stg_q, g_stg_f,
+                   g_tma_q, g_tma_f, speedup);
         }
         if (size == max_size) break;
     }
