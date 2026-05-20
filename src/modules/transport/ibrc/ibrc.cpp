@@ -18,6 +18,7 @@
 #include <atomic>
 #include <deque>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -80,6 +81,15 @@ static inline int get_ibrc_srq_depth(nvshmemt_ib_common_state_t state) { return 
 
 // Enum values are now defined in transport_ib_common.h
 
+#ifdef NVSHMEM_USE_GDRCOPY
+struct ibrc_gdrcopy_mapping {
+    void *cpu_ptr_base = nullptr;
+    gdr_mh_t mh{};
+    bool pinned = false;
+    bool mapped = false;
+};
+#endif
+
 struct ibrc_request {
     struct ibv_send_wr sr;
     struct ibv_send_wr *bad_sr;
@@ -135,8 +145,7 @@ typedef struct ibrc_mem_handle_info {
     size_t size;
     void *cpu_ptr;  // CPU-accessible pointer: set via GDRCopy map or directly for SYSMEM
 #ifdef NVSHMEM_USE_GDRCOPY
-    void *cpu_ptr_base;
-    gdr_mh_t mh;
+    ibrc_gdrcopy_mapping gdrcopy;
 #endif
 } ibrc_mem_handle_info_t;
 ibrc_mem_handle_info_t *dummy_local_mem;
@@ -162,6 +171,39 @@ static bool is_egm = false;
 static gdr_t gdr_desc;
 static struct gdrcopy_function_table gdrcopy_ftable;
 static void *gdrcopy_handle = NULL;
+
+static int nvshmemt_ibrc_release_gdrcopy_mapping(ibrc_mem_handle_info_t &handle_info) {
+    int status = 0;
+    int first_error = 0;
+    auto &mapping = handle_info.gdrcopy;
+
+    if (mapping.mapped) {
+        status = gdrcopy_ftable.unmap(gdr_desc, mapping.mh, mapping.cpu_ptr_base,
+                                      handle_info.size);
+        if (status == 0) {
+            mapping.mapped = false;
+            mapping.cpu_ptr_base = nullptr;
+        } else if (!first_error) {
+            first_error = status;
+        }
+    }
+
+    if (mapping.pinned) {
+        status = gdrcopy_ftable.unpin_buffer(gdr_desc, mapping.mh);
+        if (status == 0) {
+            mapping.pinned = false;
+            mapping.mh = {};
+            if (first_error) {
+                mapping.mapped = false;
+                mapping.cpu_ptr_base = nullptr;
+            }
+        } else if (!first_error) {
+            first_error = status;
+        }
+    }
+
+    return first_error;
+}
 #endif
 
 static struct nvshmemt_ibv_function_table ftable;
@@ -551,14 +593,15 @@ int ep_get_handle(struct nvshmemt_ib_common_ep_handle *ep_handle, struct ibrc_ep
 int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, size_t length,
                                  nvshmem_transport_t t, bool local_only) {
     int status = 0;
-    void *curr_ptr;
     struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
     nvshmemt_ib_common_state_t ibrc_state = (nvshmemt_ib_common_state_t)transport->state;
     struct ibrc_device *device = ((struct ibrc_device *)ibrc_state->devices +
                                   ibrc_state->dev_ids[ibrc_state->selected_dev_id]);
-    struct ibrc_mem_handle_info *handle_info = NULL;
+    std::unique_ptr<ibrc_mem_handle_info_t> handle_info;
     struct nvshmemt_ib_common_mem_handle *handle;
     bool is_sysmem = false;
+    const auto cache_granularity = 1ULL << t->log2_cumem_granularity;
+    auto *cached_ptr_end = static_cast<char *>(buf);
 
     /*
      * In cases where same physical memory has been mapped to multiple VAs (say VA1 and VA2)
@@ -588,9 +631,7 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
     handle = (struct nvshmemt_ib_common_mem_handle *)mem_handle;
 
     if (!local_only) {
-        handle_info = (struct ibrc_mem_handle_info *)calloc(1, sizeof(struct ibrc_mem_handle_info));
-        NVSHMEMI_NULL_ERROR_JMP(handle_info, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "unable to allocate handle info.\n");
+        handle_info = std::make_unique<ibrc_mem_handle_info_t>();
 
         handle_info->mr = handle->mr;
         handle_info->ptr = buf;
@@ -626,23 +667,26 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
             gdr_buf = alias_va_ptr;
         }
 
-        status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)gdr_buf, length, 0, 0,
-                                           &handle_info->mh);
+        auto &mapping = handle_info->gdrcopy;
+        status = gdrcopy_ftable.pin_buffer(gdr_desc, reinterpret_cast<unsigned long>(gdr_buf),
+                                           length, 0, 0, &mapping.mh);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy pin_buffer failed \n");
+        mapping.pinned = true;
 
-        status = gdrcopy_ftable.map(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base, length);
+        status = gdrcopy_ftable.map(gdr_desc, mapping.mh, &mapping.cpu_ptr_base, length);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map failed \n");
+        mapping.mapped = true;
 
         gdr_info_t info;
-        status = gdrcopy_ftable.get_info(gdr_desc, handle_info->mh, &info);
+        status = gdrcopy_ftable.get_info(gdr_desc, mapping.mh, &info);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy get_info failed \n");
 
         // remember that mappings start on a 64KB boundary, so let's
         // calculate the offset from the head of the mapping to the
         // beginning of the buffer
-        uintptr_t off;
-        off = (uintptr_t)gdr_buf - info.va;
-        handle_info->cpu_ptr = (void *)((uintptr_t)handle_info->cpu_ptr_base + off);
+        const auto off = reinterpret_cast<uintptr_t>(gdr_buf) - info.va;
+        handle_info->cpu_ptr =
+            reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mapping.cpu_ptr_base) + off);
     }
 #endif
 
@@ -657,7 +701,7 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
         // is tracked at cumem granularity (typically 512 MB), so if buffer size
         // is > 512 MB, we need to split them to ensure entries beyond first 512 MB
         // are added to cache.
-        curr_ptr = buf;
+        auto *curr_ptr = static_cast<char *>(buf);
         do {
             if (!ibrc_state->cache) {
                 status = nvshmemt_mem_handle_cache_init(t, &ibrc_state->cache);
@@ -665,11 +709,12 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
                                       "Unable to initialize mem handle cache in IB transport.");
             }
             status =
-                nvshmemt_mem_handle_cache_add(t, ibrc_state->cache, curr_ptr, (void *)handle_info);
+                nvshmemt_mem_handle_cache_add(t, ibrc_state->cache, curr_ptr, handle_info.get());
             NVSHMEMI_NZ_ERROR_JMP(status, status, out,
                                   "Unable to cache mem handle in IB transport.");
-            curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
-        } while (curr_ptr < (char *)buf + length);
+            cached_ptr_end = curr_ptr + cache_granularity;
+            curr_ptr += cache_granularity;
+        } while (curr_ptr < static_cast<char *>(buf) + length);
     }
 
     if (!dummy_local_mem) {
@@ -690,24 +735,33 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
     }
 out:
     if (status) {
-        if (!local_only && ibrc_state->cache != NULL) {
-            nvshmemt_mem_handle_cache_remove(t, ibrc_state->cache, buf);
-            if (handle_info) {
-                free(handle_info);
+#ifdef NVSHMEM_USE_GDRCOPY
+        if (handle_info) {
+            (void)nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
+        }
+#endif
+        if (handle_info) {
+            if (!local_only && ibrc_state->cache != nullptr) {
+                for (auto *cached_ptr = static_cast<char *>(buf); cached_ptr < cached_ptr_end;
+                     cached_ptr += cache_granularity) {
+                    nvshmemt_mem_handle_cache_remove(t, ibrc_state->cache, cached_ptr);
+                }
             }
         }
         nvshmemt_ib_common_release_mem_handle(&ftable, mem_handle, ibrc_state->log_level);
+    } else if (handle_info) {
+        (void)handle_info.release();
     }
     return status;
 }
 
 int nvshmemt_ibrc_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_transport_t t) {
     struct nvshmemt_ib_common_mem_handle *handle;
-    struct ibrc_mem_handle_info *handle_info = NULL;
+    struct ibrc_mem_handle_info *handle_info = nullptr;
     nvshmemt_ib_common_state_t state;
     void *addr;
-    void *curr_ptr;
     int status = 0;
+    std::unique_ptr<ibrc_mem_handle_info_t> handle_info_owner;
 
     state = (nvshmemt_ib_common_state_t)t->state;
     handle = (struct nvshmemt_ib_common_mem_handle *)mem_handle;
@@ -720,6 +774,9 @@ int nvshmemt_ibrc_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_t
 
     status = nvshmemt_ib_common_release_mem_handle(&ftable, mem_handle, state->log_level);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to dereg memory.\n");
+    if (handle_info) {
+        handle_info->mr = nullptr;
+    }
 
     if (handle_info) {
 #ifdef NVSHMEM_USE_GDRCOPY
@@ -727,23 +784,23 @@ int nvshmemt_ibrc_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_t
         is_egm = check_egm(addr, t->egm_map);
 
         if (use_gdrcopy && !is_egm) {
-            status = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
-                                          handle_info->size);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unmap failed\n");
-
-            status = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unpin failed\n");
+            status = nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "gdrcopy cleanup failed\n");
         }
 #endif
 
-        if (state->cache != NULL) {
-            curr_ptr = addr;
+        if (state->cache != nullptr) {
+            auto *curr_ptr = static_cast<char *>(addr);
+            const auto cache_granularity = 1ULL << t->log2_cumem_granularity;
+            const auto *end = static_cast<char *>(addr) + handle_info->size;
             do {
                 nvshmemt_mem_handle_cache_remove(t, state->cache, curr_ptr);
-                curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
-            } while (curr_ptr < (char *)addr + handle_info->size);
+                curr_ptr += cache_granularity;
+            } while (curr_ptr < end);
         }
-        free(handle_info);
+
+        handle_info_owner.reset(handle_info);
     }
 out:
     return status;
@@ -753,10 +810,11 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     int status = 0;
     size_t mem_handle_cache_size;
     nvshmemt_ib_common_state_t state;
-    struct ibrc_mem_handle_info *handle_info;
+    struct ibrc_mem_handle_info *handle_info, *previous_handle_info = nullptr;
+    std::unique_ptr<ibrc_mem_handle_info_t> handle_info_owner;
 
     state = (nvshmemt_ib_common_state_t)transport->state;
-    assert(state != NULL);
+    assert(state != nullptr);
     mem_handle_cache_size = nvshmemt_mem_handle_cache_get_size(state->cache);
 
     if (transport->device_pci_paths) {
@@ -785,21 +843,25 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     for (size_t i = 0; i < mem_handle_cache_size; i++) {
         handle_info =
             (struct ibrc_mem_handle_info *)nvshmemt_mem_handle_cache_get_by_idx(state->cache, i);
-        if (handle_info) {
+        if (handle_info && handle_info != previous_handle_info) {
 #ifdef NVSHMEM_USE_GDRCOPY
             /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
             is_egm = check_egm(handle_info->ptr, transport->egm_map);
             if (use_gdrcopy && !is_egm) {
-                status = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
-                                              handle_info->size);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unmap failed\n");
-
-                status = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unpin failed\n");
+                status = nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
+                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "gdrcopy cleanup failed\n");
             }
 #endif
-            free(handle_info);
+            if (handle_info->mr) {
+                status = ftable.dereg_mr(handle_info->mr);
+                NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "ibv_dereg_mr failed \n");
+                handle_info->mr = nullptr;
+            }
+            handle_info_owner.reset(handle_info);
         }
+        previous_handle_info = handle_info;
     }
 
     nvshmemt_mem_handle_cache_fini(state->cache);
@@ -1454,11 +1516,15 @@ int nvshmemt_ibrc_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
 #ifdef NVSHMEM_USE_GDRCOPY
     /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
     is_egm = check_egm(mem_handle_info->ptr, tcurr->egm_map);
-    if (use_gdrcopy && !is_egm) {
+    if (use_gdrcopy && !is_egm && mem_handle_info->gdrcopy.mapped) {
         int temp;
-        gdrcopy_ftable.copy_from_mapping(mem_handle_info->mh, &temp, mem_handle_info->cpu_ptr,
-                                         sizeof(int));
-        return status;
+        status = gdrcopy_ftable.copy_from_mapping(mem_handle_info->gdrcopy.mh, &temp,
+                                                  mem_handle_info->cpu_ptr, sizeof(int));
+        if (status == 0) {
+            return NVSHMEMX_SUCCESS;
+        }
+        INFO(state->log_level, "GDRCopy CST read failed (%d), falling back to RDMA read", status);
+        status = 0;
     }
 #endif
 
