@@ -21,6 +21,8 @@
 #include <sys/types.h>                                   // for off_t
 #include <algorithm>                                     // for for_each, remove_if, max
 #include <cctype>                                        // for tolower, isspace
+#include <mutex>                                         // for lock_guard, mutex
+#include <new>                                           // for nothrow
 #include <string>                                        // for basic_string, string, opera...
 #include <vector>                                        // for vector
 #include "device_host_transport/nvshmem_common_ibgda.h"  // for nvshmemi_ibgda_device_state_t
@@ -316,6 +318,7 @@ typedef struct {
     int cur_qp_index;       // for rc qpair indexing
     int last_num_rcs;
     int last_num_cqs;
+    std::mutex rc_endpoint_lock;
 } nvshmemt_ibgda_state_t;
 
 struct ibgda_device_local_only_mhandle_cache {
@@ -371,6 +374,7 @@ static void ibgda_get_device_dct(nvshmemi_ibgda_device_dct_t *dev_dct,
 static void ibgda_get_device_qp(nvshmemt_ibgda_state_t *ibgda_state,
                                 nvshmemi_ibgda_device_qp_t *dev_qp, struct ibgda_device *device,
                                 const struct ibgda_ep *ep, int ep_idx, int selected_dev_idx);
+static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_state);
 
 /* =============================================================================
  * Utility functions start
@@ -531,6 +535,8 @@ int ibgda_rc_progress(nvshmem_transport_t t) {
     int n_devs_selected = ibgda_state->n_devs_selected;
     int n_pes = t->n_pes;
     struct mlx5_wqe_ctrl_seg ctrl_seg;
+    std::lock_guard<std::mutex> lock(ibgda_state->rc_endpoint_lock);
+
     for (int j = 0; j < n_devs_selected; j++) {
         struct ibgda_device *device;
         int dev_idx;
@@ -3297,9 +3303,14 @@ static int ibgda_allocate_rc_structures(nvshmem_transport_t t, struct ibgda_devi
     if (device->rc.eps == NULL) {
         device->rc.eps = (struct ibgda_ep **)calloc(num_rc_eps, sizeof(*device->rc.eps));
     } else {
-        size_t new_size = device->rc.num_eps_per_pe * n_pes + num_rc_eps;
-        device->rc.eps =
+        size_t old_size = device->rc.num_eps_per_pe * n_pes;
+        size_t new_size = old_size + num_rc_eps;
+        struct ibgda_ep **eps =
             (struct ibgda_ep **)realloc(device->rc.eps, new_size * sizeof(*device->rc.eps));
+        NVSHMEMI_NULL_ERROR_JMP(eps, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "allocation of rc.eps failed.");
+        device->rc.eps = eps;
+        memset(&device->rc.eps[old_size], 0, num_rc_eps * sizeof(*device->rc.eps));
     }
     NVSHMEMI_NULL_ERROR_JMP(device->rc.eps, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "allocation of rc.eps failed.");
@@ -3319,6 +3330,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
     struct ibgda_rc_handle *local_rc_handles = NULL;
     struct ibgda_rc_handle *peer_ep_handles = NULL;
     int rc_first_index = device->rc.num_eps_per_pe * n_pes;
+    int global_rc_first_index = ibgda_state->cur_qp_index;
 
     if (num_rc_eps <= 0) {
         return NVSHMEMX_SUCCESS;
@@ -3329,6 +3341,8 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
     NVSHMEMI_NULL_ERROR_JMP(local_rc_handles, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "allocation of local_rc_handles failed.\n");
     peer_ep_handles = (struct ibgda_rc_handle *)calloc(num_rc_eps, sizeof(*peer_ep_handles));
+    NVSHMEMI_NULL_ERROR_JMP(peer_ep_handles, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                           "allocation of peer_ep_handles failed.\n");
     /* allocate local RC handles end */
 
     /* create and assign RCs start */
@@ -3340,18 +3354,21 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
             if (dst_pe == mype) continue;
             int mapped_i = rc_first_index + i * n_pes + dst_pe;
             int local_mapped_i = i + num_eps_per_pe * dst_pe;
+            /* mapped_i indexes this device's RC array; global_mapped_i indexes rc_h/rc_d. */
+            int global_mapped_i = global_rc_first_index + i * n_pes + dst_pe;
 
-            TRACE(ibgda_state->common.log_level, "dst_pe: %d, mapped_i: %d, local_mapped_i: %d",
-                  dst_pe, mapped_i, local_mapped_i);
+            TRACE(ibgda_state->common.log_level,
+                  "dst_pe: %d, mapped_i: %d, local_mapped_i: %d, global_mapped_i: %d",
+                  dst_pe, mapped_i, local_mapped_i, global_mapped_i);
             status = ibgda_create_qp(ibgda_state, &device->rc.eps[mapped_i], device, portid,
-                                     mapped_i, NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
+                                     global_mapped_i, NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "ibgda_create_rc failed on RC #%d.", mapped_i);
+                                  "ibgda_create_rc failed on RC #%d.", global_mapped_i);
 
             status = ibgda_get_rc_handle(&local_rc_handles[local_mapped_i],
                                          device->rc.eps[mapped_i], device);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "ibgda_get_rc_handle failed on RC #%d.", mapped_i);
+                                  "ibgda_get_rc_handle failed on RC #%d.", global_mapped_i);
         }
     }
 
@@ -3391,6 +3408,19 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
     ibgda_state->cur_qp_index += num_rc_eps;
 
 out:
+    if (status) {
+        for (int i = 0; i < num_rc_eps; ++i) {
+            int ep_index = rc_first_index + i;
+            if (device->rc.eps && device->rc.eps[ep_index]) {
+                int destroy_status = ibgda_destroy_ep(device->rc.eps[ep_index], ibgda_state);
+                if (destroy_status) {
+                    NVSHMEMI_ERROR_PRINT("ibgda_destroy_ep failed while rolling back RC #%d.\n",
+                                         ep_index);
+                }
+                device->rc.eps[ep_index] = NULL;
+            }
+        }
+    }
     if (local_rc_handles) {
         free(local_rc_handles);
     }
@@ -3410,11 +3440,19 @@ static int ibgda_populate_rc_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvshm
     int mype = t->my_pe;
     int n_devs_selected = ibgda_state->n_devs_selected;
     int num_rc_handles_populated = 0;
+    int first_rc_cq_index = 0;
     const size_t mvars_offset = offsetof(nvshmemi_ibgda_device_qp_t, mvars);
     const size_t prod_idx_offset = offsetof(nvshmemi_ibgda_device_qp_management_t, tx_wq.prod_idx);
     const size_t cons_t_offset = offsetof(nvshmemi_ibgda_device_qp_management_t, tx_wq.cons_idx);
     const size_t wqe_h_offset = offsetof(nvshmemi_ibgda_device_qp_management_t, tx_wq.resv_head);
     const size_t wqe_t_offset = offsetof(nvshmemi_ibgda_device_qp_management_t, tx_wq.ready_head);
+
+    /* CQs for all DCIs are packed before CQs for any RCs. */
+    for (int i = 0; i < n_devs_selected; i++) {
+        int dev_idx = ibgda_state->selected_dev_ids[i];
+        struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
+        first_rc_cq_index += device->dci.num_eps;
+    }
 
     /* Get and store RC information start */
     if (num_rc_handles > 0) {
@@ -3422,16 +3460,15 @@ static int ibgda_populate_rc_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvshm
             int dev_idx = ibgda_state->selected_dev_ids[i];
             struct ibgda_device *device =
                 (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
-            int first_cq_index = device->dci.num_eps;
             for (int j = 0; j < device->rc.num_eps_per_pe * n_pes; j++) {
                 num_rc_handles_populated++;
                 if (j % n_pes == mype) {
                     continue;
                 }
-                int ep_index = device->rc.num_eps_per_pe * i + j;
+                int ep_index = j;
                 ibgda_ep *ep = device->rc.eps[ep_index];
                 int qp_index = ep->user_index;
-                int my_cq_index = first_cq_index + qp_index;
+                int my_cq_index = first_rc_cq_index + qp_index;
 
                 TRACE(ibgda_state->common.log_level,
                       "Populating RC at ep_index #%d, qp_idx #%d, cq_idx #%d ptr: %p", ep_index,
@@ -4141,9 +4178,12 @@ static int ibgda_connect_rc_only(nvshmemt_ibgda_state_t *ibgda_state, nvshmem_tr
 
     struct ibgda_device *device;
 
+    std::lock_guard<std::mutex> lock(ibgda_state->rc_endpoint_lock);
+
     // Bail if IBGDA_NUM_RC_PER_PE < 1 (indicates DCI rather than RC)
     if (ibgda_state->common.options->IBGDA_NUM_RC_PER_PE < 1) {
-        return NVSHMEMX_SUCCESS;  // No RC endpoints to create
+        status = NVSHMEMX_SUCCESS;  // No RC endpoints to create
+        goto out;
     }
 
     // Allocate out_qp_indices array with num_qps entries
@@ -4387,7 +4427,8 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     free(ibgda_state->device_state_cache);
     ibgda_state->device_state_cache = NULL;
 
-    free(transport->state);
+    delete ibgda_state;
+    transport->state = NULL;
 
     if (transport->device_pci_paths) {
         for (int i = 0; i < transport->n_devices; i++) {
@@ -4628,7 +4669,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     CUdevice gpu_device_id;
 
     struct nvshmem_transport *transport = NULL;
-    nvshmemt_ibgda_state_t *ibgda_state;
+    nvshmemt_ibgda_state_t *ibgda_state = NULL;
     struct ibgda_device *device;
     struct ibv_device **dev_list = NULL;
 
@@ -4723,7 +4764,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                            "NVSHMEM_IBGDA_NUM_FETCH_SLOTS_PER_RC must be a positive number.\n");
     }
 
-    ibgda_state = (nvshmemt_ibgda_state_t *)calloc(1, sizeof(nvshmemt_ibgda_state_t));
+    ibgda_state = new (std::nothrow) nvshmemt_ibgda_state_t{};
     NVSHMEMI_NULL_ERROR_JMP(ibgda_state, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "p2p state allocation failed \n");
     transport->state = (void *)ibgda_state;
@@ -5021,6 +5062,9 @@ out:
         if (transport) {
             if (transport->device_pci_paths) {
                 free(transport->device_pci_paths);
+            }
+            if (transport->state) {
+                delete (nvshmemt_ibgda_state_t *)transport->state;
             }
             free(transport);
         }
