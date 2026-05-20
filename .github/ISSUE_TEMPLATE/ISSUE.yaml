@@ -35,6 +35,7 @@ body:
         The logs are a great tool to pin down issues. Please set these environment variables before the run.
         * `NVSHMEM_DEBUG=INFO` and `NVSHMEM_DEBUG_SUBSYS=ALL` to produce full debug information.
         Please configure your launch script to capture one log per rank.
+        * Before attaching logs, redact sensitive information (credentials/tokens, internal hostnames/IPs, and any user-identifying data).
 
   - type: textarea
     id: repro

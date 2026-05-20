@@ -13,3 +13,6 @@ body:
     id: question
     attributes:
       label: Question
+      placeholder: Describe your question with enough context to help us answer quickly.
+    validations:
+      required: true
