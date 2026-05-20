@@ -45,9 +45,36 @@ def _assert_tensor_equals(tensor, dtype, expected):
         assert (host == expected).all()
 
 
+def _is_cross_node_job():
+    """True when TEAM_WORLD spans more than one NVLink/NVSwitch domain.
+
+    Within a single NVLink/NVSwitch domain device AMOs take the GPU LD/ST
+    atomics path and all dtypes are supported. Across nodes the AMO is
+    sent to a remote transport (IBRC/UCX/libfabric/...). On IBRC without
+    a GDRCopy/CPU-atomics fallback only 8-byte ADD/SIGNAL_ADD and
+    SIGNAL/SIGNAL_SET are wired up; other cases call
+    ``NVSHMEMI_ERROR_EXIT`` which aborts the MPI job and cannot be
+    caught from Python.
+    """
+    return nvshmem.core.team_n_pes(nvshmem.core.Teams.TEAM_NODE) < nvshmem.core.n_pes()
+
+
+def _skip_if_unsupported_amo(dtype, native_ib_supports_8byte=False):
+    if not _is_cross_node_job():
+        return
+    if native_ib_supports_8byte and np.dtype(dtype).itemsize == 8:
+        return
+    pytest.skip(
+        "Cross-node job without NVLink/P2P atomics; remote transport does "
+        f"not support this AMO for dtype={dtype}"
+    )
+
+
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", amo_std_dtypes)
 def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
+    _skip_if_unsupported_amo(dtype, native_ib_supports_8byte=True)
+
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device()
@@ -82,6 +109,8 @@ def test_atomic_add_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", amo_std_dtypes)
 def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
+    _skip_if_unsupported_amo(dtype)
+
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device()
@@ -122,6 +151,8 @@ def test_atomic_fetch_add_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", amo_float_dtypes)
 def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
+    _skip_if_unsupported_amo(dtype)
+
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device()
@@ -161,6 +192,8 @@ def test_atomic_fetch_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", amo_float_dtypes)
 def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
+    _skip_if_unsupported_amo(dtype)
+
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device()
@@ -195,6 +228,8 @@ def test_atomic_set_on_tensor(nvshmem_init_fini, dtype):
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", amo_swap_dtypes)
 def test_atomic_swap_on_tensor(nvshmem_init_fini, dtype):
+    _skip_if_unsupported_amo(dtype)
+
     stream = _nvshmem_stream()
     local_rank = nvshmem.core.my_pe() % system.get_num_devices()
     dev = Device()
