@@ -6,8 +6,8 @@
 /*
  * Test: nvshmemx_flush
  *
- * Validates that nvshmemx_flush() makes source buffers reusable after a
- * non-blocking put.  The shared-memory source test always calls
+ * Validates that nvshmemx_flush and its scoped variants make source buffers
+ * reusable after a non-blocking put.  The shared-memory source test always calls
  * nvshmemx_give_smem(); on non-TMA-capable devices that registration is a
  * no-op and the put falls back to the regular path.  The global-memory source
  * test also runs on every device.  Both kernels overwrite the source buffer
@@ -27,54 +27,144 @@ constexpr int THREADS_PER_BLOCK = 64;
 constexpr int PATTERN_SCALE = 1000;
 constexpr int POISON_VALUE = -42;
 
+enum flush_test_scope_t {
+    FLUSH_TEST_SCOPE_THREAD,
+    FLUSH_TEST_SCOPE_WARP,
+    FLUSH_TEST_SCOPE_BLOCK,
+};
+
+__device__ int flat_thread_id() {
+    return threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+}
+
+__device__ int flat_block_size() { return blockDim.x * blockDim.y * blockDim.z; }
+
+template <flush_test_scope_t SCOPE>
+__device__ void putmem_nbi_scope(void *dest, const void *source, size_t bytes, int pe);
+
+template <>
+__device__ void putmem_nbi_scope<FLUSH_TEST_SCOPE_THREAD>(void *dest, const void *source,
+                                                          size_t bytes, int pe) {
+    if (flat_thread_id() == 0) nvshmem_putmem_nbi(dest, source, bytes, pe);
+}
+
+template <>
+__device__ void putmem_nbi_scope<FLUSH_TEST_SCOPE_WARP>(void *dest, const void *source,
+                                                        size_t bytes, int pe) {
+    if (flat_thread_id() < warpSize) nvshmemx_putmem_nbi_warp(dest, source, bytes, pe);
+}
+
+template <>
+__device__ void putmem_nbi_scope<FLUSH_TEST_SCOPE_BLOCK>(void *dest, const void *source,
+                                                         size_t bytes, int pe) {
+    nvshmemx_putmem_nbi_block(dest, source, bytes, pe);
+}
+
+template <flush_test_scope_t SCOPE>
+__device__ void flush_scope();
+
+template <>
+__device__ void flush_scope<FLUSH_TEST_SCOPE_THREAD>() {
+    if (flat_thread_id() == 0) nvshmemx_flush();
+}
+
+template <>
+__device__ void flush_scope<FLUSH_TEST_SCOPE_WARP>() {
+    if (flat_thread_id() < warpSize) nvshmemx_flush_warp();
+}
+
+template <>
+__device__ void flush_scope<FLUSH_TEST_SCOPE_BLOCK>() {
+    nvshmemx_flush_block();
+}
+
+template <flush_test_scope_t SCOPE>
+__device__ void poison_source(int *source, int nelems);
+
+template <>
+__device__ void poison_source<FLUSH_TEST_SCOPE_THREAD>(int *source, int nelems) {
+    if (flat_thread_id() == 0) {
+        for (int i = 0; i < nelems; i++) source[i] = POISON_VALUE;
+    }
+}
+
+template <>
+__device__ void poison_source<FLUSH_TEST_SCOPE_WARP>(int *source, int nelems) {
+    int tid = flat_thread_id();
+    if (tid < warpSize) {
+        for (int i = tid; i < nelems; i += warpSize) source[i] = POISON_VALUE;
+    }
+}
+
+template <>
+__device__ void poison_source<FLUSH_TEST_SCOPE_BLOCK>(int *source, int nelems) {
+    int tid = flat_thread_id();
+    for (int i = tid; i < nelems; i += flat_block_size()) source[i] = POISON_VALUE;
+}
+
+template <flush_test_scope_t SCOPE>
 __global__ void test_flush_reuses_smem_source(int *recv_data, int elems_per_block, int mype,
                                               int npes) {
     extern __shared__ char nvshmem_smem[];
     int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
     int *payload = (int *)(nvshmem_smem + smem_offset);
-    int tid = threadIdx.x;
+    int tid = flat_thread_id();
     int offset = blockIdx.x * elems_per_block;
     int peer = (mype + 1) % npes;
 
     nvshmemx_give_smem(nvshmem_smem, smem_offset);
     __syncthreads();
 
-    if (tid < elems_per_block) {
-        payload[tid] = mype * PATTERN_SCALE + offset + tid;
-    }
+    for (int i = tid; i < elems_per_block; i += flat_block_size())
+        payload[i] = mype * PATTERN_SCALE + offset + i;
     __syncthreads();
 
 #if __CUDA_ARCH__ >= 900
     asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
 #endif
 
-    nvshmemx_putmem_nbi_block(recv_data + offset, payload, (size_t)elems_per_block * sizeof(int),
-                              peer);
-    nvshmemx_flush();
+    putmem_nbi_scope<SCOPE>(recv_data + offset, payload, (size_t)elems_per_block * sizeof(int),
+                            peer);
+    flush_scope<SCOPE>();
 
-    /* nvshmemx_flush() is thread-scoped.  For block puts, synchronize after
-     * every thread has called it so non-leader threads do not overwrite the
-     * source before the elected TMA issuer has completed its flush. */
-    __syncthreads();
-
-    if (tid < elems_per_block) {
-        payload[tid] = POISON_VALUE;
-    }
+    poison_source<SCOPE>(payload, elems_per_block);
     __syncthreads();
 
     nvshmem_quiet();
     nvshmemx_release_smem();
 }
 
+template <flush_test_scope_t SCOPE>
 __global__ void test_flush_reuses_gmem_source_without_tma(int *source_data, int *recv_data,
                                                           int elems_per_block, int mype, int npes) {
-    int tid = threadIdx.x;
+    int tid = flat_thread_id();
     int offset = blockIdx.x * elems_per_block;
     int peer = (mype + 1) % npes;
 
-    if (tid < elems_per_block) {
-        source_data[offset + tid] = mype * PATTERN_SCALE + offset + tid;
-    }
+    for (int i = tid; i < elems_per_block; i += flat_block_size())
+        source_data[offset + i] = mype * PATTERN_SCALE + offset + i;
+    __syncthreads();
+
+    putmem_nbi_scope<SCOPE>(recv_data + offset, source_data + offset,
+                            (size_t)elems_per_block * sizeof(int), peer);
+    flush_scope<SCOPE>();
+
+    poison_source<SCOPE>(source_data + offset, elems_per_block);
+    __syncthreads();
+
+    nvshmem_quiet();
+}
+
+__global__ void test_flush_reuses_gmem_source_block_put_thread_flush(int *source_data,
+                                                                     int *recv_data,
+                                                                     int elems_per_block, int mype,
+                                                                     int npes) {
+    int tid = flat_thread_id();
+    int offset = blockIdx.x * elems_per_block;
+    int peer = (mype + 1) % npes;
+
+    for (int i = tid; i < elems_per_block; i += flat_block_size())
+        source_data[offset + i] = mype * PATTERN_SCALE + offset + i;
     __syncthreads();
 
     nvshmemx_putmem_nbi_block(recv_data + offset, source_data + offset,
@@ -82,9 +172,8 @@ __global__ void test_flush_reuses_gmem_source_without_tma(int *source_data, int 
     nvshmemx_flush();
     __syncthreads();
 
-    if (tid < elems_per_block) {
-        source_data[offset + tid] = POISON_VALUE;
-    }
+    for (int i = tid; i < elems_per_block; i += flat_block_size())
+        source_data[offset + i] = POISON_VALUE;
     __syncthreads();
 
     nvshmem_quiet();
@@ -100,6 +189,87 @@ static int verify_recv_data(const int *host, int nelems, int prev_pe) {
         }
     }
     return 0;
+}
+
+static const char *scope_name(flush_test_scope_t scope) {
+    switch (scope) {
+        case FLUSH_TEST_SCOPE_THREAD:
+            return "thread";
+        case FLUSH_TEST_SCOPE_WARP:
+            return "warp";
+        case FLUSH_TEST_SCOPE_BLOCK:
+            return "block";
+    }
+    return "unknown";
+}
+
+template <flush_test_scope_t SCOPE>
+static int run_smem_source_scope(int *recv_data, std::vector<int> &host, int total_elems,
+                                 int elems_per_block, int smem_size, int mype, int npes,
+                                 int prev_pe, bool use_tma) {
+    CUDA_CHECK(cudaFuncSetAttribute(test_flush_reuses_smem_source<SCOPE>,
+                                    cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+    CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+    nvshmem_barrier_all();
+    test_flush_reuses_smem_source<SCOPE><<<NUM_BLOCKS, THREADS_PER_BLOCK, smem_size>>>(
+        recv_data, elems_per_block, mype, npes);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    nvshmem_barrier_all();
+
+    CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
+                          cudaMemcpyDeviceToHost));
+    if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
+        printf("[PE %d] PASS: nvshmemx_flush %s-scope shared-memory source reuse (%s path)\n",
+               mype, scope_name(SCOPE), use_tma ? "TMA" : "non-TMA");
+        return 0;
+    }
+    return 1;
+}
+
+template <flush_test_scope_t SCOPE>
+static int run_gmem_source_scope(int *source_data, int *recv_data, std::vector<int> &host,
+                                 int total_elems, int elems_per_block, int mype, int npes,
+                                 int prev_pe) {
+    CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+    nvshmem_barrier_all();
+    test_flush_reuses_gmem_source_without_tma<SCOPE><<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(
+        source_data, recv_data, elems_per_block, mype, npes);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    nvshmem_barrier_all();
+
+    CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
+                          cudaMemcpyDeviceToHost));
+    if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
+        printf("[PE %d] PASS: nvshmemx_flush %s-scope global-memory source reuse\n", mype,
+               scope_name(SCOPE));
+        return 0;
+    }
+    return 1;
+}
+
+static int run_gmem_source_block_put_thread_flush(int *source_data, int *recv_data,
+                                                  std::vector<int> &host, int total_elems,
+                                                  int elems_per_block, int mype, int npes,
+                                                  int prev_pe) {
+    CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
+    nvshmem_barrier_all();
+    test_flush_reuses_gmem_source_block_put_thread_flush<<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(
+        source_data, recv_data, elems_per_block, mype, npes);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    nvshmem_barrier_all();
+
+    CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
+                          cudaMemcpyDeviceToHost));
+    if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
+        printf("[PE %d] PASS: nvshmemx_flush thread-scope global-memory source reuse after "
+               "block-scope put\n",
+               mype);
+        return 0;
+    }
+    return 1;
 }
 
 int main(int argc, char **argv) {
@@ -158,43 +328,26 @@ int main(int argc, char **argv) {
         int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
         int smem_size = smem_offset + THREADS_PER_BLOCK * (int)sizeof(int);
 
-        CUDA_CHECK(cudaFuncSetAttribute(test_flush_reuses_smem_source,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
-
         if (peer_p2p_reachable) {
-            CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
-            nvshmem_barrier_all();
-            test_flush_reuses_smem_source<<<NUM_BLOCKS, THREADS_PER_BLOCK, smem_size>>>(
-                recv_data, THREADS_PER_BLOCK, mype, npes);
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaDeviceSynchronize());
-            nvshmem_barrier_all();
-
-            CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
-                                  cudaMemcpyDeviceToHost));
-            if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
-                printf("[PE %d] PASS: nvshmemx_flush shared-memory source reuse (%s path)\n", mype,
-                       use_tma ? "TMA" : "non-TMA");
-            } else {
-                status = 1;
-            }
+            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_THREAD>(
+                recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
+                use_tma);
+            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_WARP>(
+                recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
+                use_tma);
+            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_BLOCK>(
+                recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
+                use_tma);
         }
 
-        CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
-        nvshmem_barrier_all();
-        test_flush_reuses_gmem_source_without_tma<<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(
-            source_data, recv_data, THREADS_PER_BLOCK, mype, npes);
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaDeviceSynchronize());
-        nvshmem_barrier_all();
-
-        CUDA_CHECK(
-            cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
-        if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
-            printf("[PE %d] PASS: nvshmemx_flush global-memory source reuse\n", mype);
-        } else {
-            status = 1;
-        }
+        status |= run_gmem_source_scope<FLUSH_TEST_SCOPE_THREAD>(
+            source_data, recv_data, host, total_elems, THREADS_PER_BLOCK, mype, npes, prev_pe);
+        status |= run_gmem_source_block_put_thread_flush(source_data, recv_data, host, total_elems,
+                                                         THREADS_PER_BLOCK, mype, npes, prev_pe);
+        status |= run_gmem_source_scope<FLUSH_TEST_SCOPE_WARP>(
+            source_data, recv_data, host, total_elems, THREADS_PER_BLOCK, mype, npes, prev_pe);
+        status |= run_gmem_source_scope<FLUSH_TEST_SCOPE_BLOCK>(
+            source_data, recv_data, host, total_elems, THREADS_PER_BLOCK, mype, npes, prev_pe);
 
         nvshmem_free(source_data);
         nvshmem_free(recv_data);

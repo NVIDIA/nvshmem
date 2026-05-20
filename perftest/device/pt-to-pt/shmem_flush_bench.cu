@@ -12,7 +12,7 @@
  *   __global__ void kernel(...) {
  *       produce(src_smem);                     // fill local smem
  *       nvshmemx_put_nbi_*(dst_remote, src_smem, N, pe);
- *       nvshmemx_flush();  // src_smem reusable
+ *       nvshmemx_flush_*();  // src_smem reusable
  *   }
  *
  * Two axes:
