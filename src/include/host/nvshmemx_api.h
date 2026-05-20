@@ -244,6 +244,12 @@ void nvshmemx_getmem_nbi_on_stream(void *dest, const void *source, size_t bytes,
 
 NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_flush();
 
+#define NVSHMEMX_DECL_FLUSH_THREADGROUP(SCOPE) __device__ void nvshmemx_flush_##SCOPE();
+
+NVSHMEMX_DECL_FLUSH_THREADGROUP(warp)
+NVSHMEMX_DECL_FLUSH_THREADGROUP(block)
+#undef NVSHMEMX_DECL_FLUSH_THREADGROUP
+
 //////////////////// Synchronization On Stream ////////////////////
 
 void nvshmemx_quiet_on_stream(cudaStream_t cstrm);

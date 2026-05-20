@@ -877,7 +877,7 @@ template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>(int pe,
 
 /*
  * nvshmemi_flush - Wait until all source buffers used by preceding
- * non-blocking puts issued from this threadgroup are safe to reuse.
+ * non-blocking puts issued from the flushing thread are safe to reuse.
  *
  * Guarantees reusability only.  Does NOT guarantee that the data is
  * visible at the remote PE.  Callers who need remote visibility must still
@@ -900,18 +900,23 @@ template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_flush(
     int pe = NVSHMEMX_PE_ALL, nvshmemx_qp_handle_t *qp_handle = NULL,
     int num_qps = NVSHMEMX_QP_ALL) {
+    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+
+    nvshmemi_threadgroup_sync<SCOPE>();
     /* TMA source-reuse drain.  Gated on smem registration so only CTAs that
      * actually issued TMA ops pay the wait_group.read cost; other CTAs skip
      * all three PTX instructions. */
-    if (nvshmemi_tma_smem_registered()) {
-        nvshmemi_tma_bulk_commit_group();
-        nvshmemi_tma_bulk_wait_group_read_0();
-        nvshmemi_tma_fence_proxy_async_shared_cta();
-    }
-    if (!nvshmemi_use_ldst_path()) {
-        /* Network path: drain send-side completions without issuing
-         * __threadfence_system() (use_membar = false). */
-        nvshmemi_transfer_quiet<SCOPE>(false, pe, qp_handle, num_qps);
+    if (!myIdx) {
+        if (nvshmemi_tma_smem_registered()) {
+            nvshmemi_tma_bulk_commit_group();
+            nvshmemi_tma_bulk_wait_group_read_0();
+            nvshmemi_tma_fence_proxy_async_shared_cta();
+        }
+        if (!nvshmemi_use_ldst_path()) {
+            /* Network path: drain send-side completions without issuing
+             * __threadfence_system() (use_membar = false). */
+            nvshmemi_transfer_quiet<NVSHMEMI_THREADGROUP_THREAD>(false, pe, qp_handle, num_qps);
+        }
     }
     /* P2P st.global path: no-op - source buffer already consumed. */
     nvshmemi_threadgroup_sync<SCOPE>();

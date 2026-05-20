@@ -762,14 +762,12 @@ nvshmemx_flush(void) {
     nvshmemi_flush<NVSHMEMI_THREADGROUP_THREAD>();
 }
 
-/*
- * nvshmemx_flush_warp - Warp-scoped variant of nvshmemx_flush().  One thread
- * per warp issues the underlying flush; all threads in the warp participate in
- * the implicit warp-level synchronization.
- */
-NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void
-nvshmemx_flush_warp(void) {
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_flush_warp(void) {
     nvshmemi_flush<NVSHMEMI_THREADGROUP_WARP>();
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_flush_block(void) {
+    nvshmemi_flush<NVSHMEMI_THREADGROUP_BLOCK>();
 }
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_qp_quiet(
