@@ -14,12 +14,15 @@
 #include "utils.h"
 
 #define INIT_DEFAULT_ITERS 150
+#define INIT_DEFAULT_ITERS_LARGE_NPES 20
+#define INIT_LARGE_NPES_THRESHOLD 8
 
 int main(int argc, char *argv[]) {
-    int devices, num_iters = 0;
+    int devices, npes, num_iters = 0;
     const char *test_num_iter = getenv("NVSHMEMTEST_INIT_NUM_ITERS");
     read_args(argc, argv);
     init_wrapper(&argc, &argv);
+    npes = nvshmem_n_pes();
     nvshmem_barrier_all();
     nvshmem_finalize();
 
@@ -28,7 +31,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (num_iters <= 0) {
-        num_iters = INIT_DEFAULT_ITERS;
+        num_iters = (use_mmap && !test_num_iter && npes > INIT_LARGE_NPES_THRESHOLD)
+                        ? INIT_DEFAULT_ITERS_LARGE_NPES
+                        : INIT_DEFAULT_ITERS;
     }
 
     for (int i = 0; i < num_iters; i++) {
