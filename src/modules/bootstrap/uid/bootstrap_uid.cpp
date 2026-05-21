@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <assert.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,7 +11,6 @@
 #include <strings.h>
 #include <sys/resource.h>
 #include <time.h>
-#include <algorithm>
 #include <cstring>
 #include "bootstrap_device_host/nvshmem_uniqueid.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
@@ -94,13 +94,13 @@ static bootstrap_result_t bootstrap_net_send(bootstrap_uid_socket_t* sock, void*
 static bootstrap_result_t bootstrap_net_recv(bootstrap_uid_socket_t* sock, void* data, int size) {
     int recv_size;
     BOOTSTRAP_CHECK(nccl_fn_table(recv, sock, &recv_size, sizeof(int)));
-    if (recv_size > size) {
-        BOOTSTRAP_ERROR_PRINT("Message truncated : received %d bytes instead of %d\n", recv_size,
-                              size);
+    if (recv_size != size) {
+        BOOTSTRAP_ERROR_PRINT("Message size mismatch: received %d bytes, expected %d bytes",
+                              recv_size, size);
         return BOOTSTRAP_INTERNAL_ERROR;
     }
 
-    BOOTSTRAP_CHECK(nccl_fn_table(recv, sock, data, std::min(recv_size, size)));
+    BOOTSTRAP_CHECK(nccl_fn_table(recv, sock, data, size));
     return BOOTSTRAP_SUCCESS;
 }
 
@@ -109,6 +109,33 @@ static bootstrap_result_t set_files_limit() {
     BOOTSTRAP_SYSCHECK(getrlimit(RLIMIT_NOFILE, &files_limit), "getrlimit");
     files_limit.rlim_cur = files_limit.rlim_max;
     BOOTSTRAP_SYSCHECK(setrlimit(RLIMIT_NOFILE, &files_limit), "setrlimit");
+    return BOOTSTRAP_SUCCESS;
+}
+
+static bootstrap_result_t bootstrap_validate_ext_info(const struct bootstrap_ext_info& info,
+                                                      int expected_nranks) {
+    if (info.nranks <= 0) {
+        BOOTSTRAP_ERROR_PRINT("invalid rank count received from peer: %d", info.nranks);
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+
+    if ((size_t)info.nranks > SIZE_MAX / sizeof(bootstrap_uid_socket_address_t)) {
+        BOOTSTRAP_ERROR_PRINT("rank count %d is too large for address allocation", info.nranks);
+        return BOOTSTRAP_INTERNAL_ERROR;
+    }
+
+    if (expected_nranks > 0 && expected_nranks != info.nranks) {
+        BOOTSTRAP_ERROR_PRINT("mismatch in rank count from procs %d : %d", expected_nranks,
+                              info.nranks);
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+
+    if (info.rank < 0 || info.rank >= info.nranks) {
+        BOOTSTRAP_ERROR_PRINT("invalid rank %d received from peer for %d ranks", info.rank,
+                              info.nranks);
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+
     return BOOTSTRAP_SUCCESS;
 }
 
@@ -220,18 +247,16 @@ static void* bootstrap_root(void* rargs) {
             goto out;
         }
 
+        info = {};
         BOOTSTRAP_CHECKGOTO(bootstrap_net_recv(&sock, &info, sizeof(info)), res, out);
         BOOTSTRAP_CHECKGOTO(nccl_fn_table(close, &sock), res, out);
+
+        BOOTSTRAP_CHECKGOTO(bootstrap_validate_ext_info(info, nranks), res, out);
 
         if (c == 0) {
             nranks = info.nranks;
             BOOTSTRAP_CHECKGOTO(BOOTSTRAP_CALLOC(&rank_addresses, nranks), res, out);
             BOOTSTRAP_CHECKGOTO(BOOTSTRAP_CALLOC(&rank_addresses_root, nranks), res, out);
-        }
-
-        if (nranks != info.nranks) {
-            BOOTSTRAP_ERROR_PRINT("mismatch in rank count from procs %d : %d", nranks, info.nranks);
-            goto out;
         }
 
         if (memcmp(zero, &rank_addresses_root[info.rank], sizeof(bootstrap_uid_socket_address_t)) !=
@@ -662,6 +687,20 @@ int nvshmemi_bootstrap_plugin_init(void* arg, bootstrap_handle_t* handle, const 
 
     // interpret arg as nvshmemx_uniqueid_args_t
     uid_args = (nvshmemx_uniqueid_args_t*)(arg);
+    if (uid_args == nullptr || uid_args->id == nullptr) {
+        BOOTSTRAP_ERROR_PRINT("UID bootstrap requires non-null unique ID arguments");
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+    if (uid_args->nranks <= 0 || uid_args->myrank < 0 || uid_args->myrank >= uid_args->nranks) {
+        BOOTSTRAP_ERROR_PRINT("invalid UID bootstrap rank arguments: rank %d of %d",
+                              uid_args->myrank, uid_args->nranks);
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+    if ((size_t)uid_args->nranks > SIZE_MAX / sizeof(bootstrap_uid_socket_address_t)) {
+        BOOTSTRAP_ERROR_PRINT("UID bootstrap rank count %d is too large", uid_args->nranks);
+        return BOOTSTRAP_INTERNAL_ERROR;
+    }
+
     handle->pg_rank = (uid_args->myrank);
     handle->pg_size = (uid_args->nranks);
     bootstrap_init_ops_t* ops = handle->pre_init_ops;

@@ -10,6 +10,7 @@
 #include <stdint.h>                          // for uint64_t, uint32_t
 #include <stdio.h>                           // for fclose, fopen, fread
 #include <stdlib.h>                          // for malloc
+#include <limits.h>                          // for SIZE_MAX
 #include <cstring>                           // for NULL, memset, size_t
 #include "bootstrap_uid_remap.h"             // for bootstrap_uid_socket_a...
 #include "bootstrap_util.h"                  // for BOOTSTRAP_ERROR_PRINT
@@ -18,14 +19,28 @@
 template <typename T>
 inline bootstrap_result_t bootstrap_calloc_debug(T** ptr, size_t nelem, const char* filefunc,
                                                  int line) {
-    void* p = malloc(nelem * sizeof(T));
+    if (ptr == NULL) {
+        BOOTSTRAP_ERROR_PRINT("%s:%d allocation called with null output pointer", filefunc, line);
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+
+    *ptr = NULL;
+    if (nelem > 0 && nelem > SIZE_MAX / sizeof(T)) {
+        BOOTSTRAP_ERROR_PRINT("%s:%d allocation size overflow: %zu elements of %zu bytes",
+                              filefunc, line, nelem, sizeof(T));
+        return BOOTSTRAP_INTERNAL_ERROR;
+    }
+
+    const size_t allocation_size = nelem * sizeof(T);
+    void* p = malloc(allocation_size);
     if (p == NULL) {
-        BOOTSTRAP_ERROR_PRINT("Unable to malloc %ld bytes", nelem * sizeof(T));
+        BOOTSTRAP_ERROR_PRINT("%s:%d unable to malloc %zu bytes", filefunc, line,
+                              allocation_size);
         return BOOTSTRAP_INTERNAL_ERROR;
     }
     // BOOTSTRAP_DEBUG_PRINT("%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*sizeof(T),
     // p);
-    memset(p, 0, nelem * sizeof(T));
+    memset(p, 0, allocation_size);
     *ptr = (T*)p;
     return BOOTSTRAP_SUCCESS;
 }
