@@ -386,14 +386,6 @@ static inline int convert_addr_to_pe(nvshmemt_libfabric_state_t *state,
     return base_ep_index / num_eps;
 }
 
-static inline nvshmemt_libfabric_signal_state_t &get_signal_state(
-    nvshmemt_libfabric_state_t *state, const nvshmemt_libfabric_endpoint_t &ep) {
-    if (ep.domain_index < state->num_host_domains) {
-        return state->host_signal_state;
-    }
-    return state->proxy_signal_state;
-}
-
 static std::pair<bool, int> accumulate_signal(signal_seq_map &completion_map, uint32_t seq,
                                               nvshmemt_libfabric_gdr_op_ctx_t *op, int delta) {
     int status = NVSHMEMX_SUCCESS;
