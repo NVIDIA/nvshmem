@@ -1159,8 +1159,9 @@ NVSHMEM_TYPE_XOR_EMULATE(uint64, uint64_t)
             Type *target_actual =                                                           \
                 (Type *)((char *)peer_base_addr +                                           \
                          ((char *)target - (char *)nvshmemi_device_state_d.heap_base));     \
-                                                                                            \
-            return (Type)atomicExch_system((subType *)target_actual, *((subType *)&value)); \
+            subType old_value =                                                             \
+                    atomicExch_system((subType *)target_actual, *((subType *)&value));      \
+            return *((Type *)&old_value);                                                   \
         } else {                                                                            \
             return nvshmemi_transfer_amo_fetch<Type>((void *)target, (Type)value, 0, pe,    \
                                                NVSHMEMI_AMO_SWAP);                          \
