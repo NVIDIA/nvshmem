@@ -114,6 +114,8 @@ static bootstrap_result_t set_files_limit() {
 
 static bootstrap_result_t bootstrap_validate_ext_info(const struct bootstrap_ext_info& info,
                                                       int expected_nranks) {
+    int validated_nranks = info.nranks;
+
     if (info.nranks <= 0) {
         BOOTSTRAP_ERROR_PRINT("invalid rank count received from peer: %d", info.nranks);
         return BOOTSTRAP_INVALID_ARGUMENT;
@@ -129,10 +131,13 @@ static bootstrap_result_t bootstrap_validate_ext_info(const struct bootstrap_ext
                               info.nranks);
         return BOOTSTRAP_INVALID_ARGUMENT;
     }
+    if (expected_nranks > 0) {
+        validated_nranks = expected_nranks;
+    }
 
-    if (info.rank < 0 || info.rank >= info.nranks) {
+    if (info.rank < 0 || info.rank >= validated_nranks) {
         BOOTSTRAP_ERROR_PRINT("invalid rank %d received from peer for %d ranks", info.rank,
-                              info.nranks);
+                              validated_nranks);
         return BOOTSTRAP_INVALID_ARGUMENT;
     }
 
@@ -221,7 +226,7 @@ static void* bootstrap_root(void* rargs) {
     root_uid_version = args->version;
     uint64_t magic = args->magic;
     bootstrap_result_t res = BOOTSTRAP_SUCCESS;
-    int nranks = 0, c = 0;
+    int nranks = args->nranks, c = 0;
     struct bootstrap_ext_info info;
     bootstrap_uid_socket_address_t* rank_addresses = NULL;
     bootstrap_uid_socket_address_t* rank_addresses_root =
@@ -254,7 +259,9 @@ static void* bootstrap_root(void* rargs) {
         BOOTSTRAP_CHECKGOTO(bootstrap_validate_ext_info(info, nranks), res, out);
 
         if (c == 0) {
-            nranks = info.nranks;
+            if (nranks == 0) {
+                nranks = info.nranks;
+            }
             BOOTSTRAP_CHECKGOTO(BOOTSTRAP_CALLOC(&rank_addresses, nranks), res, out);
             BOOTSTRAP_CHECKGOTO(BOOTSTRAP_CALLOC(&rank_addresses_root, nranks), res, out);
         }
@@ -309,11 +316,20 @@ out:
 /**
  * Bootstrap Root Thread Creation
  */
-static bootstrap_result_t bootstrap_create_root(struct bootstrap_uid_handle* handle) {
+static bootstrap_result_t bootstrap_create_root(struct bootstrap_uid_handle* handle, int nranks) {
     bootstrap_uid_socket_t* listen_sock;
     struct bootstrap_root_args* args;
     pthread_attr_t attr = {};
     bootstrap_result_t res = BOOTSTRAP_SUCCESS;
+
+    if (nranks < 0) {
+        BOOTSTRAP_ERROR_PRINT("invalid UID bootstrap root rank count: %d", nranks);
+        return BOOTSTRAP_INVALID_ARGUMENT;
+    }
+    if ((size_t)nranks > SIZE_MAX / sizeof(bootstrap_uid_socket_address_t)) {
+        BOOTSTRAP_ERROR_PRINT("UID bootstrap root rank count %d is too large", nranks);
+        return BOOTSTRAP_INTERNAL_ERROR;
+    }
 
     BOOTSTRAP_CHECKGOTO(BOOTSTRAP_CALLOC(&listen_sock, 1), res, out);
     BOOTSTRAP_CHECK(nccl_fn_table(init, listen_sock, &handle->addr, handle->magic,
@@ -325,6 +341,7 @@ static bootstrap_result_t bootstrap_create_root(struct bootstrap_uid_handle* han
     args->listen_sock = listen_sock;
     args->magic = handle->magic;
     args->version = handle->version;
+    args->nranks = nranks;
 
     BOOTSTRAP_NEQCHECK(pthread_attr_init(&attr), 0);
     BOOTSTRAP_NEQCHECK(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED), 0);
@@ -357,7 +374,7 @@ int bootstrap_get_unique_id(void* cookie) {
     } else {
         memcpy(&(handle->addr), &priv_info.bootstrap_netifaddr,
                sizeof(bootstrap_uid_socket_address_t));
-        BOOTSTRAP_CHECK(bootstrap_create_root(handle));
+        BOOTSTRAP_CHECK(bootstrap_create_root(handle, 0));
     }
 
     return BOOTSTRAP_SUCCESS;
@@ -717,7 +734,7 @@ int nvshmemi_bootstrap_plugin_init(void* arg, bootstrap_handle_t* handle, const 
         // if session ID was set and rank is 0, create a root thread to exchange peer addresses
         // using phoning home protocol
         if (handle->pg_rank == 0 && env_attr.BOOTSTRAP_UID_SESSION_ID_provided) {
-            BOOTSTRAP_CHECK(bootstrap_create_root(uid_handle));
+            BOOTSTRAP_CHECK(bootstrap_create_root(uid_handle, handle->pg_size));
         }
     } else {
         uid_handle = (struct bootstrap_uid_handle*)(ops->cookie);

@@ -32,6 +32,10 @@ inline bootstrap_result_t bootstrap_calloc_debug(T** ptr, size_t nelem, const ch
     }
 
     const size_t allocation_size = nelem * sizeof(T);
+    if (allocation_size == 0) {
+        return BOOTSTRAP_SUCCESS;
+    }
+
     void* p = malloc(allocation_size);
     if (p == NULL) {
         BOOTSTRAP_ERROR_PRINT("%s:%d unable to malloc %zu bytes", filefunc, line,
@@ -52,6 +56,7 @@ struct bootstrap_root_args {
     bootstrap_uid_socket_t* listen_sock;
     uint64_t magic;
     int version;
+    int nranks;
 };
 
 /* Socket External PEs address connection info */
