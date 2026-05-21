@@ -3454,7 +3454,7 @@ static int ibgda_populate_rc_gpu_data(nvshmemt_ibgda_state_t *ibgda_state, nvshm
     int n_pes = t->n_pes;
     int mype = t->my_pe;
     int n_devs_selected = ibgda_state->n_devs_selected;
-    int num_rc_handles_populated = 0;
+    [[maybe_unused]] int num_rc_handles_populated = 0;  // assert-only
     int first_rc_cq_index = 0;
     const size_t mvars_offset = offsetof(nvshmemi_ibgda_device_qp_t, mvars);
     const size_t prod_idx_offset = offsetof(nvshmemi_ibgda_device_qp_management_t, tx_wq.prod_idx);
@@ -4689,7 +4689,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     struct ibv_device **dev_list = NULL;
 
     bool nic_buf_on_gpumem = true;
-    bool nic_buf_on_hostmem = true;
+    [[maybe_unused]] bool nic_buf_on_hostmem = true;  // assert-only
 
     ibgda_nic_mapping_memtype_reqeust_t nic_mapping_memtype_request;
 
