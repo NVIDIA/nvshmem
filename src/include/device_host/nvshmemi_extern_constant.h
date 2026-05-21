@@ -23,7 +23,8 @@
 
 #if defined(__CUDACC_RDC__) || defined(__CUDACC_RTC__)
 #define EXTERN_CONSTANT extern __constant__
-#elif defined(__clang__)
+// Standalone clang only; nvcc -ccbin=clang takes the non-RDC nvcc branch below.
+#elif defined(__clang__) && !defined(__NVCC__)
 #ifdef __CUDACC__
 // Clang CUDA mode: use __constant__ only (avoid address_space to fix LLVM21)
 #define EXTERN_CONSTANT extern __constant__
