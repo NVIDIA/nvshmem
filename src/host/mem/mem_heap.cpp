@@ -1168,10 +1168,9 @@ int nvshmemi_symmetric_heap_static::map_heap_memory(nvshmem_mem_handle_t * /*mem
                                                     void *buf, size_t size) {
     int status = 0;
     nvshmemi_state_t *state = get_state();
-    nvshmem_mem_handle_t local_handles[state->num_initialized_transports];
+    std::vector<nvshmem_mem_handle_t> local_handles(state->num_initialized_transports);
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
     nvshmem_mem_handle_t *map_handles = nullptr;
-    memset(local_handles, 0, sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports);
 
     // iterate over p2p transport(s)
     NVSHMEMU_FOR_EACH_IF(
@@ -1185,7 +1184,7 @@ int nvshmemi_symmetric_heap_static::map_heap_memory(nvshmem_mem_handle_t * /*mem
                      "size: %lu",
                      state->mype, typeid(decltype(this)).name(), buf, size);
 
-                status = export_memory(local_handles + i, heap_base_, heap_size_);
+                status = export_memory(&local_handles[i], heap_base_, heap_size_);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "export memory failed for p2p on heap static \n");
             } else {
@@ -1201,7 +1200,7 @@ int nvshmemi_symmetric_heap_static::map_heap_memory(nvshmem_mem_handle_t * /*mem
 
     // probably not required
     status = nvshmemi_boot_handle.allgather(
-        (void *)local_handles, (void *)(p2p_handles_.back().data()),
+        local_handles.data(), (void *)(p2p_handles_.back().data()),
         (sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports), &nvshmemi_boot_handle);
 
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1221,9 +1220,8 @@ int nvshmemi_symmetric_heap_static::register_heap_chunk_by_size(void *buf, size_
     nvshmemi_state_t *state = get_state();
     nvshmemi_mem_remote_transport &remotetran = *(get_remoteref());
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
-    nvshmem_mem_handle_t local_handles[state->num_initialized_transports];
+    std::vector<nvshmem_mem_handle_t> local_handles(state->num_initialized_transports);
     nvshmem_transport_t current;
-    memset(local_handles, 0, sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports);
 
     // Register or retrieve local memory handles for the requested buffer, size range
     NVSHMEMU_FOR_EACH_IF(
@@ -1237,8 +1235,8 @@ int nvshmemi_symmetric_heap_static::register_heap_chunk_by_size(void *buf, size_
                  "size: %lu",
                  state->mype, typeid(decltype(this)).name(), i, buf, size);
 
-            status = register_heap_memory_handle(&local_handles[0], static_cast<int>(i), buf, size,
-                                                 current);
+            status = register_heap_memory_handle(local_handles.data(), static_cast<int>(i), buf,
+                                                 size, current);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "register_heap_memory_handle failed for remote \n");
         });
@@ -1248,7 +1246,7 @@ int nvshmemi_symmetric_heap_static::register_heap_chunk_by_size(void *buf, size_
         std::vector<nvshmem_mem_handle_t>(state->num_initialized_transports * state->npes));
 
     status = nvshmemi_boot_handle.allgather(
-        (void *)local_handles, (void *)(remote_handles_.back().data()),
+        local_handles.data(), (void *)(remote_handles_.back().data()),
         (sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports), &nvshmemi_boot_handle);
 
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1286,8 +1284,7 @@ int nvshmemi_symmetric_heap_dynamic::map_heap_memory(nvshmem_mem_handle_t *mem_h
     int status = 0;
     nvshmemi_state_t *state = get_state();
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
-    nvshmem_mem_handle_t local_handles[state->num_initialized_transports];
-    memset(local_handles, 0, sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports);
+    std::vector<nvshmem_mem_handle_t> local_handles(state->num_initialized_transports);
 
     NVSHMEMU_FOR_EACH_IF(
         i, state->num_initialized_transports,
@@ -1298,7 +1295,7 @@ int nvshmemi_symmetric_heap_dynamic::map_heap_memory(nvshmem_mem_handle_t *mem_h
                  state->mype, typeid(decltype(this)).name(), buf, size);
 
             // here mem_handle_in corresponds to entire size not just a chunk
-            status = export_memory((nvshmem_mem_handle_t *)(local_handles + i), mem_handle_in);
+            status = export_memory(&local_handles[i], mem_handle_in);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "export_memory failed for p2p on heap dynamic \n");
         });
@@ -1308,13 +1305,13 @@ int nvshmemi_symmetric_heap_dynamic::map_heap_memory(nvshmem_mem_handle_t *mem_h
         std::vector<nvshmem_mem_handle_t>(state->num_initialized_transports * state->npes));
 
     status = nvshmemi_boot_handle.allgather(
-        (void *)local_handles, (void *)(p2p_handles_.back().data()),
+        local_handles.data(), (void *)(p2p_handles_.back().data()),
         sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports, &nvshmemi_boot_handle);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather of mem handles failed \n");
 
     // Exchange send/recv memory handles for p2p connected PEs
-    exchange_heap_memory_handle(&local_handles[0]);
+    exchange_heap_memory_handle(local_handles.data());
 
     status = map_heap_range_by_size(buf, size);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "map_heap_range_by_size failed \n");
@@ -1327,10 +1324,9 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_chunk_by_size(void *buf, size
     int status = 0;
     nvshmemi_state_t *state = get_state();
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
-    nvshmem_mem_handle_t local_handles[state->num_initialized_transports];
+    std::vector<nvshmem_mem_handle_t> local_handles(state->num_initialized_transports);
     nvshmemi_mem_remote_transport &remotetran = *(get_remoteref());
     nvshmem_transport_t current;
-    memset(local_handles, 0, sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports);
 
     NVSHMEMU_FOR_EACH_IF(
         i, state->num_initialized_transports,
@@ -1341,7 +1337,7 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_chunk_by_size(void *buf, size
             INFO(NVSHMEM_MEM,
                  "[%d] heap type: %s calling get_mem_handle for transport: %d buf: %p size: %lu",
                  state->mype, typeid(decltype(this)).name(), i, buf, size);
-            status = remotetran.register_mem_handle(&local_handles[0], i, buf, size, current);
+            status = remotetran.register_mem_handle(local_handles.data(), i, buf, size, current);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "register_mem_handle failed for remote \n");
         });
@@ -1352,7 +1348,7 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_chunk_by_size(void *buf, size
             std::vector<nvshmem_mem_handle_t>(state->num_initialized_transports * state->npes));
 
         status = nvshmemi_boot_handle.allgather(
-            (void *)local_handles, (void *)(remote_mmap_handles_.back().data()),
+            local_handles.data(), (void *)(remote_mmap_handles_.back().data()),
             (sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports),
             &nvshmemi_boot_handle);
 
@@ -1360,7 +1356,7 @@ int nvshmemi_symmetric_heap_dynamic::register_heap_chunk_by_size(void *buf, size
         remote_handles_.push_back(
             std::vector<nvshmem_mem_handle_t>(state->num_initialized_transports * state->npes));
         status = nvshmemi_boot_handle.allgather(
-            (void *)local_handles, (void *)(remote_handles_.back().data()),
+            local_handles.data(), (void *)(remote_handles_.back().data()),
             sizeof(nvshmem_mem_handle_t) * state->num_initialized_transports,
             &nvshmemi_boot_handle);
     }

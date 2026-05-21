@@ -9,6 +9,7 @@
 #include <stdio.h>                                                         // for snprintf, NULL
 #include <mutex>                                                           // for std::once_flag, std::call_once
 #include <stdlib.h>                                                        // for calloc
+#include <vector>                                                          // for std::vector
 #include <strings.h>                                                       // for strncasecmp
 #include "device_host/nvshmem_types.h"                                     // for nvshmemi_devi...
 #include "device_host/nvshmem_common.cuh"                                  // for nvshmemi_devi...
@@ -371,7 +372,7 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
         int devices_temp = tcurr->n_devices / assignment_entity_count;
         if (devices_temp == 0) devices_temp = 1;
         const int max_devices_per_pe = devices_temp;
-        int selected_devices[max_devices_per_pe];
+        std::vector<int> selected_devices(max_devices_per_pe);
         int found_devices = 0;
 
         for (int j = 0; j < max_devices_per_pe; j++) {
@@ -393,7 +394,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
             found_devices++;
         } else {
             current_status =
-                nvshmemi_get_devices_by_distance(selected_devices, max_devices_per_pe, tcurr);
+                nvshmemi_get_devices_by_distance(selected_devices.data(), max_devices_per_pe,
+                                                 tcurr);
             NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                                   "get devices by distance failed \n");
             for (int i = 0; i < max_devices_per_pe; i++) {
@@ -416,7 +418,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
         }
 
         current_status =
-            tcurr->host_ops.connect_endpoints(tcurr, selected_devices, found_devices, NULL, 0);
+            tcurr->host_ops.connect_endpoints(tcurr, selected_devices.data(), found_devices, NULL,
+                                              0);
         NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                               "connect EPS failed \n");
 

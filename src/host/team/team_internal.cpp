@@ -2007,7 +2007,7 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
     bool stride_is_invalid = false;
     bool is_reversed = false;
 
-    int pes_in_team[parent_team->size];
+    std::vector<int> pes_in_team(parent_team->size);
 
     /* Get PE Indexes for same mype node. Note, the outer loop is over the parent team to preserve
      * parent team's order which may not match the order of the same mype node team.
@@ -2091,7 +2091,7 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
     }
     (*new_team)->config.num_contexts = parent_team->config.num_contexts;
 
-    memcpy((*new_team)->pe_mapping, pes_in_team, (size) * sizeof(int));
+    memcpy((*new_team)->pe_mapping, pes_in_team.data(), (size) * sizeof(int));
     nvshmemi_team_populate_from_world_pe_mapping(*new_team);
 out:
     if (status != NVSHMEMX_SUCCESS) {
