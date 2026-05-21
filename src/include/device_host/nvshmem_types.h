@@ -149,8 +149,7 @@
             NULL,                                                  /* nccl_comm */              \
             NVSHMEMI_RED_REX_INITIALIZER, TEAM_ULSCALAR_INVALID,   /* rdxn_count */             \
             TEAM_USCALAR_INVALID,                                  /* ll_flag */                \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[0] */       \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_pwrk[1] */       \
+            {TEAM_ULSCALAR_DEFAULT, TEAM_ULSCALAR_DEFAULT},        /* alltoall_pwrk[2] */       \
             TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_count */         \
             TEAM_ULSCALAR_INVALID,                                 /* bcast_count */            \
             TEAM_ULSCALAR_INVALID,                                 /* bcast_sync_offset */      \

@@ -3,6 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+// Silence -Wmissing-braces from clang on union member initializers below.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-braces"
+#endif
+
 /* Temporary helper #defines, #undef'ed at end of header */
 #define NVTX3_CPP_VERSION_MAJOR 1
 #define NVTX3_CPP_VERSION_MINOR 0
@@ -2207,4 +2213,8 @@ NVTX3_INLINE_IF_REQUESTED namespace NVTX3_VERSION_NAMESPACE {
 
 #if defined(NVTX3_INLINE_THIS_VERSION)
 #undef NVTX3_INLINE_THIS_VERSION
+#endif
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
 #endif
