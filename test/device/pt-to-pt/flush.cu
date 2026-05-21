@@ -323,12 +323,10 @@ int main(int argc, char **argv) {
         }
 
         std::vector<int> host(total_elems);
-        int peer = (mype + 1) % npes;
-        bool peer_p2p_reachable = (nvshmem_ptr(recv_data, peer) != NULL);
-        int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
-        int smem_size = smem_offset + THREADS_PER_BLOCK * (int)sizeof(int);
-
-        if (peer_p2p_reachable) {
+        bool all_p2p_reachable = (nvshmem_team_n_pes(NVSHMEM_TEAM_SHARED) == npes);
+        if (all_p2p_reachable) {
+            int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+            int smem_size = smem_offset + THREADS_PER_BLOCK * (int)sizeof(int);
             status |= run_smem_source_scope<FLUSH_TEST_SCOPE_THREAD>(
                 recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
                 use_tma);
