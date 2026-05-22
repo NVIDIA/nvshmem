@@ -167,13 +167,15 @@ __device__ __nv_bfloat16 assign<__nv_bfloat16>(const unsigned long val) {
     "error: found = " NVSHPRI_##TYPENAME " expected = " NVSHPRI_##TYPENAME \
         ", index = %zu, nelems = %zu type = " #TYPENAME ", scope = " #SC ", team = %d\n"
 
-#define NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC)                                    \
-    "error: found = " NVSHPRI_##TYPENAME " expected = " NVSHPRI_##TYPENAME               \
-        ", index = %zu, nelems = %zu type = " #TYPENAME ", op = " #OP ", scope = " #SC   \
+#define NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC)                                  \
+    "error: found = " NVSHPRI_##TYPENAME " expected = " NVSHPRI_##TYPENAME             \
+        ", index = %zu, nelems = %zu type = " #TYPENAME ", op = " #OP ", scope = " #SC \
         ", team = %d\n"
 
 template <typename TYPE>
-static __device__ auto to_printable(TYPE val) { return val; }
+static __device__ auto to_printable(TYPE val) {
+    return val;
+}
 static __device__ float to_printable(half val) { return __half2float(val); }
 static __device__ float to_printable(__nv_bfloat16 val) { return __bfloat162float(val); }
 #if CUTLASS_ENABLED == 1
@@ -237,52 +239,53 @@ void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);
     } while (0)
 #endif
 
-#define TILE_CHECK_ERRS()                                                                      \
-    do {                                                                                       \
-        cudaMemcpyFromSymbol(&tile_errs, tile_errs_d, sizeof(int), 0);                         \
-        if (tile_errs) {                                                                       \
-            printf("NVSHMEM Error :%d , %s\n", tile_errs, get_err_string(tile_errs).c_str());  \
-            return tile_errs;                                                                  \
-        }                                                                                      \
+#define TILE_CHECK_ERRS()                                                                     \
+    do {                                                                                      \
+        CUDA_CHECK(cudaMemcpyFromSymbol(&tile_errs, tile_errs_d, sizeof(int), 0));            \
+        if (tile_errs) {                                                                      \
+            printf("NVSHMEM Error :%d , %s\n", tile_errs, get_err_string(tile_errs).c_str()); \
+            return tile_errs;                                                                 \
+        }                                                                                     \
     } while (0)
 
 #define TOSTRING(_var) ((std::to_string(_var)).c_str())
 #define MAX_ELEMS (1 * 1024 * 1024)
 
-#define CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(func, d_smem_size)                                     \
-    do {                                                                                         \
-        if (!use_cubin && d_smem_size > 48 * 1024) {                                             \
-            CUDA_CHECK(cudaFuncSetAttribute(func, cudaFuncAttributeMaxDynamicSharedMemorySize,   \
-                                           d_smem_size));                                        \
-        }                                                                                        \
+#define CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(func, d_smem_size)                                   \
+    do {                                                                                       \
+        if (!use_cubin && d_smem_size > 48 * 1024) {                                           \
+            CUDA_CHECK(cudaFuncSetAttribute(func, cudaFuncAttributeMaxDynamicSharedMemorySize, \
+                                            d_smem_size));                                     \
+        }                                                                                      \
     } while (0)
 
 #if defined(NVSHMEM_HOSTLIB_ONLY)
-#define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size)                  \
-    do {                                                           \
-        (void)(dynamic_smem_size);                                 \
+#define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size) \
+    do {                                          \
+        (void)(dynamic_smem_size);                \
     } while (0)
 
-#define NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size)               \
-    do {                                                           \
-        (void)(dynamic_smem_size);                                 \
+#define NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size) \
+    do {                                             \
+        (void)(dynamic_smem_size);                   \
     } while (0)
 
 #else
-#define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size)                  \
-    do {                                                           \
-        if (dynamic_smem_size) {                                   \
-            extern __shared__ char nvshmem_smem[];                 \
-            nvshmemx_give_smem(nvshmem_smem, dynamic_smem_size);   \
-            __syncthreads();                                       \
-        }                                                          \
+#define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size)                \
+    do {                                                         \
+        if (dynamic_smem_size) {                                 \
+            extern __shared__ char nvshmem_smem[];               \
+            nvshmemx_give_smem(nvshmem_smem, dynamic_smem_size); \
+            __syncthreads();                                     \
+        }                                                        \
     } while (0)
 
-#define NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size)               \
-    do {                                                           \
-        if (dynamic_smem_size) {                                   \
-            nvshmemx_release_smem();                               \
-        }                                                          \
+#define NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size) \
+    do {                                             \
+        if (dynamic_smem_size) {                     \
+            __syncthreads();                         \
+            nvshmemx_release_smem();                 \
+        }                                            \
     } while (0)
 
 #endif
@@ -407,16 +410,20 @@ typedef nvmlGpuFabricInfo_v2_t nvmlGpuFabricInfoV_t;
 #endif
 
 /* Structure for platform info */
-typedef struct
-{
-    unsigned int version;                       //!< the API version number
-    unsigned char ibGuid[16];                   //!< Infiniband GUID reported by platform (for Blackwell, ibGuid is 8 bytes so indices 8-15 are zero)
-    unsigned char chassisSerialNumber[16];      //!< Serial number of the chassis containing this GPU (for Blackwell it is 13 bytes so indices 13-15 are zero)
-    unsigned char slotNumber;                   //!< The slot number in the chassis containing this GPU (includes switches)
-    unsigned char trayIndex;                    //!< The tray index within the compute slots in the chassis containing this GPU (does not include switches)
-    unsigned char hostId;                       //!< Index of the node within the slot containing this GPU
-    unsigned char peerType;                     //!< Platform indicated NVLink-peer type (e.g. switch present or not)
-    unsigned char moduleId;                     //!< ID of this GPU within the node
+typedef struct {
+    unsigned int version;      //!< the API version number
+    unsigned char ibGuid[16];  //!< Infiniband GUID reported by platform (for Blackwell, ibGuid is 8
+                               //!< bytes so indices 8-15 are zero)
+    unsigned char
+        chassisSerialNumber[16];  //!< Serial number of the chassis containing this GPU (for
+                                  //!< Blackwell it is 13 bytes so indices 13-15 are zero)
+    unsigned char
+        slotNumber;  //!< The slot number in the chassis containing this GPU (includes switches)
+    unsigned char trayIndex;  //!< The tray index within the compute slots in the chassis containing
+                              //!< this GPU (does not include switches)
+    unsigned char hostId;     //!< Index of the node within the slot containing this GPU
+    unsigned char peerType;   //!< Platform indicated NVLink-peer type (e.g. switch present or not)
+    unsigned char moduleId;   //!< ID of this GPU within the node
 } nvmlPlatformInfo_v2_t;
 typedef nvmlPlatformInfo_v2_t nvmlPlatformInfo_t;
 
@@ -430,8 +437,10 @@ struct nvml_function_table {
                                            nvmlGpuP2PCapsIndex_enum caps,
                                            nvmlGpuP2PStatus_t *p2pStatus);
     nvmlReturn_t (*nvmlDeviceGetGpuFabricInfoV)(nvmlDevice_t device, nvmlGpuFabricInfoV_t *info);
-    nvmlReturn_t (*nvmlDeviceGetFieldValues)(nvmlDevice_t device, unsigned int count, nvmlFieldValue_t *values);
-    nvmlReturn_t (*nvmlDeviceGetPlatformInfo)(nvmlDevice_t device, nvmlPlatformInfo_t *platformInfo);
+    nvmlReturn_t (*nvmlDeviceGetFieldValues)(nvmlDevice_t device, unsigned int count,
+                                             nvmlFieldValue_t *values);
+    nvmlReturn_t (*nvmlDeviceGetPlatformInfo)(nvmlDevice_t device,
+                                              nvmlPlatformInfo_t *platformInfo);
 };
 
 int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nvml_handle);
