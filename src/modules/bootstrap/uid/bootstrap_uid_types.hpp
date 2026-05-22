@@ -26,8 +26,8 @@ inline bootstrap_result_t bootstrap_calloc_debug(T** ptr, size_t nelem, const ch
 
     *ptr = NULL;
     if (nelem > 0 && nelem > SIZE_MAX / sizeof(T)) {
-        BOOTSTRAP_ERROR_PRINT("%s:%d allocation size overflow: %zu elements of %zu bytes",
-                              filefunc, line, nelem, sizeof(T));
+        BOOTSTRAP_ERROR_PRINT("%s:%d allocation size overflow: %zu elements of %zu bytes", filefunc,
+                              line, nelem, sizeof(T));
         return BOOTSTRAP_INTERNAL_ERROR;
     }
 
@@ -38,8 +38,7 @@ inline bootstrap_result_t bootstrap_calloc_debug(T** ptr, size_t nelem, const ch
 
     void* p = malloc(allocation_size);
     if (p == NULL) {
-        BOOTSTRAP_ERROR_PRINT("%s:%d unable to malloc %zu bytes", filefunc, line,
-                              allocation_size);
+        BOOTSTRAP_ERROR_PRINT("%s:%d unable to malloc %zu bytes", filefunc, line, allocation_size);
         return BOOTSTRAP_INTERNAL_ERROR;
     }
     // BOOTSTRAP_DEBUG_PRINT("%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*sizeof(T),
