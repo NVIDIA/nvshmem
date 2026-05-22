@@ -50,12 +50,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
     if (nvshmemi_use_ldst_path()) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
         if (nvshmemi_peer_reachable(peer_base_addr) &&
-            !nvshmemi_is_le_supported_and_prioritized(pe, dest)) {
+            !nvshmemi_is_le_supported_and_prioritized(pe)) {
             volatile T *dest_actual =
                 (volatile T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
             *dest_actual = value;
-        } else if (nvshmemi_is_le_implemented(pe, dest)) {
+        } else if (nvshmemi_is_le_implemented(pe)) {
             // It is more performant to use pointers for loopback to own memory
             if (pe == nvshmemi_device_state_d.mype) {
                 *dest = value;

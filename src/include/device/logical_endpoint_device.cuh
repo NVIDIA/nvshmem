@@ -32,9 +32,7 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int, size_t, threadgr
     return false;
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_implemented(int, const void *) {
-    return false;
-}
+__device__ __forceinline__ bool nvshmemi_is_le_implemented(int) { return false; }
 
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return false; }
 
@@ -44,9 +42,7 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int, si
     return false;
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int, const void *) {
-    return false;
-}
+__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int) { return false; }
 
 #else
 
@@ -102,21 +98,21 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, 
 #endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, const void *addr) {
+__device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
     const size_t required_smem_size =
         static_cast<size_t>(CFT_HANDLE_TX_SIZE) * blockDim.x * blockDim.y * blockDim.z;
     return (nvshmemi_tma_smem_registered() &&
             nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
-            nvshmemi_is_addr_offset_aligned(addr, CFT_HANDLE_TX_SIZE) &&
             nvshmemi_ld_and_check_valid_le_id(pe));
 #else
     return false;
 #endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_multicast_le_implemented(
-    uint64_t le_id_with_flag, size_t size, threadgroup_t scope) {
+__device__ __forceinline__ bool nvshmemi_is_multicast_le_implemented(uint64_t le_id_with_flag,
+                                                                     size_t size,
+                                                                     threadgroup_t scope) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
     return ((scope == NVSHMEMI_THREADGROUP_BLOCK) && IS_VALID_LE_ID(le_id_with_flag) &&
             (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= NVSHMEMI_SMEM_BUF_SIZE) &&
@@ -147,11 +143,10 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe,
 #endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe,
-                                                                         const void *addr) {
+__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe) {
 #if defined(CFT_HANDLES_ENABLED) && defined(PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
-    return nvshmemi_is_le_implemented(pe, addr);
+    return nvshmemi_is_le_implemented(pe);
 #else
     return false;
 #endif
@@ -352,6 +347,14 @@ inline __device__ uint16_t size_to_bytemask_low_first(unsigned size_bytes) {
     return static_cast<uint16_t>((1u << size_bytes) - 1u);
 }
 
+inline __device__ uint16_t byte_range_to_bytemask_low_first(unsigned byte_offset,
+                                                            unsigned size_bytes) {
+    assert(byte_offset < CFT_HANDLE_TX_SIZE);
+    assert(size_bytes <= CFT_HANDLE_TX_SIZE);
+    assert(byte_offset + size_bytes <= CFT_HANDLE_TX_SIZE);
+    return static_cast<uint16_t>(size_to_bytemask_low_first(size_bytes) << byte_offset);
+}
+
 /* try put */
 template <le_fabric_handle_kind K>
 inline constexpr bool dependent_false_v = false;
@@ -361,6 +364,40 @@ __device__ inline void fabric_try_put_async(CUlogicalEndpointId dst_le_id, uint6
                                             const void* src_in_shared_memory, uint32_t size_bytes,
                                             handle_barrier_t* bar) {
     static_assert(dependent_false_v<K>, "Unknown handle kind");
+}
+
+template <le_fabric_handle_kind K>
+__device__ inline void fabric_try_put_async(CUlogicalEndpointId dst_le_id, uint64_t dst_data_off,
+                                            const void* src_in_shared_memory, uint16_t bytemask,
+                                            handle_barrier_t* bar) {
+    static_assert(dependent_false_v<K>, "Unknown handle kind");
+}
+
+template <>
+__device__ inline void fabric_try_put_async<le_fabric_handle_kind::Unicast>(
+    CUlogicalEndpointId dst_le_id, uint64_t dst_data_off, const void* src_in_shared_memory,
+    uint16_t bytemask, handle_barrier_t* hbar) {
+    if (!bytemask) return;
+    assert((dst_data_off & (CFT_HANDLE_TX_SIZE - 1)) == 0);
+
+    // .shared::cta operands need SMEM offsets from __cvta_generic_to_shared (generic ptr is wrong).
+    unsigned long long src_smem =
+        static_cast<unsigned long long>(__cvta_generic_to_shared(src_in_shared_memory));
+    const unsigned long long bar_smem = static_cast<unsigned long long>(
+        __cvta_generic_to_shared(reinterpret_cast<void*>(&(hbar->bar))));
+
+    /* Note: completion is tracked in 16B units, so on using cp_mask
+     * we still specify size as 16B but only store based on bytemask
+     * which is essential for complete_tx tracking
+     */
+    asm volatile(
+        "fabric.try_put.async.shared::cta."
+        "mbarrier::complete_tx::16B.mbarrier::report::fabric.cp_mask.relaxed.sys.b128 "
+        "[%0, %1], [%2], %3, [%4], %5;\n"
+        :
+        : "r"(dst_le_id), "l"(dst_data_off), "l"(src_smem), "r"(CFT_HANDLE_TX_SIZE), "l"(bar_smem),
+          "h"(bytemask)
+        : "memory");
 }
 
 template <>
@@ -392,22 +429,14 @@ __device__ inline void fabric_try_put_async<le_fabric_handle_kind::Unicast>(
     // Remainder is done using cp_mask variant
     size_bytes -= adjusted_size;
     dst_data_off += adjusted_size;
-    src_smem += adjusted_size;
     assert(size_bytes <= CFT_HANDLE_TX_SIZE);
     if (size_bytes) {
         uint16_t bytemask = size_to_bytemask_low_first(size_bytes);
-        /* Note: completion is tracked in 16B units, so on using cp_mask
-         * we still specify size as 16B but only store based on bytemask
-         * which is essential for complete_tx tracking
-         */
-        asm volatile(
-            "fabric.try_put.async.shared::cta."
-            "mbarrier::complete_tx::16B.mbarrier::report::fabric.cp_mask.relaxed.sys.b128 "
-            "[%0, %1], [%2], %3, [%4], %5;\n"
-            :
-            : "r"(dst_le_id), "l"(dst_data_off), "l"(src_smem), "r"(CFT_HANDLE_TX_SIZE),
-              "l"(bar_smem), "h"(bytemask)
-            : "memory");
+        fabric_try_put_async<le_fabric_handle_kind::Unicast>(
+            dst_le_id, dst_data_off,
+            reinterpret_cast<const void*>(reinterpret_cast<const char*>(src_in_shared_memory) +
+                                          adjusted_size),
+            bytemask, hbar);
     }
 }
 

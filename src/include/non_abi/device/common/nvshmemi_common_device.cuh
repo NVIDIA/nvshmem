@@ -1056,17 +1056,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
     T *dest, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized(pe, dest)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) && !nvshmemi_is_le_supported_and_prioritized(pe)) {
         T *dest_actual = (T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = value;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    } else if (nvshmemi_is_le_implemented(pe, dest)) {
+    } else if (nvshmemi_is_le_implemented(pe)) {
         if (pe == nvshmemi_device_state_d.mype) {
             *dest = value;
         } else {
-            nvshmemi_handle_p<T>((void*)dest, value, pe);
+            nvshmemi_handle_p<T>((void *)dest, value, pe);
         }
 #endif
     } else {
@@ -1150,10 +1149,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    const bool can_use_handle = nvshmemi_is_le_implemented(pe, sig_addr);
+    const bool can_use_handle = nvshmemi_is_le_implemented(pe);
 #endif
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized(pe, sig_addr)) {
+        !nvshmemi_is_le_supported_and_prioritized(pe)) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
@@ -1997,50 +1996,97 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
 template <typename T, int SMEM_CHUNK_SIZE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *__restrict__ dst,
                                                                          const T src, int pe) {
+    // This scalar p() path stages one payload in a single 16B shared-memory slot.
+    // Larger payloads should use the regular handle put path.
+    static_assert(sizeof(T) <= CFT_HANDLE_TX_SIZE, "CFT handle p supports payloads up to 16B");
+
     unsigned mask = __activemask();
     unsigned active_threads = __popc(mask);
-    int lane_idx = threadIdx.x % warpSize;
-    int leader_lane = __ffs(mask) - 1;
 
-    uint32_t gbl_thrd_idx = threadIdx.x + (blockIdx.x * blockDim.x) +
-                            (blockIdx.y * blockDim.x * blockDim.y) +
-                            (blockIdx.z * blockDim.x * blockDim.y * blockDim.z);
-    uint32_t thrd_idx_in_blk = gbl_thrd_idx % (blockDim.x * blockDim.y * blockDim.z);
+    uint32_t thrd_idx_in_blk =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    int lane_idx = thrd_idx_in_blk % warpSize;
+    int leader_lane = __ffs(mask) - 1;
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
     uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
     int warp_idx_in_block = thrd_idx_in_blk / warpSize;
 
-    T *smem_ptr = reinterpret_cast<T *>(nvshmemi_tma_data_buffer(smem_base));
+    uint8_t *smem_ptr = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
 
     // threads from same warp share the same mbarrier
-    handle_barrier_t *tma_bar_handle =
-        nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+    handle_barrier_t *tma_bar_handle = nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block);
 
     if (lane_idx == leader_lane) {
         tma_bar_handle->init(1);
     }
     __syncwarp(mask);
 
-    // write the signal value to shared memory
-    // signal datatype is long but we reserve 16 bytes per thread in block for TMA/handle ops
-    // To compute correct offset, we multiply thread index by 2 (16 bytes per thread)
-    smem_ptr[thrd_idx_in_blk * (CFT_HANDLE_TX_SIZE / sizeof(T))] = src;
+    /*
+     * cp_mask works on byte positions within an aligned 16B lane. The
+     * destination can be unaligned, so align the fabric offset down and keep
+     * dst_byte_offset as the position of the first destination byte inside
+     * that aligned lane.
+     *
+     * Example, dst_offset = 0x108 and sizeof(T) = 8:
+     *   aligned_dst_offset = 0x100
+     *   dst_byte_offset    = 8
+     *   first mask         = 0xFF00, covering bytes 8..15
+     *   second_payload     = 0, so this thread issues one cp_mask put
+     */
+    auto dst_handle = nvshmemi_fabric_handle_for_pe(pe, dst);
+    const uint64_t dst_offset = dst_handle.offset();
+    const uint32_t dst_byte_offset = static_cast<uint32_t>(dst_offset & (CFT_HANDLE_TX_SIZE - 1));
+    const uint64_t aligned_dst_offset = dst_offset - dst_byte_offset;
+    const uint32_t payload_bytes = static_cast<uint32_t>(sizeof(T));
+
+    /*
+     * A <=16B scalar write can still straddle two aligned 16B lanes. In that
+     * case we split this thread's payload across two cp_mask puts.
+     *
+     * Example, dst_offset = 0x10c and sizeof(T) = 8:
+     *   dst_byte_offset       = 12
+     *   first_payload_bytes   = 4, bytes 12..15 in lane 0x100, mask 0xF000
+     *   second_payload_bytes  = 4, bytes  0..3  in lane 0x110, mask 0x000F
+     *
+     * crossing_mask marks the active warp lanes that need the second put.
+     * active_tx_count counts 16B fabric completion events, not logical payload
+     * bytes: every active thread has one put, crossing threads have one extra.
+     */
+    const uint32_t first_payload_bytes = (payload_bytes < (CFT_HANDLE_TX_SIZE - dst_byte_offset))
+                                             ? payload_bytes
+                                             : (CFT_HANDLE_TX_SIZE - dst_byte_offset);
+    const uint32_t second_payload_bytes = payload_bytes - first_payload_bytes;
+    const unsigned crossing_mask = __ballot_sync(mask, second_payload_bytes != 0);
+    const uint32_t active_tx_count = active_threads + __popc(crossing_mask);
+
+    uint8_t *smem_slot = smem_ptr + thrd_idx_in_blk * CFT_HANDLE_TX_SIZE;
+    const uint8_t *src_bytes = reinterpret_cast<const uint8_t *>(&src);
+    // Place source bytes at the same byte positions selected by cp_mask.  If
+    // the payload crosses a 16B boundary, the bytes for the second lane wrap to
+    // the low positions of this staging slot.
+    for (uint32_t i = 0; i < payload_bytes; i++) {
+        smem_slot[(dst_byte_offset + i) & (CFT_HANDLE_TX_SIZE - 1)] = src_bytes[i];
+    }
 
     // Ensure generic proxy stores to shared memory are visible to fabric
     fence_proxy_generic2fabric_release_system();
 
-    auto dst_handle = nvshmemi_fabric_handle_for_pe(pe, dst);
-
-    fabric_try_put_async<le_fabric_handle_kind::Unicast>(
-        dst_handle.id(), dst_handle.offset(),
-        smem_ptr + (thrd_idx_in_blk * (CFT_HANDLE_TX_SIZE / sizeof(T))), (uint32_t)sizeof(T),
-        tma_bar_handle);
+    uint16_t first_bytemask =
+        byte_range_to_bytemask_low_first(dst_byte_offset, first_payload_bytes);
+    fabric_try_put_async<le_fabric_handle_kind::Unicast>(dst_handle.id(), aligned_dst_offset,
+                                                         smem_slot, first_bytemask, tma_bar_handle);
+    if (second_payload_bytes) {
+        uint16_t second_bytemask = size_to_bytemask_low_first(second_payload_bytes);
+        fabric_try_put_async<le_fabric_handle_kind::Unicast>(
+            dst_handle.id(), aligned_dst_offset + CFT_HANDLE_TX_SIZE, smem_slot, second_bytemask,
+            tma_bar_handle);
+    }
     fabric_submit();
 
     __syncwarp(mask);
 
     if (lane_idx == leader_lane) {
-        uint64_t curr_state = tma_bar_handle->arrive_relaxed(active_threads * CFT_HANDLE_TX_SIZE);
+        uint64_t curr_state = tma_bar_handle->arrive_relaxed(active_tx_count * CFT_HANDLE_TX_SIZE);
         tma_bar_handle->try_wait_token(curr_state);
     }
     __syncwarp(mask);
