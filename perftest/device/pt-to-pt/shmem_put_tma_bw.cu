@@ -56,13 +56,19 @@
  * elect.sync chose.
  */
 __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, int iter) {
-    extern __shared__ char smem[];
-    int tid     = threadIdx.x;
-    int bid     = blockIdx.x;
+    extern __shared__ int smem[];
+    int tid = threadIdx.x;
+    int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
-    size_t bytes_per_block = bytes / nblocks;
-    char  *block_dst       = dst + (size_t)bid * bytes_per_block;
+    size_t block_id = (size_t)bid;
+    size_t nblocks_sz = (size_t)nblocks;
+    size_t base_bytes_per_block = bytes / nblocks_sz;
+    size_t extra_blocks = bytes % nblocks_sz;
+    size_t block_offset =
+        block_id * base_bytes_per_block + (block_id < extra_blocks ? block_id : extra_blocks);
+    size_t bytes_per_block = base_bytes_per_block + (block_id < extra_blocks ? 1 : 0);
+    char *block_dst = dst + block_offset;
 
     /* Register smem with NVSHMEM for TMA (once per kernel launch) */
     nvshmemx_give_smem(smem, smem_size);
@@ -70,8 +76,7 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
 
     /* Pre-fill smem (amortized; simulates prior compute filling smem) */
     size_t chunk = (size_t)smem_size;
-    for (int j = tid; j < (int)(chunk / sizeof(int)); j += blockDim.x)
-        ((int *)smem)[j] = tid;
+    for (int j = tid; j < (int)(chunk / sizeof(*smem)); j += blockDim.x) smem[j] = tid;
     __syncthreads();
 
     size_t n_chunks = (bytes_per_block + chunk - 1) / chunk;
@@ -80,9 +85,8 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
         for (size_t c = 0; c < n_chunks; c++) {
             /* Clamp last chunk to the actual remaining bytes so the BW
              * measurement is accurate when bytes_per_block < smem_size. */
-            size_t this_bytes = ((c + 1) * chunk <= bytes_per_block)
-                                    ? chunk
-                                    : (bytes_per_block - c * chunk);
+            size_t this_bytes =
+                ((c + 1) * chunk <= bytes_per_block) ? chunk : (bytes_per_block - c * chunk);
 
             /* fence: makes smem writes visible to the TMA async proxy.
              * Required each chunk because in the real workload compute writes
@@ -121,14 +125,15 @@ int main(int argc, char *argv[]) {
     char *dst = NULL;
 
     read_args(argc, argv);
-    int max_blocks  = (int)num_blocks;
+    int max_blocks = (int)num_blocks;
     int max_threads = (int)threads_per_block;
 
-    int       array_size;
-    void    **h_tables;
+    int array_size;
+    void **h_tables;
     uint64_t *h_size_arr;
-    double   *h_bw = NULL;
-    float     milliseconds;
+    double *h_bw = NULL;
+    float milliseconds;
+    int exit_code = 0;
     cudaEvent_t start, stop;
 
     init_wrapper(&argc, &argv);
@@ -146,14 +151,13 @@ int main(int argc, char *argv[]) {
     {
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
 
-        CUDA_CHECK(cudaFuncSetAttribute(bw_smem_tma,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+        CUDA_CHECK(cudaFuncSetAttribute(bw_smem_tma, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                         smem_size));
 
         array_size = max_size_log;
         alloc_tables(&h_tables, 2, array_size);
         h_size_arr = (uint64_t *)h_tables[0];
-        h_bw       = (double   *)h_tables[1];
+        h_bw = (double *)h_tables[1];
 
         dst = (char *)nvshmem_malloc(max_size);
         if (!dst) {
@@ -170,15 +174,15 @@ int main(int argc, char *argv[]) {
                 h_size_arr[i] = size;
 
                 /* Warmup */
-                bw_smem_tma<<<max_blocks, max_threads, smem_size>>>(
-                    dst, size, smem_size, peer, (int)warmup_iters);
+                bw_smem_tma<<<max_blocks, max_threads, smem_size>>>(dst, size, smem_size, peer,
+                                                                    (int)warmup_iters);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaDeviceSynchronize());
 
                 /* Timed */
                 cudaEventRecord(start);
-                bw_smem_tma<<<max_blocks, max_threads, smem_size>>>(
-                    dst, size, smem_size, peer, (int)iters);
+                bw_smem_tma<<<max_blocks, max_threads, smem_size>>>(dst, size, smem_size, peer,
+                                                                    (int)iters);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaEventSynchronize(stop));
@@ -190,8 +194,8 @@ int main(int argc, char *argv[]) {
                 i++;
             }
 
-            print_table_basic("shmem_put_tma_smem_bw", "None", "size (Bytes)",
-                              "BW", "GB/sec", '+', h_size_arr, h_bw, i);
+            print_table_basic("shmem_put_tma_smem_bw", "None", "size (Bytes)", "BW", "GB/sec", '+',
+                              h_size_arr, h_bw, i);
         } else {
             for (size_t size = min_size; size <= max_size; size *= step_factor)
                 nvshmem_barrier_all();
@@ -201,49 +205,61 @@ int main(int argc, char *argv[]) {
          * PE 0 sends one smem-sized chunk (pre-filled: element j = j % threads).
          * PE 1 checks the received buffer and reports PASS or FAIL. */
         if (getenv("NVSHMEM_PERFTEST_VERIFY")) {
-            size_t verify_size = (size_t)smem_size;
+            size_t verify_size = (size_t)smem_size < max_size ? (size_t)smem_size : max_size;
+            verify_size -= verify_size % sizeof(int);
 
-            if (mype == 1)
-                CUDA_CHECK(cudaMemset(dst, 0xFF, verify_size));
-            CUDA_CHECK(cudaDeviceSynchronize());
-            nvshmem_barrier_all();
-
-            if (mype == 0) {
-                bw_smem_tma<<<1, max_threads, smem_size>>>(
-                    dst, verify_size, smem_size, 1 /*peer*/, 1 /*iter*/);
-                CUDA_CHECK(cudaGetLastError());
-                CUDA_CHECK(cudaDeviceSynchronize());
-            }
-            nvshmem_barrier_all();
-
-            if (mype == 1) {
-                int  n_ints = (int)(verify_size / sizeof(int));
-                int *h_buf  = (int *)malloc(verify_size);
-                if (!h_buf) {
-                    fprintf(stderr, "[PE %d] malloc failed for verify buffer\n", mype);
-                    goto finalize;
+            if (verify_size == 0) {
+                exit_code = 1;
+                if (mype == 0) {
+                    printf("[verify] SKIP: max_size %zu is too small for int-pattern check\n",
+                           max_size);
                 }
-                CUDA_CHECK(cudaMemcpy(h_buf, dst, verify_size, cudaMemcpyDeviceToHost));
+            } else {
+                if (mype == 1) CUDA_CHECK(cudaMemset(dst, 0xFF, verify_size));
+                CUDA_CHECK(cudaDeviceSynchronize());
+                nvshmem_barrier_all();
 
-                int errors = 0;
-                for (int j = 0; j < n_ints; j++) {
-                    int expected = j % max_threads;
-                    if (h_buf[j] != expected) {
-                        if (errors < 5)
-                            fprintf(stderr, "[verify] FAIL at int[%d]: got %d, expected %d\n",
-                                    j, h_buf[j], expected);
-                        errors++;
+                if (mype == 0) {
+                    bw_smem_tma<<<1, max_threads, smem_size>>>(dst, verify_size, smem_size,
+                                                               1 /*peer*/, 1 /*iter*/);
+                    CUDA_CHECK(cudaGetLastError());
+                    CUDA_CHECK(cudaDeviceSynchronize());
+                }
+                nvshmem_barrier_all();
+
+                if (mype == 1) {
+                    int n_ints = (int)(verify_size / sizeof(int));
+                    int *h_buf = (int *)malloc(verify_size);
+                    if (!h_buf) {
+                        fprintf(stderr, "[PE %d] malloc failed for verify buffer\n", mype);
+                        exit_code = 1;
+                    } else {
+                        CUDA_CHECK(cudaMemcpy(h_buf, dst, verify_size, cudaMemcpyDeviceToHost));
+
+                        int errors = 0;
+                        for (int j = 0; j < n_ints; j++) {
+                            int expected = j % max_threads;
+                            if (h_buf[j] != expected) {
+                                if (errors < 5)
+                                    fprintf(stderr,
+                                            "[verify] FAIL at int[%d]: got %d, expected %d\n", j,
+                                            h_buf[j], expected);
+                                errors++;
+                            }
+                        }
+                        if (errors == 0)
+                            printf("[verify] PASS (%zu bytes, pattern j%%threads_per_block)\n",
+                                   verify_size);
+                        else {
+                            printf("[verify] FAIL: %d / %d ints wrong\n", errors, n_ints);
+                            exit_code = 1;
+                        }
+                        fflush(stdout);
+                        free(h_buf);
                     }
                 }
-                if (errors == 0)
-                    printf("[verify] PASS (%zu bytes, pattern j%%threads_per_block)\n",
-                           verify_size);
-                else
-                    printf("[verify] FAIL: %d / %d ints wrong\n", errors, n_ints);
-                fflush(stdout);
-                free(h_buf);
+                nvshmem_barrier_all();
             }
-            nvshmem_barrier_all();
         }
     }
 
@@ -252,5 +268,5 @@ finalize:
     if (h_bw) free_tables(h_tables, 2);
     finalize_wrapper();
 
-    return 0;
+    return exit_code;
 }
