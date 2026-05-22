@@ -87,7 +87,7 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
  */
-__device__ inline void nvshmemx_give_smem(char *smem, size_t size) {
+__device__ inline void nvshmemx_give_smem(void *smem, size_t size) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
@@ -757,8 +757,7 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFINE_NVSHMEM_TYPE_PUT_SIGNAL_NBI_QP)
  * For network (IB/RoCE, EFA, proxy) puts: waits for the transport to confirm
  * that the source buffer has been DMA'd.  Does not issue __threadfence_system.
  */
-NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void
-nvshmemx_flush(void) {
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_flush(void) {
     nvshmemi_flush<NVSHMEMI_THREADGROUP_THREAD>();
 }
 

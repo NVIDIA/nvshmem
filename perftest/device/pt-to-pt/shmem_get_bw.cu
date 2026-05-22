@@ -15,7 +15,7 @@ enum class SMEMToggle { DISABLE, ENABLE };
 template <SMEMToggle SMEM_MODE>
 class smem_registration_guard {
    public:
-    __device__ smem_registration_guard(char *smem, int smem_size) {
+    __device__ smem_registration_guard(void *smem, int smem_size) {
         if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
             nvshmemx_give_smem(smem, smem_size);
             __syncthreads();
@@ -36,9 +36,8 @@ class smem_registration_guard {
 template <SMEMToggle SMEM_MODE>
 __global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter) {
     extern __shared__ char nvshmem_smem[];
-    int smem_size = (SMEM_MODE == SMEMToggle::ENABLE)
-                        ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED)
-                        : 0;
+    int smem_size =
+        (SMEM_MODE == SMEMToggle::ENABLE) ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED) : 0;
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;

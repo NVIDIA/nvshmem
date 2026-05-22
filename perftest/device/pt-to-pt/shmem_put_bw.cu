@@ -15,7 +15,7 @@ enum class SMEMToggle { DISABLE, ENABLE };
 template <SMEMToggle SMEM_MODE>
 class smem_registration_guard {
    public:
-    __device__ smem_registration_guard(char *smem, int smem_size) {
+    __device__ smem_registration_guard(void *smem, int smem_size) {
         if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
             nvshmemx_give_smem(smem, smem_size);
             __syncthreads();
@@ -88,8 +88,8 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int l
 }
 
 template <SMEMToggle SMEM_MODE>
-__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe,
-                        int iter, int smem_size) {
+__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter,
+                        int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
@@ -189,8 +189,8 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int 
     __syncthreads();
 }
 
-typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe,
-                        int iter, int smem_size);
+typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter,
+                        int smem_size);
 
 static SMEMToggle parse_smem_enabled() {
     return use_smem ? SMEMToggle::ENABLE : SMEMToggle::DISABLE;
@@ -206,8 +206,7 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
             break;
         case NVSHMEM_WARP:
             *bw_fn = bw_warp<SMEM_MODE>;
-            DEBUG_PRINT("Using warp-scope put (smem=%d)\n",
-                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            DEBUG_PRINT("Using warp-scope put (smem=%d)\n", (int)(SMEM_MODE == SMEMToggle::ENABLE));
             break;
         case NVSHMEM_BLOCK:
         case NVSHMEM_ALL_SCOPES:
@@ -324,17 +323,15 @@ int main(int argc, char *argv[]) {
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
             h_size_arr[i] = size;
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d,
-                                                           size / sizeof(double), mype, skip,
-                                                           smem_size);
+            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
+                                                          mype, skip, smem_size);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
 
             cudaEventRecord(start);
-            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d,
-                                                           size / sizeof(double), mype, iter,
-                                                           smem_size);
+            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
+                                                          mype, iter, smem_size);
             cudaEventRecord(stop);
 
             CUDA_CHECK(cudaGetLastError());
