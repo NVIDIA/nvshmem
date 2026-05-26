@@ -56,12 +56,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
                                 nvshmemi_is_addr_offset_aligned(dest, CFT_HANDLE_TX_SIZE);
 #endif
     if (nvshmemi_use_ldst_path()) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
         if (nvshmemi_peer_reachable(peer_base_addr)) {
             volatile T *dest_actual =
                 (volatile T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
             *dest_actual = value;
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
         } else if (can_use_handle) {
             // It is more performant to use pointers for loopback to own memory
             if (pe == nvshmemi_device_state_d.mype) {
@@ -70,10 +70,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
                 nvshmemi_handle_p<T>((void*)dest, value, pe);
             }
 
-#endif
         } else {
             assert(0 && "signal for barrier failing both pointer and logical endpoint access");
         }
+#else
+        volatile T *dest_actual =
+            (volatile T *)((char *)(peer_base_addr) +
+                           ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
+        *dest_actual = value;
+#endif
     } else {
         nvshmemi_transfer_amo_nonfetch<T>((void *)dest, value, pe, NVSHMEMI_AMO_SIGNAL);
     }
