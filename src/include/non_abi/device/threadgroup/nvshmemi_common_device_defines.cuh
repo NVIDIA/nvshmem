@@ -37,6 +37,13 @@ __constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {
 #define assert(x) ((void)0)
 #endif
 
+#if defined(__CUDA_ARCH__)
+inline constexpr bool nvshmemi_device_has_nvls_multimem =
+    (__CUDA_ARCH__ >= 900) && (CUDART_VERSION >= 12010);
+#else
+inline constexpr bool nvshmemi_device_has_nvls_multimem = false;
+#endif
+
 typedef enum {
     nvshmemi_threadgroup_thread = 0,
     NVSHMEMI_THREADGROUP_THREAD = 0,

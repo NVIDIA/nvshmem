@@ -869,18 +869,18 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
     // NVLS Bcast only has one-shot push support currently
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI) {
         // check for NVLS support in hardware
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
+        if constexpr (nvshmemi_device_has_nvls_multimem) {
 
-        // NVLS ONE_SHOT broadcast is PUSH based algo, so we can directly start communicating
-        // User should ensure src data is ready
+            // NVLS ONE_SHOT broadcast is PUSH based algo, so we can directly start communicating
+            // User should ensure src data is ready
 
-        return nvshmemi_tile_bcast_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
-            team, src_tensor, dst_tensor, start_coord, boundary);
-#else
-        assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
-               "Unsupported NVLS on this platform");
-        return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#endif
+            return nvshmemi_tile_bcast_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
+                team, src_tensor, dst_tensor, start_coord, boundary);
+        } else {
+            assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
+                   "Unsupported NVLS on this platform");
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
     } else {
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;

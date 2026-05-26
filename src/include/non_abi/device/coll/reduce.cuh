@@ -1462,59 +1462,59 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
 template <typename TYPE, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
-    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
-    int my_idx_in_active_set = teami->my_pe;
-    int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-    /* Divide nreduce by team size and handle for the 3 cases */
-    int elems_per_pe = nreduce / teami->size;
-    int elems_remain = nreduce % teami->size;
-    // Case 1: elems_per_pe == 0 => GPU [size-1] does the work on nreduce
-    // Case 2: elems_per_pe != 0 and elems_remain != 0 => GPU [0-size-2] does elems_per_pe,
-    // GPU[size-1] does elems_per_pe + elems_remain Case 3: elems_per_pe != 0 and elems_remain == 0
-    // => all GPUs do work for elems_per_pe
-    int my_nelems = elems_per_pe;
-    if (my_idx_in_active_set == (teami->size - 1)) {
-        my_nelems = elems_per_pe + elems_remain;
-    }
+    if constexpr (nvshmemi_device_has_nvls_multimem) {
+        nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+        int my_idx_in_active_set = teami->my_pe;
+        int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+        /* Divide nreduce by team size and handle for the 3 cases */
+        int elems_per_pe = nreduce / teami->size;
+        int elems_remain = nreduce % teami->size;
+        // Case 1: elems_per_pe == 0 => GPU [size-1] does the work on nreduce
+        // Case 2: elems_per_pe != 0 and elems_remain != 0 => GPU [0-size-2] does elems_per_pe,
+        // GPU[size-1] does elems_per_pe + elems_remain Case 3: elems_per_pe != 0 and elems_remain == 0
+        // => all GPUs do work for elems_per_pe
+        int my_nelems = elems_per_pe;
+        if (my_idx_in_active_set == (teami->size - 1)) {
+            my_nelems = elems_per_pe + elems_remain;
+        }
 
-    if (my_nelems > 0) {
-        nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 0>(
-            teami, dest + elems_per_pe * my_idx_in_active_set,
-            source + elems_per_pe * my_idx_in_active_set, my_nelems);
-    }
+        if (my_nelems > 0) {
+            nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 0>(
+                teami, dest + elems_per_pe * my_idx_in_active_set,
+                source + elems_per_pe * my_idx_in_active_set, my_nelems);
+        }
 
-    nvshmemi_barrier_threadgroup<SCOPE>(team);
-#else
-    assert(0 && "Unsupported NVLS on this platform\n");
-#endif
+        nvshmemi_barrier_threadgroup<SCOPE>(team);
+    } else {
+        assert(0 && "Unsupported NVLS on this platform\n");
+    }
 }
 
 template <typename TYPE, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
-    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
-    /* Assign nreduce for all PEs. It may lead to duplicate reduction, but avoid AG stage to
-     * communicate partial results as compared to two-shot */
-    int elems_per_pe = nreduce;
-    // Case 1: elems_per_pe == 0 => no GPUs do any work.
-    // Case 2: elems_per_pe != 0 => all GPUs do work for elems_per_pe
-    if (elems_per_pe > 0) {
-        nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 1>(teami, dest, source, elems_per_pe);
-    }
+    if constexpr (nvshmemi_device_has_nvls_multimem) {
+        nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+        /* Assign nreduce for all PEs. It may lead to duplicate reduction, but avoid AG stage to
+         * communicate partial results as compared to two-shot */
+        int elems_per_pe = nreduce;
+        // Case 1: elems_per_pe == 0 => no GPUs do any work.
+        // Case 2: elems_per_pe != 0 => all GPUs do work for elems_per_pe
+        if (elems_per_pe > 0) {
+            nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 1>(teami, dest, source, elems_per_pe);
+        }
 
-    /**
-     * Using __threadfence_system() is an overkill since we store to local vidmem buffers at the end
-     * of ONESHOT add_reducast_mcast The only requirement is not reorder store with sync. Since this
-     * code is inlined, this requirement is important (non-inlined function call would automatically
-     * guarantee this). Since we use PTX for store, compiler should typically not reorder PTX. So
-     * opportunistically, we don't introduce membar.cta PTX here.
-     */
-    nvshmemi_sync_algo_threadgroup<SCOPE>(team);
-#else
-    assert(0 && "Unsupported NVLS on this platform\n");
-#endif
+        /**
+         * Using __threadfence_system() is an overkill since we store to local vidmem buffers at the end
+         * of ONESHOT add_reducast_mcast The only requirement is not reorder store with sync. Since this
+         * code is inlined, this requirement is important (non-inlined function call would automatically
+         * guarantee this). Since we use PTX for store, compiler should typically not reorder PTX. So
+         * opportunistically, we don't introduce membar.cta PTX here.
+         */
+        nvshmemi_sync_algo_threadgroup<SCOPE>(team);
+    } else {
+        assert(0 && "Unsupported NVLS on this platform\n");
+    }
 }
 
 /* This is the entry function for any rdxn collective op - host, on-stream, device
@@ -1538,7 +1538,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reduce_threadgroup(nvshme
     int reduce_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_algo;
 
     bool is_nvls_algo_supported =
-        is_rdxn_sum && is_float_v &&
+        nvshmemi_device_has_nvls_multimem && is_rdxn_sum && is_float_v &&
         nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL &&
         (nreduce * sizeof(TYPE)) % 4 == 0;
     bool is_inplace_op = (source == dest);  // exact overlap
@@ -2043,43 +2043,44 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
     }
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI) {
         // check for NVLS support in hardware
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
-        assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010);
+        if constexpr (nvshmemi_device_has_nvls_multimem) {
+            assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010);
 
-        // Only root will perform all reduce for two-shot
-        if (root == -1) {
-            assert(0 && "Root must be specified for NVLS two-shot tile allreduce");
-            return NVSHMEMX_ERROR_INVALID_VALUE;
-        } else if (root != nvshmem_team_my_pe(team)) {
-            return NVSHMEMX_SUCCESS;
+            // Only root will perform all reduce for two-shot
+            if (root == -1) {
+                assert(0 && "Root must be specified for NVLS two-shot tile allreduce");
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            } else if (root != nvshmem_team_my_pe(team)) {
+                return NVSHMEMX_SUCCESS;
+            }
+
+            return nvshmemi_tile_allreduce_nvls_thread<src_tensor_t, dst_tensor_t, tuple_t, scope, op,
+                                                       0>(team, src_tensor, dst_tensor, start_coord,
+                                                          boundary);
+        } else {
+            assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
+                   "Unsupported NVLS on this platform");
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
-
-        return nvshmemi_tile_allreduce_nvls_thread<src_tensor_t, dst_tensor_t, tuple_t, scope, op, 0>(
-            team, src_tensor, dst_tensor, start_coord, boundary);
-#else
-        assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
-               "Unsupported NVLS on this platform");
-        return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#endif
     } else {
         // check for NVLS support in hardware
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
+        if constexpr (nvshmemi_device_has_nvls_multimem) {
+            // As this algo PULLs data from other PEs, we need to ensure src data is ready
+            // Ensure all PEs have reached this point and pushed their data to local mem
 
-        // As this algo PULLs data from other PEs, we need to ensure src data is ready
-        // Ensure all PEs have reached this point and pushed their data to local mem
+            __threadfence();  // ensure data is visible in local GPU mem
+            nvshmemi_sync_algo_threadgroup<scope>(team);
 
-        __threadfence();  // ensure data is visible in local GPU mem
-        nvshmemi_sync_algo_threadgroup<scope>(team);
-
-        // root is not used in one-shot allreduce
-        // One-shot allreduce
-        return nvshmemi_tile_allreduce_nvls_thread<src_tensor_t, dst_tensor_t, tuple_t, scope, op, 1>(
-            team, src_tensor, dst_tensor, start_coord, boundary);
-#else
-        assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
-               "Unsupported NVLS on this platform");
-        return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#endif
+            // root is not used in one-shot allreduce
+            // One-shot allreduce
+            return nvshmemi_tile_allreduce_nvls_thread<src_tensor_t, dst_tensor_t, tuple_t, scope, op,
+                                                       1>(team, src_tensor, dst_tensor, start_coord,
+                                                          boundary);
+        } else {
+            assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
+                   "Unsupported NVLS on this platform");
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
     }
 }
 
@@ -2137,31 +2138,32 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
     // NVLS Reduce only has one-shot
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI) {
         // check for NVLS support in hardware
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
-        // As this algo PULLs data from other PEs, we need to ensure src data is ready
-        // Ensure all PEs have reached this point and pushed their data to local mem
+        if constexpr (nvshmemi_device_has_nvls_multimem) {
+            // As this algo PULLs data from other PEs, we need to ensure src data is ready
+            // Ensure all PEs have reached this point and pushed their data to local mem
 
-        __threadfence();  // ensure data is visible in local GPU mem
-        nvshmemi_sync_algo_threadgroup<scope>(team);
+            __threadfence();  // ensure data is visible in local GPU mem
+            nvshmemi_sync_algo_threadgroup<scope>(team);
 
-        // Reduce is implemented as one-shot AllReduce with a root
+            // Reduce is implemented as one-shot AllReduce with a root
 
-        // Only root will perform reduce
-        if (root == -1) {
-            assert(0 && "Root must be specified for NVLS tile reduce");
-            return NVSHMEMX_ERROR_INVALID_VALUE;
-        } else if (root != nvshmem_team_my_pe(team)) {
-            // Non-root will return success
-            return NVSHMEMX_SUCCESS;
+            // Only root will perform reduce
+            if (root == -1) {
+                assert(0 && "Root must be specified for NVLS tile reduce");
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            } else if (root != nvshmem_team_my_pe(team)) {
+                // Non-root will return success
+                return NVSHMEMX_SUCCESS;
+            }
+
+            return nvshmemi_tile_allreduce_nvls_thread<src_tensor_t, dst_tensor_t, tuple_t, scope, op,
+                                                       1>(team, src_tensor, dst_tensor, start_coord,
+                                                          boundary);
+        } else {
+            assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
+                   "Unsupported NVLS on this platform");
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
-
-        return nvshmemi_tile_allreduce_nvls_thread<src_tensor_t, dst_tensor_t, tuple_t, scope, op, 1>(
-            team, src_tensor, dst_tensor, start_coord, boundary);
-#else
-        assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
-               "Unsupported NVLS on this platform");
-        return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#endif
     } else {
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;

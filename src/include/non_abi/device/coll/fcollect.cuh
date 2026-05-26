@@ -44,30 +44,30 @@ typedef enum { LL8 = 0, LL128 } ll_version_t;
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_nvls_ll_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
-    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
-    const size_t fcollect_ll_threshold =
-        nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold;
-    const size_t fcollect_count = teami->fcollect_count;
-    const uint32_t ll_flag = teami->fcollect_count;
-    char *pWrk = (char *)nvshmemi_team_get_psync(teami, FCOLLECT) +
-                 (2 * teami->size * fcollect_ll_threshold *
-                  (fcollect_count % 2)); /* same for NVLS in terms of size */
-    const size_t pack_offset = (nvshmemi_team_my_pe(team) * nelems * sizeof(T)) /
-                               sizeof(uint32_t); /* offset in pSync space */
-    /* Find the multicast ptr for pWrk + pack_offset and do a store to remote pSync */
-    void *mcast_pWrk = nvshmemi_mc_ptr(teami, (void *)((uint64_t *)pWrk + pack_offset));
-    nvshmemi_mcast_packLL<T, SCOPE>((uint64_t *)mcast_pWrk, source, nelems, ll_flag);
-    for (int ii = 0; ii < teami->size; ii += 1) {
-        size_t prev_offset = (nelems * ii * sizeof(T)) / sizeof(uint32_t);
-        nvshmemi_mcast_recvLL<T, SCOPE>(dest + (ii * nelems), (uint64_t *)pWrk + prev_offset,
-                                        nelems, ll_flag);
-    }
+    if constexpr (nvshmemi_device_has_nvls_multimem) {
+        nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+        const size_t fcollect_ll_threshold =
+            nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold;
+        const size_t fcollect_count = teami->fcollect_count;
+        const uint32_t ll_flag = teami->fcollect_count;
+        char *pWrk = (char *)nvshmemi_team_get_psync(teami, FCOLLECT) +
+                     (2 * teami->size * fcollect_ll_threshold *
+                      (fcollect_count % 2)); /* same for NVLS in terms of size */
+        const size_t pack_offset = (nvshmemi_team_my_pe(team) * nelems * sizeof(T)) /
+                                   sizeof(uint32_t); /* offset in pSync space */
+        /* Find the multicast ptr for pWrk + pack_offset and do a store to remote pSync */
+        void *mcast_pWrk = nvshmemi_mc_ptr(teami, (void *)((uint64_t *)pWrk + pack_offset));
+        nvshmemi_mcast_packLL<T, SCOPE>((uint64_t *)mcast_pWrk, source, nelems, ll_flag);
+        for (int ii = 0; ii < teami->size; ii += 1) {
+            size_t prev_offset = (nelems * ii * sizeof(T)) / sizeof(uint32_t);
+            nvshmemi_mcast_recvLL<T, SCOPE>(dest + (ii * nelems), (uint64_t *)pWrk + prev_offset,
+                                            nelems, ll_flag);
+        }
 
-    nvshmemi_threadgroup_sync<SCOPE>();
-#else
-    assert(0 && "NVLink SHARP is not supported on this platform");
-#endif
+        nvshmemi_threadgroup_sync<SCOPE>();
+    } else {
+        assert(0 && "NVLink SHARP is not supported on this platform");
+    }
 }
 
 /* This function must not ever call a block-scoped synchronization API.
@@ -322,15 +322,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_p2p_allpush_thre
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_nvls_allpush_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 || defined(__clang_llvm_bitcode_lib__) || defined NVSHMEM_BUILD_LTOIR_LIBRARY
-    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
-    nvshmemi_threadgroup_sync<SCOPE>();
-    T *dst_ptr = (T *)nvshmemi_mc_ptr(teami, (void *)(dest + dest_offset));
-    nvshmemi_mcast_memcpy_threadgroup<T, SCOPE>(dst_ptr, source, nelems * sizeof(T));
-    nvshmemi_barrier_threadgroup<SCOPE>(team);
-#else
-    assert(0 && "NVLS is not supported on this platform");
-#endif
+    if constexpr (nvshmemi_device_has_nvls_multimem) {
+        nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+        nvshmemi_threadgroup_sync<SCOPE>();
+        T *dst_ptr = (T *)nvshmemi_mc_ptr(teami, (void *)(dest + dest_offset));
+        nvshmemi_mcast_memcpy_threadgroup<T, SCOPE>(dst_ptr, source, nelems * sizeof(T));
+        nvshmemi_barrier_threadgroup<SCOPE>(team);
+    } else {
+        assert(0 && "NVLS is not supported on this platform");
+    }
 }
 
 template <typename T, threadgroup_t SCOPE>
@@ -353,6 +353,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     /* NVLS LL performs better with block scoped than thread/warp scoped operations
        due to better efficiency of distributing cvt/pack/unpack ops across threads across GPUs */
     const uint8_t prefer_nvls_ll = (SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
+    bool is_nvls_algo_supported = nvshmemi_device_has_nvls_multimem &&
+                                  nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL;
     bool valid_ll_configuration = (SCOPE != NVSHMEMI_THREADGROUP_THREAD &&
                                    ((sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0)) ||
                                     (is_half_prec && (nelems % 4 == 0) &&
@@ -373,11 +375,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             } else if (sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0) &&
                        nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
                            (nelems * sizeof(T)) &&
-                       nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL &&
-                       prefer_nvls_ll) {
+                       is_nvls_algo_supported && prefer_nvls_ll) {
                 fcollect_algo = FCOLLECT_NVLS_LL; /* NVLS LL algorithm */
-            } else if (nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL &&
-                       (nelems * sizeof(T)) % 4 == 0) {
+            } else if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 fcollect_algo = FCOLLECT_NVLS; /* NVLS One shot algorithm */
             } else {
                 fcollect_algo = FCOLLECT_ONESHOT; /* P2P One shot algorithm */
@@ -391,8 +391,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
         case FCOLLECT_ONESHOT: /* One shot */
             break;
         case FCOLLECT_NVLS:
-            if (nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL &&
-                (nelems * sizeof(T)) % 4 == 0) {
+            if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 /* NVLS simple */
                 break;
             } else {
@@ -403,10 +402,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             if (sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0) &&
                 nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
                     (nelems * sizeof(T)) &&
-                nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL) {
+                is_nvls_algo_supported) {
                 fcollect_algo = FCOLLECT_NVLS_LL; /* Use NVLS LL */
-            } else if (nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL &&
-                       (nelems * sizeof(T)) % 4 == 0) {
+            } else if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 fcollect_algo = FCOLLECT_NVLS; /* Switch to NVLS simple */
             } else {
                 fcollect_algo = FCOLLECT_ONESHOT; /* One shot */
@@ -1044,18 +1042,18 @@ __device__ inline int nvshmemi_tile_allgather(nvshmem_team_t team, src_tensor_t 
     // NVLS Gather only has one-shot push support currently
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI) {
         // check for NVLS support in hardware
-#if __CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010
+        if constexpr (nvshmemi_device_has_nvls_multimem) {
+            // NVLS ONE_SHOT AllGather is PUSH based algo, so we can directly start communicating
+            // User should ensure src data is ready
 
-        // NVLS ONE_SHOT AllGather is PUSH based algo, so we can directly start communicating
-        // User should ensure src data is ready
-
-        return nvshmemi_tile_allgather_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
-            team, src_tensor, dst_tensor, start_coord, boundary);
-#else
-        assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
-               "Unsupported NVLS on this platform");
-        return NVSHMEMX_ERROR_NOT_SUPPORTED;
-#endif
+            return nvshmemi_tile_allgather_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t,
+                                                            scope>(team, src_tensor, dst_tensor,
+                                                                   start_coord, boundary);
+        } else {
+            assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010 &&
+                   "Unsupported NVLS on this platform");
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
     } else {
         // Extend as other algorithms are added
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
