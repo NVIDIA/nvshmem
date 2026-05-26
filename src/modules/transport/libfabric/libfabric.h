@@ -792,10 +792,12 @@ struct nvshmemt_libfabric_state_t {
     int proxy_request_batch_max = 0;
 
     /* Signal delivery thread. */
+    int signal_wait_spin_count = 0;
     pthread_t signal_delivery_thread{};
     std::atomic<int> signal_delivery_stop{0};
     std::atomic<int> signal_delivery_status{0};
     nvshmem_transport_t signal_delivery_transport = nullptr;
+    /* 1 while running or polling, 0 while parked in futex wait. */
     std::atomic<int> signal_delivery_futex{0};
     /* Serializes host EP CQ progress between user thread (QP_HOST blocking) and
      * proxy thread (try-lock, skip if user is already draining). Non-recursive

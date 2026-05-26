@@ -114,6 +114,11 @@ NVSHMEMI_ENV_DEF(LIBFABRIC_PROXY_REQUEST_BATCH_MAX, int, 32, NVSHMEMI_ENV_CAT_TR
 NVSHMEMI_ENV_DEF(LIBFABRIC_DISABLE_BATCH_RMA, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable support for batched RMA with FI_MORE.")
 
+NVSHMEMI_ENV_DEF(LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT, int, 1024, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of polling iterations for pending signal-delivery work in the "
+                 "libfabric transport before sleeping. Increasing this can reduce latency for "
+                 "signal-heavy operations at the cost of CPU usage; 0 sleeps immediately.")
+
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_ENV_ALL)
 /** GPU-initiated communication **/
 NVSHMEMI_ENV_DEF(IBGDA_ENABLE_MULTI_PORT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,

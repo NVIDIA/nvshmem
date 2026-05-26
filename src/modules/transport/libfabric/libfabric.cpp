@@ -1243,6 +1243,8 @@ out:
 static void *nvshmemt_libfabric_signal_delivery_thread(void *arg) {
     nvshmemt_libfabric_state_t *state = (nvshmemt_libfabric_state_t *)arg;
     nvshmem_transport_t transport = state->signal_delivery_transport;
+    const int signal_wait_spin_count = state->signal_wait_spin_count;
+    int empty_spin_count = 0;
     signal_delivery_work_entry work{};
 
     /* Inherit the process CPU affinity so the OS can schedule on any allowed core. */
@@ -1252,9 +1254,20 @@ static void *nvshmemt_libfabric_signal_delivery_thread(void *arg) {
         pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
     }
 
+    state->signal_delivery_futex.store(1, std::memory_order_release);
     while (!state->signal_delivery_stop.load(std::memory_order_relaxed)) {
         if (!state->signal_work_queue.pop(work)) {
+            if (empty_spin_count < signal_wait_spin_count) {
+                empty_spin_count++;
+                NVSHMEMT_LIBFABRIC_CPU_RELAX();
+                continue;
+            }
+            empty_spin_count = 0;
             state->signal_delivery_futex.store(0, std::memory_order_release);
+            /* Re-check stop after publishing the parked state to avoid missing finalize's wake. */
+            if (state->signal_delivery_stop.load(std::memory_order_acquire)) {
+                break;
+            }
             /* Re-check after store to avoid missed wake. */
             if (!state->signal_work_queue.pop(work)) {
                 syscall(SYS_futex, &state->signal_delivery_futex, FUTEX_WAIT_PRIVATE, 0, NULL,
@@ -1262,6 +1275,7 @@ static void *nvshmemt_libfabric_signal_delivery_thread(void *arg) {
                 continue;
             }
         }
+        empty_spin_count = 0;
         int status = nvshmemt_libfabric_gdr_process_amo(transport, work.op, work.send_elems,
                                                         work.sequence_count,
                                                         work.preceding_put_count);
@@ -3331,6 +3345,10 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     libfabric_state->log_level = nvshmemt_common_get_log_level(&options);
     libfabric_state->max_nic_per_pe = options.LIBFABRIC_MAX_NIC_PER_PE;
+    NVSHMEMI_CHECK_ERROR_JMP(options.LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT < 0, status,
+                             NVSHMEMX_ERROR_INVALID_VALUE, out,
+                             "NVSHMEM_LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT must be non-negative.\n");
+    libfabric_state->signal_wait_spin_count = options.LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT;
 
     if (strcmp(options.LIBFABRIC_PROVIDER, "verbs") == 0) {
         libfabric_state->provider = NVSHMEMT_LIBFABRIC_PROVIDER_VERBS;
