@@ -2046,11 +2046,15 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
         if constexpr (nvshmemi_device_has_nvls_multimem) {
             assert(__CUDA_ARCH__ >= 900 && CUDART_VERSION >= 12010);
 
-            // Only root will perform all reduce for two-shot
+            // All PEs must publish src before the root pulls.
             if (root == -1) {
                 assert(0 && "Root must be specified for NVLS two-shot tile allreduce");
                 return NVSHMEMX_ERROR_INVALID_VALUE;
-            } else if (root != nvshmem_team_my_pe(team)) {
+            }
+
+            __threadfence();
+            nvshmemi_sync_algo_threadgroup<scope>(team);
+            if (root != nvshmem_team_my_pe(team)) {
                 return NVSHMEMX_SUCCESS;
             }
 
