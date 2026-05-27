@@ -9,6 +9,7 @@
 /device/pt-to-pt/shmem_signal_ping_pong_latency
 /device/pt-to-pt/shmem_put_bw
 /device/pt-to-pt/shmem_get_bw
+/device/pt-to-pt/shmem_flush_bench
 /device/coll/barrier_latency
 /device/coll/bcast_latency
 /device/coll/fcollect_latency
