@@ -54,3 +54,13 @@
 #undef NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY
 #undef NVSHMEM_GPUNETIO_SUPPORT
 #endif
+
+// "transfer_device.cuh" requires <infiniband/mlx5dv.h> for IBGDA and GPUNetIO support,
+// which is not available on all systems. Disable IBGDA and GPUNetIO support on such systems.
+#if (defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+     defined(NVSHMEM_BUILD_LTOIR_LIBRARY)) &&                                             \
+    !__has_include(<infiniband/mlx5dv.h>)
+#undef NVSHMEM_IBGDA_SUPPORT
+#undef NVSHMEM_IBGDA_SUPPORT_GPUMEM_ONLY
+#undef NVSHMEM_GPUNETIO_SUPPORT
+#endif
