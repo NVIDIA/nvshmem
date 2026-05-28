@@ -237,6 +237,7 @@ int main(int argc, char *argv[]) {
      * it into d_bw_all[mype] on PE 0 every iteration. PE 0 then prints one
      * row per size with N/2 columns (one per sender pair). */
     double *d_bw_local = NULL, *d_bw_all = NULL;
+    int exit_status = 1;
 
     bw_fn_t bw_fn = NULL;
     /* Opt this benchmark into NVSHMEM's TMA path by registering smem at kernel
@@ -348,6 +349,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaGetLastError());
 
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 /* timed run */
@@ -367,10 +369,12 @@ int main(int argc, char *argv[]) {
 
                 if (is_sender) {
                     CUDA_CHECK(cudaEventSynchronize(stop));
+                    CUDA_CHECK(cudaGetLastError());
                     cudaEventElapsedTime(&milliseconds, start, stop);
                     h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
                 } else {
                     CUDA_CHECK(cudaDeviceSynchronize());
+                    CUDA_CHECK(cudaGetLastError());
                     h_bw[i] = 0.0;
                 }
                 nvshmem_barrier_all();
@@ -403,6 +407,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    exit_status = 0;
+
 finalize:
 
     if (data_d) {
@@ -419,5 +425,5 @@ finalize:
     if (h_tables) free_tables(h_tables, 2);
     finalize_wrapper();
 
-    return 0;
+    return exit_status;
 }
