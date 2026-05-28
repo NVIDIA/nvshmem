@@ -43,6 +43,7 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <cstdlib>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <getopt.h>
@@ -130,6 +131,7 @@ int main(int argc, char *argv[]) {
     std::vector<perf_stats_t> stg_flush_stats;
     std::vector<perf_stats_t> tma_quiet_stats;
     std::vector<perf_stats_t> tma_flush_stats;
+    bool machine_readable = false;
 
     read_args(argc, argv);
     max_threads = (int)threads_per_block;
@@ -140,6 +142,10 @@ int main(int argc, char *argv[]) {
 
     mype = nvshmem_my_pe();
     npes = nvshmem_n_pes();
+    if (mype == 0) {
+        const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
+        if (env) machine_readable = (std::atoi(env) != 0);
+    }
     if (npes != 2) {
         if (mype == 0) fprintf(stderr, "This test requires exactly two processes\n");
         goto finalize;
@@ -184,7 +190,7 @@ int main(int argc, char *argv[]) {
     CUDA_CHECK(cudaFuncSetAttribute(pipelined_put_smem_src<false, false>,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
 
-    if (mype == 0 && !repetitions_requested) {
+    if (mype == 0 && !machine_readable && !repetitions_requested) {
         printf("# shmem_flush_bench - pipelined put BW (source in smem)\n");
         printf("#   iters=%zu, threads=%d, CTAs=1\n", (size_t)iters, max_threads);
         printf("#   Columns: aggregate GB/s for each (transport, per-iter-sync) combo.\n");
@@ -285,7 +291,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (mype == 0) {
-            if (repetitions_requested) {
+            if (machine_readable || repetitions_requested) {
                 size_values.push_back(size);
                 stg_quiet_stats.push_back(stg_quiet);
                 stg_flush_stats.push_back(stg_flush);
@@ -300,7 +306,42 @@ int main(int argc, char *argv[]) {
         if (size == max_size) break;
     }
 
-    if (mype == 0 && repetitions_requested) {
+    if (mype == 0 && machine_readable && !size_values.empty()) {
+        if (repetitions_requested) {
+            print_basic_table("shmem_flush_bench", "st_global_quiet", "BW", "GB/sec", '+',
+                              size_values.data(), nullptr, size_values.size(),
+                              stg_quiet_stats.data());
+            print_basic_table("shmem_flush_bench", "st_global_flush", "BW", "GB/sec", '+',
+                              size_values.data(), nullptr, size_values.size(),
+                              stg_flush_stats.data());
+            print_basic_table("shmem_flush_bench", "tma_quiet", "BW", "GB/sec", '+',
+                              size_values.data(), nullptr, size_values.size(),
+                              tma_quiet_stats.data());
+            print_basic_table("shmem_flush_bench", "tma_flush", "BW", "GB/sec", '+',
+                              size_values.data(), nullptr, size_values.size(),
+                              tma_flush_stats.data());
+        } else {
+            const int num_entries = static_cast<int>(size_values.size());
+            std::vector<double> stg_quiet_values(num_entries);
+            std::vector<double> stg_flush_values(num_entries);
+            std::vector<double> tma_quiet_values(num_entries);
+            std::vector<double> tma_flush_values(num_entries);
+            for (int i = 0; i < num_entries; i++) {
+                stg_quiet_values[i] = stg_quiet_stats[i].mean;
+                stg_flush_values[i] = stg_flush_stats[i].mean;
+                tma_quiet_values[i] = tma_quiet_stats[i].mean;
+                tma_flush_values[i] = tma_flush_stats[i].mean;
+            }
+            print_basic_table("shmem_flush_bench", "st_global_quiet", "BW", "GB/sec", '+',
+                              size_values.data(), stg_quiet_values.data(), num_entries);
+            print_basic_table("shmem_flush_bench", "st_global_flush", "BW", "GB/sec", '+',
+                              size_values.data(), stg_flush_values.data(), num_entries);
+            print_basic_table("shmem_flush_bench", "tma_quiet", "BW", "GB/sec", '+',
+                              size_values.data(), tma_quiet_values.data(), num_entries);
+            print_basic_table("shmem_flush_bench", "tma_flush", "BW", "GB/sec", '+',
+                              size_values.data(), tma_flush_values.data(), num_entries);
+        }
+    } else if (mype == 0 && repetitions_requested) {
         print_basic_table("shmem_flush_bench", "st.global-quiet", "BW", "GB/sec", '+',
                           size_values.data(), nullptr, size_values.size(), stg_quiet_stats.data());
         print_basic_table("shmem_flush_bench", "st.global-flush", "BW", "GB/sec", '+',
