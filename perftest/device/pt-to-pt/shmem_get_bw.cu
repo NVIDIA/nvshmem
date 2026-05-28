@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <cassert>
 #include <vector>
 #include <cuda.h>
@@ -235,6 +236,9 @@ int main(int argc, char *argv[]) {
     uint64_t *h_size_arr;
     double *h_bw = NULL;
 
+    bool machine_readable = false;
+    std::vector<std::vector<double>> bw_per_pair_per_size;
+
     bw_fn_t bw_fn = NULL;
     const SMEMToggle smem_mode = parse_smem_enabled();
     int smem_size = 0;
@@ -290,8 +294,13 @@ int main(int argc, char *argv[]) {
     d_bw_local = (double *)nvshmem_malloc(sizeof(double));
     d_bw_all = (double *)nvshmem_malloc(npes * sizeof(double));
 
-    /* Print table header on PE 0 */
     if (mype == 0) {
+        const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
+        if (env) machine_readable = (std::atoi(env) != 0);
+        bw_per_pair_per_size.assign(array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
+    }
+
+    if (mype == 0 && !machine_readable) {
         std::fprintf(stdout, "\nshmem_get_bw (GB/s)\n");
         std::fprintf(stdout, "%14s", "size (B)");
         for (int s = 0; s < npes / 2; s++)
@@ -381,10 +390,19 @@ int main(int argc, char *argv[]) {
                 if (mype == 0) {
                     CUDA_CHECK(cudaMemcpy(h_bw_all.data(), d_bw_all, npes * sizeof(double),
                                           cudaMemcpyDeviceToHost));
-                    std::fprintf(stdout, "%14lu", (unsigned long)size);
-                    for (int s = 0; s < npes / 2; s++) std::fprintf(stdout, "%14.2f", h_bw_all[s]);
-                    std::fprintf(stdout, "\n");
-                    std::fflush(stdout);
+                    if (!machine_readable) {
+                        std::fprintf(stdout, "%14lu", (unsigned long)size);
+                    }
+                    for (int s = 0; s < npes / 2; s++) {
+                        bw_per_pair_per_size[i][s] = h_bw_all[s];
+                        if (!machine_readable) {
+                            std::fprintf(stdout, "%14.2f", h_bw_all[s]);
+                        }
+                    }
+                    if (!machine_readable) {
+                        std::fprintf(stdout, "\n");
+                        std::fflush(stdout);
+                    }
                 }
             }
 
@@ -393,6 +411,30 @@ int main(int argc, char *argv[]) {
     }
 
     exit_status = 0;
+
+    if (mype == 0 && machine_readable) {
+        const char *test_name = "shmem_get_bw_uni";
+        const int num_pairs = std::max(1, npes / 2);
+
+        std::vector<double> bw_avg(i, 0.0);
+        for (int j = 0; j < i; j++) {
+            double sum = 0.0;
+            for (int s = 0; s < num_pairs; s++) sum += bw_per_pair_per_size[j][s];
+            bw_avg[j] = sum / num_pairs;
+        }
+        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, bw_avg.data(), i);
+
+        if (npes > 2) {
+            std::vector<double> bw_pair(i, 0.0);
+            for (int s = 0; s < num_pairs; s++) {
+                for (int j = 0; j < i; j++) bw_pair[j] = bw_per_pair_per_size[j][s];
+                char subjob[32];
+                std::snprintf(subjob, sizeof(subjob), "PE%d_from_PE%d", s, s ^ (npes / 2));
+                print_basic_table(test_name, subjob, "BW", "GB/sec", '+', h_size_arr,
+                                  bw_pair.data(), i);
+            }
+        }
+    }
 
 finalize:
 
