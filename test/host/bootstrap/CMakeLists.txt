@@ -1,2 +1,5 @@
 nvshmem_add_test_no_device(bootstrap_coll.cpp)
 target_include_directories(host_bootstrap_coll PRIVATE ${NVSHMEM_TEST_TLD}/../src/include)
+if(CMAKE_DL_LIBS)
+  target_link_libraries(host_bootstrap_coll ${CMAKE_DL_LIBS})
+endif()
