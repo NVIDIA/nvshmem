@@ -224,6 +224,7 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
 int main(int argc, char *argv[]) {
     int mype, npes;
     int num_locality_domains = 0;
+    int exit_status = 1;
 
     /* Per-memory-node state */
     std::vector<double *> data_d;
@@ -620,6 +621,7 @@ int main(int argc, char *argv[]) {
                 }
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaDeviceSynchronize());
+                CUDA_CHECK(cudaGetLastError());
             }
 
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
@@ -740,6 +742,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    exit_status = 0;
+
 finalize:
 
     for (size_t n = 0; n < data_d.size(); n++) {
@@ -771,5 +775,5 @@ finalize:
     if (h_tables) free_tables(h_tables, 2);
     finalize_wrapper();
 
-    return return_code;
+    return exit_status != 0 ? exit_status : return_code;
 }

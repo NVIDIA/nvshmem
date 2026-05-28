@@ -225,6 +225,7 @@ int main(int argc, char *argv[]) {
     double *data_d = NULL;
     unsigned int *counter_d;
     double *d_bw_local = NULL, *d_bw_all = NULL;
+    int exit_status = 1;
 
     read_args(argc, argv);
     int max_blocks = num_blocks, max_threads = threads_per_block;
@@ -342,6 +343,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaGetLastError());
 
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 /* timed run */
@@ -361,10 +363,12 @@ int main(int argc, char *argv[]) {
 
                 if (is_sender) {
                     CUDA_CHECK(cudaEventSynchronize(stop));
+                    CUDA_CHECK(cudaGetLastError());
                     cudaEventElapsedTime(&milliseconds, start, stop);
                     h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
                 } else {
                     CUDA_CHECK(cudaDeviceSynchronize());
+                    CUDA_CHECK(cudaGetLastError());
                     h_bw[i] = 0.0;
                 }
 
@@ -388,6 +392,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    exit_status = 0;
+
 finalize:
 
     if (data_d) {
@@ -404,5 +410,5 @@ finalize:
     if (h_tables) free_tables(h_tables, 2);
     finalize_wrapper();
 
-    return 0;
+    return exit_status;
 }
