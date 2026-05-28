@@ -122,8 +122,8 @@ static int _nvshmemi_collective_launch(const void *func, dim3 gridDims, dim3 blo
 
     /* TODO: make it obvious we aren't going to complete this call from this thread. Possibly global
      * exit? */
-    NVSHMEMI_NZ_ERROR_JMP(launchFailed, NVSHMEMX_ERROR_COLLECTIVE_LAUNCH_FAILED, out,
-                          "One or more PEs cannot launch \n");
+    NVSHMEMI_CHECK_ERROR_JMP(launchFailed, status, NVSHMEMX_ERROR_COLLECTIVE_LAUNCH_FAILED, out,
+                             "One or more PEs cannot launch \n");
 
     CUDA_RUNTIME_CHECK_GOTO(
         cudaEventRecord(nvshmemi_device_only_state.claunch_params.begin_event, stream), status,

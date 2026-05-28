@@ -2196,9 +2196,9 @@ static int ibgda_create_qp_shared_objects(struct ibgda_device *device) {
                           "mlx5dv SRQ initialization failed.\n");
 
     srqn = dvsrq.srqn;
-    NVSHMEMI_EQ_ERROR_JMP(srqn, 0, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Unable to allocate SRQ for your device. "
-                          "This may occur if your ofed is older than version 5.0.\n");
+    NVSHMEMI_CHECK_ERROR_JMP(srqn == 0, status, NVSHMEMX_ERROR_INTERNAL, out,
+                             "Unable to allocate SRQ for your device. "
+                             "This may occur if your ofed is older than version 5.0.\n");
 
     // Create recv_cq on host memory.
     recv_cq = ftable.create_cq(context, ibgda_srq_depth, NULL, NULL, 0);

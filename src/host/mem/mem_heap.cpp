@@ -2421,8 +2421,8 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
 
     assert(mem_granularity_ <= NVSHMEMI_MAX_HANDLE_LENGTH);
 
-    NVSHMEMI_NE_ERROR_JMP(flags, 0, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                          "Non-zero flags not supported\n");
+    NVSHMEMI_CHECK_ERROR_JMP(flags != 0, status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                             "Non-zero flags not supported\n");
 
     // pref_off cannot be between heap_base_ and heap_base_ + physical_internal_heap_size_
     // as this region is used for internal alloc (nvshmem_malloc)

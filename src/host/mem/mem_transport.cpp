@@ -170,8 +170,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     if (nvshmemi_cuda_driver_version >= 12040 && prop.major >= 9 &&
         !nvshmemi_options.DISABLE_MNNVL) {
         nvml_status = nvml_ftable_.nvmlDeviceGetHandleByPciBusId(pcie_bdf, &local_device);
-        NVSHMEMI_NE_ERROR_JMP(nvml_status, NVML_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                              "nvmlDeviceGetHandleByPciBusId failed \n");
+        NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                 "nvmlDeviceGetHandleByPciBusId failed \n");
 
         /* Some platforms with older driver may not support this API, so bypass MNNVL discovery */
         if (nvml_ftable_.nvmlDeviceGetGpuFabricInfoV == NULL) {
@@ -183,9 +183,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         }
 
         nvml_status = nvml_ftable_.nvmlDeviceGetGpuFabricInfoV(local_device, &fabricInfo);
-        NVSHMEMI_NE_ERROR_JMP(nvml_status, NVML_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                              "nvmlDeviceGetGpuFabricInfoV() failed... Detection of MNNVL "
-                              "environment will not be attempted");
+        NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                 "nvmlDeviceGetGpuFabricInfoV() failed... Detection of MNNVL "
+                                 "environment will not be attempted");
 
         pe_fabricInfo = (nvmlGpuFabricInfoV_t *)std::malloc(sizeof(nvmlGpuFabricInfoV_t) * npes);
         NVSHMEMI_NULL_ERROR_JMP(pe_fabricInfo, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -203,8 +203,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             pe_platformInfo.resize(npes);
 
             nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
-            NVSHMEMI_NE_ERROR_JMP(nvml_status, NVML_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "nvmlDeviceGetPlatformInfo failed \n");
+            NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                     "nvmlDeviceGetPlatformInfo failed \n");
 
             pe_platformInfo[mype] = platformInfo;
 
