@@ -2293,6 +2293,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *sr
 
         size_t remaining_size = len - adjusted_size;
         if (remaining_size) {
+            nvshmemi_threadgroup_sync<SCOPE>();
             nvshmemi_handle_put_sub_TX_size<le_fabric_handle_kind::Unicast, SCOPE>(
                 nvshmemi_ptr_add(dst, adjusted_size), nvshmemi_ptr_add(src, adjusted_size),
                 remaining_size, dest_le_id, is_blocking, smem_chunk_size);
@@ -2358,6 +2359,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
 
         len -= adjusted_size;
         if (len) {
+            nvshmemi_threadgroup_sync<SCOPE>();
             nvshmemi_handle_put_sub_TX_size<le_fabric_handle_kind::Multicast, SCOPE>(
                 nvshmemi_ptr_add(dst, adjusted_size), nvshmemi_ptr_add(src, adjusted_size), len,
                 mc_le_id, true, smem_chunk_size);
