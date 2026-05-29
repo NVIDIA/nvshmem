@@ -628,6 +628,21 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
     };
 
     void *qp_context;
+    struct ibv_ah_attr ah_attr = {};
+    struct ibv_ah *ah = NULL;
+    struct mlx5dv_obj dv = {};
+    struct mlx5dv_ah dah = {};
+    int roce_version = 0;
+
+    auto set_grh_fields = [&]() {
+        ah_attr.is_global = 1;
+        ah_attr.grh.dgid.global.subnet_prefix = ep_handle->spn;
+        ah_attr.grh.dgid.global.interface_id = ep_handle->iid;
+        ah_attr.grh.flow_label = 0;
+        ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
+        ah_attr.grh.hop_limit = 255;
+        ah_attr.grh.traffic_class = ibdevx_state->options->IB_TRAFFIC_CLASS;
+    };
 
     if (pkey_index < 0 || pkey_index >= port_attr->pkey_tbl_len) {
         NVSHMEMI_ERROR_JMP(
@@ -684,16 +699,14 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
      * atomics up to 256 bytes. */
     DEVX_SET(qpc, qp_context, atomic_mode, NVSHMEMT_IBDEVX_MLX5_QPC_ATOMIC_MODE_UP_TO_64B);
 
+    ah_attr.port_num = portid;
+    ah_attr.sl = ibdevx_state->options->IB_SL;
+    ah_attr.src_path_bits = 0;
+
     if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        struct ibv_ah_attr ah_attr = {};
-        struct ibv_ah *ah;
-        struct mlx5dv_obj dv = {};
-        struct mlx5dv_ah dah = {};
-
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
-        int roce_version = 0;
 
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
+        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
                          &device->common_device.gid_info[portid - 1].local_gid_index,
                          ibdevx_state->log_level, ibdevx_state->options);
         ftable.query_gid(device->common_device.context, portid,
@@ -706,14 +719,7 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Error in ib_roce_get_version_num\n");
 
-        ah_attr.is_global = 1;
-        ah_attr.port_num = portid;
-        ah_attr.grh.dgid.global.subnet_prefix = ep_handle->spn;
-        ah_attr.grh.dgid.global.interface_id = ep_handle->iid;
-        ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
-        ah_attr.grh.traffic_class = ibdevx_state->options->IB_TRAFFIC_CLASS;
-        ah_attr.sl = ibdevx_state->options->IB_SL;
-        ah_attr.src_path_bits = 0;
+        set_grh_fields();
 
         assert(roce_version == 1 || roce_version == 2);
         ah_attr.dlid = port_attr->lid | (roce_version == 1 ? ibdevx_ROCE_V1_UDP_SPORT_BASE
@@ -771,12 +777,67 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
         memcpy(DEVX_ADDR_OF(qpc, qp_context, primary_address_path.rgid_rip), &dah.av->rgid,
                sizeof(dah.av->rgid));
     } else {
+        struct nvshmemt_ib_qp_path path = nvshmemt_ib_select_qp_path(
+            &device->common_device.gid_info[portid - 1].local_gid, port_attr->lid, ep_handle->lid,
+            ep_handle->spn, ep_handle->iid);
+
         DEVX_SET(qpc, qp_context, primary_address_path.tclass,
                  ibdevx_state->options->IB_TRAFFIC_CLASS);
-        DEVX_SET(qpc, qp_context, primary_address_path.rlid, ep_handle->lid);
+        DEVX_SET(qpc, qp_context, primary_address_path.rlid, path.dlid);
         DEVX_SET(qpc, qp_context, primary_address_path.mlid, 0);
         DEVX_SET(qpc, qp_context, primary_address_path.sl, ibdevx_state->options->IB_SL);
-        DEVX_SET(qpc, qp_context, primary_address_path.grh, false);
+        if (ibdevx_state->options->IB_FORCE_GRH || path.grh_required) {
+            ah_attr.dlid = path.dlid;
+            set_grh_fields();
+
+            ah = ftable.create_ah(device->common_device.pd, &ah_attr);
+            NVSHMEMI_NULL_ERROR_JMP(
+                ah, status, NVSHMEMX_ERROR_INTERNAL, out,
+                "IBDEVX AH create failed during IB QP INIT->RTR setup: device %s devid %d "
+                "port %d link_layer %s lid %u local_qpn %u remote_qpn %u remote_lid %u "
+                "remote_gid 0x%llx:0x%llx gid_index %d sl %d traffic_class %d errno %d (%s)\n",
+                device->common_device.dev->name, devid, portid,
+                nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpid,
+                ep_handle->qpn, ep_handle->lid, (unsigned long long)ep_handle->spn,
+                (unsigned long long)ep_handle->iid,
+                device->common_device.gid_info[portid - 1].local_gid_index,
+                ibdevx_state->options->IB_SL, ibdevx_state->options->IB_TRAFFIC_CLASS, errno,
+                strerror(errno));
+
+            dv.ah.in = ah;
+            dv.ah.out = &dah;
+            status = mlx5dv_init_obj(&dv, MLX5DV_OBJ_AH);
+            if (status) {
+                int destroy_status = ftable.destroy_ah(ah);
+                if (destroy_status) {
+                    NVSHMEMI_ERROR_PRINT(
+                        "IBDEVX AH destroy failed after IB mlx5dv initialization failure: "
+                        "device %s devid %d port %d local_qpn %u remote_qpn %u init_status %d "
+                        "(%s) destroy_status %d (%s)\n",
+                        device->common_device.dev->name, devid, portid, ep->qpid, ep_handle->qpn,
+                        status, strerror(status), destroy_status, strerror(destroy_status));
+                }
+                NVSHMEMI_ERROR_JMP(
+                    status, NVSHMEMX_ERROR_INTERNAL, out,
+                    "IBDEVX AH mlx5dv initialization failed during IB QP INIT->RTR setup: "
+                    "device %s devid %d port %d local_qpn %u remote_qpn %u remote_gid "
+                    "0x%llx:0x%llx gid_index %d status %d (%s)\n",
+                    device->common_device.dev->name, devid, portid, ep->qpid, ep_handle->qpn,
+                    (unsigned long long)ep_handle->spn, (unsigned long long)ep_handle->iid,
+                    device->common_device.gid_info[portid - 1].local_gid_index, status,
+                    strerror(status));
+            }
+            ep->ah = ah;
+
+            DEVX_SET(qpc, qp_context, primary_address_path.grh, true);
+            memcpy(DEVX_ADDR_OF(qpc, qp_context, primary_address_path.rgid_rip), &dah.av->rgid,
+                   sizeof(dah.av->rgid));
+            DEVX_SET(qpc, qp_context, primary_address_path.hop_limit, ah_attr.grh.hop_limit);
+            DEVX_SET(qpc, qp_context, primary_address_path.src_addr_index,
+                     device->common_device.gid_info[portid - 1].local_gid_index);
+        } else {
+            DEVX_SET(qpc, qp_context, primary_address_path.grh, false);
+        }
     }
 
     if (nvshmemt_ibdevx_max_rd_atomic == 0) {
@@ -875,12 +936,9 @@ int ep_get_handle(struct nvshmemt_ib_common_ep_handle *ep_handle, struct ibdevx_
 
     ep_handle->lid = device->common_device.port_attr[ep->portid - 1].lid;
     ep_handle->qpn = ep->qpid;
-    if (ep_handle->lid == 0) {
-        ep_handle->spn =
-            device->common_device.gid_info[ep->portid - 1].local_gid.global.subnet_prefix;
-        ep_handle->iid =
-            device->common_device.gid_info[ep->portid - 1].local_gid.global.interface_id;
-    }
+    /* Always store GID info so IB peers with GRH routing can exchange it. */
+    ep_handle->spn = device->common_device.gid_info[ep->portid - 1].local_gid.global.subnet_prefix;
+    ep_handle->iid = device->common_device.gid_info[ep->portid - 1].local_gid.global.interface_id;
 
     return status;
 }

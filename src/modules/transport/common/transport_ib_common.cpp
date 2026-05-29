@@ -209,6 +209,42 @@ static bool link_local_gid(union ibv_gid *gid) {
 
 static bool valid_gid(union ibv_gid *gid) { return (configured_gid(gid) && !link_local_gid(gid)); }
 
+static uint16_t extract_flid(const union ibv_gid *gid) {
+    uint16_t flid;
+    memcpy(&flid, gid->raw + 4, sizeof(flid));
+    return ntohs(flid);
+}
+
+static uint16_t extract_subnet_id(const union ibv_gid *gid) {
+    uint16_t subnet_id;
+    memcpy(&subnet_id, gid->raw + 6, sizeof(subnet_id));
+    return ntohs(subnet_id);
+}
+
+struct nvshmemt_ib_qp_path nvshmemt_ib_select_qp_path(const union ibv_gid *local_gid,
+                                                      uint16_t local_lid, uint16_t remote_lid,
+                                                      uint64_t remote_spn, uint64_t remote_iid) {
+    union ibv_gid remote_gid = {};
+    remote_gid.global.subnet_prefix = remote_spn;
+    remote_gid.global.interface_id = remote_iid;
+
+    bool same_subnet = extract_subnet_id(local_gid) == extract_subnet_id(&remote_gid);
+    uint16_t remote_flid = extract_flid(&remote_gid);
+    uint16_t dlid = remote_lid;
+
+    if (!same_subnet) {
+        if (remote_flid != 0) {
+            dlid = remote_flid;
+        } else {
+            NVSHMEMI_WARN_PRINT(
+                "IB remote FLID is zero for cross-subnet peer; falling back to peer LID %u.\n",
+                remote_lid);
+        }
+    }
+
+    return {dlid, !same_subnet || remote_lid == local_lid};
+}
+
 int ib_roce_get_version_num(const char *deviceName, int portNum, int gidIndex, int *version) {
     char gidRoceVerStr[16] = {0};
     char roceTypePath[PATH_MAX] = {0};
@@ -277,10 +313,26 @@ static void update_gid_index(const struct nvshmemt_ibv_function_table *ftable,
 }
 
 void ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct ibv_context *context,
-                      uint8_t portNum, int gidTblLen, int *gidIndex, int log_level,
-                      nvshmemi_options_s *options) {
+                      uint8_t portNum, const struct ibv_port_attr *portAttr, int *gidIndex,
+                      int log_level, nvshmemi_options_s *options) {
+    int gidTblLen = portAttr->gid_tbl_len;
+
     *gidIndex = options->IB_GID_INDEX;
     if (*gidIndex >= 0) {
+        return;
+    }
+
+    if (portAttr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        int routableGidIndex = options->IB_ROUTABLE_FLID_GID_INDEX;
+
+        *gidIndex = 0;
+        if (routableGidIndex >= 0 && routableGidIndex < gidTblLen) {
+            union ibv_gid gid = {};
+            int status = ftable->query_gid(context, portNum, routableGidIndex, &gid);
+            if (status == 0 && extract_flid(&gid) != 0) {
+                *gidIndex = routableGidIndex;
+            }
+        }
         return;
     }
 
@@ -1175,7 +1227,7 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
                 continue;
             }
 
-            ib_get_gid_index(ftable, device->context, p, device->port_attr[p - 1].gid_tbl_len,
+            ib_get_gid_index(ftable, device->context, p, &device->port_attr[p - 1],
                              &device->gid_info[p - 1].local_gid_index, log_level, options);
             status = ftable->query_gid(device->context, p, device->gid_info[p - 1].local_gid_index,
                                        &device->gid_info[p - 1].local_gid);

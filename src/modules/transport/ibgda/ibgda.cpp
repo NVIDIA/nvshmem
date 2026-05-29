@@ -1769,20 +1769,20 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     ah_attr.port_num = portid;
 
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
-        /* GRH is needed for cross-subnet IB (different subnet prefix). Same-subnet IB peers
-         * are LID-routable without GRH. NVSHMEM_IB_FORCE_GRH overrides automatic detection. */
-        if (ibgda_state->common.options->IB_FORCE_GRH ||
-            peer_ep_handle->spn !=
-                device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix) {
+        struct nvshmemt_ib_qp_path path = nvshmemt_ib_select_qp_path(
+            &device->common_device.gid_info[portid - 1].local_gid, port_attr->lid,
+            peer_ep_handle->lid, peer_ep_handle->spn, peer_ep_handle->iid);
+        ah_attr.dlid = path.dlid;
+        /* GRH is needed for cross-subnet IB and for ambiguous same-LID paths. */
+        if (ibgda_state->common.options->IB_FORCE_GRH || path.grh_required) {
             set_grh_fields();
         } else {
-            ah_attr.dlid = peer_ep_handle->lid;
             ah_attr.is_global = 0;
         }
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
 
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
+        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
                          (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
                          ibgda_state->common.log_level, ibgda_state->common.options);
         ftable.query_gid(device->common_device.context, portid,
@@ -1803,6 +1803,11 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     }
 
     ah = ftable.create_ah(device->common_device.pd, &ah_attr);
+    if (!ah && errno == EINVAL && port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND &&
+        !ah_attr.is_global) {
+        set_grh_fields();
+        ah = ftable.create_ah(device->common_device.pd, &ah_attr);
+    }
     if (!ah) {
         if (ah_attr.is_global) {
             NVSHMEMI_ERROR_JMP(
@@ -1858,7 +1863,7 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
         DEVX_SET(qpc, qpc, primary_address_path.mlid, 0);
         DEVX_SET(qpc, qpc, primary_address_path.tclass,
                  ibgda_state->common.options->IB_TRAFFIC_CLASS);
-        DEVX_SET(qpc, qpc, primary_address_path.rlid, peer_ep_handle->lid);
+        DEVX_SET(qpc, qpc, primary_address_path.rlid, ah_attr.dlid);
         DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->common.options->IB_SL);
         DEVX_SET(qpc, qpc, primary_address_path.grh, ah_attr.is_global);
         if (ah_attr.is_global) {
@@ -2486,6 +2491,18 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
 
     memset(&ah_attr, 0, sizeof(ah_attr));
 
+    auto set_grh_fields = [&]() {
+        ah_attr.is_global = 1;
+        ah_attr.grh.dgid.global.subnet_prefix =
+            device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix;
+        ah_attr.grh.dgid.global.interface_id =
+            device->common_device.gid_info[portid - 1].local_gid.global.interface_id;
+        ah_attr.grh.flow_label = 0;
+        ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
+        ah_attr.grh.traffic_class = ibgda_state->common.options->IB_TRAFFIC_CLASS;
+        ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
+    };
+
     bool support_half_av_seg;
     int hca_support_compact_address_vector;
 
@@ -2534,17 +2551,9 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
 
     /* GRH is needed for RoCE (lid == 0). For IB, the DCT self-AH uses LID routing;
      * the connecting RC initiator independently determines GRH need via subnet comparison.
-     * NVSHMEM_IB_FORCE_GRH overrides automatic detection. */
+     * If an OFED stack rejects the IB LID-only AH, retry with GRH below. */
     if (ibgda_state->common.options->IB_FORCE_GRH || port_attr->lid == 0) {
-        ah_attr.is_global = 1;
-        ah_attr.grh.dgid.global.subnet_prefix =
-            device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix;
-        ah_attr.grh.dgid.global.interface_id =
-            device->common_device.gid_info[portid - 1].local_gid.global.interface_id;
-        ah_attr.grh.flow_label = 0;
-        ah_attr.grh.sgid_index = device->common_device.gid_info[portid - 1].local_gid_index;
-        ah_attr.grh.traffic_class = ibgda_state->common.options->IB_TRAFFIC_CLASS;
-        ah_attr.grh.hop_limit = IBGDA_GRH_HOP_LIMIT;
+        set_grh_fields();
         support_half_av_seg = false;
     } else {
         /* Pure IB without GRH. */
@@ -2558,6 +2567,12 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     ah_attr.port_num = portid;
 
     ah = ftable.create_ah(device->common_device.pd, &ah_attr);
+    if (!ah && errno == EINVAL && port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND &&
+        !ah_attr.is_global) {
+        set_grh_fields();
+        support_half_av_seg = false;
+        ah = ftable.create_ah(device->common_device.pd, &ah_attr);
+    }
     if (!ah) {
         if (ah_attr.is_global) {
             NVSHMEMI_ERROR_JMP(

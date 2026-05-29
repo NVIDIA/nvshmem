@@ -477,18 +477,18 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
     };
 
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
-        attr.ah_attr.dlid = ep_handle->lid;
-        /* GRH is needed for cross-subnet IB (different subnet prefix). Same-subnet IB peers
-         * are LID-routable without GRH. NVSHMEM_IB_FORCE_GRH overrides automatic detection. */
-        if (ibrc_state->options->IB_FORCE_GRH ||
-            ep_handle->spn !=
-                device->common_device.gid_info[portid - 1].local_gid.global.subnet_prefix) {
+        struct nvshmemt_ib_qp_path path = nvshmemt_ib_select_qp_path(
+            &device->common_device.gid_info[portid - 1].local_gid, port_attr->lid, ep_handle->lid,
+            ep_handle->spn, ep_handle->iid);
+        attr.ah_attr.dlid = path.dlid;
+        /* GRH is needed for cross-subnet IB and for ambiguous same-LID paths. */
+        if (ibrc_state->options->IB_FORCE_GRH || path.grh_required) {
             set_grh_fields();
         } else {
             attr.ah_attr.is_global = 0;
         }
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr->gid_tbl_len,
+        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
                          &device->common_device.gid_info[portid - 1].local_gid_index,
                          ibrc_state->log_level, ibrc_state->options);
         ftable.query_gid(device->common_device.context, portid,
