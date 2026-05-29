@@ -1,18 +1,10 @@
-# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
-#
-# NVIDIA CORPORATION and its licensors retain all intellectual property
-# and proprietary rights in and to this software, related documentation
-# and any modifications thereto.  Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
-#
-# See License.txt for license information
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 from nvshmem.bindings.device.cute import *
 
 import cutlass
 from cutlass import cute
-from cutlass.cute.typing import dtype as cute_dtype
 from cutlass.base_dsl.ast_helpers import const_expr
 from cutlass.base_dsl.typing import cast as cute_cast
 
@@ -1342,4 +1334,3 @@ def g(src, pe):
         return half_g(src_ptr, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
-

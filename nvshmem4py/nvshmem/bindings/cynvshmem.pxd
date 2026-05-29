@@ -1,12 +1,5 @@
-# Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
-#
-# NVIDIA CORPORATION and its licensors retain all intellectual property
-# and proprietary rights in and to this software, related documentation
-# and any modifications thereto.  Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
-#
-# See License.txt for license information
+# Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
 # This code was automatically generated from NVSHMEM with version 3.3.0. 
 # Modify it directly at your own risk.
@@ -28,6 +21,18 @@ from libc.stdint cimport (
 ctypedef enum nvshmemx_signal_op_t "nvshmemx_signal_op_t":
     NVSHMEM_SIGNAL_SET "NVSHMEM_SIGNAL_SET" = 9
     NVSHMEM_SIGNAL_ADD "NVSHMEM_SIGNAL_ADD" = 10
+
+ctypedef enum nvshmemx_tma_policy_t "nvshmemx_tma_policy_t":
+    NVSHMEMX_TMA_DISABLE "NVSHMEMX_TMA_DISABLE" = 0
+    NVSHMEMX_TMA_ENABLE "NVSHMEMX_TMA_ENABLE" = 1
+    NVSHMEMX_TMA_FORCE "NVSHMEMX_TMA_FORCE" = 2
+    NVSHMEMX_TMA_POLICY_MAX "NVSHMEMX_TMA_POLICY_MAX" = 32767
+
+ctypedef enum nvshmemx_smem_amount_t "nvshmemx_smem_amount_t":
+    NVSHMEMX_SMEM_RECOMMENDED "NVSHMEMX_SMEM_RECOMMENDED" = 0
+    NVSHMEMX_SMEM_MINIMUM "NVSHMEMX_SMEM_MINIMUM" = 1
+    NVSHMEMX_SMEM_BARRIERS_ONLY "NVSHMEMX_SMEM_BARRIERS_ONLY" = 2
+    NVSHMEMX_SMEM_AMOUNT_MAX "NVSHMEMX_SMEM_AMOUNT_MAX" = 32767
 
 ctypedef enum nvshmemx_cmp_type_t "nvshmemx_cmp_type_t":
     NVSHMEM_CMP_EQ "NVSHMEM_CMP_EQ" = 0
@@ -85,11 +90,13 @@ ctypedef enum nvshmem_team_id_t "nvshmem_team_id_t":
     NVSHMEM_TEAM_SAME_GPU_INDEX "NVSHMEM_TEAM_SAME_GPU_INDEX" = 4
     NVSHMEMI_TEAM_GPU_LEADERS "NVSHMEMI_TEAM_GPU_LEADERS" = 5
     NVSHMEM_TEAM_GPU_LEADERS_INDEX "NVSHMEM_TEAM_GPU_LEADERS_INDEX" = 5
-    NVSHMEM_TEAMS_MIN "NVSHMEM_TEAMS_MIN" = 6
+    NVSHMEM_TEAM_MC_SHARED "NVSHMEM_TEAM_MC_SHARED" = 6
+    NVSHMEM_TEAM_MC_SHARED_INDEX "NVSHMEM_TEAM_MC_SHARED_INDEX" = 6
+    NVSHMEM_TEAMS_MIN "NVSHMEM_TEAMS_MIN" = 7
     NVSHMEM_TEAM_INDEX_MAX "NVSHMEM_TEAM_INDEX_MAX" = 32767
 
 ctypedef enum nvshmemx_status "nvshmemx_status":
-    NVSHMEMX_SUCCESS "NVSHMEMX_SUCCESS" = 0
+    NVSHMEMX_SUCCESS "NVSHMEMX_SUCCESS"
     NVSHMEMX_ERROR_INVALID_VALUE "NVSHMEMX_ERROR_INVALID_VALUE"
     NVSHMEMX_ERROR_OUT_OF_MEMORY "NVSHMEMX_ERROR_OUT_OF_MEMORY"
     NVSHMEMX_ERROR_NOT_SUPPORTED "NVSHMEMX_ERROR_NOT_SUPPORTED"

@@ -1,12 +1,5 @@
-# Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
-#
-# NVIDIA CORPORATION and its licensors retain all intellectual property
-# and proprietary rights in and to this software, related documentation
-# and any modifications thereto.  Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
-#
-# See License.txt for license information
+# Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
 # This code was automatically generated from NVSHMEM with version 3.3.0. 
 # Modify it directly at your own risk.
@@ -306,6 +299,20 @@ class Signal_op(_IntEnum):
     SIGNAL_SET = NVSHMEM_SIGNAL_SET
     SIGNAL_ADD = NVSHMEM_SIGNAL_ADD
 
+class Tma_policy(_IntEnum):
+    """See `nvshmemx_tma_policy_t`."""
+    TMA_DISABLE = NVSHMEMX_TMA_DISABLE
+    TMA_ENABLE = NVSHMEMX_TMA_ENABLE
+    TMA_FORCE = NVSHMEMX_TMA_FORCE
+    MAX = NVSHMEMX_TMA_POLICY_MAX
+
+class Smem_amount(_IntEnum):
+    """See `nvshmemx_smem_amount_t`."""
+    SMEM_RECOMMENDED = NVSHMEMX_SMEM_RECOMMENDED
+    SMEM_MINIMUM = NVSHMEMX_SMEM_MINIMUM
+    SMEM_BARRIERS_ONLY = NVSHMEMX_SMEM_BARRIERS_ONLY
+    MAX = NVSHMEMX_SMEM_AMOUNT_MAX
+
 class Cmp_type(_IntEnum):
     """See `nvshmemx_cmp_type_t`."""
     CMP_EQ = NVSHMEM_CMP_EQ
@@ -369,6 +376,8 @@ class Team_id(_IntEnum):
     TEAM_SAME_GPU_INDEX = NVSHMEM_TEAM_SAME_GPU_INDEX
     TEAM_GPU_LEADERS = NVSHMEMI_TEAM_GPU_LEADERS
     TEAM_GPU_LEADERS_INDEX = NVSHMEM_TEAM_GPU_LEADERS_INDEX
+    TEAM_MC_SHARED = NVSHMEM_TEAM_MC_SHARED
+    TEAM_MC_SHARED_INDEX = NVSHMEM_TEAM_MC_SHARED_INDEX
     TEAMS_MIN = NVSHMEM_TEAMS_MIN
     TEAM_INDEX_MAX = NVSHMEM_TEAM_INDEX_MAX
 
