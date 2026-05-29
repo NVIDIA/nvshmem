@@ -1502,6 +1502,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     int groupSize = nvshmemi_threadgroup_size<SCOPE>();
 
     assert(groupSize % warpSize == 0);
+    /* Pull-reduce reads the source through a multicast handle. One-shot stores through TMA S2G,
+     * while two-shot writes the destination through a multicast handle.
+     */
     assert(nvshmemi_is_addr_offset_aligned(src_ptr, CFT_HANDLE_TX_SIZE));
     assert(nvshmemi_tma_smem_registered());
     if constexpr (ONESHOT) {
@@ -1990,6 +1993,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
 
     assert(groupSize % warpSize == 0);
 
+    /* Local reduce copies the pull-reduced data through TMA S2G and reads the source through a
+     * multicast handle, so destination address and source heap offset must satisfy 16B alignment.
+     */
     assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst_ptr));
     assert(nvshmemi_is_addr_offset_aligned(src_ptr, CFT_HANDLE_TX_SIZE));
     assert(nvshmemi_tma_smem_registered());
@@ -2106,6 +2112,94 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
 
 /******* Tile collective functions ********/
 
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
+          rdxn_ops_t op, int ONESHOT, int major_dim, int minor_dim>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle_threadgroup_dim(
+    nvshmem_team_t team, src_tensor_t src_tensor, dst_tensor_t dst_tensor, tuple_t start_coord,
+    tuple_t boundary) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    using T = typename src_tensor_t::value_type;
+    if constexpr (is_handle_pullred_supported<T, op>()) {
+        nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+        const int size_major_dim = get_shape_element<major_dim>(src_tensor);
+        const int size_minor_dim = get_shape_element<minor_dim>(src_tensor);
+        const int valid_major_dim =
+            nvshmemi_tile_valid_dim_size<major_dim>(size_major_dim, start_coord, boundary);
+        const int valid_minor_dim =
+            nvshmemi_tile_valid_dim_size<minor_dim>(size_minor_dim, start_coord, boundary);
+
+        if ((valid_major_dim == 0) || (valid_minor_dim == 0)) {
+            return true;
+        }
+
+        const int src_stride_minor_dim = get_stride_element<minor_dim>(src_tensor);
+        const int dst_stride_minor_dim = get_stride_element<minor_dim>(dst_tensor);
+        const size_t row_bytes = valid_major_dim * sizeof(T);
+        const bool full_major_dim = (valid_major_dim == size_major_dim);
+        const bool is_fully_contiguous =
+            (valid_minor_dim == 1) || (full_major_dim && (src_stride_minor_dim == size_major_dim) &&
+                                       (dst_stride_minor_dim == size_major_dim));
+        const size_t reduce_bytes = is_fully_contiguous ? row_bytes * valid_minor_dim : row_bytes;
+
+        /* Handle pull-reduce needs an implemented multicast LE for this transfer size,
+         * registered TMA SMEM, global source/destination buffers, and a 16B-aligned source
+         * heap offset.
+         */
+        if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, reduce_bytes, scope) ||
+            !nvshmemi_tma_smem_registered() || __isShared(src_tensor.data()) ||
+            __isShared(dst_tensor.data()) ||
+            !nvshmemi_is_addr_offset_aligned(src_tensor.data(), CFT_HANDLE_TX_SIZE)) {
+            return false;
+        }
+
+        if constexpr (ONESHOT) {
+            /* One-shot writes the reduced tile through TMA shared-to-global, which requires a
+             * 16B-aligned local destination address.
+             */
+            if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst_tensor.data())) {
+                return false;
+            }
+        } else {
+            /* Two-shot writes the destination through multicast handles, so the destination heap
+             * offset must be 16B-aligned.
+             */
+            if (!nvshmemi_is_addr_offset_aligned(dst_tensor.data(), CFT_HANDLE_TX_SIZE)) {
+                return false;
+            }
+        }
+
+        if (is_fully_contiguous) {
+            nvshmemi_threadgroup_sync<scope>();
+            nvshmemi_handle_reduce_mcast_threadroup<T, scope, op, (ONESHOT != 0)>(
+                teami, dst_tensor.data(), src_tensor.data(), reduce_bytes / sizeof(T));
+            nvshmemi_threadgroup_sync<scope>();
+            return true;
+        }
+
+        /* Strided tiles issue one handle pull-reduce per row, so every row starting address must
+         * remain 16B-aligned for both source and destination.
+         */
+        if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
+            ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+            return false;
+        }
+
+        for (int i = 0; i < valid_minor_dim; ++i) {
+            const T *src_ptr = src_tensor.data() + src_stride_minor_dim * i;
+            T *dst_ptr = dst_tensor.data() + dst_stride_minor_dim * i;
+
+            nvshmemi_threadgroup_sync<scope>();
+            nvshmemi_handle_reduce_mcast_threadroup<T, scope, op, (ONESHOT != 0)>(
+                teami, dst_ptr, src_ptr, valid_major_dim);
+            nvshmemi_threadgroup_sync<scope>();
+        }
+
+        return true;
+    }
+#endif
+    return false;
+}
+
 // Select implementation based on the operation, datatype
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, rdxn_ops_t op,
           int ONESHOT, int major_dim, int minor_dim>
@@ -2219,6 +2313,12 @@ __device__ inline int nvshmemi_tile_allreduce_nvls_dim(nvshmem_team_t team, src_
                                                        dst_tensor_t dst_tensor, tuple_t start_coord,
                                                        tuple_t boundary) {
     using T = typename src_tensor_t::value_type;
+
+    if (nvshmemi_tile_allreduce_try_handle_threadgroup_dim<
+            src_tensor_t, dst_tensor_t, tuple_t, scope, op, ONESHOT, major_dim, minor_dim>(
+            team, src_tensor, dst_tensor, start_coord, boundary)) {
+        return NVSHMEMX_SUCCESS;
+    }
 
     // check for vector len == 4
     // Conditions: ptr must be aligned to int4, shape must be a multiple of 16, stride must be a
