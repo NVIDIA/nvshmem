@@ -422,6 +422,84 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
 
 // ************** Tile broadcast **************/
 
+template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
+          int major_dim, int minor_dim>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_threadgroup_dim(
+    nvshmem_team_t team, src_tensor_t src_tensor, dst_tensor_t dst_tensor, tuple_t start_coord,
+    tuple_t boundary) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    using T = typename src_tensor_t::value_type;
+    const int size_major_dim = get_shape_element<major_dim>(src_tensor);
+    const int size_minor_dim = get_shape_element<minor_dim>(src_tensor);
+    const int valid_major_dim =
+        nvshmemi_tile_valid_dim_size<major_dim>(size_major_dim, start_coord, boundary);
+    const int valid_minor_dim =
+        nvshmemi_tile_valid_dim_size<minor_dim>(size_minor_dim, start_coord, boundary);
+
+    if ((valid_major_dim == 0) || (valid_minor_dim == 0)) {
+        return true;
+    }
+
+    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+
+    /* Handle multicast needs a prioritized multicast LE, registered TMA SMEM, a 16B-aligned
+     * destination heap offset, and a 16B-aligned global source for TMA staging.
+     */
+    if (!nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
+                                                            CFT_HANDLE_TX_SIZE, scope) ||
+        !nvshmemi_tma_smem_registered() ||
+        !nvshmemi_is_addr_offset_aligned(dst_tensor.data(), CFT_HANDLE_TX_SIZE) ||
+        __isShared(src_tensor.data()) ||
+        !nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src_tensor.data())) {
+        return false;
+    }
+    const int src_stride_minor_dim = get_stride_element<minor_dim>(src_tensor);
+    const int dst_stride_minor_dim = get_stride_element<minor_dim>(dst_tensor);
+    const size_t row_bytes = valid_major_dim * sizeof(T);
+    const bool full_major_dim = (valid_major_dim == size_major_dim);
+    const bool is_fully_contiguous =
+        (valid_minor_dim == 1) || (full_major_dim && (src_stride_minor_dim == size_major_dim) &&
+                                   (dst_stride_minor_dim == size_major_dim));
+
+    if (is_fully_contiguous) {
+        const size_t copy_bytes = row_bytes * valid_minor_dim;
+        /* Fully contiguous tiles use one handle copy; ensure that transaction size is supported. */
+        if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, copy_bytes, scope)) {
+            return false;
+        }
+
+        nvshmemi_threadgroup_sync<scope>();
+        size_t leftover = nvshmemi_handle_mcast_memcpy_threadgroup<T, scope>(
+            teami, dst_tensor.data(), src_tensor.data(), copy_bytes);
+        assert(leftover == 0);
+        nvshmemi_threadgroup_sync<scope>();
+        return true;
+    }
+
+    /* Strided tiles issue one handle copy per row, so every row starting address must remain
+     * 16B-aligned for both source and destination.
+     */
+    if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
+        ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+        return false;
+    }
+
+    for (int i = 0; i < valid_minor_dim; ++i) {
+        T *src_ptr = src_tensor.data() + src_stride_minor_dim * i;
+        T *dst_ptr = dst_tensor.data() + dst_stride_minor_dim * i;
+
+        nvshmemi_threadgroup_sync<scope>();
+        size_t leftover =
+            nvshmemi_handle_mcast_memcpy_threadgroup<T, scope>(teami, dst_ptr, src_ptr, row_bytes);
+        assert(leftover == 0);
+        nvshmemi_threadgroup_sync<scope>();
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 template <typename elemType, threadgroup_t SCOPE, typename tuple_t, int major_dim, int minor_dim>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tile_bcast_threadgroup_v4(
     int4 *dest, const int4 *source, const int nelem_major_dim, const int nelem_minor_dim,
@@ -728,6 +806,12 @@ __device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team, src_ten
                                                     tuple_t boundary) {
     using T = typename src_tensor_t::value_type;
 
+    if (nvshmemi_tile_bcast_try_handle_threadgroup_dim<src_tensor_t, dst_tensor_t, tuple_t, scope,
+                                                       major_dim, minor_dim>(
+            team, src_tensor, dst_tensor, start_coord, boundary)) {
+        return;
+    }
+
     // check for vector len == 4
     // Conditions: ptr must be aligned to int4, shape must be a multiple of 16, stride must be a
     // multiple of 16
@@ -823,7 +907,6 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
                                           dst_tensor_t dst_tensor, tuple_t start_coord,
                                           tuple_t boundary, uint64_t flag) {
     using T = typename src_tensor_t::value_type;
-
     static_assert(
         std::is_same<typename src_tensor_t::value_type, typename dst_tensor_t::value_type>::value,
         "Source and destination tensors must have the same type");
