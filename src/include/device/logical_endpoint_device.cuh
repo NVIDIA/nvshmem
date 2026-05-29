@@ -253,6 +253,16 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe)
 #endif
 }
 
+__device__ __forceinline__ bool nvshmemi_is_multicast_le_supported_and_prioritized(
+    uint64_t le_id_with_flag, size_t size, threadgroup_t scope) {
+#if defined(CFT_HANDLES_ENABLED) && defined(PRIORITIZE_LOGICAL_ENDPOINT) && \
+    LE_HW_SW_REQUIREMENTS_MET
+    return nvshmemi_is_multicast_le_implemented(le_id_with_flag, size, scope);
+#else
+    return false;
+#endif
+}
+
 #if LE_HW_SW_REQUIREMENTS_MET
 #include <cuda_awbarrier_primitives.h>  // __mbarrier_*
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
