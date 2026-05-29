@@ -127,6 +127,21 @@ get_tuple_val(cuda::std::tuple<Args...> const& tuple) {
     return cuda::std::get<I>(tuple);
 }
 
+template <int dim, typename tuple_t>
+NVSHMEMI_HOSTDEVICE_PREFIX constexpr int nvshmemi_tile_valid_dim_size(int dim_size,
+                                                                      tuple_t start_coord,
+                                                                      tuple_t boundary) {
+    if constexpr (cuda::std::is_empty<tuple_t>::value) {
+        return dim_size;
+    } else if constexpr (dim >= tuple_size_traits<tuple_t>::value) {
+        return dim_size;
+    } else {
+        int remaining = get_tuple_val<dim>(boundary) - get_tuple_val<dim>(start_coord);
+        if (remaining <= 0) return 0;
+        return remaining < dim_size ? remaining : dim_size;
+    }
+}
+
 /*** Accessor functions for shape ***/
 /*** if index used is out of bounds, return 1 ***/
 // Primary template for shape access (out-of-bounds)
