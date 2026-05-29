@@ -444,6 +444,29 @@ def detect_cuda_coherence_model(device_ordinal: int = 0) -> str:
         return CUDA_COH_NONE  # Maxwell and older
 
 
+def _fabric_handles_supported(device_ordinal: int = 0) -> bool:
+    """Return True iff CUDA can issue CU_MEM_HANDLE_TYPE_FABRIC on this device.
+
+    CPU/GPU coherence (CUDA_COH_FULL) does NOT imply that the inter-GPU fabric
+    runtime (NVSwitch + nvidia-fabricmanager, or IMEX) is present. This probe
+    matches what libnvshmem uses internally before picking FABRIC vs POSIX_FD.
+
+    Note: True here only means the GPU silicon advertises fabric handles; the
+    actual cuMemCreate(..., FABRIC, ...) may still fail with NOT_PERMITTED if
+    fabric-manager/IMEX is not running. Callers should still be prepared to
+    fall back to posix_fd on that exception.
+    """
+    attr = getattr(driver.CUdevice_attribute,
+                   "CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED", None)
+    if attr is None:
+        return False
+    err, dev = driver.cuDeviceGet(device_ordinal)
+    if err != driver.CUresult.CUDA_SUCCESS:
+        return False
+    err, val = driver.cuDeviceGetAttribute(attr, dev)
+    return err == driver.CUresult.CUDA_SUCCESS and int(val) != 0
+
+
 def test_external_buffer():
     print("Testing external buffer")
     local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
@@ -455,21 +478,33 @@ def test_external_buffer():
     # We implement a new MemoryResource for VMM buffers.
     print("Creating VMMResource")
 
-    # For coherent platforms, always use fabric handles to support MNNVL.
-    # For non-coherent platforms, use the default handle type (posix_fd).
+    # Pick handle_type from the *fabric* capability, not CPU/GPU coherence.
+    # CUDA_COH_FULL is true on Grace-Hopper AND on x86+HMM boxes that have no
+    # NVSwitch/fabric-manager/IMEX (e.g. CG4), so coherence alone is not a safe
+    # signal for "fabric handles will work". We gate on both axes.
     coherence_model = detect_cuda_coherence_model(dev.device_id)
-    print("Coherence model:", coherence_model)
-    if coherence_model == CUDA_COH_FULL:
+    fabric_supported = _fabric_handles_supported(dev.device_id)
+    use_fabric = (coherence_model == CUDA_COH_FULL) and fabric_supported
+    print(f"Coherence model: {coherence_model}, fabric_supported: {fabric_supported}, use_fabric: {use_fabric}")
+    if use_fabric:
         options = VirtualMemoryResourceOptions(handle_type="fabric", gpu_direct_rdma=True)
     else:
         options = VirtualMemoryResourceOptions(gpu_direct_rdma=True)
 
-    if coherence_model != CUDA_COH_FULL and coherence_model != CUDA_COH_MIGRATION:
-        print("NOTICE: Non-coherent platform detected or CDMM mode detected. Using posix_fd handle type.")
-
     resource = VirtualMemoryResource(dev, config=options)
     print("Allocating Buffer using VMM APIs via VMMResource")
-    buffer1 = resource.allocate(536870912)
+    try:
+        buffer1 = resource.allocate(536870912)
+    except Exception as e:
+        # Safety net: HANDLE_TYPE_FABRIC_SUPPORTED can be 1 while the runtime
+        # (fabric-manager / IMEX) refuses to grant a channel, surfacing as
+        # CUDA_ERROR_NOT_PERMITTED. Downgrade to posix_fd in that case.
+        if not use_fabric:
+            raise
+        print(f"NOTICE: fabric handle allocation failed ({e}); falling back to posix_fd")
+        options = VirtualMemoryResourceOptions(gpu_direct_rdma=True)
+        resource = VirtualMemoryResource(dev, config=options)
+        buffer1 = resource.allocate(536870912)
     buffer2 = resource.allocate(536870912)
 
     print("Creating Torch Tensors from the buffers")
@@ -569,24 +604,29 @@ if __name__ == '__main__':
     elif args.init_type == "mpi":
         mpi_init()
 
-    test_buffer()
-    test_peer_buffer()
-    test_peer_array()
-    test_peer_tensor()
-    test_interop_cupy()
-    test_interop_torch()
-    test_del_buffer()
-    test_mc_buffer()
-    test_mc_tensor()
-    test_mc_array()
-    test_release_del_buffer()
-    test_buffer_scope_release_gc()
-    test_buffer_scope_release_gc_free()
-    test_buffer_scope_release_gc_free_reuse()
-    test_fortran_morder_alloc_torch()
-    test_fortran_morder_alloc_cupy()
-    test_external_buffer()
-    test_get_peer_memory_scope()
-    test_peer_buffer_reuse_updates_size()
-
-    nvshmem.core.finalize()
+    # Guarantee finalize() runs even if a test raises, so the NVSHMEM proxy
+    # thread is stopped and joined before CUDA teardown. Without this, an
+    # uncaught test exception leaves the proxy thread spinning on pinned-host
+    # buffers that CUDA unmaps during interpreter shutdown -> SIGSEGV.
+    try:
+        test_buffer()
+        test_peer_buffer()
+        test_peer_array()
+        test_peer_tensor()
+        test_interop_cupy()
+        test_interop_torch()
+        test_del_buffer()
+        test_mc_buffer()
+        test_mc_tensor()
+        test_mc_array()
+        test_release_del_buffer()
+        test_buffer_scope_release_gc()
+        test_buffer_scope_release_gc_free()
+        test_buffer_scope_release_gc_free_reuse()
+        test_fortran_morder_alloc_torch()
+        test_fortran_morder_alloc_cupy()
+        test_external_buffer()
+        test_get_peer_memory_scope()
+        test_peer_buffer_reuse_updates_size()
+    finally:
+        nvshmem.core.finalize()
