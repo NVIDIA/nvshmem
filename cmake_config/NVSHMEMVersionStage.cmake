@@ -18,4 +18,4 @@
 # precedence over environment values when both are set.
 
 set(NVSHMEM_VERSION_STAGE_DEFAULT "rc")
-set(NVSHMEM_VERSION_STAGE_NUMBER_DEFAULT "3")
+set(NVSHMEM_VERSION_STAGE_NUMBER_DEFAULT "4")
