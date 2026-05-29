@@ -64,10 +64,8 @@ def _skip_if_unsupported_amo(dtype, native_ib_supports_8byte=False):
         return
     if native_ib_supports_8byte and np.dtype(dtype).itemsize == 8:
         return
-    pytest.skip(
-        "Cross-node job without NVLink/P2P atomics; remote transport does "
-        f"not support this AMO for dtype={dtype}"
-    )
+    pytest.skip("Cross-node job without NVLink/P2P atomics; remote transport does "
+                f"not support this AMO for dtype={dtype}")
 
 
 @pytest.mark.mpi

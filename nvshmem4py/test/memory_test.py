@@ -456,8 +456,7 @@ def _fabric_handles_supported(device_ordinal: int = 0) -> bool:
     fabric-manager/IMEX is not running. Callers should still be prepared to
     fall back to posix_fd on that exception.
     """
-    attr = getattr(driver.CUdevice_attribute,
-                   "CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED", None)
+    attr = getattr(driver.CUdevice_attribute, "CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED", None)
     if attr is None:
         return False
     err, dev = driver.cuDeviceGet(device_ordinal)
