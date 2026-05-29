@@ -142,7 +142,8 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
     /* Both Grid and block are 1D */                                                              \
     __global__ void test_##TYPENAME##_tile_bcast_kernel_v##VLN##SC_SUFFIX(                        \
         nvshmem_team_t *teams_dev, TYPE *dest, TYPE *source, size_t nelems, size_t tensor_size_0, \
-        size_t tensor_size_1, int my_pe) {                                                        \
+        size_t tensor_size_1, int my_pe, size_t dynamic_smem_size) {                              \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                \
         /* source is already initialized */                                                       \
         size_t num_tiles_major, num_tiles_minor;                                                  \
         /* create layout */                                                                       \
@@ -205,14 +206,14 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
                     nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(                          \
                     teams_dev[team_id], src_tensor, dest_tensor, start_coord, boundary, 0);       \
                 if (tile_errs_d != NVSHMEMX_SUCCESS) {                                            \
-                    return;                                                                       \
+                    goto cleanup;                                                                 \
                 }                                                                                 \
             }                                                                                     \
         }                                                                                         \
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
         if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
-            return;                                                                               \
+            goto cleanup;                                                                         \
         }                                                                                         \
         /* validate data */                                                                       \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
@@ -240,7 +241,7 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
         if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
-            return;                                                                               \
+            goto cleanup;                                                                         \
         }                                                                                         \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
              i += gridDim.x * SC##s_per_block) {                                                  \
@@ -264,30 +265,36 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(VALIDATE_TILE_BCAST_DATA, NA)
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
         if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
-            return;                                                                               \
+            goto cleanup;                                                                         \
         }                                                                                         \
+    cleanup:                                                                                      \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                             \
     }
 
 NVSHMEMTEST_TILE_REPT_SCOPES_AND_VLEN(DEFN_TYPENAME_TILE_BCAST, NA, float, float)
 NVSHMEMTEST_TILE_REPT_SCOPES_AND_VLEN(DEFN_TYPENAME_TILE_BCAST, NA, half, half)
 NVSHMEMTEST_TILE_REPT_SCOPES_AND_VLEN(DEFN_TYPENAME_TILE_BCAST, NA, bfloat16, __nv_bfloat16)
 
-#define DO_PUT_TEST(OP, SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, VLN)                             \
-    init_##TYPENAME##_tile_data_kernel<<<8, 256, 0, cstrm>>>(                                      \
-        NVSHMEM_TEAM_WORLD, reinterpret_cast<TYPE *>(source), num_elems);                          \
-    CUDA_CHECK(cudaGetLastError());                                                                \
-    CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                      \
-                                                                                                   \
-    assert(V##VLN##_MATRIX_SHAPE % V##VLN##_TILE_SIZE_0 == 0);                                     \
-    assert(V##VLN##_MATRIX_SHAPE % V##VLN##_TILE_SIZE_1 == 0);                                     \
-                                                                                                   \
-    DEBUG_PRINT("Launching test with scope: %s %s %s\n", #SC, #TYPENAME, #VLN);                    \
-    test_##TYPENAME##_tile_bcast_kernel_v##VLN##SC_SUFFIX<<<grid_size, block_size, 0, cstrm>>>(    \
-        teams_dev, (TYPE *)dest, (TYPE *)source, num_elems,                                        \
-        V##VLN##_MATRIX_SHAPE /* tensor size 0*/, V##VLN##_MATRIX_SHAPE /* tensor size 1*/, mype); \
-    CUDA_CHECK(cudaGetLastError());                                                                \
-    CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                      \
-    TILE_CHECK_ERRS();                                                                             \
+#define DO_PUT_TEST(OP, SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, VLN)                            \
+    init_##TYPENAME##_tile_data_kernel<<<8, 256, 0, cstrm>>>(                                     \
+        NVSHMEM_TEAM_WORLD, reinterpret_cast<TYPE *>(source), num_elems);                         \
+    CUDA_CHECK(cudaGetLastError());                                                               \
+    CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                     \
+                                                                                                  \
+    assert(V##VLN##_MATRIX_SHAPE % V##VLN##_TILE_SIZE_0 == 0);                                    \
+    assert(V##VLN##_MATRIX_SHAPE % V##VLN##_TILE_SIZE_1 == 0);                                    \
+                                                                                                  \
+    DEBUG_PRINT("Launching test with scope: %s %s %s\n", #SC, #TYPENAME, #VLN);                   \
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##TYPENAME##_tile_bcast_kernel_v##VLN##SC_SUFFIX,      \
+                                      _dynamic_smem_size);                                        \
+    test_##TYPENAME##_tile_bcast_kernel_v##VLN##SC_SUFFIX<<<grid_size, block_size,                \
+                                                            _dynamic_smem_size, cstrm>>>(         \
+        teams_dev, (TYPE *)dest, (TYPE *)source, num_elems,                                       \
+        V##VLN##_MATRIX_SHAPE /* tensor size 0*/, V##VLN##_MATRIX_SHAPE /* tensor size 1*/, mype, \
+        _dynamic_smem_size);                                                                      \
+    CUDA_CHECK(cudaGetLastError());                                                               \
+    CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                     \
+    TILE_CHECK_ERRS();                                                                            \
     nvshmem_barrier_all();
 
 int main(int argc, char **argv) {
