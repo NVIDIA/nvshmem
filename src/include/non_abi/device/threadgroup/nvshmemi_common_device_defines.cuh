@@ -117,7 +117,8 @@ __device__ inline void nvshmemi_threadgroup_sync() {
                 threadIdx.x + (threadIdx.y * blockDim.x) + (threadIdx.z * blockDim.x * blockDim.y);
 
             // each warpgroup has a unique barrier id per CTA
-            barrierId = (tid / (4 * warpSize));
+            // barrierId = 0 is used for the threadgroup_sync barrier
+            barrierId = 1 + (tid / (4 * warpSize));
             // Ensure blocksize is a multiple of warpgroup size
             assert((blockDim.x * blockDim.y * blockDim.z) % (4 * warpSize) == 0);
             // Hardware limit on named barriers (max 16)
