@@ -470,9 +470,6 @@ if (NVSHMEM_TEST_RELEASE_PREFIX)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/host/init")
 endif()
 add_custom_target(kernel_nvshmem_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem.fatbin)
-if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
-  add_dependencies(kernel_nvshmem_dummy gpunetio_build)
-endif()
 
 # Non-RDC fatbin: compiled without -rdc=true, with all device functions inlined.
 # Single-stage compilation — no device-link step needed.
@@ -496,9 +493,6 @@ if (NVSHMEM_TEST_RELEASE_PREFIX)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/host/init")
 endif()
 add_custom_target(kernel_nvshmem_no_rdc_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/host/init/kernel_nvshmem_no_rdc.fatbin)
-if(NVSHMEM_GPUNETIO_SUPPORT AND NVSHMEM_BUILD_GPUNETIO_LIBRARY AND TARGET gpunetio_build)
-  add_dependencies(kernel_nvshmem_no_rdc_dummy gpunetio_build)
-endif()
 
 add_subdirectory(apps)
 add_subdirectory(device)
