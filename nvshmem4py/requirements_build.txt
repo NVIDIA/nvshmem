@@ -1,7 +1,8 @@
 # These are the build-time python/pip requirements for nvshmem4py
 # They are mostly required to run Cybind and build wheels
 networkx
-numpy<=2.3
+numpy<=2.3; python_version < "3.14"
+numpy>=2.3.3,<3; python_version >= "3.14"
 pycparser
 build
 Cython>=0.29.24
