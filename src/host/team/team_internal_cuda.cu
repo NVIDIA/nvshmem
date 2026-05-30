@@ -185,8 +185,8 @@ __global__ void nvshmemi_team_mapping_kernel(
             if (peer_uniqueid == uniqueid) {
                 nvshmemi_transfer_syncapi_update_mem();
 
-		// Wait until peer's pe_in_team is valid
-		 nvshmemi_wait_until_greater_than_equals<int>(
+                // Wait until peer's pe_in_team is valid
+                nvshmemi_wait_until_greater_than_equals<int>(
                     (volatile int *)&nvshmemi_team_creation_psync->pe_info[i].pe_in_team,
                     0,  // wait until value >= 0
                     NVSHMEMI_CALL_SITE_WAIT_UNTIL_GE

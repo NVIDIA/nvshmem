@@ -814,8 +814,8 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
         NVSHMEMU_FOR_EACH(i, unicast_endpoint_ids_with_flag_.size()) {
             if (IS_VALID_LE_ID(unicast_endpoint_ids_with_flag_[i])) {
             status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdRelease(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[i]), 1 /* count */));
-	        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-			        "cuLogicalEndpointIdRelease failed\n");
+                           NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                           "cuLogicalEndpointIdRelease failed\n");
             }
         }
         unicast_endpoint_ids_with_flag_.clear();

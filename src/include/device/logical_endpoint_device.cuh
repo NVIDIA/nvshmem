@@ -269,7 +269,7 @@ struct handle_barrier_t {
 
     inline __device__ bool try_wait_token(uint64_t state) {
         uint8_t err = 0;
-	    while(!try_wait_token_with_err(state, &err)) {}
+        while(!try_wait_token_with_err(state, &err)) {}
         assert(err == 0);
         return true;
     }
