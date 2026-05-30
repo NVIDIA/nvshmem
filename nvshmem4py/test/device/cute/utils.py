@@ -59,9 +59,8 @@ def _torch_view_of_cute_tensor(tensor, dtype_name):
     # via DLPack -- the same path ``nvshmem.core.interop.torch.tensor()`` uses
     # to expose NVSHMEM symmetric memory to Torch.  Routing host I/O through
     # Torch instead of raw ``cuMemcpy{HtoD,DtoH}`` avoids segfaults on
-    # libcuda's VMM-mapped symmetric heap (NVBug 5983765); raw cuMemcpyDtoH
-    # against that region traps inside ``cuMemcpyDtoH_v2`` while libcuda walks
-    # its allocation table.
+    # libcuda's VMM-mapped symmetric heap; raw cuMemcpyDtoH against that region
+    # traps inside ``cuMemcpyDtoH_v2`` while libcuda walks its allocation table.
     buf, _, _ = cute_interop.tensor_get_buffer(tensor)
     torch_dtype = _TORCH_DTYPE_MAP[dtype_name]
     return torch.utils.dlpack.from_dlpack(buf).view(torch_dtype).view(tuple(tensor.shape))
