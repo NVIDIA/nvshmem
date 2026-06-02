@@ -857,13 +857,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet(int pe = NVSHMEMX_P
     nvshmemi_tma_drain_if_registered();
 
     if (!nvshmemi_use_ldst_path()) {
+        /* Network path: Require membar.sys to ensure P2P store visibility. (use_membar = true). */
         nvshmemi_transfer_quiet<SCOPE>(true, pe, qp_handle, num_qps);
+    } else {
+        /* __threadfence_system is required for P2P store visibility. */
+        if (!myIdx)
+            __threadfence_system();
+        nvshmemi_threadgroup_sync<SCOPE>();
     }
-    /* __threadfence_system is required for both TMA (P2P NVLink) and regular
-     * P2P store visibility.  Issue unconditionally after all quiet paths. */
-    if (!myIdx)
-        __threadfence_system();
-    nvshmemi_threadgroup_sync<SCOPE>();
 }
 
 template __device__ void nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>(
