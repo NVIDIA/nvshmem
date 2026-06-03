@@ -2618,7 +2618,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_ibgda_rma_g_impl(
     uint64_t raddr;
     size_t rchunk_size;
 
+#ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp = ibgda_can_coalesce_warp_pe(amask, proxy_pe);
+#else
+    bool can_coalesce_warp = false;
+#endif
     bool can_combine_data = false;
     int pred_contiguous = 0;
     int pred_rkey = 0;
@@ -2795,7 +2799,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma(
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     int proxy_pe = ibgda_get_proxy_pe(dst_pe);
+#ifndef __clang_llvm_bitcode_lib__
     if (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+#else
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
+#endif
         if (state->support_half_av_seg) {
             ibgda_rma_thread<channel_op, false, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
                                                       proxy_pe, qp_index);
@@ -2803,6 +2811,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma(
             ibgda_rma_thread<channel_op, false, false>((uint64_t)rptr, (uint64_t)lptr, bytes,
                                                        dst_pe, proxy_pe, qp_index);
         }
+#ifndef __clang_llvm_bitcode_lib__
     } else {
         if (state->support_half_av_seg) {
             ibgda_rma<SCOPE, channel_op, false, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
@@ -2812,6 +2821,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma(
                                                        dst_pe, proxy_pe, qp_index);
         }
     }
+#else
+    }
+    nvshmemi_threadgroup_sync<SCOPE>();
+#endif
 }
 
 /**
