@@ -349,17 +349,29 @@ struct signal_seq_map {
         uint32_t seq, const nvshmemt_libfabric_comp_entry_t &e) {
         slot &s = slots[seq % window];
 
+        /* If this seq already lives in the direct-mapped slot, merge there. */
+        if (s.occupied && s.seq == seq) {
+            return {&s.entry, false};
+        }
+
+        /* A seq can only be claimed by the slot if the slot is free AND the seq
+         * is not already resident in overflow.  Otherwise a seq that previously
+         * collided into overflow (while the slot held a different seq) would get
+         * a second, split copy in the now-free slot -- find() checks the slot
+         * first, shadowing the overflow copy, so the put (-1) and signal
+         * (+num_writes) for one put-signal would never net to zero. */
         if (!s.occupied) {
+            auto ov = overflow.find(seq);
+            if (ov != overflow.end()) {
+                return {&ov->second, false};
+            }
             s.entry = e;
             s.seq = seq;
             s.occupied = true;
             return {&s.entry, true};
         }
 
-        if (s.seq == seq) {
-            return {&s.entry, false};
-        }
-
+        /* Slot occupied by a different seq -> this seq lives in overflow. */
         auto [it, inserted] = overflow.try_emplace(seq, e);
         return {&it->second, inserted};
     }
