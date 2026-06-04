@@ -36,9 +36,14 @@ packages = [
     "nvshmem.bindings",
     "nvshmem.bindings.device",
     "nvshmem.bindings.device.numba",
+    "nvshmem.bindings.device.numba_cuda_mlir",
+    "nvshmem.device",
+    "nvshmem.device.bindings",
+    "nvshmem.device.bindings.numba_cuda_mlir",
     "nvshmem.core",
     "nvshmem.core.device",
     "nvshmem.core.device.numba",
+    "nvshmem.core.device.numba_cuda_mlir",
     "nvshmem.core.device.cute"
 ]
 include-package-data = true
@@ -47,9 +52,12 @@ include-package-data = true
 "nvshmem.core" = ["*.py"]  # Match Python package name, not filesystem path
 "nvshmem.core.device" = ["*.py"]
 "nvshmem.core.device.numba" = ["*.py"]
+"nvshmem.core.device.numba_cuda_mlir" = ["*.py"]
 "nvshmem.bindings" = ["*.py", "*.pxd","*.so"]
 "nvshmem.bindings._internal" = ["*.py", "*.pxd", "*.so"]
 "nvshmem.bindings.device.numba" = ["*.py", "entry_point.h"]
+"nvshmem.bindings.device.numba_cuda_mlir" = ["*.py", "entry_point.h"]
+"nvshmem.device.bindings.numba_cuda_mlir" = ["*.py"]
 "nvshmem.bindings.device.cute" = ["*.py"]
 
 
