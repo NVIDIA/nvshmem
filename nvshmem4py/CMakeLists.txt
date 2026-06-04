@@ -21,6 +21,7 @@ include(cmake/buildWheel.cmake)
 # Set up shared Python env for bindings only when sources exist.
 if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addCybind.cmake" OR
    EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" OR
+   EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbastMlir.cmake" OR
    EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake")
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -74,6 +75,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BU
     )
 endif()
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbastMlir.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba_cuda_mlir/_numbast.py"))
+    include(cmake/addNumbastMlir.cmake)
+    AddNumbastMlir(
+        VERSION "0.10.0"
+    )
+endif()
+
 set(CUTEAST_OUTPUT "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py")
 set(CUTE_BINDINGS_ASSET_DIR "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute")
 set(CUTE_BINDINGS_INPUTS
@@ -110,6 +118,14 @@ endif()
 # Avoid race conditions by serializing pip installs.
 if(TARGET pip_install_cybind AND TARGET pip_install_numbast)
     add_dependencies(pip_install_numbast pip_install_cybind)
+endif()
+
+if(TARGET pip_install_numbast_mlir AND TARGET pip_install_numbast)
+    add_dependencies(pip_install_numbast_mlir pip_install_numbast)
+endif()
+
+if(TARGET pip_install_numbast_mlir AND TARGET pip_install_cybind)
+    add_dependencies(pip_install_numbast_mlir pip_install_cybind)
 endif()
 
 
@@ -220,6 +236,10 @@ foreach(LINE IN LISTS PYTHON_LINE_LIST)
 
         if(TARGET build_bindings_numbast AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
             add_dependencies(${WHEEL_TARGET} build_bindings_numbast)
+        endif()
+
+        if(TARGET build_bindings_numbast_mlir AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+            add_dependencies(${WHEEL_TARGET} build_bindings_numbast_mlir)
         endif()
 
         if(TARGET build_bindings_cute AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)

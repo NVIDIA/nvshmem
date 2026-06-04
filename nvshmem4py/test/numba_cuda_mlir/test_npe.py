@@ -1,0 +1,43 @@
+# Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from numba_cuda_mlir import cuda
+import cupy as cp
+import argparse
+from mpi4py import MPI
+
+from utils import uid_init, mpi_init
+
+from nvshmem.device.bindings.numba_cuda_mlir import n_pes
+from nvshmem.core import finalize
+
+
+def test_npe():
+
+    @cuda.jit(lto=True)
+    def kernel_nvshmem(destination):
+        npes = n_pes()
+        destination[0] = npes
+
+    npes = cp.zeros(1, dtype="int32")
+    kernel_nvshmem[1, 1](npes)
+    cuda.synchronize()
+
+    assert npes[0] > 0
+    print(f"{npes[0]=}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid"], default="uid")
+    args = parser.parse_args()
+    if args.init_type == "uid":
+        uid_init()
+    elif args.init_type == "mpi":
+        mpi_init()
+
+    try:
+        test_npe()
+    finally:
+        MPI.COMM_WORLD.Barrier()
+        finalize()

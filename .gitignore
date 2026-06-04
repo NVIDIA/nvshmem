@@ -101,6 +101,11 @@ nvshmem4py/pyproject.toml
 nvshmem4py/build_assets/cute/_cuteast.py
 nvshmem4py/build_assets/cute/config_nvshmem.yml
 nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py
+nvshmem4py/nvshmem/bindings/device/numba_cuda_mlir/_numbast.py
+nvshmem4py/nvshmem/core/device/numba_cuda_mlir/amo.py
+nvshmem4py/nvshmem/core/device/numba_cuda_mlir/collective.py
+nvshmem4py/nvshmem/core/device/numba_cuda_mlir/mem.py
+nvshmem4py/nvshmem/core/device/numba_cuda_mlir/rma.py
 
 # Filesystem objects
 .DS_STORE
