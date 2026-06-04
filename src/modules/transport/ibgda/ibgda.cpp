@@ -348,11 +348,9 @@ static int ibgda_num_fetch_slots_per_rc;
 static struct nvshmemt_ibv_function_table ftable;
 static void *ibv_handle;
 
-#ifdef NVSHMEM_USE_MLX5DV
 /* mlx5dv state */
 static struct nvshmemt_mlx5dv_function_table mlx5dv_ftable;
 static void *mlx5dv_handle;
-#endif
 
 /* CUDA function table */
 static struct nvshmemi_cuda_fn_table *ibgda_cuda_syms;
@@ -4426,11 +4424,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     nvshmemt_ibv_ftable_fini(&ibv_handle);
 
-#ifdef NVSHMEM_USE_MLX5DV
-    if (mlx5dv_handle) {
-        nvshmemt_mlx5dv_ftable_fini(&mlx5dv_handle);
-    }
-#endif
+    nvshmemt_ib_common_fini_mlx5dv(&mlx5dv_handle);
 
     free(ibgda_state->selected_dev_ids);
     ibgda_state->selected_dev_ids = NULL;
@@ -4795,13 +4789,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                            "Unable to dlopen libibverbs. Skipping IBGDA transport.\n");
     }
 
-#ifdef NVSHMEM_USE_MLX5DV
     nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
                                    ibgda_state->common.options->DISABLE_DATA_DIRECT,
                                    ibgda_state->common.log_level);
-#else
-    INFO(ibgda_state->common.log_level, "directNIC features are disabled");
-#endif
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (options->DISABLE_GDRCOPY) {

@@ -21,7 +21,17 @@
 #include "transport_common.h"                  // for LOAD_SYM, INFO, MAXPAT...
 
 static void *ibv_lib_handle = nullptr;
+#ifdef NVSHMEM_USE_MLX5DV
 static void *mlx5_lib_handle = nullptr;
+#endif
+
+static void nvshmemt_mlx5dv_ftable_clear(struct nvshmemt_mlx5dv_function_table *ftable) {
+    if (ftable) {
+        ftable->mlx5dv_internal_is_supported = nullptr;
+        ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
+        ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+    }
+}
 
 void nvshmemt_ib_common_sanitize_timeout(struct nvshmemi_options_s *options) {
     /*
@@ -405,7 +415,12 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
         CUPFN(table, cuMemGetHandleForAddressRange)) {
         size_t page_size = sysconf(_SC_PAGESIZE);
         size_t size_aligned;
+#ifdef NVSHMEM_USE_MLX5DV
         int handle_flag = is_data_direct ? CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE : 0;
+#else
+        assert(!is_data_direct);
+        int handle_flag = 0;
+#endif
         CUdeviceptr p;
         p = (CUdeviceptr)((uintptr_t)buf & ~(page_size - 1));
         size_aligned =
@@ -415,6 +430,7 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
                     cuMemGetHandleForAddressRange(&handle->fd, (CUdeviceptr)p, size_aligned,
                                                   CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, handle_flag),
                     status, out);
+#ifdef NVSHMEM_USE_MLX5DV
         if (is_data_direct) {
             NVSHMEMI_NULL_ERROR_JMP(mlx5dv_ftable, status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                                     "mlx5dv_ftable is NULL with data direct enabled\n");
@@ -428,7 +444,9 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
                 goto reg_dmabuf_failure;
             }
             INFO(log_level, "mlx5dv_reg_dmabuf_mr handle %p mr %p", handle, mr);
-        } else {
+        } else
+#endif
+        {
             mr = ftable->reg_dmabuf_mr(pd, 0, size_aligned, (uint64_t)p, handle->fd,
                                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                                            IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC |
@@ -487,6 +505,7 @@ out:
     return status;
 }
 
+#ifdef NVSHMEM_USE_MLX5DV
 bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
                                     const struct nvshmemt_ibv_function_table *ftable,
                                     const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable) {
@@ -515,6 +534,7 @@ bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
 out:
     return false;
 }
+#endif
 
 int nvshmemt_ib_common_check_poll_avail(nvshmem_transport_t tcurr, nvshmemt_ib_common_ep_ptr_t ep,
                                         nvshmemt_ib_wait_predicate_t wait_predicate) {
@@ -864,12 +884,14 @@ static void nvshmemt_ibv_ftable_fini_wrapper(void) {
     }
 }
 
+#ifdef NVSHMEM_USE_MLX5DV
 static void nvshmemt_mlx5dv_ftable_fini_wrapper(void) {
     if (mlx5_lib_handle) {
         dlclose(mlx5_lib_handle);
         mlx5_lib_handle = nullptr;
     }
 }
+#endif
 
 int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_table *ftable,
                              int log_level) {
@@ -912,6 +934,7 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
     return 0;
 }
 
+#ifdef NVSHMEM_USE_MLX5DV
 int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_function_table *ftable,
                                 int log_level) {
     if (mlx5_lib_handle != nullptr) {
@@ -923,9 +946,7 @@ int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_fun
         }
         if (*mlx5dv_handle == nullptr) {
             INFO(log_level, "Failed to open libmlx5.so[.1]");
-            ftable->mlx5dv_internal_is_supported = nullptr;
-            ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-            ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+            nvshmemt_mlx5dv_ftable_clear(ftable);
             return -1;
         }
         mlx5_lib_handle = *mlx5dv_handle;
@@ -940,6 +961,7 @@ int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_fun
 
     return 0;
 }
+#endif
 
 void nvshmemt_ibv_ftable_fini(void **ibv_handle) {
     if (ibv_handle) {
@@ -947,11 +969,13 @@ void nvshmemt_ibv_ftable_fini(void **ibv_handle) {
     }
 }
 
+#ifdef NVSHMEM_USE_MLX5DV
 void nvshmemt_mlx5dv_ftable_fini(void **mlx5dv_handle) {
     if (mlx5dv_handle) {
         *mlx5dv_handle = nullptr;
     }
 }
+#endif
 
 bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *name) {
     bool device_supported = false;
@@ -975,26 +999,40 @@ bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *na
     return device_supported;
 }
 
-#ifdef NVSHMEM_USE_MLX5DV
 int nvshmemt_ib_common_init_mlx5dv(void **mlx5dv_handle,
                                    struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
-                                   bool disable_data_direct, int log_level) {
+                                   [[maybe_unused]] bool disable_data_direct, int log_level) {
+#ifdef NVSHMEM_USE_MLX5DV
     if (!disable_data_direct) {
         if (nvshmemt_mlx5dv_ftable_init(mlx5dv_handle, mlx5dv_ftable, log_level)) {
             NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.");
-            mlx5dv_ftable->mlx5dv_internal_is_supported = nullptr;
-            mlx5dv_ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-            mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+            nvshmemt_mlx5dv_ftable_clear(mlx5dv_ftable);
         }
     } else {
-        mlx5dv_ftable->mlx5dv_internal_is_supported = nullptr;
-        mlx5dv_ftable->mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-        mlx5dv_ftable->mlx5dv_internal_reg_dmabuf_mr = nullptr;
+        nvshmemt_mlx5dv_ftable_clear(mlx5dv_ftable);
         INFO(log_level, "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
     }
+#else
+    if (mlx5dv_handle) {
+        *mlx5dv_handle = nullptr;
+    }
+    nvshmemt_mlx5dv_ftable_clear(mlx5dv_ftable);
+    INFO(log_level, "directNIC features are disabled");
+#endif
     return 0;
 }
+
+void nvshmemt_ib_common_fini_mlx5dv(void **mlx5dv_handle) {
+#ifdef NVSHMEM_USE_MLX5DV
+    if (mlx5dv_handle && *mlx5dv_handle) {
+        nvshmemt_mlx5dv_ftable_fini(mlx5dv_handle);
+    }
+#else
+    if (mlx5dv_handle) {
+        *mlx5dv_handle = nullptr;
+    }
 #endif
+}
 
 int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
                                         const struct nvshmemt_ib_common_state &state) {

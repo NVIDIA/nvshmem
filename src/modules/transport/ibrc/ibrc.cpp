@@ -209,10 +209,8 @@ static int nvshmemt_ibrc_release_gdrcopy_mapping(ibrc_mem_handle_info_t &handle_
 static struct nvshmemt_ibv_function_table ftable;
 static void *ibv_handle;
 
-#ifdef NVSHMEM_USE_MLX5DV
 static struct nvshmemt_mlx5dv_function_table mlx5dv_ftable;
 static void *mlx5dv_handle;
-#endif
 
 int progress_send(nvshmemt_ib_common_state_t ibrc_state);
 int progress_recv_wrapper(nvshmem_transport_t tcurr, nvshmemt_ib_wait_predicate_t wait_predicate);
@@ -955,11 +953,7 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
 
     nvshmemt_ibv_ftable_fini(&ibv_handle);
 
-#ifdef NVSHMEM_USE_MLX5DV
-    if (mlx5dv_handle) {
-        nvshmemt_mlx5dv_ftable_fini(&mlx5dv_handle);
-    }
-#endif
+    nvshmemt_ib_common_fini_mlx5dv(&mlx5dv_handle);
 
 out:
     return status;
@@ -1686,12 +1680,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                            "Unable to dlopen libibverbs. Skipping devx transport.");
     }
 
-#ifdef NVSHMEM_USE_MLX5DV
     nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
                                    ibrc_state->options->DISABLE_DATA_DIRECT, ibrc_state->log_level);
-#else
-    INFO(ibrc_state->log_level, "directNIC features are disabled");
-#endif
 
     ftable.fork_init();
 

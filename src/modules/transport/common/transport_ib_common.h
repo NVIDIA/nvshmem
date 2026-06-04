@@ -185,10 +185,6 @@ struct nvshmemt_mlx5dv_function_table {
                                                     int access, int mlx5_access);
 };
 
-bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
-                                    const struct nvshmemt_ibv_function_table *ftable,
-                                    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
-
 int nvshmemt_ib_iface_get_mlx_path(ibv_device *dev, ibv_context *ctx, char **path,
                                    const struct nvshmemt_ibv_function_table *ftable,
                                    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
@@ -198,9 +194,14 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
                              int log_level);
 void nvshmemt_ibv_ftable_fini(void **ibv_handle);
 
+#ifdef NVSHMEM_USE_MLX5DV
 int nvshmemt_mlx5dv_ftable_init(void **mlx5dv_handle, struct nvshmemt_mlx5dv_function_table *ftable,
                                 int log_level);
 void nvshmemt_mlx5dv_ftable_fini(void **mlx5dv_handle);
+bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
+                                    const struct nvshmemt_ibv_function_table *ftable,
+                                    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
+#endif
 
 void nvshmemt_ib_common_sanitize_timeout(struct nvshmemi_options_s *options);
 void nvshmemt_ib_common_sanitize_retry_cnt(struct nvshmemi_options_s *options);
@@ -239,11 +240,10 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
 /* Helper function to filter devices based on HCA_PREFIX */
 bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *name);
 
-#ifdef NVSHMEM_USE_MLX5DV
 int nvshmemt_ib_common_init_mlx5dv(void **mlx5dv_handle,
                                    struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable,
                                    bool disable_data_direct, int log_level);
-#endif
+void nvshmemt_ib_common_fini_mlx5dv(void **mlx5dv_handle);
 
 struct nvshmemt_ib_hca_filter {
     struct nvshmemt_hca_info hca_list[MAX_NUM_HCAS];
