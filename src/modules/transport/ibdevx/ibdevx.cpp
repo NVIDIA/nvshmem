@@ -215,10 +215,8 @@ static int nvshmemt_ibdevx_max_rd_atomic = INT_MAX;
 static struct nvshmemt_ibv_function_table ftable;
 static void *ibv_handle;
 
-#ifdef NVSHMEM_USE_MLX5DV
 static struct nvshmemt_mlx5dv_function_table mlx5dv_ftable;
 static void *mlx5dv_handle;
-#endif
 
 int nvshmemt_ibdevx_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("ibdevx show info not implemented");
@@ -1048,11 +1046,7 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
     }
 
     nvshmemt_ibv_ftable_fini(&ibv_handle);
-#ifdef NVSHMEM_USE_MLX5DV
-    if (mlx5dv_handle) {
-        nvshmemt_mlx5dv_ftable_fini(&mlx5dv_handle);
-    }
-#endif
+    nvshmemt_ib_common_fini_mlx5dv(&mlx5dv_handle);
 
     status = pthread_mutex_destroy(&ibdevx_mutex_send_progress);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "pthread_mutex_destroy failed\n");
@@ -1753,13 +1747,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                            "Unable to dlopen libibverbs. Skipping devx transport.");
     }
 
-#ifdef NVSHMEM_USE_MLX5DV
     nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
                                    ibdevx_state->options->DISABLE_DATA_DIRECT,
                                    ibdevx_state->log_level);
-#else
-    INFO(ibdevx_state->log_level, "directNIC features are disabled");
-#endif
 
     if (ibdevx_state->options->DISABLE_IB_NATIVE_ATOMICS) {
         use_ib_native_atomics = 0;

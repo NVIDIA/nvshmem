@@ -355,10 +355,8 @@ struct nvshmemt_gpunetio_state_t {
     // Function tables
     nvshmemt_ibv_function_table ftable = {};
     void *ibv_handle = nullptr;
-#ifdef NVSHMEM_USE_MLX5DV
     nvshmemt_mlx5dv_function_table mlx5dv_ftable = {};
     void *mlx5dv_handle = nullptr;
-#endif
     nvshmemi_cuda_fn_table *cuda_syms = nullptr;
 
    private:
@@ -1186,23 +1184,8 @@ int nvshmemt_gpunetio_state_t::init_ftables(nvshmemi_options_s *options,
                            "Unable to dlopen libibverbs. Skipping DOCA transport.\n");
     }
 
-#ifdef NVSHMEM_USE_MLX5DV
-    if (!options->DISABLE_DATA_DIRECT) {
-        if (nvshmemt_mlx5dv_ftable_init(&mlx5dv_handle, &mlx5dv_ftable, log_level)) {
-            NVSHMEMI_WARN_PRINT("Unable to dlopen libmlx5dv. Disabling directNIC features.\n");
-            mlx5dv_ftable.mlx5dv_internal_is_supported = nullptr;
-            mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-            mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = nullptr;
-        }
-    } else {
-        mlx5dv_ftable.mlx5dv_internal_is_supported = nullptr;
-        mlx5dv_ftable.mlx5dv_internal_get_data_direct_sysfs_path = nullptr;
-        mlx5dv_ftable.mlx5dv_internal_reg_dmabuf_mr = nullptr;
-        INFO(log_level, "directNIC features are disabled by NVSHMEM_DISABLE_DATA_DIRECT=1");
-    }
-#else
-    INFO(log_level, "directNIC features are disabled\n");
-#endif
+    nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
+                                   options->DISABLE_DATA_DIRECT, log_level);
 
     return NVSHMEMX_SUCCESS;
 }
@@ -1803,11 +1786,7 @@ nvshmemt_gpunetio_state_t::~nvshmemt_gpunetio_state_t() {
     if (ibv_handle) {
         nvshmemt_ibv_ftable_fini(&ibv_handle);
     }
-#ifdef NVSHMEM_USE_MLX5DV
-    if (mlx5dv_handle) {
-        nvshmemt_mlx5dv_ftable_fini(&mlx5dv_handle);
-    }
-#endif
+    nvshmemt_ib_common_fini_mlx5dv(&mlx5dv_handle);
 }
 
 // Transport C wrappers
