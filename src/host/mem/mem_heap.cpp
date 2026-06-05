@@ -62,6 +62,22 @@ std::mutex& get_cs_mutex() {
 }
 }  // namespace
 
+static bool nvshmemi_should_process_nvls_team_pool_entry(size_t team_idx) {
+    const size_t mc_shared_idx = static_cast<size_t>(NVSHMEM_TEAM_MC_SHARED_INDEX);
+    const size_t shared_idx = static_cast<size_t>(NVSHMEM_TEAM_SHARED_INDEX);
+
+    if (nvshmemi_team_pool == NULL || nvshmemi_max_teams <= 0) return false;
+
+    const size_t max_teams = static_cast<size_t>(nvshmemi_max_teams);
+    if (team_idx >= max_teams || nvshmemi_team_pool[team_idx] == NULL) return false;
+
+    bool is_mc_shared_alias =
+        team_idx == mc_shared_idx && max_teams > mc_shared_idx &&
+        nvshmemi_team_pool[mc_shared_idx] == nvshmemi_team_pool[shared_idx];
+
+    return !is_mc_shared_alias && nvshmemi_team_support_nvls(nvshmemi_team_pool[team_idx]);
+}
+
 long nvshmem_error = 0;
 
 #define LE_IPC_HANDLE_TYPE CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC
@@ -1768,9 +1784,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_create_heap_memory(uint64_t
     if (!get_state()->is_platform_nvls) return (status);
 
     NVSHMEMU_FOR_EACH_IF(
-        i, nvshmemi_max_teams,
-        nvshmemi_team_pool != NULL && nvshmemi_team_pool[i] != NULL &&
-            nvshmemi_team_support_nvls(nvshmemi_team_pool[i]),
+        i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i),
         {
             team = nvshmemi_team_pool[i];
             status = nvls_create_heap_memory_by_size(team, mem_size);
@@ -1818,9 +1832,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_bind_heap_memory(
     nvshmem_mem_handle_t *mem_handle, off_t mc_offset, off_t mmap_offset, size_t mmap_size) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
     if (!get_state()->is_platform_nvls) return (status);
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams,
-                         nvshmemi_team_pool != NULL && nvshmemi_team_pool[i] != NULL &&
-                             nvshmemi_team_support_nvls(nvshmemi_team_pool[i]),
+    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i),
                          {
                              status =
                                  nvls_bind_heap_memory_by_size(nvshmemi_team_pool[i], mem_handle,
@@ -1872,9 +1884,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_map_heap_memory(uint64_t si
                                                                      off_t mc_offset) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
     if (!get_state()->is_platform_nvls) return (status);
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams,
-                         nvshmemi_team_pool != NULL && nvshmemi_team_pool[i] != NULL &&
-                             nvshmemi_team_support_nvls(nvshmemi_team_pool[i]),
+    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i),
                          {
                              status = nvls_map_heap_memory_by_size(nvshmemi_team_pool[i], size,
                                                                    mmap_offset, mc_offset);
@@ -1955,9 +1965,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_unmap_heap_memory(off_t mc_
     int status = 0;
     if (!get_state()->is_platform_nvls) return status;
 
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams,
-                         nvshmemi_team_pool != NULL && nvshmemi_team_pool[i] != NULL &&
-                             nvshmemi_team_support_nvls(nvshmemi_team_pool[i]),
+    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i),
                          {
                              status = nvls_unmap_heap_memory_by_size(nvshmemi_team_pool[i],
                                                                      mc_offset, size);
@@ -1996,9 +2004,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_unbind_heap_memory_by_size(
     nvls::nvshmemi_nvls_rsc *nvls_obj;
     // for all teams unbind mc_handle
     NVSHMEMU_FOR_EACH_IF(
-        i, nvshmemi_max_teams,
-        nvshmemi_team_pool != NULL && nvshmemi_team_pool[i] != NULL &&
-            nvshmemi_team_support_nvls(nvshmemi_team_pool[i]),
+        i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i),
         {
             nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(nvshmemi_team_pool[i]->nvls_rsc);
             if (nvls_obj == nullptr || !nvls_obj->is_owner(nvshmemi_team_pool[i])) continue;

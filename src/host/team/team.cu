@@ -104,7 +104,7 @@ void nvshmem_team_destroy(nvshmem_team_t team) {
         team == NVSHMEMI_TEAM_GPU_LEADERS)
         NVSHMEMI_ERROR_PRINT("Cannot destroy a pre-defined team");
     if (team == NVSHMEM_TEAM_INVALID) return;
-    if (team >= nvshmemi_max_teams){
+    if (team >= nvshmemi_max_teams) {
         NVSHMEMI_ERROR_PRINT("Cannot destroy a team with an invalid handle");
         return;
     }
