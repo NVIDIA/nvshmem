@@ -1,6 +1,7 @@
 nvshmem_add_test(cuobject_init.cpp)
 nvshmem_add_test(cuobject_init_no_rdc.cpp)
 nvshmem_add_test_no_device(host_api_no_rdc.cu)
+target_compile_definitions(host_host_api_no_rdc PRIVATE NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
 nvshmem_add_test(nvrtc_api.cpp)
 nvshmem_add_test(nvrtc_numba_include.cpp)
 nvshmem_add_test(nvrtc_numba_ltoir.cpp)
