@@ -74,7 +74,6 @@ def test_get_on_array(nvshmem_init_fini, dtype):
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
     assert (buf_dst == nvshmem.core.my_pe() + 1).all()
-    del nb_stream
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
@@ -117,7 +116,6 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
-    del nb_stream
     print("Done testing put signal on Array")
 
 
