@@ -64,6 +64,10 @@ int nvshmemt_parse_hca_list(const char *string, struct nvshmemt_hca_info *hca_li
                 hca_list[if_num].port = -1;
                 hca_list[if_num].count = 1;
             }
+            if (if_counter >= static_cast<int>(sizeof(hca_list[if_num].name) - 1)) {
+                NVSHMEMI_ERROR_PRINT("HCA name too long in HCA list\n");
+                return -1;
+            }
             hca_list[if_num].name[if_counter] = c;
             if_counter++;
         }

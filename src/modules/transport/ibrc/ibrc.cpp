@@ -1746,7 +1746,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibrc_state->srq_depth = ibrc_state->options->SRQ_DEPTH;
     // qp_depth and srq_depth are now accessed directly from ibrc_state
 
-    nvshmemt_ib_common_parse_hca_filter(hca_filter, *ibrc_state);
+    status = nvshmemt_ib_common_parse_hca_filter(hca_filter, *ibrc_state);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                          "HCA filter parsing failed.\n");
 
     status = nvshmemt_ib_common_enumerate_devices(&ftable, *ibrc_state, sizeof(struct ibrc_device),
                                                   hca_filter, dev_list, num_devices);

@@ -1803,7 +1803,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = pthread_mutex_init(&ibdevx_mutex_send_progress, NULL);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "pthread_mutex_init failed \n");
 
-    nvshmemt_ib_common_parse_hca_filter(hca_filter, *ibdevx_state);
+    status = nvshmemt_ib_common_parse_hca_filter(hca_filter, *ibdevx_state);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                          "HCA filter parsing failed.\n");
 
     status = nvshmemt_ib_common_enumerate_devices(
         &ftable, *ibdevx_state, sizeof(struct ibdevx_device), hca_filter, dev_list, num_devices);
