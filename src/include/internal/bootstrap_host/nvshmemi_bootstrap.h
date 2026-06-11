@@ -16,8 +16,8 @@
 #define NVSHMEM_BOOTSTRAP_MAJOR_VERSION(ver) (ver / 10000)
 #define NVSHMEM_BOOTSTRAP_MAJOR_MINOR_VERSION(ver) (ver / 100)
 
-inline bool nvshmemi_is_bootstrap_compatible(int bootstrap_version, int nvshmem_version,
-                                             bool boot_backward_compatible) {
+static inline bool nvshmemi_is_bootstrap_compatible(int bootstrap_version, int nvshmem_version,
+                                                    bool boot_backward_compatible) {
     if (NVSHMEM_BOOTSTRAP_MAJOR_VERSION(bootstrap_version) !=
         NVSHMEM_BOOTSTRAP_MAJOR_VERSION(nvshmem_version)) {
         return false;
