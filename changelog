@@ -20,6 +20,10 @@
 - Switched to C++17 as the minimum required C++ version.
 - Changed licensing to Apache-2.0 and added DCO contributing guidance.
 
+### Breaking Changes
+
+- The LLVM bitcode device library is now shipped as per-architecture files named `libnvshmem_device_sm_<arch>.bc`. Tools that assumed the bitcode device library was a single, architecture-independent `libnvshmem_device.bc` file must be updated to select the bitcode file that matches the target GPU architecture. A compatibility `libnvshmem_device.bc` entry may be present for `sm_90` builds, but it should not be treated as portable across GPU architectures.
+
 ### Bug Fixes
 
 - Fixed build portability issues around C++17/C++20 compilation, GNU extensions, and device-library CUDA architecture propagation.
