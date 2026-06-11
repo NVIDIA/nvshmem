@@ -191,7 +191,7 @@ int bootstrap_init(int flags, bootstrap_attr_t *attr, bootstrap_handle_t *handle
                        strcmp_case_insensitive(nvshmemi_options.BOOTSTRAP_PMI, "PMI2") == 0) {
                 plugin_name = nvshmemi_options.BOOTSTRAP_PMI2_PLUGIN;
                 status = bootstrap_loader_init(plugin_name, NULL, handle);
-                if (status && !nvshmemi_options.BOOTSTRAP_PMI_PLUGIN_provided) {
+                if (status && !nvshmemi_options.BOOTSTRAP_PMI2_PLUGIN_provided) {
                     status = bootstrap_loader_init(LEGACY_BOOTSTRAP_MODULE_PMI2, NULL, handle);
                 }
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -200,7 +200,7 @@ int bootstrap_init(int flags, bootstrap_attr_t *attr, bootstrap_handle_t *handle
             } else if (strcmp_case_insensitive(nvshmemi_options.BOOTSTRAP_PMI, "PMI") == 0) {
                 plugin_name = nvshmemi_options.BOOTSTRAP_PMI_PLUGIN;
                 status = bootstrap_loader_init(plugin_name, NULL, handle);
-                if (status && !nvshmemi_options.BOOTSTRAP_UID_PLUGIN_provided) {
+                if (status && !nvshmemi_options.BOOTSTRAP_PMI_PLUGIN_provided) {
                     status = bootstrap_loader_init(LEGACY_BOOTSTRAP_MODULE_PMI, NULL, handle);
                 }
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -232,7 +232,7 @@ int bootstrap_init(int flags, bootstrap_attr_t *attr, bootstrap_handle_t *handle
             plugin_name = nvshmemi_options.BOOTSTRAP_UID_PLUGIN;
 
             status = bootstrap_loader_init(plugin_name, (attr->uid_args), handle);
-            if (status && !nvshmemi_options.BOOTSTRAP_PMI_PLUGIN_provided) {
+            if (status && !nvshmemi_options.BOOTSTRAP_UID_PLUGIN_provided) {
                 status =
                     bootstrap_loader_init(LEGACY_BOOTSTRAP_MODULE_UID, (attr->uid_args), handle);
             }
