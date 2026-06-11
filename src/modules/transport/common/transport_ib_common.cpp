@@ -1038,6 +1038,7 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
                                         const struct nvshmemt_ib_common_state &state) {
     struct nvshmemi_options_s *options = state.options;
     int log_level = state.log_level;
+    int status = 0;
     filter.hca_list_count = 0;
     filter.pe_hca_map_count = 0;
     filter.user_selection = 0;
@@ -1046,8 +1047,9 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
     if (options->HCA_LIST_provided) {
         filter.user_selection = 1;
         filter.exclude_list = (options->HCA_LIST[0] == '^');
-        filter.hca_list_count =
-            nvshmemt_parse_hca_list(options->HCA_LIST, filter.hca_list, MAX_NUM_HCAS, log_level);
+        status = nvshmemt_parse_hca_list(options->HCA_LIST, filter.hca_list, MAX_NUM_HCAS, log_level);
+        if (status < 0) return NVSHMEMX_ERROR_INVALID_VALUE;
+        filter.hca_list_count = status;
     }
 
     if (options->HCA_PE_MAPPING_provided) {
@@ -1058,8 +1060,10 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
                 "NVSHMEM_HCA_PE_MAPPING \n");
         } else {
             filter.user_selection = 1;
-            filter.pe_hca_map_count = nvshmemt_parse_hca_list(
-                options->HCA_PE_MAPPING, filter.pe_hca_mapping, MAX_NUM_PES_PER_NODE, log_level);
+            status = nvshmemt_parse_hca_list(options->HCA_PE_MAPPING, filter.pe_hca_mapping,
+                                             MAX_NUM_PES_PER_NODE, log_level);
+            if (status < 0) return NVSHMEMX_ERROR_INVALID_VALUE;
+            filter.pe_hca_map_count = status;
         }
     }
 

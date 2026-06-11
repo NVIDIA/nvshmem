@@ -4848,7 +4848,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibgda_state->common.port_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibgda_state->common.port_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "malloc failed \n");
-    nvshmemt_ib_common_parse_hca_filter(hca_filter, ibgda_state->common);
+    status = nvshmemt_ib_common_parse_hca_filter(hca_filter, ibgda_state->common);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                          "HCA filter parsing failed.\n");
 
     nic_mapping_memtype_request =
         ibgda_parse_nic_mapping_memtype_request(options->IBGDA_FORCE_NIC_BUF_MEMTYPE);
