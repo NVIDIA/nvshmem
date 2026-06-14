@@ -1860,6 +1860,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
     uint32_t blkIdx_flat = nvshmemi_get_flat_blk_idx();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx_flat];
+    // Copy-style handle operations allocate one SMEM/barrier pair per calling threadgroup.
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
     /* Only following threads enter this code path:

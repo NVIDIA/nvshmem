@@ -1514,11 +1514,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     uint32_t byte_offset_src = 0;
     uint32_t byte_offset_dst = 0;
     uint32_t pending_bytes_copy = 0;
-    // for 2shot, each warp will use 2 barriers
-    uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / 2;
-    if constexpr (ONESHOT) {
-        max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS;
-    }
+    // Each active warp owns one data chunk per stage and one barrier slot per stage.
+    uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES;
     size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
     size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
     max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
@@ -1531,10 +1528,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     work_warps = work_warps ? work_warps : 1;
     uint32_t num_warps = max_warps < work_warps ? max_warps : work_warps;
     uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
-    uint32_t warpIdx = myIdx / warpSize;
-    size_t start_offset_warp = warpIdx * warpchunk_size * num_warpchunks_per_warp;
+    // Work partitioning is relative to the calling threadgroup.
+    uint32_t warp_idx_in_scope = myIdx / warpSize;
+    size_t start_offset_warp = warp_idx_in_scope * warpchunk_size * num_warpchunks_per_warp;
     size_t bytes_per_warp = warpchunk_size * num_warpchunks_per_warp;
-    if (warpIdx == num_warps - 1) {
+    if (warp_idx_in_scope == num_warps - 1) {
         bytes_per_warp = len - start_offset_warp;
     }
 
@@ -1543,22 +1541,26 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
 
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
     uintptr_t tma_smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+    uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
+    // SMEM data chunks and handle barrier slots are allocated per thread block.
+    uint32_t warp_idx_in_block = tid_in_blk / warpSize;
 
     // all threads in warp have to call this function with the
     // same arguments
-    if (warpIdx < num_warps) {
+    if (warp_idx_in_scope < num_warps) {
+        assert(warp_idx_in_block < max_mbarrier);
         CUlogicalEndpointId mc_le_id = PARSE_LE_ID(teami->mc_leid_with_flag);
         auto src_handle = nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
             mc_le_id, (const char *)src_ptr + start_offset_warp);
 
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+                           (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
         smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           smem_data_buf_size + (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+                           smem_data_buf_size + (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
 
         handle_barrier_t *tma_bar_handle =
-            nvshmemi_handle_barrier_slot(tma_smem_base, warpIdx * TMA_COPY_NUM_STAGES);
+            nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
         // only lane 0 in warp initializes the barrier
         tma_bar_handle->init(1, myIdx);
@@ -1693,8 +1695,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_t
         if (my_nelems > 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
             if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
-                if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
-                                                         my_nelems * sizeof(TYPE), SCOPE) &&
+                /* Two-shot handle reduce reads the source and writes the partial result through
+                 * multicast handles, so both heap offsets must be 16B-aligned.
+                 */
+                if (nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(teami->mc_leid_with_flag,
+                                                                       my_nelems * sizeof(TYPE)) &&
                     nvshmemi_tma_smem_registered() && !__isShared(dest_ptr) &&
                     !__isShared(source_ptr) &&
                     ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
@@ -1730,8 +1735,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_t
         if (elems_per_pe > 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
             if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
-                if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
-                                                         elems_per_pe * sizeof(TYPE), SCOPE) &&
+                /* One-shot handle reduce reads through a multicast source handle and stores the
+                 * reduced data through TMA S2G, so source heap offset and destination address need
+                 * 16B alignment.
+                 */
+                if (nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(
+                        teami->mc_leid_with_flag, elems_per_pe * sizeof(TYPE)) &&
                     nvshmemi_tma_smem_registered() && !__isShared(dest) && !__isShared(source) &&
                     nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
                     ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
@@ -1990,7 +1999,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
     int byte_offset_src = 0;
     int byte_offset_dst = 0;
 
-    uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / 2;  // each warp use 2 barriers
+    uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES;
     size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
     size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
     max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
@@ -2003,10 +2012,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
     work_warps = work_warps ? work_warps : 1;
     uint32_t num_warps = max_warps < work_warps ? max_warps : work_warps;
     uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
-    uint32_t warpIdx = myIdx / warpSize;
-    size_t start_offset_warp = warpIdx * warpchunk_size * num_warpchunks_per_warp;
+    // Work partitioning is relative to the calling threadgroup.
+    uint32_t warp_idx_in_scope = myIdx / warpSize;
+    size_t start_offset_warp = warp_idx_in_scope * warpchunk_size * num_warpchunks_per_warp;
     size_t bytes_per_warp = warpchunk_size * num_warpchunks_per_warp;
-    if (warpIdx == num_warps - 1) {
+    if (warp_idx_in_scope == num_warps - 1) {
         bytes_per_warp = len - start_offset_warp;
     }
 
@@ -2015,22 +2025,26 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
 
     uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
     uintptr_t tma_smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+    uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
+    // SMEM data chunks and handle barrier slots are allocated per thread block.
+    uint32_t warp_idx_in_block = tid_in_blk / warpSize;
 
     // all threads in warp have to call this function with the
     // same arguments
-    if (warpIdx < num_warps) {
+    if (warp_idx_in_scope < num_warps) {
+        assert(warp_idx_in_block < max_mbarrier);
         CUlogicalEndpointId mc_le_id = PARSE_LE_ID(teami->mc_leid_with_flag);
         auto src_handle = nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
             mc_le_id, (const char *)src_ptr + start_offset_warp);
 
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+                           (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
         smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           smem_data_buf_size + (warpIdx * NVSHMEMI_SMEM_BUF_SIZE);
+                           smem_data_buf_size + (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
 
         handle_barrier_t *tma_bar_handle =
-            nvshmemi_handle_barrier_slot(tma_smem_base, warpIdx * TMA_COPY_NUM_STAGES);
+            nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
         // only lane 0 in warp initializes the barrier
         tma_bar_handle->init(1, myIdx);

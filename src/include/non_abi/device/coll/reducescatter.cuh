@@ -98,8 +98,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
 
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
         if constexpr (is_handle_pullred_supported<TYPE, OP>()) {
-            if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
-                                                     nreduce * sizeof(TYPE), SCOPE) &&
+            if (nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(teami->mc_leid_with_flag,
+                                                                   nreduce * sizeof(TYPE)) &&
                 nvshmemi_tma_smem_registered() && !__isShared(dest) &&
                 !__isShared(source + source_offset) &&
                 nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&

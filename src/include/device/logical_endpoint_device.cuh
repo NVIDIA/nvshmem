@@ -92,7 +92,8 @@ __device__ __forceinline__ size_t nvshmemi_handle_smem_chunk_size() {
 }
 
 template <threadgroup_t SCOPE>
-__device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(size_t smem_chunk_size) {
+__device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(size_t smem_chunk_size,
+                                                              size_t barrier_slots_per_group) {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
         return false;
     }
@@ -102,17 +103,22 @@ __device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(size_t smem_chunk_
         if ((threads_per_cta % (4 * NVSHMEMI_WARP_SIZE)) != 0) return false;
     }
 
-    if (smem_chunk_size == 0) return false;
+    if (smem_chunk_size == 0 || barrier_slots_per_group == 0) return false;
 
     size_t stage_bytes = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
     size_t max_thrdgrps_by_smem = stage_bytes / smem_chunk_size;
-    size_t max_thrdgrps_by_barrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES;
+    size_t max_thrdgrps_by_barrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / barrier_slots_per_group;
     size_t max_thrdgrps = max_thrdgrps_by_smem < max_thrdgrps_by_barrier ? max_thrdgrps_by_smem
                                                                          : max_thrdgrps_by_barrier;
     uint32_t tid_in_block = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t thrdgrp_idx = tid_in_block / nvshmemi_threadgroup_size<SCOPE>();
 
     return thrdgrp_idx < max_thrdgrps;
+}
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(size_t smem_chunk_size) {
+    return is_thrdgrp_smem_rsc_available<SCOPE>(smem_chunk_size, TMA_COPY_NUM_STAGES);
 }
 
 template <threadgroup_t SCOPE, int SMEM_CHUNK_SIZE>
@@ -179,8 +185,37 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_le_implemented(uint64_t le
                                                                      size_t size,
                                                                      threadgroup_t scope) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    return ((scope == NVSHMEMI_THREADGROUP_BLOCK) && IS_VALID_LE_ID(le_id_with_flag) &&
-            (nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) >= NVSHMEMI_SMEM_BUF_SIZE) &&
+    if (size == 0 || !nvshmemi_tma_smem_registered() || !IS_VALID_LE_ID(le_id_with_flag) ||
+        ((size % CFT_HANDLE_TX_SIZE) != 0)) {
+        return false;
+    }
+
+    return is_thrdgrp_smem_rsc_available(scope);
+#else
+    return false;
+#endif
+}
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ bool nvshmemi_is_multicast_reduce_le_implemented(
+    uint64_t le_id_with_flag, size_t size) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        return false;
+    }
+
+    const size_t threadgroup_size = nvshmemi_threadgroup_size<SCOPE>();
+    if ((threadgroup_size % NVSHMEMI_WARP_SIZE) != 0) {
+        return false;
+    }
+
+    const size_t warps_per_threadgroup = threadgroup_size / NVSHMEMI_WARP_SIZE;
+    const size_t smem_chunk_size = warps_per_threadgroup * NVSHMEMI_SMEM_BUF_SIZE;
+    const size_t barrier_slots_per_group = warps_per_threadgroup * TMA_COPY_NUM_STAGES;
+
+    return (size != 0 && warps_per_threadgroup != 0 && nvshmemi_tma_smem_registered() &&
+            IS_VALID_LE_ID(le_id_with_flag) &&
+            is_thrdgrp_smem_rsc_available<SCOPE>(smem_chunk_size, barrier_slots_per_group) &&
             ((size % CFT_HANDLE_TX_SIZE) == 0));
 #else
     return false;
