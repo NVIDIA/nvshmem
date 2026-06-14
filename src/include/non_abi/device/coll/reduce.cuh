@@ -2145,7 +2145,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
          * registered TMA SMEM, global source/destination buffers, and a 16B-aligned source
          * heap offset.
          */
-        if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, reduce_bytes, scope) ||
+        if (!nvshmemi_is_multicast_reduce_le_supported_and_prioritized<scope>(
+                teami->mc_leid_with_flag, reduce_bytes) ||
             !nvshmemi_tma_smem_registered() || __isShared(src_tensor.data()) ||
             __isShared(dst_tensor.data()) ||
             !nvshmemi_is_addr_offset_aligned(src_tensor.data(), CFT_HANDLE_TX_SIZE)) {
