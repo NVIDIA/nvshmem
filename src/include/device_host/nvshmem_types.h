@@ -116,6 +116,9 @@
      TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
      {0}}
 
+constexpr inline int NVSHMEMI_TEAM_DUP_COUNT = 128;
+constexpr inline int NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEAM_DUP_COUNT;
+
 #define NVSHMEMI_TEAM_V4_IDENTIFIER ((4 << 16) + sizeof(nvshmemi_team_t))
 #define NVSHMEMI_TEAM_INITIALIZER                                                      \
     {                                                                                  \
@@ -363,7 +366,7 @@ typedef struct {
     nvshmem_team_t team_same_mype_node;
     void *nvls_rsc;          /* To be cast to nvshmemi_nvls_rsc whenever used */
     void *nvls_rsc_base_ptr; /* Shared b/w GPU threads of this team */
-    nvshmem_team_t team_dups[128];
+    nvshmem_team_t team_dups[NVSHMEMI_TEAM_DUP_COUNT];
     int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
     uint64_t p2p_sync_on_stream_count;
     bool are_gpus_nvls_connected;
@@ -395,7 +398,7 @@ typedef struct {
     nvshmem_team_t team_same_mype_node;
     void *nvls_rsc;          /* To be cast to nvshmemi_nvls_rsc whenever used */
     void *nvls_rsc_base_ptr; /* Shared b/w GPU threads of this team */
-    nvshmem_team_t team_dups[128];
+    nvshmem_team_t team_dups[NVSHMEMI_TEAM_DUP_COUNT];
     int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
 } nvshmemi_team_v3;
 
@@ -424,7 +427,7 @@ typedef struct {
     nvshmem_team_t team_same_mype_node;
     void *nvls_rsc;          /* To be cast to nvshmemi_nvls_rsc whenever used */
     void *nvls_rsc_base_ptr; /* Shared b/w GPU threads of this team */
-    nvshmem_team_t team_dups[128];
+    nvshmem_team_t team_dups[NVSHMEMI_TEAM_DUP_COUNT];
 } nvshmemi_team_v2;
 
 typedef struct {

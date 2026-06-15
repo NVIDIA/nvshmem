@@ -181,6 +181,7 @@ int nvshmemu_get_num_gpus_per_node();
 uint64_t nvshmemu_getHostHash();
 nvshmemResult_t nvshmemu_gethostname(char *hostname, int maxlen);
 void setup_sig_handler();
+int nvshmemi_get_nvls_max_ctas();
 char *nvshmemu_hexdump(void *ptr, size_t len);
 void nvshmemu_debug_log_cpuset(int category, const char *thread_name);
 

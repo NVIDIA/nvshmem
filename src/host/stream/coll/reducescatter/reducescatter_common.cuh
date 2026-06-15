@@ -73,7 +73,7 @@ void nvshmemi_call_reducescatter_on_stream_kernel(nvshmem_team_t team, TYPE *des
     if (teami->nvls_rsc_base_ptr != NULL) {
         if (nvshmemi_options.MAX_CTAS_provided &&
             nreduce * teami->size * sizeof(TYPE) >= NVSHMEMI_REDUCESCATTER_CTA_THRESHOLD) {
-            num_blocks = nvshmemi_options.MAX_CTAS;
+            num_blocks = nvshmemi_get_nvls_max_ctas();
         } else if (nreduce * teami->size * sizeof(TYPE) >= NVSHMEMI_REDUCESCATTER_CTA_THRESHOLD) {
             num_blocks = NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT;
         } else {

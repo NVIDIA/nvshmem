@@ -57,7 +57,7 @@ static int *nvshmemi_device_team_pe_location(nvshmemi_team_t *team) { return (in
  */
 static void nvshmemi_team_init_dups(nvshmemi_team_t *teami, int team_idx) {
     teami->team_dups[0] = team_idx;
-    for (int i = 1; i < 128; ++i) {
+    for (int i = 1; i < NVSHMEMI_TEAM_DUP_COUNT; ++i) {
         teami->team_dups[i] = NVSHMEM_TEAM_INVALID;
     }
 }
@@ -943,7 +943,7 @@ void nvshmemi_duplicate_team(nvshmem_team_t team, nvshmemi_team_t *my_team) {
      *       NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT)
      */
     if (nvshmemi_options.MAX_CTAS_provided) {
-        max_required_duplicate_teams = nvshmemi_options.MAX_CTAS;
+        max_required_duplicate_teams = nvshmemi_get_nvls_max_ctas();
     } else {
         max_required_duplicate_teams = std::max(
             NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT,

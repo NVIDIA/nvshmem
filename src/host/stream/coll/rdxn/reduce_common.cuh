@@ -73,7 +73,7 @@ void nvshmemi_call_rdxn_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const 
     if (teami->nvls_rsc_base_ptr != NULL) {
         if (nvshmemi_options.MAX_CTAS_provided &&
             nreduce * sizeof(TYPE) >= NVSHMEMI_REDUCE_CTA_THRESHOLD) {
-            num_blocks = nvshmemi_options.MAX_CTAS;
+            num_blocks = nvshmemi_get_nvls_max_ctas();
         } else if (nreduce * sizeof(TYPE) >= NVSHMEMI_REDUCE_CTA_THRESHOLD) {
             num_blocks = NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT;
         } else {

@@ -57,6 +57,17 @@ uint64_t nvshmemu_getHostHash() {
 // TODO: force to single node
 int nvshmemu_get_num_gpus_per_node() { return 128; }
 
+int nvshmemi_get_nvls_max_ctas() {
+    if (nvshmemi_options.MAX_CTAS > NVSHMEMI_NVLS_MAX_CTA_COUNT) {
+        NVSHMEMI_WARN_PRINT(
+            "NVSHMEM_MAX_CTAS=%d exceeds the NVLS host collective maximum of %d, clamping to %d",
+            nvshmemi_options.MAX_CTAS, NVSHMEMI_NVLS_MAX_CTA_COUNT, NVSHMEMI_NVLS_MAX_CTA_COUNT);
+        return NVSHMEMI_NVLS_MAX_CTA_COUNT;
+    }
+
+    return nvshmemi_options.MAX_CTAS;
+}
+
 /* Convert data to a hexadecimal string */
 char *nvshmemu_hexdump(void *ptr, size_t len) {
     const char *hex = "0123456789abcdef";
