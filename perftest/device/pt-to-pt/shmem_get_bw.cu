@@ -33,11 +33,13 @@ class smem_registration_guard {
     }
 };
 
+/* SMEMToggle::ENABLE opts get bandwidth kernels into NVSHMEM's TMA-capable path by
+ * registering dynamic shared memory at kernel entry.  CFT handles are limited to
+ * warp/block scope, but thread scope still uses this registration for TMA-only paths. */
 template <SMEMToggle SMEM_MODE>
-__global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter) {
+__global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int len, int pe,
+                         int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
-    int smem_size =
-        (SMEM_MODE == SMEMToggle::ENABLE) ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED) : 0;
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
     unsigned int counter;
@@ -75,8 +77,145 @@ __global__ void bw(double *data_d, volatile unsigned int *counter_d, int len, in
     }
 }
 
-typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe,
-                        int iter);
+template <SMEMToggle SMEM_MODE>
+__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter,
+                        int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
+    int i, peer;
+    unsigned int counter;
+    int tid = threadIdx.x;
+    int bid = blockIdx.x;
+    int nblocks = gridDim.x;
+    int nwarps_per_block = blockDim.x * blockDim.y * blockDim.z / warpSize;
+    int warpid = tid / warpSize;
+    size_t get_size_per_block = len / nblocks;
+    size_t get_size_per_warp = get_size_per_block / nwarps_per_block;
+
+    peer = !pe;
+    for (i = 0; i < iter; i++) {
+        nvshmemx_double_get_nbi_warp(
+            data_d + (bid * get_size_per_block + warpid * get_size_per_warp),
+            data_d + (bid * get_size_per_block + warpid * get_size_per_warp), get_size_per_warp,
+            peer);
+
+        __syncthreads();
+        if (!tid) {
+            __threadfence();
+            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+            if (counter == (gridDim.x * (i + 1) - 1)) {
+                *(counter_d + 1) += 1;
+            }
+            while (*(counter_d + 1) != i + 1);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * (i + 1) - 1)) {
+            nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != i + 1);
+    }
+}
+
+template <SMEMToggle SMEM_MODE>
+__global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int len, int pe,
+                          int iter, int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
+    int i, peer;
+    unsigned int counter;
+    int tid = threadIdx.x;
+    int bid = blockIdx.x;
+    int nblocks = gridDim.x;
+    int nthreads_per_block = blockDim.x;
+    size_t get_size_per_block = len / nblocks;
+    size_t get_size_per_thread = get_size_per_block / nthreads_per_block;
+
+    peer = !pe;
+    for (i = 0; i < iter; i++) {
+        nvshmem_double_get_nbi(data_d + (bid * get_size_per_block + tid * get_size_per_thread),
+                               data_d + (bid * get_size_per_block + tid * get_size_per_thread),
+                               get_size_per_thread, peer);
+
+        __syncthreads();
+        if (!tid) {
+            __threadfence();
+            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+            if (counter == (gridDim.x * (i + 1) - 1)) {
+                *(counter_d + 1) += 1;
+            }
+            while (*(counter_d + 1) != i + 1);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * (i + 1) - 1)) {
+            nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != i + 1);
+    }
+}
+
+typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter,
+                        int smem_size);
+
+static SMEMToggle parse_smem_enabled() {
+    return use_smem ? SMEMToggle::ENABLE : SMEMToggle::DISABLE;
+}
+
+template <SMEMToggle SMEM_MODE>
+static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
+    *smem_size = 0;
+
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            *bw_fn = bw_thread<SMEM_MODE>;
+            DEBUG_PRINT("Using thread-scope get (smem=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+                *smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+                CUDA_CHECK(cudaFuncSetAttribute(
+                    bw_thread<SMEM_MODE>, cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+            }
+            break;
+        case NVSHMEM_WARP:
+            *bw_fn = bw_warp<SMEM_MODE>;
+            DEBUG_PRINT("Using warp-scope get (smem=%d)\n", (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+                *smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+                CUDA_CHECK(cudaFuncSetAttribute(
+                    bw_warp<SMEM_MODE>, cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+            }
+            break;
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            *bw_fn = bw_block<SMEM_MODE>;
+            DEBUG_PRINT("Using block-scope get (smem=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
+                *smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+                CUDA_CHECK(cudaFuncSetAttribute(
+                    bw_block<SMEM_MODE>, cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+            }
+            break;
+        default:
+            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
+            return false;
+    }
+
+    return true;
+}
 
 int main(int argc, char *argv[]) {
     int mype, npes;
@@ -95,8 +234,9 @@ int main(int argc, char *argv[]) {
     double *d_bw = NULL, *d_bw_sum = NULL;
     double *d_msgrate = NULL, *d_msgrate_sum = NULL;
 
-    bw_fn_t bw_fn = use_smem ? bw<SMEMToggle::ENABLE> : bw<SMEMToggle::DISABLE>;
-    int smem_size = use_smem ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED) : 0;
+    bw_fn_t bw_fn = NULL;
+    const SMEMToggle smem_mode = parse_smem_enabled();
+    int smem_size = 0;
     int iter = iters;
     int skip = warmup_iters;
 
@@ -115,10 +255,16 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "This test requires exactly two processes \n");
         goto finalize;
     }
-    if (use_smem) {
-        CUDA_CHECK(cudaFuncSetAttribute(bw<SMEMToggle::ENABLE>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+
+    switch (smem_mode) {
+        case SMEMToggle::ENABLE:
+            if (!configure_bw_mode<SMEMToggle::ENABLE>(&bw_fn, &smem_size)) goto finalize;
+            break;
+        case SMEMToggle::DISABLE:
+            if (!configure_bw_mode<SMEMToggle::DISABLE>(&bw_fn, &smem_size)) goto finalize;
+            break;
     }
+
     if (use_mmap) {
         data_d = (double *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
         DEBUG_PRINT("Allocated mmap buffer\n");
@@ -169,13 +315,13 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
             bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
-                                                          mype, skip);
+                                                          mype, skip, smem_size);
             CUDA_CHECK(cudaDeviceSynchronize());
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
                 cudaEventRecord(start);
-                bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d,
-                                                              size / sizeof(double), mype, iter);
+                bw_fn<<<max_blocks, max_threads, smem_size>>>(
+                    data_d, counter_d, size / sizeof(double), mype, iter, smem_size);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaEventSynchronize(stop));
