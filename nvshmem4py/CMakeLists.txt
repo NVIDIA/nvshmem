@@ -144,10 +144,17 @@ if(NVSHMEM4PY_PYTHON_VERSIONS)
 else()
     message(STATUS "Auto-detecting all available Python versions >= 3.9")
     execute_process(
-        COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/scripts/find_python_versions.sh"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/scripts/find_python_versions.sh"
         OUTPUT_VARIABLE PYTHON_VERSION_LINES
+        ERROR_VARIABLE PYTHON_DISCOVER_ERROR
+        RESULT_VARIABLE PYTHON_DISCOVER_RESULT
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
     )
+
+    if(NOT PYTHON_DISCOVER_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to auto-detect Python versions: ${PYTHON_DISCOVER_ERROR}")
+    endif()
 
     # Each line is now "3.10|/usr/bin/python3.10"
     string(REPLACE "\n" ";" PYTHON_LINE_LIST "${PYTHON_VERSION_LINES}")
@@ -157,18 +164,19 @@ endif()
 set(ALL_WHEEL_TARGETS "")
 set(PREV_WHEEL_TARGET "")
 
+if(NVSHMEM4PY_CUDA_VERSIONS)
+    set(CUDA_VERSIONS ${NVSHMEM4PY_CUDA_VERSIONS})
+    message(STATUS "Using filtered CUDA versions: ${CUDA_VERSIONS}")
+else()
+    set(CUDA_VERSIONS "12" "13")
+    message(STATUS "Using default CUDA versions: ${CUDA_VERSIONS}")
+endif()
+
 foreach(LINE IN LISTS PYTHON_LINE_LIST)
     string(REPLACE "|" ";" PYTHON_PAIR "${LINE}")
     list(GET PYTHON_PAIR 0 PY_VER)
     list(GET PYTHON_PAIR 1 PY_EXEC)
     message(STATUS "Found Python3 ${PY_EXEC}")
-
-    if(NVSHMEM4PY_CUDA_VERSIONS)
-        set(CUDA_VERSIONS ${NVSHMEM4PY_CUDA_VERSIONS})
-        message(STATUS "Using filtered CUDA versions: ${CUDA_VERSIONS}")
-    else()
-        set(CUDA_VERSIONS "12" "13")
-    endif()
 
     foreach(CUDA_VER IN LISTS CUDA_VERSIONS)
         set(WHEEL_TARGET build_nvshmem4py_wheel_cu${CUDA_VER}_${PY_VER})
