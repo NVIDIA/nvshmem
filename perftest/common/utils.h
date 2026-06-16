@@ -31,6 +31,11 @@
 #define MEM_TYPE_POSIX_FD 1
 #define MEM_TYPE_FABRIC 2
 #define MEM_GRANULARITY 536870912  // 512MB
+#if defined(NVSHMEM_HOSTLIB_ONLY)
+#define NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED ((size_t)0)
+#else
+#define NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED ((size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED))
+#endif
 #define CUMODULE_LOAD(CUMODULE, CUMODULE_PATH, ERROR) \
     CU_CHECK(cuModuleLoad(&CUMODULE, CUMODULE_PATH)); \
     ERROR = nvshmemx_cumodule_init(CUMODULE);
@@ -140,6 +145,43 @@ using namespace std;
         }                                                                                  \
         assert(CUDA_SUCCESS == result);                                                    \
     } while (0)
+
+#define CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(func, d_smem_size)                                   \
+    do {                                                                                       \
+        if (!use_cubin && (d_smem_size) > 48 * 1024) {                                         \
+            CUDA_CHECK(cudaFuncSetAttribute(func, cudaFuncAttributeMaxDynamicSharedMemorySize, \
+                                            d_smem_size));                                     \
+        }                                                                                      \
+    } while (0)
+
+#if defined(NVSHMEM_HOSTLIB_ONLY)
+#define NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size) \
+    do {                                          \
+        (void)(dynamic_smem_size);                \
+    } while (0)
+
+#define NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size) \
+    do {                                             \
+        (void)(dynamic_smem_size);                   \
+    } while (0)
+#else
+#define NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size)                \
+    do {                                                         \
+        if (dynamic_smem_size) {                                 \
+            extern __shared__ char nvshmem_smem[];               \
+            nvshmemx_give_smem(nvshmem_smem, dynamic_smem_size); \
+            __syncthreads();                                     \
+        }                                                        \
+    } while (0)
+
+#define NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size) \
+    do {                                             \
+        if (dynamic_smem_size) {                     \
+            __syncthreads();                         \
+            nvshmemx_release_smem();                 \
+        }                                            \
+    } while (0)
+#endif
 
 #define ERROR_EXIT(...)                                                  \
     do {                                                                 \
