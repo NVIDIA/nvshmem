@@ -18,31 +18,38 @@
 extern "C" {
 #endif
 
-__global__ void latency_kern(int *data_d, int len, int pe, int iter) {
+__global__ void latency_kern(int *data_d, int len, int pe, int iter, size_t dynamic_smem_size) {
     int i, peer;
 
     peer = !pe;
+    NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);
 
     for (i = 0; i < iter; i++) {
         nvshmem_int_put_nbi(data_d, data_d, len, peer);
         nvshmem_quiet();
     }
+
+    NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);
 }
 
-#define LATENCY_THREADGROUP(group)                                                 \
-    __global__ void latency_kern_##group(int *data_d, int len, int pe, int iter) { \
-        int i, tid, peer;                                                          \
-                                                                                   \
-        peer = !pe;                                                                \
-        tid = threadIdx.x;                                                         \
-                                                                                   \
-        for (i = 0; i < iter; i++) {                                               \
-            nvshmemx_int_put_##group(data_d, data_d, len, peer);                   \
-                                                                                   \
-            __syncthreads();                                                       \
-            if (!tid) nvshmem_quiet();                                             \
-            __syncthreads();                                                       \
-        }                                                                          \
+#define LATENCY_THREADGROUP(group)                                               \
+    __global__ void latency_kern_##group(int *data_d, int len, int pe, int iter, \
+                                         size_t dynamic_smem_size) {             \
+        int i, tid, peer;                                                        \
+                                                                                 \
+        peer = !pe;                                                              \
+        tid = threadIdx.x;                                                       \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                               \
+                                                                                 \
+        for (i = 0; i < iter; i++) {                                             \
+            nvshmemx_int_put_##group(data_d, data_d, len, peer);                 \
+                                                                                 \
+            __syncthreads();                                                     \
+            if (!tid) nvshmem_quiet();                                           \
+            __syncthreads();                                                     \
+        }                                                                        \
+                                                                                 \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                            \
     }
 
 LATENCY_THREADGROUP(warp)
@@ -52,16 +59,25 @@ LATENCY_THREADGROUP(block)
 }
 #endif
 
-#define DEFINE_TEST_LATENCY(TG)                                                               \
-                                                                                              \
-    void test_latency##TG(int *data_d, int len, int pe, int iter, CUfunction kernel,          \
-                          int threads) {                                                      \
-        if (use_cubin) {                                                                      \
-            void *arglist[] = {(void *)&data_d, (void *)&len, (void *)&pe, (void *)&iter};    \
-            CU_CHECK(cuLaunchKernel(kernel, 1, 1, 1, threads, 1, 1, 0, NULL, arglist, NULL)); \
-        } else {                                                                              \
-            latency_kern##TG<<<1, threads>>>(data_d, len, pe, iter);                          \
-        }                                                                                     \
+#define DEFINE_TEST_LATENCY(TG)                                                                   \
+                                                                                                  \
+    void test_latency##TG(int *data_d, int len, int pe, int iter, CUfunction kernel, int threads, \
+                          size_t dynamic_smem_size) {                                             \
+        if (use_cubin) {                                                                          \
+            void *arglist[] = {(void *)&data_d, (void *)&len, (void *)&pe, (void *)&iter,         \
+                               (void *)&dynamic_smem_size};                                       \
+            if (dynamic_smem_size > 48 * 1024) {                                                  \
+                CU_CHECK(cuFuncSetAttribute(kernel,                                               \
+                                            CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,      \
+                                            (int)dynamic_smem_size));                             \
+            }                                                                                     \
+            CU_CHECK(cuLaunchKernel(kernel, 1, 1, 1, threads, 1, 1,                               \
+                                    (unsigned int)dynamic_smem_size, NULL, arglist, NULL));       \
+        } else {                                                                                  \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(latency_kern##TG, dynamic_smem_size);               \
+            latency_kern##TG<<<1, threads, dynamic_smem_size>>>(data_d, len, pe, iter,            \
+                                                                dynamic_smem_size);               \
+        }                                                                                         \
     }
 
 DEFINE_TEST_LATENCY()
@@ -75,6 +91,7 @@ int main(int argc, char *argv[]) {
     read_args(argc, argv);
     int iter = iters;
     int skip = warmup_iters;
+    size_t dynamic_smem_size = 0;
 
     int array_size, i;
     void **h_tables;
@@ -89,6 +106,9 @@ int main(int argc, char *argv[]) {
     CUfunction test_cubin_block = NULL;
 
     init_wrapper(&argc, &argv);
+    if (use_smem && !use_cubin) {
+        dynamic_smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
@@ -135,10 +155,10 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
             nelems = size / sizeof(int);
 
-            test_latency(data_d, nelems, mype, skip, test_cubin, 1);
+            test_latency(data_d, nelems, mype, skip, test_cubin, 1, dynamic_smem_size);
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 cudaEventRecord(start);
-                test_latency(data_d, nelems, mype, iter, test_cubin, 1);
+                test_latency(data_d, nelems, mype, iter, test_cubin, 1, dynamic_smem_size);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaEventSynchronize(stop));
@@ -165,10 +185,12 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
             nelems = size / sizeof(int);
 
-            test_latency_warp(data_d, nelems, mype, skip, test_cubin_warp, THREADS_PER_WARP);
+            test_latency_warp(data_d, nelems, mype, skip, test_cubin_warp, THREADS_PER_WARP,
+                              dynamic_smem_size);
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 cudaEventRecord(start);
-                test_latency_warp(data_d, nelems, mype, iter, test_cubin_warp, THREADS_PER_WARP);
+                test_latency_warp(data_d, nelems, mype, iter, test_cubin_warp, THREADS_PER_WARP,
+                                  dynamic_smem_size);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaEventSynchronize(stop));
@@ -195,10 +217,12 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
             nelems = size / sizeof(int);
 
-            test_latency_block(data_d, nelems, mype, skip, test_cubin_block, threads_per_block);
+            test_latency_block(data_d, nelems, mype, skip, test_cubin_block, threads_per_block,
+                               dynamic_smem_size);
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 cudaEventRecord(start);
-                test_latency_block(data_d, nelems, mype, iter, test_cubin_block, threads_per_block);
+                test_latency_block(data_d, nelems, mype, iter, test_cubin_block, threads_per_block,
+                                   dynamic_smem_size);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaEventSynchronize(stop));
