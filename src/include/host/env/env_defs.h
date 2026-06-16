@@ -364,6 +364,19 @@ NVSHMEMI_ENV_DEF(DISABLE_LOCAL_ONLY_PROXY, bool, false, NVSHMEMI_ENV_CAT_TRANSPO
                  "device side wait timeout polling (enabled by ``NVSHMEM_TIMEOUT_DEVICE_POLLING`` "
                  "build-time variable) because these are processed by the proxy thread.")
 
+NVSHMEMI_ENV_DEF(UCX_TLS, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "UCX transport list to use when initializing NVSHMEM's UCX transport. "
+                 "When unset, NVSHMEM respects a user-provided ``UCX_TLS`` value. If neither "
+                 "variable is set, NVSHMEM chooses a transport list based on the UCX atomics path.")
+NVSHMEMI_ENV_DEF(UCX_RC_TX_INLINE_RESP, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "UCX RC inline response setting to use when initializing NVSHMEM's UCX "
+                 "transport. When unset, NVSHMEM respects a user-provided "
+                 "``UCX_RC_TX_INLINE_RESP`` value. If neither variable is set, NVSHMEM uses 0.")
+NVSHMEMI_ENV_DEF(UCX_ZCOPY_THRESH, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "UCX zero-copy threshold to use when initializing NVSHMEM's UCX transport. "
+                 "When unset, NVSHMEM respects a user-provided ``UCX_ZCOPY_THRESH`` value. If "
+                 "neither variable is set, NVSHMEM uses 0.")
+
 /** Runtime optimimzations **/
 NVSHMEMI_ENV_DEF(PROXY_REQUEST_BATCH_MAX, int, 32, NVSHMEMI_ENV_CAT_OTHER,
                  "Maxmum number of requests that the proxy thread processes in a single iteration "

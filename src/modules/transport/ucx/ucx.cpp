@@ -72,6 +72,34 @@ int nvshmemt_ucx_progress(nvshmem_transport_t transport);
         fprintf(stderr, "\n");                                                            \
     } while (0)
 
+static inline bool nvshmemt_ucx_config_is_set(const char *value) {
+    return value != NULL && value[0] != '\0';
+}
+
+static const char *nvshmemt_ucx_config_value(int log_level, const char *ucx_config_name,
+                                             const char *ucx_env_name,
+                                             const char *nvshmem_env_name,
+                                             const char *nvshmem_value,
+                                             bool nvshmem_value_provided,
+                                             const char *default_value) {
+    const char *ucx_env_value = getenv(ucx_env_name);
+
+    if (nvshmem_value_provided && nvshmemt_ucx_config_is_set(nvshmem_value)) {
+        INFO(log_level, "Using %s=%s for UCX %s configuration.\n", nvshmem_env_name,
+             nvshmem_value, ucx_config_name);
+        return nvshmem_value;
+    }
+
+    if (nvshmemt_ucx_config_is_set(ucx_env_value)) {
+        INFO(log_level, "%s=%s is set; preserving user UCX %s configuration.\n", ucx_env_name,
+             ucx_env_value, ucx_config_name);
+        return NULL;
+    }
+
+    INFO(log_level, "Using default UCX %s configuration: %s.\n", ucx_config_name, default_value);
+    return default_value;
+}
+
 static nvshmemt_ucx_mem_handle_info_t *get_mem_handle_info(nvshmem_transport_t transport,
                                                            transport_ucx_state_t *ucx_state,
                                                            void *gpu_ptr) {
@@ -1325,6 +1353,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
     int log_level;
 
     int status = 0;
+    const char *ucx_rc_tx_inline_resp = NULL;
+    const char *ucx_tls = NULL;
+    const char *ucx_zcopy_thresh = NULL;
 
     int num_ib_devices;
     struct ibv_device **dev_list = NULL;
@@ -1374,10 +1405,16 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
     }
 
     /* This environment variable is needed to enable g/get operations <= 64 bytes */
-    status = setenv("UCX_RC_TX_INLINE_RESP", "0", 1);
-    if (status) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
-                           "Failed to set UCX environment variable UCX_RC_TX_INLINE_RESP.\n");
+    ucx_rc_tx_inline_resp = nvshmemt_ucx_config_value(
+        log_level, "RC_TX_INLINE_RESP", "UCX_RC_TX_INLINE_RESP",
+        "NVSHMEM_UCX_RC_TX_INLINE_RESP", options.UCX_RC_TX_INLINE_RESP,
+        options.UCX_RC_TX_INLINE_RESP_provided, "0");
+    if (ucx_rc_tx_inline_resp != NULL) {
+        status = setenv("UCX_RC_TX_INLINE_RESP", ucx_rc_tx_inline_resp, 1);
+        if (status) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
+                               "Failed to set UCX environment variable UCX_RC_TX_INLINE_RESP.\n");
+        }
     }
 
     transport = (nvshmem_transport_t)calloc(1, sizeof(struct nvshmem_transport));
@@ -1404,20 +1441,27 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
                                "Failed to read UCP configuration for UCX.\n");
     }
 
-    if (use_local_atomics) {
-        ucs_rc = ucp_config_modify(ucx_state->library_config, "TLS", "posix,ib");
-    } else {
-        ucs_rc = ucp_config_modify(ucx_state->library_config, "TLS", "rc");
-    }
-    if (ucs_rc != UCS_OK) {
-        NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, ucs_rc,
-                               "Failed to modify configuration for UCX.\n");
+    ucx_tls =
+        nvshmemt_ucx_config_value(log_level, "TLS", "UCX_TLS", "NVSHMEM_UCX_TLS",
+                                  options.UCX_TLS, options.UCX_TLS_provided,
+                                  use_local_atomics ? "posix,ib" : "rc");
+    if (ucx_tls != NULL) {
+        ucs_rc = ucp_config_modify(ucx_state->library_config, "TLS", ucx_tls);
+        if (ucs_rc != UCS_OK) {
+            NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, ucs_rc,
+                                   "Failed to modify TLS configuration for UCX.\n");
+        }
     }
 
-    ucs_rc = ucp_config_modify(ucx_state->library_config, "ZCOPY_THRESH", "0");
-    if (ucs_rc != UCS_OK) {
-        NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, ucs_rc,
-                               "Failed to modify configuration for UCX.\n");
+    ucx_zcopy_thresh = nvshmemt_ucx_config_value(
+        log_level, "ZCOPY_THRESH", "UCX_ZCOPY_THRESH", "NVSHMEM_UCX_ZCOPY_THRESH",
+        options.UCX_ZCOPY_THRESH, options.UCX_ZCOPY_THRESH_provided, "0");
+    if (ucx_zcopy_thresh != NULL) {
+        ucs_rc = ucp_config_modify(ucx_state->library_config, "ZCOPY_THRESH", ucx_zcopy_thresh);
+        if (ucs_rc != UCS_OK) {
+            NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, ucs_rc,
+                                   "Failed to modify ZCOPY_THRESH configuration for UCX.\n");
+        }
     }
 
     params.field_mask = UCP_PARAM_FIELD_FEATURES;
