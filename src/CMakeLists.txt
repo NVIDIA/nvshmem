@@ -42,6 +42,12 @@ ExternalProject_Add(nvshmem_device_project
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                                 -DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}
+                                -DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}
+                                -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
+                                -DCMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS}
+                                -DCMAKE_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}
+                                -DCMAKE_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}
+                                -DCMAKE_MODULE_LINKER_FLAGS=${CMAKE_MODULE_LINKER_FLAGS}
                                 -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                                 -DCMAKE_CUDA_STANDARD=${CMAKE_CUDA_STANDARD}
                                 -DPROJECT_VERSION=${PROJECT_VERSION}
