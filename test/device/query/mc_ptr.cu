@@ -4,6 +4,8 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "nvshmem.h"
@@ -64,7 +66,7 @@ __global__ void check_mc_ptr_no_support(void *v_d) {
     int me = nvshmem_my_pe();
     void *mc_ptr = nvshmemx_mc_ptr(NVSHMEM_TEAM_MC_SHARED, v_d);
     if (mc_ptr != NULL) {
-        printf("[%d] Device expected NULL mc ptr for %p on unsupported platforms.\n", me, v_d);
+        printf("[%d] Device expected NULL mc ptr for %p when NVLS is unavailable.\n", me, v_d);
         ++errors_d;
     } else {
         mc_teams_d++;
@@ -87,6 +89,11 @@ static bool is_mc_platform(void) {
         current_dev));
 
     return (mc_support != 0);
+}
+
+static bool nvls_disabled_by_env(void) {
+    const char *disable_nvls = getenv("NVSHMEM_DISABLE_NVLS");
+    return disable_nvls != NULL && strcmp(disable_nvls, "0") != 0;
 }
 
 int main(int argc, char **argv) {
@@ -119,10 +126,10 @@ int main(int argc, char **argv) {
         return (0);
     }
 
-    if (!is_mc_platform()) {
+    if (nvls_disabled_by_env() || !is_mc_platform()) {
         void *mc_ptr = nvshmemx_mc_ptr(NVSHMEM_TEAM_MC_SHARED, v_d);
         if (mc_ptr != NULL) {
-            printf("[%d] Host expected NULL mc ptr for %p on unsupported platforms.\n", me, v_d);
+            printf("[%d] Host expected NULL mc ptr for %p when NVLS is unavailable.\n", me, v_d);
             ++errors;
         }
         check_mc_ptr_no_support<<<1, 1>>>(v_d);
