@@ -746,8 +746,8 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_fence() {
                                                                                                  \
             return ((Type)atomicAdd_system(target_actual, value));                               \
         } else {                                                                                 \
-            return nvshmemi_transfer_amo_fetch<Type>((void *)target, value, 0, pe,               \
-                                               NVSHMEMI_AMO_FETCH_ADD);                          \
+            return nvshmemi_transfer_amo_fetch<Type>((void *)target, value, decltype(value){},   \
+                                               pe, NVSHMEMI_AMO_FETCH_ADD);                      \
         }                                                                                        \
     }
 #define NVSHMEM_TYPE_ATOMIC_FETCH_ADD(Name, Type) NVSHMEMI_TYPE_ATOMIC_FETCH_ADD(, Name, Type)
