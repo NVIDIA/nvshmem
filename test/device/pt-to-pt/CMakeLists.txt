@@ -1,5 +1,6 @@
 nvshmem_add_test(atomic_add.cu)
 nvshmem_add_test(atomic_and.cu)
+nvshmem_add_test(atomic_half_no_conversions.cu)
 nvshmem_add_test(atomic_float_add.cu)
 nvshmem_add_test(atomic_compare_swap.cu)
 nvshmem_add_test(atomic_fetch.cu)

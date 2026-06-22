@@ -679,7 +679,7 @@ template <typename T>
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_amo_nonfetch(
     void *rptr, T swap_add, int pe, nvshmemi_amo_t op,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
-    amo<T>(rptr, 0 /* dummy value */, swap_add, 0, pe, op, qp_index);
+    amo<T>(rptr, 0 /* dummy g_buf_counter */, swap_add, T{}, pe, op, qp_index);
 }
 
 template <typename T>
