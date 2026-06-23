@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.7.1
+
+### Bug Fixes
+
+- Fixed build issue in NVSHMEM atomic float operations due to untyped compare operands when `__CUDA_NO_HALF_CONVERSIONS__` enabled
+
 ## 3.7.0
 
 ### Features
