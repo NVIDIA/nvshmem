@@ -82,14 +82,14 @@ static const char *nvshmemt_ucx_config_value(int log_level, const char *ucx_conf
                                              const char *nvshmem_value,
                                              bool nvshmem_value_provided,
                                              const char *default_value) {
-    const char *ucx_env_value = getenv(ucx_env_name);
-    const bool ucx_env_value_provided = nvshmemt_ucx_config_is_set(ucx_env_value);
-
     if (nvshmem_value_provided && nvshmemt_ucx_config_is_set(nvshmem_value)) {
         INFO(log_level, "Using %s=%s for UCX %s configuration.\n", nvshmem_env_name,
              nvshmem_value, ucx_config_name);
         return nvshmem_value;
     }
+
+    const char *ucx_env_value = getenv(ucx_env_name);
+    const bool ucx_env_value_provided = nvshmemt_ucx_config_is_set(ucx_env_value);
 
     if (ucx_env_value_provided) {
         INFO(log_level, "%s=%s is set; preserving user UCX %s configuration.\n", ucx_env_name,
