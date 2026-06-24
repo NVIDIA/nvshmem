@@ -5,6 +5,9 @@ get_filename_component(PACKAGE_PREFIX_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../" 
 
 include(CMakeFindDependencyMacro)
 find_dependency(CUDAToolkit REQUIRED)
+if (CUDAToolkit_VERSION VERSION_LESS 12.0)
+  message(FATAL_ERROR "NVSHMEM requires CUDA 12.0 or later.")
+endif()
 if (CUDAToolkit_VERSION_MAJOR GREATER 12)
   find_dependency(CCCL PATHS ${CUDAToolkit_LIBRARY_DIR}/cmake/cccl)
 else()

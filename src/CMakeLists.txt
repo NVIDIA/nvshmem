@@ -205,8 +205,7 @@ endif()
 #
 if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   # nvcc --ltoir requires CUDA 12.8 or later
-  if(CUDAToolkit_VERSION_MAJOR LESS 12 OR
-     (CUDAToolkit_VERSION_MAJOR EQUAL 12 AND CUDAToolkit_VERSION_MINOR LESS 8))
+  if(CUDAToolkit_VERSION_MAJOR EQUAL 12 AND CUDAToolkit_VERSION_MINOR LESS 8)
     message(WARNING "NVSHMEM_BUILD_LTOIR_LIBRARY requires CUDA 12.8 or later (nvcc --ltoir), but found CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}. Disabling LTOIR library build.")
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "Build the nvshmem_device LTOIR library and tests" FORCE)
   else()
