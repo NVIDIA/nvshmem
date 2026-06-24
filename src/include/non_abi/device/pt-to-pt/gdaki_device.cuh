@@ -1488,9 +1488,7 @@ nvshmemi_gdaki_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
     }
 
     ret = READ_ONCE(*(T *)laddr);
-    if (sizeof(T) == 4) {
-        ret = doca_gpu_dev_verbs_bswap32((uint32_t)ret);
-    }
+    ret = nvshmemi_bswap32_if_4byte(ret);
 
     if (can_coalesce_warp) {
         gdaki_warp_sync();

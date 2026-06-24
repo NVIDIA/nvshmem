@@ -3032,7 +3032,7 @@ nvshmemi_ibgda_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
     if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 
     ret = READ_ONCE(*(T *)laddr);
-    if (sizeof(T) == 4) ret = BSWAP32((uint32_t)ret);
+    ret = nvshmemi_bswap32_if_4byte(ret);
 
     if (can_coalesce_warp) nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 

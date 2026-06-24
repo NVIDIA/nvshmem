@@ -13,6 +13,11 @@
 #endif
 
 #include <cuda_runtime.h>
+#if __has_include(<cuda/std/type_traits>)
+#include <cuda/std/type_traits>
+#else
+#include <cccl/cuda/std/type_traits>
+#endif
 
 #if defined __CUDACC__
 #define NVSHMEMI_COMM_DEVICE_UTILS_USE_PTX
@@ -106,5 +111,27 @@ __device__ static inline uint16_t BSWAP16(uint16_t x) {
 #define HTOBE64(x) BSWAP64(x)
 #define HTOBE32(x) BSWAP32(x)
 #define HTOBE16(x) BSWAP16(x)
+
+// TODO: Replace this with cuda::std::bit_cast once CUDA 12 support is dropped.
+template <typename To, typename From>
+__device__ static inline To nvshmemi_bit_cast(From value) {
+    static_assert(sizeof(To) == sizeof(From), "nvshmemi_bit_cast requires equal-sized types");
+    static_assert(cuda::std::is_trivially_copyable<To>::value &&
+                      cuda::std::is_trivially_copyable<From>::value,
+                  "nvshmemi_bit_cast requires trivially copyable types");
+    To ret;
+    memcpy(&ret, &value, sizeof(To));
+    return ret;
+}
+
+template <typename T>
+__device__ static inline T nvshmemi_bswap32_if_4byte(T value) {
+    if constexpr (sizeof(T) == sizeof(uint32_t)) {
+        // TODO: Replace BSWAP32 with cuda::std::byteswap once CUDA 12 support is dropped.
+        return nvshmemi_bit_cast<T>(BSWAP32(nvshmemi_bit_cast<uint32_t>(value)));
+    } else {
+        return value;
+    }
+}
 
 #endif /* _COMM_DEVICE_UTILS_H */
