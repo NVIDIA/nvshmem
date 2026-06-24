@@ -1200,7 +1200,7 @@ int nvshmemt_ucx_finalize(nvshmem_transport_t transport) {
             "Discovered uncompleted active messages during UCX transport shutdown.\n");
         while (!pending_recv_headers.empty()) {
             recv_header = (nvshmemt_ucx_am_header_t *)pending_recv_headers.front();
-            free_recv_headers.pop_front();
+            pending_recv_headers.pop_front();
 
             if (recv_header->nvshmem_owned) {
                 if (recv_header->dynamic_alloc) {
