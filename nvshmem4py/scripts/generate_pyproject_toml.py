@@ -27,7 +27,7 @@ requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.20.0",
     "scipy>=1.6.0",
-    "cupy-cuda11x"
+    "cupy-cuda12x"
 ]
 
 [tool.setuptools]
