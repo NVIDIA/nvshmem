@@ -336,13 +336,32 @@ if [ -d "$SITE_NVIDIA_DIR" ] && [ -d "$CUDA_HOME" ]; then
     # numba-cuda prefers CUDA component wheels over CUDA_HOME for static
     # libraries.  Keep those static inputs aligned with the nvJitLink/NVRTC
     # shared libraries overlaid above.
+    CUDART_STATIC_TARGET=""
+    # CUDA 12 runtime wheels may omit libcudadevrt.a.  Create its expected
+    # package location so it can be supplied from the matching toolkit.
+    if [ "$CUDA_MAJOR" = 12 ] && [ -d "$SITE_NVIDIA_DIR/cuda_runtime" ]; then
+        CUDART_STATIC_TARGET="$SITE_NVIDIA_DIR/cuda_runtime/lib/libcudadevrt.a"
+    fi
+
     CUDART_STATIC_SRC=$(find "$TK" -name libcudadevrt.a ! -path "*/stubs/*" 2>/dev/null | sort -V | tail -1)
     if [ -n "$CUDART_STATIC_SRC" ]; then
+        if [ -n "$CUDART_STATIC_TARGET" ]; then
+            mkdir -p "$SITE_NVIDIA_DIR/cuda_runtime/lib"
+            if [ "$CUDART_STATIC_SRC" != "$CUDART_STATIC_TARGET" ]; then
+                cp -f "$CUDART_STATIC_SRC" "$CUDART_STATIC_TARGET"
+                echo "Overlaid $CUDART_STATIC_TARGET <- $CUDART_STATIC_SRC"
+            fi
+        fi
         while IFS= read -r tgt; do
             [ -n "$tgt" ] || continue
+            [ "$CUDART_STATIC_TARGET" != "$tgt" ] || continue
             cp -f "$CUDART_STATIC_SRC" "$tgt"
             echo "Overlaid $tgt <- $CUDART_STATIC_SRC"
         done < <(find "$SITE_NVIDIA_DIR" -name libcudadevrt.a ! -path "*/stubs/*" 2>/dev/null | sort)
+    elif [ -n "$CUDART_STATIC_TARGET" ] && [ -f "$CUDART_STATIC_TARGET" ]; then
+        echo "Using packaged $CUDART_STATIC_TARGET"
+    elif [ "$CUDA_MAJOR" = 12 ]; then
+        echo "WARNING: libcudadevrt.a not found; Numba LTO kernels may fail to link."
     fi
 
     LIBDEVICE_SRC=$(find "$TK" -path "*/nvvm/libdevice/libdevice.10.bc" 2>/dev/null | sort -V | tail -1)
