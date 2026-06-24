@@ -4,11 +4,7 @@
  */
 
 #include <cuda.h>  // for CUresult
-#if CUDART_VERSION >= 11030
 #include <cudaTypedefs.h>
-#else
-// IWYU pragma: no_include <cudaTypedefs.h>
-#endif
 
 #include <cuda_runtime.h>                                // for cudaDriverGetVersion
 #include <dlfcn.h>                                       // for dlsym, dlopen, RTLD...

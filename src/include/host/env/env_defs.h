@@ -207,8 +207,8 @@ NVSHMEMI_ENV_DEF(ENABLE_LOGICAL_ENDPOINT, bool, false, NVSHMEMI_ENV_CAT_OTHER,
 NVSHMEMI_ENV_DEF(DISABLE_CUDA_VMM, bool, NVSHMEMI_ENV_DISABLE_CUDA_VMM_DEFAULT,
                  NVSHMEMI_ENV_CAT_OTHER,
                  "Disable use of CUDA VMM for P2P memory mapping. By default, CUDA VMM is enabled "
-                 "on x86 and disabled on P9. CUDA VMM feature in NVSHMEM requires CUDA RT version "
-                 "and CUDA Driver version to be greater than or equal to 11.3.")
+                 "on x86 and disabled on P9. CUDA VMM feature in NVSHMEM requires supported CUDA "
+                 "Runtime and Driver versions.")
 
 #undef NVSHMEMI_ENV_DISABLE_CUDA_VMM_DEFAULT
 

@@ -20,34 +20,12 @@
 #define CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID (CUdevice_attribute)134
 #endif
 
-#if CUDART_VERSION < 11020
-#define CU_MEM_HANDLE_TYPE_NONE (CUmemAllocationHandleType)0x0
-#endif
-
 #if CUDART_VERSION < 12010
 typedef CUresult(CUDAAPI *PFN_cuCtxSetFlags_v12010)(int flags);
 #endif
 
 #if CUDART_VERSION < 12080
 #define CU_MEM_RANGE_FLAG_DMA_BUF_MAPPING_TYPE_PCIE 0x1
-#endif
-
-#if CUDART_VERSION < 11070
-#define CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED 124
-typedef enum CUmemRangeHandleType_enum {
-    CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD = 0x1,
-    CU_MEM_RANGE_HANDLE_TYPE_MAX = 0x7FFFFFFF
-} CUmemRangeHandleType;
-typedef CUresult(CUDAAPI *PFN_cuMemGetHandleForAddressRange_v11070)(void *handle, CUdeviceptr dptr,
-                                                                    size_t size,
-                                                                    CUmemRangeHandleType handleType,
-                                                                    unsigned long long flags);
-#endif
-
-#if CUDART_VERSION < 12000
-typedef void *CUlibrary;
-typedef CUresult(CUDAAPI *PFN_cuLibraryGetGlobal_v12000)(CUdeviceptr *dptr, size_t *bytes,
-                                                         CUlibrary library, const char *name);
 #endif
 
 #if CUDART_VERSION < 12010
@@ -155,81 +133,7 @@ typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointGetLimits_v13030)(cuuint64_t *bin
 
 #endif
 
-#if CUDART_VERSION >= 11030
 #include <cudaTypedefs.h>
-#else
-typedef enum CUflushGPUDirectRDMAWritesTarget_enum {
-    CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TARGET_CURRENT_CTX = 0
-} CUflushGPUDirectRDMAWritesTarget;
-typedef enum CUflushGPUDirectRDMAWritesScope_enum {
-    CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER = 100,
-    CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_ALL_DEVICES = 200
-} CUflushGPUDirectRDMAWritesScope;
-
-#define CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_FLUSH_WRITES_OPTIONS 117
-#define CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WRITES_ORDERING 118
-#define CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_HOST (1 << 0)
-typedef CUresult(CUDAAPI *PFN_cuInit_v2000)(unsigned int Flags);
-typedef CUresult(CUDAAPI *PFN_cuGetProcAddress_v11030)(const char *symbol, void **pfn,
-                                                       int driverVersion, cuuint64_t flags);
-typedef CUresult(CUDAAPI *PFN_cuDeviceGetAttribute_v2000)(int *pi, CUdevice_attribute attrib,
-                                                          CUdevice dev);
-typedef CUresult(CUDAAPI *PFN_cuPointerGetAttribute_v4000)(void *data,
-                                                           CUpointer_attribute attribute,
-                                                           CUdeviceptr ptr);
-typedef CUresult(CUDAAPI *PFN_cuPointerSetAttribute_v6000)(const void *value,
-                                                           CUpointer_attribute attribute,
-                                                           CUdeviceptr ptr);
-typedef CUresult(CUDAAPI *PFN_cuGetErrorString_v6000)(CUresult error, const char **pStr);
-typedef CUresult(CUDAAPI *PFN_cuGetErrorName_v6000)(CUresult error, const char **pStr);
-typedef CUresult(CUDAAPI *PFN_cuDeviceGet_v2000)(CUdevice *device, int ordinal);
-typedef CUresult(CUDAAPI *PFN_cuCtxSetCurrent_v4000)(CUcontext ctx);
-typedef CUresult(CUDAAPI *PFN_cuCtxGetDevice_v2000)(CUdevice *device);
-typedef CUresult(CUDAAPI *PFN_cuCtxGetCurrent_v4000)(CUcontext *pctx);
-typedef CUresult(CUDAAPI *PFN_cuCtxGetFlags_v7000)(unsigned int *flags);
-typedef CUresult(CUDAAPI *PFN_cuCtxSetFlags_v12010)(int flags);
-typedef CUresult(CUDAAPI *PFN_cuDevicePrimaryCtxRetain_v7000)(CUcontext *pctx, CUdevice dev);
-typedef CUresult(CUDAAPI *PFN_cuCtxSynchronize_v2000)();
-typedef CUresult(CUDAAPI *PFN_cuFlushGPUDirectRDMAWrites_v11030)(
-    CUflushGPUDirectRDMAWritesTarget target, CUflushGPUDirectRDMAWritesScope scope);
-typedef CUresult(CUDAAPI *PFN_cuModuleGetGlobal_v3020)(CUdeviceptr *dptr, size_t *bytes,
-                                                       CUmodule hmod, const char *name);
-typedef CUresult(CUDAAPI *PFN_cuMemCreate_v10020)(CUmemGenericAllocationHandle *handle, size_t size,
-                                                  const CUmemAllocationProp *prop,
-                                                  unsigned long long flags);
-typedef CUresult(CUDAAPI *PFN_cuMemGetAllocationGranularity_v10020)(
-    size_t *granularity, const CUmemAllocationProp *prop, CUmemAllocationGranularity_flags option);
-typedef CUresult(CUDAAPI *PFN_cuMemGetAllocationPropertiesFromHandle_v10020)(
-    size_t *granularity, const CUmemAllocationProp *prop, CUmemGenericAllocationHandle handle);
-
-typedef CUresult(CUDAAPI *PFN_cuMemAddressReserve_v10020)(CUdeviceptr *ptr, size_t size,
-                                                          size_t alignment, CUdeviceptr addr,
-                                                          unsigned long long flags);
-typedef CUresult(CUDAAPI *PFN_cuMemAddressFree_v10020)(CUdeviceptr ptr, size_t size);
-typedef CUresult(CUDAAPI *PFN_cuMemExportToShareableHandle_v10020)(
-    void *shareableHandle, CUmemGenericAllocationHandle handle,
-    CUmemAllocationHandleType handleType, unsigned long long flags);
-typedef CUresult(CUDAAPI *PFN_cuMemImportFromShareableHandle_v10020)(
-    CUmemGenericAllocationHandle *handle, void *osHandle, CUmemAllocationHandleType shHandleType);
-typedef CUresult(CUDAAPI *PFN_cuMemMap_v10020)(CUdeviceptr ptr, size_t size, size_t offset,
-                                               CUmemGenericAllocationHandle handle,
-                                               unsigned long long flags);
-typedef CUresult(CUDAAPI *PFN_cuMemRelease_v10020)(CUmemGenericAllocationHandle handle);
-typedef CUresult(CUDAAPI *PFN_cuMemSetAccess_v10020)(CUdeviceptr ptr, size_t size,
-                                                     const CUmemAccessDesc *desc, size_t count);
-typedef CUresult(CUDAAPI *PFN_cuMemUnmap_v10020)(CUdeviceptr ptr, size_t size);
-typedef CUresult(CUDAAPI *PFN_cuMemGetAccess_v10020)(unsigned long long *flags,
-                                                     const CUmemLocation *location,
-                                                     CUdeviceptr ptr);
-typedef CUresult(CUDAAPI *PFN_cuStreamWriteValue64_v11070)(CUstream stream, CUdeviceptr addr,
-                                                           cuuint64_t value, unsigned int flags);
-typedef CUresult(CUDAAPI *PFN_cuStreamWaitValue64_v11070)(CUstream stream, CUdeviceptr addr,
-                                                          cuuint64_t value, unsigned int flags);
-typedef CUresult(CUDAAPI *PFN_cuMemRetainAllocationHandle_v11000)(
-    CUmemGenericAllocationHandle *handle, void *addr);
-
-typedef CUresult(CUDAAPI *PFN_cuGetExportTable_v3000)(const void **ppExportTable, const CUuuid *pExportTableId);
-#endif
 
 #define DEFINE_SYM(symbol, version) PFN_##symbol##_v##version pfn_##symbol;
 struct nvshmemi_cuda_fn_table {

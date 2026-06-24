@@ -1297,7 +1297,6 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
         nvshmemi_fcollect_threadgroup<TYPE, SCOPE>(
             NVSHMEMX_TEAM_SAME_MYPE_NODE, pWrk, dest,
             nvshmemi_team_my_pe(NVSHMEMX_TEAM_SAME_MYPE_NODE) * nreduce, nreduce);
-#if CUDART_VERSION >= 12000
         if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && OP == RDXN_OPS_SUM &&
                       sizeof(TYPE) >= 4 && sizeof(TYPE) <= 8) {
             for (int i = myIdx; i < nreduce; i += groupSize) *(dest + i) = 0;
@@ -1316,9 +1315,7 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
                             cg::plus<TYPE>());
                 }
             }
-        } else
-#endif
-        {
+        } else {
             for (int j = myIdx; j < nreduce; j += groupSize) {
                 gpu_linear_reduce_threadgroup<TYPE, OP, NVSHMEMI_THREADGROUP_THREAD>(
                     (TYPE *)pWrk + j, (TYPE *)pWrk + nreduce + j, dest + j, 1);

@@ -71,15 +71,6 @@ void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags);
 void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, size_t size,
                                                                void *preferred_addr, int flags);
 int nvshmemx_buffer_unregister_symmetric(void *mmap_ptr, size_t size);
-#if defined(CUDA_VERSION) && CUDART_VERSION < 12000
-/**
- * CULibrary is a CUDA 12 type
- * This is handled "correctly" by wrappers in `cudawrap.h`
- * But that's not #include-able from here since it's in `internal/`
- * This type needs to match the one in `cudawrap.h`
- */
-typedef void *CUlibrary;
-#endif
 
 int nvshmemx_culibrary_init(CUlibrary library);
 int nvshmemx_culibrary_finalize(CUlibrary library);

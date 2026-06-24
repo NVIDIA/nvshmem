@@ -1928,23 +1928,10 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t ibgda_reserve_
     nvshmemi_ibgda_device_qp_management_t *mvars = &qp->mvars;
     uint64_t wqe_idx;
 
-// OK to keep this conditional since we only support one build per major verion.
-#if CUDART_VERSION >= 12000
     if (is_qp_shared_among_ctas)
         wqe_idx = atomicAdd((unsigned long long int *)&mvars->tx_wq.resv_head, num_wqes);
     else
         wqe_idx = atomicAdd_block((unsigned long long int *)&mvars->tx_wq.resv_head, num_wqes);
-#else
-    // WAR NVBUG 3749055. The fix is in nvcc of CUDA 12.0 and later.
-    if (is_qp_shared_among_ctas)
-        asm volatile("atom.relaxed.gpu.global.add.u64 %0, [%1], %2;"
-                     : "=l"(wqe_idx)
-                     : "l"(&mvars->tx_wq.resv_head), "l"(num_wqes));
-    else
-        asm volatile("atom.relaxed.cta.global.add.u64 %0, [%1], %2;"
-                     : "=l"(wqe_idx)
-                     : "l"(&mvars->tx_wq.resv_head), "l"(num_wqes));
-#endif
     // If last slot is available, all prior slots are also available.
     ibgda_wait_for_slot_availability(qp, wqe_idx + num_wqes);
     return wqe_idx;

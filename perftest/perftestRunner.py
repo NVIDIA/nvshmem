@@ -162,7 +162,7 @@ if __name__ == '__main__':
       cuda_home = os.environ["CUDA_HOME"]
     except Exception:
       cuda_home = select_case("There is no CUDA_HOME. Please select:",\
-        ["/usr/local/cuda", "/usr/local/cuda-11.0", "/usr/local/cuda-11.8", "/usr/local/cuda-12.0", "/usr/local/cuda-12.1", "/usr/local/cuda-12.2", "/usr/local/cuda-12.4", "/usr/local/cuda-13.0", "/usr/local/cuda-13.1", "/usr/local/cuda-13.2", "/usr/local/cuda-13.3", "/usr/local/cuda-13.4"])[0]
+        ["/usr/local/cuda", "/usr/local/cuda-12.0", "/usr/local/cuda-12.1", "/usr/local/cuda-12.2", "/usr/local/cuda-12.4", "/usr/local/cuda-13.0", "/usr/local/cuda-13.1", "/usr/local/cuda-13.2", "/usr/local/cuda-13.3", "/usr/local/cuda-13.4"])[0]
       os.environ.update({"CUDA_HOME": cuda_home})
 
     # GDRCopy
