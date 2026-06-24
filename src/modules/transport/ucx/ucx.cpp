@@ -73,7 +73,7 @@ int nvshmemt_ucx_progress(nvshmem_transport_t transport);
     } while (0)
 
 static inline bool nvshmemt_ucx_config_is_set(const char *value) {
-    return value != NULL && value[0] != '\0';
+    return value != nullptr && value[0] != '\0';
 }
 
 static const char *nvshmemt_ucx_config_value(int log_level, const char *ucx_config_name,
@@ -83,6 +83,7 @@ static const char *nvshmemt_ucx_config_value(int log_level, const char *ucx_conf
                                              bool nvshmem_value_provided,
                                              const char *default_value) {
     const char *ucx_env_value = getenv(ucx_env_name);
+    const bool ucx_env_value_provided = nvshmemt_ucx_config_is_set(ucx_env_value);
 
     if (nvshmem_value_provided && nvshmemt_ucx_config_is_set(nvshmem_value)) {
         INFO(log_level, "Using %s=%s for UCX %s configuration.\n", nvshmem_env_name,
@@ -90,10 +91,10 @@ static const char *nvshmemt_ucx_config_value(int log_level, const char *ucx_conf
         return nvshmem_value;
     }
 
-    if (nvshmemt_ucx_config_is_set(ucx_env_value)) {
+    if (ucx_env_value_provided) {
         INFO(log_level, "%s=%s is set; preserving user UCX %s configuration.\n", ucx_env_name,
              ucx_env_value, ucx_config_name);
-        return NULL;
+        return nullptr;
     }
 
     INFO(log_level, "Using default UCX %s configuration: %s.\n", ucx_config_name, default_value);
@@ -1353,9 +1354,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
     int log_level;
 
     int status = 0;
-    const char *ucx_rc_tx_inline_resp = NULL;
-    const char *ucx_tls = NULL;
-    const char *ucx_zcopy_thresh = NULL;
+    const char *ucx_rc_tx_inline_resp = nullptr;
+    const char *ucx_tls = nullptr;
+    const char *ucx_zcopy_thresh = nullptr;
 
     int num_ib_devices;
     struct ibv_device **dev_list = NULL;
@@ -1409,7 +1410,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
         log_level, "RC_TX_INLINE_RESP", "UCX_RC_TX_INLINE_RESP",
         "NVSHMEM_UCX_RC_TX_INLINE_RESP", options.UCX_RC_TX_INLINE_RESP,
         options.UCX_RC_TX_INLINE_RESP_provided, "0");
-    if (ucx_rc_tx_inline_resp != NULL) {
+    if (ucx_rc_tx_inline_resp != nullptr) {
         status = setenv("UCX_RC_TX_INLINE_RESP", ucx_rc_tx_inline_resp, 1);
         if (status) {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
@@ -1445,7 +1446,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
         nvshmemt_ucx_config_value(log_level, "TLS", "UCX_TLS", "NVSHMEM_UCX_TLS",
                                   options.UCX_TLS, options.UCX_TLS_provided,
                                   use_local_atomics ? "posix,ib" : "rc");
-    if (ucx_tls != NULL) {
+    if (ucx_tls != nullptr) {
         ucs_rc = ucp_config_modify(ucx_state->library_config, "TLS", ucx_tls);
         if (ucs_rc != UCS_OK) {
             NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, ucs_rc,
@@ -1456,7 +1457,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
     ucx_zcopy_thresh = nvshmemt_ucx_config_value(
         log_level, "ZCOPY_THRESH", "UCX_ZCOPY_THRESH", "NVSHMEM_UCX_ZCOPY_THRESH",
         options.UCX_ZCOPY_THRESH, options.UCX_ZCOPY_THRESH_provided, "0");
-    if (ucx_zcopy_thresh != NULL) {
+    if (ucx_zcopy_thresh != nullptr) {
         ucs_rc = ucp_config_modify(ucx_state->library_config, "ZCOPY_THRESH", ucx_zcopy_thresh);
         if (ucs_rc != UCS_OK) {
             NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, ucs_rc,
