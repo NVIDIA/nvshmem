@@ -3692,17 +3692,22 @@ static int ibgda_setup_qp_groups_gpu_state(nvshmemt_ibgda_state_t *ibgda_state,
     int status = 0;
     int n_devs_selected = ibgda_state->n_devs_selected;
     int n_pes = t->n_pes;
+    int num_qp_group_switches;
 
     /* Calculate QP groups start */
     if (num_rc_handles > 0) {
         *num_qp_groups = std::max(num_rc_handles / n_devs_selected / n_pes, 2);
+        // In RC mode, we need to initialize one slot more for switching on the QP any group
+        num_qp_group_switches = *num_qp_groups + 1;
     } else {
         *num_qp_groups = num_dci_handles / n_devs_selected;
+        num_qp_group_switches = *num_qp_groups;
     }
     /* Calculate QP groups end */
 
     /* Allocate QP group switches device memory start */
-    status = cudaMalloc(qp_group_switches_d, *num_qp_groups * sizeof(**qp_group_switches_d));
+    status =
+        cudaMalloc(qp_group_switches_d, num_qp_group_switches * sizeof(**qp_group_switches_d));
     NVSHMEMI_NE_ERROR_JMP(status, cudaSuccess, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                           "qp_group_switches_d cudaM err.");
     /* Allocate QP group switches device memory end */
@@ -3959,8 +3964,10 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
                                                  &num_qp_groups, &qp_group_switches_d);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "ibgda_setup_qp_groups_gpu_state failed.");
-        cudaMemsetAsync(qp_group_switches_d, 0, num_qp_groups * sizeof(*qp_group_switches_d),
-                        ibgda_state->my_stream);
+        int num_qp_group_switches = num_qp_groups + (num_rc_handles > 0 ? 1 : 0);
+        status = cudaMemsetAsync(qp_group_switches_d, 0,
+                                 num_qp_group_switches * sizeof(*qp_group_switches_d),
+                                 ibgda_state->my_stream);
         NVSHMEMI_NE_ERROR_JMP(status, cudaSuccess, NVSHMEMX_ERROR_INTERNAL, out,
                               "qp_group_switches_d set err.");
     } else {
