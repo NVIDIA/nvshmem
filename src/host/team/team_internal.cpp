@@ -2566,6 +2566,23 @@ static bool inline nvshmemi_is_rsvd_teams(nvshmem_team_t team_idx) {
             (team_idx >= NVSHMEM_TEAM_WORLD_INDEX && team_idx < NVSHMEM_TEAMS_MIN));
 }
 
+static void nvshmemi_team_destroy_dups(nvshmemi_team_t *team) {
+    if (nvshmemi_team_pool == NULL) return;
+
+    for (size_t i = 1; i < sizeof(team->team_dups) / sizeof(team->team_dups[0]); ++i) {
+        nvshmem_team_t dup_idx = team->team_dups[i];
+        if (dup_idx == NVSHMEM_TEAM_INVALID) continue;
+
+        team->team_dups[i] = NVSHMEM_TEAM_INVALID;
+        if (dup_idx < 0 || dup_idx >= nvshmemi_max_teams) continue;
+        if (nvshmemi_team_pool[dup_idx] == NULL) continue;
+
+        INFO(NVSHMEM_COLL, "Destroy duplicate team at index[%d] for parent-team [%p] at index[%d]",
+             dup_idx, team, team->team_idx);
+        nvshmemi_team_destroy(nvshmemi_team_pool[dup_idx]);
+    }
+}
+
 void nvshmemi_team_destroy(nvshmemi_team_t *team) {
     int idx;
 
@@ -2589,6 +2606,8 @@ void nvshmemi_team_destroy(nvshmemi_team_t *team) {
             }
         }
     }
+
+    nvshmemi_team_destroy_dups(team);
 
     if (!team->is_team_node) {
         if (!nvshmemi_is_rsvd_teams(team->team_node) &&

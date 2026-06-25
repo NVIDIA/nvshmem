@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include "nvshmem.h"
 #include "nvshmemx.h"
 #include "utils.h"
@@ -78,9 +79,34 @@ static int check_2d(nvshmem_team_t parent_team, int xdim) {
     return errors != 0;
 }
 
+static int check_2d_destroy_reuse(nvshmem_team_t parent_team, int xdim, int iterations) {
+    int errors = 0;
+
+    for (int i = 0; i < iterations; ++i) {
+        nvshmem_team_t xteam = NVSHMEM_TEAM_INVALID;
+        nvshmem_team_t yteam = NVSHMEM_TEAM_INVALID;
+
+        int ret = nvshmem_team_split_2d(parent_team, xdim, NULL, 0, &xteam, NULL, 0, &yteam);
+        if (ret != 0 || xteam == NVSHMEM_TEAM_INVALID || yteam == NVSHMEM_TEAM_INVALID) {
+            printf("%d: 2d split reuse failed on iteration %d, ret: %d, xteam: %d, yteam: %d\n",
+                   nvshmem_my_pe(), i, ret, xteam, yteam);
+            ++errors;
+            break;
+        }
+
+        nvshmem_team_destroy(xteam);
+        nvshmem_team_destroy(yteam);
+    }
+
+    return errors != 0;
+}
+
 int main(int argc, char **argv) {
     int errors = 0, me, npes, ret;
-    nvshmem_team_t even_team;
+    nvshmem_team_t even_team = NVSHMEM_TEAM_INVALID;
+
+    setenv("NVSHMEM_MAX_CTAS", "2", 1);
+    setenv("NVSHMEM_MAX_TEAMS", "128", 1);
 
     init_wrapper(&argc, &argv);
 
@@ -102,9 +128,12 @@ int main(int argc, char **argv) {
         errors += check_2d(even_team, 1);
         errors += check_2d(even_team, 2);
         errors += check_2d(even_team, 3);
+        nvshmem_team_destroy(even_team);
     } else {
         if (me == 0) printf("Unable to create even team\n");
     }
+
+    errors += check_2d_destroy_reuse(NVSHMEM_TEAM_WORLD, 2, 80);
 
     finalize_wrapper();
     return errors != 0;
