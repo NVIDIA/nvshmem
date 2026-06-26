@@ -108,6 +108,14 @@ struct nvshmemt_ib_qp_path {
     bool grh_required;
 };
 
+static inline bool nvshmemt_ib_common_port_requires_grh(const struct ibv_port_attr *port_attr) {
+#ifdef IBV_QPF_GRH_REQUIRED
+    return (port_attr->flags & IBV_QPF_GRH_REQUIRED) != 0;
+#else
+    return false;
+#endif
+}
+
 struct nvshmemt_ib_common_state {
     void *devices;
     int *dev_ids;

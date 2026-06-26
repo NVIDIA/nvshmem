@@ -479,8 +479,9 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             &device->common_device.gid_info[portid - 1].local_gid, port_attr->lid, ep_handle->lid,
             ep_handle->spn, ep_handle->iid);
         attr.ah_attr.dlid = path.dlid;
-        /* GRH is needed for cross-subnet IB and for ambiguous same-LID paths. */
-        if (ibrc_state->options->IB_FORCE_GRH || path.grh_required) {
+        /* GRH is needed for GRH-only ports, cross-subnet IB, and ambiguous same-LID paths. */
+        if (ibrc_state->options->IB_FORCE_GRH ||
+            nvshmemt_ib_common_port_requires_grh(port_attr) || path.grh_required) {
             set_grh_fields();
         } else {
             attr.ah_attr.is_global = 0;
