@@ -690,8 +690,16 @@ int gpunetio_device::create_ah(int portid) {
     DOCA_CHECK(doca_verbs_ah_attr_set_sl(local_ah, state_->options->IB_SL));
     DOCA_CHECK(doca_verbs_ah_attr_set_traffic_class(local_ah, state_->options->IB_TRAFFIC_CLASS));
 
-    if (common_device.port_attr[portid - 1].link_layer == 1) {
-        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(local_ah, DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
+    const struct ibv_port_attr *port_attr = common_device.port_attr + (portid - 1);
+    const bool use_ib_grh =
+        state_->options->IB_FORCE_GRH || nvshmemt_ib_common_port_requires_grh(port_attr);
+
+    if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(
+            local_ah, use_ib_grh ? DOCA_VERBS_ADDR_TYPE_IB_GRH : DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
+        if (use_ib_grh) {
+            DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(local_ah, GPUNETIO_QP_HOP_LIMIT));
+        }
     } else {
         DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(local_ah, DOCA_VERBS_ADDR_TYPE_IPv4));
         DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(local_ah, GPUNETIO_QP_HOP_LIMIT));
@@ -789,7 +797,9 @@ int gpunetio_device::connect_self_loop(int portid, doca_gpu_verbs_qp_hl *qp_loca
     memcpy(vgid.raw, gid->raw, sizeof(union ibv_gid));
 
     DOCA_CHECK(doca_verbs_ah_attr_set_gid(ah, vgid));
-    if (port_attr.link_layer == 1) DOCA_CHECK(doca_verbs_ah_attr_set_dlid(ah, port_attr.lid));
+    if (port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        DOCA_CHECK(doca_verbs_ah_attr_set_dlid(ah, port_attr.lid));
+    }
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_backup->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;

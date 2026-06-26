@@ -784,7 +784,8 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
         DEVX_SET(qpc, qp_context, primary_address_path.rlid, path.dlid);
         DEVX_SET(qpc, qp_context, primary_address_path.mlid, 0);
         DEVX_SET(qpc, qp_context, primary_address_path.sl, ibdevx_state->options->IB_SL);
-        if (ibdevx_state->options->IB_FORCE_GRH || path.grh_required) {
+        if (ibdevx_state->options->IB_FORCE_GRH ||
+            nvshmemt_ib_common_port_requires_grh(port_attr) || path.grh_required) {
             ah_attr.dlid = path.dlid;
             set_grh_fields();
 
