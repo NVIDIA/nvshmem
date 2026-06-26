@@ -1771,8 +1771,9 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
             &device->common_device.gid_info[portid - 1].local_gid, port_attr->lid,
             peer_ep_handle->lid, peer_ep_handle->spn, peer_ep_handle->iid);
         ah_attr.dlid = path.dlid;
-        /* GRH is needed for cross-subnet IB and for ambiguous same-LID paths. */
-        if (ibgda_state->common.options->IB_FORCE_GRH || path.grh_required) {
+        /* GRH is needed for GRH-only ports, cross-subnet IB, and ambiguous same-LID paths. */
+        if (ibgda_state->common.options->IB_FORCE_GRH ||
+            nvshmemt_ib_common_port_requires_grh(port_attr) || path.grh_required) {
             set_grh_fields();
         } else {
             ah_attr.is_global = 0;
@@ -2547,10 +2548,12 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     NVSHMEMI_NULL_ERROR_JMP(recv_cq, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "ibv_create_cq for recv_cq failed.\n");
 
-    /* GRH is needed for RoCE (lid == 0). For IB, the DCT self-AH uses LID routing;
-     * the connecting RC initiator independently determines GRH need via subnet comparison.
-     * If an OFED stack rejects the IB LID-only AH, retry with GRH below. */
-    if (ibgda_state->common.options->IB_FORCE_GRH || port_attr->lid == 0) {
+    /* GRH is needed for RoCE (lid == 0) and GRH-only IB ports. For other IB ports, the
+     * DCT self-AH uses LID routing; the connecting RC initiator independently determines
+     * GRH need via subnet comparison. If an OFED stack rejects the IB LID-only AH, retry
+     * with GRH below. */
+    if (ibgda_state->common.options->IB_FORCE_GRH || port_attr->lid == 0 ||
+        nvshmemt_ib_common_port_requires_grh(port_attr)) {
         set_grh_fields();
         support_half_av_seg = false;
     } else {
