@@ -29,7 +29,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_pow2_t
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int size = teami->size;
     volatile long *sync_counter = (volatile long *)nvshmemi_team_get_sync_counter(teami);
-    volatile long *pSync = (volatile long *)nvshmemi_team_get_psync(teami, SYNC) + NVSHMEMI_SYNC_SIZE * (sync_counter[0] % 2);
+    volatile long *pSync = (volatile long *)nvshmemi_team_get_psync(teami, SYNC) +
+                           NVSHMEMI_SYNC_SIZE * (sync_counter[0] % 2);
     volatile long *sync_arr = NULL;
     int shift;
     int to_nbr_idx, to_nbr;
@@ -49,8 +50,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_pow2_t
 
             to_nbr_idx = teami->my_pe + shift;
             to_nbr = nvshmemi_team_translate_pe_to_team_world_wrap(teami, to_nbr_idx);
-            nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(sync_arr, nvshmemi_device_state_d.mype),
-                                              counter[0], to_nbr);
+            nvshmemi_signal_for_barrier<long>(
+                get_pe_sync_addr(sync_arr, nvshmemi_device_state_d.mype), counter[0], to_nbr);
         }
 
         /* wait for neighbors notification */
@@ -61,8 +62,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_pow2_t
             from_nbr_idx = teami->my_pe - shift;
             if (from_nbr_idx < 0) from_nbr_idx = size + from_nbr_idx;
             from_nbr = nvshmemi_team_translate_pe_to_team_world_wrap(teami, from_nbr_idx);
-            nvshmemi_wait_until_greater_than_equals<long>(get_pe_sync_addr(sync_arr, from_nbr),
-                                                                   counter[0], NVSHMEMI_CALL_SITE_BARRIER_WARP);
+            nvshmemi_wait_until_greater_than_equals<long>(
+                get_pe_sync_addr(sync_arr, from_nbr), counter[0], NVSHMEMI_CALL_SITE_BARRIER_WARP);
         }
         pow_k <<= logk;
         temp >>= logk;
@@ -79,7 +80,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
 
     volatile long *sync_counter = (volatile long *)nvshmemi_team_get_sync_counter(teami);
-    volatile long *pSync = (volatile long *)nvshmemi_team_get_psync(teami, SYNC) + NVSHMEMI_SYNC_SIZE * (sync_counter[0] % 2);
+    volatile long *pSync = (volatile long *)nvshmemi_team_get_psync(teami, SYNC) +
+                           NVSHMEMI_SYNC_SIZE * (sync_counter[0] % 2);
     int num_phases = 0;
 
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -116,8 +118,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
             from_nbr_idx = my_idx_in_active_set - shift;
             if (from_nbr_idx < 0) from_nbr_idx = size + from_nbr_idx;
             from_nbr = teami->pe_mapping[from_nbr_idx];
-            nvshmemi_wait_until_greater_than_equals<long>(get_pe_sync_addr(pSync, from_nbr), counter[0],
-                                                                   NVSHMEMI_CALL_SITE_BARRIER_WARP);
+            nvshmemi_wait_until_greater_than_equals<long>(
+                get_pe_sync_addr(pSync, from_nbr), counter[0], NVSHMEMI_CALL_SITE_BARRIER_WARP);
         }
         pow_k *= k;
         nvshmemi_threadgroup_sync<SCOPE>();
@@ -156,8 +158,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
             if (shift >= size) break;
             to_nbr_idx = (my_idx_in_active_set + shift) % size;
             to_nbr = start + to_nbr_idx * stride;
-            nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(sync_arr, nvshmemi_device_state_d.mype),
-                                              counter[0], to_nbr);
+            nvshmemi_signal_for_barrier<long>(
+                get_pe_sync_addr(sync_arr, nvshmemi_device_state_d.mype), counter[0], to_nbr);
         }
 
         /* wait for neighbors notification */
@@ -168,8 +170,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
             from_nbr_idx = my_idx_in_active_set - shift;
             if (from_nbr_idx < 0) from_nbr_idx = size + from_nbr_idx;
             from_nbr = start + from_nbr_idx * stride;
-            nvshmemi_wait_until_greater_than_equals<long>(get_pe_sync_addr(sync_arr, from_nbr), counter[0],
-                                                                   NVSHMEMI_CALL_SITE_BARRIER_WARP);
+            nvshmemi_wait_until_greater_than_equals<long>(
+                get_pe_sync_addr(sync_arr, from_nbr), counter[0], NVSHMEMI_CALL_SITE_BARRIER_WARP);
         }
         pow_k *= k;
         nvshmemi_threadgroup_sync<SCOPE>();
@@ -186,7 +188,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void sync_dissem_thread
     int stride = teami->stride;
     int size = teami->size;
     volatile long *sync_counter = (volatile long *)nvshmemi_team_get_sync_counter(teami);
-    volatile long *pSync = (volatile long *)nvshmemi_team_get_psync(teami, SYNC) + NVSHMEMI_SYNC_SIZE * (sync_counter[0] % 2);
+    volatile long *pSync = (volatile long *)nvshmemi_team_get_psync(teami, SYNC) +
+                           NVSHMEMI_SYNC_SIZE * (sync_counter[0] % 2);
 
     if (stride > 0) {
         sync_dissem_threadgroup_2<SCOPE>(start, stride, size, pSync, sync_counter);

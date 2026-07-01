@@ -178,8 +178,7 @@ static int nvshmemt_ibrc_release_gdrcopy_mapping(ibrc_mem_handle_info_t &handle_
     auto &mapping = handle_info.gdrcopy;
 
     if (mapping.mapped) {
-        status = gdrcopy_ftable.unmap(gdr_desc, mapping.mh, mapping.cpu_ptr_base,
-                                      handle_info.size);
+        status = gdrcopy_ftable.unmap(gdr_desc, mapping.mh, mapping.cpu_ptr_base, handle_info.size);
         if (status == 0) {
             mapping.mapped = false;
             mapping.cpu_ptr_base = nullptr;
@@ -338,8 +337,9 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
             status, NVSHMEMX_ERROR_INVALID_VALUE, out,
             "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBRC QP: expected 0 <= "
             "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); pe %d device %s devid %d port %d "
-            "link_layer %s lid %hu\n", pkey_index, port_attr->pkey_tbl_len, t->my_pe,
-            device->common_device.dev->name, ibrc_state->dev_ids[devid], portid,
+            "link_layer %s lid %hu\n",
+            pkey_index, port_attr->pkey_tbl_len, t->my_pe, device->common_device.dev->name,
+            ibrc_state->dev_ids[devid], portid,
             nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
     }
 
@@ -480,8 +480,8 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             ep_handle->spn, ep_handle->iid);
         attr.ah_attr.dlid = path.dlid;
         /* GRH is needed for GRH-only ports, cross-subnet IB, and ambiguous same-LID paths. */
-        if (ibrc_state->options->IB_FORCE_GRH ||
-            nvshmemt_ib_common_port_requires_grh(port_attr) || path.grh_required) {
+        if (ibrc_state->options->IB_FORCE_GRH || nvshmemt_ib_common_port_requires_grh(port_attr) ||
+            path.grh_required) {
             set_grh_fields();
         } else {
             attr.ah_attr.is_global = 0;
@@ -784,8 +784,7 @@ int nvshmemt_ibrc_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_t
 
         if (use_gdrcopy && !is_egm) {
             status = nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "gdrcopy cleanup failed\n");
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy cleanup failed\n");
         }
 #endif
 

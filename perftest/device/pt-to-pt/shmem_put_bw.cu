@@ -65,8 +65,7 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int l
             if (counter == (gridDim.x * (i + 1) - 1)) {
                 *(counter_d + 1) += 1;
             }
-            while (*(counter_d + 1) != i + 1)
-                ;
+            while (*(counter_d + 1) != i + 1);
         }
         __syncthreads();
     }
@@ -80,8 +79,7 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int l
             nvshmem_quiet();
             *(counter_d + 1) += 1;
         }
-        while (*(counter_d + 1) != i + 1)
-            ;
+        while (*(counter_d + 1) != i + 1);
         nvshmem_quiet();
     }
     __syncthreads();
@@ -117,8 +115,7 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int le
             if (counter == (gridDim.x * (i + 1) - 1)) {
                 *(counter_d + 1) += 1;
             }
-            while (*(counter_d + 1) != i + 1)
-                ;
+            while (*(counter_d + 1) != i + 1);
         }
         __syncthreads();
     }
@@ -132,8 +129,7 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int le
             nvshmem_quiet();
             *(counter_d + 1) += 1;
         }
-        while (*(counter_d + 1) != i + 1)
-            ;
+        while (*(counter_d + 1) != i + 1);
         nvshmem_quiet();
     }
     __syncthreads();
@@ -167,8 +163,7 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int 
             if (counter == (gridDim.x * (i + 1) - 1)) {
                 *(counter_d + 1) += 1;
             }
-            while (*(counter_d + 1) != i + 1)
-                ;
+            while (*(counter_d + 1) != i + 1);
         }
         __syncthreads();
     }
@@ -182,8 +177,7 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int 
             nvshmem_quiet();
             *(counter_d + 1) += 1;
         }
-        while (*(counter_d + 1) != i + 1)
-            ;
+        while (*(counter_d + 1) != i + 1);
         nvshmem_quiet();
     }
     __syncthreads();

@@ -148,8 +148,8 @@ static enum netdevs_policy get_netdevs_policy(void) {
         return NETDEVS_POLICY_AUTO;
     }
 
-    if (strcasecmp(nvshmemi_options.NETDEVS_POLICY,
-                   "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE") == 0) {
+    if (strcasecmp(nvshmemi_options.NETDEVS_POLICY, "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE") ==
+        0) {
         return NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE;
     }
 
@@ -190,8 +190,7 @@ static int get_all_physical_gpu_paths_and_index(int cuda_device_id, char ***cuda
 
     status = get_cuda_bus_id(cuda_device_id, my_bus_id);
     if (status != NVSHMEMX_SUCCESS) return status;
-    for (int k = 0; k < MAX_BUSID_SIZE; k++)
-        my_bus_id[k] = tolower(my_bus_id[k]);
+    for (int k = 0; k < MAX_BUSID_SIZE; k++) my_bus_id[k] = tolower(my_bus_id[k]);
 
     nvidia_dir = opendir(NVIDIA_DRIVER_PATH);
     if (!nvidia_dir) {
@@ -207,8 +206,7 @@ static int get_all_physical_gpu_paths_and_index(int cuda_device_id, char ***cuda
         if (!is_pci_addr(ent->d_name)) continue;
         std::array<char, MAX_BUSID_SIZE> bus_id = {};
         strncpy(bus_id.data(), ent->d_name, MAX_BUSID_SIZE - 1);
-        for (int k = 0; k < MAX_BUSID_SIZE; k++)
-            bus_id[k] = tolower(bus_id[k]);
+        for (int k = 0; k < MAX_BUSID_SIZE; k++) bus_id[k] = tolower(bus_id[k]);
         gpu_bus_ids.push_back(bus_id);
     }
     closedir(nvidia_dir);
@@ -370,14 +368,14 @@ out:
 
 static int collect_all_physical_gpu_paths(char ***entity_paths, int *n_entities,
                                           int *my_entity_index) {
-    return get_all_physical_gpu_paths_and_index(nvshmemi_state->device_id, entity_paths,
-                                                n_entities, my_entity_index);
+    return get_all_physical_gpu_paths_and_index(nvshmemi_state->device_id, entity_paths, n_entities,
+                                                my_entity_index);
 }
 
 static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
                                       struct nvshmem_transport *tcurr, char **entity_paths,
-                                      int n_entities, int my_entity_index,
-                                      const char *entity_name, enum netdevs_policy policy) {
+                                      int n_entities, int my_entity_index, const char *entity_name,
+                                      enum netdevs_policy policy) {
     struct dev_info {
         char *dev_path;
         int use_count;
@@ -462,8 +460,8 @@ static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
                         break;
                     }
                 }
-                INFO(NVSHMEM_TOPO, "%s %d: %s dev %d: %s distance: %d\n", entity_name,
-                     entity_id, entity_paths[entity_id], dev_id, dev_info_all[dev_id].dev_path,
+                INFO(NVSHMEM_TOPO, "%s %d: %s dev %d: %s distance: %d\n", entity_name, entity_id,
+                     entity_paths[entity_id], dev_id, dev_info_all[dev_id].dev_path,
                      distance_compare);
                 entity_dev_pairs.insert(pairs_iter, {entity_id, dev_id, distance_compare});
             }
@@ -506,8 +504,7 @@ static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
             /* This NIC is optimal for this entity. */
             INFO(NVSHMEM_TOPO, "Pairing %s %d with device %d at distance %d\n", entity_name,
                  (*pairs_iter).entity_idx, (*pairs_iter).dev_idx, (*pairs_iter).pcie_distance);
-            entity_selected_devices[entity_base_index + entity_pair_index] =
-                (*pairs_iter).dev_idx;
+            entity_selected_devices[entity_base_index + entity_pair_index] = (*pairs_iter).dev_idx;
             entity_device_distance[entity_base_index + entity_pair_index] =
                 (*pairs_iter).pcie_distance;
             used_devs[(*pairs_iter).dev_idx]++;
@@ -642,8 +639,7 @@ int nvshmemi_get_devices_by_distance(int *device_arr, int max_dev_per_pe,
     INFO(NVSHMEM_TOPO,
          "NVSHMEM_NETDEVS_POLICY=%s assignment_scope=%s n_entities=%d "
          "my_entity_index=%d max_devices_per_entity=%d\n",
-         get_netdevs_policy_name(policy), entity_name, n_entities, my_entity_index,
-         max_dev_per_pe);
+         get_netdevs_policy_name(policy), entity_name, n_entities, my_entity_index, max_dev_per_pe);
 
     status = select_devices_by_distance(device_arr, max_dev_per_pe, tcurr, entity_paths, n_entities,
                                         my_entity_index, entity_name, policy);
@@ -849,9 +845,8 @@ static int cpumap_to_cpuset(std::string_view map_str, cpu_set_t *set) {
         }
 
         std::size_t end = map_str.find(',', start);
-        std::string_view token_view =
-            map_str.substr(start, end == std::string_view::npos ? std::string_view::npos
-                                                                : end - start);
+        std::string_view token_view = map_str.substr(
+            start, end == std::string_view::npos ? std::string_view::npos : end - start);
         uint32_t parsed_mask;
         int status = parse_cpumap_mask(token_view, &parsed_mask);
         if (status != NVSHMEMX_SUCCESS) {
@@ -887,8 +882,8 @@ static int set_cpu_affinity(nvshmemi_state_t *state) {
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    status = CUPFN(nvshmemi_cuda_syms,
-                   cuDeviceGetAttribute)(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, cudev);
+    status = CUPFN(nvshmemi_cuda_syms, cuDeviceGetAttribute)(
+        &numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, cudev);
     if (status != CUDA_SUCCESS || numa_id < 0) {
         INFO(NVSHMEM_INIT, "cuDeviceGetAttribute failed: %d (numa_id: %d).\n", status, numa_id);
         return NVSHMEMX_ERROR_INTERNAL;

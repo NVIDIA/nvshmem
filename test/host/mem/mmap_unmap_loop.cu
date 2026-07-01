@@ -77,7 +77,8 @@ void releaseUserBuf(void *ptr, size_t size) {
     CU_CHECK(cuMemRelease(memHandle));
 }
 
-int test_allocation_at_preferred_address(void *user_buf, size_t size, void *mmaped_addr, bool should_match_preferred_addr) {
+int test_allocation_at_preferred_address(void *user_buf, size_t size, void *mmaped_addr,
+                                         bool should_match_preferred_addr) {
     void *mmaped_buf_pref;
     // register with preferred address
     mmaped_buf_pref = (void *)nvshmemx_buffer_register_symmetric_at_preferred_address(
@@ -88,7 +89,8 @@ int test_allocation_at_preferred_address(void *user_buf, size_t size, void *mmap
     }
     // this should allocate at preferred address
     if (should_match_preferred_addr && (mmaped_buf_pref != mmaped_addr)) {
-        ERROR_PRINT("Could not allocate at preferred address %p %p\n", mmaped_buf_pref, mmaped_addr);
+        ERROR_PRINT("Could not allocate at preferred address %p %p\n", mmaped_buf_pref,
+                    mmaped_addr);
         return -1;
     }
     if (nvshmemx_buffer_unregister_symmetric(mmaped_buf_pref, size)) {
@@ -201,8 +203,8 @@ int main(int argc, char **argv) {
     // test allocation when preferred address is unavailable
     // allocation should succeed but should not be at preferred address
     if (iter > 2) {
-        status = test_allocation_at_preferred_address(buffer[0], bufSize[buffer[0]], mmaped_buf[buffer[1]],
-                                                      false);
+        status = test_allocation_at_preferred_address(buffer[0], bufSize[buffer[0]],
+                                                      mmaped_buf[buffer[1]], false);
         if (status) {
             ERROR_PRINT("test_allocation_at_preferred_address failed \n");
             goto out;
@@ -246,9 +248,11 @@ int main(int argc, char **argv) {
             }
 
             // register with buf id 1 as preferred offset
-            status = test_allocation_at_preferred_address(buffer[1], bufSize[buffer[1]], mmaped_buf[buffer[1]], true);
+            status = test_allocation_at_preferred_address(buffer[1], bufSize[buffer[1]],
+                                                          mmaped_buf[buffer[1]], true);
             if (status) {
-                ERROR_PRINT("test_allocation_at_preferred_address within unmapped region failed \n");
+                ERROR_PRINT(
+                    "test_allocation_at_preferred_address within unmapped region failed \n");
                 goto out;
             }
 
@@ -275,8 +279,8 @@ int main(int argc, char **argv) {
 
         // check if preferred allocation in empty heap region
         if (iter > 2) {
-            status =
-                test_allocation_at_preferred_address(buffer[1], bufSize[buffer[1]], mmaped_buf[buffer[1]], true);
+            status = test_allocation_at_preferred_address(buffer[1], bufSize[buffer[1]],
+                                                          mmaped_buf[buffer[1]], true);
             if (status) {
                 ERROR_PRINT("test_allocation_at_preferred_address failed \n");
                 goto out;

@@ -325,7 +325,7 @@ __device__ unsigned int __attribute__((noreturn)) __nvvm_reflect(const char *s);
     NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE_WITH_SCOPE2(NVSHMEMI_FN_TEMPLATE, block, _block, x)
 
 /* Utility macros for calculating psync space */
-#define NVSHMEMI_TEAM_ROUND_UP_DIV(x, y) (((x) + (y)-1) / (y))
+#define NVSHMEMI_TEAM_ROUND_UP_DIV(x, y) (((x) + (y) - 1) / (y))
 #define NVSHMEMI_TEAM_ROUND_UP(x, y) (NVSHMEMI_TEAM_ROUND_UP_DIV(x, y) * (y))
 
 /* The LL 128 psync size for any PE is equal to:

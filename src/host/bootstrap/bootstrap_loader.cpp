@@ -74,7 +74,7 @@ out:
 
 int bootstrap_loader_preinit(const char *plugin, bootstrap_handle_t *handle) {
     int status = 0;
-    int (*bootstrap_plugin_preinitops)(bootstrap_handle_t * handle, int nvshmem_version);
+    int (*bootstrap_plugin_preinitops)(bootstrap_handle_t *handle, int nvshmem_version);
     status = _bootstrap_loader_init_helper(plugin);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
                           "Bootstrap library dlopen failed for %s\n", plugin);

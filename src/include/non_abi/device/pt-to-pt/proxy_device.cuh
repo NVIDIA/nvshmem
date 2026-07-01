@@ -39,11 +39,17 @@ __host__ __device__ constexpr bool nvshmemi_is_float_type<double>() {
 template <typename T>
 struct nvshmemi_uint_for_float {};
 template <>
-struct nvshmemi_uint_for_float<__half> { typedef uint16_t type; };
+struct nvshmemi_uint_for_float<__half> {
+    typedef uint16_t type;
+};
 template <>
-struct nvshmemi_uint_for_float<float> { typedef uint32_t type; };
+struct nvshmemi_uint_for_float<float> {
+    typedef uint32_t type;
+};
 template <>
-struct nvshmemi_uint_for_float<double> { typedef uint64_t type; };
+struct nvshmemi_uint_for_float<double> {
+    typedef uint64_t type;
+};
 
 #ifdef __CUDA_ARCH__
 
@@ -51,8 +57,8 @@ struct nvshmemi_uint_for_float<double> { typedef uint64_t type; };
 #define likely(x) (__builtin_expect(!!(x), 1))
 #endif
 
-NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void check_channel_availability(
-    uint64_t tail_idx) {
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE
+    __device__ void check_channel_availability(uint64_t tail_idx) {
     uint64_t complete;
     complete = *((volatile uint64_t *)nvshmemi_device_state_d.proxy_channels_complete_local_ptr);
     if ((complete + nvshmemi_device_state_d.proxy_channel_buf_size - 1) < tail_idx) {
@@ -275,8 +281,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
     idx += CHANNEL_ENTRY_BYTES;
     req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
     curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
-    *((volatile uint64_t *)req) =
-        (uint64_t)((static_cast<uint64_t>(qp_index) << 32) | (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
+    *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_index) << 32) |
+                                             (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
 }
 
 /*XXX : Only no const version is used*/
@@ -369,8 +375,8 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
     idx += CHANNEL_ENTRY_BYTES;
     req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
     curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
-    *((volatile uint64_t *)req) =
-        (uint64_t)((static_cast<uint64_t>(qp_index) << 32) | (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
+    *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_index) << 32) |
+                                             (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
 
     /* put_signal_request_3
      * 32              | 8              | 8      | 8          | 8

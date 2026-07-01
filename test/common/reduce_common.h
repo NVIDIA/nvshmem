@@ -186,8 +186,8 @@ NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE(INIT_REDUCE_DATA_KERNEL)
                 }                                                                                \
             }                                                                                    \
             if (dest[i] != expected) {                                                           \
-                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
-                       to_printable(dest[i]), to_printable(expected), i, nelems, team);          \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC), to_printable(dest[i]),     \
+                       to_printable(expected), i, nelems, team);                                 \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \
@@ -354,7 +354,7 @@ VALIDATE_ALLREDUCE_TILE_DATA(sum, thread, , x, cutlass_bfloat16_t, cutlass::bflo
         TYPE expected = assign<TYPE>(0);                                                         \
         TYPE temp = assign<TYPE>(0);                                                             \
         for (size_t i = myIdx; i < tot_elem_in_tile; i = i + groupSize) {                        \
-            idx_in_tile = ((i)*cuda::std::get<major_dim>(dest.stride()));                        \
+            idx_in_tile = ((i) * cuda::std::get<major_dim>(dest.stride()));                      \
             flat_elem_idx = (tile_start_elem_idx + idx_in_tile);                                 \
             if (nvshmtest_are_strings_same(#TYPENAME, "half") ||                                 \
                 nvshmtest_are_strings_same(#TYPENAME, "bfloat16")) {                             \

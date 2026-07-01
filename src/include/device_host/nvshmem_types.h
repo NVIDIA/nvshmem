@@ -16,7 +16,7 @@
  * reference slots by index via nvshmemi_tma_barrier_slot(int).
  */
 #define NVSHMEMI_TMA_BARRIER_REGION_BYTES 512
-#define NVSHMEMI_TMA_NUM_BARRIER_SLOTS    32
+#define NVSHMEMI_TMA_NUM_BARRIER_SLOTS 32
 #define NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS 32
 #define NVSHMEMI_HANDLE_BARRIER_BYTES (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS * 16)
 
@@ -67,196 +67,169 @@
     } while (0);
 
 #define NVSHMEM_INIT_ARGS_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_args_t)
-#define NVSHMEMX_INIT_ARGS_V2_INITIALIZER                                   \
-    {                                                                       \
-        NVSHMEM_INIT_ARGS_V2_IDENTIFIER, /* version */                      \
-            NVSHMEMX_UNIQUEID_ARGS_INITIALIZER, INIT_ARGS_SCALAR_INVALID, { \
-            0                                                               \
-        }                                                                   \
-    }
+#define NVSHMEMX_INIT_ARGS_V2_INITIALIZER           \
+    {NVSHMEM_INIT_ARGS_V2_IDENTIFIER, /* version */ \
+     NVSHMEMX_UNIQUEID_ARGS_INITIALIZER,            \
+     INIT_ARGS_SCALAR_INVALID,                      \
+     {0}}
 
-#define NVSHMEMX_INIT_ARGS_INITIALIZER                          \
-    {                                                           \
-        (1 << 16) + sizeof(nvshmemx_init_args_t), /* version */ \
-            NVSHMEMX_UNIQUEID_ARGS_INITIALIZER, {               \
-            0                                                   \
-        }                                                       \
-    }
+#define NVSHMEMX_INIT_ARGS_INITIALIZER                       \
+    {(1 << 16) + sizeof(nvshmemx_init_args_t), /* version */ \
+     NVSHMEMX_UNIQUEID_ARGS_INITIALIZER,                     \
+     {0}}
 
 #define NVSHMEM_INIT_ATTR_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_attr_t)
-#define NVSHMEMX_INIT_ATTR_INITIALIZER                  \
-    {                                                   \
-        NVSHMEM_INIT_ATTR_V2_IDENTIFIER, /* version */  \
-            NULL,                        /* mpi_comm */ \
-            NVSHMEMX_INIT_ARGS_V2_INITIALIZER           \
-    }
+#define NVSHMEMX_INIT_ATTR_INITIALIZER               \
+    {NVSHMEM_INIT_ATTR_V2_IDENTIFIER, /* version */  \
+     NULL,                            /* mpi_comm */ \
+     NVSHMEMX_INIT_ARGS_V2_INITIALIZER}
 
 #define NVSHMEM_INIT_ATTR_V1_IDENTIFIER (1 << 16) + sizeof(nvshmemx_init_attr_t)
-#define NVSHMEMX_INIT_ATTR_V1_INITIALIZER               \
-    {                                                   \
-        NVSHMEM_INIT_ATTR_V1_IDENTIFIER, /* version */  \
-            NULL,                        /* mpi_comm */ \
-            NVSHMEMX_INIT_ARGS_INITIALIZER              \
-    }
+#define NVSHMEMX_INIT_ATTR_V1_INITIALIZER            \
+    {NVSHMEM_INIT_ATTR_V1_IDENTIFIER, /* version */  \
+     NULL,                            /* mpi_comm */ \
+     NVSHMEMX_INIT_ARGS_INITIALIZER}
 
-#define NVSHMEMI_RED_REX_INITIALIZER                                        \
-    {                                                                       \
-        (1 << 16) + sizeof(nvshmemi_reduce_recexch_t), /* version */        \
-            RED_REC_INVALID_SCALAR,                    /* step1_sendto */   \
-            NULL,                                      /* step1_recvfrom */ \
-            NULL,                                      /* step2_nbrs */     \
-            RED_REC_INVALID_SCALAR,                    /* step1_nrecvs */   \
-            RED_REC_INVALID_SCALAR,                    /* step2_nphases */  \
-        {                                                                   \
-            0                                                               \
-        }                                                                   \
-    }
+#define NVSHMEMI_RED_REX_INITIALIZER                                     \
+    {(1 << 16) + sizeof(nvshmemi_reduce_recexch_t), /* version */        \
+     RED_REC_INVALID_SCALAR,                        /* step1_sendto */   \
+     NULL,                                          /* step1_recvfrom */ \
+     NULL,                                          /* step2_nbrs */     \
+     RED_REC_INVALID_SCALAR,                        /* step1_nrecvs */   \
+     RED_REC_INVALID_SCALAR,                        /* step2_nphases */  \
+     {0}}
 
 #define NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER (2 << 16) + sizeof(nvshmem_team_config_t)
-#define NVSHMEMI_TEAM_CONFIG_INITIALIZER                              \
-    {                                                                 \
-        NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER, /* version */      \
-            TEAM_CONFIG_SCALAR_INVALID,            /* num_contexts */ \
-            TEAM_ULSCALAR_INVALID,                 /* uniqueid */     \
-        {                                                             \
-            0                                                         \
-        }                                                             \
-    }
+#define NVSHMEMI_TEAM_CONFIG_INITIALIZER                           \
+    {NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER, /* version */      \
+     TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
+     TEAM_ULSCALAR_INVALID,                     /* uniqueid */     \
+     {0}}
 #define NVSHMEM_TEAM_CONFIG_INITIALIZER NVSHMEMI_TEAM_CONFIG_INITIALIZER
 #define NVSHMEM_TEAM_CONFIG_MASK_NUM_CONTEXTS 0x0000000000000001
 #define NVSHMEM_TEAM_CONFIG_MASK_UNIQUEID 0x0000000000000002
 
 #define NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER (1 << 16) + sizeof(nvshmem_team_config_v1)
-#define NVSHMEMI_TEAM_CONFIG_V1_INITIALIZER                           \
-    {                                                                 \
-        NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER, /* version */      \
-            TEAM_CONFIG_SCALAR_INVALID,            /* num_contexts */ \
-        {                                                             \
-            0                                                         \
-        }                                                             \
-    }
+#define NVSHMEMI_TEAM_CONFIG_V1_INITIALIZER                        \
+    {NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER, /* version */      \
+     TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
+     {0}}
 
 #define NVSHMEMI_TEAM_V4_IDENTIFIER ((4 << 16) + sizeof(nvshmemi_team_t))
-#define NVSHMEMI_TEAM_INITIALIZER                                                               \
-    {                                                                                           \
-        NVSHMEMI_TEAM_V4_IDENTIFIER,                               /* version */                \
-            TEAM_SCALAR_INVALID,                                   /* my_pe */                  \
-            TEAM_SCALAR_INVALID,                                   /* start */                  \
-            TEAM_SCALAR_INVALID,                                   /* stride */                 \
-            TEAM_SCALAR_INVALID,                                   /* size */                   \
-            TEAM_SCALAR_INVALID,                                   /* team_idx */               \
-            NVSHMEMI_TEAM_CONFIG_INITIALIZER, TEAM_SCALAR_INVALID, /* config_mask */            \
-            NULL,                                                  /* nccl_comm */              \
-            NVSHMEMI_RED_REX_INITIALIZER, TEAM_ULSCALAR_INVALID,   /* rdxn_count */             \
-            TEAM_USCALAR_INVALID,                                  /* ll_flag */                \
-            {TEAM_ULSCALAR_DEFAULT, TEAM_ULSCALAR_DEFAULT},        /* alltoall_pwrk[2] */       \
-            TEAM_ULSCALAR_DEFAULT,                                 /* alltoall_count */         \
-            TEAM_ULSCALAR_INVALID,                                 /* bcast_count */            \
-            TEAM_ULSCALAR_INVALID,                                 /* bcast_sync_offset */      \
-            TEAM_ULSCALAR_INVALID,                                 /* fcollect_count */         \
-            TEAM_USCALAR_INVALID,                                  /* fcollect_ll_flag */       \
-            false,                                                 /* are_gpus_p2p_connected */ \
-            false,                                                 /* is_team_node */           \
-            TEAM_SCALAR_INVALID,                                   /* team_node */              \
-            false,                                                 /* is_team_same_mype_node */ \
-            TEAM_SCALAR_INVALID,                                   /* team_same_mype_node */    \
-            NULL,                                                  /* nvls_rsc */               \
-            NULL,                                                  /* nvls_rsc_base_ptr */      \
-            {TEAM_SCALAR_INVALID},                                 /* team_dups */              \
-            NULL,                                                  /* pe_mapping */             \
-            TEAM_ULSCALAR_INVALID,                                 /* p2p_sync_on_stream_count */ \
-            false,                                                 /* are_gpus_nvls_connected */\
-            TEAM_ULSCALAR_INVALID,                                 /* mc_leid_with_flag */      \
+#define NVSHMEMI_TEAM_INITIALIZER                                                      \
+    {                                                                                  \
+        NVSHMEMI_TEAM_V4_IDENTIFIER, /* version */                                     \
+        TEAM_SCALAR_INVALID,         /* my_pe */                                       \
+        TEAM_SCALAR_INVALID,         /* start */                                       \
+        TEAM_SCALAR_INVALID,         /* stride */                                      \
+        TEAM_SCALAR_INVALID,         /* size */                                        \
+        TEAM_SCALAR_INVALID,         /* team_idx */                                    \
+        NVSHMEMI_TEAM_CONFIG_INITIALIZER,                                              \
+        TEAM_SCALAR_INVALID, /* config_mask */                                         \
+        NULL,                /* nccl_comm */                                           \
+        NVSHMEMI_RED_REX_INITIALIZER,                                                  \
+        TEAM_ULSCALAR_INVALID,                          /* rdxn_count */               \
+        TEAM_USCALAR_INVALID,                           /* ll_flag */                  \
+        {TEAM_ULSCALAR_DEFAULT, TEAM_ULSCALAR_DEFAULT}, /* alltoall_pwrk[2] */         \
+        TEAM_ULSCALAR_DEFAULT,                          /* alltoall_count */           \
+        TEAM_ULSCALAR_INVALID,                          /* bcast_count */              \
+        TEAM_ULSCALAR_INVALID,                          /* bcast_sync_offset */        \
+        TEAM_ULSCALAR_INVALID,                          /* fcollect_count */           \
+        TEAM_USCALAR_INVALID,                           /* fcollect_ll_flag */         \
+        false,                                          /* are_gpus_p2p_connected */   \
+        false,                                          /* is_team_node */             \
+        TEAM_SCALAR_INVALID,                            /* team_node */                \
+        false,                                          /* is_team_same_mype_node */   \
+        TEAM_SCALAR_INVALID,                            /* team_same_mype_node */      \
+        NULL,                                           /* nvls_rsc */                 \
+        NULL,                                           /* nvls_rsc_base_ptr */        \
+        {TEAM_SCALAR_INVALID},                          /* team_dups */                \
+        NULL,                                           /* pe_mapping */               \
+        TEAM_ULSCALAR_INVALID,                          /* p2p_sync_on_stream_count */ \
+        false,                                          /* are_gpus_nvls_connected */  \
+        TEAM_ULSCALAR_INVALID,                          /* mc_leid_with_flag */        \
     }
 
-#define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                          \
-    {                                                                                 \
-        (2 << 16) + sizeof(gpu_coll_env_params_t), /* version */                      \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* barrier_dissem_kval */          \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* barrier_tg_dissem_kval */       \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* reduce_recexch_kval */          \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* bcast_tree_kval */              \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* bcast_algo */                   \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* reduce_algo */                  \
-            COLL_ENV_PARAMS_ULSCALAR_INVALID,      /* fcollect_ll_threshold */        \
-            COLL_ENV_PARAMS_ULSCALAR_INVALID,      /* fcollect_nvls_threshold */      \
-            COLL_ENV_PARAMS_ULSCALAR_INVALID,      /* reduce_scratch_size */          \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* fcollect_algo */                \
-            COLL_ENV_PARAMS_ULSCALAR_INVALID,      /* reducescatter_nvls_threshold */ \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* reducescatter_algo */           \
-            COLL_ENV_PARAMS_SCALAR_INVALID,        /* reduce_maxloc_algo */           \
-            COLL_ENV_PARAMS_ULSCALAR_INVALID,      /* fcollect_ll128_threahold */     \
-            COLL_ENV_PARAMS_ULSCALAR_INVALID,      /* reduce_nvls_threshold */        \
-        {                                                                             \
-            0                                                                         \
-        }                                                                             \
-    }
+#define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                       \
+    {(2 << 16) + sizeof(gpu_coll_env_params_t), /* version */                      \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* barrier_dissem_kval */          \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* barrier_tg_dissem_kval */       \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* reduce_recexch_kval */          \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* bcast_tree_kval */              \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* bcast_algo */                   \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* reduce_algo */                  \
+     COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* fcollect_ll_threshold */        \
+     COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* fcollect_nvls_threshold */      \
+     COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* reduce_scratch_size */          \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* fcollect_algo */                \
+     COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* reducescatter_nvls_threshold */ \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* reducescatter_algo */           \
+     COLL_ENV_PARAMS_SCALAR_INVALID,            /* reduce_maxloc_algo */           \
+     COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* fcollect_ll128_threahold */     \
+     COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* reduce_nvls_threshold */        \
+     {0}}
 
-#define NVSHMEMI_TIMEOUT_INITIALIZER                                      \
-    {                                                                     \
-        (1 << 16) + sizeof(nvshmemi_timeout_t), /* version */             \
-            TIMEOUT_ULSCALAR_INVALID,           /* signal */              \
-            TIMEOUT_ULSCALAR_INVALID,           /* caller */              \
-            TIMEOUT_ULSCALAR_INVALID,           /* signal_addr */         \
-            TIMEOUT_ULSCALAR_INVALID,           /* signal_val_found */    \
-            TIMEOUT_ULSCALAR_INVALID,           /* signal_val_expected */ \
-        {                                                                 \
-            0                                                             \
-        }                                                                 \
-    }
+#define NVSHMEMI_TIMEOUT_INITIALIZER                                   \
+    {(1 << 16) + sizeof(nvshmemi_timeout_t), /* version */             \
+     TIMEOUT_ULSCALAR_INVALID,               /* signal */              \
+     TIMEOUT_ULSCALAR_INVALID,               /* caller */              \
+     TIMEOUT_ULSCALAR_INVALID,               /* signal_addr */         \
+     TIMEOUT_ULSCALAR_INVALID,               /* signal_val_found */    \
+     TIMEOUT_ULSCALAR_INVALID,               /* signal_val_expected */ \
+     {0}}
 
 #define NVSHMEMI_DEVICE_HOST_STATE_INITIALIZER                                                    \
     {                                                                                             \
         (1 << 16) + sizeof(nvshmemi_device_host_state_t), /* version */                           \
-            STATE_SCALAR_INVALID,                         /* mype */                              \
-            STATE_SCALAR_INVALID,                         /* npes */                              \
-            STATE_SCALAR_INVALID,                         /* node_mype */                         \
-            STATE_SCALAR_INVALID,                         /* node_npes */                         \
-            NVSHMEMI_PE_DIST_MAX,                         /* pe_dist */                           \
-            STATE_SCALAR_INVALID,                         /* proxy */                             \
-            STATE_SCALAR_INVALID,                         /* atomics_sync */                      \
-            STATE_SCALAR_INVALID,                         /* job_connectivity */                  \
-            false,                                        /* proxy_ops_are_ordered */             \
-            false,                                        /* atomics_complete_on_quiet */         \
-            NULL,                                         /* heap_base */                         \
-            STATE_ULSCALAR_INVALID,                       /* heap_size */                         \
-            NULL,                                         /* peer_heap_base_p2p */                \
-            NULL,                                         /* peer_heap_base_remote */             \
-            false,                                        /* symmetric_heap_kind */               \
-            false,                                        /* enable_rail_opt */                   \
-            STATE_USCALAR_INVALID,                        /* atomics_le_min_size */               \
-            NULL,                                         /* timeout */                           \
-            NULL,                                         /* test_wait_any_start_idx_ptr */       \
-            NULL,                                         /* team_pool */                         \
-            NULL,                                         /* psync_pool */                        \
-            NULL,                                         /* sync_counter */                      \
-            NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER,         /* gpu_coll_env_params_var */           \
-            NULL,                                         /* proxy_channels_buf */                \
-            NULL,                                         /* proxy_channel_g_buf */               \
-            NULL,                                         /* proxy_channel_g_coalescing_buf */    \
-            NULL,                                         /* proxy_channel_g_buf_head_ptr */      \
-            STATE_ULSCALAR_INVALID,                       /* proxy_channel_g_buf_size */          \
-            STATE_ULSCALAR_INVALID,                       /* proxy_channel_g_buf_log_size */      \
-            NULL,                                         /* proxy_channels_issue */              \
-            NULL,                                         /* proxy_channels_complete */           \
-            NULL,                                         /* proxy_channels_complete_local_ptr */ \
-            NULL,                                         /* proxy_channels_quiet_issue */        \
-            NULL,                                         /* proxy_channels_quiet_ack */          \
-            NULL,                                         /* proxy_channels_cst_issue */          \
-            NULL,                                         /* proxy_channels_cst_ack */            \
-            STATE_ULSCALAR_INVALID,                       /* proxy_channel_buf_size */            \
-            STATE_USCALAR_INVALID,                        /* proxy_channel_buf_logsize */         \
-            NULL,                                         /* global_exit_request_state */         \
-            NULL,                                         /* global_exit_code */                  \
-            false,                                        /* ibgda_is_initialized */              \
-            false,                                        /* nvshmemi_is_nvshmem_initialized */   \
-            false,                                        /* nvshmemi_is_nvshmem_bootstrapped */  \
-            NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY,         /* selected_device_transport */         \
-            0,                                            /* tma_policy (NVSHMEMX_TMA_DISABLE) */ \
-            NULL,                                         /* tma_smem_bases */                    \
-            0,                                            /* tma_smem_bases_len */                \
-            NULL,                                         /* tma_smem_size */                     \
-            NULL                                          /* unicast_le_ids_ */                   \
+        STATE_SCALAR_INVALID,                             /* mype */                              \
+        STATE_SCALAR_INVALID,                             /* npes */                              \
+        STATE_SCALAR_INVALID,                             /* node_mype */                         \
+        STATE_SCALAR_INVALID,                             /* node_npes */                         \
+        NVSHMEMI_PE_DIST_MAX,                             /* pe_dist */                           \
+        STATE_SCALAR_INVALID,                             /* proxy */                             \
+        STATE_SCALAR_INVALID,                             /* atomics_sync */                      \
+        STATE_SCALAR_INVALID,                             /* job_connectivity */                  \
+        false,                                            /* proxy_ops_are_ordered */             \
+        false,                                            /* atomics_complete_on_quiet */         \
+        NULL,                                             /* heap_base */                         \
+        STATE_ULSCALAR_INVALID,                           /* heap_size */                         \
+        NULL,                                             /* peer_heap_base_p2p */                \
+        NULL,                                             /* peer_heap_base_remote */             \
+        false,                                            /* symmetric_heap_kind */               \
+        false,                                            /* enable_rail_opt */                   \
+        STATE_USCALAR_INVALID,                            /* atomics_le_min_size */               \
+        NULL,                                             /* timeout */                           \
+        NULL,                                             /* test_wait_any_start_idx_ptr */       \
+        NULL,                                             /* team_pool */                         \
+        NULL,                                             /* psync_pool */                        \
+        NULL,                                             /* sync_counter */                      \
+        NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER,             /* gpu_coll_env_params_var */           \
+        NULL,                                             /* proxy_channels_buf */                \
+        NULL,                                             /* proxy_channel_g_buf */               \
+        NULL,                                             /* proxy_channel_g_coalescing_buf */    \
+        NULL,                                             /* proxy_channel_g_buf_head_ptr */      \
+        STATE_ULSCALAR_INVALID,                           /* proxy_channel_g_buf_size */          \
+        STATE_ULSCALAR_INVALID,                           /* proxy_channel_g_buf_log_size */      \
+        NULL,                                             /* proxy_channels_issue */              \
+        NULL,                                             /* proxy_channels_complete */           \
+        NULL,                                             /* proxy_channels_complete_local_ptr */ \
+        NULL,                                             /* proxy_channels_quiet_issue */        \
+        NULL,                                             /* proxy_channels_quiet_ack */          \
+        NULL,                                             /* proxy_channels_cst_issue */          \
+        NULL,                                             /* proxy_channels_cst_ack */            \
+        STATE_ULSCALAR_INVALID,                           /* proxy_channel_buf_size */            \
+        STATE_USCALAR_INVALID,                            /* proxy_channel_buf_logsize */         \
+        NULL,                                             /* global_exit_request_state */         \
+        NULL,                                             /* global_exit_code */                  \
+        false,                                            /* ibgda_is_initialized */              \
+        false,                                            /* nvshmemi_is_nvshmem_initialized */   \
+        false,                                            /* nvshmemi_is_nvshmem_bootstrapped */  \
+        NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY,             /* selected_device_transport */         \
+        0,                                                /* tma_policy (NVSHMEMX_TMA_DISABLE) */ \
+        NULL,                                             /* tma_smem_bases */                    \
+        0,                                                /* tma_smem_bases_len */                \
+        NULL,                                             /* tma_smem_size */                     \
+        NULL                                              /* unicast_le_ids_ */                   \
     }
 #else
 #include <cuda/std/cstddef>
@@ -278,8 +251,8 @@ typedef enum {
 
 typedef enum {
     NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY = 0,
-    NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA = 1, // IBGDA transport
-    NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI = 2, // DOCA GPUNetIO GDAKI
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA = 1,           // IBGDA transport
+    NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI = 2,  // DOCA GPUNetIO GDAKI
     NVSHMEMI_DEVICE_TRANSPORT_TYPE_MAX = INT_MAX
 } nvshmemi_selected_device_transport_t;
 static_assert(sizeof(nvshmemi_selected_device_transport_t) == 4,
@@ -590,11 +563,11 @@ typedef struct {
     bool nvshmemi_is_nvshmem_bootstrapped;
     nvshmemi_selected_device_transport_t selected_device_transport;
 
-    int tma_policy;              /* nvshmemx_tma_policy_t: TMA usage policy */
-    uintptr_t *tma_smem_bases;   /* Per-CTA shared memory base pointers for TMA */
-    size_t tma_smem_bases_len;   /* Number of entries in tma_smem_bases */
-    size_t *tma_smem_size;       /* Shared memory size promised by all CTAs */
-    void *unicast_le_ids_;       /* LE IDs of PEs */
+    int tma_policy;            /* nvshmemx_tma_policy_t: TMA usage policy */
+    uintptr_t *tma_smem_bases; /* Per-CTA shared memory base pointers for TMA */
+    size_t tma_smem_bases_len; /* Number of entries in tma_smem_bases */
+    size_t *tma_smem_size;     /* Shared memory size promised by all CTAs */
+    void *unicast_le_ids_;     /* LE IDs of PEs */
 } nvshmemi_device_host_state_v1;
 static_assert(sizeof(nvshmemi_device_host_state_v1) == 816,
               "device_host_state_v1 must be 816 bytes.");

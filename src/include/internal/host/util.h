@@ -146,7 +146,6 @@
         exit(-1);                                                                                \
     }
 
-
 #define NVSHMEMU_MAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                          \
     toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_local_pe_base()[peer]) + \
                      ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
@@ -225,7 +224,7 @@ void nvshmemi_gpunetio_get_device_state(void **state);
             }                                           \
         }                                               \
     } while (0)
-#define NVSHMEMU_ROUND_UP(x, y) (((x) + (y)-1) / (y)) * (y)
+#define NVSHMEMU_ROUND_UP(x, y) (((x) + (y) - 1) / (y)) * (y)
 #define NVSHMEMU_HOST_PTR_FREE(ptr) \
     do {                            \
         if ((ptr)) {                \

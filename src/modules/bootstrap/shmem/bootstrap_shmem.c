@@ -100,9 +100,10 @@ static int parse_bootstrap_shmem_mode(enum bootstrap_shmem_mode *mode) {
         return 0;
     }
 
-    BOOTSTRAP_ERROR_PRINT("Invalid NVSHMEM_BOOTSTRAP_SHMEM_MODE='%s'. "
-                          "Allowed values: auto, legacy, teams.\n",
-                          value);
+    BOOTSTRAP_ERROR_PRINT(
+        "Invalid NVSHMEM_BOOTSTRAP_SHMEM_MODE='%s'. "
+        "Allowed values: auto, legacy, teams.\n",
+        value);
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
@@ -150,8 +151,8 @@ static int bootstrap_shmem_allgather_legacy(const void *sendbuf, void *recvbuf, 
     shmem_barrier_all();
 
     for (int i = 0; i < handle->pg_size; i++) {
-        memcpy((char *)recvbuf + (size_t)i * length,
-               (char *)recvbuf_i + (size_t)i * length_rup, length);
+        memcpy((char *)recvbuf + (size_t)i * length, (char *)recvbuf_i + (size_t)i * length_rup,
+               length);
     }
 
 out:
@@ -188,8 +189,8 @@ static int bootstrap_shmem_alltoall_legacy(const void *sendbuf, void *recvbuf, i
     shmem_barrier_all();
 
     for (int i = 0; i < handle->pg_size; i++) {
-        memcpy((char *)recvbuf + (size_t)i * length,
-               (char *)recvbuf_i + (size_t)i * length_rup, length);
+        memcpy((char *)recvbuf + (size_t)i * length, (char *)recvbuf_i + (size_t)i * length_rup,
+               length);
     }
 
 out:
@@ -219,9 +220,10 @@ out:
 #ifdef NVSHMEM_SHMEM_HAS_ACTIVE_SET
 static void fallback_to_legacy(struct bootstrap_handle *handle, int rc) {
     if (bootstrap_shmem_mode == BOOTSTRAP_SHMEM_MODE_TEAMS) {
-        BOOTSTRAP_ERROR_PRINT("OpenSHMEM teams collective failed at runtime (rc=%d) while "
-                              "NVSHMEM_BOOTSTRAP_SHMEM_MODE=teams is set.\n",
-                              rc);
+        BOOTSTRAP_ERROR_PRINT(
+            "OpenSHMEM teams collective failed at runtime (rc=%d) while "
+            "NVSHMEM_BOOTSTRAP_SHMEM_MODE=teams is set.\n",
+            rc);
         return;
     }
 
@@ -236,18 +238,20 @@ static void fallback_to_legacy(struct bootstrap_handle *handle, int rc) {
         handle->barrier = bootstrap_shmem_barrier_legacy;
     }
 }
-#define TEAMS_FALLBACK(handle, func, ...) \
-    do { \
-        fallback_to_legacy(handle, rc); \
+#define TEAMS_FALLBACK(handle, func, ...)                                                       \
+    do {                                                                                        \
+        fallback_to_legacy(handle, rc);                                                         \
         if (bootstrap_shmem_mode == BOOTSTRAP_SHMEM_MODE_TEAMS) return NVSHMEMX_ERROR_INTERNAL; \
-        return func(__VA_ARGS__); \
+        return func(__VA_ARGS__);                                                               \
     } while (0)
 #else
-#define TEAMS_FALLBACK(handle, func, ...) \
-    do { \
-        BOOTSTRAP_ERROR_PRINT("shmem teams collective failed (rc=%d) and legacy " \
-                              "active-set fallback is not available.\n", rc); \
-        return NVSHMEMX_ERROR_INTERNAL; \
+#define TEAMS_FALLBACK(handle, func, ...)                       \
+    do {                                                        \
+        BOOTSTRAP_ERROR_PRINT(                                  \
+            "shmem teams collective failed (rc=%d) and legacy " \
+            "active-set fallback is not available.\n",          \
+            rc);                                                \
+        return NVSHMEMX_ERROR_INTERNAL;                         \
     } while (0)
 #endif
 
@@ -409,8 +413,9 @@ int nvshmemi_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle,
     }
 #elif defined(NVSHMEM_SHMEM_HAS_TEAMS)
     if (bootstrap_shmem_mode == BOOTSTRAP_SHMEM_MODE_LEGACY) {
-        BOOTSTRAP_ERROR_PRINT("NVSHMEM_BOOTSTRAP_SHMEM_MODE=legacy was requested, but this "
-                              "OpenSHMEM build does not provide legacy active-set collectives.\n");
+        BOOTSTRAP_ERROR_PRINT(
+            "NVSHMEM_BOOTSTRAP_SHMEM_MODE=legacy was requested, but this "
+            "OpenSHMEM build does not provide legacy active-set collectives.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
         goto out;
     }
@@ -419,8 +424,9 @@ int nvshmemi_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle,
     handle->barrier = bootstrap_shmem_barrier;
 #elif defined(NVSHMEM_SHMEM_HAS_ACTIVE_SET)
     if (bootstrap_shmem_mode == BOOTSTRAP_SHMEM_MODE_TEAMS) {
-        BOOTSTRAP_ERROR_PRINT("NVSHMEM_BOOTSTRAP_SHMEM_MODE=teams was requested, but this "
-                              "OpenSHMEM build does not provide teams collectives.\n");
+        BOOTSTRAP_ERROR_PRINT(
+            "NVSHMEM_BOOTSTRAP_SHMEM_MODE=teams was requested, but this "
+            "OpenSHMEM build does not provide teams collectives.\n");
         status = NVSHMEMX_ERROR_INTERNAL;
         goto out;
     }

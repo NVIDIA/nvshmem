@@ -77,14 +77,12 @@ static inline bool nvshmemt_ucx_config_is_set(const char *value) {
 }
 
 static const char *nvshmemt_ucx_config_value(int log_level, const char *ucx_config_name,
-                                             const char *ucx_env_name,
-                                             const char *nvshmem_env_name,
-                                             const char *nvshmem_value,
-                                             bool nvshmem_value_provided,
+                                             const char *ucx_env_name, const char *nvshmem_env_name,
+                                             const char *nvshmem_value, bool nvshmem_value_provided,
                                              const char *default_value) {
     if (nvshmem_value_provided && nvshmemt_ucx_config_is_set(nvshmem_value)) {
-        INFO(log_level, "Using %s=%s for UCX %s configuration.\n", nvshmem_env_name,
-             nvshmem_value, ucx_config_name);
+        INFO(log_level, "Using %s=%s for UCX %s configuration.\n", nvshmem_env_name, nvshmem_value,
+             ucx_config_name);
         return nvshmem_value;
     }
 
@@ -818,21 +816,18 @@ int nvshmemt_ucx_process_amos(struct nvshmem_transport *transport) {
         switch (send_header->op_size) {
             case 2:
                 status = nvshmemt_ucx_handle_amo<uint16_t>(
-                    transport, send_header->ep, amo_op, ptr, send_header->value,
-                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy,
-                    is_float);
+                    transport, send_header->ep, amo_op, ptr, send_header->value, send_header->cmp,
+                    send_header->retptr, send_header->retflag, header->is_proxy, is_float);
                 break;
             case 4:
                 status = nvshmemt_ucx_handle_amo<uint32_t>(
-                    transport, send_header->ep, amo_op, ptr, send_header->value,
-                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy,
-                    is_float);
+                    transport, send_header->ep, amo_op, ptr, send_header->value, send_header->cmp,
+                    send_header->retptr, send_header->retflag, header->is_proxy, is_float);
                 break;
             case 8:
                 status = nvshmemt_ucx_handle_amo<uint64_t>(
-                    transport, send_header->ep, amo_op, ptr, send_header->value,
-                    send_header->cmp, send_header->retptr, send_header->retflag, header->is_proxy,
-                    is_float);
+                    transport, send_header->ep, amo_op, ptr, send_header->value, send_header->cmp,
+                    send_header->retptr, send_header->retflag, header->is_proxy, is_float);
                 break;
             default:
                 NVSHMEMI_ERROR_PRINT("UCX bad size supplied for atomic.\n");
@@ -1407,9 +1402,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
 
     /* This environment variable is needed to enable g/get operations <= 64 bytes */
     ucx_rc_tx_inline_resp = nvshmemt_ucx_config_value(
-        log_level, "RC_TX_INLINE_RESP", "UCX_RC_TX_INLINE_RESP",
-        "NVSHMEM_UCX_RC_TX_INLINE_RESP", options.UCX_RC_TX_INLINE_RESP,
-        options.UCX_RC_TX_INLINE_RESP_provided, "0");
+        log_level, "RC_TX_INLINE_RESP", "UCX_RC_TX_INLINE_RESP", "NVSHMEM_UCX_RC_TX_INLINE_RESP",
+        options.UCX_RC_TX_INLINE_RESP, options.UCX_RC_TX_INLINE_RESP_provided, "0");
     if (ucx_rc_tx_inline_resp != nullptr) {
         status = setenv("UCX_RC_TX_INLINE_RESP", ucx_rc_tx_inline_resp, 1);
         if (status) {
@@ -1443,9 +1437,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
     }
 
     ucx_tls =
-        nvshmemt_ucx_config_value(log_level, "TLS", "UCX_TLS", "NVSHMEM_UCX_TLS",
-                                  options.UCX_TLS, options.UCX_TLS_provided,
-                                  use_local_atomics ? "posix,ib" : "rc");
+        nvshmemt_ucx_config_value(log_level, "TLS", "UCX_TLS", "NVSHMEM_UCX_TLS", options.UCX_TLS,
+                                  options.UCX_TLS_provided, use_local_atomics ? "posix,ib" : "rc");
     if (ucx_tls != nullptr) {
         ucs_rc = ucp_config_modify(ucx_state->library_config, "TLS", ucx_tls);
         if (ucs_rc != UCS_OK) {

@@ -98,8 +98,7 @@ void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_o
         // because for self-writes it will not be zero SM.
         if (!nvshmemi_state->heap_obj->is_egm((void *)sig_addr) &&
             nvshmemi_can_use_cuda_64_bit_stream_memops &&
-            CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64) &&
-            nvshmemi_state->mype == pe) {
+            CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64) && nvshmemi_state->mype == pe) {
             status = CUPFN(nvshmemi_cuda_syms,
                            cuStreamWriteValue64(cstrm, (CUdeviceptr)peer_addr, signal, 0));
             NVSHMEMI_CU_NZ_EXIT(nvshmemi_cuda_syms, status, "cuStreamWriteValue64() failed\n");

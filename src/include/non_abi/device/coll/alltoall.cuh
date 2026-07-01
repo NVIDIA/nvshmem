@@ -112,7 +112,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
     /* Delegate the quiet to a single spare warp when one exists; otherwise every warp was used
      * above and we must fall back to a scope-wide quiet (num_warps == first_unused_warp would
      * match no warp and silently skip the quiet). */
-    if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && PE_size < groupSize && num_warps > first_unused_warp) {
+    if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && PE_size < groupSize &&
+        num_warps > first_unused_warp) {
         if (my_warp_idx == first_unused_warp)
             nvshmemi_transfer_quiet<NVSHMEMI_THREADGROUP_WARP>(false);
     } else

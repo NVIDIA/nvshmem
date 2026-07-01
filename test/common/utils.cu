@@ -97,12 +97,14 @@ void init_cumodule(const char *str) {
         *dot = '\0';
     }
     char cubin_bc_path[1000];
-    snprintf(cubin_bc_path, sizeof(cubin_bc_path), "%s/%s_bc.cubin", exe_dir, base_name);         // produces: path/to/shmem_put_latency_bc.cubin
+    snprintf(cubin_bc_path, sizeof(cubin_bc_path), "%s/%s_bc.cubin", exe_dir,
+             base_name);  // produces: path/to/shmem_put_latency_bc.cubin
 
     char cubin_ltoir_path[1000];
-    snprintf(cubin_ltoir_path, sizeof(cubin_ltoir_path), "%s/%s_ltoir.cubin", exe_dir, base_name);    // produces: path/to/shmem_put_latency_ltoir.cubin
+    snprintf(cubin_ltoir_path, sizeof(cubin_ltoir_path), "%s/%s_ltoir.cubin", exe_dir,
+             base_name);  // produces: path/to/shmem_put_latency_ltoir.cubin
 
-    char* selected_path;
+    char *selected_path;
 
     if (use_cubin == NVSHMEM_CUBIN_BC) {
         selected_path = cubin_bc_path;
@@ -113,13 +115,16 @@ void init_cumodule(const char *str) {
     // check if that specific .cubin with a suffix exists
     if (use_cubin == NVSHMEM_CUBIN_BC || use_cubin == NVSHMEM_CUBIN_LTOIR) {
         if (access(selected_path, R_OK) != 0) {
-            fprintf(stderr,
-                    "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, 2=libnvshmem_device.ltoir.fatbin] but cubin not found: %s\n",
-                    use_cubin, selected_path);
+            fprintf(
+                stderr,
+                "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, "
+                "2=libnvshmem_device.ltoir.fatbin] but cubin not found: %s\n",
+                use_cubin, selected_path);
             exit(-1);
         }
     } else {
-        fprintf(stderr, "Invalid NVSHMEM_TEST_CUBIN_LIBRARY value: %d. Expected 1 or 2.\n", use_cubin);
+        fprintf(stderr, "Invalid NVSHMEM_TEST_CUBIN_LIBRARY value: %d. Expected 1 or 2.\n",
+                use_cubin);
         exit(-1);
     }
 
@@ -332,7 +337,8 @@ void read_args(int argc, char **argv) {
                                            {0, 0, 0, 0}};
     /* getopt_long stores the option index here. */
     int option_index = 0;
-    while ((c = getopt_long(argc, argv, "h:b:e:f:i:j:r:s:m:d:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "h:b:e:f:i:j:r:s:m:d:", long_options, &option_index)) !=
+           -1) {
         switch (c) {
             case 'h':
                 printf(
@@ -347,7 +353,8 @@ void read_args(int argc, char **argv) {
                     "--mmap (Use mmaped buffer) \n"
                     "--only_p2p (run P2P variant of test) \n"
                     "-m, --mem_handle_type <0:auto, 1:posix_fd, 2:fabric> (for mmaped buffer) \n"
-                    "-d, --dynamic_smem_mode <0:Disable, 1:Recommended, 2:Minimum, 3:Barriers only> (for TMA, handles) \n"
+                    "-d, --dynamic_smem_mode <0:Disable, 1:Recommended, 2:Minimum, 3:Barriers "
+                    "only> (for TMA, handles) \n"
                     "--egm: use EGM memory buffers \n");
                 exit(0);
             case 0:
@@ -391,7 +398,9 @@ void read_args(int argc, char **argv) {
                     threadgroup_scope.type = NVSHMEM_BLOCK;
                     threadgroup_scope.name = "block";
                 } else {
-                    fprintf(stderr, "Invalid scope: %s. Valid options: thread, warp, warpgroup, block\n", optarg);
+                    fprintf(stderr,
+                            "Invalid scope: %s. Valid options: thread, warp, warpgroup, block\n",
+                            optarg);
                     exit(-1);
                 }
                 break;
@@ -410,7 +419,8 @@ void read_args(int argc, char **argv) {
                 } else if (smem_size_option == 3) {
                     _dynamic_smem_size = SMEM_SIZE_BARRIERS_ONLY;
                 } else {
-                    fprintf(stderr, "Invalid dynamic smem size: %zu. Valid options: 0, 1, 2, 3\n", smem_size_option);
+                    fprintf(stderr, "Invalid dynamic smem size: %zu. Valid options: 0, 1, 2, 3\n",
+                            smem_size_option);
                     exit(-1);
                 }
                 break;
@@ -431,9 +441,11 @@ void read_args(int argc, char **argv) {
     printf("Runtime options after parsing command line arguments\n");
     printf(
         "min_size: %zu, max_size: %zu, step_factor: %zu, min_iters: %zu, max_iters: %zu, repeat: "
-        "%zu, threadgroup_scope: %s, mmap: %d, use_egm: %d, only_p2p: %d, mem_handle_type: %zu, dynamic_smem_size: %zu\n",
-        _min_size, _max_size, _step_factor, _min_iters, _max_iters, _repeat, threadgroup_scope.name.c_str(), use_mmap, use_egm,
-        _only_p2p, _mem_handle_type, _dynamic_smem_size);
+        "%zu, threadgroup_scope: %s, mmap: %d, use_egm: %d, only_p2p: %d, mem_handle_type: %zu, "
+        "dynamic_smem_size: %zu\n",
+        _min_size, _max_size, _step_factor, _min_iters, _max_iters, _repeat,
+        threadgroup_scope.name.c_str(), use_mmap, use_egm, _only_p2p, _mem_handle_type,
+        _dynamic_smem_size);
     printf(
         "Note: Above is full list of options, any given test will use only a subset of these "
         "variables.\n");
@@ -474,7 +486,7 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
         LOAD_SYM(*nvml_handle, "nvmlDeviceGetGpuFabricInfoV",
                  nvml_ftable->nvmlDeviceGetGpuFabricInfoV, 1, status);
         LOAD_SYM(*nvml_handle, "nvmlDeviceGetFieldValues", nvml_ftable->nvmlDeviceGetFieldValues, 0,
-                    status);
+                 status);
     }
 
     if (status != 0) {

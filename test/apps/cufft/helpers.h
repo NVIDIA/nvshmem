@@ -72,8 +72,8 @@ struct optional {
     bool has_value() { return set; }
     T value() { return val; }
     T value_or(T v) { return (this->set ? val : v); }
-    optional(T v) : set(true), val(v){};
-    optional() : set(false){};
+    optional(T v) : set(true), val(v) {};
+    optional() : set(false) {};
 
    private:
     T val;

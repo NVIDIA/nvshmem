@@ -73,8 +73,7 @@ __global__ void bw(T *data_d, volatile unsigned int *counter_d, int len, int pe,
             if (counter == (gridDim.x * (i + 1) - 1)) {
                 *(counter_d + 1) += 1;
             }
-            while (*(counter_d + 1) != i + 1)
-                ;
+            while (*(counter_d + 1) != i + 1);
         }
 
         __syncthreads();
@@ -89,8 +88,7 @@ __global__ void bw(T *data_d, volatile unsigned int *counter_d, int len, int pe,
         if (counter == (gridDim.x * (i + 1) - 1)) {
             *(counter_d + 1) += 1;
         }
-        while (*(counter_d + 1) != i + 1)
-            ;
+        while (*(counter_d + 1) != i + 1);
     }
 }
 
@@ -98,8 +96,8 @@ void call_bw(int blocks, int threads, void *data_d, unsigned int *counter_d, siz
              NVSHMEM_DATATYPE_T dt, int mype, int iter, int stride) {
     switch (dt) {
         case NVSHMEM_INT:
-            bw<int><<<blocks, threads>>>((int *)data_d, counter_d, size / sizeof(int), mype,
-                                         iter, stride);
+            bw<int><<<blocks, threads>>>((int *)data_d, counter_d, size / sizeof(int), mype, iter,
+                                         stride);
             break;
         case NVSHMEM_LONG:
             bw<long><<<blocks, threads>>>((long *)data_d, counter_d, size / sizeof(long), mype,
@@ -111,7 +109,8 @@ void call_bw(int blocks, int threads, void *data_d, unsigned int *counter_d, siz
             break;
         case NVSHMEM_ULONGLONG:
             bw<unsigned long long><<<blocks, threads>>>((unsigned long long *)data_d, counter_d,
-                                                        size / sizeof(unsigned long long), mype, iter, stride);
+                                                        size / sizeof(unsigned long long), mype,
+                                                        iter, stride);
             break;
         case NVSHMEM_FLOAT:
             bw<float><<<blocks, threads>>>((float *)data_d, counter_d, size / sizeof(float), mype,
@@ -130,16 +129,16 @@ void call_bw(int blocks, int threads, void *data_d, unsigned int *counter_d, siz
                                              mype, iter, stride);
             break;
         case NVSHMEM_UINT32:
-            bw<uint32_t><<<blocks, threads>>>((uint32_t *)data_d, counter_d, size / sizeof(uint32_t),
-                                              mype, iter, stride);
+            bw<uint32_t><<<blocks, threads>>>((uint32_t *)data_d, counter_d,
+                                              size / sizeof(uint32_t), mype, iter, stride);
             break;
         case NVSHMEM_INT64:
             bw<int64_t><<<blocks, threads>>>((int64_t *)data_d, counter_d, size / sizeof(int64_t),
                                              mype, iter, stride);
             break;
         case NVSHMEM_UINT64:
-            bw<uint64_t><<<blocks, threads>>>((uint64_t *)data_d, counter_d, size / sizeof(uint64_t),
-                                              mype, iter, stride);
+            bw<uint64_t><<<blocks, threads>>>((uint64_t *)data_d, counter_d,
+                                              size / sizeof(uint64_t), mype, iter, stride);
             break;
         case NVSHMEM_FP16:
             bw<half><<<blocks, threads>>>((half *)data_d, counter_d, size / sizeof(half), mype,
@@ -148,7 +147,8 @@ void call_bw(int blocks, int threads, void *data_d, unsigned int *counter_d, siz
 #if CUDA_VERSION >= 12020
         case NVSHMEM_BF16:
             bw<__nv_bfloat16><<<blocks, threads>>>((__nv_bfloat16 *)data_d, counter_d,
-                                                   size / sizeof(__nv_bfloat16), mype, iter, stride);
+                                                   size / sizeof(__nv_bfloat16), mype, iter,
+                                                   stride);
             break;
 #endif
         default:

@@ -58,11 +58,11 @@ NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(float, float)
 NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(double, double)
 NVSHMEMX_TYPE_ADD_NOT_IMPLEMENTED(half, __half)
 
-#define NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(Name, TYPE)                                 \
+#define NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(Name, TYPE)                                  \
     TYPE nvshmemx_##Name##_atomic_fetch_add(TYPE * /*target*/, TYPE /*value*/, int /*pe*/) { \
         NVSHMEMI_ERROR_PRINT("[%d] nvshmemx_" #Name "_atomic_fetch_add() not implemented",   \
-                             nvshmemi_state->mype);                                         \
-        return (TYPE)0;                                                                     \
+                             nvshmemi_state->mype);                                          \
+        return (TYPE)0;                                                                      \
     }
 
 NVSHMEMX_TYPE_FETCH_ADD_NOT_IMPLEMENTED(float, float)

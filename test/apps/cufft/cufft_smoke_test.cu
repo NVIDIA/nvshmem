@@ -143,7 +143,7 @@ struct nvshmem_info_t {
     const int rank;
     const int size;
     const bool print;
-    nvshmem_info_t() : rank(nvshmem_my_pe()), size(nvshmem_n_pes()), print(nvshmem_my_pe() == 0){};
+    nvshmem_info_t() : rank(nvshmem_my_pe()), size(nvshmem_n_pes()), print(nvshmem_my_pe() == 0) {};
 };
 
 /**

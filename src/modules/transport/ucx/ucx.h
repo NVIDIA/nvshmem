@@ -44,7 +44,7 @@ typedef struct {
     uint64_t retflag;
     void *addr;
     void *retptr;
-    nvshmemi_amo_t op;  /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
+    nvshmemi_amo_t op; /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
 } nvshmemt_ucx_am_send_header_t;
 
 typedef struct {

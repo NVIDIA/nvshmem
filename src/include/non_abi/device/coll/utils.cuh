@@ -67,7 +67,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
             if (pe == nvshmemi_device_state_d.mype) {
                 *dest = value;
             } else {
-                nvshmemi_handle_p<T>((void*)dest, value, pe);
+                nvshmemi_handle_p<T>((void *)dest, value, pe);
             }
 
         } else {

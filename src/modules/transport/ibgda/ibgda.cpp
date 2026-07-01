@@ -1617,8 +1617,9 @@ static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
                 status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                 "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBGDA QP: expected 0 <= "
                 "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); type %s device %s port %d "
-                "link_layer %s lid %hu\n", pkey_index, port_attr->pkey_tbl_len,
-                ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
+                "link_layer %s lid %hu\n",
+                pkey_index, port_attr->pkey_tbl_len, ibgda_qp_type_name(ep->qp_type),
+                device->common_device.dev->name, portid,
                 nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
         }
 
@@ -2665,8 +2666,9 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
             status, NVSHMEMX_ERROR_INVALID_VALUE, out,
             "Invalid NVSHMEM_IB_PKEY_INDEX %d for IBGDA DCT: expected 0 <= "
             "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu); device %s port %d link_layer %s "
-            "lid %hu\n", pkey_index, port_attr->pkey_tbl_len, device->common_device.dev->name,
-            portid, nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
+            "lid %hu\n",
+            pkey_index, port_attr->pkey_tbl_len, device->common_device.dev->name, portid,
+            nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid);
     }
 
     memset(&ib_qp_attr_ex, 0, sizeof(ib_qp_attr_ex));
@@ -3359,7 +3361,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
                             "allocation of local_rc_handles failed.\n");
     peer_ep_handles = (struct ibgda_rc_handle *)calloc(num_rc_eps, sizeof(*peer_ep_handles));
     NVSHMEMI_NULL_ERROR_JMP(peer_ep_handles, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                           "allocation of peer_ep_handles failed.\n");
+                            "allocation of peer_ep_handles failed.\n");
     /* allocate local RC handles end */
 
     /* create and assign RCs start */
@@ -3375,8 +3377,8 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
             int global_mapped_i = global_rc_first_index + i * n_pes + dst_pe;
 
             TRACE(ibgda_state->common.log_level,
-                  "dst_pe: %d, mapped_i: %d, local_mapped_i: %d, global_mapped_i: %d",
-                  dst_pe, mapped_i, local_mapped_i, global_mapped_i);
+                  "dst_pe: %d, mapped_i: %d, local_mapped_i: %d, global_mapped_i: %d", dst_pe,
+                  mapped_i, local_mapped_i, global_mapped_i);
             status = ibgda_create_qp(ibgda_state, &device->rc.eps[mapped_i], device, portid,
                                      global_mapped_i, NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,

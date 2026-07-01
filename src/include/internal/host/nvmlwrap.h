@@ -46,31 +46,35 @@ typedef nvmlGpuFabricInfo_v2_t nvmlGpuFabricInfoV_t;
 #endif
 
 /* Structure for platform info */
-typedef struct
-{
-    unsigned int version;                       //!< the API version number
-    unsigned char ibGuid[16];                   //!< Infiniband GUID reported by platform (for Blackwell, ibGuid is 8 bytes so indices 8-15 are zero)
-    unsigned char chassisSerialNumber[16];      //!< Serial number of the chassis containing this GPU (for Blackwell it is 13 bytes so indices 13-15 are zero)
-    unsigned char slotNumber;                   //!< The slot number in the chassis containing this GPU (includes switches)
-    unsigned char trayIndex;                    //!< The tray index within the compute slots in the chassis containing this GPU (does not include switches)
-    unsigned char hostId;                       //!< Index of the node within the slot containing this GPU
-    unsigned char peerType;                     //!< Platform indicated NVLink-peer type (e.g. switch present or not)
-    unsigned char moduleId;                     //!< ID of this GPU within the node
+typedef struct {
+    unsigned int version;      //!< the API version number
+    unsigned char ibGuid[16];  //!< Infiniband GUID reported by platform (for Blackwell, ibGuid is 8
+                               //!< bytes so indices 8-15 are zero)
+    unsigned char
+        chassisSerialNumber[16];  //!< Serial number of the chassis containing this GPU (for
+                                  //!< Blackwell it is 13 bytes so indices 13-15 are zero)
+    unsigned char
+        slotNumber;  //!< The slot number in the chassis containing this GPU (includes switches)
+    unsigned char trayIndex;  //!< The tray index within the compute slots in the chassis containing
+                              //!< this GPU (does not include switches)
+    unsigned char hostId;     //!< Index of the node within the slot containing this GPU
+    unsigned char peerType;   //!< Platform indicated NVLink-peer type (e.g. switch present or not)
+    unsigned char moduleId;   //!< ID of this GPU within the node
 } nvmlPlatformInfo_v2_t;
 typedef nvmlPlatformInfo_v2_t nvmlPlatformInfo_t;
 
 #endif
 /* end NVML Header defs. */
 
-#define NVML_CHECK(stmt)                                                                      \
-    do {                                                                                      \
-        nvmlReturn_t result = (stmt);                                                         \
-        if (unlikely(NVML_SUCCESS != result)) {                                               \
-            fprintf(stderr, "[%s:%d] NVML failed with error code %d \n", __FILE__, __LINE__,  \
-                    result);                                                                   \
-            exit(-1);                                                                         \
-        }                                                                                     \
-        assert(NVML_SUCCESS == result);                                                       \
+#define NVML_CHECK(stmt)                                                                     \
+    do {                                                                                     \
+        nvmlReturn_t result = (stmt);                                                        \
+        if (unlikely(NVML_SUCCESS != result)) {                                              \
+            fprintf(stderr, "[%s:%d] NVML failed with error code %d \n", __FILE__, __LINE__, \
+                    result);                                                                 \
+            exit(-1);                                                                        \
+        }                                                                                    \
+        assert(NVML_SUCCESS == result);                                                      \
     } while (0)
 
 struct nvml_function_table {
@@ -83,7 +87,8 @@ struct nvml_function_table {
     nvmlReturn_t (*nvmlDeviceGetGpuFabricInfoV)(nvmlDevice_t device, nvmlGpuFabricInfoV_t *info);
     nvmlReturn_t (*nvmlDeviceGetFieldValues)(nvmlDevice_t device, unsigned int count,
                                              nvmlFieldValue_t *values);
-    nvmlReturn_t (*nvmlDeviceGetPlatformInfo)(nvmlDevice_t device, nvmlPlatformInfo_t *platformInfo);
+    nvmlReturn_t (*nvmlDeviceGetPlatformInfo)(nvmlDevice_t device,
+                                              nvmlPlatformInfo_t *platformInfo);
 };
 
 int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nvml_handle);

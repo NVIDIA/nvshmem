@@ -96,8 +96,8 @@ static int nvshmemi_p2p_rma_optimized(cudaStream_t custrm /* internal stream */,
                                       cudaMemcpyDeviceToDevice, verb.cstrm),
                     status, out);
             } /*is_contig*/
-        }     /*is_nbi*/
-    } else {  /*!is_stream*/
+        } /*is_nbi*/
+    } else { /*!is_stream*/
         if (verb.is_nbi) {
             if (is_contig) { /*can include iput,iget in future*/
                 CUDA_RUNTIME_CHECK_GOTO(
@@ -137,7 +137,7 @@ static int nvshmemi_p2p_rma_optimized(cudaStream_t custrm /* internal stream */,
             } /*is_contig*/
             CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(custrm), status, out);
         } /*is_nbi*/
-    }     /*is_stream*/
+    } /*is_stream*/
 
 out:
     return status;

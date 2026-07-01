@@ -21,8 +21,8 @@ EXTERN_CONSTANT nvshmemi_device_host_state_t nvshmemi_device_state_d;
 #undef EXTERN_CONSTANT
 #endif
 
-#if defined(__NVSHMEM_NUMBA_SUPPORT__) || \
-    (defined(__CUDACC__) && !defined(__CUDACC_RDC__) && !defined(__CUDACC_RTC__) && !defined(__clang__))
+#if defined(__NVSHMEM_NUMBA_SUPPORT__) || (defined(__CUDACC__) && !defined(__CUDACC_RDC__) && \
+                                           !defined(__CUDACC_RTC__) && !defined(__clang__))
 // Non-RDC / Numba: emit a per-TU version symbol for nvshmemx_cumodule_init;
 // __CUDACC__ ensures this is never reached by a plain host compiler.
 __constant__ nvshmemi_version_t nvshmemi_device_lib_version_d = {

@@ -13,31 +13,31 @@
 #include <inttypes.h>
 
 #define DO_ALLTOALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                          \
-    void *args_##TYPENAME##_##SC_SUFFIX[] = {(void *)&team, (void *)&d_dest, (void *)&d_source,   \
-                                             (void *)&nelems, (void *)&iters,                     \
-                                             (void *)&_dynamic_smem_size};                        \
+    void *args_##TYPENAME##_##SC_SUFFIX[] = {(void *)&team,     (void *)&d_dest,                  \
+                                             (void *)&d_source, (void *)&nelems,                  \
+                                             (void *)&iters,    (void *)&_dynamic_smem_size};     \
     CUfunction test_##TYPENAME##_alltoall##SC_SUFFIX_cubin;                                       \
     init_test_case_kernel(&test_##TYPENAME##_alltoall##SC_SUFFIX_cubin,                           \
                           NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_alltoall##SC_SUFFIX));        \
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_alltoall##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, \
                             1, _dynamic_smem_size, cstrm, args_##TYPENAME##_##SC_SUFFIX, NULL));
 
-#define DO_ALLTOALLMEM_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX)                                      \
-    void *args_allmem_##SC_SUFFIX[] = {(void *)&team, (void *)&d_dest, (void *)&d_source,        \
-                                       (void *)&nelems, (void *)&iters,                          \
-                                       (void *)&_dynamic_smem_size};                             \
-    CUfunction test_allmem_##SC_SUFFIX_cubin;                                                    \
-    init_test_case_kernel(&test_allmem_##SC_SUFFIX_cubin,                                        \
-                          NVSHMEMI_TEST_STRINGIFY(test_alltoallmem##SC_SUFFIX));                 \
-    CU_CHECK(cuLaunchKernel(test_allmem_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1,           \
+#define DO_ALLTOALLMEM_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX)                             \
+    void *args_allmem_##SC_SUFFIX[] = {(void *)&team,     (void *)&d_dest,              \
+                                       (void *)&d_source, (void *)&nelems,              \
+                                       (void *)&iters,    (void *)&_dynamic_smem_size}; \
+    CUfunction test_allmem_##SC_SUFFIX_cubin;                                           \
+    init_test_case_kernel(&test_allmem_##SC_SUFFIX_cubin,                               \
+                          NVSHMEMI_TEST_STRINGIFY(test_alltoallmem##SC_SUFFIX));        \
+    CU_CHECK(cuLaunchKernel(test_allmem_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1,  \
                             _dynamic_smem_size, cstrm, args_allmem_##SC_SUFFIX, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
-#define DECL_ALLTOALL_TEST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                \
-    __global__ void test_##TYPENAME##_alltoall##SC_SUFFIX(nvshmem_team_t team, TYPE *dest, \
+#define DECL_ALLTOALL_TEST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                       \
+    __global__ void test_##TYPENAME##_alltoall##SC_SUFFIX(nvshmem_team_t team, TYPE *dest,        \
                                                           TYPE *source, size_t nelems, int iters, \
                                                           size_t dynamic_smem_size);
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DECL_ALLTOALL_TEST_KERNEL, thread, , )
@@ -55,9 +55,9 @@ DECL_ALLTOALLMEM_TEST_KERNEL(block, _block, x)
 #undef DECL_ALLTOALLMEM_TEST_KERNEL
 
 #define DEFN_ALLTOALL_TEST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                        \
-    __global__ void test_##TYPENAME##_alltoall##SC_SUFFIX(                                         \
-        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, int iters,                   \
-        size_t dynamic_smem_size) {                                                                \
+    __global__ void test_##TYPENAME##_alltoall##SC_SUFFIX(nvshmem_team_t team, TYPE *dest,         \
+                                                          TYPE *source, size_t nelems, int iters,  \
+                                                          size_t dynamic_smem_size) {              \
         int iter;                                                                                  \
         int PE_size = nvshmem_team_n_pes(team);                                                    \
         int myIdx = nvshmtest_thread_id_in_##SC();                                                 \
@@ -113,24 +113,24 @@ DEFN_ALLTOALLMEM_TEST_KERNEL(block, _block, x)
 }
 #endif
 
-#define DO_ALLTOALL_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)           \
-    if (use_cubin) {                                                         \
-        DO_ALLTOALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);    \
-    } else {                                                                 \
+#define DO_ALLTOALL_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                            \
+    if (use_cubin) {                                                                          \
+        DO_ALLTOALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);                     \
+    } else {                                                                                  \
         test_##TYPENAME##_alltoall##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-            team, (TYPE *)d_dest, (TYPE *)d_source, nelems, iters, _dynamic_smem_size);      \
-    }                                                                        \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                  \
+            team, (TYPE *)d_dest, (TYPE *)d_source, nelems, iters, _dynamic_smem_size);       \
+    }                                                                                         \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                   \
     cudaStreamSynchronize(cstrm);
 
-#define DO_ALLTOALLMEM_TEST(SC, SC_SUFFIX, SC_PREFIX)                                             \
-    if (use_cubin) {                                                                              \
-        DO_ALLTOALLMEM_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX);                                      \
-    } else {                                                                                      \
-        test_alltoallmem##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>(               \
-            team, d_dest, d_source, nelems, iters, _dynamic_smem_size);                           \
-    }                                                                                             \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                       \
+#define DO_ALLTOALLMEM_TEST(SC, SC_SUFFIX, SC_PREFIX)                               \
+    if (use_cubin) {                                                                \
+        DO_ALLTOALLMEM_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX);                        \
+    } else {                                                                        \
+        test_alltoallmem##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+            team, d_dest, d_source, nelems, iters, _dynamic_smem_size);             \
+    }                                                                               \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                         \
     cudaStreamSynchronize(cstrm);
 
 int main(int argc, char **argv) {

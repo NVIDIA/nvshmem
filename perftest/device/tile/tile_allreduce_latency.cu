@@ -13,21 +13,21 @@
 
 size_t round_up(int val, int gran) { return ((val + gran - 1) / gran) * gran; }
 
-#define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                     \
-                                                                                              \
-    template <nvshmemx::tile_coll_algo_t algo, typename src_tensor_t, typename dst_tensor_t>  \
-    __global__ void test_tile_##TYPENAME##_##OP##_allreduce_kern##TG(                         \
-        nvshmem_team_t team, src_tensor_t *src, dst_tensor_t *dst, int nelems, int iter) {    \
-        int i;                                                                                \
-        struct empty {};                                                                      \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {             \
-            for (i = 0; i < iter; i++) {                                                      \
-                /* Only one tile, so root is always 0 */                                      \
-                nvshmemx::tile_##OP##_reduce##TG<src_tensor_t, dst_tensor_t, empty, algo>( \
-                    team, *src, *dst, {}, {}, 0, 0 /*flag*/);                                 \
-                nvshmemx::tile_collective_wait##TG<algo>(team, 0);                            \
-            }                                                                                 \
-        }                                                                                     \
+#define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                    \
+                                                                                             \
+    template <nvshmemx::tile_coll_algo_t algo, typename src_tensor_t, typename dst_tensor_t> \
+    __global__ void test_tile_##TYPENAME##_##OP##_allreduce_kern##TG(                        \
+        nvshmem_team_t team, src_tensor_t *src, dst_tensor_t *dst, int nelems, int iter) {   \
+        int i;                                                                               \
+        struct empty {};                                                                     \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {            \
+            for (i = 0; i < iter; i++) {                                                     \
+                /* Only one tile, so root is always 0 */                                     \
+                nvshmemx::tile_##OP##_reduce##TG<src_tensor_t, dst_tensor_t, empty, algo>(   \
+                    team, *src, *dst, {}, {}, 0, 0 /*flag*/);                                \
+                nvshmemx::tile_collective_wait##TG<algo>(team, 0);                           \
+            }                                                                                \
+        }                                                                                    \
     }
 
 #define CALL_RDXN_KERNEL(TYPENAME, OP, TG, BLOCKS, THREADS, ALGO, TEAM, SRC_TENSOR, DST_TENSOR, \

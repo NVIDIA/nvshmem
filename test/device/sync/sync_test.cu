@@ -12,8 +12,7 @@ __device__ int error_d;
 __global__ void test_nvshmem_test_kernel(uint64_t *remote, int mype, int npes) {
     nvshmemx_signal_op(remote, (uint64_t)mype + 1, NVSHMEM_SIGNAL_SET, (mype + 1) % npes);
 
-    while (!nvshmem_uint64_test(remote, NVSHMEM_CMP_NE, 0))
-        ;
+    while (!nvshmem_uint64_test(remote, NVSHMEM_CMP_NE, 0));
     if (*remote != ((uint64_t)mype + npes - 1) % npes + 1) {
         printf("PE %d received incorrect value", mype);
         error_d = 1;

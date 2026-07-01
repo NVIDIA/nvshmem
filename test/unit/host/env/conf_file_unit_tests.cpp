@@ -50,16 +50,13 @@ TEST_F(EnvConfFileTest, ConfOverridesEnvAndRespectsOrder_UserThenSpecified) {
     std::string userConf = homeDir + "/.nvshmem.conf";
     std::string specifiedConf = homeDir + "/specified.conf";
 
-    (void)writeFile(userConf,
-                    std::string("# user config\n") +
-                        "NVSHMEM_UNITTEST_DEBUG=INFO\n" +
-                        "NVSHMEM_UNITTEST_SOME_INT =  7  \n");
+    (void)writeFile(userConf, std::string("# user config\n") + "NVSHMEM_UNITTEST_DEBUG=INFO\n" +
+                                  "NVSHMEM_UNITTEST_SOME_INT =  7  \n");
 
-    (void)writeFile(specifiedConf,
-                    std::string("# specified config\n") +
-                        "NVSHMEM_UNITTEST_DEBUG=WARN\n" +
-                        "NVSHMEM_UNITTEST_SOME_INT=42 # trailing comment\n" +
-                        "# NVSHMEM_IGNORED=1\n");
+    (void)writeFile(specifiedConf, std::string("# specified config\n") +
+                                       "NVSHMEM_UNITTEST_DEBUG=WARN\n" +
+                                       "NVSHMEM_UNITTEST_SOME_INT=42 # trailing comment\n" +
+                                       "# NVSHMEM_IGNORED=1\n");
 
     ASSERT_EQ(setenv("HOME", homeDir.c_str(), 1), 0);
     ASSERT_EQ(setenv("NVSHMEM_CONF_FILE", specifiedConf.c_str(), 1), 0);
@@ -121,15 +118,14 @@ TEST_F(EnvConfFileTest, ParsingEdgeCases) {
     std::string dir = makeTempDir();
     std::string conf = dir + "/edge.conf";
 
-    (void)writeFile(conf,
-                    std::string("  # leading whitespace comment\r\n") +
-                        "NVSHMEM_A=1\r\n"
-                        "NVSHMEM_EMPTY=\n"
-                        "NVSHMEM_WS =  2  \n"
-                        "NOEQUALS\n"
-                        "NVSHMEM_HASH=va#lue\n"
-                        "NVSHMEM_HASH2=va #lue\n"
-                        "NVSHMEM_HASH3=#value\n");
+    (void)writeFile(conf, std::string("  # leading whitespace comment\r\n") +
+                              "NVSHMEM_A=1\r\n"
+                              "NVSHMEM_EMPTY=\n"
+                              "NVSHMEM_WS =  2  \n"
+                              "NOEQUALS\n"
+                              "NVSHMEM_HASH=va#lue\n"
+                              "NVSHMEM_HASH2=va #lue\n"
+                              "NVSHMEM_HASH3=#value\n");
 
     ASSERT_EQ(setenv("NVSHMEM_CONF_FILE", conf.c_str(), 1), 0);
 

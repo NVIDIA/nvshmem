@@ -1744,7 +1744,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
     uint32_t id;
     uint32_t dev_offset;
     bool shared_among_ctas = false;
-    uint32_t warpid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() / nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
+    uint32_t warpid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() /
+                      nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
 
     switch (state->dci_map_type) {
         case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_CTA:
@@ -1755,12 +1756,16 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
             shared_among_ctas = true;
             break;
         case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_WARP:
-            id = ibgda_get_ctaid() * nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() / nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() + warpid;
+            id = ibgda_get_ctaid() * nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() /
+                     nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() +
+                 warpid;
             break;
         case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_DCT: {
             uint32_t dct_id;
-            uint32_t group_id =
-                ibgda_get_ctaid() * nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() / nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() + warpid;
+            uint32_t group_id = ibgda_get_ctaid() *
+                                    nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() /
+                                    nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() +
+                                warpid;
 
             dct_id = ibgda_get_dct_id(pe, 0);
             id = (group_id % state->num_dct_groups) * state->ndcts_per_pe *
@@ -2902,7 +2907,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_amo_nonfetch(
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     /* Float atomics are not supported by IBGDA — the proxy path is not
        available when IBGDA is the active transport. */
-    assert(!nvshmemi_is_float_type<T>() || (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
+    assert(!nvshmemi_is_float_type<T>() ||
+           (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
 
     if (state->support_half_av_seg)
@@ -3036,7 +3042,8 @@ nvshmemi_ibgda_amo_fetch(void *rptr, const T value, const T compare, int pe, nvs
                          nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     /* Float atomics are not supported by IBGDA — the proxy path is not
        available when IBGDA is the active transport. */
-    assert(!nvshmemi_is_float_type<T>() || (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
+    assert(!nvshmemi_is_float_type<T>() ||
+           (op != NVSHMEMI_AMO_ADD && op != NVSHMEMI_AMO_FETCH_ADD));
     T ret;
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
 

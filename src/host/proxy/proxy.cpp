@@ -190,8 +190,7 @@ static inline bool proxy_dma_more_follows(proxy_state_t *state, proxy_channel_t 
     int next_req_2_flag = COUNTER_TO_FLAG(state, next_req_2_ctr);
     put_dma_request_2_t *next_dma_req_2 =
         reinterpret_cast<put_dma_request_2_t *>(WRAPPED_CHANNEL_BUF(state, ch, next_req_2_ctr));
-    uint8_t next_req_2_flag_val =
-        __atomic_load_n(&next_dma_req_2->flag, __ATOMIC_ACQUIRE) & 1;
+    uint8_t next_req_2_flag_val = __atomic_load_n(&next_dma_req_2->flag, __ATOMIC_ACQUIRE) & 1;
     if (next_req_2_flag_val != next_req_2_flag) {
         return false;
     }
@@ -450,20 +449,17 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
 
     dma_req_0 = (put_dma_request_0_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 8));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 8));
-    while (*((volatile uint8_t *)&dma_req_0->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&dma_req_0->flag) != flag);
 
     dma_req_1 = (put_dma_request_1_t *)(put_dma_request_0_t *)WRAPPED_CHANNEL_BUF(
         state, ch, (ch->processed + 16));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 16));
-    while (*((volatile uint8_t *)&dma_req_1->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&dma_req_1->flag) != flag);
 
     dma_req_2 = (put_dma_request_2_t *)(put_dma_request_0_t *)WRAPPED_CHANNEL_BUF(
         state, ch, (ch->processed + 24));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 24));
-    while (*((volatile uint8_t *)&dma_req_2->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&dma_req_2->flag) != flag);
 
     if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
         qp_index = dma_req_2->qp_index;
@@ -533,20 +529,17 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
 
     inline_req_0 = (put_inline_request_0_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 8));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 8));
-    while (*((volatile uint8_t *)&inline_req_0->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&inline_req_0->flag) != flag);
 
     inline_req_1 = (put_inline_request_1_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 16));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 16));
-    while (*((volatile uint8_t *)&inline_req_1->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&inline_req_1->flag) != flag);
 
     if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
         inline_req_2 =
             (put_inline_request_2_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 24));
         flag = COUNTER_TO_FLAG(state, (ch->processed + 24));
-        while (*((volatile uint8_t *)&inline_req_2->flag) != flag)
-            ;
+        while (*((volatile uint8_t *)&inline_req_2->flag) != flag);
     }
 
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
@@ -635,29 +628,24 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
 
     req_0 = (amo_request_0_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 8));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 8));
-    while (*((volatile uint8_t *)&req_0->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&req_0->flag) != flag);
 
     req_1 = (amo_request_1_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 16));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 16));
-    while (*((volatile uint8_t *)&req_1->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&req_1->flag) != flag);
 
     req_2 = (amo_request_2_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 24));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 24));
-    while (*((volatile uint8_t *)&req_2->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&req_2->flag) != flag);
 
     req_3 = (amo_request_3_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 32));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 32));
-    while (*((volatile uint8_t *)&req_3->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&req_3->flag) != flag);
 
     if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
         req_4 = (amo_request_4_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 40));
         flag = COUNTER_TO_FLAG(state, (ch->processed + 40));
-        while (*((volatile uint8_t *)&req_4->flag) != flag)
-            ;
+        while (*((volatile uint8_t *)&req_4->flag) != flag);
         qp_index = static_cast<nvshmemx_qp_handle_t>(req_4->qp_index);
     }
 
@@ -993,8 +981,7 @@ inline int process_channel_qp_fence(proxy_state_t *proxy_state, proxy_channel_t 
         qp_sync_req_0 = (qp_sync_request_0_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch,
                                                                    (ch->processed + 8 + i * 8));
         flag = COUNTER_TO_FLAG(proxy_state, (ch->processed + 8 + i * 8));
-        while (*((volatile uint8_t *)&qp_sync_req_0->flag) != flag)
-            ;
+        while (*((volatile uint8_t *)&qp_sync_req_0->flag) != flag);
     }
 
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
@@ -1054,8 +1041,7 @@ inline int process_channel_qp_quiet(proxy_state_t *proxy_state, proxy_channel_t 
         qp_sync_req_0 = (qp_sync_request_0_t *)WRAPPED_CHANNEL_BUF(proxy_state, ch,
                                                                    (ch->processed + 8 + i * 8));
         flag = COUNTER_TO_FLAG(proxy_state, (ch->processed + 8 + i * 8));
-        while (*((volatile uint8_t *)&qp_sync_req_0->flag) != flag)
-            ;
+        while (*((volatile uint8_t *)&qp_sync_req_0->flag) != flag);
     }
 
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
@@ -1114,8 +1100,7 @@ inline void copy_from_channel(proxy_state_t *state, proxy_channel_t *ch, void *d
         channel_ptr = (void *)WRAPPED_CHANNEL_BUF(state, ch, counter);
         channel_ptr_char = (volatile char *)channel_ptr;
         channel_ptr_uint64 = (volatile uint64_t *)channel_ptr;
-        while ((channel_ptr_char[0] & 1) != flag)
-            ;
+        while ((channel_ptr_char[0] & 1) != flag);
         bounce.whole_buffer = *channel_ptr_uint64;
         memcpy(dest_ptr, &bounce.bytes[1], 7);
 
@@ -1189,28 +1174,23 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
 
     ps_req_0 = (put_signal_request_0 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 8));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 8));
-    while (*((volatile uint8_t *)&ps_req_0->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&ps_req_0->flag) != flag);
 
     ps_req_1 = (put_signal_request_1 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 16));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 16));
-    while (*((volatile uint8_t *)&ps_req_1->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&ps_req_1->flag) != flag);
 
     ps_req_2 = (put_signal_request_2 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 24));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 24));
-    while (*((volatile uint8_t *)&ps_req_2->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&ps_req_2->flag) != flag);
 
     ps_req_3 = (put_signal_request_3 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 32));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 32));
-    while (*((volatile uint8_t *)&ps_req_3->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&ps_req_3->flag) != flag);
 
     ps_req_4 = (put_signal_request_4 *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 40));
     flag = COUNTER_TO_FLAG(state, (ch->processed + 40));
-    while (*((volatile uint8_t *)&ps_req_4->flag) != flag)
-        ;
+    while (*((volatile uint8_t *)&ps_req_4->flag) != flag);
 
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
     __sync_synchronize();  // XXX : prevents load from buf_d reordered to before load from issue_d
@@ -1474,7 +1454,9 @@ void progress_timeout_polling(proxy_state_t *proxy_state) {
             case NVSHMEMI_CALL_SITE_G_WAIT_FLAG:
                 str = "nvshmemi_call_site_g_wait_flag";
                 break;
-            default: { str = "unknown call site, exiting"; }
+            default: {
+                str = "unknown call site, exiting";
+            }
         }
         NVSHMEMI_ERROR_PRINT("received timeout signal from GPU thread(s) in %s\n", str);
         NVSHMEMI_ERROR_PRINT("signal addr %" PRIu64 " signal val found %" PRIu64

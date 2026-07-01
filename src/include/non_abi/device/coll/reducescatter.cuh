@@ -100,13 +100,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
         if constexpr (is_handle_pullred_supported<TYPE, OP>()) {
             if (nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag,
                                                      nreduce * sizeof(TYPE), SCOPE) &&
-                nvshmemi_tma_smem_registered() &&
-                !__isShared(dest) &&
+                nvshmemi_tma_smem_registered() && !__isShared(dest) &&
                 !__isShared(source + source_offset) &&
                 nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
                 ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
                 nvshmemi_is_addr_offset_aligned(source + source_offset, CFT_HANDLE_TX_SIZE)) {
-
                 nvshmemi_handle_local_reduce_mcast_threadroup<TYPE, SCOPE, OP>(
                     teami, dest, source + source_offset, nreduce);
 
@@ -120,11 +118,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
         nvshmemi_threadgroup_sync<SCOPE>();
         nvshmemi_local_reduce_mcast_threadgroup<TYPE, OP, SCOPE>(dest, src_ptr, nreduce);
         /* Since ld.red is done atomically on the NVSwitch, the value obtained into local dest
-         * ref for a given PE would be ready, right away. We can still have a case that after returning
-         * from this kernel, source buffer can be mutated on one PE, while another PE is still
-         * performing ld.red, causing data correctness issue. We don't however need to add
-         * threadfence_system for ordering since the subsequent load to source buffer will be ordered
-         * already to prior ld.reduce (RAR) by HW.
+         * ref for a given PE would be ready, right away. We can still have a case that after
+         * returning from this kernel, source buffer can be mutated on one PE, while another PE is
+         * still performing ld.red, causing data correctness issue. We don't however need to add
+         * threadfence_system for ordering since the subsequent load to source buffer will be
+         * ordered already to prior ld.reduce (RAR) by HW.
          */
         nvshmemi_sync_threadgroup<SCOPE>(team);
     } else {

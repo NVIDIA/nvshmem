@@ -3,23 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <assert.h>                                                        // for assert
-#include <dlfcn.h>                                                         // for dlclose, dlerror
-#include <stdint.h>                                                        // for SIZE_MAX
-#include <stdio.h>                                                         // for snprintf, NULL
-#include <mutex>                                                           // for std::once_flag, std::call_once
-#include <stdlib.h>                                                        // for calloc
-#include <vector>                                                          // for std::vector
-#include <strings.h>                                                       // for strncasecmp
-#include "device_host/nvshmem_types.h"                                     // for nvshmemi_devi...
-#include "device_host/nvshmem_common.cuh"                                  // for nvshmemi_devi...
-#include "non_abi/nvshmemx_error.h"                                        // for NVSHMEMI_ERRO...
-#include "internal/host/debug.h"                                           // for INFO, NVSHMEM...
-#include "internal/host/nvshmem_internal.h"                                // for nvshmemi_loca...
-#include "internal/common/error_codes_internal.h"                          // for NVSHMEMI_INTE...
-#include "internal/host/nvshmemi_symmetric_heap.hpp"                       // for nvshmemi_symm...
-#include "internal/host/nvshmemi_types.h"                                  // for nvshmemi_state_t
-#include "internal/host/util.h"                                            // for nvshmemi_options
+#include <assert.h>                                   // for assert
+#include <dlfcn.h>                                    // for dlclose, dlerror
+#include <stdint.h>                                   // for SIZE_MAX
+#include <stdio.h>                                    // for snprintf, NULL
+#include <mutex>                                      // for std::once_flag, std::call_once
+#include <stdlib.h>                                   // for calloc
+#include <vector>                                     // for std::vector
+#include <strings.h>                                  // for strncasecmp
+#include "device_host/nvshmem_types.h"                // for nvshmemi_devi...
+#include "device_host/nvshmem_common.cuh"             // for nvshmemi_devi...
+#include "non_abi/nvshmemx_error.h"                   // for NVSHMEMI_ERRO...
+#include "internal/host/debug.h"                      // for INFO, NVSHMEM...
+#include "internal/host/nvshmem_internal.h"           // for nvshmemi_loca...
+#include "internal/common/error_codes_internal.h"     // for NVSHMEMI_INTE...
+#include "internal/host/nvshmemi_symmetric_heap.hpp"  // for nvshmemi_symm...
+#include "internal/host/nvshmemi_types.h"             // for nvshmemi_state_t
+#include "internal/host/util.h"                       // for nvshmemi_options
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"  // for nvshmemi_boot...
 #include "bootstrap_host_transport/env_defs_internal.h"                    // for nvshmemi_opti...
 #include "internal/host_transport/transport.h"                             // for nvshmem_trans...
@@ -408,8 +408,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
 
         if (nvshmemi_options.ENABLE_NIC_PE_MAPPING && explicit_hca_assignment) {
             assignment_entity_count = state->npes_node > 0 ? state->npes_node : 1;
-            max_devices_per_pe = (tcurr->n_devices + assignment_entity_count - 1) /
-                                 assignment_entity_count;
+            max_devices_per_pe =
+                (tcurr->n_devices + assignment_entity_count - 1) / assignment_entity_count;
         }
 
         if (max_devices_per_pe == 0) max_devices_per_pe = 1;
@@ -419,10 +419,9 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
 
         if (nvshmemi_options.ENABLE_NIC_PE_MAPPING && explicit_hca_assignment &&
             tcurr->n_devices <= 0) {
-            NVSHMEMI_ERROR_JMP(
-                current_status, NVSHMEMX_ERROR_INVALID_VALUE, handle_transport_error,
-                "%s resolved no HCA slots; cannot apply explicit HCA PE mapping.\n",
-                nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode));
+            NVSHMEMI_ERROR_JMP(current_status, NVSHMEMX_ERROR_INVALID_VALUE, handle_transport_error,
+                               "%s resolved no HCA slots; cannot apply explicit HCA PE mapping.\n",
+                               nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode));
         }
 
         // assumes symmetry of transport list at all PEs
@@ -446,13 +445,12 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                         entity_index, entity_count);
                 }
 
-                bool use_block =
-                    (tcurr->device_assignment_mode ==
-                         NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST &&
-                     tcurr->n_devices >= entity_count) ||
-                    (tcurr->device_assignment_mode ==
-                         NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING &&
-                     tcurr->n_devices > entity_count);
+                bool use_block = (tcurr->device_assignment_mode ==
+                                      NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST &&
+                                  tcurr->n_devices >= entity_count) ||
+                                 (tcurr->device_assignment_mode ==
+                                      NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING &&
+                                  tcurr->n_devices > entity_count);
                 if (use_block) {
                     int block_devices = tcurr->n_devices;
                     if (tcurr->device_assignment_mode ==
@@ -460,10 +458,11 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                         int ignored_devices = tcurr->n_devices % entity_count;
                         block_devices = tcurr->n_devices - ignored_devices;
                         if (ignored_devices > 0) {
-                            WARN("%s has %d HCA slot(s), which does not divide cleanly across %d "
-                                 "local PE(s); ignoring the trailing %d slot(s).",
-                                 nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode),
-                                 tcurr->n_devices, entity_count, ignored_devices);
+                            WARN(
+                                "%s has %d HCA slot(s), which does not divide cleanly across %d "
+                                "local PE(s); ignoring the trailing %d slot(s).",
+                                nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode),
+                                tcurr->n_devices, entity_count, ignored_devices);
                         }
                     }
                     current_status = nvshmemi_get_device_block(
@@ -480,8 +479,7 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                     found_devices = 1;
                 }
 
-                INFO(NVSHMEM_INIT,
-                     "%s selected %d logical HCA slot(s) for local PE %d",
+                INFO(NVSHMEM_INIT, "%s selected %d logical HCA slot(s) for local PE %d",
                      nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode),
                      found_devices, entity_index);
                 for (int j = 0; j < found_devices; j++) {
@@ -497,8 +495,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                 found_devices++;
             }
         } else {
-            current_status =
-                nvshmemi_get_devices_by_distance(selected_devices.data(), max_devices_per_pe, tcurr);
+            current_status = nvshmemi_get_devices_by_distance(selected_devices.data(),
+                                                              max_devices_per_pe, tcurr);
             NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                                   "get devices by distance failed \n");
             for (int i = 0; i < max_devices_per_pe; i++) {

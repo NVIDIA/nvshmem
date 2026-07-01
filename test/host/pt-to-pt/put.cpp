@@ -194,9 +194,9 @@
 #define TEST_SHMEM_PUT_WORDSIZE(bitsPerWord, bytesPerWord, nelems, niter)                        \
     for (size_t elems = 1; elems <= nelems; elems *= 2) {                                        \
         /*init host test buff and use that to init shmem buff to be pushed to*/                  \
-        INIT_SHMEM_TEST_BUFF(elems *bytesPerWord)                                                \
+        INIT_SHMEM_TEST_BUFF(elems * bytesPerWord)                                               \
         /*init host ref buff and use that to init dev ref buff*/                                 \
-        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems *bytesPerWord)                                    \
+        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems * bytesPerWord)                                   \
         nvshmem_barrier_all();                                                                   \
         /*issue shmem put's*/                                                                    \
         for (pe = 0; pe < npes; pe++) {                                                          \
@@ -215,9 +215,9 @@
 #define TEST_SHMEMX_PUT_WORDSIZE_ON_STREAM(bitsPerWord, bytesPerWord, nelems, niter)              \
     for (size_t elems = 1; elems <= nelems; elems *= 2) {                                         \
         /*init host test buff and use that to init shmem buff to be pushed to*/                   \
-        INIT_SHMEM_TEST_BUFF(elems *bytesPerWord)                                                 \
+        INIT_SHMEM_TEST_BUFF(elems * bytesPerWord)                                                \
         /*init host ref buff and use that to init dev ref buff*/                                  \
-        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems *bytesPerWord)                                     \
+        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems * bytesPerWord)                                    \
         nvshmem_barrier_all();                                                                    \
         /*issue shmem put's*/                                                                     \
         for (pe = 0; pe < npes; pe++) {                                                           \
@@ -283,9 +283,9 @@
 #define TEST_SHMEM_TYPE_PUT_WORDSIZE_NBI(bitsPerWord, bytesPerWord, nelems, niter)                \
     for (size_t elems = 1; elems <= nelems; elems *= 2) {                                         \
         /*init host test buff and use that to init shmem buff to be pushed to*/                   \
-        INIT_SHMEM_TEST_BUFF(elems *bytesPerWord)                                                 \
+        INIT_SHMEM_TEST_BUFF(elems * bytesPerWord)                                                \
         /*init host ref buff and use that to init dev ref buff*/                                  \
-        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems *bytesPerWord)                                     \
+        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems * bytesPerWord)                                    \
         nvshmem_barrier_all();                                                                    \
         /*issue shmem put's*/                                                                     \
         for (pe = 0; pe < npes; pe++) {                                                           \
@@ -306,9 +306,9 @@
 #define TEST_SHMEMX_TYPE_PUT_WORDSIZE_NBI_ON_STREAM(bitsPerWord, bytesPerWord, nelems, niter)     \
     for (size_t elems = 1; elems <= nelems; elems *= 2) {                                         \
         /*init host test buff and use that to init shmem buff to be pushed to*/                   \
-        INIT_SHMEM_TEST_BUFF(elems *bytesPerWord)                                                 \
+        INIT_SHMEM_TEST_BUFF(elems * bytesPerWord)                                                \
         /*init host ref buff and use that to init dev ref buff*/                                  \
-        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems *bytesPerWord)                                     \
+        INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(elems * bytesPerWord)                                    \
         nvshmem_barrier_all();                                                                    \
         /*issue shmem put's*/                                                                     \
         for (pe = 0; pe < npes; pe++) {                                                           \

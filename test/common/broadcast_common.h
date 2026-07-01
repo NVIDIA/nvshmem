@@ -80,8 +80,8 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(INIT_BROADCAST_DATA_KERNEL)
         for (size_t i = myIdx; i < nelems; i += groupSize) {                                     \
             TYPE expected = assign<TYPE>(i);                                                     \
             if (dest[i] != expected) {                                                           \
-                printf(NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC),                                \
-                       to_printable(dest[i]), to_printable(expected), i, nelems, team);          \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC), to_printable(dest[i]),         \
+                       to_printable(expected), i, nelems, team);                                 \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \

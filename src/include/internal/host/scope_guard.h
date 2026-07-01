@@ -12,7 +12,7 @@
 
 template <typename F>
 class scope_guard {
-public:
+   public:
     scope_guard(const scope_guard&) = delete;
     scope_guard& operator=(const scope_guard&) = delete;
 
@@ -35,15 +35,13 @@ public:
 
     void dismiss() noexcept { active_ = false; }
 
-private:
-    F    func_;
+   private:
+    F func_;
     bool active_;
 };
 
 template <typename F>
-auto make_scope_guard(F&& f)
-    -> scope_guard<typename std::decay<F>::type>
-{
+auto make_scope_guard(F&& f) -> scope_guard<typename std::decay<F>::type> {
     return scope_guard<typename std::decay<F>::type>(std::forward<F>(f));
 }
 

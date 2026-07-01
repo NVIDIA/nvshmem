@@ -160,14 +160,14 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
                 nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(                              \
                 teams_dev[team_id], src_tensor, dest_tensor, start_coord, boundary,               \
                 ((my_tile_idx / SC##s_per_block) % npes), 0);                                     \
-            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                 \
+            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                \
                 return;                                                                           \
             }                                                                                     \
         }                                                                                         \
                                                                                                   \
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                     \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
             return;                                                                               \
         }                                                                                         \
         /* validate data */                                                                       \
@@ -194,11 +194,11 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
                 V##VLN##_TENSOR_SIZE_MINOR, get<major_dim>(boundary), get<minor_dim>(boundary));  \
         }                                                                                         \
                                                                                                   \
-        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
-            return;                                                                                \
-        }                                                                                          \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
+            return;                                                                               \
+        }                                                                                         \
                                                                                                   \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
              i += gridDim.x * SC##s_per_block) {                                                  \
@@ -221,7 +221,7 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
         }                                                                                         \
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI>(teams_dev[team_id], 0);           \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                     \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
             return;                                                                               \
         }                                                                                         \
     }

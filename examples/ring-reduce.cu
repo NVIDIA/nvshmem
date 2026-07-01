@@ -198,10 +198,10 @@ int main(int argc, char **argv) {
     int *dst = (int *)nvshmem_malloc(max_size);
     int *src = (int *)nvshmem_malloc(max_size);
     int *data_h = (int *)malloc(max_size);
-    size_t max_chunks_per_block = (max_size + num_blocks * chunk_size - 1) / (num_blocks * chunk_size);
+    size_t max_chunks_per_block =
+        (max_size + num_blocks * chunk_size - 1) / (num_blocks * chunk_size);
     size_t signals_per_block = 2 * max_chunks_per_block;
-    uint64_t *signal =
-        (uint64_t *)nvshmem_calloc(num_blocks * signals_per_block, sizeof(uint64_t));
+    uint64_t *signal = (uint64_t *)nvshmem_calloc(num_blocks * signals_per_block, sizeof(uint64_t));
     dim3 gridDim(num_blocks), blockDim(threads_per_block);
 
     for (size_t i = 0; i < max_ints; i++) data_h[i] = i;

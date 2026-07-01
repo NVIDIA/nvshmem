@@ -63,7 +63,7 @@ extern "C" {
                 if ((value > 0) && (old >= (expected * npes))) {                                   \
                     printf("PE %i error inconsistent value of old (%s, %s)\n", mype, #OP, #TYPE);  \
                     printf("found = " NVSHPRI_##TYPENAME ", expected < " NVSHPRI_##TYPENAME "\n",  \
-                           old, expected *npes);                                                   \
+                           old, expected * npes);                                                  \
                     error_d++;                                                                     \
                 } else if ((value <= 0) && (old < (expected * npes))) {                            \
                     printf("PE %i error inconsistent value of old (%s, %s)\n", mype, #OP, #TYPE);  \

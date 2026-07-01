@@ -375,9 +375,9 @@ __device__ inline void nvshmemi_tile_cpy_nvl_threadgroup_dim(src_tensor_t src_te
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
           bool is_put>
 __device__ inline int nvshmemi_tile_cpy_nvl_threadgroup(src_tensor_t src_tensor,
-                                                         dst_tensor_t dst_tensor,
-                                                         tuple_t start_coord, tuple_t boundary,
-                                                         int pe) {
+                                                        dst_tensor_t dst_tensor,
+                                                        tuple_t start_coord, tuple_t boundary,
+                                                        int pe) {
     using T = typename src_tensor_t::value_type;
     if constexpr ((get_constant(safe_get<0>(decltype(src_tensor.stride()){})) == 1) &&
                   (get_constant(safe_get<0>(decltype(dst_tensor.stride()){})) == 1)) {
@@ -387,11 +387,12 @@ __device__ inline int nvshmemi_tile_cpy_nvl_threadgroup(src_tensor_t src_tensor,
 
         if constexpr (sizeof(T) < 4) {
             bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
+                                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
             // Shape along major dimension should be divisible by 2, because we operate at fp16x2
             if (!is_32b_aligned) {
-                assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                        "along their continuous dimension");
+                assert(is_32b_aligned &&
+                       "Currently for 16B datatypes, we only support tensors which are 32b aligned "
+                       "along their continuous dimension");
                 return NVSHMEMX_ERROR_INVALID_VALUE;
             }
         }
@@ -407,11 +408,12 @@ __device__ inline int nvshmemi_tile_cpy_nvl_threadgroup(src_tensor_t src_tensor,
 
         if constexpr (sizeof(T) < 4) {
             bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
+                                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
             // Shape along major dimension should be divisible by 2, because we operate at fp16x2
             if (!is_32b_aligned) {
-                assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                        "along their continuous dimension");
+                assert(is_32b_aligned &&
+                       "Currently for 16B datatypes, we only support tensors which are 32b aligned "
+                       "along their continuous dimension");
                 return NVSHMEMX_ERROR_INVALID_VALUE;
             }
         }
@@ -428,12 +430,14 @@ __device__ inline int nvshmemi_tile_cpy_nvl_threadgroup(src_tensor_t src_tensor,
 
             if constexpr (sizeof(T) < 4) {
                 bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                    ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
+                                       ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
                 // Shape along major dimension should be divisible by 2, because we operate at
                 // fp16x2
                 if (!is_32b_aligned) {
-                    assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                            "along their continuous dimension");
+                    assert(is_32b_aligned &&
+                           "Currently for 16B datatypes, we only support tensors which are 32b "
+                           "aligned "
+                           "along their continuous dimension");
                     return NVSHMEMX_ERROR_INVALID_VALUE;
                 }
             }
@@ -448,12 +452,14 @@ __device__ inline int nvshmemi_tile_cpy_nvl_threadgroup(src_tensor_t src_tensor,
 
             if constexpr (sizeof(T) < 4) {
                 bool is_32b_aligned = (((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&
-                    ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
+                                       ((get_shape_element<major_dim>(dst_tensor) % 2) == 0));
                 // Shape along major dimension should be divisible by 2, because we operate at
                 // fp16x2
                 if (!is_32b_aligned) {
-                    assert(is_32b_aligned && "Currently for 16B datatypes, we only support tensors which are 32b aligned "
-                            "along their continuous dimension");
+                    assert(is_32b_aligned &&
+                           "Currently for 16B datatypes, we only support tensors which are 32b "
+                           "aligned "
+                           "along their continuous dimension");
                     return NVSHMEMX_ERROR_INVALID_VALUE;
                 }
             }
@@ -497,9 +503,9 @@ __device__ inline void nvshmemi_tile_cpy_put_get_threadgroup_wrapper(src_tensor_
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
           bool is_put>
 __device__ inline int nvshmemi_tile_cpy_remote_threadgroup(src_tensor_t src_tensor,
-                                                            dst_tensor_t dst_tensor,
-                                                            tuple_t start_coord, tuple_t boundary,
-                                                            int pe) {
+                                                           dst_tensor_t dst_tensor,
+                                                           tuple_t start_coord, tuple_t boundary,
+                                                           int pe) {
     if constexpr ((get_constant(safe_get<0>(decltype(src_tensor.stride()){})) == 1) &&
                   (get_constant(safe_get<0>(decltype(dst_tensor.stride()){})) == 1)) {
         // dim 0 major
@@ -589,13 +595,14 @@ __device__ inline int nvshmemi_tile_put(src_tensor_t src_tensor, dst_tensor_t ds
     // if NvLink based
     if constexpr (algo == nvshmemx::tile_algo_t::PEER_PUSH_NBI) {
         // User should ensure src data is ready
-        return nvshmemi_tile_cpy_nvl_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope, 1 /*is_put*/>(
-            src_tensor, dst_tensor, start_coord, boundary, pe);
+        return nvshmemi_tile_cpy_nvl_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope,
+                                                 1 /*is_put*/>(src_tensor, dst_tensor, start_coord,
+                                                               boundary, pe);
 
     } else if constexpr (algo == nvshmemx::tile_algo_t::REMOTE_PUSH_NBI) {
         return nvshmemi_tile_cpy_remote_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope,
-                                             1 /*is_put*/>(src_tensor, dst_tensor, start_coord,
-                                                           boundary, pe);
+                                                    1 /*is_put*/>(src_tensor, dst_tensor,
+                                                                  start_coord, boundary, pe);
 
     } else {
         // Extend as other algorithms are added
@@ -644,11 +651,13 @@ __device__ inline int nvshmemi_tile_get(src_tensor_t src_tensor, dst_tensor_t ds
 
     // check if both src and dst have same continuous dimension
     // TODO relax this constraint
-    bool is_contiguous = (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
-                 ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1)));
+    bool is_contiguous =
+        (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
+         ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1)));
     if (!is_contiguous) {
-        assert(is_contiguous && "Currently we only support cases where source and destination tile are continuous "
-                "along one dimension");
+        assert(is_contiguous &&
+               "Currently we only support cases where source and destination tile are continuous "
+               "along one dimension");
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 

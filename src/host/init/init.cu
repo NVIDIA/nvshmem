@@ -66,10 +66,11 @@ static size_t nvshmemi_get_device_state_symbol_size() {
     cudaError_t status = cudaGetSymbolSize(&state_size, nvshmemi_device_state_d);
     if (status != cudaSuccess) {
         state_size = sizeof(nvshmemi_device_host_state_t);
-        WARN("Unable to query nvshmemi_device_state_d symbol size: %s. Falling back to host "
-             "device state size %zu; compatibility with older device libraries may not be "
-             "guaranteed.",
-             cudaGetErrorString(status), state_size);
+        WARN(
+            "Unable to query nvshmemi_device_state_d symbol size: %s. Falling back to host "
+            "device state size %zu; compatibility with older device libraries may not be "
+            "guaranteed.",
+            cudaGetErrorString(status), state_size);
     }
 
     return state_size;
@@ -242,8 +243,7 @@ int nvshmemi_update_device_state() {
             size_t copy_size =
                 std::min(registered_state.state_size, sizeof(nvshmemi_device_host_state_t));
             nvshmemi_get_device_state((void **)&device_state);
-            status = cudaMemcpy(it->first, (void *)device_state, copy_size,
-                                cudaMemcpyHostToDevice);
+            status = cudaMemcpy(it->first, (void *)device_state, copy_size, cudaMemcpyHostToDevice);
             if (status) break;
         }
         num_initialized_device_states = iter;
@@ -526,7 +526,8 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
 
     CUDA_RUNTIME_CHECK(cudaGetDevice(&cuda_dev));
     status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&current_dev, cuda_dev));
-    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuDeviceGet failed \n");
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out,
+                             "cuDeviceGet failed \n");
 
     /* Skip multicast attribute query when NVLS is disabled: avoids driver quirks (e.g.
      * CUDA_ERROR_INVALID_VALUE on some GPU/driver combos) when the result would be unused. */
@@ -541,7 +542,8 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
         cuDeviceGetAttribute(
             &mc_support, static_cast<CUdevice_attribute>(CU_DEVICE_ATTRIBUTE_MULTICAST_SUPPORTED),
             current_dev));
-    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_INTERNAL, out, "cuDeviceGetAttribute failed \n");
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_INTERNAL, out,
+                             "cuDeviceGetAttribute failed \n");
 
     if (!mc_support) {
         INFO(NVSHMEM_INIT, "NVLS: cuMulticast is not supported on CUDA\n");
@@ -1034,7 +1036,8 @@ static int nvshmemi_query_cuda_attributes() {
     CUdevice device;
 
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice)(&device);
-    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out, "cuCtxGetDevice failed \n");
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_GPU_NOT_SELECTED, out,
+                             "cuCtxGetDevice failed \n");
 
     curesult = CUPFN(nvshmemi_cuda_syms, cuDeviceGetAttribute)(
         &nvshmemi_can_use_cuda_64_bit_stream_memops,
@@ -1773,7 +1776,8 @@ int set_job_connectivity(nvshmemi_state_t *state) {
                 } else if (state->transports[j]->cap[i] &
                            (NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST | NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD)) {
                     peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_LDST);
-                } else if (state->transports[j]->cap[i] & (NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
+                } else if (state->transports[j]->cap[i] &
+                           (NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
                     // Treating handle accessible PEs as part of LDST connectivity
                     peer_connectivity = std::min(peer_connectivity, (int)NVSHMEMI_JOB_GPU_LDST);
                 }
@@ -1886,8 +1890,8 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
 #if defined(CFT_HANDLES_ENABLED)
     /* maintain 8 bytes per PE for unicast LE id <valid-4bytes|leId-4bytes> */
-    CUDA_RUNTIME_CHECK_GOTO(
-        cudaMalloc(&unicast_le_ids_dptr, (state->npes) * sizeof(uint64_t)), status, out);
+    CUDA_RUNTIME_CHECK_GOTO(cudaMalloc(&unicast_le_ids_dptr, (state->npes) * sizeof(uint64_t)),
+                            status, out);
 #endif
 
     status = set_job_connectivity(state);
@@ -1905,16 +1909,16 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
 #if defined(CFT_HANDLES_ENABLED)
     if (state->heap_obj->get_unicast_le_ids()) {
-        CUDA_RUNTIME_CHECK_GOTO(
-        cudaMemcpyAsync(unicast_le_ids_dptr,
-                        (const void *)state->heap_obj->get_unicast_le_ids(),
-                        sizeof(uint64_t) * state->npes, cudaMemcpyHostToDevice, state->my_stream),
-        status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemcpyAsync(unicast_le_ids_dptr,
+                                                (const void *)state->heap_obj->get_unicast_le_ids(),
+                                                sizeof(uint64_t) * state->npes,
+                                                cudaMemcpyHostToDevice, state->my_stream),
+                                status, out);
     } else {
         // if LE is not enabled, set all LE ids to 0 to indicate invalid LE ids
-        CUDA_RUNTIME_CHECK_GOTO(
-            cudaMemsetAsync(unicast_le_ids_dptr, 0, sizeof(uint64_t) * state->npes, state->my_stream),
-            status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemsetAsync(unicast_le_ids_dptr, 0,
+                                                sizeof(uint64_t) * state->npes, state->my_stream),
+                                status, out);
     }
 
 #endif
@@ -1958,7 +1962,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     nvshmemi_device_state.node_npes = state->npes_node;
 
 #if defined(CFT_HANDLES_ENABLED)
-    nvshmemi_device_state.unicast_le_ids_ = (void*)unicast_le_ids_dptr;
+    nvshmemi_device_state.unicast_le_ids_ = (void *)unicast_le_ids_dptr;
 #endif
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);
@@ -1989,22 +1993,23 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 #if defined(CFT_HANDLES_ENABLED)
     if ((nvshmemi_options.ENABLE_LOGICAL_ENDPOINT) &&
         (nvshmemi_device_state.tma_policy == NVSHMEMX_TMA_DISABLE)) {
-        NVSHMEMI_ERROR_PRINT("Logical endpoint support needs TMA, "
-                             "Please enable TMA by setting NVSHMEM_TMA_POLICY=ENABLE\n");
+        NVSHMEMI_ERROR_PRINT(
+            "Logical endpoint support needs TMA, "
+            "Please enable TMA by setting NVSHMEM_TMA_POLICY=ENABLE\n");
         status = NVSHMEMX_ERROR_NOT_SUPPORTED;
         goto out;
     }
 #endif
 
     if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
-        CUDA_RUNTIME_CHECK_GOTO(cudaDeviceGetAttribute(&cuda_dev_cap_major,
-                                                       cudaDevAttrComputeCapabilityMajor,
-                                                       state->device_id),
-                                status, out);
-        CUDA_RUNTIME_CHECK_GOTO(cudaDeviceGetAttribute(&cuda_dev_cap_minor,
-                                                       cudaDevAttrComputeCapabilityMinor,
-                                                       state->device_id),
-                                status, out);
+        CUDA_RUNTIME_CHECK_GOTO(
+            cudaDeviceGetAttribute(&cuda_dev_cap_major, cudaDevAttrComputeCapabilityMajor,
+                                   state->device_id),
+            status, out);
+        CUDA_RUNTIME_CHECK_GOTO(
+            cudaDeviceGetAttribute(&cuda_dev_cap_minor, cudaDevAttrComputeCapabilityMinor,
+                                   state->device_id),
+            status, out);
 
         if (cuda_dev_cap_major < 9) {
             if (nvshmemi_device_state.tma_policy == NVSHMEMX_TMA_FORCE) {
@@ -2015,10 +2020,11 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                 goto out;
             }
 
-            WARN("NVSHMEM_TMA_POLICY=%s requires sm_90 or newer. Device %d is sm_%d%d; "
-                 "disabling TMA.\n",
-                 nvshmemi_options.TMA_POLICY, state->device_id, cuda_dev_cap_major,
-                 cuda_dev_cap_minor);
+            WARN(
+                "NVSHMEM_TMA_POLICY=%s requires sm_90 or newer. Device %d is sm_%d%d; "
+                "disabling TMA.\n",
+                nvshmemi_options.TMA_POLICY, state->device_id, cuda_dev_cap_major,
+                cuda_dev_cap_minor);
             nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
         }
     }
@@ -2035,11 +2041,10 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
         nvshmemi_device_state.tma_smem_bases = tma_smem_bases_dptr;
         CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_bases_dptr, 0, tma_bases_alloc_size), status,
                                 out);
-        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_size_dptr, sizeof(size_t)),
-                                status, out);
-        nvshmemi_device_state.tma_smem_size = tma_smem_size_dptr;
-        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, sizeof(size_t)), status,
+        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_size_dptr, sizeof(size_t)), status,
                                 out);
+        nvshmemi_device_state.tma_smem_size = tma_smem_size_dptr;
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, sizeof(size_t)), status, out);
         nvshmemi_device_state.tma_smem_bases_len = NVSHMEMI_TMA_MAX_BLOCKS;
     }
 
@@ -2120,8 +2125,8 @@ int nvshmemx_culibrary_init(CUlibrary library) {
         get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuLibraryGetGlobal), library);
 #endif
 
-    status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, state_size,
-                                           transport_dptr);
+    status =
+        nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, state_size, transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize device state internal structures\n");
 out:
@@ -2145,8 +2150,8 @@ int nvshmemx_cumodule_init(CUmodule module) {
         get_transport_device_global(CUPFN(nvshmemi_cuda_syms, cuModuleGetGlobal), module);
 #endif
 
-    status = nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, state_size,
-                                           transport_dptr);
+    status =
+        nvshmemi_cuobject_init_common(lib_dptr, lib_size, state_dptr, state_size, transport_dptr);
     NVSHMEMI_NE_ERROR_JMP(status, NVSHMEMX_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize device state internal structures\n");
 out:

@@ -98,9 +98,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     errored_on_initialization_ =
         true; /* By default, p2p is not initialized, so some features may be disabled */
 
-    nvshmemi_nvls_connected_pes_.resize(npes,0); //this is a bitmap
-    nvshmemi_nvl_connected_pes_.resize(npes,0);
-    nvshmemi_handle_accessible_pes_.resize(npes,0);
+    nvshmemi_nvls_connected_pes_.resize(npes, 0);  // this is a bitmap
+    nvshmemi_nvl_connected_pes_.resize(npes, 0);
+    nvshmemi_handle_accessible_pes_.resize(npes, 0);
     cudaDeviceProp prop;
     int flag = false;
     nvmlDevice_t local_device;
@@ -139,7 +139,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
 
     status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&cudevice));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuCtxGetDevice failed \n");
+                             "cuCtxGetDevice failed \n");
 
     cudev = (CUdevice *)std::malloc(sizeof(CUdevice) * ndev);
     NVSHMEMI_NULL_ERROR_JMP(cudev, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -147,8 +147,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
 
     NVSHMEMU_FOR_EACH(i, ndev) {
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&cudev[i], i));
-        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                              "cuDeviceGet failed \n");
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                                 out, "cuDeviceGet failed \n");
         if (cudev[i] == cudevice) {
             device_id = i;
             cudaDeviceProp prop;
@@ -194,8 +194,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
             // Override the cliqueId to use rackIDs to determine NVLink domain
             if (nvml_ftable_.nvmlDeviceGetPlatformInfo == nullptr) {
-                NVSHMEMI_ERROR_PRINT("nvmlDeviceGetPlatformInfo not found. Override of cliqueId will not be "
-                     "attempted\n");
+                NVSHMEMI_ERROR_PRINT(
+                    "nvmlDeviceGetPlatformInfo not found. Override of cliqueId will not be "
+                    "attempted\n");
                 status = NVSHMEMX_ERROR_INTERNAL;
                 goto out;
             }
@@ -203,13 +204,14 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             pe_platformInfo.resize(npes);
 
             nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
-            NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                     "nvmlDeviceGetPlatformInfo failed \n");
+            NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL,
+                                     out, "nvmlDeviceGetPlatformInfo failed \n");
 
             pe_platformInfo[mype] = platformInfo;
 
-            status = nvshmemi_boot_handle.allgather((void *)&platformInfo, (void *)pe_platformInfo.data(),
-                                                    sizeof(nvmlPlatformInfo_t), &nvshmemi_boot_handle);
+            status = nvshmemi_boot_handle.allgather(
+                (void *)&platformInfo, (void *)pe_platformInfo.data(), sizeof(nvmlPlatformInfo_t),
+                &nvshmemi_boot_handle);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "allgather of pe_platformInfo failed \n");
             platformInfo1 = pe_platformInfo[mype];
@@ -249,7 +251,6 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                 (memcmp(fabricInfo1.clusterUuid, fabricInfo2.clusterUuid,
                         NVML_GPU_FABRIC_UUID_LEN) == 0) &&
                 (fabricInfo1.cliqueId == fabricInfo2.cliqueId)) {
-
                 // setup nvl_connected_pes initially to include all PEs
                 // that are connected via NVL. If there are VA mapping restrictions,
                 // then this will updated.
@@ -258,9 +259,11 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                 nvshmemi_handle_accessible_pes_[i] = 1;
 
                 if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
-                    // group PEs with same rackID in multicast domain (a subset of nvl_connected_pes)
+                    // group PEs with same rackID in multicast domain (a subset of
+                    // nvl_connected_pes)
                     platformInfo2 = pe_platformInfo[i];
-                    if (memcmp(platformInfo1.chassisSerialNumber, platformInfo2.chassisSerialNumber, sizeof(platformInfo1.chassisSerialNumber)) == 0) {
+                    if (memcmp(platformInfo1.chassisSerialNumber, platformInfo2.chassisSerialNumber,
+                               sizeof(platformInfo1.chassisSerialNumber)) == 0) {
                         nvshmemi_nvls_connected_pes_[i] = 1;
                     }
                 } else {
@@ -279,8 +282,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "FABRIC") == 0)
             nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_FABRIC;
         else if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "ANY") == 0)
-            nvshmemi_mem_handle_type_ = (CUmemAllocationHandleType)(
-                CU_MEM_HANDLE_TYPE_FABRIC | CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
+            nvshmemi_mem_handle_type_ =
+                (CUmemAllocationHandleType)(CU_MEM_HANDLE_TYPE_FABRIC |
+                                            CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
         else
             nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
     }
@@ -289,8 +293,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: Fabric Handle\n");
     } else if (nvshmemi_mem_handle_type_ ==
                (CU_MEM_HANDLE_TYPE_FABRIC | CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR)) {
-        INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: ANY "
-                          "(effective: Fabric when MNNVL active, POSIX otherwise)\n");
+        INFO(NVSHMEM_MEM,
+             "Symmetric Memory Heap Handle Type: ANY "
+             "(effective: Fabric when MNNVL active, POSIX otherwise)\n");
     } else {
         INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: POSIX File Descriptor\n");
     }

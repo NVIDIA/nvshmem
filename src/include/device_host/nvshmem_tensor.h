@@ -105,7 +105,7 @@ typedef enum {
 
 typedef enum {
     PEER_PUSH_NBI = 0,
-    PEER_PULL_NBI = 0, // Both PULL/PUSH have same behavior
+    PEER_PULL_NBI = 0,  // Both PULL/PUSH have same behavior
     REMOTE_PUSH_NBI = 1,
     REMOTE_PULL_NBI = 1,
     NVSHMEMI_TILE_ALGO_SENTINEL = INT_MAX

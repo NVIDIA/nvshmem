@@ -108,9 +108,9 @@ NVSHMEMI_HOSTDEVICE_PREFIX void *nvshmemx_mc_ptr(nvshmem_team_t team, const void
 #define NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO_HALF(OPGRPNAME, opname)
 #endif
 
-#define NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(OPGRPNAME, opname) \
+#define NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(OPGRPNAME, opname)  \
     NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO_HALF(OPGRPNAME, opname) \
-    NVSHMEMI_DECL_TYPE_##OPGRPNAME(float, float, opname)            \
+    NVSHMEMI_DECL_TYPE_##OPGRPNAME(float, float, opname)           \
         NVSHMEMI_DECL_TYPE_##OPGRPNAME(double, double, opname)
 
 /* inc */
@@ -160,11 +160,11 @@ NVSHMEMI_REPT_OPGROUP_FOR_STANDARD_AMO(ADD_SET, add)
  * supported over GPU LD/ST atomics, such as NVLink peer access, and over the IBRC
  * remote transport.
  */
-#define NVSHMEMI_DECL_TYPE_XADD(type, TYPE, opname)                                          \
+#define NVSHMEMI_DECL_TYPE_XADD(type, TYPE, opname)                                           \
     NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_##type##_atomic_##opname(TYPE *dest, TYPE value, \
                                                                       int pe);
 #define NVSHMEMI_DECL_TYPE_XFADD(type, TYPE, opname)                                          \
-    NVSHMEMI_HOSTDEVICE_PREFIX TYPE nvshmemx_##type##_atomic_##opname(TYPE *dest, TYPE value,  \
+    NVSHMEMI_HOSTDEVICE_PREFIX TYPE nvshmemx_##type##_atomic_##opname(TYPE *dest, TYPE value, \
                                                                       int pe);
 
 NVSHMEMI_REPT_OPGROUP_FOR_EXTENDED_AMO(XADD, add)

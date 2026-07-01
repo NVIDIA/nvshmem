@@ -36,23 +36,22 @@ extern "C" {
 NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DECL_TYPENAME_OP_REDUCE, thread, , , or)
 #undef DECL_TYPENAME_OP_REDUCE
 
-#define DEFN_TYPENAME_OP_REDUCE(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)              \
-    __global__ void test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX(                     \
-        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems,                      \
-        size_t dynamic_smem_size) {                                                        \
-        int myIdx = nvshmtest_thread_id_in_##SC();                                         \
-        int groupSize = nvshmtest_##SC##_size();                                           \
-        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                         \
-        init_##TYPENAME##_##OP##_reduce_data##SC_SUFFIX(team, source, nelems);             \
-                                                                                           \
-        for (int j = 0; j < 1 /*MAX_ITER*/; j++) {                                         \
-            reset_##TYPENAME##_##OP##_reduce_data##SC_SUFFIX(team, dest, nelems);          \
-            nvshmem##SC_PREFIX##_barrier##SC_SUFFIX(team);                                 \
-            nvshmem##SC_PREFIX##_##TYPENAME##_##OP##_reduce##SC_SUFFIX(team, dest, source, \
-                                                                       nelems);            \
-            validate_##TYPENAME##_##OP##_reduce_data##SC_SUFFIX(team, dest, nelems);       \
-        }                                                                                  \
-        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                      \
+#define DEFN_TYPENAME_OP_REDUCE(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)                     \
+    __global__ void test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX(                            \
+        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, size_t dynamic_smem_size) { \
+        int myIdx = nvshmtest_thread_id_in_##SC();                                                \
+        int groupSize = nvshmtest_##SC##_size();                                                  \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                \
+        init_##TYPENAME##_##OP##_reduce_data##SC_SUFFIX(team, source, nelems);                    \
+                                                                                                  \
+        for (int j = 0; j < 1 /*MAX_ITER*/; j++) {                                                \
+            reset_##TYPENAME##_##OP##_reduce_data##SC_SUFFIX(team, dest, nelems);                 \
+            nvshmem##SC_PREFIX##_barrier##SC_SUFFIX(team);                                        \
+            nvshmem##SC_PREFIX##_##TYPENAME##_##OP##_reduce##SC_SUFFIX(team, dest, source,        \
+                                                                       nelems);                   \
+            validate_##TYPENAME##_##OP##_reduce_data##SC_SUFFIX(team, dest, nelems);              \
+        }                                                                                         \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                             \
     }
 
 NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DEFN_TYPENAME_OP_REDUCE, thread, , , or)
@@ -60,14 +59,15 @@ NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DEFN_TYPENAME_OP_REDUCE, t
 }
 #endif
 
-#define DO_RDXN_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)                                \
-    if (use_cubin) {                                                                                      \
-        DO_RDXN_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP);                                 \
-    } else {                                                                                              \
-        test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-            team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                              \
-    }                                                                                                     \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                               \
+#define DO_RDXN_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)                              \
+    if (use_cubin) {                                                                            \
+        DO_RDXN_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP);                       \
+    } else {                                                                                    \
+        test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, \
+                                                            cstrm>>>(                           \
+            team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                    \
+    }                                                                                           \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                     \
     CUDA_RUNTIME_CHECK(cudaStreamSynchronize(cstrm));
 
 int main(int argc, char **argv) {

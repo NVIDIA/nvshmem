@@ -178,8 +178,7 @@ int main(int c, char *v[]) {
             exit(-1);
         }
 
-        while (*((volatile int *)hflag) != 1)
-            ;
+        while (*((volatile int *)hflag) != 1);
 
         nvshmem_barrier_all();
         i++;

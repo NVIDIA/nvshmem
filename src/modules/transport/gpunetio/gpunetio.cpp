@@ -377,8 +377,7 @@ struct nvshmemt_gpunetio_state_t {
 // Utility functions
 static inline int gpunetio_round_up_pow2(int n) {
     int pow2 = 0;
-    for (pow2 = 1; pow2 < n; pow2 <<= 1)
-        ;
+    for (pow2 = 1; pow2 < n; pow2 <<= 1);
     return pow2;
 }
 
@@ -1216,8 +1215,8 @@ int nvshmemt_gpunetio_state_t::init_ftables(nvshmemi_options_s *options,
                            "Unable to dlopen libibverbs. Skipping DOCA transport.\n");
     }
 
-    nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable,
-                                   options->DISABLE_DATA_DIRECT, log_level);
+    nvshmemt_ib_common_init_mlx5dv(&mlx5dv_handle, &mlx5dv_ftable, options->DISABLE_DATA_DIRECT,
+                                   log_level);
 
     return NVSHMEMX_SUCCESS;
 }

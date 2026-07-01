@@ -31,15 +31,13 @@ static void mps_cpu_barrier(volatile std::atomic<int>& barrier, volatile std::at
             1;       // equivalent to ++barrier with release memory ordering
     if (count == n)  // Last one in
         sense = 1;
-    while (!sense)
-        ;
+    while (!sense);
 
     // Check-out
     count = --barrier;
     if (count == 0)  // Last one out
         sense = 0;
-    while (sense.load(std::memory_order_acquire))
-        ;
+    while (sense.load(std::memory_order_acquire));
 }
 
 void nvshmemi_mps_sync_gpu_on_stream(cudaStream_t stream) {

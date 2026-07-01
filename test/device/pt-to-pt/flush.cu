@@ -211,17 +211,17 @@ static int run_smem_source_scope(int *recv_data, std::vector<int> &host, int tot
                                     cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
     CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
     nvshmem_barrier_all();
-    test_flush_reuses_smem_source<SCOPE><<<NUM_BLOCKS, THREADS_PER_BLOCK, smem_size>>>(
-        recv_data, elems_per_block, mype, npes);
+    test_flush_reuses_smem_source<SCOPE>
+        <<<NUM_BLOCKS, THREADS_PER_BLOCK, smem_size>>>(recv_data, elems_per_block, mype, npes);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     nvshmem_barrier_all();
 
-    CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
-                          cudaMemcpyDeviceToHost));
+    CUDA_CHECK(
+        cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
     if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
-        printf("[PE %d] PASS: nvshmemx_flush %s-scope shared-memory source reuse (%s path)\n",
-               mype, scope_name(SCOPE), use_tma ? "TMA" : "non-TMA");
+        printf("[PE %d] PASS: nvshmemx_flush %s-scope shared-memory source reuse (%s path)\n", mype,
+               scope_name(SCOPE), use_tma ? "TMA" : "non-TMA");
         return 0;
     }
     return 1;
@@ -233,14 +233,14 @@ static int run_gmem_source_scope(int *source_data, int *recv_data, std::vector<i
                                  int prev_pe) {
     CUDA_CHECK(cudaMemset(recv_data, 0, sizeof(int) * total_elems));
     nvshmem_barrier_all();
-    test_flush_reuses_gmem_source_without_tma<SCOPE><<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(
-        source_data, recv_data, elems_per_block, mype, npes);
+    test_flush_reuses_gmem_source_without_tma<SCOPE>
+        <<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(source_data, recv_data, elems_per_block, mype, npes);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     nvshmem_barrier_all();
 
-    CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
-                          cudaMemcpyDeviceToHost));
+    CUDA_CHECK(
+        cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
     if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
         printf("[PE %d] PASS: nvshmemx_flush %s-scope global-memory source reuse\n", mype,
                scope_name(SCOPE));
@@ -261,12 +261,13 @@ static int run_gmem_source_block_put_thread_flush(int *source_data, int *recv_da
     CUDA_CHECK(cudaDeviceSynchronize());
     nvshmem_barrier_all();
 
-    CUDA_CHECK(cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems,
-                          cudaMemcpyDeviceToHost));
+    CUDA_CHECK(
+        cudaMemcpy(host.data(), recv_data, sizeof(int) * total_elems, cudaMemcpyDeviceToHost));
     if (verify_recv_data(host.data(), total_elems, prev_pe) == 0) {
-        printf("[PE %d] PASS: nvshmemx_flush thread-scope global-memory source reuse after "
-               "block-scope put\n",
-               mype);
+        printf(
+            "[PE %d] PASS: nvshmemx_flush thread-scope global-memory source reuse after "
+            "block-scope put\n",
+            mype);
         return 0;
     }
     return 1;
@@ -327,15 +328,15 @@ int main(int argc, char **argv) {
         if (all_p2p_reachable) {
             int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
             int smem_size = smem_offset + THREADS_PER_BLOCK * (int)sizeof(int);
-            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_THREAD>(
-                recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
-                use_tma);
-            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_WARP>(
-                recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
-                use_tma);
-            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_BLOCK>(
-                recv_data, host, total_elems, THREADS_PER_BLOCK, smem_size, mype, npes, prev_pe,
-                use_tma);
+            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_THREAD>(recv_data, host, total_elems,
+                                                                     THREADS_PER_BLOCK, smem_size,
+                                                                     mype, npes, prev_pe, use_tma);
+            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_WARP>(recv_data, host, total_elems,
+                                                                   THREADS_PER_BLOCK, smem_size,
+                                                                   mype, npes, prev_pe, use_tma);
+            status |= run_smem_source_scope<FLUSH_TEST_SCOPE_BLOCK>(recv_data, host, total_elems,
+                                                                    THREADS_PER_BLOCK, smem_size,
+                                                                    mype, npes, prev_pe, use_tma);
         }
 
         status |= run_gmem_source_scope<FLUSH_TEST_SCOPE_THREAD>(

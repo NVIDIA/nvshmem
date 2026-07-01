@@ -44,7 +44,7 @@ nvshmemi_nvls_rsc::nvshmemi_nvls_rsc(nvshmemi_team_t *team, nvshmemi_state_t *st
     CUDA_RUNTIME_CHECK(cudaGetDevice(&cuda_dev));
     status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&current_dev_, cuda_dev));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuDeviceGet failed\n");
+                             "cuDeviceGet failed\n");
 
     if (team->size < 2) {
         status = NVSHMEMX_ERROR_NOT_SUPPORTED;
@@ -109,25 +109,24 @@ int nvshmemi_nvls_rsc::export_group(uint64_t mem_size, char *shareable_handle) {
 
     status = CUPFN(nvshmemi_cuda_syms, cuMulticastCreate(&mc_handle, &prop_));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMulticastCreate failed \n");
+                             "cuMulticastCreate failed \n");
 
     INFO(NVSHMEM_TEAM, "Creating mcHandle %lld on GPU device %d of size: %zu\n", mc_handle,
          current_dev_, mem_size);
     cumc_handles_.push_back(std::make_pair(mc_handle, mem_size));
-    status = CUPFN(nvshmemi_cuda_syms,
-                   cuMemExportToShareableHandle(shareable_handle, mc_handle,
-                                               state->heap_obj->get_effective_import_handle_type(),
-                                               0));
+    status = CUPFN(nvshmemi_cuda_syms, cuMemExportToShareableHandle(
+                                           shareable_handle, mc_handle,
+                                           state->heap_obj->get_effective_import_handle_type(), 0));
 
     if (state->heap_obj->is_cuda_mem_handle_type_fabric()) {
-        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                              "cuMemExportToShareableHandle failed for fabric handles\n");
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                                 out, "cuMemExportToShareableHandle failed for fabric handles\n");
         INFO(NVSHMEM_TEAM, "Exporting mcHandle %lld via FH on GPU device %d\n", mc_handle,
              current_dev_);
 
     } else {
-        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                              "cuMemExportToShareableHandle failed for ipc handles\n");
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                                 out, "cuMemExportToShareableHandle failed for ipc handles\n");
         INFO(NVSHMEM_TEAM, "Exporting mcHandle %lld via POSIX FD on GPU device %d\n", mc_handle,
              current_dev_);
         status = 0;
@@ -143,24 +142,23 @@ int nvshmemi_nvls_rsc::import_group(char *shareable_handle, CUmemGenericAllocati
     int status = -1;
     if (state->heap_obj->is_cuda_mem_handle_type_ipc()) {
         int fd = *(int *)shareable_handle;
-        status = CUPFN(nvshmemi_cuda_syms,
-                       cuMemImportFromShareableHandle(
-                           mc_handle, (void *)(uintptr_t)fd,
-                           state->heap_obj->get_effective_import_handle_type()));
-        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS,
-                                 NVSHMEMX_ERROR_INTERNAL, out,
-                              "cuMemImportFromShareableHandle failed for ipc handles\n");
+        status = CUPFN(
+            nvshmemi_cuda_syms,
+            cuMemImportFromShareableHandle(mc_handle, (void *)(uintptr_t)fd,
+                                           state->heap_obj->get_effective_import_handle_type()));
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                                 out, "cuMemImportFromShareableHandle failed for ipc handles\n");
         INFO(NVSHMEM_TEAM, "Importing mcHandle %lld via POSIX FD on GPU device %d\n", *mc_handle,
              current_dev_);
         close(fd);
     } else {
-        status = CUPFN(nvshmemi_cuda_syms,
-                       cuMemImportFromShareableHandle(
-                           mc_handle, (void *)shareable_handle,
-                           state->heap_obj->get_effective_import_handle_type()));
-        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS,
-                                 NVSHMEMX_ERROR_INTERNAL, out,
-                              "cuMemImportFromShareableHandle failed for fabric handles \n");
+        status = CUPFN(
+            nvshmemi_cuda_syms,
+            cuMemImportFromShareableHandle(mc_handle, (void *)shareable_handle,
+                                           state->heap_obj->get_effective_import_handle_type()));
+        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                                 out,
+                                 "cuMemImportFromShareableHandle failed for fabric handles \n");
         INFO(NVSHMEM_TEAM, "Importing mcHandle %lld via FH on GPU device %d\n", *mc_handle,
              current_dev_);
     }
@@ -176,7 +174,7 @@ int nvshmemi_nvls_rsc::subscribe_group(CUmemGenericAllocationHandle *mc_handle) 
     int status = -1;
     status = CUPFN(nvshmemi_cuda_syms, cuMulticastAddDevice(*mc_handle, current_dev_));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMulticastAddDevice failed \n");
+                             "cuMulticastAddDevice failed \n");
 
     INFO(NVSHMEM_TEAM, "Adding mcHandle %lld to GPU device %d\n", *mc_handle, current_dev_);
 out:
@@ -189,7 +187,7 @@ int nvshmemi_nvls_rsc::reserve_group_mem(void) {
                    cuMemAddressReserve((CUdeviceptr *)&mc_base_ptr_, virt_alloc_size_,
                                        alloc_granularity_, (CUdeviceptr)NULL, 0));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMemAddressReserve failed for mc base ptr \n");
+                             "cuMemAddressReserve failed for mc base ptr \n");
     INFO(NVSHMEM_TEAM, "Reserving mc base ptr %p on GPU device %d\n", mc_base_ptr_, current_dev_);
 out:
     return (status);
@@ -201,7 +199,7 @@ int nvshmemi_nvls_rsc::free_group_mem(void) {
     status =
         CUPFN(nvshmemi_cuda_syms, cuMemAddressFree((CUdeviceptr)mc_base_ptr_, virt_alloc_size_));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMemAddressFree failed for mc base ptr \n");
+                             "cuMemAddressFree failed for mc base ptr \n");
 out:
     return (status);
 }
@@ -239,8 +237,8 @@ int nvshmemi_nvls_rsc::unbind_group_mem(CUmemGenericAllocationHandle *mc_handle,
     status =
         CUPFN(nvshmemi_cuda_syms, cuMulticastUnbind(*mc_handle, current_dev_, mc_offset, mem_size));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMulticastUnbind failed for mc_offset %lx on device %d\n", mc_offset,
-                          current_dev_);
+                             "cuMulticastUnbind failed for mc_offset %lx on device %d\n", mc_offset,
+                             current_dev_);
     INFO(NVSHMEM_TEAM,
          "Unbind multicast group handle %lld for mem size %zu "
          "mc offset %lx\n on GPU device %d\n",
@@ -270,8 +268,8 @@ int nvshmemi_nvls_rsc::map_group_mem(CUmemGenericAllocationHandle *mc_handle, si
               cuMemSetAccess((CUdeviceptr)NVSHMEMI_SYMMETRIC_HEAP_OFFSET(mc_base_ptr_, mc_offset),
                              mem_size, (const CUmemAccessDesc *)&access, 1));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMemSetAccess failed for address: %p on device %d\n",
-                          NVSHMEMI_SYMMETRIC_HEAP_OFFSET(mc_base_ptr_, mc_offset), current_dev_);
+                             "cuMemSetAccess failed for address: %p on device %d\n",
+                             NVSHMEMI_SYMMETRIC_HEAP_OFFSET(mc_base_ptr_, mc_offset), current_dev_);
 
     INFO(NVSHMEM_TEAM,
          "Mapping multicast group handle %lld @ mc heap addr %lx for mem size %zu "
@@ -288,8 +286,8 @@ int nvshmemi_nvls_rsc::unmap_group_mem(off_t mc_offset, uint64_t mem_size) {
         nvshmemi_cuda_syms,
         cuMemUnmap((CUdeviceptr)NVSHMEMI_SYMMETRIC_HEAP_OFFSET(mc_base_ptr_, mc_offset), mem_size));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cuMemUnmap failed to map %ld bytes at address: %p\n", mem_size,
-                          NVSHMEMI_SYMMETRIC_HEAP_OFFSET(mc_base_ptr_, mc_offset));
+                             "cuMemUnmap failed to map %ld bytes at address: %p\n", mem_size,
+                             NVSHMEMI_SYMMETRIC_HEAP_OFFSET(mc_base_ptr_, mc_offset));
 
     INFO(NVSHMEM_TEAM,
          "Unmapping mc heap addr %lx for mem size %zu "

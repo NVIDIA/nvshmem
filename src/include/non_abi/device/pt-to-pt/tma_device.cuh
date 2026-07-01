@@ -66,8 +66,8 @@ selp.u32 %0, 1, 0, elect_p;
  * Call this from ALL threads in the block; returns true for exactly one.
  */
 __device__ __forceinline__ bool nvshmemi_tma_block_is_elected() {
-    unsigned int tid = threadIdx.x + threadIdx.y * blockDim.x +
-                       threadIdx.z * blockDim.x * blockDim.y;
+    unsigned int tid =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     unsigned int warp_id = tid / warpSize;
     /* Broadcast warp_id from lane 0 to make it a compiler-known uniform value */
     unsigned int uniform_warp_id = __shfl_sync(0xffffffff, warp_id, 0);
@@ -134,8 +134,7 @@ inline __device__ void cp_async_bulk_global_to_shared(void *dest, const void *sr
         : "memory");
 }
 
-inline __device__ void cp_async_bulk_shared_to_global(void *dest, const void *src,
-                                                      uint32_t size) {
+inline __device__ void cp_async_bulk_shared_to_global(void *dest, const void *src, uint32_t size) {
     nvshmemi_tma_bulk_shared_to_global(dest, nvshmemi_tma_cvta_to_shared(src), size);
 }
 
@@ -143,8 +142,8 @@ template <int n>
 inline __device__ void cp_async_bulk_wait_group_read() {
     static_assert(n >= 0 && n <= 24, "n must be between 0 and 24");
 
-#define NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(N) \
-    if constexpr (n == N) {                            \
+#define NVSHMEMI_CP_ASYNC_BULK_WAIT_GROUP_READ_CASE(N)                      \
+    if constexpr (n == N) {                                                 \
         asm volatile("cp.async.bulk.wait_group.read " #N ";" ::: "memory"); \
     }
 
@@ -233,10 +232,9 @@ __device__ __forceinline__ void nvshmemi_tma_mbarrier_init(uint64_t *mbar) {
 }
 
 __device__ __forceinline__ void nvshmemi_tma_mbarrier_arrive_expect_tx(uint64_t *mbar,
-                                                                        uint32_t bytes) {
+                                                                       uint32_t bytes) {
     unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
-    asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;" ::"r"(addr),
-                 "r"(bytes));
+    asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;" ::"r"(addr), "r"(bytes));
 }
 
 __device__ __forceinline__ void nvshmemi_tma_mbarrier_try_wait(uint64_t *mbar, int phase) {
@@ -257,7 +255,7 @@ mbarrier.try_wait.parity.shared::cta.b64 p, [%0], %1;
  * being fulfilled by a cp.async.bulk completion.
  */
 __device__ __forceinline__ void nvshmemi_tma_mbarrier_complete_tx(uint64_t *mbar,
-                                                                    uint32_t tx_count) {
+                                                                  uint32_t tx_count) {
     unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
     asm volatile("mbarrier.complete_tx.relaxed.cta.shared::cta.b64 [%0], %1;" ::"r"(addr),
                  "r"(tx_count)
@@ -269,9 +267,8 @@ __device__ __forceinline__ void nvshmemi_tma_mbarrier_complete_tx(uint64_t *mbar
  * The mbarrier's tx_count is incremented by `bytes` on completion.
  */
 __device__ __forceinline__ void nvshmemi_tma_bulk_global_to_shared(void *smem_dst,
-                                                                    const void *gmem_src,
-                                                                    uint32_t bytes,
-                                                                    uint64_t *mbar) {
+                                                                   const void *gmem_src,
+                                                                   uint32_t bytes, uint64_t *mbar) {
     unsigned int dst_addr = nvshmemi_tma_cvta_to_shared(smem_dst);
     unsigned int mbar_addr = nvshmemi_tma_cvta_to_shared(mbar);
     asm volatile(

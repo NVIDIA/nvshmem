@@ -165,9 +165,7 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
     /**
      * Default constructor - initializes counter to zero
      */
-    nvshmemt_libfabric_endpoint_seq_counter_t() {
-        reset();
-    }
+    nvshmemt_libfabric_endpoint_seq_counter_t() { reset(); }
 
     /**
      * Reset counter and pending acks to zero
@@ -396,12 +394,17 @@ struct nvshmemt_libfabric_ack_aggregator_t {
         uint8_t amo_ack_count;
         /* Number of record_ack calls (signals/AMOs with submitted_ops+=2). */
         uint8_t signal_ack_count;
-        uint16_t age; /* Progress cycles since last record; used for age-based flushing */
+        uint16_t age;  /* Progress cycles since last record; used for age-based flushing */
         bool is_dirty; /* Whether this peer is in the dirty_peers vector */
 
         nvshmemt_libfabric_peer_pending_acks_t()
-            : range_end{0}, range_count{0}, has_range{false}, amo_ack_count{0}, signal_ack_count{0},
-              age{0}, is_dirty{false} {}
+            : range_end{0},
+              range_count{0},
+              has_range{false},
+              amo_ack_count{0},
+              signal_ack_count{0},
+              age{0},
+              is_dirty{false} {}
 
         uint16_t total_pending() const {
             return static_cast<uint16_t>(range_count) + amo_ack_count;
@@ -427,18 +430,17 @@ struct nvshmemt_libfabric_ack_aggregator_t {
     std::vector<nvshmemt_libfabric_peer_pending_acks_t> pending_per_peer;
     std::vector<int> dirty_peers;
 
-    nvshmemt_libfabric_ack_aggregator_t(int npes)
-        : pending_per_peer(npes) {
+    nvshmemt_libfabric_ack_aggregator_t(int npes) : pending_per_peer(npes) {
         dirty_peers.reserve(npes);
     }
 
     int record_ack(int pe, uint16_t seq_num, nvshmem_transport_t transport,
                    nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr,
                    uint8_t preceding_put_count);
-    int record_amo_ack(int pe, nvshmem_transport_t transport,
-                       nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr);
-    int flush_peer(int pe, nvshmem_transport_t transport,
-                   nvshmemt_libfabric_endpoint_t &ep, fi_addr_t dest_addr);
+    int record_amo_ack(int pe, nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep,
+                       fi_addr_t dest_addr);
+    int flush_peer(int pe, nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep,
+                   fi_addr_t dest_addr);
     int flush_all(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep);
     int flush_stale(nvshmem_transport_t transport, nvshmemt_libfabric_endpoint_t &ep);
     bool try_extract_for_peer(int pe, uint16_t &range_end, uint8_t &range_count,
@@ -467,7 +469,7 @@ typedef struct nvshmemt_libfabric_gdr_send_p_op {
 } nvshmemt_libfabric_gdr_send_p_op_t;
 
 typedef struct nvshmemt_libfabric_gdr_send_amo_op {
-    nvshmemi_amo_t op;  /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
+    nvshmemi_amo_t op; /* high bit (NVSHMEMI_AMO_FLOAT_BIT) encodes float type */
     void *target_addr;
     void *ret_addr;
     union {
@@ -675,9 +677,9 @@ struct signal_delivery_done_entry {
 
 /* Common ack payload embedded in both signal ops (piggybacked) and standalone ack ops */
 typedef struct nvshmemt_libfabric_ack_payload {
-    uint16_t ack_seq_num;  /* End (last seq num) of acked sequence number range */
-    uint8_t  ack_count;    /* Count of acked sequence numbers */
-    uint8_t  ack_num_ops;  /* Number of ack operations (for completed_staged_atomics) */
+    uint16_t ack_seq_num; /* End (last seq num) of acked sequence number range */
+    uint8_t ack_count;    /* Count of acked sequence numbers */
+    uint8_t ack_num_ops;  /* Number of ack operations (for completed_staged_atomics) */
 } nvshmemt_libfabric_ack_payload_t;
 static_assert(sizeof(nvshmemt_libfabric_ack_payload_t) == 4);
 
@@ -696,15 +698,13 @@ class nvshmemt_libfabric_deferred_work_queue_t {
 
    public:
     void push(const nvshmemt_libfabric_deferred_work_t &item) {
-        while (lock.test_and_set(std::memory_order_acquire))
-            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        while (lock.test_and_set(std::memory_order_acquire)) NVSHMEMT_LIBFABRIC_CPU_RELAX();
         queue.push_back(item);
         lock.clear(std::memory_order_release);
     }
 
     bool pop(nvshmemt_libfabric_deferred_work_t &item) {
-        while (lock.test_and_set(std::memory_order_acquire))
-            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        while (lock.test_and_set(std::memory_order_acquire)) NVSHMEMT_LIBFABRIC_CPU_RELAX();
         if (queue.empty()) {
             lock.clear(std::memory_order_release);
             return false;
@@ -716,8 +716,7 @@ class nvshmemt_libfabric_deferred_work_queue_t {
     }
 
     void clear() {
-        while (lock.test_and_set(std::memory_order_acquire))
-            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        while (lock.test_and_set(std::memory_order_acquire)) NVSHMEMT_LIBFABRIC_CPU_RELAX();
         queue.clear();
         lock.clear(std::memory_order_release);
     }
@@ -873,7 +872,6 @@ static constexpr size_t NVSHMEMT_LIBFABRIC_MAX_DOMAINS_PER_PE =
 typedef struct nvshmemt_libfabric_mem_handle_t nvshmemt_libfabric_mem_handle_t;
 static_assert(sizeof(nvshmemt_libfabric_mem_handle_t) <= nvshmemt_libfabric_mem_handle_t::MAX_SIZE);
 
-
 /* Wire data for put-signal gdr staged atomics
  * 32 bytes
  * | 1 type | 1 op | 1 elem_size | 1 preceding_put_count | 2 num_writes | 2 src_pe
@@ -884,11 +882,11 @@ typedef struct nvshmemt_libfabric_gdr_signal_op {
     nvshmemt_libfabric_recv_t type; /* Must be first */
     uint8_t op;
     uint8_t elem_size;
-    uint8_t  preceding_put_count;
+    uint8_t preceding_put_count;
     uint16_t num_writes;
     uint16_t src_pe;
     uint64_t sig_val;
-    void    *target_addr;
+    void *target_addr;
     uint16_t sequence_count;
     nvshmemt_libfabric_ack_payload_t ack;
     uint16_t reserved;
@@ -897,7 +895,7 @@ typedef struct nvshmemt_libfabric_gdr_signal_op {
 static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) == 32);
 /* This type is nested in nvshmemt_libfabric_gdr_op_ctx_t, so make sure it fits */
 static_assert(sizeof(nvshmemt_libfabric_gdr_signal_op_t) <=
-              offsetof(nvshmemt_libfabric_gdr_op_ctx_t, ofi_context),
+                  offsetof(nvshmemt_libfabric_gdr_op_ctx_t, ofi_context),
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");
 
 /* Wire data for AMO ack sent via fi_send
@@ -912,5 +910,5 @@ static_assert(sizeof(nvshmemt_libfabric_gdr_amo_ack_op_t) <= 32,
               "Must fit within EFA's inline send limit of 32 bytes");
 /* This type is nested in nvshmemt_libfabric_gdr_op_ctx_t, so make sure it fits */
 static_assert(sizeof(nvshmemt_libfabric_gdr_amo_ack_op_t) <=
-              offsetof(nvshmemt_libfabric_gdr_op_ctx_t, ofi_context),
+                  offsetof(nvshmemt_libfabric_gdr_op_ctx_t, ofi_context),
               "Must fit within nvshmemt_libfabric_gdr_op_ctx_t");

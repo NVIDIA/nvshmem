@@ -27,9 +27,9 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_alltoa
 }
 
 #define DEFN_NVSHMEM_TYPENAME_ALLTOALL(TYPENAME, TYPE)                                       \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX                                                   \
-        NVSHMEMI_DEVICE_INLINE int nvshmem_##TYPENAME##_alltoall(                            \
-            nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nelems) {            \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int                        \
+    nvshmem_##TYPENAME##_alltoall(nvshmem_team_t team, TYPE *dest, const TYPE *source,       \
+                                  size_t nelems) {                                           \
         nvshmemi_alltoall_threadgroup<TYPE, nvshmemi_threadgroup_thread>(team, dest, source, \
                                                                          nelems);            \
         return 0;                                                                            \
@@ -38,8 +38,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_alltoa
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFN_NVSHMEM_TYPENAME_ALLTOALL)
 #undef DEFN_NVSHMEM_TYPENAME_ALLTOALL
 
-NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_barrier(
-    nvshmem_team_t team) {
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX
+    NVSHMEMI_DEVICE_INLINE int nvshmem_barrier(nvshmem_team_t team) {
     nvshmemi_barrier_threadgroup<nvshmemi_threadgroup_thread>(team);
     return 0;
 }
@@ -65,13 +65,13 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_broadc
     return 0;
 }
 
-#define DEFN_NVSHMEM_TYPENAME_BROADCAST(TYPENAME, TYPE)                                        \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX                                                     \
-        NVSHMEMI_DEVICE_INLINE int nvshmem_##TYPENAME##_broadcast(                             \
-            nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nelems, int PE_root) { \
-        nvshmemi_broadcast_threadgroup<TYPE, nvshmemi_threadgroup_thread>(team, dest, source,  \
-                                                                          nelems, PE_root);    \
-        return 0;                                                                              \
+#define DEFN_NVSHMEM_TYPENAME_BROADCAST(TYPENAME, TYPE)                                       \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int                         \
+    nvshmem_##TYPENAME##_broadcast(nvshmem_team_t team, TYPE *dest, const TYPE *source,       \
+                                   size_t nelems, int PE_root) {                              \
+        nvshmemi_broadcast_threadgroup<TYPE, nvshmemi_threadgroup_thread>(team, dest, source, \
+                                                                          nelems, PE_root);   \
+        return 0;                                                                             \
     }
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFN_NVSHMEM_TYPENAME_BROADCAST)
@@ -84,25 +84,25 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_fcolle
     return 0;
 }
 
-#define DEFN_NVSHMEM_TYPENAME_FCOLLECT(TYPENAME, TYPE)                            \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX                                        \
-        NVSHMEMI_DEVICE_INLINE int nvshmem_##TYPENAME##_fcollect(                 \
-            nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nelems) { \
-        nvshmemi_fcollect_threadgroup<TYPE, nvshmemi_threadgroup_thread>(         \
-            team, dest, source, nelems * nvshmem_team_my_pe(team), nelems);       \
-        return 0;                                                                 \
+#define DEFN_NVSHMEM_TYPENAME_FCOLLECT(TYPENAME, TYPE)                                 \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int                  \
+    nvshmem_##TYPENAME##_fcollect(nvshmem_team_t team, TYPE *dest, const TYPE *source, \
+                                  size_t nelems) {                                     \
+        nvshmemi_fcollect_threadgroup<TYPE, nvshmemi_threadgroup_thread>(              \
+            team, dest, source, nelems * nvshmem_team_my_pe(team), nelems);            \
+        return 0;                                                                      \
     }
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFN_NVSHMEM_TYPENAME_FCOLLECT)
 #undef DEFN_NVSHMEM_TYPENAME_FCOLLECT
 
-#define DEFN_NVSHMEM_TYPENAME_OP_REDUCE(TYPENAME, TYPE, OP)                            \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX                                             \
-        NVSHMEMI_DEVICE_INLINE int nvshmem_##TYPENAME##_##OP##_reduce(                 \
-            nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {     \
-        nvshmemi_reduce_threadgroup<TYPE, RDXN_OPS_##OP, nvshmemi_threadgroup_thread>( \
-            team, dest, source, nreduce);                                              \
-        return 0;                                                                      \
+#define DEFN_NVSHMEM_TYPENAME_OP_REDUCE(TYPENAME, TYPE, OP)                                 \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int                       \
+    nvshmem_##TYPENAME##_##OP##_reduce(nvshmem_team_t team, TYPE *dest, const TYPE *source, \
+                                       size_t nreduce) {                                    \
+        nvshmemi_reduce_threadgroup<TYPE, RDXN_OPS_##OP, nvshmemi_threadgroup_thread>(      \
+            team, dest, source, nreduce);                                                   \
+        return 0;                                                                           \
     }
 
 #define DEFN_NVSHMEM_REDUCE()                                                     \
@@ -120,13 +120,13 @@ DEFN_NVSHMEM_REDUCE();
 #undef DEFN_NVSHMEM_TYPENAME_OP_REDUCE
 #undef DEFN_NVSHMEM_REDUCE
 
-#define DEFN_NVSHMEM_TYPENAME_OP_REDUCESCATTER(TYPENAME, TYPE, OP)                            \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX                                                    \
-        NVSHMEMI_DEVICE_INLINE int nvshmem_##TYPENAME##_##OP##_reducescatter(                 \
-            nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {            \
-        nvshmemi_reducescatter_threadgroup<TYPE, RDXN_OPS_##OP, nvshmemi_threadgroup_thread>( \
-            team, dest, source, nreduce * nvshmem_team_my_pe(team), nreduce);                 \
-        return 0;                                                                             \
+#define DEFN_NVSHMEM_TYPENAME_OP_REDUCESCATTER(TYPENAME, TYPE, OP)                                 \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int                              \
+    nvshmem_##TYPENAME##_##OP##_reducescatter(nvshmem_team_t team, TYPE *dest, const TYPE *source, \
+                                              size_t nreduce) {                                    \
+        nvshmemi_reducescatter_threadgroup<TYPE, RDXN_OPS_##OP, nvshmemi_threadgroup_thread>(      \
+            team, dest, source, nreduce * nvshmem_team_my_pe(team), nreduce);                      \
+        return 0;                                                                                  \
     }
 
 #define DEFN_NVSHMEM_REDUCESCATTER()                                                     \

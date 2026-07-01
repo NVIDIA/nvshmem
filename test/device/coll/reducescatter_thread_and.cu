@@ -19,11 +19,11 @@ using namespace std;
 extern "C" {
 #endif
 
-NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DECL_TYPENAME_OP_REDUCESCATTER, thread, , ,
-                                                      and)
+NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DECL_TYPENAME_OP_REDUCESCATTER, thread, ,
+                                                      , and)
 
-NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DEFN_TYPENAME_OP_REDUCESCATTER, thread, , ,
-                                                      and)
+NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DEFN_TYPENAME_OP_REDUCESCATTER, thread, ,
+                                                      , and)
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 }

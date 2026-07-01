@@ -58,8 +58,7 @@
                 if (counter == (gridDim.x * (i + 1) - 1)) {                                        \
                     *(counter_d + 1) += 1;                                                         \
                 }                                                                                  \
-                while (*(counter_d + 1) != i + 1)                                                  \
-                    ;                                                                              \
+                while (*(counter_d + 1) != i + 1);                                                 \
             }                                                                                      \
                                                                                                    \
             __syncthreads();                                                                       \
@@ -75,8 +74,7 @@
                 nvshmem_quiet();                                                                   \
                 *(counter_d + 1) += 1;                                                             \
             }                                                                                      \
-            while (*(counter_d + 1) != i + 1)                                                      \
-                ;                                                                                  \
+            while (*(counter_d + 1) != i + 1);                                                     \
         }                                                                                          \
     }
 
@@ -111,8 +109,7 @@
                 if (counter == (gridDim.x * (i + 1) - 1)) {                                        \
                     *(counter_d + 1) += 1;                                                         \
                 }                                                                                  \
-                while (*(counter_d + 1) != i + 1)                                                  \
-                    ;                                                                              \
+                while (*(counter_d + 1) != i + 1);                                                 \
             }                                                                                      \
                                                                                                    \
             __syncthreads();                                                                       \
@@ -128,8 +125,7 @@
                 nvshmem_quiet();                                                                   \
                 *(counter_d + 1) += 1;                                                             \
             }                                                                                      \
-            while (*(counter_d + 1) != i + 1)                                                      \
-                ;                                                                                  \
+            while (*(counter_d + 1) != i + 1);                                                     \
         }                                                                                          \
                                                                                                    \
         __syncthreads();                                                                           \
@@ -168,8 +164,7 @@
                 if (counter == (gridDim.x * (i + 1) - 1)) {                                        \
                     *(counter_d + 1) += 1;                                                         \
                 }                                                                                  \
-                while (*(counter_d + 1) != i + 1)                                                  \
-                    ;                                                                              \
+                while (*(counter_d + 1) != i + 1);                                                 \
             }                                                                                      \
                                                                                                    \
             __syncthreads();                                                                       \
@@ -185,8 +180,7 @@
                 nvshmem_quiet();                                                                   \
                 *(counter_d + 1) += 1;                                                             \
             }                                                                                      \
-            while (*(counter_d + 1) != i + 1)                                                      \
-                ;                                                                                  \
+            while (*(counter_d + 1) != i + 1);                                                     \
         }                                                                                          \
     }
 

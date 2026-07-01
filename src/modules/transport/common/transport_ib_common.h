@@ -34,7 +34,7 @@
 #define MLX5DV_VERSION "MLX5_1.8"
 #endif
 
-#define DIVUP(x, y) (((x) + (y)-1) / (y))
+#define DIVUP(x, y) (((x) + (y) - 1) / (y))
 
 #define ROUNDUP(x, y) (DIVUP((x), (y)) * (y))
 
@@ -276,11 +276,10 @@ int nvshmemt_ib_common_check_dmabuf_support(bool &out_dmabuf_support,
                                             const struct nvshmemi_cuda_fn_table *table,
                                             bool ib_disable_dmabuf);
 
-int nvshmemt_ib_common_discover_pci_paths(nvshmem_transport_t t,
-                                          struct nvshmemt_ib_common_state &state,
-                                          size_t device_struct_size,
-                                          const struct nvshmemt_ibv_function_table *ftable,
-                                          const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
+int nvshmemt_ib_common_discover_pci_paths(
+    nvshmem_transport_t t, struct nvshmemt_ib_common_state &state, size_t device_struct_size,
+    const struct nvshmemt_ibv_function_table *ftable,
+    const struct nvshmemt_mlx5dv_function_table *mlx5dv_ftable);
 
 int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_table *ftable,
                                          struct nvshmemt_ib_common_state &state,

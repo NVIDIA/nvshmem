@@ -44,10 +44,11 @@ NVSHMEMI_ENV_DEF(DISABLE_NVLS, bool, false, NVSHMEMI_ENV_CAT_OPENSHMEM,
 NVSHMEMI_ENV_DEF(DISABLE_NVLS_SHARING, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Disable NVLS SHARP resource sharing for user-defined teams")
 
-NVSHMEMI_ENV_DEF(CPU_AFFINITY, string, "AUTO", NVSHMEMI_ENV_CAT_OPENSHMEM,
-                 "Controls NUMA-aware CPU affinity pinning during initialization.\n"
-                 "Allowed values: AUTO enables automatic NUMA-local pinning; OFF disables pinning.\n"
-                 "AUTO only narrows current affinity and does not overwrite existing settings")
+NVSHMEMI_ENV_DEF(
+    CPU_AFFINITY, string, "AUTO", NVSHMEMI_ENV_CAT_OPENSHMEM,
+    "Controls NUMA-aware CPU affinity pinning during initialization.\n"
+    "Allowed values: AUTO enables automatic NUMA-local pinning; OFF disables pinning.\n"
+    "AUTO only narrows current affinity and does not overwrite existing settings")
 
 NVSHMEMI_ENV_DEF(SYMMETRIC_SIZE, size, (size_t)(SYMMETRIC_SIZE_DEFAULT), NVSHMEMI_ENV_CAT_OPENSHMEM,
                  "Specifies the size (in bytes) of the symmetric heap memory per PE. The resulting "
@@ -235,9 +236,10 @@ NVSHMEMI_ENV_DEF(IGNORE_CUDA_MPS_ACTIVE_THREAD_PERCENTAGE, bool, false, NVSHMEMI
 NVSHMEMI_ENV_DEF(CUMEM_GRANULARITY, size, (size_t)((size_t)1 << 29), NVSHMEMI_ENV_CAT_OTHER,
                  "Granularity for ``cuMemAlloc``/``cuMemCreate``")
 
-NVSHMEMI_ENV_DEF(CUMEM_HANDLE_TYPE, string, "FILE_DESCRIPTOR", NVSHMEMI_ENV_CAT_HIDDEN,
-                 "Handle type for ``cuMemCreate``. Supported are - FABRIC, FILE_DESCRIPTOR, or "
-                 "ANY (requests both FABRIC and FILE_DESCRIPTOR; effective type resolved at runtime)")
+NVSHMEMI_ENV_DEF(
+    CUMEM_HANDLE_TYPE, string, "FILE_DESCRIPTOR", NVSHMEMI_ENV_CAT_HIDDEN,
+    "Handle type for ``cuMemCreate``. Supported are - FABRIC, FILE_DESCRIPTOR, or "
+    "ANY (requests both FABRIC and FILE_DESCRIPTOR; effective type resolved at runtime)")
 
 NVSHMEMI_ENV_DEF(BYPASS_ACCESSIBILITY_CHECK, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Bypass peer GPU accessbility checks")

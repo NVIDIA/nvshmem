@@ -374,8 +374,7 @@ TEST_F(TopoPolicyTest, ExternalSharingPcieSwitchNicExclusiveSharesNicsWhenFewerN
     set_state(/*npes=*/1, /*npes_node=*/1, /*mype=*/0, /*device_id=*/0);
     cuda_device_bus_ids = {"0000:02:00.0"};
     allgather_bus_ids = cuda_device_bus_ids;
-    for (const char *bdf : {"0000:01:00.0", "0000:02:00.0", "0000:03:00.0",
-                            "0000:04:00.0"}) {
+    for (const char *bdf : {"0000:01:00.0", "0000:02:00.0", "0000:03:00.0", "0000:04:00.0"}) {
         add_sysfs_gpu(bdf);
     }
 
@@ -384,8 +383,7 @@ TEST_F(TopoPolicyTest, ExternalSharingPcieSwitchNicExclusiveSharesNicsWhenFewerN
 
     std::vector<int> selected_exclusive;
     nvshmemi_options.NETDEVS_POLICY = "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE";
-    EXPECT_EQ(select_devices(&transport, /*max_devices=*/1, &selected_exclusive),
-              NVSHMEMX_SUCCESS);
+    EXPECT_EQ(select_devices(&transport, /*max_devices=*/1, &selected_exclusive), NVSHMEMX_SUCCESS);
     ASSERT_EQ(selected_exclusive.size(), 1u);
     EXPECT_EQ(selected_exclusive[0], 1);
 }
@@ -395,8 +393,7 @@ TEST_F(TopoPolicyTest,
     set_state(/*npes=*/1, /*npes_node=*/1, /*mype=*/0, /*device_id=*/0);
     cuda_device_bus_ids = {"0000:02:00.0"};
     allgather_bus_ids = cuda_device_bus_ids;
-    for (const char *bdf : {"0000:01:00.0", "0000:02:00.0", "0000:03:00.0",
-                            "0000:04:00.0"}) {
+    for (const char *bdf : {"0000:01:00.0", "0000:02:00.0", "0000:03:00.0", "0000:04:00.0"}) {
         add_sysfs_gpu(bdf);
     }
 
@@ -412,16 +409,16 @@ TEST_F(TopoPolicyTest,
 
     std::vector<int> selected_exclusive;
     nvshmemi_options.NETDEVS_POLICY = "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE";
-    EXPECT_EQ(select_devices(&transport, /*max_devices=*/1, &selected_exclusive),
-              NVSHMEMX_SUCCESS);
+    EXPECT_EQ(select_devices(&transport, /*max_devices=*/1, &selected_exclusive), NVSHMEMX_SUCCESS);
     ASSERT_EQ(selected_exclusive.size(), 1u);
     EXPECT_EQ(selected_exclusive[0], 2);
 
     EXPECT_EQ(nvshmemi_get_netdevs_policy_entity_count(&test_state), 4);
 }
 
-TEST_F(TopoPolicyTest,
-       ExternalSharingPcieSwitchNicExclusiveKeepsOptimalNicWhenOnlyLessOptimalAlternativeAvoidsOverlap) {
+TEST_F(
+    TopoPolicyTest,
+    ExternalSharingPcieSwitchNicExclusiveKeepsOptimalNicWhenOnlyLessOptimalAlternativeAvoidsOverlap) {
     nvshmemi_options.NETDEVS_POLICY = "EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE";
     set_state(/*npes=*/1, /*npes_node=*/1, /*mype=*/0, /*device_id=*/0);
     cuda_device_bus_ids = {"0000:01:00.2"};

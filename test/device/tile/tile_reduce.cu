@@ -150,20 +150,20 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
                                                                                                   \
             /* tile reduce */                                                                     \
             /* No predicate */ struct empty {};                                                   \
-            tile_errs_d = nvshmemx::tile_##OP##_rooted_reduce##SC_SUFFIX<                                              \
+            tile_errs_d = nvshmemx::tile_##OP##_rooted_reduce##SC_SUFFIX<                         \
                 decltype(src_tensor), decltype(dest_tensor), empty,                               \
                 nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(                              \
                 teams_dev[team_id], src_tensor, dest_tensor, empty{}, empty{}, root, 0);          \
-            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                  \
-                return;                                                                             \
-            }                                                                                      \
+            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                \
+                return;                                                                           \
+            }                                                                                     \
         }                                                                                         \
                                                                                                   \
-        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(teams_dev[team_id], 0);           \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
-            return;                                                                                \
-        }                                                                                          \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
+            return;                                                                               \
+        }                                                                                         \
         /* validate data */                                                                       \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
              i += gridDim.x * SC##s_per_block) {                                                  \
@@ -192,11 +192,11 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
             }                                                                                     \
         }                                                                                         \
                                                                                                   \
-        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(teams_dev[team_id], 0);           \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
-            return;                                                                                \
-        }                                                                                          \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
+            return;                                                                               \
+        }                                                                                         \
         /* reset data */                                                                          \
         for (int i = blockIdx.x * SC##s_per_block; i < num_tiles_major * num_tiles_minor;         \
              i += gridDim.x * SC##s_per_block) {                                                  \
@@ -217,11 +217,11 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES_AND_OPS(DECL_TYPENAME_OP_REDUCE)
             reset_##TYPENAME##_tile_data##SC_SUFFIX<decltype(dest_tensor), major_dim, minor_dim>( \
                 offset, dest_tensor);                                                             \
         }                                                                                         \
-        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                  \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI>(teams_dev[team_id], 0);           \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
-            return;                                                                                \
-        }                                                                                          \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                    \
+            return;                                                                               \
+        }                                                                                         \
     }
 
 #if CUTLASS_ENABLED == 1

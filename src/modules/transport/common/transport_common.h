@@ -88,17 +88,17 @@ static inline const char *nvshmemt_strerror_from_status(int status) {
         }                                                                                   \
     } while (0)
 
-#define NVSHMEMT_ERRNO_NULL_ERROR_JMP(var, status, err, label, ...)                          \
-    do {                                                                                     \
-        if (unlikely((var) == NULL)) {                                                       \
-            int saved_errno = errno;                                                         \
-            fprintf(stderr, "%s:%d: NULL value (errno: %d, %s) ", __FILE__, __LINE__,        \
-                    saved_errno, nvshmemt_strerror_from_errno(saved_errno));                  \
-            fprintf(stderr, __VA_ARGS__);                                                    \
-            fprintf(stderr, "\n");                                                           \
-            status = err;                                                                    \
-            goto label;                                                                      \
-        }                                                                                    \
+#define NVSHMEMT_ERRNO_NULL_ERROR_JMP(var, status, err, label, ...)                                \
+    do {                                                                                           \
+        if (unlikely((var) == NULL)) {                                                             \
+            int saved_errno = errno;                                                               \
+            fprintf(stderr, "%s:%d: NULL value (errno: %d, %s) ", __FILE__, __LINE__, saved_errno, \
+                    nvshmemt_strerror_from_errno(saved_errno));                                    \
+            fprintf(stderr, __VA_ARGS__);                                                          \
+            fprintf(stderr, "\n");                                                                 \
+            status = err;                                                                          \
+            goto label;                                                                            \
+        }                                                                                          \
     } while (0)
 
 #define NVSHMEMT_ERRNO_NZ_ERROR_RET(status, err, ...)                                       \

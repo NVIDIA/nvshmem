@@ -111,22 +111,19 @@ typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointBindAddr_v13030)(CUlogicalEndpoin
                                                                 CUdevice dev, cuuint64_t offset,
                                                                 void *ptr, cuuint64_t size,
                                                                 unsigned long long flags);
-typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointBindMem_v13030)(CUlogicalEndpointId leId,
-                                                            CUdevice dev, cuuint64_t offset,
-                                                            CUmemGenericAllocationHandle memHandle,
-                                                            cuuint64_t memOffset, cuuint64_t size,
-                                                            unsigned long long flags);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointBindMem_v13030)(
+    CUlogicalEndpointId leId, CUdevice dev, cuuint64_t offset,
+    CUmemGenericAllocationHandle memHandle, cuuint64_t memOffset, cuuint64_t size,
+    unsigned long long flags);
 typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointUnbind_v13030)(CUlogicalEndpointId leId,
                                                               CUdevice dev, cuuint64_t offset,
                                                               cuuint64_t size);
-typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointExport_v13030)(void *handle,
-                                                            const CUlogicalEndpointId leId,
-                                                            CUlogicalEndpointIpcHandleType handleType);
-typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointImport_v13030)(CUlogicalEndpointId leId,
-                                                            const void *handle,
-                                                            CUlogicalEndpointIpcHandleType handleType);
-typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointQuery_v13030)(CUlogicalEndpointId leId, cuuint32_t count,
-                                                             int *queryStatus);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointExport_v13030)(
+    void *handle, const CUlogicalEndpointId leId, CUlogicalEndpointIpcHandleType handleType);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointImport_v13030)(
+    CUlogicalEndpointId leId, const void *handle, CUlogicalEndpointIpcHandleType handleType);
+typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointQuery_v13030)(CUlogicalEndpointId leId,
+                                                             cuuint32_t count, int *queryStatus);
 typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointGetLimits_v13030)(cuuint64_t *bindAlignment,
                                                                  cuuint64_t *maxSize,
                                                                  const CUlogicalEndpointProp *prop);
@@ -210,11 +207,11 @@ static inline void nvshmemi_cu_get_error_info(struct nvshmemi_cuda_fn_table *tab
     }
 }
 
-#define NVSHMEMI_CU_ERROR_LOG(table, status)                                \
-    do {                                                                    \
-        const char *cu_err_name = "UNKNOWN";                                \
-        const char *cu_err_desc = "Unknown";                                \
-        nvshmemi_cu_get_error_info(table, status, &cu_err_name, &cu_err_desc); \
+#define NVSHMEMI_CU_ERROR_LOG(table, status)                                        \
+    do {                                                                            \
+        const char *cu_err_name = "UNKNOWN";                                        \
+        const char *cu_err_desc = "Unknown";                                        \
+        nvshmemi_cu_get_error_info(table, status, &cu_err_name, &cu_err_desc);      \
         fprintf(stderr, "Status = %s. Description = %s", cu_err_name, cu_err_desc); \
     } while (false)
 
@@ -231,43 +228,42 @@ static inline void nvshmemi_cu_get_error_info(struct nvshmemi_cuda_fn_table *tab
         }                                                                  \
     } while (false)
 
-#define NVSHMEMI_CU_NZ_ERROR_JMP(table, status, err, label, ...)        \
-    do {                                                                \
-        if ((status) != CUDA_SUCCESS) {                                 \
-            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__);             \
-            fprintf(stderr, __VA_ARGS__);                               \
-            fprintf(stderr, " ");                                       \
-            NVSHMEMI_CU_ERROR_LOG(table, status);                       \
-            fprintf(stderr, "\n");                                      \
-            status = err;                                               \
-            goto label;                                                 \
-        }                                                               \
+#define NVSHMEMI_CU_NZ_ERROR_JMP(table, status, err, label, ...) \
+    do {                                                         \
+        if ((status) != CUDA_SUCCESS) {                          \
+            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__);      \
+            fprintf(stderr, __VA_ARGS__);                        \
+            fprintf(stderr, " ");                                \
+            NVSHMEMI_CU_ERROR_LOG(table, status);                \
+            fprintf(stderr, "\n");                               \
+            status = err;                                        \
+            goto label;                                          \
+        }                                                        \
     } while (false)
 
-#define NVSHMEMI_CU_NZ_EXIT(table, status, ...)                          \
-    do {                                                                \
-        if ((status) != CUDA_SUCCESS) {                                 \
-            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__);             \
-            fprintf(stderr, __VA_ARGS__);                               \
-            fprintf(stderr, " ");                                       \
-            NVSHMEMI_CU_ERROR_LOG(table, status);                       \
-            fprintf(stderr, "\n");                                      \
-            exit(-1);                                                   \
-        }                                                               \
+#define NVSHMEMI_CU_NZ_EXIT(table, status, ...)             \
+    do {                                                    \
+        if ((status) != CUDA_SUCCESS) {                     \
+            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__); \
+            fprintf(stderr, __VA_ARGS__);                   \
+            fprintf(stderr, " ");                           \
+            NVSHMEMI_CU_ERROR_LOG(table, status);           \
+            fprintf(stderr, "\n");                          \
+            exit(-1);                                       \
+        }                                                   \
     } while (false)
 
 // Check CUDA PFN driver calls
-#define CUCHECKNORETURN(table, cmd)                          \
-    do {                                                     \
-        CUresult err = table->pfn_##cmd;                     \
-        if (err != CUDA_SUCCESS) {                           \
-            const char *err_name = "UNKNOWN";                \
-            const char *err_desc = "Unknown";                \
-            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc); \
-            fprintf(stderr, "Cuda failure. Status = %s. Description = %s", \
-                    err_name, err_desc);                     \
-        }                                                    \
-        assert(err == CUDA_SUCCESS);                         \
+#define CUCHECKNORETURN(table, cmd)                                                             \
+    do {                                                                                        \
+        CUresult err = table->pfn_##cmd;                                                        \
+        if (err != CUDA_SUCCESS) {                                                              \
+            const char *err_name = "UNKNOWN";                                                   \
+            const char *err_desc = "Unknown";                                                   \
+            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);                       \
+            fprintf(stderr, "Cuda failure. Status = %s. Description = %s", err_name, err_desc); \
+        }                                                                                       \
+        assert(err == CUDA_SUCCESS);                                                            \
     } while (false)
 
 #define CUASSERTAPIAVAILABLE(table, cmd) \
@@ -278,69 +274,69 @@ static inline void nvshmemi_cu_get_error_info(struct nvshmemi_cuda_fn_table *tab
     } while (false)
 
 // Check CUDA PFN driver calls
-#define CUCHECK(table, cmd)                                                         \
-    do {                                                                            \
-        CUresult err = table->pfn_##cmd;                                            \
-        if (err != CUDA_SUCCESS) {                                                  \
-            const char *err_name = "UNKNOWN";                                       \
-            const char *err_desc = "Unknown";                                       \
-            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);           \
-            fprintf(stderr, "%s:%d Cuda failure. Status = %s. Description = %s",   \
-                    __FILE__, __LINE__, err_name, err_desc);                        \
-            return NVSHMEMX_ERROR_INTERNAL;                                         \
-        }                                                                           \
+#define CUCHECK(table, cmd)                                                                \
+    do {                                                                                   \
+        CUresult err = table->pfn_##cmd;                                                   \
+        if (err != CUDA_SUCCESS) {                                                         \
+            const char *err_name = "UNKNOWN";                                              \
+            const char *err_desc = "Unknown";                                              \
+            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);                  \
+            fprintf(stderr, "%s:%d Cuda failure. Status = %s. Description = %s", __FILE__, \
+                    __LINE__, err_name, err_desc);                                         \
+            return NVSHMEMX_ERROR_INTERNAL;                                                \
+        }                                                                                  \
     } while (false)
 
-#define CUCHECKGOTO(table, cmd, res, label)                                         \
-    do {                                                                            \
-        CUresult err = table->pfn_##cmd;                                            \
-        if (err != CUDA_SUCCESS) {                                                  \
-            const char *err_name = "UNKNOWN";                                       \
-            const char *err_desc = "Unknown";                                       \
-            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);           \
-            fprintf(stderr, "%s:%d Cuda failure. Status = %s. Description = %s",   \
-                    __FILE__, __LINE__, err_name, err_desc);                        \
-            res = NVSHMEMX_ERROR_INTERNAL;                                          \
-            goto label;                                                             \
-        }                                                                           \
-    } while (false)
-
-// Report failure but clear error and continue
-#define CUCHECKIGNORE(table, cmd)                                                   \
-    do {                                                                            \
-        CUresult err = table->pfn_##cmd;                                            \
-        if (err != CUDA_SUCCESS) {                                                  \
-            const char *err_name = "UNKNOWN";                                       \
-            const char *err_desc = "Unknown";                                       \
-            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);           \
-            fprintf(stderr, "%s:%d Cuda failure. Status = %s. Description = %s",   \
-                    __FILE__, __LINE__, err_name, err_desc);                        \
-        }                                                                           \
+#define CUCHECKGOTO(table, cmd, res, label)                                                \
+    do {                                                                                   \
+        CUresult err = table->pfn_##cmd;                                                   \
+        if (err != CUDA_SUCCESS) {                                                         \
+            const char *err_name = "UNKNOWN";                                              \
+            const char *err_desc = "Unknown";                                              \
+            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);                  \
+            fprintf(stderr, "%s:%d Cuda failure. Status = %s. Description = %s", __FILE__, \
+                    __LINE__, err_name, err_desc);                                         \
+            res = NVSHMEMX_ERROR_INTERNAL;                                                 \
+            goto label;                                                                    \
+        }                                                                                  \
     } while (false)
 
 // Report failure but clear error and continue
-#define CUCHECKIGNORE_NO_PRINT(table, cmd)                   \
-    do {                                                     \
-        CUresult err = table->pfn_##cmd;                     \
-        if (err != CUDA_SUCCESS) {                           \
-            const char *err_name = "UNKNOWN";                \
-            const char *err_desc = "Unknown";                \
+#define CUCHECKIGNORE(table, cmd)                                                          \
+    do {                                                                                   \
+        CUresult err = table->pfn_##cmd;                                                   \
+        if (err != CUDA_SUCCESS) {                                                         \
+            const char *err_name = "UNKNOWN";                                              \
+            const char *err_desc = "Unknown";                                              \
+            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);                  \
+            fprintf(stderr, "%s:%d Cuda failure. Status = %s. Description = %s", __FILE__, \
+                    __LINE__, err_name, err_desc);                                         \
+        }                                                                                  \
+    } while (false)
+
+// Report failure but clear error and continue
+#define CUCHECKIGNORE_NO_PRINT(table, cmd)                                \
+    do {                                                                  \
+        CUresult err = table->pfn_##cmd;                                  \
+        if (err != CUDA_SUCCESS) {                                        \
+            const char *err_name = "UNKNOWN";                             \
+            const char *err_desc = "Unknown";                             \
             nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc); \
-        }                                                    \
+        }                                                                 \
     } while (false)
 
-#define CUCHECKTHREAD(table, cmd, args)                                             \
-    do {                                                                            \
-        CUresult err = table->pfn_##cmd;                                            \
-        if (err != CUDA_SUCCESS) {                                                  \
-            const char *err_name = "UNKNOWN";                                       \
-            const char *err_desc = "Unknown";                                       \
-            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);           \
-            fprintf(stderr, "%s:%d -> %s (%s) [Async thread]", __FILE__, __LINE__,  \
-                    err_name, err_desc);                                            \
-            args->ret = NVSHMEMX_ERROR_INTERNAL;                                    \
-            return args;                                                            \
-        }                                                                           \
+#define CUCHECKTHREAD(table, cmd, args)                                                      \
+    do {                                                                                     \
+        CUresult err = table->pfn_##cmd;                                                     \
+        if (err != CUDA_SUCCESS) {                                                           \
+            const char *err_name = "UNKNOWN";                                                \
+            const char *err_desc = "Unknown";                                                \
+            nvshmemi_cu_get_error_info(table, err, &err_name, &err_desc);                    \
+            fprintf(stderr, "%s:%d -> %s (%s) [Async thread]", __FILE__, __LINE__, err_name, \
+                    err_desc);                                                               \
+            args->ret = NVSHMEMX_ERROR_INTERNAL;                                             \
+            return args;                                                                     \
+        }                                                                                    \
     } while (0)
 
 #endif

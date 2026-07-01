@@ -191,11 +191,12 @@ int nvshmemi_coll_common_cpu_init() {
     }
 
 fn_out:
-    /* Ensure nvshmemi_use_nccl is consistent across all PEs to avoid hang in finalize_team_init(). */
+    /* Ensure nvshmemi_use_nccl is consistent across all PEs to avoid hang in finalize_team_init().
+     */
     {
         std::vector<int> use_nccl_all(nvshmemi_state->npes);
-        status = nvshmemi_boot_handle.allgather(&nvshmemi_use_nccl, use_nccl_all.data(), sizeof(int),
-                                               &nvshmemi_boot_handle);
+        status = nvshmemi_boot_handle.allgather(&nvshmemi_use_nccl, use_nccl_all.data(),
+                                                sizeof(int), &nvshmemi_boot_handle);
 
         if (status != 0) {
             return NVSHMEMX_ERROR_INTERNAL;

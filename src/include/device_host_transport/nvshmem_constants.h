@@ -23,8 +23,8 @@
 #define NVSHMEM_MAJOR_VERSION 1
 #define NVSHMEM_MINOR_VERSION 3
 
-#define NVSHMEM_VENDOR_VERSION                                                   \
-    ((NVSHMEM_VENDOR_MAJOR_VERSION)*10000 + (NVSHMEM_VENDOR_MINOR_VERSION)*100 + \
+#define NVSHMEM_VENDOR_VERSION                                                       \
+    ((NVSHMEM_VENDOR_MAJOR_VERSION) * 10000 + (NVSHMEM_VENDOR_MINOR_VERSION) * 100 + \
      (NVSHMEM_VENDOR_PATCH_VERSION))
 
 #define NVSHMEMI_SUBST_AND_STRINGIFY_HELPER(S) #S

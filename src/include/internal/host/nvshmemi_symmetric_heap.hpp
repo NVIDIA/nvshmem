@@ -271,7 +271,7 @@ class nvshmemi_symmetric_heap {
 
     bool le_unicast_enabled_ = false;
     bool le_multicast_enabled_ = false;
-    std::vector<uint64_t> unicast_endpoint_ids_with_flag_; // 4 bytes valid, 4 bytes for le id
+    std::vector<uint64_t> unicast_endpoint_ids_with_flag_;  // 4 bytes valid, 4 bytes for le id
 };
 
 inline nvshmem_mem_handle *nvshmemi_symmetric_heap::get_transport_mem_handle(void *addr,
@@ -443,7 +443,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int nvls_setup_multicast_endpoint(nvshmemi_team_t *team, uint64_t mem_size);
     int nvls_setup_multicast_endpoint_by_team(nvshmemi_team_t *team);
     int nvls_bind_multicast_endpoint(nvshmemi_team_t *team, CUmemGenericAllocationHandle mem_handle,
-        off_t mc_offset, off_t mmap_offset, size_t mmap_size);
+                                     off_t mc_offset, off_t mmap_offset, size_t mmap_size);
     int nvls_unbind_multicast_endpoint(nvshmemi_team_t *team, off_t le_offset, size_t size);
     int nvls_destroy_multicast_endpoint_by_team(nvshmemi_team_t *team);
 

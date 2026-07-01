@@ -28,10 +28,10 @@
 
 #define align_request(req) (((req) + CHUNK_ALIGN_MASK) & ~CHUNK_ALIGN_MASK)
 /* the number of bytes to offset an address to align it */
-#define align_offset(A)                    \
-    ((((size_t)(A)&CHUNK_ALIGN_MASK) == 0) \
-         ? 0                               \
-         : ((NVSHMEMI_MALLOC_ALIGNMENT - ((size_t)(A)&CHUNK_ALIGN_MASK)) & CHUNK_ALIGN_MASK))
+#define align_offset(A)                      \
+    ((((size_t)(A) & CHUNK_ALIGN_MASK) == 0) \
+         ? 0                                 \
+         : ((NVSHMEMI_MALLOC_ALIGNMENT - ((size_t)(A) & CHUNK_ALIGN_MASK)) & CHUNK_ALIGN_MASK))
 
 #ifdef _NVSHMEM_DEBUG
 static size_t get_total_size(std::map<void *, size_t> chunk_map) {
@@ -163,12 +163,11 @@ void *mspace::allocate_at_preferred_addr(void *ptr, size_t size) {
     INFO(NVSHMEM_MEM, "mspace_allocate_preferred called with %p, %zu bytes", ptr, size);
     if (size == 0) return NULL;
     size = align_request(size);
-    for (auto it = free_chunks_start.begin();
-         it != free_chunks_start.end(); it++) {
+    for (auto it = free_chunks_start.begin(); it != free_chunks_start.end(); it++) {
         // check if there is free chunk large to cover ptr <---> ptr+size
-        if ((it->first <= ptr) && (((char*)it->first + it->second) >= ((char*)ptr + size))) {
-            INFO(NVSHMEM_MEM, "free chunk at %p for %p with size = %zu bytes found", it->first,
-                 ptr, it->second);
+        if ((it->first <= ptr) && (((char *)it->first + it->second) >= ((char *)ptr + size))) {
+            INFO(NVSHMEM_MEM, "free chunk at %p for %p with size = %zu bytes found", it->first, ptr,
+                 it->second);
 
             // there could be void before and after
             /* |...<it->first>---<ptr>---<ptr+size>---<it->first+it->second>...|
@@ -177,7 +176,7 @@ void *mspace::allocate_at_preferred_addr(void *ptr, size_t size) {
 
             void *orig_void_start = (char *)it->first;
             size_t orig_void_size = it->second;
-            size_t rsize = (char*)ptr - (char*)orig_void_start;
+            size_t rsize = (char *)ptr - (char *)orig_void_start;
 
             // handle void between "it->first" and "ptr"
             if (rsize > 0) {
@@ -188,12 +187,12 @@ void *mspace::allocate_at_preferred_addr(void *ptr, size_t size) {
             }
 
             // handle void between "it->first + it->second" and "ptr + size"
-            rsize = ((char*)orig_void_start + orig_void_size) - ((char*)ptr + size);
+            rsize = ((char *)orig_void_start + orig_void_size) - ((char *)ptr + size);
             if (rsize > 0) {
-                free_chunks_start[(char*)ptr + size] = rsize;
-                free_chunks_end[(char*)orig_void_start + orig_void_size] = rsize;
+                free_chunks_start[(char *)ptr + size] = rsize;
+                free_chunks_end[(char *)orig_void_start + orig_void_size] = rsize;
             } else {
-                free_chunks_end.erase((char*)orig_void_start + orig_void_size);
+                free_chunks_end.erase((char *)orig_void_start + orig_void_size);
             }
             inuse_chunks[ptr] = size;
             ASSERT_CORRECTNESS

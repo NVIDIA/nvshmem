@@ -137,7 +137,7 @@ int nvshmemt_mem_handle_cache_add(nvshmem_transport_t t,
         size_t new_cache_size = cache->size * 2 > arr_idx ? cache->size * 2 : arr_idx + 1;
         size_t old_cache_size = cache->size;
         void *new_cache;
-        new_cache = realloc(cache->cache, new_cache_size * sizeof(void*));
+        new_cache = realloc(cache->cache, new_cache_size * sizeof(void *));
         if (new_cache == NULL) {
             NVSHMEMI_ERROR_PRINT("Unable to reallocate larger heap cache.");
             return NVSHMEMX_ERROR_OUT_OF_MEMORY;
@@ -145,7 +145,8 @@ int nvshmemt_mem_handle_cache_add(nvshmem_transport_t t,
 
         cache->cache = (void **)new_cache;
         // zero out newly allocated region
-        memset(&cache->cache[old_cache_size], 0, (new_cache_size - old_cache_size) * sizeof(void *));
+        memset(&cache->cache[old_cache_size], 0,
+               (new_cache_size - old_cache_size) * sizeof(void *));
         cache->size = new_cache_size;
     }
 

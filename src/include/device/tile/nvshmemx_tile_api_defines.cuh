@@ -24,7 +24,7 @@ namespace nvshmemx {
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, int root, uint64_t flag) {                                  \
         return nvshmemi_tile_allreduce<algo, src_tensor_t, dst_tensor_t, tuple_t,     \
-                                nvshmemi_threadgroup_##SC, RDXN_OPS_##OP>(            \
+                                       nvshmemi_threadgroup_##SC, RDXN_OPS_##OP>(     \
             team, src, dst, start_coord, boundary, root, flag);                       \
     }                                                                                 \
     template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
@@ -33,7 +33,7 @@ namespace nvshmemx {
         nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
         tuple_t boundary, uint64_t flag) {                                            \
         return nvshmemi_tile_allreduce<algo, src_tensor_t, dst_tensor_t, tuple_t,     \
-                                nvshmemi_threadgroup_##SC, RDXN_OPS_##OP>(            \
+                                       nvshmemi_threadgroup_##SC, RDXN_OPS_##OP>(     \
             team, src, dst, start_coord, boundary, -1, flag);                         \
     }
 
@@ -51,14 +51,15 @@ DEFN_NVSHMEM_TILE_ALLREDUCE_THREADGROUP(block, _block, x);
 #undef DEFN_NVSHMEM_TILE_ALLREDUCE_THREADGROUP
 
 // Tile Reduce
-#define DEFN_NVSHMEMX_OP_TILE_REDUCE_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX, OP)                     \
-    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                      \
-              nvshmemx::tile_coll_algo_t algo>                                                     \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_rooted_reduce##SC_SUFFIX(   \
-        nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,              \
-        tuple_t boundary, int root, uint64_t flag) {                                               \
-        return nvshmemi_tile_reduce<algo, src_tensor_t, dst_tensor_t, tuple_t, nvshmemi_threadgroup_##SC, \
-                             RDXN_OPS_##OP>(team, src, dst, start_coord, boundary, root, flag);    \
+#define DEFN_NVSHMEMX_OP_TILE_REDUCE_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX, OP)        \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,         \
+              nvshmemx::tile_coll_algo_t algo>                                        \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_##OP##_rooted_reduce##SC_SUFFIX(  \
+        nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, \
+        tuple_t boundary, int root, uint64_t flag) {                                  \
+        return nvshmemi_tile_reduce<algo, src_tensor_t, dst_tensor_t, tuple_t,        \
+                                    nvshmemi_threadgroup_##SC, RDXN_OPS_##OP>(        \
+            team, src, dst, start_coord, boundary, root, flag);                       \
     }
 
 #define DEFN_NVSHMEM_TILE_REDUCE_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)      \
@@ -75,15 +76,15 @@ DEFN_NVSHMEM_TILE_REDUCE_THREADGROUP(block, _block, x);
 #undef DEFN_NVSHMEM_TILE_REDUCE_THREADGROUP
 
 // Tile AllGather
-#define DEFN_NVSHMEMX_TILE_ALLGATHER_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                        \
-    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                     \
-              nvshmemx::tile_coll_algo_t algo>                                                    \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_allgather##SC_SUFFIX(                         \
-        nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,             \
-        tuple_t boundary, uint64_t flag) {                                                        \
-        return nvshmemi_tile_allgather<algo, src_tensor_t, dst_tensor_t, tuple_t,                        \
-                                nvshmemi_threadgroup_##SC>(team, src, dst, start_coord, boundary, \
-                                                           flag);                                 \
+#define DEFN_NVSHMEMX_TILE_ALLGATHER_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                     \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                  \
+              nvshmemx::tile_coll_algo_t algo>                                                 \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_allgather##SC_SUFFIX(                      \
+        nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,          \
+        tuple_t boundary, uint64_t flag) {                                                     \
+        return nvshmemi_tile_allgather<algo, src_tensor_t, dst_tensor_t, tuple_t,              \
+                                       nvshmemi_threadgroup_##SC>(team, src, dst, start_coord, \
+                                                                  boundary, flag);             \
     }
 
 DEFN_NVSHMEMX_TILE_ALLGATHER_THREADGROUP(thread, , x);
@@ -94,15 +95,15 @@ DEFN_NVSHMEMX_TILE_ALLGATHER_THREADGROUP(block, _block, x);
 #undef DEFN_NVSHMEMX_TILE_ALLGATHER_THREADGROUP
 
 // Tile Put
-#define DEFN_NVSHMEMX_TILE_PUT_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                                \
-    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                       \
-              nvshmemx::tile_algo_t algo>                                                           \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_put##SC_SUFFIX(                                 \
-        src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,                                    \
-        tuple_t boundary, int pe, uint64_t flag) {                                                  \
-        return nvshmemi_tile_put<algo, src_tensor_t, dst_tensor_t, tuple_t,                                \
-                                nvshmemi_threadgroup_##SC>(src, dst, start_coord, boundary,         \
-                                                           pe, flag);                               \
+#define DEFN_NVSHMEMX_TILE_PUT_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                             \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                    \
+              nvshmemx::tile_algo_t algo>                                                        \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_put##SC_SUFFIX(                              \
+        src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, tuple_t boundary, int pe,       \
+        uint64_t flag) {                                                                         \
+        return nvshmemi_tile_put<algo, src_tensor_t, dst_tensor_t, tuple_t,                      \
+                                 nvshmemi_threadgroup_##SC>(src, dst, start_coord, boundary, pe, \
+                                                            flag);                               \
     }
 
 DEFN_NVSHMEMX_TILE_PUT_THREADGROUP(thread, , x);
@@ -113,15 +114,15 @@ DEFN_NVSHMEMX_TILE_PUT_THREADGROUP(block, _block, x);
 #undef DEFN_NVSHMEMX_TILE_PUT_THREADGROUP
 
 // Tile Get
-#define DEFN_NVSHMEMX_TILE_GET_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                                \
-    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                       \
-              nvshmemx::tile_algo_t algo>                                                           \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_get##SC_SUFFIX(                                 \
-        src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,                                    \
-        tuple_t boundary, int pe, uint64_t flag) {                                                  \
-        return nvshmemi_tile_get<algo, src_tensor_t, dst_tensor_t, tuple_t,                                \
-                                nvshmemi_threadgroup_##SC>(src, dst, start_coord, boundary,         \
-                                                           pe, flag);                               \
+#define DEFN_NVSHMEMX_TILE_GET_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                             \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                    \
+              nvshmemx::tile_algo_t algo>                                                        \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_get##SC_SUFFIX(                              \
+        src_tensor_t src, dst_tensor_t dst, tuple_t start_coord, tuple_t boundary, int pe,       \
+        uint64_t flag) {                                                                         \
+        return nvshmemi_tile_get<algo, src_tensor_t, dst_tensor_t, tuple_t,                      \
+                                 nvshmemi_threadgroup_##SC>(src, dst, start_coord, boundary, pe, \
+                                                            flag);                               \
     }
 
 DEFN_NVSHMEMX_TILE_GET_THREADGROUP(thread, , x);
@@ -132,15 +133,15 @@ DEFN_NVSHMEMX_TILE_GET_THREADGROUP(block, _block, x);
 #undef DEFN_NVSHMEMX_TILE_GET_THREADGROUP
 
 // Tile Broadcast
-#define DEFN_NVSHMEMX_TILE_BCAST_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                              \
-    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,                       \
-              nvshmemx::tile_coll_algo_t algo>                                                      \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_broadcast##SC_SUFFIX(                           \
-        nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,               \
-        tuple_t boundary, uint64_t flag) {                                                          \
-        return nvshmemi_tile_bcast<algo, src_tensor_t, dst_tensor_t, tuple_t,                              \
-                                nvshmemi_threadgroup_##SC>(team, src, dst, start_coord, boundary,   \
-                                                           flag);                                   \
+#define DEFN_NVSHMEMX_TILE_BCAST_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)                     \
+    template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t,              \
+              nvshmemx::tile_coll_algo_t algo>                                             \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_broadcast##SC_SUFFIX(                  \
+        nvshmem_team_t team, src_tensor_t src, dst_tensor_t dst, tuple_t start_coord,      \
+        tuple_t boundary, uint64_t flag) {                                                 \
+        return nvshmemi_tile_bcast<algo, src_tensor_t, dst_tensor_t, tuple_t,              \
+                                   nvshmemi_threadgroup_##SC>(team, src, dst, start_coord, \
+                                                              boundary, flag);             \
     }
 
 DEFN_NVSHMEMX_TILE_BCAST_THREADGROUP(thread, , x);
@@ -150,12 +151,11 @@ DEFN_NVSHMEMX_TILE_BCAST_THREADGROUP(block, _block, x);
 
 #undef DEFN_NVSHMEMX_TILE_BCAST_THREADGROUP
 
-
 // Tile Collective Wait
-#define DEFN_NVSHMEMX_TILE_COLLECTIVE_WAIT_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)             \
-    template <nvshmemx::tile_coll_algo_t algo>                                               \
-    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_collective_wait##SC_SUFFIX(              \
-        nvshmem_team_t team, uint64_t flag) {                                                \
+#define DEFN_NVSHMEMX_TILE_COLLECTIVE_WAIT_THREADGROUP(SC, SC_SUFFIX, SC_PREFIX)           \
+    template <nvshmemx::tile_coll_algo_t algo>                                             \
+    NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX int tile_collective_wait##SC_SUFFIX(            \
+        nvshmem_team_t team, uint64_t flag) {                                              \
         return nvshmemi_tile_collective_wait<algo, nvshmemi_threadgroup_##SC>(team, flag); \
     }
 

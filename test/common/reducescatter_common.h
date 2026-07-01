@@ -106,8 +106,8 @@ NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE(INIT_REDUCESCATTER_DATA_KERNEL)
                 }                                                                                \
             }                                                                                    \
             if (dest[i] != expected) {                                                           \
-                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC),                            \
-                       to_printable(dest[i]), to_printable(expected), i, nelems, team);          \
+                printf(NVSHMEMTEST_ERRSTR_FORMAT_2(TYPENAME, OP, SC), to_printable(dest[i]),     \
+                       to_printable(expected), i, nelems, team);                                 \
                 atomicAdd(&errs_d, 1);                                                           \
             }                                                                                    \
         }                                                                                        \
@@ -163,8 +163,7 @@ NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE(RESET_REDUCESCATTER_DATA_KERNEL)
 
 #define DEFN_TYPENAME_OP_REDUCESCATTER(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)              \
     __global__ void test_##TYPENAME##_##OP##_reducescatter_kernel##SC_SUFFIX(                     \
-        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems,                             \
-        size_t dynamic_smem_size) {                                                              \
+        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, size_t dynamic_smem_size) { \
         int myIdx = nvshmtest_thread_id_in_##SC();                                                \
         int groupSize = nvshmtest_##SC##_size();                                                  \
         NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                \
@@ -180,16 +179,16 @@ NVSHMEMI_REPT_TYPES_AND_OPS_FOR_REDUCE(RESET_REDUCESCATTER_DATA_KERNEL)
         NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                             \
     }
 
-#define DO_REDUCESCATTER_DEVICE_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)              \
-    if (use_cubin) {                                                                            \
-        init_cumodule(CUMODULE_NAME);                                                           \
-        DO_RDST_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP);                       \
-    } else {                                                                                    \
-        test_##TYPENAME##_##OP##_reducescatter_kernel##SC_SUFFIX<<<1, num_threads,              \
+#define DO_REDUCESCATTER_DEVICE_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)               \
+    if (use_cubin) {                                                                             \
+        init_cumodule(CUMODULE_NAME);                                                            \
+        DO_RDST_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP);                        \
+    } else {                                                                                     \
+        test_##TYPENAME##_##OP##_reducescatter_kernel##SC_SUFFIX<<<1, num_threads,               \
                                                                    _dynamic_smem_size, cstrm>>>( \
-            team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                    \
-    }                                                                                           \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                     \
+            team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                     \
+    }                                                                                            \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                      \
     CUDA_RUNTIME_CHECK(cudaStreamSynchronize(cstrm));
 
 #endif /* NVSHMEMTEST_REDUCESCATTER_COMMON_CPU_H */

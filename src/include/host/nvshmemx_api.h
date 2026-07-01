@@ -69,7 +69,7 @@ int nvshmemx_cumodule_finalize(CUmodule module);
 
 void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags);
 void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, size_t size,
-                                                               void *preferred_addr, int flags);
+                                                              void *preferred_addr, int flags);
 int nvshmemx_buffer_unregister_symmetric(void *mmap_ptr, size_t size);
 
 int nvshmemx_culibrary_init(CUlibrary library);

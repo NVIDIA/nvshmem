@@ -45,8 +45,7 @@ __global__ void bw_nbi(double *data_d, double *ldata_d, volatile unsigned int *c
             nvshmem_quiet();
             *(counter_d + 1) = *(counter_d + 1) + 1;
         }
-        while (*(counter_d + 1) != 1)
-            ;
+        while (*(counter_d + 1) != 1);
     }
 }
 

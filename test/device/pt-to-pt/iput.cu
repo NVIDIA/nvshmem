@@ -30,37 +30,42 @@ int ldisp = 2;
     }                                                                               \
     CU_CHECK(cuLaunchKernel(test_ring_cubin, 1, 1, 1, 1, 1, 1, 0, cstrm, args_ring, NULL));
 
-#define TEST_NVSHMEM_ALL_G_CUBIN(GROUP)                                                        \
-    void *args_all_g[] = {(void *)&src_, (void *)&dest_, (void *)&ldisp, (void *)&ldisp,       \
-                          (void *)&len,  (void *)&mype,  (void *)&npes,                        \
-                          (void *)&_dynamic_smem_size};                                        \
-    CUfunction test_all_cubin;                                                                 \
-    if (typeid(T) == typeid(int)) {                                                            \
-        init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_int_##GROUP)); \
-    }                                                                                          \
-    CU_CHECK(cuFuncSetAttribute(test_all_cubin,                                                 \
-                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,                 \
+#define TEST_NVSHMEM_ALL_G_CUBIN(GROUP)                                                          \
+    void *args_all_g[] = {                                                                       \
+        (void *)&src_, (void *)&dest_, (void *)&ldisp, (void *)&ldisp,                           \
+        (void *)&len,  (void *)&mype,  (void *)&npes,  (void *)&_dynamic_smem_size};             \
+    CUfunction test_all_cubin;                                                                   \
+    if (typeid(T) == typeid(int)) {                                                              \
+        init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_int_##GROUP));   \
+    }                                                                                            \
+    CU_CHECK(cuFuncSetAttribute(test_all_cubin, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, \
                                 (int)_dynamic_smem_size));                                       \
-    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_all_g, NULL));
+    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm,         \
+                            args_all_g, NULL));
 
 #define TEST_NVSHMEM_RING_G_CUBIN(GROUP)                                                      \
-    void *args_ring_g[] = {(void *)&src_,  (void *)&dest_, (void *)&ldisp,                    \
-                           (void *)&ldisp, (void *)&len,   (void *)&nextpe,                   \
+    void *args_ring_g[] = {(void *)&src_,                                                     \
+                           (void *)&dest_,                                                    \
+                           (void *)&ldisp,                                                    \
+                           (void *)&ldisp,                                                    \
+                           (void *)&len,                                                      \
+                           (void *)&nextpe,                                                   \
                            (void *)&_dynamic_smem_size};                                      \
     CUfunction test_ring_g_cubin;                                                             \
     if (typeid(T) == typeid(int)) {                                                           \
         init_test_case_kernel(&test_ring_g_cubin, NVSHMEMI_TEST_STRINGIFY(ring_int_##GROUP)); \
     }                                                                                         \
     CU_CHECK(cuFuncSetAttribute(test_ring_g_cubin,                                            \
-                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,               \
-                                (int)_dynamic_smem_size));                                     \
-    CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_ring_g, NULL));
+                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,              \
+                                (int)_dynamic_smem_size));                                    \
+    CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm,   \
+                            args_ring_g, NULL));
 
-#define DEFINE_RMA_PUT_WRAPPER(Group)                                                       \
-    __device__ void rma_iput_wrapper_##Group(int *src, int *dest, int dstride, int sstride, \
+#define DEFINE_RMA_PUT_WRAPPER(Group)                                                        \
+    __device__ void rma_iput_wrapper_##Group(int *src, int *dest, int dstride, int sstride,  \
                                              size_t len, int pe, size_t dynamic_smem_size) { \
         NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                           \
-        nvshmemx_int_iput_##Group(dest, src, dstride, sstride, len, pe);                    \
+        nvshmemx_int_iput_##Group(dest, src, dstride, sstride, len, pe);                     \
     }
 
 DEFINE_RMA_PUT_WRAPPER(warp)
@@ -112,8 +117,8 @@ DEFINE_RMA_PUT_WRAPPER(block)
         if (use_cubin) {                                                                         \
             TEST_NVSHMEM_RING_G_CUBIN(Group);                                                    \
         } else {                                                                                 \
-            ring_##Group<T><<<1, 1, _dynamic_smem_size, cstrm>>>(                                \
-                src_, dest_, ldisp, ldisp, len, nextpe, _dynamic_smem_size);                     \
+            ring_##Group<T><<<1, 1, _dynamic_smem_size, cstrm>>>(src_, dest_, ldisp, ldisp, len, \
+                                                                 nextpe, _dynamic_smem_size);    \
         }                                                                                        \
     }
 

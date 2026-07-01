@@ -16,10 +16,7 @@
 
 __device__ int error_d;
 
-enum op {
-    ATOMIC_ADD_FLOAT = 0,
-    ATOMIC_FETCH_ADD_FLOAT
-};
+enum op { ATOMIC_ADD_FLOAT = 0, ATOMIC_FETCH_ADD_FLOAT };
 
 #define TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP)                                      \
     void *args_##TYPENAME##_add_##OP[] = {(void *)&remote, (void *)&value, (void *)&expected}; \
@@ -48,13 +45,11 @@ extern "C" {
                 old = nvshmemx_##TYPENAME##_atomic_fetch_add(remote, value, i);                   \
                 if (((float)value > 0) && ((float)old >= (float)expected * npes)) {               \
                     printf("PE %i error inconsistent value of old (%s, %s)\n", mype, #OP, #TYPE); \
-                    printf("found = %f, expected < %f\n", (double)old,                            \
-                           (double)expected * npes);                                               \
+                    printf("found = %f, expected < %f\n", (double)old, (double)expected * npes);  \
                     error_d++;                                                                    \
                 } else if (((float)value <= 0) && ((float)old < (float)expected * npes)) {        \
                     printf("PE %i error inconsistent value of old (%s, %s)\n", mype, #OP, #TYPE); \
-                    printf("found = %f, expected >= %f\n", (double)old,                           \
-                           (double)expected * npes);                                               \
+                    printf("found = %f, expected >= %f\n", (double)old, (double)expected * npes); \
                     error_d++;                                                                    \
                 }                                                                                 \
             } else {                                                                              \
@@ -66,7 +61,7 @@ extern "C" {
         float tolerance = 1e-5f * (float)expected * npes;                                         \
         float diff = (float)*remote - (float)expected * npes;                                     \
         if (diff > tolerance || diff < -tolerance) {                                              \
-            printf("PE %i observed error with TEST_NVSHMEM_ADD_KERNEL(%s, %s)\n", mype, #OP,       \
+            printf("PE %i observed error with TEST_NVSHMEM_ADD_KERNEL(%s, %s)\n", mype, #OP,      \
                    #TYPE);                                                                        \
             printf("found = %f, expected = %f\n", (double)*remote, (double)expected * npes);      \
             error_d = 1;                                                                          \
@@ -83,27 +78,27 @@ TEST_NVSHMEM_ATOMIC_ADD_KERNEL(ATOMIC_FETCH_ADD_FLOAT, double, double)
 }
 #endif
 
-#define TEST_NVSHMEM_ATOMIC_ADD_FLOATING(OP, TYPE, TYPENAME)                             \
-    do {                                                                                 \
-        TYPE value = 1.25f;                                                              \
-        TYPE expected = 1.25f;                                                           \
-        TYPE *remote = (TYPE *)nvshmem_calloc(1, sizeof(TYPE));                          \
-        nvshmem_barrier_all();                                                           \
-        if (use_cubin) {                                                                 \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                           \
-        } else {                                                                         \
+#define TEST_NVSHMEM_ATOMIC_ADD_FLOATING(OP, TYPE, TYPENAME)                            \
+    do {                                                                                \
+        TYPE value = 1.25f;                                                             \
+        TYPE expected = 1.25f;                                                          \
+        TYPE *remote = (TYPE *)nvshmem_calloc(1, sizeof(TYPE));                         \
+        nvshmem_barrier_all();                                                          \
+        if (use_cubin) {                                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
+        } else {                                                                        \
             test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                                \
-        cudaDeviceSynchronize();                                                         \
-        value = -0.5f;                                                                   \
-        expected = 0.75f;                                                                \
-        nvshmem_barrier_all();                                                           \
-        if (use_cubin) {                                                                 \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                           \
-        } else {                                                                         \
+        }                                                                               \
+        cudaDeviceSynchronize();                                                        \
+        value = -0.5f;                                                                  \
+        expected = 0.75f;                                                               \
+        nvshmem_barrier_all();                                                          \
+        if (use_cubin) {                                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
+        } else {                                                                        \
             test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                                \
-        cudaDeviceSynchronize();                                                         \
+        }                                                                               \
+        cudaDeviceSynchronize();                                                        \
     } while (0)
 
 int main(int argc, char *argv[]) {

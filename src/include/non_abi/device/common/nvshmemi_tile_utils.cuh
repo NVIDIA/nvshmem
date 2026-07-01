@@ -14,15 +14,15 @@
 #include "cutlass/bfloat16.h"
 #endif
 
-#define ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim) \
-    do { \
-        if constexpr (sizeof(T) < 4) { \
-            assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) && \
-                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) && \
+#define ASSERT_FP16_ALIGNMENT(T, src_tensor, dst_tensor, major_dim)                              \
+    do {                                                                                         \
+        if constexpr (sizeof(T) < 4) {                                                           \
+            assert(((get_shape_element<major_dim>(src_tensor) % 2) == 0) &&                      \
+                   ((get_shape_element<major_dim>(dst_tensor) % 2) == 0) &&                      \
                    "Currently for 16B datatypes, we only support tensors which are 32b aligned " \
-                   "along their continuous dimension"); \
-        } \
-    } while(0)
+                   "along their continuous dimension");                                          \
+        }                                                                                        \
+    } while (0)
 
 using tuple5Int_t = cuda::std::tuple<int, int, int, int, int>;
 
@@ -121,8 +121,8 @@ NVSHMEMI_HOSTDEVICE_PREFIX constexpr size_t get_tuple_size(
 
 template <int I, typename... Args>
 /*NVSHMEMI_HOSTDEVICE_PREFIX constexpr*/
-__host__ __device__ __forceinline__ constexpr decltype(
-    cuda::std::get<I>(cuda::std::declval<const cuda::std::tuple<Args...>&>()))
+__host__ __device__ __forceinline__ constexpr decltype(cuda::std::get<I>(
+    cuda::std::declval<const cuda::std::tuple<Args...>&>()))
 get_tuple_val(cuda::std::tuple<Args...> const& tuple) {
     return cuda::std::get<I>(tuple);
 }
@@ -150,17 +150,16 @@ struct tensor_shape_element_impl<I, T, Layout, true> {
 template <int I, typename T, class Layout>
 NVSHMEMI_HOSTDEVICE_PREFIX constexpr auto get_shape_element(
     const nvshmemx::Tensor<T, Layout>& tensor)
-    -> decltype(
-        tensor_shape_element_impl<
-            I, T, Layout, is_index_in_bounds<I, decltype(tensor.shape())>::value>::get(tensor)) {
+    -> decltype(tensor_shape_element_impl<
+                I, T, Layout,
+                is_index_in_bounds<I, decltype(tensor.shape())>::value>::get(tensor)) {
     return tensor_shape_element_impl<
         I, T, Layout, is_index_in_bounds<I, decltype(tensor.shape())>::value>::get(tensor);
 }
 
 // Up to 5D tensors
 template <typename T, class Layout>
-NVSHMEMI_HOSTDEVICE_PREFIX constexpr auto get_tensor_size(
-    const nvshmemx::Tensor<T, Layout>& tensor)
+NVSHMEMI_HOSTDEVICE_PREFIX constexpr auto get_tensor_size(const nvshmemx::Tensor<T, Layout>& tensor)
     -> int {
     return get_shape_element<0>(tensor) * get_shape_element<1>(tensor) *
            get_shape_element<2>(tensor) * get_shape_element<3>(tensor) *
@@ -191,9 +190,9 @@ struct tensor_stride_element_impl<I, T, Layout, true> {
 template <int I, typename T, class Layout>
 NVSHMEMI_HOSTDEVICE_PREFIX constexpr auto get_stride_element(
     const nvshmemx::Tensor<T, Layout>& tensor)
-    -> decltype(
-        tensor_stride_element_impl<
-            I, T, Layout, is_index_in_bounds<I, decltype(tensor.stride())>::value>::get(tensor)) {
+    -> decltype(tensor_stride_element_impl<
+                I, T, Layout,
+                is_index_in_bounds<I, decltype(tensor.stride())>::value>::get(tensor)) {
     return tensor_stride_element_impl<
         I, T, Layout, is_index_in_bounds<I, decltype(tensor.stride())>::value>::get(tensor);
 }

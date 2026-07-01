@@ -77,14 +77,14 @@ __global__ void test_double2_maxloc_reduce_kernel_block(nvshmem_team_t team, dou
 }
 #endif
 
-#define DO_TEST()                                                              \
-    if (use_cubin) {                                                           \
-        DO_TEST_CUBIN();                                                       \
-    } else {                                                                   \
+#define DO_TEST()                                                                               \
+    if (use_cubin) {                                                                            \
+        DO_TEST_CUBIN();                                                                        \
+    } else {                                                                                    \
         test_double2_maxloc_reduce_kernel_block<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-            team, (double2 *)dest, (double2 *)source, nelems, _dynamic_smem_size);            \
-    }                                                                          \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                    \
+            team, (double2 *)dest, (double2 *)source, nelems, _dynamic_smem_size);              \
+    }                                                                                           \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                     \
     cudaStreamSynchronize(cstrm);
 
 int main(int argc, char **argv) {

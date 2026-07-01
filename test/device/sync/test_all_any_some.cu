@@ -13,8 +13,7 @@ __global__ void test_nvshmem_test_all_kernel(uint64_t *remote, int mype, int npe
     nvshmemx_signal_op(remote, (uint64_t)mype + 1, NVSHMEM_SIGNAL_SET, (mype + 1) % npes);
     int status = 0;
 
-    while (!nvshmem_uint64_test_all(remote, 1, &status, NVSHMEM_CMP_NE, 0))
-        ;
+    while (!nvshmem_uint64_test_all(remote, 1, &status, NVSHMEM_CMP_NE, 0));
 
     if (*remote != ((uint64_t)mype + npes - 1) % npes + 1) {
         printf("PE %d received incorrect value with TEST_ALL_KERNEL", mype);
@@ -26,8 +25,7 @@ __global__ void test_nvshmem_test_any_kernel(uint64_t *remote, int mype, int npe
     nvshmemx_signal_op(remote, (uint64_t)mype + 1, NVSHMEM_SIGNAL_SET, (mype + 1) % npes);
     int status = 0;
 
-    while (nvshmem_uint64_test_any(remote, 1, &status, NVSHMEM_CMP_NE, 0) == SIZE_MAX)
-        ;
+    while (nvshmem_uint64_test_any(remote, 1, &status, NVSHMEM_CMP_NE, 0) == SIZE_MAX);
 
     if (*remote != ((uint64_t)mype + npes - 1) % npes + 1) {
         printf("PE %d received incorrect value with TEST_ANY_KERNEL", mype);
@@ -40,8 +38,7 @@ __global__ void test_nvshmem_test_some_kernel(uint64_t *remote, int mype, int np
     int status = 0;
     size_t indices;
 
-    while (!nvshmem_uint64_test_some(remote, 1, &indices, &status, NVSHMEM_CMP_NE, 0))
-        ;
+    while (!nvshmem_uint64_test_some(remote, 1, &indices, &status, NVSHMEM_CMP_NE, 0));
 
     if (*remote != ((uint64_t)mype + npes - 1) % npes + 1) {
         printf("PE %d received incorrect value with TEST_SOME_KERNEL", mype);

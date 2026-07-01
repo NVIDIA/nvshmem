@@ -1047,7 +1047,8 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
     if (options->HCA_LIST_provided) {
         filter.user_selection = 1;
         filter.exclude_list = (options->HCA_LIST[0] == '^');
-        status = nvshmemt_parse_hca_list(options->HCA_LIST, filter.hca_list, MAX_NUM_HCAS, log_level);
+        status =
+            nvshmemt_parse_hca_list(options->HCA_LIST, filter.hca_list, MAX_NUM_HCAS, log_level);
         if (status < 0) return NVSHMEMX_ERROR_INVALID_VALUE;
         filter.hca_list_count = status;
     }
@@ -1072,10 +1073,9 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
 
 nvshmem_transport_device_assignment_mode_t nvshmemt_ib_common_device_assignment_mode(
     const struct nvshmemt_ib_hca_filter &filter) {
-    return filter.hca_list_count > 0
-               ? NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST
-               : filter.pe_hca_map_count > 0 ? NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING
-                                             : NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_DEFAULT;
+    return filter.hca_list_count > 0     ? NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST
+           : filter.pe_hca_map_count > 0 ? NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING
+                                         : NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_DEFAULT;
 }
 
 void nvshmemt_ib_common_warn_missing_hcas(const struct nvshmemt_ib_hca_filter &filter) {

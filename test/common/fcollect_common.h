@@ -75,26 +75,26 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(INIT_FCOLLECT_DATA)
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(INIT_FCOLLECT_DATA_KERNEL)
 #undef INIT_FCOLLECT_DATA_KERNEL
 
-#define VALIDATE_FCOLLECT_DATA(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                          \
-    __device__ void validate_##TYPENAME##_fcollect_data##SC_SUFFIX(nvshmem_team_t team,           \
-                                                                   TYPE *dest, size_t nelems) {   \
-        int n_pes = nvshmem_team_n_pes(team);                                                     \
-        int my_pe = nvshmem_team_my_pe(team);                                                     \
-        int myIdx = nvshmtest_thread_id_in_##SC();                                                \
-        int groupSize = nvshmtest_##SC##_size();                                                  \
-                                                                                                  \
-        for (size_t i = 0; i < n_pes; i++) {                                                      \
-            for (size_t j = myIdx; j < nelems; j += groupSize) {                                  \
-                TYPE expected = assign<TYPE>(i * nelems + j);                                     \
-                if (dest[i * nelems + j] != expected) {                                           \
-                    printf(NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC),                             \
-                           to_printable(dest[i * nelems + j]), to_printable(expected),            \
-                           i * nelems + j, nelems, team);                                         \
-                    atomicAdd(&errs_d, 1);                                                        \
-                }                                                                                 \
-            }                                                                                     \
-        }                                                                                         \
-        nvshmtest_##SC##_sync();                                                                  \
+#define VALIDATE_FCOLLECT_DATA(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                        \
+    __device__ void validate_##TYPENAME##_fcollect_data##SC_SUFFIX(nvshmem_team_t team,         \
+                                                                   TYPE *dest, size_t nelems) { \
+        int n_pes = nvshmem_team_n_pes(team);                                                   \
+        int my_pe = nvshmem_team_my_pe(team);                                                   \
+        int myIdx = nvshmtest_thread_id_in_##SC();                                              \
+        int groupSize = nvshmtest_##SC##_size();                                                \
+                                                                                                \
+        for (size_t i = 0; i < n_pes; i++) {                                                    \
+            for (size_t j = myIdx; j < nelems; j += groupSize) {                                \
+                TYPE expected = assign<TYPE>(i * nelems + j);                                   \
+                if (dest[i * nelems + j] != expected) {                                         \
+                    printf(NVSHMEMTEST_ERRSTR_FORMAT_1(TYPENAME, SC),                           \
+                           to_printable(dest[i * nelems + j]), to_printable(expected),          \
+                           i * nelems + j, nelems, team);                                       \
+                    atomicAdd(&errs_d, 1);                                                      \
+                }                                                                               \
+            }                                                                                   \
+        }                                                                                       \
+        nvshmtest_##SC##_sync();                                                                \
     }
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(VALIDATE_FCOLLECT_DATA)

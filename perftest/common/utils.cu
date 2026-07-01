@@ -56,12 +56,14 @@ void init_cumodule(const char *str) {
         *dot = '\0';
     }
     char cubin_bc_path[1000];
-    snprintf(cubin_bc_path, sizeof(cubin_bc_path), "%s/%s_bc.cubin", exe_dir, base_name);         // produces: path/to/shmem_put_latency_bc.cubin
+    snprintf(cubin_bc_path, sizeof(cubin_bc_path), "%s/%s_bc.cubin", exe_dir,
+             base_name);  // produces: path/to/shmem_put_latency_bc.cubin
 
     char cubin_ltoir_path[1000];
-    snprintf(cubin_ltoir_path, sizeof(cubin_ltoir_path), "%s/%s_ltoir.cubin", exe_dir, base_name);    // produces: path/to/shmem_put_latency_ltoir.cubin
+    snprintf(cubin_ltoir_path, sizeof(cubin_ltoir_path), "%s/%s_ltoir.cubin", exe_dir,
+             base_name);  // produces: path/to/shmem_put_latency_ltoir.cubin
 
-    char* selected_path;
+    char *selected_path;
 
     if (use_cubin == NVSHMEM_CUBIN_BC) {
         selected_path = cubin_bc_path;
@@ -72,13 +74,16 @@ void init_cumodule(const char *str) {
     // check if that specific .cubin with a suffix exists
     if (use_cubin == NVSHMEM_CUBIN_BC || use_cubin == NVSHMEM_CUBIN_LTOIR) {
         if (access(selected_path, R_OK) != 0) {
-            fprintf(stderr,
-                    "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, 2=libnvshmem_device.ltoir.fatbin] but cubin not found: %s\n",
-                    use_cubin, selected_path);
+            fprintf(
+                stderr,
+                "Requested NVSHMEM_TEST_CUBIN_LIBRARY=%d [0=libnvshmem.a, 1=libnvshmem_device.bc, "
+                "2=libnvshmem_device.ltoir.fatbin] but cubin not found: %s\n",
+                use_cubin, selected_path);
             exit(-1);
         }
     } else {
-        fprintf(stderr, "Invalid NVSHMEM_TEST_CUBIN_LIBRARY value: %d. Expected 1 or 2.\n", use_cubin);
+        fprintf(stderr, "Invalid NVSHMEM_TEST_CUBIN_LIBRARY value: %d. Expected 1 or 2.\n",
+                use_cubin);
         exit(-1);
     }
 
@@ -1145,7 +1150,7 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
         LOAD_SYM(*nvml_handle, "nvmlDeviceGetGpuFabricInfoV",
                  nvml_ftable->nvmlDeviceGetGpuFabricInfoV, 1, status);
         LOAD_SYM(*nvml_handle, "nvmlDeviceGetFieldValues", nvml_ftable->nvmlDeviceGetFieldValues, 0,
-                    status);
+                 status);
     }
 
     if (status != 0) {
@@ -1315,11 +1320,9 @@ void *allocate_mmap_buffer(size_t size, int mem_fabric_handle_type, bool use_egm
     CU_CHECK(cuMemMap((CUdeviceptr)bufAddr, size, 0, userAllocHandle, 0));
 
     if (use_egm) {
-        CU_CHECK(
-                cuMemSetAccess((CUdeviceptr)bufAddr, size, &accessDescriptor[0], 2));
+        CU_CHECK(cuMemSetAccess((CUdeviceptr)bufAddr, size, &accessDescriptor[0], 2));
     } else {
-        CU_CHECK(
-                cuMemSetAccess((CUdeviceptr)bufAddr, size, &accessDescriptor[0], 1));
+        CU_CHECK(cuMemSetAccess((CUdeviceptr)bufAddr, size, &accessDescriptor[0], 1));
     }
 
     mmapedAddr = (void *)nvshmemx_buffer_register_symmetric(bufAddr, size, 0);

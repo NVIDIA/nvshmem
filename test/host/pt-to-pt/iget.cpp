@@ -46,13 +46,14 @@
     for (pe = 0; pe < npes; pe++) {                                                                \
         for (size_t i = 0; i < nused; i++) {                                                       \
             for (int j = 0; j < bytesPerWord; j++) {                                               \
-                *((unsigned char *)hostTestBuffer + (pe * nused * (dst)*bytesPerWord) +            \
-                  (i * (dst)*bytesPerWord) + j) = (unsigned char)0xab;                             \
+                *((unsigned char *)hostTestBuffer + (pe * nused * (dst) * bytesPerWord) +          \
+                  (i * (dst) * bytesPerWord) + j) = (unsigned char)0xab;                           \
             }                                                                                      \
         }                                                                                          \
-        CUDA_CHECK(cudaMemcpy((unsigned char *)devTestBuffer + (pe * nused * (dst)*bytesPerWord),  \
-                              (unsigned char *)hostTestBuffer + (pe * nused * (dst)*bytesPerWord), \
-                              nused * (dst)*bytesPerWord, cudaMemcpyHostToDevice));                \
+        CUDA_CHECK(                                                                                \
+            cudaMemcpy((unsigned char *)devTestBuffer + (pe * nused * (dst) * bytesPerWord),       \
+                       (unsigned char *)hostTestBuffer + (pe * nused * (dst) * bytesPerWord),      \
+                       nused * (dst) * bytesPerWord, cudaMemcpyHostToDevice));                     \
     }
 
 #define INIT_SHMEM_REF_BUFF_FOR_PULL(TYPE, nused, sst)                                \
@@ -75,113 +76,113 @@
                           cudaMemcpyHostToDevice));                                   \
     for (size_t i = 0; i < nused; i++) {                                              \
         for (int j = 0; j < bytesPerWord; j++) {                                      \
-            *((unsigned char *)hostRefBuffer + (i * (sst)*bytesPerWord) + j) =        \
+            *((unsigned char *)hostRefBuffer + (i * (sst) * bytesPerWord) + j) =      \
                 (unsigned char)mype + (unsigned char)npes;                            \
         }                                                                             \
     }                                                                                 \
     CUDA_CHECK(                                                                       \
-        cudaMemcpy(buffer, hostRefBuffer, nused *(sst)*bytesPerWord, cudaMemcpyHostToDevice));
+        cudaMemcpy(buffer, hostRefBuffer, nused *(sst) * bytesPerWord, cudaMemcpyHostToDevice));
 
-#define VALIDATE_IGET(TYPE, nused, dst, apiname)                                                   \
-    CUDA_CHECK(cudaMemcpy(hostTestBuffer, devTestBuffer, nused * sizeof(long double) * (dst)*npes, \
-                          cudaMemcpyDeviceToHost));                                                \
-    for (pe = 0; pe < npes; pe++) {                                                                \
-        errs = 0;                                                                                  \
-        if (pe != mype) {                                                                          \
-            for (size_t i = 0; i < nused; i++) {                                                   \
-                if (*((TYPE *)hostTestBuffer + pe * nused * (dst) + i * (dst)) !=                  \
-                    (TYPE)pe + (TYPE)npes) {                                                       \
-                    errs++;                                                                        \
-                }                                                                                  \
-            }                                                                                      \
-            if (errs > 0) {                                                                        \
-                ERROR_PRINT("[%d][%d] " #apiname " errors %d\n", mype, pe, errs);                  \
-                status = -1;                                                                       \
-            }                                                                                      \
-        }                                                                                          \
+#define VALIDATE_IGET(TYPE, nused, dst, apiname)                                                \
+    CUDA_CHECK(cudaMemcpy(hostTestBuffer, devTestBuffer,                                        \
+                          nused * sizeof(long double) * (dst) * npes, cudaMemcpyDeviceToHost)); \
+    for (pe = 0; pe < npes; pe++) {                                                             \
+        errs = 0;                                                                               \
+        if (pe != mype) {                                                                       \
+            for (size_t i = 0; i < nused; i++) {                                                \
+                if (*((TYPE *)hostTestBuffer + pe * nused * (dst) + i * (dst)) !=               \
+                    (TYPE)pe + (TYPE)npes) {                                                    \
+                    errs++;                                                                     \
+                }                                                                               \
+            }                                                                                   \
+            if (errs > 0) {                                                                     \
+                ERROR_PRINT("[%d][%d] " #apiname " errors %d\n", mype, pe, errs);               \
+                status = -1;                                                                    \
+            }                                                                                   \
+        }                                                                                       \
     }
 
-#define VALIDATE_BYTES_IGET(bytesPerWord, nused, dst, apiname)                                     \
-    CUDA_CHECK(cudaMemcpy(hostTestBuffer, devTestBuffer, nused * sizeof(long double) * (dst)*npes, \
-                          cudaMemcpyDeviceToHost));                                                \
-    for (pe = 0; pe < npes; pe++) {                                                                \
-        errs = 0;                                                                                  \
-        if (pe != mype) {                                                                          \
-            for (size_t i = 0; i < nused; i++) {                                                   \
-                for (int j = 0; j < bytesPerWord; j++) {                                           \
-                    if (*((unsigned char *)hostTestBuffer + (pe * nused * (dst)*bytesPerWord) +    \
-                          (i * (dst)*bytesPerWord) + j) !=                                         \
-                        (unsigned char)pe + (unsigned char)npes) {                                 \
-                        errs++;                                                                    \
-                    }                                                                              \
-                    break;                                                                         \
-                }                                                                                  \
-            }                                                                                      \
-            if (errs > 0) {                                                                        \
-                ERROR_PRINT("[%d][%d] " #apiname " errors %d\n", mype, pe, errs);                  \
-                status = -1;                                                                       \
-            }                                                                                      \
-        }                                                                                          \
+#define VALIDATE_BYTES_IGET(bytesPerWord, nused, dst, apiname)                                    \
+    CUDA_CHECK(cudaMemcpy(hostTestBuffer, devTestBuffer,                                          \
+                          nused * sizeof(long double) * (dst) * npes, cudaMemcpyDeviceToHost));   \
+    for (pe = 0; pe < npes; pe++) {                                                               \
+        errs = 0;                                                                                 \
+        if (pe != mype) {                                                                         \
+            for (size_t i = 0; i < nused; i++) {                                                  \
+                for (int j = 0; j < bytesPerWord; j++) {                                          \
+                    if (*((unsigned char *)hostTestBuffer + (pe * nused * (dst) * bytesPerWord) + \
+                          (i * (dst) * bytesPerWord) + j) !=                                      \
+                        (unsigned char)pe + (unsigned char)npes) {                                \
+                        errs++;                                                                   \
+                    }                                                                             \
+                    break;                                                                        \
+                }                                                                                 \
+            }                                                                                     \
+            if (errs > 0) {                                                                       \
+                ERROR_PRINT("[%d][%d] " #apiname " errors %d\n", mype, pe, errs);                 \
+                status = -1;                                                                      \
+            }                                                                                     \
+        }                                                                                         \
     }
 
-#define TEST_SHMEM_IGET_WORDSIZE(bitsPerWord, bytesPerWord, nused, dst, sst)                \
-    /*init host test buff and use that to init dev test buff*/                              \
-    INIT_BYTES_DEV_TEST_BUFF(bytesPerWord, nused, dst)                                      \
-    /*init host ref buff and use that to init shmem buff to be pulled from*/                \
-    INIT_BYTES_SHMEM_REF_BUFF_FOR_PULL(bytesPerWord, nused, sst)                            \
-    nvshmem_barrier_all();                                                                  \
-    /*issue shmem iget's*/                                                                  \
-    for (int pe = 0; pe < npes; pe++) {                                                     \
-        if (pe != mype) {                                                                   \
-            nvshmem_iget##bitsPerWord(                                                      \
-                (void *)((unsigned char *)devTestBuffer + nused * bytesPerWord * (dst)*pe), \
-                (void *)buffer, dst, sst, nused, pe);                                       \
-        }                                                                                   \
-    }                                                                                       \
-    /*nvshmem_quiet();*/                                                                    \
-    nvshmem_barrier_all();                                                                  \
-    /*copy dev test buff to host test buff and validate*/                                   \
-    VALIDATE_BYTES_IGET(bytesPerWord, nused, dst, nvshmem_iget##bitsPerWord)                \
+#define TEST_SHMEM_IGET_WORDSIZE(bitsPerWord, bytesPerWord, nused, dst, sst)                  \
+    /*init host test buff and use that to init dev test buff*/                                \
+    INIT_BYTES_DEV_TEST_BUFF(bytesPerWord, nused, dst)                                        \
+    /*init host ref buff and use that to init shmem buff to be pulled from*/                  \
+    INIT_BYTES_SHMEM_REF_BUFF_FOR_PULL(bytesPerWord, nused, sst)                              \
+    nvshmem_barrier_all();                                                                    \
+    /*issue shmem iget's*/                                                                    \
+    for (int pe = 0; pe < npes; pe++) {                                                       \
+        if (pe != mype) {                                                                     \
+            nvshmem_iget##bitsPerWord(                                                        \
+                (void *)((unsigned char *)devTestBuffer + nused * bytesPerWord * (dst) * pe), \
+                (void *)buffer, dst, sst, nused, pe);                                         \
+        }                                                                                     \
+    }                                                                                         \
+    /*nvshmem_quiet();*/                                                                      \
+    nvshmem_barrier_all();                                                                    \
+    /*copy dev test buff to host test buff and validate*/                                     \
+    VALIDATE_BYTES_IGET(bytesPerWord, nused, dst, nvshmem_iget##bitsPerWord)                  \
     nvshmem_barrier_all();
 
-#define TEST_SHMEMX_IGET_WORDSIZE_ON_STREAM(bitsPerWord, bytesPerWord, nused, dst, sst)     \
-    /*init host test buff and use that to init dev test buff*/                              \
-    INIT_BYTES_DEV_TEST_BUFF(bytesPerWord, nused, dst)                                      \
-    /*init host ref buff and use that to init shmem buff to be pulled from*/                \
-    INIT_BYTES_SHMEM_REF_BUFF_FOR_PULL(bytesPerWord, nused, sst)                            \
-    nvshmem_barrier_all();                                                                  \
-    /*issue shmem iget's*/                                                                  \
-    for (int pe = 0; pe < npes; pe++) {                                                     \
-        if (pe != mype) {                                                                   \
-            nvshmemx_iget##bitsPerWord##_on_stream(                                         \
-                (void *)((unsigned char *)devTestBuffer + nused * bytesPerWord * (dst)*pe), \
-                (void *)buffer, dst, sst, nused, pe, cstrm[pe]);                            \
-            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                   \
-        }                                                                                   \
-    }                                                                                       \
-    /*nvshmem_quiet();*/                                                                    \
-    nvshmem_barrier_all();                                                                  \
-    /*copy dev test buff to host test buff and validate*/                                   \
-    VALIDATE_BYTES_IGET(bytesPerWord, nused, dst, nvshmem_iget##bitsPerWord)                \
+#define TEST_SHMEMX_IGET_WORDSIZE_ON_STREAM(bitsPerWord, bytesPerWord, nused, dst, sst)       \
+    /*init host test buff and use that to init dev test buff*/                                \
+    INIT_BYTES_DEV_TEST_BUFF(bytesPerWord, nused, dst)                                        \
+    /*init host ref buff and use that to init shmem buff to be pulled from*/                  \
+    INIT_BYTES_SHMEM_REF_BUFF_FOR_PULL(bytesPerWord, nused, sst)                              \
+    nvshmem_barrier_all();                                                                    \
+    /*issue shmem iget's*/                                                                    \
+    for (int pe = 0; pe < npes; pe++) {                                                       \
+        if (pe != mype) {                                                                     \
+            nvshmemx_iget##bitsPerWord##_on_stream(                                           \
+                (void *)((unsigned char *)devTestBuffer + nused * bytesPerWord * (dst) * pe), \
+                (void *)buffer, dst, sst, nused, pe, cstrm[pe]);                              \
+            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                     \
+        }                                                                                     \
+    }                                                                                         \
+    /*nvshmem_quiet();*/                                                                      \
+    nvshmem_barrier_all();                                                                    \
+    /*copy dev test buff to host test buff and validate*/                                     \
+    VALIDATE_BYTES_IGET(bytesPerWord, nused, dst, nvshmem_iget##bitsPerWord)                  \
     nvshmem_barrier_all();
 
-#define TEST_SHMEM_TYPE_IGET(type, TYPE, nused, dst, sst)                                          \
-    /*init host test buff and use that to init dev test buff*/                                     \
-    INIT_DEV_TEST_BUFF(TYPE, nused, dst)                                                           \
-    /*init host ref buff and use that to init shmem buff to be pulled from*/                       \
-    INIT_SHMEM_REF_BUFF_FOR_PULL(TYPE, nused, sst)                                                 \
-    nvshmem_barrier_all();                                                                         \
-    /*issue shmem iget's*/                                                                         \
-    for (pe = 0; pe < npes; pe++) {                                                                \
-        if (pe != mype) {                                                                          \
-            nvshmem_##type##_iget(((TYPE *)devTestBuffer + nused * (dst)*pe), (TYPE *)buffer, dst, \
-                                  sst, nused, pe);                                                 \
-        }                                                                                          \
-    }                                                                                              \
-    /*nvshmem_quiet();*/                                                                           \
-    nvshmem_barrier_all();                                                                         \
-    /*copy dev test buff to host test buff and validate*/                                          \
-    VALIDATE_IGET(TYPE, nused, dst, nvshmem_##type##_iget)                                         \
+#define TEST_SHMEM_TYPE_IGET(type, TYPE, nused, dst, sst)                                       \
+    /*init host test buff and use that to init dev test buff*/                                  \
+    INIT_DEV_TEST_BUFF(TYPE, nused, dst)                                                        \
+    /*init host ref buff and use that to init shmem buff to be pulled from*/                    \
+    INIT_SHMEM_REF_BUFF_FOR_PULL(TYPE, nused, sst)                                              \
+    nvshmem_barrier_all();                                                                      \
+    /*issue shmem iget's*/                                                                      \
+    for (pe = 0; pe < npes; pe++) {                                                             \
+        if (pe != mype) {                                                                       \
+            nvshmem_##type##_iget(((TYPE *)devTestBuffer + nused * (dst) * pe), (TYPE *)buffer, \
+                                  dst, sst, nused, pe);                                         \
+        }                                                                                       \
+    }                                                                                           \
+    /*nvshmem_quiet();*/                                                                        \
+    nvshmem_barrier_all();                                                                      \
+    /*copy dev test buff to host test buff and validate*/                                       \
+    VALIDATE_IGET(TYPE, nused, dst, nvshmem_##type##_iget)                                      \
     nvshmem_barrier_all();
 
 #define TEST_SHMEMX_TYPE_IGET_ON_STREAM(type, TYPE, nused, dst, sst)                          \
@@ -193,7 +194,7 @@
     /*issue shmem iget's*/                                                                    \
     for (pe = 0; pe < npes; pe++) {                                                           \
         if (pe != mype) {                                                                     \
-            nvshmemx_##type##_iget_on_stream(((TYPE *)devTestBuffer + nused * (dst)*pe),      \
+            nvshmemx_##type##_iget_on_stream(((TYPE *)devTestBuffer + nused * (dst) * pe),    \
                                              (TYPE *)buffer, dst, sst, nused, pe, cstrm[pe]); \
             CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                     \
         }                                                                                     \

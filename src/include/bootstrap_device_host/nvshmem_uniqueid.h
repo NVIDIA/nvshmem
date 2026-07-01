@@ -10,20 +10,16 @@
 #define UNIQUEID_ARGS_INVALID -1
 #if !defined __CUDACC_RTC__
 #include <stddef.h>  // for NULL
-#define NVSHMEMX_UNIQUEID_INITIALIZER                          \
-    {                                                          \
-        (1 << 16) + sizeof(nvshmemx_uniqueid_t), /* version */ \
-        {                                                      \
-            0                                                  \
-        }                                                      \
-    }
+#define NVSHMEMX_UNIQUEID_INITIALIZER                       \
+    {(1 << 16) + sizeof(nvshmemx_uniqueid_t), /* version */ \
+     {0}}
 
 #define NVSHMEMX_UNIQUEID_ARGS_INITIALIZER                          \
     {                                                               \
         (1 << 16) + sizeof(nvshmemx_uniqueid_args_t), /* version */ \
-            NULL,                                     /* id */      \
-            UNIQUEID_ARGS_INVALID,                    /* myrank */  \
-            UNIQUEID_ARGS_INVALID                     /* nranks */  \
+        NULL,                                         /* id */      \
+        UNIQUEID_ARGS_INVALID,                        /* myrank */  \
+        UNIQUEID_ARGS_INVALID                         /* nranks */  \
     }
 #endif
 typedef struct {

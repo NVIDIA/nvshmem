@@ -24,17 +24,15 @@
 extern "C" {
 #endif
 
-#define DECL_TEST_BROADCAST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                \
-    __global__ void test_##TYPENAME##_broadcast##SC_SUFFIX(nvshmem_team_t team, TYPE *dest, \
-                                                           TYPE *source, size_t nelems,     \
-                                                           size_t dynamic_smem_size);
+#define DECL_TEST_BROADCAST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE) \
+    __global__ void test_##TYPENAME##_broadcast##SC_SUFFIX(                  \
+        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, size_t dynamic_smem_size);
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DECL_TEST_BROADCAST_KERNEL)
 
 #define DEFN_TEST_BROADCAST_KERNEL(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                       \
-    __global__ void test_##TYPENAME##_broadcast##SC_SUFFIX(nvshmem_team_t team, TYPE *dest,        \
-                                                           TYPE *source, size_t nelems,            \
-                                                           size_t dynamic_smem_size) {             \
+    __global__ void test_##TYPENAME##_broadcast##SC_SUFFIX(                                        \
+        nvshmem_team_t team, TYPE *dest, TYPE *source, size_t nelems, size_t dynamic_smem_size) {  \
         int iters;                                                                                 \
         int PE_size = nvshmem_team_n_pes(team);                                                    \
         int myIdx = nvshmtest_thread_id_in_##SC();                                                 \
@@ -57,10 +55,10 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DEFN_TEST_BROADCAST_KERNEL)
 }
 #endif
 
-#define DO_BROADCAST_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                           \
-    test_##TYPENAME##_broadcast##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>(    \
-        team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                      \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                   \
+#define DO_BROADCAST_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                        \
+    test_##TYPENAME##_broadcast##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+        team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                   \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                \
     cudaStreamSynchronize(cstrm);
 
 int main(int argc, char **argv) {

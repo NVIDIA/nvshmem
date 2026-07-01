@@ -47,13 +47,14 @@
     for (pe = 0; pe < npes; pe++) {                                                                \
         for (size_t i = 0; i < nused; i++) {                                                       \
             for (int j = 0; j < bytesPerWord; j++) {                                               \
-                *((unsigned char *)hostTestBuffer + (pe * nused * (dst)*bytesPerWord) +            \
-                  (i * (dst)*bytesPerWord) + j) = (unsigned char)0xab;                             \
+                *((unsigned char *)hostTestBuffer + (pe * nused * (dst) * bytesPerWord) +          \
+                  (i * (dst) * bytesPerWord) + j) = (unsigned char)0xab;                           \
             }                                                                                      \
         }                                                                                          \
-        CUDA_CHECK(cudaMemcpy((unsigned char *)buffer + (pe * nused * (dst)*bytesPerWord),         \
-                              (unsigned char *)hostTestBuffer + (pe * nused * (dst)*bytesPerWord), \
-                              nused * (dst)*bytesPerWord, cudaMemcpyHostToDevice));                \
+        CUDA_CHECK(                                                                                \
+            cudaMemcpy((unsigned char *)buffer + (pe * nused * (dst) * bytesPerWord),              \
+                       (unsigned char *)hostTestBuffer + (pe * nused * (dst) * bytesPerWord),      \
+                       nused * (dst) * bytesPerWord, cudaMemcpyHostToDevice));                     \
     }
 
 #define INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, nused, sst)                                        \
@@ -76,34 +77,34 @@
                           cudaMemcpyHostToDevice));                                         \
     for (size_t i = 0; i < nused; i++) {                                                    \
         for (int j = 0; j < bytesPerWord; j++) {                                            \
-            *((unsigned char *)hostRefBuffer + (i * (sst)*bytesPerWord) + j) =              \
+            *((unsigned char *)hostRefBuffer + (i * (sst) * bytesPerWord) + j) =            \
                 (unsigned char)mype + (unsigned char)npes;                                  \
         }                                                                                   \
     }                                                                                       \
-    CUDA_CHECK(cudaMemcpy(devRefBuffer, hostRefBuffer, nused *(sst)*bytesPerWord,           \
+    CUDA_CHECK(cudaMemcpy(devRefBuffer, hostRefBuffer, nused *(sst) * bytesPerWord,         \
                           cudaMemcpyHostToDevice));
 
-#define VALIDATE_IPUT(TYPE, nused, dst, apiname)                                            \
-    CUDA_CHECK(cudaMemcpy(hostTestBuffer, buffer, nused * sizeof(long double) * (dst)*npes, \
-                          cudaMemcpyDeviceToHost));                                         \
-    for (pe = 0; pe < npes; pe++) {                                                         \
-        errs = 0;                                                                           \
-        if (pe != mype) {                                                                   \
-            for (size_t i = 0; i < nused; i++) {                                            \
-                if (*((TYPE *)hostTestBuffer + (pe * nused * (dst)) + (i * (dst))) !=       \
-                    (TYPE)pe + (TYPE)npes) {                                                \
-                    errs++;                                                                 \
-                }                                                                           \
-            }                                                                               \
-            if (errs > 0) {                                                                 \
-                ERROR_PRINT("[%d][%d] " #apiname " errors %d\n", mype, pe, errs);           \
-                status = -1;                                                                \
-            }                                                                               \
-        }                                                                                   \
+#define VALIDATE_IPUT(TYPE, nused, dst, apiname)                                              \
+    CUDA_CHECK(cudaMemcpy(hostTestBuffer, buffer, nused * sizeof(long double) * (dst) * npes, \
+                          cudaMemcpyDeviceToHost));                                           \
+    for (pe = 0; pe < npes; pe++) {                                                           \
+        errs = 0;                                                                             \
+        if (pe != mype) {                                                                     \
+            for (size_t i = 0; i < nused; i++) {                                              \
+                if (*((TYPE *)hostTestBuffer + (pe * nused * (dst)) + (i * (dst))) !=         \
+                    (TYPE)pe + (TYPE)npes) {                                                  \
+                    errs++;                                                                   \
+                }                                                                             \
+            }                                                                                 \
+            if (errs > 0) {                                                                   \
+                ERROR_PRINT("[%d][%d] " #apiname " errors %d\n", mype, pe, errs);             \
+                status = -1;                                                                  \
+            }                                                                                 \
+        }                                                                                     \
     }
 
 #define VALIDATE_BYTES_IPUT(bytesPerWord, nused, dst, apiname)                                     \
-    CUDA_CHECK(cudaMemcpy(hostTestBuffer, buffer, nused * sizeof(long double) * (dst)*npes,        \
+    CUDA_CHECK(cudaMemcpy(hostTestBuffer, buffer, nused * sizeof(long double) * (dst) * npes,      \
                           cudaMemcpyDeviceToHost));                                                \
     for (pe = 0; pe < npes; pe++) {                                                                \
         errs = 0;                                                                                  \
@@ -113,8 +114,8 @@
                  * + (pe*nused*(dst+1)*bytesPerWord) + (i*(dst+1)*bytesPerWord)),                  \
                  * (pe*nused*(dst+1)*bytesPerWord) + (i*(dst+1)*bytesPerWord));*/                  \
                 for (int j = 0; j < bytesPerWord; j++) {                                           \
-                    if (*((unsigned char *)hostTestBuffer + (pe * nused * (dst)*bytesPerWord) +    \
-                          (i * (dst)*bytesPerWord) + j) !=                                         \
+                    if (*((unsigned char *)hostTestBuffer + (pe * nused * (dst) * bytesPerWord) +  \
+                          (i * (dst) * bytesPerWord) + j) !=                                       \
                         (unsigned char)pe + (unsigned char)npes) {                                 \
                         errs++;                                                                    \
                     }                                                                              \
@@ -128,23 +129,23 @@
         }                                                                                          \
     }
 
-#define TEST_SHMEM_TYPE_IPUT(type, TYPE, nused, dst, sst)                                      \
-    /*init host test buff and use that to init shmem buff to be pushed to*/                    \
-    INIT_SHMEM_TEST_BUFF(TYPE, nused, dst)                                                     \
-    /*init host ref buff and use that to init dev ref buff*/                                   \
-    INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, nused, sst)                                               \
-    nvshmem_barrier_all();                                                                     \
-    /*issue shmem iput's*/                                                                     \
-    for (pe = 0; pe < npes; pe++) {                                                            \
-        if (pe != mype) {                                                                      \
-            nvshmem_##type##_iput(((TYPE *)buffer + nused * (dst)*mype), (TYPE *)devRefBuffer, \
-                                  dst, sst, nused, pe);                                        \
-        }                                                                                      \
-    }                                                                                          \
-    /*nvshmem_quiet();*/                                                                       \
-    nvshmem_barrier_all();                                                                     \
-    /*copy shmem test buff to host test buff and validate*/                                    \
-    VALIDATE_IPUT(TYPE, nused, dst, nvshmem_##type##_iput)                                     \
+#define TEST_SHMEM_TYPE_IPUT(type, TYPE, nused, dst, sst)                                        \
+    /*init host test buff and use that to init shmem buff to be pushed to*/                      \
+    INIT_SHMEM_TEST_BUFF(TYPE, nused, dst)                                                       \
+    /*init host ref buff and use that to init dev ref buff*/                                     \
+    INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, nused, sst)                                                 \
+    nvshmem_barrier_all();                                                                       \
+    /*issue shmem iput's*/                                                                       \
+    for (pe = 0; pe < npes; pe++) {                                                              \
+        if (pe != mype) {                                                                        \
+            nvshmem_##type##_iput(((TYPE *)buffer + nused * (dst) * mype), (TYPE *)devRefBuffer, \
+                                  dst, sst, nused, pe);                                          \
+        }                                                                                        \
+    }                                                                                            \
+    /*nvshmem_quiet();*/                                                                         \
+    nvshmem_barrier_all();                                                                       \
+    /*copy shmem test buff to host test buff and validate*/                                      \
+    VALIDATE_IPUT(TYPE, nused, dst, nvshmem_##type##_iput)                                       \
     nvshmem_barrier_all();
 
 #define TEST_SHMEMX_TYPE_IPUT_ON_STREAM(type, TYPE, nused, dst, sst)                    \
@@ -156,7 +157,7 @@
     /*issue shmem iput's*/                                                              \
     for (pe = 0; pe < npes; pe++) {                                                     \
         if (pe != mype) {                                                               \
-            nvshmemx_##type##_iput_on_stream(((TYPE *)buffer + nused * (dst)*mype),     \
+            nvshmemx_##type##_iput_on_stream(((TYPE *)buffer + nused * (dst) * mype),   \
                                              (TYPE *)devRefBuffer, dst, sst, nused, pe, \
                                              cstrm[pe]);                                \
             CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                               \
@@ -168,45 +169,45 @@
     VALIDATE_IPUT(TYPE, nused, dst, nvshmem_##type##_iput)                              \
     nvshmem_barrier_all();
 
-#define TEST_SHMEM_IPUT_WORDSIZE(bitsPerWord, bytesPerWord, nused, dst, sst)           \
-    /*init host test buff and use that to init shmem buff to be pushed to*/            \
-    INIT_BYTES_SHMEM_TEST_BUFF(bytesPerWord, nused, dst)                               \
-    /*init host ref buff and use that to init dev ref buff*/                           \
-    INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(bytesPerWord, nused, sst)                         \
-    nvshmem_barrier_all();                                                             \
-    /*issue shmem iput's*/                                                             \
-    for (pe = 0; pe < npes; pe++) {                                                    \
-        if (pe != mype) {                                                              \
-            nvshmem_iput##bitsPerWord(                                                 \
-                (void *)((unsigned char *)buffer + nused * bytesPerWord * (dst)*mype), \
-                (void *)devRefBuffer, dst, sst, nused, pe);                            \
-        }                                                                              \
-    }                                                                                  \
-    /*nvshmem_quiet();*/                                                               \
-    nvshmem_barrier_all();                                                             \
-    /*copy shmem test buff to host test buff and validate*/                            \
-    VALIDATE_BYTES_IPUT(bytesPerWord, nused, dst, nvshmem_iput##bitsPerWord)           \
+#define TEST_SHMEM_IPUT_WORDSIZE(bitsPerWord, bytesPerWord, nused, dst, sst)             \
+    /*init host test buff and use that to init shmem buff to be pushed to*/              \
+    INIT_BYTES_SHMEM_TEST_BUFF(bytesPerWord, nused, dst)                                 \
+    /*init host ref buff and use that to init dev ref buff*/                             \
+    INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(bytesPerWord, nused, sst)                           \
+    nvshmem_barrier_all();                                                               \
+    /*issue shmem iput's*/                                                               \
+    for (pe = 0; pe < npes; pe++) {                                                      \
+        if (pe != mype) {                                                                \
+            nvshmem_iput##bitsPerWord(                                                   \
+                (void *)((unsigned char *)buffer + nused * bytesPerWord * (dst) * mype), \
+                (void *)devRefBuffer, dst, sst, nused, pe);                              \
+        }                                                                                \
+    }                                                                                    \
+    /*nvshmem_quiet();*/                                                                 \
+    nvshmem_barrier_all();                                                               \
+    /*copy shmem test buff to host test buff and validate*/                              \
+    VALIDATE_BYTES_IPUT(bytesPerWord, nused, dst, nvshmem_iput##bitsPerWord)             \
     nvshmem_barrier_all();
 
-#define TEST_SHMEMX_IPUT_WORDSIZE_ON_STREAM(bitsPerWord, bytesPerWord, nused, dst, sst) \
-    /*init host test buff and use that to init shmem buff to be pushed to*/             \
-    INIT_BYTES_SHMEM_TEST_BUFF(bytesPerWord, nused, dst)                                \
-    /*init host ref buff and use that to init dev ref buff*/                            \
-    INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(bytesPerWord, nused, sst)                          \
-    nvshmem_barrier_all();                                                              \
-    /*issue shmem iput's*/                                                              \
-    for (pe = 0; pe < npes; pe++) {                                                     \
-        if (pe != mype) {                                                               \
-            nvshmemx_iput##bitsPerWord##_on_stream(                                     \
-                (void *)((unsigned char *)buffer + nused * bytesPerWord * (dst)*mype),  \
-                (void *)devRefBuffer, dst, sst, nused, pe, cstrm[pe]);                  \
-            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                               \
-        }                                                                               \
-    }                                                                                   \
-    /*nvshmem_quiet();*/                                                                \
-    nvshmem_barrier_all();                                                              \
-    /*copy shmem test buff to host test buff and validate*/                             \
-    VALIDATE_BYTES_IPUT(bytesPerWord, nused, dst, nvshmem_iput##bitsPerWord)            \
+#define TEST_SHMEMX_IPUT_WORDSIZE_ON_STREAM(bitsPerWord, bytesPerWord, nused, dst, sst)  \
+    /*init host test buff and use that to init shmem buff to be pushed to*/              \
+    INIT_BYTES_SHMEM_TEST_BUFF(bytesPerWord, nused, dst)                                 \
+    /*init host ref buff and use that to init dev ref buff*/                             \
+    INIT_BYTES_DEV_REF_BUFF_FOR_PUSH(bytesPerWord, nused, sst)                           \
+    nvshmem_barrier_all();                                                               \
+    /*issue shmem iput's*/                                                               \
+    for (pe = 0; pe < npes; pe++) {                                                      \
+        if (pe != mype) {                                                                \
+            nvshmemx_iput##bitsPerWord##_on_stream(                                      \
+                (void *)((unsigned char *)buffer + nused * bytesPerWord * (dst) * mype), \
+                (void *)devRefBuffer, dst, sst, nused, pe, cstrm[pe]);                   \
+            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                \
+        }                                                                                \
+    }                                                                                    \
+    /*nvshmem_quiet();*/                                                                 \
+    nvshmem_barrier_all();                                                               \
+    /*copy shmem test buff to host test buff and validate*/                              \
+    VALIDATE_BYTES_IPUT(bytesPerWord, nused, dst, nvshmem_iput##bitsPerWord)             \
     nvshmem_barrier_all();
 
 #define MIN_BYTES_PER_WORD 1

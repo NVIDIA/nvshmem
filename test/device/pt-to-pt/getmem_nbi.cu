@@ -22,25 +22,26 @@
     init_test_case_kernel(&test_ring_cubin, NVSHMEMI_TEST_STRINGIFY(ring));             \
     CU_CHECK(cuLaunchKernel(test_ring_cubin, 1, 1, 1, 1, 1, 1, 0, cstrm, args_ring, NULL));
 
-#define TEST_NVSHMEM_ALL_G_CUBIN(GROUP)                                                \
-    void *args_all_g[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&mype,  \
-                          (void *)&npes, (void *)&_dynamic_smem_size};                 \
-    CUfunction test_all_cubin;                                                         \
-    init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_##GROUP)); \
-    CU_CHECK(cuFuncSetAttribute(test_all_cubin,                                        \
-                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,        \
-                                (int)_dynamic_smem_size));                              \
-    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_all_g, NULL));
+#define TEST_NVSHMEM_ALL_G_CUBIN(GROUP)                                                          \
+    void *args_all_g[] = {(void *)&src_, (void *)&dest_, (void *)&len,                           \
+                          (void *)&mype, (void *)&npes,  (void *)&_dynamic_smem_size};           \
+    CUfunction test_all_cubin;                                                                   \
+    init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_##GROUP));           \
+    CU_CHECK(cuFuncSetAttribute(test_all_cubin, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, \
+                                (int)_dynamic_smem_size));                                       \
+    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm,         \
+                            args_all_g, NULL));
 
-#define TEST_NVSHMEM_RING_G_CUBIN(GROUP)                                                  \
-    void *args_ring_g[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&prevpe,  \
-                           (void *)&_dynamic_smem_size};                                  \
-    CUfunction test_ring_g_cubin;                                                         \
-    init_test_case_kernel(&test_ring_g_cubin, NVSHMEMI_TEST_STRINGIFY(ring_##GROUP));     \
-    CU_CHECK(cuFuncSetAttribute(test_ring_g_cubin,                                        \
-                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,           \
-                                (int)_dynamic_smem_size));                                 \
-    CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, args_ring_g, NULL));
+#define TEST_NVSHMEM_RING_G_CUBIN(GROUP)                                                    \
+    void *args_ring_g[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&prevpe,    \
+                           (void *)&_dynamic_smem_size};                                    \
+    CUfunction test_ring_g_cubin;                                                           \
+    init_test_case_kernel(&test_ring_g_cubin, NVSHMEMI_TEST_STRINGIFY(ring_##GROUP));       \
+    CU_CHECK(cuFuncSetAttribute(test_ring_g_cubin,                                          \
+                                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,            \
+                                (int)_dynamic_smem_size));                                  \
+    CU_CHECK(cuLaunchKernel(test_ring_g_cubin, 1, 1, 1, 1, 1, 1, _dynamic_smem_size, cstrm, \
+                            args_ring_g, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
@@ -74,8 +75,8 @@ extern "C" {
         if (use_cubin) {                                                                           \
             TEST_NVSHMEM_ALL_G_CUBIN(Group);                                                       \
         } else {                                                                                   \
-            alltoall_##Group<<<1, 1, _dynamic_smem_size, cstrm>>>(src_, dest_, len, mype,          \
-                                                                  npes, _dynamic_smem_size);       \
+            alltoall_##Group<<<1, 1, _dynamic_smem_size, cstrm>>>(src_, dest_, len, mype, npes,    \
+                                                                  _dynamic_smem_size);             \
         }                                                                                          \
     }                                                                                              \
                                                                                                    \

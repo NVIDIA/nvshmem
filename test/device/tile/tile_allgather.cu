@@ -181,18 +181,18 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(DECL_TYPENAME_ALLGATHER, )
                                                                                                    \
             /* tile allgather */                                                                   \
             /* No predication */ struct empty {};                                                  \
-            tile_errs_d = nvshmemx::tile_allgather##SC_SUFFIX<                                                   \
+            tile_errs_d = nvshmemx::tile_allgather##SC_SUFFIX<                                     \
                 decltype(src_tensor), decltype(dest_tensor), empty,                                \
                 nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(                               \
                 teams_dev[team_id], src_tensor, dest_tensor, empty{}, empty{}, 0);                 \
-            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                  \
-                return;                                                                             \
+            if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                 \
+                return;                                                                            \
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
-        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                                 \
+        tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                   \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);            \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                     \
             return;                                                                                \
         }                                                                                          \
                                                                                                    \
@@ -232,7 +232,7 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(DECL_TYPENAME_ALLGATHER, )
                                                                                                    \
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                   \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);            \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                     \
             return;                                                                                \
         }                                                                                          \
         for (int i = blockIdx.x * SC##s_per_block; i < src_num_tiles_major * src_num_tiles_minor;  \
@@ -266,7 +266,7 @@ NVSHMEMTEST_TILE_REPT_TYPES_AND_SCOPES(DECL_TYPENAME_ALLGATHER, )
         }                                                                                          \
         tile_errs_d = nvshmemx::tile_collective_wait##SC_SUFFIX<                                   \
             nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI>(teams_dev[team_id], 0);            \
-        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                      \
+        if (tile_errs_d != NVSHMEMX_SUCCESS) {                                                     \
             return;                                                                                \
         }                                                                                          \
     }

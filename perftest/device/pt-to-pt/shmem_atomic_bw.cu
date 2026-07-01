@@ -264,7 +264,9 @@ int main(int argc, char *argv[]) {
                     }
                     break;
                 }
-                default: { break; }
+                default: {
+                    break;
+                }
             }
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());

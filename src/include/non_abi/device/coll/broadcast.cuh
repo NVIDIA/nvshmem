@@ -766,9 +766,9 @@ __device__ inline void nvshmemi_tile_bcast_nvls_dim(nvshmem_team_t team, src_ten
 // specialize for the vectorization
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope>
 __device__ inline int nvshmemi_tile_bcast_nvls_threadgroup(nvshmem_team_t team,
-                                                            src_tensor_t src_tensor,
-                                                            dst_tensor_t dst_tensor,
-                                                            tuple_t start_coord, tuple_t boundary) {
+                                                           src_tensor_t src_tensor,
+                                                           dst_tensor_t dst_tensor,
+                                                           tuple_t start_coord, tuple_t boundary) {
     using T = typename src_tensor_t::value_type;
     if constexpr ((get_constant(safe_get<0>(decltype(src_tensor.stride()){})) == 1) &&
                   (get_constant(safe_get<0>(decltype(dst_tensor.stride()){})) == 1)) {
@@ -852,12 +852,14 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
 
     // check if both src and dst have same continuous dimension
     // TODO relax this constraint
-    bool is_contiguous = (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
-                 ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1)));
+    bool is_contiguous =
+        (((get_stride_element<0>(src_tensor) == 1) && (get_stride_element<0>(dst_tensor) == 1)) ||
+         ((get_stride_element<1>(src_tensor) == 1) && (get_stride_element<1>(dst_tensor) == 1)));
 
     if (!is_contiguous) {
-        assert(is_contiguous && "Currently we only support cases where source and destination tile are continuous "
-                "along one dimension");
+        assert(is_contiguous &&
+               "Currently we only support cases where source and destination tile are continuous "
+               "along one dimension");
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
@@ -870,7 +872,6 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PUSH_NBI) {
         // check for NVLS support in hardware
         if constexpr (nvshmemi_device_has_nvls_multimem) {
-
             // NVLS ONE_SHOT broadcast is PUSH based algo, so we can directly start communicating
             // User should ensure src data is ready
 

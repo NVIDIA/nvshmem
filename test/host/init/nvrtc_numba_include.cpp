@@ -73,8 +73,8 @@ int main() {
         return 1;
     }
 
-    result = nvrtcCompileProgram(numba_include_prog,
-                                 sizeof(compile_opts) / sizeof(compile_opts[0]), compile_opts);
+    result = nvrtcCompileProgram(numba_include_prog, sizeof(compile_opts) / sizeof(compile_opts[0]),
+                                 compile_opts);
     if (result != NVRTC_SUCCESS) {
         fprintf(stderr, "Failed to compile program with error %s\n", nvrtcGetErrorString(result));
         print_compile_log(numba_include_prog);

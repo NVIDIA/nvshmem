@@ -44,8 +44,7 @@ __global__ void bw(double *data_d, double *remote_d, volatile unsigned int *coun
             if (counter == (gridDim.x * (i + 1) - 1)) {
                 *(counter_d + 1) += 1;
             }
-            while (*(counter_d + 1) != i + 1)
-                ;
+            while (*(counter_d + 1) != i + 1);
         }
 
         __syncthreads();
@@ -61,8 +60,7 @@ __global__ void bw(double *data_d, double *remote_d, volatile unsigned int *coun
             nvshmem_quiet();
             *(counter_d + 1) += 1;
         }
-        while (*(counter_d + 1) != i + 1)
-            ;
+        while (*(counter_d + 1) != i + 1);
     }
 }
 

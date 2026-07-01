@@ -79,8 +79,8 @@
 
 // Helper functions
 
-__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE CONSTANT_ADDRESS_SPACE
-    nvshmemi_gpunetio_device_state_t *
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE
+    CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *
     gdaki_get_state() {
     return &nvshmemi_gpunetio_device_state_d;
 }
@@ -122,8 +122,7 @@ gdaki_reserve_ibuf_slots(nvshmemi_gpunetio_device_qp_t *qp, unsigned long long i
         idx -
             doca_gpu_dev_verbs_atomic_read<uint64_t, DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
                 &mvars->ibuf.tail) >
-        nslots)
-        ;
+        nslots);
 
     // Prevent the reordering of the above wait loop.
     gdaki_mfence();
@@ -139,8 +138,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_release_ibuf
     gdaki_mfence();
     // Wait here.
     while (atomicCAS((unsigned long long int *)&mvars->ibuf.tail, (unsigned long long int)base_idx,
-                     new_idx) != base_idx)
-        ;
+                     new_idx) != base_idx);
     gdaki_mfence();
 }
 
