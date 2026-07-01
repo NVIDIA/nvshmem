@@ -257,6 +257,9 @@ struct nvshmemt_ib_hca_filter {
 int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
                                         const struct nvshmemt_ib_common_state &state);
 
+nvshmem_transport_device_assignment_mode_t nvshmemt_ib_common_device_assignment_mode(
+    const struct nvshmemt_ib_hca_filter &filter);
+
 void nvshmemt_ib_common_warn_missing_hcas(const struct nvshmemt_ib_hca_filter &filter);
 
 void nvshmemt_ib_common_log_device_assignment(const struct nvshmemt_ib_common_state &state);

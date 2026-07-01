@@ -50,6 +50,39 @@ static void nvshmemi_transport_lib_fini_wrapper(void) {
 #endif
 }
 
+static const char *nvshmemi_device_assignment_mode_name(
+    nvshmem_transport_device_assignment_mode_t assignment_mode) {
+    switch (assignment_mode) {
+        case NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST:
+            return "NVSHMEM_HCA_LIST";
+        case NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING:
+            return "NVSHMEM_HCA_PE_MAPPING";
+        case NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_DEFAULT:
+        default:
+            return "DEFAULT";
+    }
+}
+
+static int nvshmemi_get_device_block(int device_count, int entity_count, int entity_index,
+                                     int *start, int *count) {
+    if (!start || !count) return NVSHMEMX_ERROR_INVALID_VALUE;
+
+    *start = -1;
+    *count = 0;
+
+    if (device_count <= 0 || entity_count <= 0 || entity_index < 0 ||
+        entity_index >= entity_count) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    int block_count = device_count / entity_count;
+    int remainder = device_count % entity_count;
+    *start = entity_index * block_count + (entity_index < remainder ? entity_index : remainder);
+    *count = block_count + (entity_index < remainder ? 1 : 0);
+
+    return NVSHMEMX_SUCCESS;
+}
+
 int nvshmemi_transport_show_info(nvshmemi_state_t *state) {
     int status = 0;
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
@@ -368,34 +401,104 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
             continue;
         }
 
+        bool explicit_hca_assignment =
+            tcurr->device_assignment_mode != NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_DEFAULT;
         int assignment_entity_count = nvshmemi_get_netdevs_policy_entity_count(state);
-        int devices_temp = tcurr->n_devices / assignment_entity_count;
-        if (devices_temp == 0) devices_temp = 1;
-        const int max_devices_per_pe = devices_temp;
-        std::vector<int> selected_devices(max_devices_per_pe);
+        int max_devices_per_pe = tcurr->n_devices / assignment_entity_count;
+
+        if (nvshmemi_options.ENABLE_NIC_PE_MAPPING && explicit_hca_assignment) {
+            assignment_entity_count = state->npes_node > 0 ? state->npes_node : 1;
+            max_devices_per_pe = (tcurr->n_devices + assignment_entity_count - 1) /
+                                 assignment_entity_count;
+        }
+
+        if (max_devices_per_pe == 0) max_devices_per_pe = 1;
+
+        std::vector<int> selected_devices(max_devices_per_pe, -1);
         int found_devices = 0;
 
-        for (int j = 0; j < max_devices_per_pe; j++) {
-            selected_devices[j] = -1;
+        if (nvshmemi_options.ENABLE_NIC_PE_MAPPING && explicit_hca_assignment &&
+            tcurr->n_devices <= 0) {
+            NVSHMEMI_ERROR_JMP(
+                current_status, NVSHMEMX_ERROR_INVALID_VALUE, handle_transport_error,
+                "%s resolved no HCA slots; cannot apply explicit HCA PE mapping.\n",
+                nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode));
         }
 
         // assumes symmetry of transport list at all PEs
-        if (tcurr->n_devices <= 1) {
-            /* return the index of the first available device.
-             * -1 if no devices found.
-             */
-            selected_devices[0] = tcurr->n_devices - 1;
+        if (tcurr->n_devices == 0) {
+            INFO(NVSHMEM_INIT, "Transport manages device selection internally.");
+        } else if (tcurr->n_devices == 1) {
+            /* return the index of the only available device. */
+            selected_devices[0] = 0;
             found_devices++;
         } else if (nvshmemi_options.ENABLE_NIC_PE_MAPPING) {
-            selected_devices[0] =
-                nvshmemi_state->mype_node % (tcurr->n_devices > 0 ? tcurr->n_devices : 1);
-            INFO(NVSHMEM_INIT, "NVSHMEM_ENABLE_NIC_PE_MAPPING = 1, setting dev_id = %d",
-                 selected_devices[0]);
-            found_devices++;
+            if (explicit_hca_assignment) {
+                int entity_count = state->npes_node > 0 ? state->npes_node : 1;
+                int entity_index = state->mype_node;
+                int block_start = -1;
+                int block_count = 0;
+
+                if (entity_index < 0 || entity_index >= entity_count) {
+                    NVSHMEMI_ERROR_JMP(
+                        current_status, NVSHMEMX_ERROR_INVALID_VALUE, handle_transport_error,
+                        "Invalid local PE index %d for explicit HCA assignment entity count %d.\n",
+                        entity_index, entity_count);
+                }
+
+                bool use_block =
+                    (tcurr->device_assignment_mode ==
+                         NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST &&
+                     tcurr->n_devices >= entity_count) ||
+                    (tcurr->device_assignment_mode ==
+                         NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING &&
+                     tcurr->n_devices > entity_count);
+                if (use_block) {
+                    int block_devices = tcurr->n_devices;
+                    if (tcurr->device_assignment_mode ==
+                        NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST) {
+                        int ignored_devices = tcurr->n_devices % entity_count;
+                        block_devices = tcurr->n_devices - ignored_devices;
+                        if (ignored_devices > 0) {
+                            WARN("%s has %d HCA slot(s), which does not divide cleanly across %d "
+                                 "local PE(s); ignoring the trailing %d slot(s).",
+                                 nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode),
+                                 tcurr->n_devices, entity_count, ignored_devices);
+                        }
+                    }
+                    current_status = nvshmemi_get_device_block(
+                        block_devices, entity_count, entity_index, &block_start, &block_count);
+                    NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INVALID_VALUE,
+                                          handle_transport_error,
+                                          "Failed to select HCA BLOCK range.\n");
+                    for (int j = 0; j < block_count; j++) {
+                        selected_devices[j] = block_start + j;
+                    }
+                    found_devices = block_count;
+                } else {
+                    selected_devices[0] = entity_index % tcurr->n_devices;
+                    found_devices = 1;
+                }
+
+                INFO(NVSHMEM_INIT,
+                     "%s selected %d logical HCA slot(s) for local PE %d",
+                     nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode),
+                     found_devices, entity_index);
+                for (int j = 0; j < found_devices; j++) {
+                    INFO(NVSHMEM_INIT, "%s connection slot %d uses dev_id = %d",
+                         nvshmemi_device_assignment_mode_name(tcurr->device_assignment_mode), j,
+                         selected_devices[j]);
+                }
+            } else {
+                selected_devices[0] =
+                    nvshmemi_state->mype_node % (tcurr->n_devices > 0 ? tcurr->n_devices : 1);
+                INFO(NVSHMEM_INIT, "NVSHMEM_ENABLE_NIC_PE_MAPPING = 1, setting dev_id = %d",
+                     selected_devices[0]);
+                found_devices++;
+            }
         } else {
             current_status =
-                nvshmemi_get_devices_by_distance(selected_devices.data(), max_devices_per_pe,
-                                                 tcurr);
+                nvshmemi_get_devices_by_distance(selected_devices.data(), max_devices_per_pe, tcurr);
             NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                                   "get devices by distance failed \n");
             for (int i = 0; i < max_devices_per_pe; i++) {
@@ -417,9 +520,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                                "No devices selected.\n");
         }
 
-        current_status =
-            tcurr->host_ops.connect_endpoints(tcurr, selected_devices.data(), found_devices, NULL,
-                                              0);
+        current_status = tcurr->host_ops.connect_endpoints(
+            tcurr, found_devices > 0 ? selected_devices.data() : NULL, found_devices, NULL, 0);
         NVSHMEMI_NZ_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                               "connect EPS failed \n");
 

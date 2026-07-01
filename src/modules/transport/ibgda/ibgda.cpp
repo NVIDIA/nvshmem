@@ -298,6 +298,7 @@ typedef struct {
     struct nvshmemt_ib_common_state common;
     nvshmemt_ibgda_device_state_cache_t device_state_cache;
     int *selected_dev_ids;
+    int *selected_port_ids;
     int n_devs_selected;
     bool cuda_support_dmabuf;
     bool dmabuf_support_for_data_buffers;
@@ -4054,7 +4055,6 @@ static bool ibgda_cst_is_required(struct ibgda_device *device, CUdevice dev_id) 
  * CONNECTION ENDPOINTS HELPER FUNCTIONS (CACHED VERSIONS)
  * ============================================================================= */
 
-// Phase 1: One-time global setup
 static int ibgda_connect_global_setup(nvshmemt_ibgda_state_t *ibgda_state, int num_selected_devs,
                                       int *selected_dev_ids) {
     int status = 0;
@@ -4064,21 +4064,42 @@ static int ibgda_connect_global_setup(nvshmemt_ibgda_state_t *ibgda_state, int n
                                               &ibgda_state->cached_mtpb, &ibgda_state->cached_mpc);
     if (status) return status;
 
+    if (num_selected_devs <= 0 || selected_dev_ids == NULL) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
     // Allocate global structs if not already done
     if (!ibgda_state->selected_dev_ids) {
-        ibgda_state->selected_dev_ids = (int *)calloc(num_selected_devs, sizeof(*selected_dev_ids));
+        ibgda_state->selected_dev_ids =
+            (int *)calloc(num_selected_devs, sizeof(*ibgda_state->selected_dev_ids));
         if (!ibgda_state->selected_dev_ids) {
             return NVSHMEMX_ERROR_OUT_OF_MEMORY;
         }
     }
 
-    // Validate device IDs
+    if (!ibgda_state->selected_port_ids) {
+        ibgda_state->selected_port_ids =
+            (int *)calloc(num_selected_devs, sizeof(*ibgda_state->selected_port_ids));
+        if (!ibgda_state->selected_port_ids) {
+            free(ibgda_state->selected_dev_ids);
+            ibgda_state->selected_dev_ids = NULL;
+            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+        }
+    }
+
+    // Validate selected logical slot IDs and preserve duplicates from HCA_PE_MAPPING counts.
     for (int i = 0; i < num_selected_devs; i++) {
         if (selected_dev_ids[i] < 0 || selected_dev_ids[i] >= ibgda_state->common.n_dev_ids) {
             NVSHMEMI_ERROR_PRINT("Invalid device ID %d.\n", selected_dev_ids[i]);
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
-        ibgda_state->selected_dev_ids[i] = ibgda_state->common.dev_ids[selected_dev_ids[i]];
+        int dev_id = ibgda_state->common.dev_ids[selected_dev_ids[i]];
+        if (dev_id < 0 || dev_id >= MAX_NUM_HCAS) {
+            NVSHMEMI_ERROR_PRINT("Invalid raw device ID %d.\n", dev_id);
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+        }
+        ibgda_state->selected_dev_ids[i] = dev_id;
+        ibgda_state->selected_port_ids[i] = ibgda_state->common.port_ids[selected_dev_ids[i]];
     }
 
     ibgda_state->n_devs_selected = num_selected_devs;
@@ -4214,7 +4235,7 @@ static int ibgda_connect_rc_only(nvshmemt_ibgda_state_t *ibgda_state, nvshmem_tr
         out_qp_indices[i] = ibgda_state->cur_qp_index;
         selected_dev_idx = ibgda_state->last_device_index % ibgda_state->n_devs_selected;
         dev_idx = ibgda_state->selected_dev_ids[selected_dev_idx];
-        portid = ibgda_state->common.port_ids[selected_dev_idx];
+        portid = ibgda_state->selected_port_ids[selected_dev_idx];
         device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
 
         status = ibgda_setup_rc_endpoints(ibgda_state, device, portid, t, 1);
@@ -4268,12 +4289,18 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     // Phase 2-4: Per-device processing (cached per device)
     int init_dev_cnt = 0;
     int n_pes = t->n_pes;
-    for (int i = 0; i < num_selected_devs; i++) {
-        int dev_idx = ibgda_state->common.dev_ids[selected_dev_ids[i]];
+    bool initialized_devices[MAX_NUM_HCAS] = {};
+    for (int i = 0; i < ibgda_state->n_devs_selected; i++) {
+        int dev_idx = ibgda_state->selected_dev_ids[i];
         struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
-        int portid = ibgda_state->common.port_ids[selected_dev_ids[i]];
+        int portid = ibgda_state->selected_port_ids[i];
 
-        // Only process if not already done for this device
+        // Only initialize each raw device once; duplicate logical slots still weight GPU state.
+        if (initialized_devices[dev_idx]) {
+            continue;
+        }
+        initialized_devices[dev_idx] = true;
+
         status = ibgda_connect_device_calculations(ibgda_state, device, n_pes);
         if (status) return status;
 
@@ -4291,8 +4318,8 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
         ibgda_state->skip_cst = false;
     }
 
-    // Set all device support_half_av_seg
-    for (int i = 0; i < init_dev_cnt; i++) {
+    // Set support_half_av_seg for all selected logical slots.
+    for (int i = 0; i < ibgda_state->n_devs_selected; i++) {
         int curr_dev_id = ibgda_state->selected_dev_ids[i];
         struct ibgda_device *device =
             (struct ibgda_device *)ibgda_state->common.devices + curr_dev_id;
@@ -4302,10 +4329,6 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     // Phase 5: GPU setup (only once)
     status = ibgda_setup_gpu_state(t);
     if (status) return status;
-
-    if (init_dev_cnt < num_selected_devs) {
-        NVSHMEMI_WARN_PRINT("Failed to initialize all selected devices. Perf may be limited.");
-    }
 
     // Mark that first call is complete
     ibgda_state->connect_endpoints_first_call = false;
@@ -4323,6 +4346,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     int n_pes = transport->n_pes;
     int mype = transport->my_pe;
     int num_rc_eps;
+    bool device_finalized[MAX_NUM_HCAS] = {};
 
     if (!ibgda_state) {
         goto out;
@@ -4386,8 +4410,11 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     /* Free all devices, not just ones we used. */
     for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
-        device =
-            (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
+        dev_id = ibgda_state->common.dev_ids[i];
+        if (dev_id < 0 || dev_id >= MAX_NUM_HCAS || device_finalized[dev_id]) continue;
+        device_finalized[dev_id] = true;
+
+        device = (struct ibgda_device *)ibgda_state->common.devices + dev_id;
         if (device->common_device.pd) {
             status = ftable.dealloc_pd(device->common_device.pd);
             // NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed
@@ -4428,6 +4455,8 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     free(ibgda_state->selected_dev_ids);
     ibgda_state->selected_dev_ids = NULL;
+    free(ibgda_state->selected_port_ids);
+    ibgda_state->selected_port_ids = NULL;
 
     free(ibgda_state->device_state_cache->dct_h);
     free(ibgda_state->device_state_cache->dci_h);
@@ -4851,6 +4880,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = nvshmemt_ib_common_parse_hca_filter(hca_filter, ibgda_state->common);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "HCA filter parsing failed.\n");
+    transport->device_assignment_mode = nvshmemt_ib_common_device_assignment_mode(hca_filter);
 
     nic_mapping_memtype_request =
         ibgda_parse_nic_mapping_memtype_request(options->IBGDA_FORCE_NIC_BUF_MEMTYPE);

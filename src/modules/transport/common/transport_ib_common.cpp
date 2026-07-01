@@ -1070,6 +1070,14 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
     return 0;
 }
 
+nvshmem_transport_device_assignment_mode_t nvshmemt_ib_common_device_assignment_mode(
+    const struct nvshmemt_ib_hca_filter &filter) {
+    return filter.hca_list_count > 0
+               ? NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST
+               : filter.pe_hca_map_count > 0 ? NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING
+                                             : NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_DEFAULT;
+}
+
 void nvshmemt_ib_common_warn_missing_hcas(const struct nvshmemt_ib_hca_filter &filter) {
     if (filter.hca_list_count) {
         for (int j = 0; j < filter.hca_list_count; j++) {

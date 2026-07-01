@@ -903,8 +903,12 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     connected_qp_count = 0;
 
     if (state->devices) {
+        bool device_finalized[MAX_NUM_HCAS] = {};
         for (int i = 0; i < state->n_dev_ids; i++) {
             int dev_id = state->dev_ids[i];
+            if (dev_id < 0 || dev_id >= MAX_NUM_HCAS || device_finalized[dev_id]) continue;
+            device_finalized[dev_id] = true;
+
             if (((struct ibrc_device *)state->devices)[dev_id].bpool_mr) {
                 status = ftable.dereg_mr(((struct ibrc_device *)state->devices)[dev_id].bpool_mr);
                 NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1749,6 +1753,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = nvshmemt_ib_common_parse_hca_filter(hca_filter, *ibrc_state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "HCA filter parsing failed.\n");
+    transport->device_assignment_mode = nvshmemt_ib_common_device_assignment_mode(hca_filter);
 
     status = nvshmemt_ib_common_enumerate_devices(&ftable, *ibrc_state, sizeof(struct ibrc_device),
                                                   hca_filter, dev_list, num_devices);

@@ -1249,6 +1249,7 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     temp_state.log_level = log_level;
     status = nvshmemt_ib_common_parse_hca_filter(hca_filter, temp_state);
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE, "HCA filter parsing failed.\n");
+    transport->device_assignment_mode = nvshmemt_ib_common_device_assignment_mode(hca_filter);
 
     struct nvshmemt_ib_common_device common_devs[MAX_NUM_HCAS] = {};
     int temp_dev_ids[MAX_NUM_PES_PER_NODE];

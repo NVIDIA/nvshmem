@@ -68,6 +68,13 @@ typedef enum {
 } nvshmem_transport_inline_lib_code_type_t;
 
 typedef enum {
+    NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_DEFAULT = 0,
+    NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST,
+    NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING,
+    NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_MAX = INT_MAX,
+} nvshmem_transport_device_assignment_mode_t;
+
+typedef enum {
     NVSHMEM_TRANSPORT_OP_FLAG_NONE = 0,
     /*
      * Advisory only: this operation is not the terminal operation in a compatible
@@ -212,6 +219,7 @@ typedef struct nvshmem_transport {
     std::unordered_map<void *, size_t> *egm_map;
     /* APIs */
     struct nvshmem_transport_host_ops host_ops;
+    nvshmem_transport_device_assignment_mode_t device_assignment_mode;
 } nvshmem_transport_v2;
 
 typedef nvshmem_transport_v2 *nvshmem_transport_t;
