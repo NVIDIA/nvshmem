@@ -548,8 +548,30 @@ std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> gpunetio_ep::make(
 
 int gpunetio_ep::connect(nvshmemt_gpunetio_state_t *gpunetio_state,
                          gpunetio_exch_info *remote_exch_info) {
+    const struct ibv_port_attr *port_attr = device_->common_device.port_attr + (portid - 1);
+    uint16_t dlid = remote_exch_info->lid;
+
+    if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        const struct nvshmemt_ib_qp_path path = nvshmemt_ib_select_qp_path(
+            &device_->common_device.gid_info[portid - 1].local_gid, port_attr->lid,
+            remote_exch_info->lid, remote_exch_info->gid.global.subnet_prefix,
+            remote_exch_info->gid.global.interface_id);
+        const bool use_ib_grh = gpunetio_state->options->IB_FORCE_GRH ||
+                                nvshmemt_ib_common_port_requires_grh(port_attr) ||
+                                path.grh_required;
+
+        /* The AH is shared across endpoints, so set its address type for every peer. */
+        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(
+            device_->ah,
+            use_ib_grh ? DOCA_VERBS_ADDR_TYPE_IB_GRH : DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
+        if (use_ib_grh) {
+            DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(device_->ah, GPUNETIO_QP_HOP_LIMIT));
+        }
+        dlid = path.dlid;
+    }
+
     DOCA_CHECK(doca_verbs_ah_attr_set_gid(device_->ah, remote_exch_info->vgid));
-    DOCA_CHECK(doca_verbs_ah_attr_set_dlid(device_->ah, remote_exch_info->lid));
+    DOCA_CHECK(doca_verbs_ah_attr_set_dlid(device_->ah, dlid));
 
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
     int rc = device_->create_qp_attr(&verbs_qp_attr, remote_exch_info->qpn, portid);
