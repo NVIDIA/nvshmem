@@ -127,12 +127,8 @@ settings.
 - CUDA-Oxide is experimental, and its local crate layout is part of the current
   test integration. The generated runtime Cargo manifest is therefore a
   build-tree artifact tied to the configured CUDA-Oxide checkout.
-- Multi-PE execution requires a compatible NVSHMEM launcher, host library, and
-  device LTOIR built from the same NVSHMEM revision.
-- The original prototype carried NVSHMEM host-initialization fixes for external
-  CUDA modules and nonzero local GPU ordinals. Those core changes are not part
-  of this self-contained contribution and must be upstreamed separately before
-  those configurations are supported.
+- Cross-version compatibility is not supported. The bindings, host library,
+  and device LTOIR must be generated or built from the same NVSHMEM revision.
 
 ## Maintainers
 
