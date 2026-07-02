@@ -1,0 +1,5 @@
+/build/
+/generated/
+/externals/
+**/__pycache__/
+**/target/

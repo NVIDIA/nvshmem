@@ -1,0 +1,35 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+Name: NVSHMEM Rust Host Bindings
+Version: {{CONFIG_VERSION}}
+Entry Point: {{ENTRY_POINT_PATH}}
+# The list of files from which host APIs are allow-listed.
+File List:
+    - {{NVSHMEM_INCLUDE_DIR}}/host/nvshmem_api.h
+    - {{NVSHMEM_INCLUDE_DIR}}/host/nvshmemx_api.h
+    - {{NVSHMEM_INCLUDE_DIR}}/host/nvshmem_coll_api.h
+    - {{NVSHMEM_INCLUDE_DIR}}/host/nvshmemx_coll_api.h
+
+GPU Arch:
+  - {{GPU_ARCH}}
+
+CUDA Toolkit Include Paths:
+{% if CUDA_INCLUDE_PATH %}
+  - {{CUDA_INCLUDE_PATH}}
+{% endif %}
+{% if CUDA13_CCCL_INCLUDE_PATH %}
+  - {{CUDA13_CCCL_INCLUDE_PATH}}
+{% endif %}
+
+Clang Include Paths:
+  - {{NVSHMEM_INCLUDE_DIR}}
+
+Macro-expanded Function Prefixes:
+  - nvshmem_
+  - nvshmemx_
+
+Predefined Macros:
+  - NVSHMEM_HOSTLIB_ONLY
+
+Output Name: {{OUTPUT_NAME}}

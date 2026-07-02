@@ -1,0 +1,13 @@
+[package]
+name = "nvshmem"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+name = "nvshmem"
+path = "src/lib.rs"
+
+[dependencies]
+cuda-core = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-core" }
+libloading = "0.8"

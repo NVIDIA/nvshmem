@@ -1,0 +1,35 @@
+nvshmem4rust uses the following third-party projects at build or test time.
+Their source code is not vendored in this directory.
+
+Numbast and AST Canopy
+  Source: https://github.com/NVIDIA/numbast
+  License: Apache License 2.0
+  Use: Parse NVSHMEM C/CUDA headers for binding generation.
+
+Click
+  Source: https://github.com/pallets/click
+  License: BSD 3-Clause License
+  Use: Command-line parsing for the configuration generator.
+
+Jinja
+  Source: https://github.com/pallets/jinja
+  License: BSD 3-Clause License
+  Use: Render Numbast configuration files.
+
+PyYAML
+  Source: https://github.com/yaml/pyyaml
+  License: MIT License
+  Use: Read the generated binding configuration.
+
+CUDA-Oxide
+  Source: https://github.com/NVlabs/cuda-oxide
+  License: Apache License 2.0
+  Use: Compile and run the optional Rust CUDA tests.
+
+libloading
+  Source: https://github.com/nagisa/rust_libloading
+  License: ISC License
+  Use: Load libnvshmem_host with global symbol visibility.
+
+Additional transitive Python and Rust dependencies are installed by pip or
+Cargo and remain subject to the licenses distributed with those packages.

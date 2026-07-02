@@ -1,0 +1,15 @@
+[package]
+name = "nvshmem_cuda_oxide_smoke"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+cuda-core = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-core" }
+cuda-device = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-device" }
+cuda-host = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-host" }
+libnvvm-sys = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/libnvvm-sys" }
+nvjitlink-sys = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/nvjitlink-sys" }
+nvshmem = { path = "../nvshmem_host_runtime" }

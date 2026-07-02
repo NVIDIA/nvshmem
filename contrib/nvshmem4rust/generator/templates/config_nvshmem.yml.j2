@@ -1,0 +1,35 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+Name: NVSHMEM CUDA-Oxide Rust Device Bindings
+Version: {{CONFIG_VERSION}}
+Entry Point: {{ENTRY_POINT_PATH}}
+# The list of files from which APIs are allow-listed.
+File List:
+    - {{NVSHMEM_INCLUDE_DIR}}/device/nvshmem_coll_defines.cuh
+    - {{NVSHMEM_INCLUDE_DIR}}/device/nvshmem_defines.h
+    - {{NVSHMEM_INCLUDE_DIR}}/device/nvshmemx_coll_defines.cuh
+    - {{NVSHMEM_INCLUDE_DIR}}/device/nvshmemx_defines.h
+
+GPU Arch:
+  - {{GPU_ARCH}}
+
+CUDA Toolkit Include Paths:
+{% if CUDA_INCLUDE_PATH %}
+  - {{CUDA_INCLUDE_PATH}}
+{% endif %}
+{% if CUDA13_CCCL_INCLUDE_PATH %}
+  - {{CUDA13_CCCL_INCLUDE_PATH}}
+{% endif %}
+
+Clang Include Paths:
+  - {{NVSHMEM_INCLUDE_DIR}}
+
+Macro-expanded Function Prefixes:
+  - nvshmem_
+  - nvshmemx_
+
+Predefined Macros:
+  - NVSHMEM_BUILD_LTOIR_LIBRARY
+
+Output Name: {{OUTPUT_NAME}}
