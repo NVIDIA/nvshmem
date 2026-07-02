@@ -230,8 +230,9 @@ pip install "cuda-python>=${CUDA_MAJOR}.0,<${CUDA_NEXT_MAJOR}.0"
 pip install mpi4py --no-binary mpi4py
 pip install cupy-cuda${CUDA_MAJOR}x
 pip install cffi
+NUMBA_SPEC="${NUMBA_SPEC:-numba<0.66}"
 NUMBA_CUDA_SPEC="${NUMBA_CUDA_SPEC:-numba-cuda[cu${CUDA_MAJOR}]>=0.28.0}"
-pip install "$NUMBA_CUDA_SPEC"
+pip install "$NUMBA_SPEC" "$NUMBA_CUDA_SPEC"
 pip install "cuda.core>=0.5.0"
 # Keep PyTorch and the CUDA component wheels on the same CUDA minor version
 # as the toolkit used to build the NVSHMEM bitcode.  Mixing CUDA 12.8 toolkit

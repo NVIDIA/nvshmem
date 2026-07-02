@@ -3,6 +3,7 @@
 networkx
 numpy<=2.3; python_version < "3.14"
 numpy>=2.3.3,<3; python_version >= "3.14"
+numba<0.66
 pycparser
 build
 Cython>=0.29.24

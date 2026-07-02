@@ -68,6 +68,7 @@ dev = [
     "isort",
 ]
 numba = [
+    "numba<0.66",
     "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.28.0",
 ]
 cute = [
