@@ -1516,12 +1516,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     uint32_t curr_buf_idx = 0;
     uint32_t byte_offset_src = 0;
     uint32_t byte_offset_dst = 0;
-    uint32_t pending_bytes_copy = 0;
     // Each active warp owns one data chunk per stage and one barrier slot per stage.
     uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES;
     /* One-shot keeps two SMEM stages so its S2G TMA copy can overlap the next
-     * pull-reduce.  Two-shot staging is optimized separately. */
-    size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+     * pull-reduce.  Two-shot must wait for fabric to consume the put source
+     * before that storage can be overwritten, so use the full data region as
+     * one larger buffer. */
+    constexpr size_t num_data_buffers = ONESHOT ? TMA_COPY_NUM_STAGES : 1;
+    size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(num_data_buffers);
     size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
     max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
 
@@ -1536,12 +1538,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
 
     /* Every warp-scope group in a block shares the registered SMEM region, so
-     * partition each one-shot stage by physical block warps rather than by
-     * warps in the calling scope. */
+     * partition each stage or full single buffer by physical block warps rather
+     * than by warps in the calling scope. */
     uint32_t threads_in_block = blockDim.x * blockDim.y * blockDim.z;
     uint32_t warps_in_block = (threads_in_block + static_cast<uint32_t>(warpSize) - 1) / warpSize;
-    size_t one_shot_chunk_size = nvshmemi_tma_align_down_16(smem_data_buf_size / warps_in_block);
-    size_t handle_chunk_size = ONESHOT ? one_shot_chunk_size : NVSHMEMI_SMEM_BUF_SIZE;
+    size_t handle_chunk_size = nvshmemi_tma_align_down_16(smem_data_buf_size / warps_in_block);
     assert(handle_chunk_size >= CFT_HANDLE_TX_SIZE);
     assert(handle_chunk_size * warps_in_block <= smem_data_buf_size);
 
@@ -1572,15 +1573,31 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
                            (warp_idx_in_block * handle_chunk_size);
-        smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           smem_data_buf_size + (warp_idx_in_block * handle_chunk_size);
+        if constexpr (ONESHOT) {
+            smem_data_buf[1] =
+                reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
+                smem_data_buf_size + (warp_idx_in_block * handle_chunk_size);
+        } else {
+            // Preserve the common loop structure while using one larger buffer.
+            smem_data_buf[1] = smem_data_buf[0];
+        }
 
-        handle_barrier_t *handle_bar =
+        handle_barrier_t *pullred_bar =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+        handle_barrier_t *put_bar = nullptr;
 
-        // Only lane 0 prepares the shared per-warp barrier.
+        // Only lane 0 prepares each barrier.  Two-shot tracks pull-reduce and
+        // multicast-put completion independently so puts can remain globally
+        // outstanding while the next pull-reduce is in progress.
         if (myIdx % warpSize == 0) {
-            handle_bar->prepare_handle(warp_idx_in_block);
+            pullred_bar->prepare_handle(warp_idx_in_block);
+        }
+        if constexpr (!ONESHOT) {
+            put_bar = nvshmemi_handle_barrier_slot(tma_smem_base,
+                                                   warp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
+            if (myIdx % warpSize == 0) {
+                put_bar->prepare_handle(warp_idx_in_block);
+            }
         }
 
         __syncwarp();
@@ -1588,7 +1605,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         // perform pullred and get data into curr_idx buffer
         nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
                                                       smem_data_buf[curr_buf_idx], copy_bytes,
-                                                      handle_bar);
+                                                      pullred_bar);
         byte_offset_src += copy_bytes;
 
         while (byte_offset_src < bytes_per_warp) {
@@ -1612,18 +1629,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                         nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
                             mc_le_id, (char *)dst_ptr + start_offset_warp);
                     nvshmemi_try_put_wrapper_thread<le_fabric_handle_kind::Multicast>(
-                        myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, handle_bar,
-                        copy_bytes, &pending_bytes_copy);
+                        myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, put_bar,
+                        copy_bytes);
                     byte_offset_dst += copy_bytes;
-                    pending_bytes_copy += copy_bytes;
 
-                    /* We use 1 handle barrier for both pullred and try_put multimem
-                     * so we wait till the entire mbarrier is done and we can reinit the
-                     * arrival count
-                     */
-                    uint64_t curr_state = handle_bar->arrive_relaxed(pending_bytes_copy);
-                    handle_bar->try_wait_token(curr_state);
-                    pending_bytes_copy = 0;
+                    /* The next pull-reduce may proceed once fabric has consumed
+                     * the shared-memory source.  Global put completion is drained
+                     * once at the end (or by the wrapper at its batch limit). */
+                    put_bar->fabric_wait_sync_reads();
                 }
             }
 
@@ -1635,7 +1648,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
             // copy next chunk of data from peer global to shared memory
             nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
                                                           smem_data_buf[curr_buf_idx ^ 1],
-                                                          copy_bytes, handle_bar);
+                                                          copy_bytes, pullred_bar);
             byte_offset_src += copy_bytes;
             curr_buf_idx ^= 1;
         }
@@ -1658,20 +1671,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                     nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
                         mc_le_id, (char *)dst_ptr + start_offset_warp);
                 nvshmemi_try_put_wrapper_thread<le_fabric_handle_kind::Multicast>(
-                    myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, handle_bar,
-                    copy_bytes, &pending_bytes_copy);
+                    myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, put_bar,
+                    copy_bytes);
                 byte_offset_dst += copy_bytes;
-                pending_bytes_copy += copy_bytes;
 
-                /* We use 1 handle barrier for both pullred and try_put multimem
-                 * so we wait till the entire mbarrier is done and we can reinit the
-                 * arrival count
-                 */
-                if (myIdx % warpSize == 0) {
-                    uint64_t curr_state = handle_bar->arrive_relaxed(pending_bytes_copy);
-                    handle_bar->try_wait_token(curr_state);
-                    pending_bytes_copy = 0;
-                }
+                put_bar->fabric_wait_sync_reads();
             }
         }
         // sync entire warp
@@ -1682,8 +1686,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         }
         assert(byte_offset_src == bytes_per_warp);
 
-        // invalidate the barrier
-        handle_bar->inval(myIdx);
+        if constexpr (!ONESHOT) {
+            if (myIdx % warpSize == 0) {
+                put_bar->drain_pending_handle(false);
+            }
+            put_bar->inval(myIdx);
+        }
+        pullred_bar->inval(myIdx);
     }
 }
 #endif
