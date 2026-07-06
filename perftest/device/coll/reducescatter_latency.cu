@@ -12,43 +12,43 @@
 extern "C" {
 #endif
 
-#define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                         \
-                                                                                                  \
-    void call_test_##TYPENAME##_##OP##_reducescatter_kern##TG##_cubin(                            \
-        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                       \
-        CUfunction test_##TYPENAME##_##OP##_reducescatter_kern##TG_cubin;                         \
-                                                                                                  \
-        init_test_case_kernel(                                                                    \
-            &test_##TYPENAME##_##OP##_reducescatter_kern##TG_cubin,                               \
-            NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_##OP##_reducescatter_kern##TG));            \
-        CU_CHECK(cuLaunchCooperativeKernel(test_##TYPENAME##_##OP##_reducescatter_kern##TG_cubin, \
-                                           num_blocks, 1, 1, num_tpb, 1, 1, 0, stream, arglist)); \
-    }                                                                                             \
-                                                                                                  \
-    __global__ void test_##TYPENAME##_##OP##_reducescatter_kern##TG(                              \
-        nvshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int iter) {              \
-        int i;                                                                                    \
-                                                                                                  \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {                 \
-            for (i = 0; i < iter; i++) {                                                          \
-                nvshmem##TG_PRE##_##TYPENAME##_##OP##_reducescatter##TG(team, dest, source,       \
-                                                                        nelems);                  \
-            }                                                                                     \
-        }                                                                                         \
+#define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                     \
+                                                                                              \
+    void call_test_##TYPENAME##_##OP##_reducescatter_kern##TG##_cubin(                        \
+        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                   \
+        CUfunction test_##TYPENAME##_##OP##_reducescatter_kern##TG_cubin;                     \
+                                                                                              \
+        init_test_case_kernel(                                                                \
+            &test_##TYPENAME##_##OP##_reducescatter_kern##TG_cubin,                           \
+            NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_##OP##_reducescatter_kern##TG));        \
+        size_t dynamic_smem_size = *reinterpret_cast<size_t *>(arglist[5]);                   \
+        NVSHMEM_PERF_CU_LAUNCH_COOP(test_##TYPENAME##_##OP##_reducescatter_kern##TG_cubin,    \
+                                    num_blocks, num_tpb, stream, arglist, dynamic_smem_size); \
+    }                                                                                         \
+                                                                                              \
+    __global__ void test_##TYPENAME##_##OP##_reducescatter_kern##TG(                          \
+        nvshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int iter,            \
+        size_t dynamic_smem_size) {                                                           \
+        int i;                                                                                \
+                                                                                              \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                            \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {             \
+            for (i = 0; i < iter; i++) {                                                      \
+                nvshmem##TG_PRE##_##TYPENAME##_##OP##_reducescatter##TG(team, dest, source,   \
+                                                                        nelems);              \
+            }                                                                                 \
+        }                                                                                     \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                         \
     }
 
-#define CALL_RDXN_KERNEL(TYPENAME, OP, TG, BLOCKS, THREADS, ARG_LIST, STREAM)                 \
-    if (use_cubin) {                                                                          \
-        call_test_##TYPENAME##_##OP##_reducescatter_kern##TG##_cubin(BLOCKS, THREADS, STREAM, \
-                                                                     ARG_LIST);               \
-    } else {                                                                                  \
-        status = nvshmemx_collective_launch(                                                  \
-            (const void *)test_##TYPENAME##_##OP##_reducescatter_kern##TG, BLOCKS, THREADS,   \
-            ARG_LIST, 0, STREAM);                                                             \
-        if (status != NVSHMEMX_SUCCESS) {                                                     \
-            fprintf(stderr, "shmemx_collective_launch failed %d \n", status);                 \
-            exit(-1);                                                                         \
-        }                                                                                     \
+#define CALL_RDXN_KERNEL(TYPENAME, OP, TG, BLOCKS, THREADS, ARG_LIST, STREAM)                   \
+    if (use_cubin) {                                                                            \
+        call_test_##TYPENAME##_##OP##_reducescatter_kern##TG##_cubin(BLOCKS, THREADS, STREAM,   \
+                                                                     ARG_LIST);                 \
+    } else {                                                                                    \
+        size_t dynamic_smem_size = *reinterpret_cast<size_t *>((ARG_LIST)[5]);                  \
+        NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_##TYPENAME##_##OP##_reducescatter_kern##TG, \
+                                       BLOCKS, THREADS, ARG_LIST, dynamic_smem_size, STREAM);   \
     }
 
 #define CALL_RDXN_OPS_ALL_TG(TYPENAME, TYPE)                     \
@@ -97,8 +97,8 @@ CALL_RDXN_OPS_ALL_TG(int64, int64_t)
 
 #define RUN_ITERS_OP(TYPENAME, TYPE, GROUP, OP, ELEM_COMP)                                       \
     do {                                                                                         \
-        void *skip_arg_list[] = {&team, &dest, &source, &num_elems, &skip};                      \
-        void *time_arg_list[] = {&team, &dest, &source, &num_elems, &iter};                      \
+        void *skip_arg_list[] = {&team, &dest, &source, &num_elems, &skip, &dynamic_smem_size};  \
+        void *time_arg_list[] = {&team, &dest, &source, &num_elems, &iter, &dynamic_smem_size};  \
         float milliseconds;                                                                      \
         cudaEvent_t start, stop;                                                                 \
         cudaEventCreate(&start);                                                                 \
@@ -145,6 +145,7 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
     size_t num_elems = 1, min_elems, max_elems;
     int iter = iters;
     int skip = warmup_iters;
+    size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
     int j;
     int npes = nvshmem_n_pes();
     uint64_t *size_arr = (uint64_t *)h_tables[0];

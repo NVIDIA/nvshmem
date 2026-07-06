@@ -11,39 +11,38 @@
 extern "C" {
 #endif
 
-#define SYNC_KERNEL(TG_PRE, THREADGROUP, THREAD_COMP, VARIANT, VARIANT_API, TEAM, TEAM_DELIM)      \
-    void test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP##_cubin(                   \
-        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                        \
-        CUfunction test_cubin;                                                                     \
-                                                                                                   \
-        init_test_case_kernel(                                                                     \
-            &test_cubin, NVSHMEMI_TEST_STRINGIFY(                                                  \
-                             test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP));     \
-        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, num_blocks, 1, 1, num_tpb, 1, 1, 0, stream, \
-                                           arglist));                                              \
-    }                                                                                              \
-                                                                                                   \
-    __global__ void test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP(                \
-        int iter, nvshmem_team_t team) {                                                           \
-        int i;                                                                                     \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                          \
-            for (i = 0; i < iter; i++) {                                                           \
-                nvshmem##TG_PRE##TEAM_DELIM##TEAM##_sync##VARIANT_API##THREADGROUP(TEAM);          \
-            }                                                                                      \
-        }                                                                                          \
+#define SYNC_KERNEL(TG_PRE, THREADGROUP, THREAD_COMP, VARIANT, VARIANT_API, TEAM, TEAM_DELIM)  \
+    void test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP##_cubin(               \
+        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist,                      \
+        size_t dynamic_smem_size) {                                                            \
+        CUfunction test_cubin;                                                                 \
+                                                                                               \
+        init_test_case_kernel(                                                                 \
+            &test_cubin, NVSHMEMI_TEST_STRINGIFY(                                              \
+                             test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP)); \
+        NVSHMEM_PERF_CU_LAUNCH_COOP(test_cubin, num_blocks, num_tpb, stream, arglist,          \
+                                    dynamic_smem_size);                                        \
+    }                                                                                          \
+                                                                                               \
+    __global__ void test_sync##TEAM_DELIM##TEAM##VARIANT##call_kernel##THREADGROUP(            \
+        int iter, nvshmem_team_t team, size_t dynamic_smem_size) {                             \
+        int i;                                                                                 \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                             \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                      \
+            for (i = 0; i < iter; i++) {                                                       \
+                nvshmem##TG_PRE##TEAM_DELIM##TEAM##_sync##VARIANT_API##THREADGROUP(TEAM);      \
+            }                                                                                  \
+        }                                                                                      \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                          \
     }
 
-#define CALL_SYNC_KERNEL(THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM, VARIANT)                  \
-    if (use_cubin) {                                                                               \
-        test_sync##VARIANT##call_kernel##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM, ARG_LIST);   \
-    } else {                                                                                       \
-        status =                                                                                   \
-            nvshmemx_collective_launch((const void *)test_sync##VARIANT##call_kernel##THREADGROUP, \
-                                       BLOCKS, THREADS, ARG_LIST, 0, STREAM);                      \
-        if (status != NVSHMEMX_SUCCESS) {                                                          \
-            fprintf(stderr, "shmemx_collective_launch failed %d \n", status);                      \
-            exit(-1);                                                                              \
-        }                                                                                          \
+#define CALL_SYNC_KERNEL(THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM, VARIANT)               \
+    if (use_cubin) {                                                                            \
+        test_sync##VARIANT##call_kernel##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM, ARG_LIST, \
+                                                             dynamic_smem_size);                \
+    } else {                                                                                    \
+        NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_sync##VARIANT##call_kernel##THREADGROUP,    \
+                                       BLOCKS, THREADS, ARG_LIST, dynamic_smem_size, STREAM);   \
     }
 
 SYNC_KERNEL(, , 1, _, , team, _);
@@ -63,6 +62,7 @@ int sync_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, void
     int nvshm_test_num_tpb = threads_per_block;
     int skip = warmup_iters;
     int iter = iters;
+    size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
     int num_blocks = 1;
     double *h_thread_lat = (double *)h_tables[0];
     double *h_warp_lat = (double *)h_tables[1];
@@ -72,10 +72,10 @@ int sync_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, void
 
     uint64_t tpb_size = (uint64_t)nvshm_test_num_tpb;
 
-    void *sync_args_1[] = {&skip, &team};
-    void *sync_args_2[] = {&iter, &team};
-    void *sync_all_args_1[] = {&skip};
-    void *sync_all_args_2[] = {&iter};
+    void *sync_args_1[] = {&skip, &team, &dynamic_smem_size};
+    void *sync_args_2[] = {&iter, &team, &dynamic_smem_size};
+    void *sync_all_args_1[] = {&skip, &team, &dynamic_smem_size};
+    void *sync_all_args_2[] = {&iter, &team, &dynamic_smem_size};
     float milliseconds;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);

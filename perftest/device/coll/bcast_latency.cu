@@ -15,15 +15,17 @@ extern "C" {
 #define CALL_BCAST(TYPENAME, TYPE, TG_PRE, THREADGROUP, THREAD_COMP, ELEM_COMP)                    \
     __global__ void test_##TYPENAME##_bcast_call_kern##THREADGROUP(                                \
         nvshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int mype, int PE_root,    \
-        int iter) {                                                                                \
+        int iter, size_t dynamic_smem_size) {                                                      \
         int i;                                                                                     \
                                                                                                    \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                                 \
         if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {                  \
             for (i = 0; i < iter; i++) {                                                           \
                 nvshmem##TG_PRE##_##TYPENAME##_broadcast##THREADGROUP(team, dest, source, nelems,  \
                                                                       PE_root);                    \
             }                                                                                      \
         }                                                                                          \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                              \
     }                                                                                              \
     void test_##TYPENAME##_bcast_call_kern##THREADGROUP##_cubin(                                   \
         int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                        \
@@ -31,21 +33,18 @@ extern "C" {
                                                                                                    \
         init_test_case_kernel(                                                                     \
             &test_cubin, NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_bcast_call_kern##THREADGROUP)); \
-        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, num_blocks, 1, 1, num_tpb, 1, 1, 0, stream, \
-                                           arglist));                                              \
+        size_t dynamic_smem_size = *reinterpret_cast<size_t *>(arglist[7]);                        \
+        NVSHMEM_PERF_CU_LAUNCH_COOP(test_cubin, num_blocks, num_tpb, stream, arglist,              \
+                                    dynamic_smem_size);                                            \
     }
 
 #define CALL_BCAST_KERNEL(TYPENAME, THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM)                \
     if (use_cubin) {                                                                               \
         test_##TYPENAME##_bcast_call_kern##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM, ARG_LIST); \
     } else {                                                                                       \
-        status = nvshmemx_collective_launch(                                                       \
-            (const void *)test_##TYPENAME##_bcast_call_kern##THREADGROUP, BLOCKS, THREADS,         \
-            ARG_LIST, 0, STREAM);                                                                  \
-        if (status != NVSHMEMX_SUCCESS) {                                                          \
-            fprintf(stderr, "shmemx_collective_launch failed %d \n", status);                      \
-            exit(-1);                                                                              \
-        }                                                                                          \
+        size_t dynamic_smem_size = *reinterpret_cast<size_t *>((ARG_LIST)[7]);                     \
+        NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_##TYPENAME##_bcast_call_kern##THREADGROUP,     \
+                                       BLOCKS, THREADS, ARG_LIST, dynamic_smem_size, STREAM);      \
     }
 
 CALL_BCAST(int32, int32_t, , , 1, 512);
@@ -69,6 +68,7 @@ int broadcast_calling_kernel(nvshmem_team_t team, void *dest, const void *source
     int thread_points, warp_points, block_points;
     int skip = warmup_iters;
     int iter = iters;
+    size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
     int npes = nvshmem_n_pes();
     uint64_t *h_size_array = (uint64_t *)h_tables[0];
     double *h_thread_lat = (double *)h_tables[1];
@@ -78,8 +78,10 @@ int broadcast_calling_kernel(nvshmem_team_t team, void *dest, const void *source
     std::vector<perf_stats_t> h_warp_stats(max_size_log);
     std::vector<perf_stats_t> h_block_stats(max_size_log);
     float milliseconds;
-    void *args_1[] = {&team, &dest, &source, &num_elems, &mype, &PE_root, &skip};
-    void *args_2[] = {&team, &dest, &source, &num_elems, &mype, &PE_root, &iter};
+    void *args_1[] = {&team, &dest,    &source, &num_elems,
+                      &mype, &PE_root, &skip,   &dynamic_smem_size};
+    void *args_2[] = {&team, &dest,    &source, &num_elems,
+                      &mype, &PE_root, &iter,   &dynamic_smem_size};
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
