@@ -73,6 +73,26 @@ int consume_cuda_runtime_error_for_failed_ipc(cudaError_t api_status, const char
     }
     return NVSHMEMX_SUCCESS;
 }
+
+bool is_node_local_pe(const nvshmemi_state_t *state, int pe_id) {
+    assert(pe_id >= 0 && pe_id < state->npes);
+    if (nvshmemi_host_hashes != nullptr) {
+        return nvshmemi_host_hashes[pe_id] == nvshmemi_host_hashes[state->mype];
+    }
+
+    return (pe_id / state->npes_node) == (state->mype / state->npes_node);
+}
+
+int node_local_index(const nvshmemi_state_t *state, int pe_id) {
+    assert(is_node_local_pe(state, pe_id));
+    if (nvshmemi_host_hashes == nullptr) return pe_id % state->npes_node;
+
+    int local_index = 0;
+    for (int i = 0; i < pe_id; i++) {
+        if (nvshmemi_host_hashes[i] == nvshmemi_host_hashes[pe_id]) local_index++;
+    }
+    return local_index;
+}
 }  // namespace
 
 static bool nvshmemi_should_process_nvls_team_pool_entry(size_t team_idx) {
@@ -1033,9 +1053,10 @@ int nvshmemi_symmetric_heap_sysmem_static_shm::map_heap_range_by_pe(int pe_id,
                                                                     size_t /*size*/) {
     nvshmemi_state_t *state = get_state();
     if (empty_heap_handle_cache()) {
+        if (!is_node_local_pe(state, pe_id)) return NVSHMEMX_ERROR_INVALID_VALUE;
         peer_heap_base_p2p_[state->mype] = heap_base_;
         peer_heap_base_p2p_[pe_id] =
-            (char *)global_heap_base_ + (pe_id % state->npes_node) * heap_size_;
+            (char *)global_heap_base_ + node_local_index(state, pe_id) * heap_size_;
     }
 
     return (0); /* This is a NOOP for sysmem shared memory as it is already mmap during allocation
