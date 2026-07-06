@@ -2028,25 +2028,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tma_s2g_copy_thread(int m
 template <le_fabric_handle_kind cft_handle_kind>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_put_wrapper_thread(
     int myIdx, const void *smem_buf, nvshmemi_fabric_handle<cft_handle_kind> dst_handle,
-    size_t byte_offset_dst, handle_barrier_t *handle_bar, uint32_t copy_bytes,
-    uint32_t *pending_copy_bytes = nullptr) {
+    size_t byte_offset_dst, handle_barrier_t *handle_bar, uint32_t copy_bytes) {
     if ((myIdx % warpSize) == 0) {
-        if (pending_copy_bytes) {
-            if (*pending_copy_bytes + copy_bytes >= TMA_PUT_MAX_BATCH_SIZE) {
-                uint64_t curr_state = handle_bar->arrive_relaxed(*pending_copy_bytes);
-                handle_bar->try_wait_token(curr_state);
-                *pending_copy_bytes = 0;
-            }
-        } else {
-            handle_bar->ensure_handle_tx_capacity(copy_bytes);
-        }
+        handle_bar->ensure_handle_tx_capacity(copy_bytes);
         fabric_try_put_async<cft_handle_kind>(dst_handle.id(),
                                               dst_handle.offset() + byte_offset_dst, smem_buf,
                                               copy_bytes, handle_bar);
         fabric_submit();
-        if (!pending_copy_bytes) {
-            handle_bar->record_pending_handle(copy_bytes);
-        }
+        handle_bar->record_pending_handle(copy_bytes);
     }
 }
 
