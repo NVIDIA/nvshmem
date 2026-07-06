@@ -11,49 +11,51 @@
 extern "C" {
 #endif
 
-#define BARRIER_KERNEL_WRAPPER(TG_PRE, THREADGROUP, THREAD_COMP, VARIANT, VARIANT_API)             \
-    void test_barrier##VARIANT##call_kernel##VARIANT_API##THREADGROUP##_cubin(                     \
-        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                        \
-        CUfunction test_cubin;                                                                     \
-                                                                                                   \
-        init_test_case_kernel(&test_cubin,                                                         \
-                              NVSHMEMI_TEST_STRINGIFY(                                             \
-                                  test_barrier##VARIANT##call_kernel##VARIANT_API##THREADGROUP));  \
-        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, num_blocks, 1, 1, num_tpb, 1, 1, 0, stream, \
-                                           arglist));                                              \
+#define BARRIER_KERNEL_WRAPPER(TG_PRE, THREADGROUP, THREAD_COMP, VARIANT, VARIANT_API)            \
+    void test_barrier##VARIANT##call_kernel##VARIANT_API##THREADGROUP##_cubin(                    \
+        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist,                         \
+        size_t dynamic_smem_size) {                                                               \
+        CUfunction test_cubin;                                                                    \
+                                                                                                  \
+        init_test_case_kernel(&test_cubin,                                                        \
+                              NVSHMEMI_TEST_STRINGIFY(                                            \
+                                  test_barrier##VARIANT##call_kernel##VARIANT_API##THREADGROUP)); \
+        NVSHMEM_PERF_CU_LAUNCH_COOP(test_cubin, num_blocks, num_tpb, stream, arglist,             \
+                                    dynamic_smem_size);                                           \
     }
 
-#define BARRIER_KERNEL(TG_PRE, THREADGROUP, THREAD_COMP)                                   \
-    __global__ void test_barrier_call_kernel##THREADGROUP(nvshmem_team_t team, int iter) { \
-        int i;                                                                             \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                  \
-            for (i = 0; i < iter; i++) {                                                   \
-                nvshmem##TG_PRE##_barrier##THREADGROUP(team);                              \
-            }                                                                              \
-        }                                                                                  \
-    }                                                                                      \
-                                                                                           \
-    __global__ void test_barrier_all_call_kernel##THREADGROUP(int iter) {                  \
-        int i;                                                                             \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                  \
-            for (i = 0; i < iter; i++) {                                                   \
-                nvshmem##TG_PRE##_barrier_all##THREADGROUP();                              \
-            }                                                                              \
-        }                                                                                  \
+#define BARRIER_KERNEL(TG_PRE, THREADGROUP, THREAD_COMP)                                  \
+    __global__ void test_barrier_call_kernel##THREADGROUP(nvshmem_team_t team, int iter,  \
+                                                          size_t dynamic_smem_size) {     \
+        int i;                                                                            \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                        \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                 \
+            for (i = 0; i < iter; i++) {                                                  \
+                nvshmem##TG_PRE##_barrier##THREADGROUP(team);                             \
+            }                                                                             \
+        }                                                                                 \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                     \
+    }                                                                                     \
+                                                                                          \
+    __global__ void test_barrier_all_call_kernel##THREADGROUP(int iter,                   \
+                                                              size_t dynamic_smem_size) { \
+        int i;                                                                            \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                        \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP)) {                                 \
+            for (i = 0; i < iter; i++) {                                                  \
+                nvshmem##TG_PRE##_barrier_all##THREADGROUP();                             \
+            }                                                                             \
+        }                                                                                 \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                     \
     }
 
-#define CALL_BARRIER_KERNEL(THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM, VARIANT)        \
-    if (use_cubin) {                                                                        \
-        test_barrier##VARIANT##call_kernel##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM,    \
-                                                                ARG_LIST);                  \
-    } else {                                                                                \
-        status = nvshmemx_collective_launch(                                                \
-            (const void *)test_barrier##VARIANT##call_kernel##THREADGROUP, BLOCKS, THREADS, \
-            ARG_LIST, 0, STREAM);                                                           \
-        if (status != NVSHMEMX_SUCCESS) {                                                   \
-            fprintf(stderr, "shmemx_collective_launch failed %d \n", status);               \
-            exit(-1);                                                                       \
-        }                                                                                   \
+#define CALL_BARRIER_KERNEL(THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM, VARIANT)               \
+    if (use_cubin) {                                                                               \
+        test_barrier##VARIANT##call_kernel##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM, ARG_LIST, \
+                                                                dynamic_smem_size);                \
+    } else {                                                                                       \
+        NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_barrier##VARIANT##call_kernel##THREADGROUP,    \
+                                       BLOCKS, THREADS, ARG_LIST, dynamic_smem_size, STREAM);      \
     }
 
 BARRIER_KERNEL(, , 1);
@@ -76,6 +78,7 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
     int nvshm_test_num_tpb = threads_per_block;
     size_t skip = warmup_iters;
     size_t iter = iters;
+    size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
     int num_blocks = 1;
     int npes = nvshmem_n_pes();
     double *h_thread_lat = (double *)h_tables[0];
@@ -84,10 +87,10 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
     perf_stats_t thread_stats = {}, warp_stats = {}, block_stats = {};
     perf_stats_t all_thread_stats = {}, all_warp_stats = {}, all_block_stats = {};
     uint64_t tpb_size = nvshm_test_num_tpb;
-    void *barrier_args_1[] = {&team, &skip};
-    void *barrier_args_2[] = {&team, &iter};
-    void *barrier_all_args_1[] = {&skip};
-    void *barrier_all_args_2[] = {&iter};
+    void *barrier_args_1[] = {&team, &skip, &dynamic_smem_size};
+    void *barrier_args_2[] = {&team, &iter, &dynamic_smem_size};
+    void *barrier_all_args_1[] = {&skip, &dynamic_smem_size};
+    void *barrier_all_args_2[] = {&iter, &dynamic_smem_size};
     float milliseconds;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);

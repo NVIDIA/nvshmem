@@ -6,16 +6,19 @@
 #include "coll_test.h"
 #define LARGEST_DT double2
 
-#define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                     \
-    __global__ void test_##TYPENAME##_##OP##_reduce_kern##TG(                                 \
-        nvshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int iter) {          \
-        int i;                                                                                \
-                                                                                              \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {             \
-            for (i = 0; i < iter; i++) {                                                      \
-                nvshmem##TG_PRE##_##TYPENAME##_##OP##_reduce##TG(team, dest, source, nelems); \
-            }                                                                                 \
-        }                                                                                     \
+#define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                          \
+    __global__ void test_##TYPENAME##_##OP##_reduce_kern##TG(nvshmem_team_t team, TYPE *dest,      \
+                                                             const TYPE *source, int nelems,       \
+                                                             int iter, size_t dynamic_smem_size) { \
+        int i;                                                                                     \
+                                                                                                   \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                                 \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {                  \
+            for (i = 0; i < iter; i++) {                                                           \
+                nvshmem##TG_PRE##_##TYPENAME##_##OP##_reduce##TG(team, dest, source, nelems);      \
+            }                                                                                      \
+        }                                                                                          \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                              \
     }
 
 #define CALL_RDXN_OPS_ALL_TG(TYPENAME, TYPE) \
@@ -37,47 +40,39 @@ CALL_RDXN_OPS_ALL_TG(double2, double2)
         }                                                                                  \
     } while (0)
 
-#define RUN_ITERS_OP(TYPENAME, TYPE, GROUP, OP, ELEM_COMP)                             \
-    do {                                                                               \
-        void *skip_arg_list[] = {&team, &dest, &source, &num_elems, &skip};            \
-        void *time_arg_list[] = {&team, &dest, &source, &num_elems, &iter};            \
-        float milliseconds;                                                            \
-        cudaEvent_t start, stop;                                                       \
-        cudaEventCreate(&start);                                                       \
-        cudaEventCreate(&stop);                                                        \
-        SET_SIZE_ARR(TYPE, ELEM_COMP);                                                 \
-                                                                                       \
-        nvshmem_barrier_all();                                                         \
-        j = 0;                                                                         \
-        for (num_elems = min_elems; num_elems < ELEM_COMP; num_elems *= step_factor) { \
-            status = nvshmemx_collective_launch(                                       \
-                (const void *)test_##TYPENAME##_##OP##_reduce_kern##GROUP, num_blocks, \
-                nvshm_test_num_tpb, skip_arg_list, 0, stream);                         \
-            if (status != NVSHMEMX_SUCCESS) {                                          \
-                fprintf(stderr, "shmemx_collective_launch failed %d \n", status);      \
-                exit(-1);                                                              \
-            }                                                                          \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                 \
-            nvshmem_barrier_all();                                                     \
-                                                                                       \
-            cudaEventRecord(start, stream);                                            \
-            status = nvshmemx_collective_launch(                                       \
-                (const void *)test_##TYPENAME##_##OP##_reduce_kern##GROUP, num_blocks, \
-                nvshm_test_num_tpb, time_arg_list, 0, stream);                         \
-            if (status != NVSHMEMX_SUCCESS) {                                          \
-                fprintf(stderr, "shmemx_collective_launch failed %d \n", status);      \
-                exit(-1);                                                              \
-            }                                                                          \
-            cudaEventRecord(stop, stream);                                             \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                 \
-                                                                                       \
-            if (!mype) {                                                               \
-                cudaEventElapsedTime(&milliseconds, start, stop);                      \
-                h_##OP##_lat[j] = (milliseconds * 1000.0) / (float)iter;               \
-            }                                                                          \
-            nvshmem_barrier_all();                                                     \
-            j++;                                                                       \
-        }                                                                              \
+#define RUN_ITERS_OP(TYPENAME, TYPE, GROUP, OP, ELEM_COMP)                                      \
+    do {                                                                                        \
+        void *skip_arg_list[] = {&team, &dest, &source, &num_elems, &skip, &dynamic_smem_size}; \
+        void *time_arg_list[] = {&team, &dest, &source, &num_elems, &iter, &dynamic_smem_size}; \
+        float milliseconds;                                                                     \
+        cudaEvent_t start, stop;                                                                \
+        cudaEventCreate(&start);                                                                \
+        cudaEventCreate(&stop);                                                                 \
+        SET_SIZE_ARR(TYPE, ELEM_COMP);                                                          \
+                                                                                                \
+        nvshmem_barrier_all();                                                                  \
+        j = 0;                                                                                  \
+        for (num_elems = min_elems; num_elems < ELEM_COMP; num_elems *= step_factor) {          \
+            NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_##TYPENAME##_##OP##_reduce_kern##GROUP, \
+                                           num_blocks, nvshm_test_num_tpb, skip_arg_list,       \
+                                           dynamic_smem_size, stream);                          \
+            CUDA_CHECK(cudaStreamSynchronize(stream));                                          \
+            nvshmem_barrier_all();                                                              \
+                                                                                                \
+            cudaEventRecord(start, stream);                                                     \
+            NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_##TYPENAME##_##OP##_reduce_kern##GROUP, \
+                                           num_blocks, nvshm_test_num_tpb, time_arg_list,       \
+                                           dynamic_smem_size, stream);                          \
+            cudaEventRecord(stop, stream);                                                      \
+            CUDA_CHECK(cudaStreamSynchronize(stream));                                          \
+                                                                                                \
+            if (!mype) {                                                                        \
+                cudaEventElapsedTime(&milliseconds, start, stop);                               \
+                h_##OP##_lat[j] = (milliseconds * 1000.0) / (float)iter;                        \
+            }                                                                                   \
+            nvshmem_barrier_all();                                                              \
+            j++;                                                                                \
+        }                                                                                       \
     } while (0)
 
 #define RUN_ITERS(TYPENAME, TYPE, GROUP, ELEM_COMP) \
@@ -94,6 +89,7 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
     size_t max_elems = max_elems_arg;
     int iter = iters;
     int skip = warmup_iters;
+    size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
     int j;
     int npes = nvshmem_n_pes();
     uint64_t *size_arr = (uint64_t *)h_tables[0];
