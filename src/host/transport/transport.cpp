@@ -445,12 +445,13 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                         entity_index, entity_count);
                 }
 
-                bool use_block = (tcurr->device_assignment_mode ==
-                                      NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST &&
-                                  tcurr->n_devices >= entity_count) ||
-                                 (tcurr->device_assignment_mode ==
-                                      NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING &&
-                                  tcurr->n_devices > entity_count);
+                bool use_block = (tcurr->attr & NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED) &&
+                                 ((tcurr->device_assignment_mode ==
+                                       NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST &&
+                                   tcurr->n_devices >= entity_count) ||
+                                  (tcurr->device_assignment_mode ==
+                                       NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_PE_MAPPING &&
+                                   tcurr->n_devices > entity_count));
                 if (use_block) {
                     int block_devices = tcurr->n_devices;
                     if (tcurr->device_assignment_mode ==

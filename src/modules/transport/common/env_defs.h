@@ -83,6 +83,10 @@ NVSHMEMI_ENV_DEF(IB_NUM_RC_PER_DEVICE, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,
 NVSHMEMI_ENV_DEF(HCA_PREFIX, string, "^smi", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Prefix of HCA interface names. Example, mlx5, ibp.")
 
+NVSHMEMI_ENV_DEF(ENABLE_NIC_PE_MAPPING, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Enable round-robin or explicit HCA-to-PE assignment. When set to 0, "
+                 "NVSHMEM_HCA_LIST and NVSHMEM_HCA_PE_MAPPING are ignored.")
+
 NVSHMEMI_ENV_DEF(HCA_LIST, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Comma-separated list of HCAs to use in the NVSHMEM application. Entries "
                  "are of the form ``hca_name:port``, e.g. ``mlx5_1:1,mlx5_2:2`` and entries "

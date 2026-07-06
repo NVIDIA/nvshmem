@@ -5085,6 +5085,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.put_signal = NULL;
 
     transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
+    if (options->IBGDA_ENABLE_MULTI_PORT) {
+        transport->attr |= NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED;
+    }
     transport->is_successfully_initialized = true;
     transport->max_op_len = 1ULL << 30;
     transport->atomic_host_endian_min_size = atomic_host_endian_size;

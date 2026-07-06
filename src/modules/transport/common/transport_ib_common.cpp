@@ -1044,7 +1044,7 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
     filter.user_selection = 0;
     filter.exclude_list = 0;
 
-    if (options->HCA_LIST_provided) {
+    if (options->ENABLE_NIC_PE_MAPPING && options->HCA_LIST_provided) {
         filter.user_selection = 1;
         filter.exclude_list = (options->HCA_LIST[0] == '^');
         status =
@@ -1053,7 +1053,7 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
         filter.hca_list_count = status;
     }
 
-    if (options->HCA_PE_MAPPING_provided) {
+    if (options->ENABLE_NIC_PE_MAPPING && options->HCA_PE_MAPPING_provided) {
         if (filter.hca_list_count) {
             NVSHMEMI_WARN_PRINT(
                 "Found conflicting parameters NVSHMEM_HCA_LIST and NVSHMEM_HCA_PE_MAPPING, "
