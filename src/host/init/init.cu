@@ -337,6 +337,39 @@ static int nvshmemi_transport_cap_support_amo(int cap) {
     return 0;
 }
 
+static void nvshmemi_refresh_selected_transports(nvshmemi_state_t *state) {
+    for (int pe = 0; pe < state->npes; pe++) {
+        state->selected_transport_for_rma[pe] = -1;
+        state->selected_transport_for_amo[pe] = -1;
+    }
+
+    for (int i = 0; i < state->npes; i++) {
+        bool amo_initialized = false, rma_initialized = false;
+        int tbitmap = state->transport_bitmap;
+        for (int j = 0; j < state->num_initialized_transports; j++) {
+            if (!(state->transports[j])) {
+                tbitmap >>= 1;
+                continue;
+            }
+
+            if (tbitmap & 1) {
+                if (!rma_initialized &&
+                    nvshmemi_transport_cap_support_rma(state->transports[j]->cap[i])) {
+                    rma_initialized = true;
+                    state->selected_transport_for_rma[i] = j;
+                }
+
+                if (!amo_initialized &&
+                    nvshmemi_transport_cap_support_amo(state->transports[j]->cap[i])) {
+                    amo_initialized = true;
+                    state->selected_transport_for_amo[i] = j;
+                }
+            }
+            tbitmap >>= 1;
+        }
+    }
+}
+
 int nvshmemx_get_uniqueid(nvshmemx_uniqueid_t *uid) {
     int status = 0;
     nvshmemi_options_init();
@@ -713,36 +746,7 @@ static int nvshmemi_setup_nvshmem_handles(nvshmemi_state_t *state) {
     state->host_memory_registration_supported =
         dev_attr & cudaDevAttrCanUseHostPointerForRegisteredMem;
 
-    for (int pe = 0; pe < state->npes; pe++) {
-        state->selected_transport_for_rma[pe] = -1;
-        state->selected_transport_for_amo[pe] = -1;
-    }
-    int tbitmap;
-    for (int i = 0; i < state->npes; i++) {
-        bool amo_initialized = false, rma_initialized = false;
-        tbitmap = state->transport_bitmap;
-        for (int j = 0; j < state->num_initialized_transports; j++) {
-            if (!(state->transports[j])) {
-                tbitmap >>= 1;
-                continue;
-            }
-
-            if (tbitmap & 1) {
-                if (!rma_initialized &&
-                    nvshmemi_transport_cap_support_rma(nvshmemi_state->transports[j]->cap[i])) {
-                    rma_initialized = true;
-                    state->selected_transport_for_rma[i] = j;
-                }
-
-                if (!amo_initialized &&
-                    nvshmemi_transport_cap_support_amo(nvshmemi_state->transports[j]->cap[i])) {
-                    amo_initialized = true;
-                    state->selected_transport_for_amo[i] = j;
-                }
-            }
-            tbitmap >>= 1;
-        }
-    }
+    nvshmemi_refresh_selected_transports(state);
 
     return status;
 }
@@ -1240,6 +1244,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     status = state->heap_obj->setup_symmetric_heap();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmem register static heaps failed \n");
+
+    /* Static VIDMEM heap registration may prune MAP capabilities after IPC-open failures. */
+    nvshmemi_refresh_selected_transports(state);
 
     nvshmemi_coll_common_cpu_check_ll128_availability();
 

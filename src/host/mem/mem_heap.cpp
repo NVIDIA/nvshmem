@@ -61,6 +61,18 @@ std::mutex &get_cs_mutex() {
     static std::mutex instance;
     return instance;
 }
+
+int consume_cuda_runtime_error_for_failed_ipc(cudaError_t api_status, const char *api_name) {
+    const cudaError_t status = cudaGetLastError();
+    if (status == cudaSuccess) return NVSHMEMX_SUCCESS;
+    if (status != api_status) {
+        NVSHMEMI_ERROR_PRINT("%s returned %d (%s), but cudaGetLastError returned %d (%s)\n",
+                             api_name, api_status, cudaGetErrorString(api_status), status,
+                             cudaGetErrorString(status));
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    return NVSHMEMX_SUCCESS;
+}
 }  // namespace
 
 static bool nvshmemi_should_process_nvls_team_pool_entry(size_t team_idx) {
@@ -314,6 +326,8 @@ int nvshmemi_symmetric_heap::map_heap_range_by_size(void *buf, size_t size) {
                      buf, size, i, j);
                 status = map_heap_range_by_pe(i, j, (char *)buf, size);
                 if (status) {
+                    if (status != NVSHMEMX_ERROR_INVALID_VALUE) return status;
+
                     // map operation failed, remove ALL map-related capabilities
                     state->transports[j]->cap[i] &=
                         ~(NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST |
@@ -1527,10 +1541,14 @@ int nvshmemi_symmetric_heap_vidmem_static_pinned::export_memory(nvshmem_mem_hand
     assert(sizeof(cudaIpcMemHandle_t) <= NVSHMEM_MEM_HANDLE_SIZE);
     INFO(NVSHMEM_MEM, "calling cuIpcGetMemHandle on buf: %p size: %zu", buf, length);
 
-    status = cudaIpcGetMemHandle(ipc_handle, buf);
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                          "cudaIpcGetMemHandle failed \n");
-out:
+    cudaError_t cuda_status = cudaIpcGetMemHandle(ipc_handle, buf);
+    if (cuda_status != cudaSuccess) {
+        NVSHMEMI_ERROR_PRINT("cudaIpcGetMemHandle failed with error %d (%s)\n", cuda_status,
+                             cudaGetErrorString(cuda_status));
+        status = consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcGetMemHandle");
+        if (status != NVSHMEMX_SUCCESS) return status;
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     return (status);
 }
 
@@ -1602,10 +1620,15 @@ int nvshmemi_symmetric_heap_vidmem_static_pinned::import_memory(nvshmem_mem_hand
     int status = 0;
     cudaIpcMemHandle_t *ipc_handle = (cudaIpcMemHandle_t *)mem_handle;
 
-    status = cudaIpcOpenMemHandle(buf, *ipc_handle, cudaIpcMemLazyEnablePeerAccess);
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                          "cudaIpcOpenMemHandle failed with error %d \n", status);
-out:
+    cudaError_t cuda_status =
+        cudaIpcOpenMemHandle(buf, *ipc_handle, cudaIpcMemLazyEnablePeerAccess);
+    if (cuda_status != cudaSuccess) {
+        NVSHMEMI_ERROR_PRINT("cudaIpcOpenMemHandle failed with error %d (%s) \n", cuda_status,
+                             cudaGetErrorString(cuda_status));
+        status = consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcOpenMemHandle");
+        if (status != NVSHMEMX_SUCCESS) return status;
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     return (status);
 }
 
