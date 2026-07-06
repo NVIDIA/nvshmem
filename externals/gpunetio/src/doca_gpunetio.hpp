@@ -57,4 +57,6 @@ struct doca_gpu_open {
                                        ///< is supported
     bool need_mcst;                    ///< Boolean value that indicates if memory consistency
                                        ///< algorithm is required for igress GPU data
+    bool support_gdrcopy_data_direct;  ///< Boolean value that indicates if gdrcopy
+                                       ///< with the data direct path is supported
 };

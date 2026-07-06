@@ -85,6 +85,8 @@ enum doca_gpu_mem_type {
     DOCA_GPU_MEM_TYPE_GPU_CPU = 1,
     /* CPU memory with direct access from GPU. */
     DOCA_GPU_MEM_TYPE_CPU_GPU = 2,
+    /* GPU memory with CPU direct access using Data Direct. */
+    DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT = 3,
 };
 
 /**
@@ -92,7 +94,7 @@ enum doca_gpu_mem_type {
  *
  */
 struct doca_gpu_dev_verbs_qp;
-struct doca_gpu_dev_verbs_cq;
+struct doca_dev;
 struct doca_verbs_cq_t;
 struct doca_verbs_qp_t;
 
@@ -117,6 +119,15 @@ struct doca_gpu_verbs_qp {
     struct doca_gpu_dev_verbs_qp *qp_gpu;
     /* CPU-accessible GPU handler. Linked with qp_gpu via GDRCopy. */
     struct doca_gpu_dev_verbs_qp *qp_gpu_h;
+    /*
+     * Free flow rings DB whenever this threshold is reached or there is no more WQE.
+     * Set the threshold to 0 to ring DB only when there is no more WQE.
+     */
+    uint32_t free_flow_ring_db_threshold;
+    enum doca_gpu_dev_verbs_cq_type cq_type;
+    doca_verbs_cq_t *cq_sq;
+    unsigned int refcount;
+    bool enable_data_direct;
 };
 
 /**
@@ -169,6 +180,7 @@ doca_error_t doca_gpu_destroy(doca_gpu_t *gpu_dev);
  * - DOCA_GPU_MEM_TYPE_GPU memptr_gpu is not NULL while memptr_cpu is NULL.
  * - DOCA_GPU_MEM_TYPE_GPU_CPU both memptr_gpu and memptr_cpu are not NULL.
  * - DOCA_GPU_MEM_TYPE_CPU_GPU both memptr_gpu and memptr_cpu are not NULL.
+ * - DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT both memptr_gpu and memptr_cpu are not NULL.
  *
  * @param [in] gpu_dev
  * DOCA GPUNetIO handler.
@@ -190,8 +202,8 @@ doca_error_t doca_gpu_destroy(doca_gpu_t *gpu_dev);
  * @return
  * Non NULL memptr_gpu pointer on success, NULL otherwise.
  * Non NULL memptr_cpu pointer on success in case of DOCA_GPU_MEM_TYPE_CPU_GPU and
- * DOCA_GPU_MEM_TYPE_GPU_CPU, NULL otherwise. DOCA_SUCCESS - in case of success. doca_error code -
- * in case of failure:
+ * DOCA_GPU_MEM_TYPE_GPU_CPU and DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT, NULL otherwise.
+ * DOCA_SUCCESS - in case of success. doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - if an invalid input had been received.
  * - DOCA_ERROR_NO_MEMORY - if an error occurred dealing with GPU memory.
  */
@@ -229,6 +241,10 @@ doca_error_t doca_gpu_mem_free(doca_gpu_t *gpu, void *memptr_gpu);
  * DOCA Verbs CQ SQ CPU object connected to the QP.
  * @param [in] send_dbr_mode_ext
  * Send DBR mode.
+ * @param [in] cq_type
+ * CQ type.
+ * @param [in] enable_data_direct
+ * Whether to enable data direct support for this QP.
  * @param [out] qp_out
  * DOCA GPUNetIO Verbs QP object.
  *
@@ -237,11 +253,12 @@ doca_error_t doca_gpu_mem_free(doca_gpu_t *gpu, void *memptr_gpu);
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - if an invalid input had been received.
  */
-doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
+doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, struct doca_verbs_qp_t *qp,
                                       enum doca_gpu_dev_verbs_nic_handler nic_handler,
-                                      void *gpu_qp_umem_dev_ptr, doca_verbs_cq_t *cq_sq,
+                                      void *gpu_qp_umem_dev_ptr, struct doca_verbs_cq_t *cq_sq,
                                       enum doca_gpu_verbs_send_dbr_mode_ext send_dbr_mode_ext,
-                                      struct doca_gpu_verbs_qp **qp_out);
+                                      enum doca_gpu_dev_verbs_cq_type cq_type,
+                                      bool enable_data_direct, struct doca_gpu_verbs_qp **qp_out);
 
 /**
  * Destroy a GPU handler for a Verbs QP object
@@ -414,8 +431,10 @@ doca_error_t doca_gpu_verbs_destroy_service(doca_gpu_verbs_service_t service);
 doca_error_t doca_gpu_verbs_query_last_error(struct doca_gpu_verbs_qp *qp,
                                              struct doca_gpu_verbs_qp_error_info *error_info);
 
+
 /**
- * Export multiple QPs to GPU
+ * Export multiple QPs to GPU.
+ * This API allows holes in the `qps` array.
  *
  * @param [in] gpu_dev
  * DOCA GPUNetIO handler.
@@ -508,6 +527,20 @@ doca_error_t doca_gpu_verbs_check_device_code_compatibility(uint32_t device_code
  * - DOCA_ERROR_NOT_SUPPORTED - if the library is not compatible with the host code version
  */
 doca_error_t doca_gpu_verbs_check_host_code_compatibility(uint32_t host_code_version);
+
+/**
+ * Request notification for upcoming GPUNetIO Verbs CQ completions
+ *
+ * @param [in] gpu_dev
+ * DOCA GPUNetIO handler.
+ * @param [in] verbs_cq
+ * Pointer to the verbs_cq instance.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ */
+doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *verbs_cq);
 
 #ifdef __cplusplus
 }

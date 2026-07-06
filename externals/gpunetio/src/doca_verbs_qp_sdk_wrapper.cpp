@@ -34,7 +34,6 @@
 #include <sys/syslog.h>
 #include <string.h>
 #include <mutex>
-#include <infiniband/verbs.h>
 
 #include "doca_gpunetio_log.hpp"
 #include "doca_verbs_uar_sdk_wrapper.h"
@@ -137,6 +136,23 @@ typedef doca_error_t (*doca_verbs_qp_attr_set_max_rd_atomic_t)(void *verbs_qp_at
                                                                uint8_t max_rd_atomic);
 typedef doca_error_t (*doca_verbs_qp_attr_set_max_dest_rd_atomic_t)(void *verbs_qp_attr,
                                                                     uint8_t max_dest_rd_atomic);
+typedef doca_error_t (*doca_verbs_qp_attr_set_cc_group_t)(void *verbs_qp_attr, void *cc_group);
+typedef void *(*doca_verbs_qp_attr_get_cc_group_t)(const void *verbs_qp_attr);
+
+typedef doca_error_t (*doca_verbs_query_cc_group_caps_t)(void *verbs_context, void **cc_group_caps);
+typedef doca_error_t (*doca_verbs_cc_group_caps_get_data_t)(void *cc_group_caps, const void **data,
+                                                            size_t *size);
+typedef doca_error_t (*doca_verbs_cc_group_caps_free_t)(void *cc_group_caps);
+typedef doca_error_t (*doca_verbs_cc_group_attr_create_t)(void **verbs_cc_group_attr);
+typedef doca_error_t (*doca_verbs_cc_group_attr_destroy_t)(void *verbs_cc_group_attr);
+typedef doca_error_t (*doca_verbs_cc_group_attr_set_hint_t)(void *verbs_cc_group_attr,
+                                                            const void *hint_data,
+                                                            size_t hint_data_size);
+typedef doca_error_t (*doca_verbs_cc_group_create_t)(void *verbs_context, void *verbs_cc_group_attr,
+                                                     void **verbs_cc_group);
+typedef doca_error_t (*doca_verbs_cc_group_destroy_t)(void *verbs_cc_group);
+typedef doca_error_t (*doca_verbs_cc_group_modify_t)(void *verbs_cc_group,
+                                                     void *verbs_cc_group_attr);
 
 typedef doca_error_t (*doca_verbs_ah_attr_create_t)(void *verbs_context, void **verbs_ah_attr);
 typedef doca_error_t (*doca_verbs_ah_attr_destroy_t)(void *verbs_ah_attr);
@@ -174,7 +190,9 @@ typedef doca_error_t (*doca_verbs_bridge_verbs_context_import_t)(struct ibv_cont
                                                                  uint32_t flags,
                                                                  void **verbs_context);
 
+#if DOCA_VERBS_QP_SDK_WRAPPER_ENABLE_DEBUG == 1
 typedef doca_error_t (*doca_log_backend_create_with_file_sdk_t)(FILE *fptr, void **backend);
+#endif
 
 /* Global function pointers */
 static doca_verbs_qp_init_attr_create_t p_doca_verbs_qp_init_attr_create = nullptr;
@@ -269,7 +287,21 @@ static doca_rdma_bridge_get_dev_pd_t p_doca_rdma_bridge_get_dev_pd = nullptr;
 static doca_verbs_bridge_verbs_pd_import_t p_doca_verbs_bridge_verbs_pd_import = nullptr;
 static doca_verbs_bridge_verbs_context_import_t p_doca_verbs_bridge_verbs_context_import = nullptr;
 
+#if DOCA_VERBS_QP_SDK_WRAPPER_ENABLE_DEBUG == 1
 static doca_log_backend_create_with_file_sdk_t p_doca_log_backend_create_with_file_sdk = nullptr;
+#endif
+
+static doca_verbs_qp_attr_set_cc_group_t p_doca_verbs_qp_attr_set_cc_group = nullptr;
+static doca_verbs_qp_attr_get_cc_group_t p_doca_verbs_qp_attr_get_cc_group = nullptr;
+static doca_verbs_query_cc_group_caps_t p_doca_verbs_query_cc_group_caps = nullptr;
+static doca_verbs_cc_group_caps_get_data_t p_doca_verbs_cc_group_caps_get_data = nullptr;
+static doca_verbs_cc_group_caps_free_t p_doca_verbs_cc_group_caps_free = nullptr;
+static doca_verbs_cc_group_attr_create_t p_doca_verbs_cc_group_attr_create = nullptr;
+static doca_verbs_cc_group_attr_destroy_t p_doca_verbs_cc_group_attr_destroy = nullptr;
+static doca_verbs_cc_group_attr_set_hint_t p_doca_verbs_cc_group_attr_set_hint = nullptr;
+static doca_verbs_cc_group_create_t p_doca_verbs_cc_group_create = nullptr;
+static doca_verbs_cc_group_destroy_t p_doca_verbs_cc_group_destroy = nullptr;
+static doca_verbs_cc_group_modify_t p_doca_verbs_cc_group_modify = nullptr;
 
 static void *common_handle = nullptr;
 static void *verbs_handle = nullptr;
@@ -459,6 +491,29 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
         (doca_verbs_qp_attr_set_max_dest_rd_atomic_t)get_verbs_sdk_symbol(
             "doca_verbs_qp_attr_set_max_dest_rd_atomic");
 
+    p_doca_verbs_qp_attr_set_cc_group =
+        (doca_verbs_qp_attr_set_cc_group_t)get_verbs_sdk_symbol("doca_verbs_qp_attr_set_cc_group");
+    p_doca_verbs_qp_attr_get_cc_group =
+        (doca_verbs_qp_attr_get_cc_group_t)get_verbs_sdk_symbol("doca_verbs_qp_attr_get_cc_group");
+    p_doca_verbs_query_cc_group_caps =
+        (doca_verbs_query_cc_group_caps_t)get_verbs_sdk_symbol("doca_verbs_query_cc_group_caps");
+    p_doca_verbs_cc_group_caps_get_data = (doca_verbs_cc_group_caps_get_data_t)get_verbs_sdk_symbol(
+        "doca_verbs_cc_group_caps_get_data");
+    p_doca_verbs_cc_group_caps_free =
+        (doca_verbs_cc_group_caps_free_t)get_verbs_sdk_symbol("doca_verbs_cc_group_caps_free");
+    p_doca_verbs_cc_group_attr_create =
+        (doca_verbs_cc_group_attr_create_t)get_verbs_sdk_symbol("doca_verbs_cc_group_attr_create");
+    p_doca_verbs_cc_group_attr_destroy = (doca_verbs_cc_group_attr_destroy_t)get_verbs_sdk_symbol(
+        "doca_verbs_cc_group_attr_destroy");
+    p_doca_verbs_cc_group_attr_set_hint = (doca_verbs_cc_group_attr_set_hint_t)get_verbs_sdk_symbol(
+        "doca_verbs_cc_group_attr_set_hint");
+    p_doca_verbs_cc_group_create =
+        (doca_verbs_cc_group_create_t)get_verbs_sdk_symbol("doca_verbs_cc_group_create");
+    p_doca_verbs_cc_group_destroy =
+        (doca_verbs_cc_group_destroy_t)get_verbs_sdk_symbol("doca_verbs_cc_group_destroy");
+    p_doca_verbs_cc_group_modify =
+        (doca_verbs_cc_group_modify_t)get_verbs_sdk_symbol("doca_verbs_cc_group_modify");
+
     p_doca_verbs_ah_attr_create =
         (doca_verbs_ah_attr_create_t)get_verbs_sdk_symbol("doca_verbs_ah_attr_create");
     p_doca_verbs_ah_attr_destroy =
@@ -506,9 +561,11 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
         (doca_verbs_bridge_verbs_context_import_t)get_verbs_sdk_symbol(
             "doca_verbs_bridge_verbs_context_import");
 
+#if DOCA_VERBS_QP_SDK_WRAPPER_ENABLE_DEBUG == 1
     p_doca_log_backend_create_with_file_sdk =
         (doca_log_backend_create_with_file_sdk_t)get_verbs_sdk_symbol(
             "doca_log_backend_create_with_file_sdk");
+#endif
 
     /* Check if all symbols were found */
     /*
@@ -552,9 +609,7 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
         !p_doca_verbs_qp_create || !p_doca_verbs_qp_destroy || !p_doca_verbs_qp_modify ||
         !p_doca_verbs_qp_query || !p_doca_verbs_qp_get_wq ||
         !p_doca_verbs_qp_init_attr_get_qp_context || !p_doca_verbs_qp_get_dbr_addr ||
-        !p_doca_verbs_qp_get_uar_addr || !p_doca_verbs_qp_get_qpn ||
-
-        !p_doca_log_backend_create_with_file_sdk) {
+        !p_doca_verbs_qp_get_uar_addr || !p_doca_verbs_qp_get_qpn) {
         DOCA_LOG(LOG_ERR, "Failed to get all required DOCA Verbs Dev SDK symbols\n");
         dlclose(verbs_handle);
         verbs_handle = nullptr;
@@ -567,6 +622,31 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
         DOCA_LOG(LOG_WARNING,
                  "The DOCA SDK installed on the system doesn't provide symbols for the set/get "
                  "ordering semantic\n");
+
+    if (!p_doca_verbs_qp_attr_set_cc_group || !p_doca_verbs_qp_attr_get_cc_group)
+        DOCA_LOG(LOG_WARNING,
+                 "The DOCA SDK installed on the system doesn't provide symbols for QP CC group "
+                 "set/get\n");
+
+    if (!p_doca_verbs_query_cc_group_caps || !p_doca_verbs_cc_group_caps_get_data ||
+        !p_doca_verbs_cc_group_caps_free || !p_doca_verbs_cc_group_attr_create ||
+        !p_doca_verbs_cc_group_attr_destroy || !p_doca_verbs_cc_group_attr_set_hint ||
+        !p_doca_verbs_cc_group_create || !p_doca_verbs_cc_group_destroy ||
+        !p_doca_verbs_cc_group_modify)
+        DOCA_LOG(LOG_WARNING,
+                 "The DOCA SDK installed on the system doesn't provide CC group symbols "
+                 "(doca_verbs_cc_group_* / query_cc_group_caps)\n");
+
+#if DOCA_VERBS_QP_SDK_WRAPPER_ENABLE_DEBUG == 1
+    if (!p_doca_log_backend_create_with_file_sdk) {
+        DOCA_LOG(LOG_ERR,
+                 "Failed to get doca_log_backend_create_with_file_sdk DOCA Verbs Dev SDK symbol\n");
+        dlclose(verbs_handle);
+        verbs_handle = nullptr;
+        *ret = -1;
+        goto exit_error;
+    }
+#endif
 
     *ret = 0;
     return;
@@ -1872,6 +1952,250 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_get_wq(void *verbs_qp, void *
         return DOCA_SDK_WRAPPER_SUCCESS;
     } else
         return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+static doca_sdk_wrapper_error_t map_doca_cc_group(doca_error_t e) {
+    if (e == DOCA_SUCCESS) {
+        return DOCA_SDK_WRAPPER_SUCCESS;
+    }
+    return DOCA_SDK_WRAPPER_API_ERROR;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_query_cc_group_caps(doca_dev_t *net_dev,
+                                                                    void **cc_group_caps) {
+    doca_error_t doca_err;
+
+    if (!net_dev || !cc_group_caps) {
+        return DOCA_SDK_WRAPPER_API_INVALID_VALUE;
+    }
+    if (net_dev->sdk_context == nullptr) {
+        DOCA_LOG(LOG_ERR, "%s: net_dev->sdk_context is NULL (SDK verbs context required)",
+                 __func__);
+        return DOCA_SDK_WRAPPER_API_INVALID_VALUE;
+    }
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_query_cc_group_caps) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_query_cc_group_caps(net_dev->sdk_context, cc_group_caps);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_caps_get_data(void *cc_group_caps,
+                                                                       const void **data,
+                                                                       size_t *size) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_caps_get_data) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_cc_group_caps_get_data(cc_group_caps, data, size);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_caps_free(void *cc_group_caps) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_caps_free) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_cc_group_caps_free(cc_group_caps);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_attr_create(void **verbs_cc_group_attr) {
+    doca_error_t doca_err;
+
+    if (!verbs_cc_group_attr) {
+        return DOCA_SDK_WRAPPER_API_INVALID_VALUE;
+    }
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_attr_create) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_cc_group_attr_create(verbs_cc_group_attr);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_attr_destroy(void *verbs_cc_group_attr) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_attr_destroy) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_cc_group_attr_destroy(verbs_cc_group_attr);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_attr_set_hint(void *verbs_cc_group_attr,
+                                                                       const void *hint_data,
+                                                                       size_t hint_data_size) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_attr_set_hint) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err =
+            p_doca_verbs_cc_group_attr_set_hint(verbs_cc_group_attr, hint_data, hint_data_size);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_create(doca_dev_t *net_dev,
+                                                                void *verbs_cc_group_attr,
+                                                                void **verbs_cc_group) {
+    doca_error_t doca_err;
+
+    if (!net_dev || !verbs_cc_group) {
+        return DOCA_SDK_WRAPPER_API_INVALID_VALUE;
+    }
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+
+        if (net_dev->type != DOCA_VERBS_SDK_LIB_TYPE_SDK) {
+            DOCA_LOG(LOG_ERR, "doca_dev_t is not a SDK instance.");
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+
+        if (net_dev->sdk_context == nullptr) {
+            DOCA_LOG(LOG_ERR, "%s: net_dev->sdk_context is NULL (SDK verbs context required)",
+                     __func__);
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+
+        if (!p_doca_verbs_cc_group_create) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err =
+            p_doca_verbs_cc_group_create(net_dev->sdk_context, verbs_cc_group_attr, verbs_cc_group);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_destroy(void *verbs_cc_group) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_destroy) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_cc_group_destroy(verbs_cc_group);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_modify(void *verbs_cc_group,
+                                                                void *verbs_cc_group_attr) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_cc_group_modify) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        doca_err = p_doca_verbs_cc_group_modify(verbs_cc_group, verbs_cc_group_attr);
+        return map_doca_cc_group(doca_err);
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_attr_set_cc_group(
+    void *qp_attr, doca_verbs_cc_group_t *cc_group) {
+    doca_error_t doca_err;
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_qp_attr_set_cc_group) {
+            DOCA_LOG(LOG_WARNING,
+                     "The DOCA SDK doesn't provide doca_verbs_qp_attr_set_cc_group "
+                     "(older libdoca_verbs?)\n");
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        void *sdk_cc_group = nullptr;
+        if (cc_group != nullptr) {
+            if (cc_group->type != DOCA_VERBS_SDK_LIB_TYPE_SDK) {
+                DOCA_LOG(LOG_ERR, "doca_verbs_cc_group_t is not a SDK instance.");
+                return DOCA_SDK_WRAPPER_NOT_FOUND;
+            }
+            sdk_cc_group = cc_group->sdk;
+        }
+        doca_err = p_doca_verbs_qp_attr_set_cc_group(qp_attr, sdk_cc_group);
+        if (doca_err == DOCA_SUCCESS) {
+            return DOCA_SDK_WRAPPER_SUCCESS;
+        }
+        DOCA_LOG(LOG_ERR, "DOCA SDK function in %s returned error %d", __func__, doca_err);
+        return DOCA_SDK_WRAPPER_API_ERROR;
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+}
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_attr_get_cc_group(void *qp_attr,
+                                                                     void **cc_group) {
+    if (cc_group == nullptr) {
+        DOCA_LOG(LOG_ERR, "cc_group output pointer is null", __func__);
+        return DOCA_SDK_WRAPPER_API_INVALID_VALUE;
+    }
+
+    if (get_sdk_wrapper_env_var() > 0) {
+        if (init_verbs_sdk_wrapper() != 0) {
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        if (!p_doca_verbs_qp_attr_get_cc_group) {
+            DOCA_LOG(LOG_WARNING,
+                     "The DOCA SDK doesn't provide doca_verbs_qp_attr_get_cc_group "
+                     "(older libdoca_verbs?)\n");
+            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        }
+        *cc_group = p_doca_verbs_qp_attr_get_cc_group(qp_attr);
+        return DOCA_SDK_WRAPPER_SUCCESS;
+    }
+    return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 }
 
 #ifdef __cplusplus

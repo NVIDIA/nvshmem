@@ -90,6 +90,13 @@ struct doca_verbs_uar_open {
     void *get_reg_addr() const noexcept { return m_reg_addr; }
 
     /**
+     * @brief Get UAR base address
+     *
+     * @return UAR base address
+     */
+    void *get_base_addr() const noexcept { return m_base_addr; }
+
+    /**
      * @brief Get DBR-less DB address
      *
      * @return DBR-less DB address
@@ -104,6 +111,7 @@ struct doca_verbs_uar_open {
     };
     uint32_t m_uar_id{};
     void *m_reg_addr{};
+    void *m_base_addr{};
     void *m_dbr_less_addr{};
 
     doca_verbs_uar_open(doca_verbs_uar_open const &) = delete;

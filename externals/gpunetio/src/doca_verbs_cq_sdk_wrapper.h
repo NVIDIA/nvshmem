@@ -66,11 +66,15 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_cq_context(void *cq_
                                                                        void *cq_context);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_external_umem(
     void *cq_attr, doca_verbs_umem_t *external_umem, uint64_t external_umem_offset);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_external_dbr_umem(
+    void *cq_attr, doca_verbs_umem_t *external_dbr_umem, uint64_t external_dbr_umem_offset);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_external_uar(
     void *cq_attr, doca_verbs_uar_t *external_uar);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_cq_overrun(
     void *cq_attr, enum doca_verbs_cq_overrun overrun);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_cq_collapsed(void *cq_attr, uint8_t cc);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_comp_channel(void *cq_attr, void *compch);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_st(void *cq_attr, enum doca_verbs_cq_state cq_state);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_create(doca_dev_t *net_dev,
                                                           doca_verbs_cq_attr_t *cq_attr,
                                                           void **verbs_cq);
@@ -83,6 +87,12 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_get_dbr_addr(void *verbs_cq,
                                                                 uint32_t **ci_dbr,
                                                                 uint32_t **arm_dbr);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_get_cqn(const void *verbs_cq, uint32_t *cqn);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_set_cq_context(void *cq, void *cq_context);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_comp_channel_create(void *sdk_context, void **compch);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_comp_channel_destroy(void *compch);
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_get_cq_event(void *compch, void **cq_context);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_ack_cq_events(void *verbs_cq, unsigned int nevents);
 
 #ifdef __cplusplus
 }

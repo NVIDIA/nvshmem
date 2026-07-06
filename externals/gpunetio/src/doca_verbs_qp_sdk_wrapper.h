@@ -140,6 +140,28 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_attr_set_max_dest_rd_atomic(
     void *qp_attr, uint8_t max_dest_rd_atomic);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_attr_set_ah_attr(void *qp_attr,
                                                                     doca_verbs_ah_attr_t *ah_attr);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_attr_set_cc_group(
+    void *qp_attr, doca_verbs_cc_group_t *cc_group);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_qp_attr_get_cc_group(void *qp_attr,
+                                                                     void **cc_group);
+
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_query_cc_group_caps(doca_dev_t *net_dev,
+                                                                    void **cc_group_caps);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_caps_get_data(void *cc_group_caps,
+                                                                       const void **data,
+                                                                       size_t *size);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_caps_free(void *cc_group_caps);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_attr_create(void **verbs_cc_group_attr);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_attr_destroy(void *verbs_cc_group_attr);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_attr_set_hint(void *verbs_cc_group_attr,
+                                                                       const void *hint_data,
+                                                                       size_t hint_data_size);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_create(doca_dev_t *net_dev,
+                                                                void *verbs_cc_group_attr,
+                                                                void **verbs_cc_group);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_destroy(void *verbs_cc_group);
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cc_group_modify(void *verbs_cc_group,
+                                                                void *verbs_cc_group_attr);
 
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_ah_attr_create(doca_dev_t *net_dev, void **ah_attr);
 doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_ah_attr_destroy(void *ah_attr);

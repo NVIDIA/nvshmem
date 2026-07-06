@@ -85,7 +85,7 @@ struct doca_dev_open;
 /**
  * Opaque structure representing a DOCA Verbs DEV handler open and SDK.
  */
-typedef struct {
+typedef struct doca_dev {
     enum doca_verbs_lib_type type;
     union {
         void *sdk;
@@ -156,6 +156,7 @@ typedef struct {
  * Opaque structure representing a DOCA Completion Queue open instance.
  */
 struct doca_verbs_cq_open;
+struct mlx5dv_devx_obj;
 /**
  * Opaque structure representing a DOCA Verbs Completion Queue handler open and SDK.
  */
@@ -166,6 +167,21 @@ struct doca_verbs_cq_t {
         struct doca_verbs_cq_open *open;
     };
 };
+
+/**
+ * Opaque structure representing a DOCA Comp Channel open instance.
+ */
+struct doca_verbs_comp_channel_open;
+/**
+ * Opaque structure representing a DOCA Verbs Comp Channel handler open and SDK.
+ */
+typedef struct doca_verbs_comp_channel {
+    enum doca_verbs_lib_type type;
+    union {
+        void *sdk;
+        struct doca_verbs_comp_channel_open *open;
+    };
+} doca_verbs_comp_channel_t;
 
 /**
  * Opaque structure representing a DOCA Verbs Shared Receive Queue instance.
@@ -187,6 +203,21 @@ struct doca_verbs_ah_attr_t {
     union {
         void *sdk;
         struct doca_verbs_ah_attr_open *open;
+    };
+};
+
+/**
+ * Opaque structure representing a DOCA Verbs CC group handle open instance.
+ */
+struct doca_verbs_cc_group_open;
+/**
+ * Opaque structure representing a DOCA Verbs CC group handler open and SDK.
+ */
+struct doca_verbs_cc_group_t {
+    enum doca_verbs_lib_type type;
+    union {
+        void *sdk;
+        struct doca_verbs_cc_group_open *open;
     };
 };
 
@@ -426,6 +457,11 @@ enum doca_verbs_qp_send_dbr_mode {
  * concurrently as a responder.
  */
 #define DOCA_VERBS_QP_ATTR_MAX_DEST_RD_ATOMIC (1 << 17)
+
+/**
+ * @brief CC group (congestion control) attribute (experimental SDK).
+ */
+#define DOCA_VERBS_QP_ATTR_CC_GROUP (1 << 18)
 
 /**
  * @brief Specifies the length of a GID (Global ID) in bytes.
@@ -1237,6 +1273,22 @@ doca_error_t doca_verbs_qp_attr_set_max_dest_rd_atomic(doca_verbs_qp_attr_t *qp_
                                                        uint8_t max_dest_rd_atomic);
 
 /**
+ * @brief Associate an experimental CC group with QP attribute state (DOCA SDK / runtime dlopen
+ * path).
+ *
+ * @param[in] verbs_qp_attr QP attributes.
+ * @param[in] cc_group CC group handle from doca_verbs_cc_group_* (or NULL to clear when supported).
+ *
+ * @return DOCA_SUCCESS on success, doca_error code on failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ * - DOCA_ERROR_NOT_SUPPORTED - called in open-source mode without SDK.
+ * - DOCA_SDK_WRAPPER_NOT_SUPPORTED - SDK wrapper path is enabled but CC-group symbols are
+ * unavailable.
+ */
+doca_error_t doca_verbs_qp_attr_set_cc_group(doca_verbs_qp_attr_t *verbs_qp_attr,
+                                             doca_verbs_cc_group_t *cc_group);
+
+/**
  * @brief Set counter_set_id attribute for verbs_qp_attr
  *
  * @param [in] verbs_qp_attr
@@ -1727,6 +1779,30 @@ doca_error_t doca_verbs_cq_attr_set_external_umem(doca_verbs_cq_attr_t *cq_attr,
                                                   uint64_t external_umem_offset);
 
 /**
+ * @brief Set external DBR umem attribute for doca_verbs_cq_attr.
+ *
+ * Setting this attribute provides a separate umem for the CQ doorbell record,
+ * instead of packing the DBR inside the CQ ring umem.
+ * This is used when CQ ring and CQ DBR live in different umem slabs
+ * (e.g., for control buffer suballocation).
+ *
+ * @param [in] cq_attr
+ * Pointer to doca_verbs_cq_attr instance.
+ * @param [in] external_dbr_umem
+ * External umem instance for the CQ doorbell record.
+ * @param [in] external_dbr_umem_offset
+ * The offset in the external DBR umem buffer for the CQ doorbell record.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_cq_attr_set_external_dbr_umem(doca_verbs_cq_attr_t *cq_attr,
+                                                      doca_verbs_umem_t *external_dbr_umem,
+                                                      uint64_t external_dbr_umem_offset);
+
+/**
  * @brief Set external uar attribute for doca_verbs_cq_attr.
  *
  * Setting this attribute means that the user wants to provide an external uar by himself,
@@ -1775,6 +1851,48 @@ doca_error_t doca_verbs_cq_attr_set_cq_overrun(doca_verbs_cq_attr_t *cq_attr,
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
 doca_error_t doca_verbs_cq_attr_set_cq_collapsed(doca_verbs_cq_attr_t *cq_attr, uint8_t cc);
+
+/**
+ * @brief Set comp_channel attribute for doca_verbs_cq_attr.
+ *
+ * @param [in] cq_attr
+ * Pointer to doca_verbs_cq_attr instance.
+ * @param [in] comp_channel
+ * Pointer to completion channel to bind the CQ to. comp_channel may be null in case the application regrets setting a
+ * completion channel.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_cq_attr_set_comp_channel(doca_verbs_cq_attr_t *cq_attr, doca_verbs_comp_channel_t *comp_channel);
+
+/**
+ * @brief CQ doorbell create state
+ */
+enum doca_verbs_cq_state {
+	DOCA_VERBS_CQ_ST_NO_ACTION,
+	DOCA_VERBS_CQ_ST_SOLICITED_NOTIFICATION_REQUEST_ARMED,
+	DOCA_VERBS_CQ_ST_NOTIFICATION_REQUEST_ARMED,
+	DOCA_VERBS_CQ_ST_FIRED,
+};
+
+/**
+ * @brief Set CQ doorbell create state attribute for doca_verbs_cq_attr.
+ *
+ * @param [in] cq_attr
+ * Pointer to doca_verbs_cq_attr instance.
+ * @param [in] cq_state
+ * Create state (@see doca_verbs_cq_state).
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_cq_attr_set_st(doca_verbs_cq_attr_t *cq_attr, enum doca_verbs_cq_state cq_state);
+
 /**
  * @brief Create a DOCA Verbs Completion Queue instance.
  *
@@ -1835,7 +1953,7 @@ doca_error_t doca_verbs_cq_get_wq(doca_verbs_cq_t *verbs_cq, void **cq_buf,
  * @param [out] arm_dbr
  * Pointer to the arm doorbell record
  */
-doca_error_t doca_verbs_cq_get_dbr_addr(doca_verbs_cq_t *verbs_cq, uint64_t **uar_db_reg,
+doca_error_t doca_verbs_cq_get_dbr_db_addr(doca_verbs_cq_t *verbs_cq, uint64_t **uar_db_reg,
                                         uint32_t **ci_dbr, uint32_t **arm_dbr);
 
 /**
@@ -1849,7 +1967,80 @@ doca_error_t doca_verbs_cq_get_dbr_addr(doca_verbs_cq_t *verbs_cq, uint64_t **ua
  * @return
  * The CQ number.
  */
-doca_error_t doca_verbs_cq_get_cqn(const doca_verbs_cq_t *verbs_cq, uint32_t *cqn);
+doca_error_t doca_verbs_cq_get_cq_num(const doca_verbs_cq_t *verbs_cq, uint32_t *cqn);
+
+/**
+ * @brief Set cq_context attribute for verbs_cq. This function allows to set cq_context if the desired user data is not
+ * available at CQ creation time.
+ *
+ * @param [in] verbs_cq
+ * Pointer to verbs_cq instance.
+ * @param [in] cq_context
+ * User data. cq_context may be null in case the application regrets setting a user data.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_cq_set_cq_context(doca_verbs_cq_t *verbs_cq, void *cq_context);
+
+/**
+ * @brief Create a DOCA Verbs Completion Channel instance.
+ *
+ * @param [in] net_dev
+ * Pointer to net_dev instance.
+ * @param [out] verbs_comp_channel
+ * Pointer to pointer to be set to point to the created verbs_comp_channel instance.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ * - DOCA_ERROR_NO_MEMORY - failed to allocate resources.
+ */
+doca_error_t doca_verbs_comp_channel_create(const doca_dev_t *net_dev, doca_verbs_comp_channel_t **verbs_comp_channel);
+
+/**
+ * @brief Destroy a DOCA Verbs Completion Channel instance.
+ *
+ * @param [in] verbs_comp_channel
+ * Pointer to verbs_comp_channel instance.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_comp_channel_destroy(doca_verbs_comp_channel_t *verbs_comp_channel);
+
+/**
+ * @brief Get the next event from a DOCA Verbs Completion Channel.
+ *
+ * @param [in] verbs_comp_channel
+ * Pointer to verbs_comp_channel instance to get the next event from.
+ * @param [out] cq_context
+ * Pointer to the user-data associated with the event.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_get_cq_comp_channel_event(doca_verbs_comp_channel_t *verbs_comp_channel, void **cq_context);
+
+/**
+ * Acknowledge completion events
+ *
+ * Every event received from doca_verbs_get_cq_event() must be acknowledged using this API.
+ * To prevent races, the CQ destroy will wait until all events are acknowledged.
+ *
+ * @param [in] verbs_cq
+ * Pointer to the verbs_cq instance.
+ * @param [in] nevents
+ * The number of events to acknowledge.
+ */
+doca_error_t doca_verbs_ack_cq_events(doca_verbs_cq_t *verbs_cq, unsigned int nevents);
 
 /**
  * @brief Create a DOCA Verbs SRQ Init Attributes instance.

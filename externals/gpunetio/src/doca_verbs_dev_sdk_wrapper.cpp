@@ -34,9 +34,9 @@
 #include <sys/syslog.h>
 #include <mutex>
 #include <string.h>
-#include <infiniband/verbs.h>
 
 #include "doca_gpunetio_log.hpp"
+#include "doca_verbs_net_wrapper.h"
 #include "doca_verbs_dev_sdk_wrapper.h"
 
 #ifdef __cplusplus

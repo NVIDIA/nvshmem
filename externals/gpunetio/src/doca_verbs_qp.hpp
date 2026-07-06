@@ -192,7 +192,7 @@ struct doca_verbs_qp_open {
 
     doca_error_t create_qp_obj(uint32_t uar_id, uint32_t log_rq_size, uint32_t log_sq_size,
                                uint32_t log_stride, uint64_t dbr_umem_offset, uint32_t dbr_umem_id,
-                               uint32_t wq_umem_id,
+                               uint64_t wq_umem_offset, uint32_t wq_umem_id,
                                struct doca_verbs_qp_init_attr_open *verbs_qp_init_attr) noexcept;
 
     doca_error_t rst2init(struct doca_verbs_qp_attr_open *verbs_qp_attr, int param_mask) noexcept;

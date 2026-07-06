@@ -63,6 +63,14 @@
 #define DOCA_GPUNETIO_VERBS_HAS_FENCE_ACQUIRE_RELEASE_PTX 1
 #endif
 
+#ifndef DOCA_GPUNETIO_VERBS_USE_LDG
+#define DOCA_GPUNETIO_VERBS_USE_LDG 0
+#endif
+
+#if CUDA_VERSION >= 13030
+#define DOCA_GPUNETIO_VERBS_HAS_STORE_RELEASE_MMIO 1
+#endif
+
 /**
  * @brief Queries the global timer
  *
@@ -133,6 +141,18 @@ __device__ static __forceinline__ uint16_t doca_gpu_dev_verbs_bswap16(uint16_t x
 __device__ static __forceinline__ void doca_gpu_dev_verbs_store_relaxed_mmio(uint64_t *ptr,
                                                                              uint64_t val) {
     asm volatile("st.mmio.relaxed.sys.global.b64 [%0], %1;" : : "l"(ptr), "l"(val));
+}
+#endif
+
+#ifdef DOCA_GPUNETIO_VERBS_HAS_STORE_RELEASE_MMIO
+__device__ static __forceinline__ void doca_gpu_dev_verbs_store_release_mmio(uint64_t *ptr,
+                                                                             uint64_t val) {
+    asm volatile("st.mmio.release.sys.global.b64 [%0], %1;" : : "l"(ptr), "l"(val));
+}
+
+__device__ static __forceinline__ void doca_gpu_dev_verbs_store_release_mmio(uint32_t *ptr,
+                                                                             uint32_t val) {
+    asm volatile("st.mmio.release.sys.global.b32 [%0], %1;" : : "l"(ptr), "r"(val));
 }
 #endif
 
@@ -428,4 +448,18 @@ doca_gpu_dev_verbs_div_ceil_aligned_pow2_32bits(uint64_t x, int denominator_shif
     return uint32_t(x >> denominator_shift) + !!__funnelshift_r(0, uint32_t(x), denominator_shift);
 }
 
+/** @brief Conditional __ldg wrapper for GPUNetIO verbs device API.
+ *  Returns cached load via __ldg if enabled, otherwise dereference directly.
+ * @tparam T Pointer type.
+ * @param ptr Pointer to load.
+ * @return Loaded value via __ldg or dereferenced value.
+ */
+template <typename T>
+__device__ __forceinline__ T doca_gpu_dev_verbs_load_const(const T *ptr) {
+#if DOCA_GPUNETIO_VERBS_USE_LDG
+    return __ldg(ptr);
+#else
+    return *ptr;
+#endif
+}
 #endif /* DOCA_GPUNETIO_DEV_VERBS_COMMON_H */

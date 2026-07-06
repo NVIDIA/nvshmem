@@ -680,7 +680,7 @@ doca_verbs_qp_state doca_verbs_qp_open::get_current_state() const noexcept {
 
 doca_error_t doca_verbs_qp_open::create_qp_obj(
     uint32_t uar_id, uint32_t log_rq_size, uint32_t log_sq_size_wqebb, uint32_t log_stride,
-    uint64_t dbr_umem_offset, uint32_t dbr_umem_id, uint32_t wq_umem_id,
+    uint64_t dbr_umem_offset, uint32_t dbr_umem_id, uint64_t wq_umem_offset, uint32_t wq_umem_id,
     struct doca_verbs_qp_init_attr_open *verbs_qp_init_attr) noexcept {
     create_qp_in create_in{0};
     create_qp_out create_out{0};
@@ -767,7 +767,9 @@ doca_error_t doca_verbs_qp_open::create_qp_obj(
     DEVX_SET(qpc, qpc, dbr_umem_id, dbr_umem_id);
     DEVX_SET64(qpc, qpc, dbr_addr, dbr_umem_offset);
 
-    DEVX_SET64(qpc, qpc, cd_master, verbs_qp_init_attr->core_direct_master);
+    DEVX_SET(qpc, qpc, cd_master, verbs_qp_init_attr->core_direct_master);
+
+    DEVX_SET64(create_qp_in, create_in, wq_umem_offset, wq_umem_offset);
     DEVX_SET(create_qp_in, create_in, wq_umem_id, wq_umem_id);
     DEVX_SET(create_qp_in, create_in, wq_umem_valid, 1);
 
@@ -1483,6 +1485,7 @@ void doca_verbs_qp_open::create() {
     uint32_t dbr_umem_id{0};
     uint64_t dbr_umem_offset{0};
     uint32_t wq_umem_id{0};
+    uint64_t wq_umem_offset{0};
 
     if (m_init_attr.external_umem == nullptr) {
         auto db_umem_offset =
@@ -1510,6 +1513,7 @@ void doca_verbs_qp_open::create() {
             throw DOCA_ERROR_DRIVER;
         }
 
+        wq_umem_offset = 0;
         wq_umem_id = m_umem_obj->umem_id;
         dbr_umem_offset = db_umem_offset;
         dbr_umem_id = wq_umem_id;
@@ -1526,7 +1530,8 @@ void doca_verbs_qp_open::create() {
             throw status;
         }
 
-        m_wq_buf += m_init_attr.external_umem_offset;
+        wq_umem_offset = m_init_attr.external_umem_offset;
+        m_wq_buf += wq_umem_offset;
         m_rq_buf = m_wq_buf;
         m_sq_buf = m_wq_buf + ((uintptr_t)m_rq_size << m_log_rcv_wqe_size);
 
@@ -1556,7 +1561,7 @@ void doca_verbs_qp_open::create() {
 
     /* Create QP object */
     status = create_qp_obj(uar_id, log_rq_size, log_sq_size_wqebb, log_stride, dbr_umem_offset,
-                           dbr_umem_id, wq_umem_id, &m_init_attr);
+                           dbr_umem_id, wq_umem_offset, wq_umem_id, &m_init_attr);
     if (status != DOCA_SUCCESS) {
         DOCA_LOG(LOG_ERR, "Failed to create QP object");
         throw DOCA_ERROR_DRIVER;
@@ -2991,6 +2996,34 @@ doca_error_t doca_verbs_qp_attr_set_max_dest_rd_atomic(doca_verbs_qp_attr_t *qp_
     qp_attr->open->max_dest_rd_atomic = max_dest_rd_atomic;
 
     return DOCA_SUCCESS;
+}
+
+doca_error_t doca_verbs_qp_attr_set_cc_group(doca_verbs_qp_attr_t *qp_attr,
+                                             doca_verbs_cc_group_t *cc_group) {
+    if (qp_attr == nullptr) {
+        DOCA_LOG(LOG_ERR, "Failed to set cc_group: parameter qp_attr is NULL");
+        return DOCA_ERROR_INVALID_VALUE;
+    }
+
+    if (cc_group == nullptr) {
+        DOCA_LOG(LOG_ERR, "Failed to set cc_group: parameter cc_group is NULL");
+        return DOCA_ERROR_INVALID_VALUE;
+    }
+
+    if (qp_attr->type == DOCA_VERBS_SDK_LIB_TYPE_SDK) {
+        auto err = doca_verbs_sdk_wrapper_qp_attr_set_cc_group(qp_attr->sdk, cc_group);
+        if (err == DOCA_SDK_WRAPPER_SUCCESS) {
+            return DOCA_SUCCESS;
+        } else if (err == DOCA_SDK_WRAPPER_API_ERROR) {
+            DOCA_LOG(LOG_INFO, "DOCA SDK function returned an error", __func__);
+            return DOCA_ERROR_UNEXPECTED;
+        }
+        DOCA_LOG(LOG_INFO, "QP CC group not available (SDK symbol or DOCA_SDK_LIB_PATH)", __func__);
+        return DOCA_ERROR_NOT_SUPPORTED;
+    }
+
+    DOCA_LOG(LOG_INFO, "QP CC group attribute is SDK-only.", __func__);
+    return DOCA_ERROR_NOT_SUPPORTED;
 }
 
 doca_error_t doca_verbs_qp_attr_set_counter_set_id(doca_verbs_qp_attr_t *qp_attr,

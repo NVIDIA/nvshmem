@@ -67,6 +67,7 @@ doca_sdk_wrapper_error_t doca_gpu_sdk_wrapper_mem_alloc(void *gpu_dev, size_t si
 doca_sdk_wrapper_error_t doca_gpu_sdk_wrapper_mem_free(void *gpu, void *memptr_gpu);
 doca_sdk_wrapper_error_t doca_gpu_sdk_wrapper_dmabuf_fd(void *gpu, void *memptr_gpu, size_t size,
                                                         int *dmabuf_fd);
+doca_sdk_wrapper_error_t doca_gpu_sdk_wrapper_verbs_req_notify_cq(void *gpu_dev, void *verbs_cq);
 
 #ifdef __cplusplus
 }

@@ -28,29 +28,15 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/**
- * @file gdaki_gdrcopy.h
- * @brief A header file for the GDRCopy APIs used in GDAKI
- */
+#pragma once
 
-#ifndef DOCA_GPUNETIO_GDRCOPY_H
-#define DOCA_GPUNETIO_GDRCOPY_H
+#include <mutex>
+#include <set>
 
-#include <stddef.h>
-#include <stdbool.h>
+#include "host/doca_gpunetio.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-bool doca_gpu_gdrcopy_is_supported();
-bool doca_gpu_gdrcopy_supports_force_pcie();
-int doca_gpu_gdrcopy_create_mapping(void *dev_aligned_ptr, size_t size, bool force_pcie,
-                                    void **out_mh, void **out_host_ptr);
-void doca_gpu_gdrcopy_destroy_mapping(void *mh, void *host_ptr, size_t size);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif  // DOCA_GPUNETIO_GDRCOPY_H
+struct doca_gpu_net_event {
+    struct mlx5dv_devx_event_channel *channel{};
+    std::set<struct doca_gpu_verbs_qp *> qps;
+    bool degraded{false};
+};

@@ -113,6 +113,7 @@ void doca_verbs_uar_open::create() {
 
     m_uar_id = m_uar->page_id;
     m_reg_addr = m_uar->reg_addr;
+    m_base_addr = m_uar->base_addr;
     m_dbr_less_addr = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(m_uar->base_addr) +
                                                DOCA_VERBS_UAR_DBR_LESS_DB_OFFSET);
 }

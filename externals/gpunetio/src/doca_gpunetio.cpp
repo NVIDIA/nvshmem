@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <time.h>
+#include <endian.h>
 #include <cuda_runtime.h>
 #include <string.h>
 
@@ -41,6 +42,7 @@
 #include <unordered_map>
 #include <mutex>
 
+#include "common/doca_gpunetio_verbs_def.h"
 #include "host/mlx5_prm.h"
 #include "host/mlx5_ifc.h"
 
@@ -58,6 +60,23 @@
 #define GPU_PAGE_SHIFT 16
 #define GPU_PAGE_SIZE (1UL << GPU_PAGE_SHIFT)
 #define GPU_FULL_ASYNC_STORE_RELEASE_SUPPORT_COMPUTE_CAP_MAJOR 10
+
+#define DOCA_GPUNETIO_FREE_FLOW_RING_DB_THRESHOLD_DEFAULT 64
+
+static doca_error_t normalize_export_cq_type(enum doca_gpu_dev_verbs_cq_type *cq_type) {
+    switch (*cq_type) {
+        case DOCA_GPUNETIO_VERBS_CQ_UNKNOWN:
+            *cq_type = DOCA_GPUNETIO_VERBS_CQ_64B;
+            return DOCA_SUCCESS;
+        case DOCA_GPUNETIO_VERBS_CQ_64B:
+        case DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED:
+        case DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST:
+            return DOCA_SUCCESS;
+        default:
+            DOCA_LOG(LOG_ERR, "Invalid CQ type %d", *cq_type);
+            return DOCA_ERROR_INVALID_VALUE;
+    }
+}
 
 struct doca_gpu_mtable {
     uintptr_t base_addr;
@@ -145,7 +164,7 @@ doca_error_t doca_gpu_create(const char *gpu_bus_id, doca_gpu_t **gpu_dev) {
     res_cuda = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
         cudaDeviceGetByPCIBusId(&gpu_dev_->open->cuda_dev, gpu_bus_id));
     if (res_cuda != cudaSuccess) {
-        DOCA_LOG(LOG_ERR, "Invalid GPU bus id provided (ret %d).", res_drv);
+        DOCA_LOG(LOG_ERR, "Invalid GPU bus id provided (ret %d).", res_cuda);
         goto exit_error;
     }
 
@@ -179,6 +198,7 @@ doca_error_t doca_gpu_create(const char *gpu_bus_id, doca_gpu_t **gpu_dev) {
     gpu_dev_->open->support_bf_uar = true;
     gpu_dev_->open->support_async_store_release = priv_query_async_store_release_support();
     gpu_dev_->open->support_gdrcopy = doca_gpu_gdrcopy_is_supported();
+    gpu_dev_->open->support_gdrcopy_data_direct = doca_gpu_gdrcopy_supports_force_pcie();
 
     try {
         gpu_dev_->open->mtable = new std::unordered_map<uintptr_t, struct doca_gpu_mtable *>();
@@ -259,6 +279,8 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
     void *memptr_cpu_orig_ = 0;
     doca_error_t status = DOCA_SUCCESS;
     doca_sdk_wrapper_error_t err;
+    bool is_gpu_cpu_mtype;
+    bool is_data_direct_mtype;
 
     if (gpu_dev == nullptr) {
         DOCA_LOG(LOG_ERR, "Invalid input parameters.");
@@ -276,6 +298,10 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
         }
     }
 
+    is_gpu_cpu_mtype =
+        (mtype == DOCA_GPU_MEM_TYPE_GPU_CPU || mtype == DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT);
+    is_data_direct_mtype = (mtype == DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT);
+
     if (gpu_dev->open == nullptr) {
         DOCA_LOG(LOG_ERR, "Invalid DOCA GPUNetIO instance provided.");
         return DOCA_ERROR_INVALID_VALUE;
@@ -286,9 +312,23 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
         return DOCA_ERROR_INVALID_VALUE;
     }
 
+    if (mtype != DOCA_GPU_MEM_TYPE_GPU && !is_gpu_cpu_mtype && mtype != DOCA_GPU_MEM_TYPE_CPU_GPU) {
+        DOCA_LOG(LOG_ERR, "Invalid memory type provided.");
+        return DOCA_ERROR_INVALID_VALUE;
+    }
+
     if (mtype != DOCA_GPU_MEM_TYPE_GPU && memptr_cpu == nullptr) {
         DOCA_LOG(LOG_ERR, "Invalid memptr_cpu provided.");
         return DOCA_ERROR_INVALID_VALUE;
+    }
+
+    if (is_data_direct_mtype) {
+        if (!gpu_dev->open->support_gdrcopy_data_direct) {
+            DOCA_LOG(LOG_ERR,
+                     "DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT memory type is not supported on this "
+                     "GPU.");
+            return DOCA_ERROR_NOT_SUPPORTED;
+        }
     }
 
     if (size == 0) {
@@ -307,7 +347,7 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
     mentry->mtype = mtype;
     mentry->size = size;
 
-    if (mtype == DOCA_GPU_MEM_TYPE_GPU_CPU && alignment != GPU_PAGE_SIZE) alignment = GPU_PAGE_SIZE;
+    if (is_gpu_cpu_mtype && alignment != GPU_PAGE_SIZE) alignment = GPU_PAGE_SIZE;
 
     if (mtype == DOCA_GPU_MEM_TYPE_GPU) {
         mentry->size_orig = mentry->size + alignment;
@@ -343,8 +383,10 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
         mentry->base_addr = (uintptr_t)cudev_memptr_gpu_orig_;
         mentry->align_addr_gpu = (uintptr_t)cudev_memptr_gpu_;
         mentry->align_addr_cpu = 0;
-    } else if (mtype == DOCA_GPU_MEM_TYPE_GPU_CPU) {
+    } else if (is_gpu_cpu_mtype) {
         if (gpu_dev->open->support_gdrcopy == true) {
+            bool force_pcie = is_data_direct_mtype;
+
             mentry->size_orig = mentry->size + alignment;
 
             res = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
@@ -379,9 +421,9 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
             mentry->align_addr_gpu = (uintptr_t)cudev_memptr_gpu_;
             mentry->align_addr_cpu = 0;
 
-            ret =
-                doca_gpu_gdrcopy_create_mapping((void *)mentry->align_addr_gpu, mentry->size,
-                                                &mentry->gdr_mh, (void **)&mentry->align_addr_cpu);
+            ret = doca_gpu_gdrcopy_create_mapping((void *)mentry->align_addr_gpu, mentry->size,
+                                                  force_pcie, &mentry->gdr_mh,
+                                                  (void **)&mentry->align_addr_cpu);
             if (ret) {
                 DOCA_LOG(LOG_ERR, "Error mapping GPU memory at %lx to CPU", mentry->align_addr_gpu);
                 status = DOCA_ERROR_DRIVER;
@@ -389,8 +431,8 @@ doca_error_t doca_gpu_mem_alloc(doca_gpu_t *gpu_dev, size_t size, size_t alignme
             }
         } else {
             DOCA_LOG(LOG_WARNING,
-                     "GDRCopy not enabled, can't allocate memory type DOCA_GPU_MEM_TYPE_GPU_CPU. "
-                     "Using DOCA_GPU_MEM_TYPE_CPU_GPU mode instead");
+                     "GDRCopy not enabled, can't allocate GPU-CPU memory type. Using "
+                     "DOCA_GPU_MEM_TYPE_CPU_GPU mode instead");
 
             mentry->size_orig = mentry->size;
 
@@ -536,7 +578,8 @@ doca_error_t doca_gpu_mem_free(doca_gpu_t *gpu_dev, void *memptr_gpu) {
 
     if (mentry->mtype == DOCA_GPU_MEM_TYPE_GPU)
         DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaFree((void *)mentry->base_addr));
-    else if (mentry->mtype == DOCA_GPU_MEM_TYPE_GPU_CPU) {
+    else if (mentry->mtype == DOCA_GPU_MEM_TYPE_GPU_CPU ||
+             mentry->mtype == DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT) {
         if (gpu_dev->open->support_gdrcopy)
             doca_gpu_gdrcopy_destroy_mapping(mentry->gdr_mh, (void *)mentry->align_addr_cpu,
                                              mentry->size);
@@ -717,7 +760,8 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
                                       enum doca_gpu_dev_verbs_nic_handler nic_handler,
                                       void *gpu_qp_umem_dev_ptr, doca_verbs_cq_t *cq_sq,
                                       enum doca_gpu_verbs_send_dbr_mode_ext send_dbr_mode_ext,
-                                      struct doca_gpu_verbs_qp **qp_out) {
+                                      enum doca_gpu_dev_verbs_cq_type cq_type,
+                                      bool enable_data_direct, struct doca_gpu_verbs_qp **qp_out) {
     doca_error_t status = DOCA_SUCCESS;
     struct doca_gpu_dev_verbs_qp *qp_cpu_ = nullptr;
     struct doca_gpu_verbs_qp *qp_gverbs = nullptr;
@@ -739,6 +783,9 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
     if (gpu_dev->open == nullptr || qp == nullptr || qp == nullptr || cq_sq == nullptr)
         return DOCA_ERROR_INVALID_VALUE;
 
+    status = normalize_export_cq_type(&cq_type);
+    if (status != DOCA_SUCCESS) return status;
+
     if ((nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR) &&
         (send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_VALID_DBR)) {
         DOCA_LOG(LOG_ERR,
@@ -751,8 +798,23 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
     if ((send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
         !gpu_dev->open->support_gdrcopy) {
         DOCA_LOG(LOG_ERR, "SW-emulated no DBR feature is not supported without GDRCopy");
-        status = DOCA_ERROR_INVALID_VALUE;
+        status = DOCA_ERROR_NOT_SUPPORTED;
         goto out;
+    }
+
+    if (cq_type == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST) {
+        if (!gpu_dev->open->support_gdrcopy) {
+            DOCA_LOG(LOG_ERR, "Host-collapsed CQ type is not supported without GDRCopy");
+            status = DOCA_ERROR_NOT_SUPPORTED;
+            goto out;
+        }
+        if (enable_data_direct && !gpu_dev->open->support_gdrcopy_data_direct) {
+            DOCA_LOG(LOG_ERR,
+                     "GDRCopy does not support data-direct, cannot enable data-direct with "
+                     "host-collapsed CQ type");
+            status = DOCA_ERROR_NOT_SUPPORTED;
+            goto out;
+        }
     }
 
     qp_gverbs = (struct doca_gpu_verbs_qp *)calloc(1, sizeof(struct doca_gpu_verbs_qp));
@@ -819,6 +881,7 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
     qp_gverbs->qp_gpu = nullptr;
     qp_gverbs->send_dbr_mode_ext = send_dbr_mode_ext;
     qp_gverbs->qp = qp;
+    qp_gverbs->cq_sq = cq_sq;
 
     status = doca_verbs_qp_init_attr_create(&qp_init_attr_out);
     if (status != DOCA_SUCCESS) {
@@ -859,7 +922,7 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
         goto out;
     }
 
-    if (nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY) {
+    if ((nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) == 0) {
         status = doca_gpu_verbs_export_uar(sq_db, (uint64_t **)&(qp_cpu_->sq_db));
         if (status != DOCA_SUCCESS && nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO) {
             DOCA_LOG(LOG_ERR, "Can't export UAR to GPU.");
@@ -868,24 +931,27 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
     }
 
     if ((status != DOCA_SUCCESS && nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO) ||
-        nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY) {
+        (nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) != 0) {
         DOCA_LOG(LOG_WARNING, "Enabling CPU proxy mode");
 
-        status = doca_gpu_mem_alloc(gpu_dev, sizeof(uint64_t), priv_get_page_size(),
-                                    DOCA_GPU_MEM_TYPE_CPU_GPU, (void **)&(qp_gverbs->cpu_db),
-                                    (void **)&(qp_gverbs->cpu_db));
+        bool use_free_flow = ((nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW) != 0);
+        uint32_t num_cpu_db_entries = use_free_flow ? sq_wqe_num : 1;
+        status = doca_gpu_mem_alloc(gpu_dev, sizeof(uint64_t) * num_cpu_db_entries,
+                                    priv_get_page_size(), DOCA_GPU_MEM_TYPE_CPU_GPU,
+                                    (void **)&(qp_gverbs->cpu_db), (void **)&(qp_gverbs->cpu_db));
         if (status != DOCA_SUCCESS) {
             DOCA_LOG(LOG_ERR, "Failed to alloc GPU memory for CPU proxy DB");
             goto out;
         }
 
-        *(qp_gverbs->cpu_db) = 0;
+        memset(qp_gverbs->cpu_db, 0, sizeof(uint64_t) * num_cpu_db_entries);
         qp_cpu_->sq_db = qp_gverbs->cpu_db;
         qp_gverbs->cpu_proxy = true;
         qp_gverbs->sq_num_shift8_be = qp_cpu_->sq_num_shift8_be;
         qp_gverbs->sq_dbrec = qp_cpu_->sq_dbrec;
         qp_gverbs->sq_db = sq_db;
-        qp_cpu_->nic_handler = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+        qp_cpu_->nic_handler = use_free_flow ? DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW
+                                             : DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
         nic_handler_must_be_cpu_proxy = true;
     }
 
@@ -909,20 +975,24 @@ doca_error_t doca_gpu_verbs_export_qp(doca_gpu_t *gpu_dev, doca_verbs_qp_t *qp,
     doca_verbs_cq_get_wq(cq_sq, (void **)&(qp_cpu_->cq_sq.cqe_daddr), &(qp_cpu_->cq_sq.cqe_num),
                          &(qp_cpu_->cq_sq.cqe_size));
 
-    status = doca_verbs_cq_get_dbr_addr(cq_sq, &uar_db_reg, (uint32_t **)&(cq_dbrec), &arm_dbr);
+    status = doca_verbs_cq_get_dbr_db_addr(cq_sq, &uar_db_reg, (uint32_t **)&(cq_dbrec), &arm_dbr);
     if (status != DOCA_SUCCESS) {
         DOCA_LOG(LOG_ERR, "Failed to get CQ DBR address, error = %d", status);
         goto out;
     }
 
     qp_cpu_->cq_sq.dbrec = (__be32 *)cq_dbrec;
-    doca_verbs_cq_get_cqn(cq_sq, &qp_cpu_->cq_sq.cq_num);
+    doca_verbs_cq_get_cq_num(cq_sq, &qp_cpu_->cq_sq.cq_num);
     qp_cpu_->cq_sq.cqe_mask = (qp_cpu_->cq_sq.cqe_num - 1);
     qp_cpu_->cq_sq.cqe_ci = 0;
     qp_cpu_->cq_sq.cqe_rsvd = 0;
     qp_cpu_->cq_sq.mem_type = DOCA_GPUNETIO_VERBS_MEM_TYPE_GPU;
+    qp_cpu_->cq_sq.cq_type = cq_type;
 
     qp_gverbs->gpu_dev = gpu_dev;
+    qp_gverbs->free_flow_ring_db_threshold = DOCA_GPUNETIO_FREE_FLOW_RING_DB_THRESHOLD_DEFAULT;
+    qp_gverbs->enable_data_direct = enable_data_direct;
+    qp_gverbs->cq_type = cq_type;
 
     *qp_out = qp_gverbs;
 
@@ -934,9 +1004,13 @@ out:
         if (qp_gverbs) {
             if (qp_gverbs->qp_cpu) {
                 if (qp_gverbs->qp_cpu->sq_db &&
-                    (qp_gverbs->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY))
+                    ((qp_gverbs->qp_cpu->nic_handler &
+                      DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) == 0))
                     doca_gpu_verbs_unexport_uar(qp_gverbs->qp_cpu->sq_db);
                 free(qp_gverbs->qp_cpu);
+            }
+            if (qp_gverbs->cpu_db) {
+                doca_gpu_mem_free(gpu_dev, qp_gverbs->cpu_db);
             }
             free(qp_gverbs);
         }
@@ -957,9 +1031,14 @@ doca_error_t doca_gpu_verbs_get_qp_dev(struct doca_gpu_verbs_qp *qp,
     assert(qp->qp_cpu);
 
     if (qp->qp_gpu == nullptr) {
-        mtype = (qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED)
-                    ? DOCA_GPU_MEM_TYPE_GPU_CPU
-                    : DOCA_GPU_MEM_TYPE_GPU;
+        if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) ||
+            (qp->cq_type == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST)) {
+            mtype = qp->enable_data_direct ? DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT
+                                           : DOCA_GPU_MEM_TYPE_GPU_CPU;
+        } else {
+            mtype = DOCA_GPU_MEM_TYPE_GPU;
+        }
+
         status = doca_gpu_mem_alloc(qp->gpu_dev, sizeof(struct doca_gpu_dev_verbs_qp),
                                     priv_get_page_size(), mtype, (void **)&qp->qp_gpu,
                                     (void **)&qp->qp_gpu_h);
@@ -979,7 +1058,7 @@ doca_error_t doca_gpu_verbs_get_qp_dev(struct doca_gpu_verbs_qp *qp,
         }
 
         if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
-            (qp->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)) {
+            ((qp->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) == 0)) {
             assert(qp->gpu_dev->open->support_gdrcopy);
             qp->cpu_db = &qp->qp_gpu_h->sq_wqe_pi;
         }
@@ -993,14 +1072,19 @@ doca_error_t doca_gpu_verbs_get_qp_dev(struct doca_gpu_verbs_qp *qp,
 doca_error_t doca_gpu_verbs_unexport_qp(doca_gpu_t *gpu_dev, struct doca_gpu_verbs_qp *qp_gverbs) {
     if (gpu_dev == nullptr || qp_gverbs == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
-    if (qp_gverbs->cpu_db && ((qp_gverbs->send_dbr_mode_ext !=
-                               DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) ||
-                              (qp_gverbs->qp_cpu && (qp_gverbs->qp_cpu->nic_handler ==
-                                                     DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY))))
+    if (qp_gverbs->refcount > 0) {
+        return DOCA_ERROR_IN_USE;
+    }
+
+    if (qp_gverbs->cpu_db &&
+        ((qp_gverbs->send_dbr_mode_ext !=
+          DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) ||
+         (qp_gverbs->qp_cpu &&
+          (qp_gverbs->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) != 0)))
         doca_gpu_mem_free(gpu_dev, qp_gverbs->cpu_db);
 
     if (qp_gverbs->qp_cpu) {
-        if (qp_gverbs->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)
+        if ((qp_gverbs->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) == 0)
             doca_gpu_verbs_unexport_uar(qp_gverbs->qp_cpu->sq_db);
         free(qp_gverbs->qp_cpu);
     }
@@ -1029,6 +1113,7 @@ doca_error_t doca_gpu_verbs_export_multi_qps_dev(doca_gpu_t *gpu_dev,
     struct doca_gpu_dev_verbs_qp *qp_gpus_h = nullptr;
     struct doca_gpu_verbs_qp *qp;
     bool need_cpu_mapping = false;
+    bool need_data_direct = false;
 
     unsigned int qp_idx;
 
@@ -1039,14 +1124,21 @@ doca_error_t doca_gpu_verbs_export_multi_qps_dev(doca_gpu_t *gpu_dev,
 
     for (unsigned int qp_idx = 0; qp_idx < num_qps; qp_idx++) {
         qp = qps[qp_idx];
+        if (qp == nullptr) continue;
         assert(qp->qp_cpu != nullptr);
         need_cpu_mapping |=
-            (qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED);
+            (qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) ||
+            (qp->cq_type == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST);
+        need_data_direct |= qp->enable_data_direct;
     }
 
     if (need_cpu_mapping) assert(gpu_dev->open->support_gdrcopy);
 
-    mtype = need_cpu_mapping ? DOCA_GPU_MEM_TYPE_GPU_CPU : DOCA_GPU_MEM_TYPE_GPU;
+    if (need_cpu_mapping)
+        mtype =
+            need_data_direct ? DOCA_GPU_MEM_TYPE_GPU_CPU_DATA_DIRECT : DOCA_GPU_MEM_TYPE_GPU_CPU;
+    else
+        mtype = DOCA_GPU_MEM_TYPE_GPU;
     status = doca_gpu_mem_alloc(gpu_dev, sizeof(struct doca_gpu_dev_verbs_qp) * num_qps,
                                 GPU_PAGE_SIZE, mtype, (void **)&qp_gpus_d, (void **)&qp_cpus);
     if (status != DOCA_SUCCESS) {
@@ -1063,10 +1155,13 @@ doca_error_t doca_gpu_verbs_export_multi_qps_dev(doca_gpu_t *gpu_dev,
 
     for (qp_idx = 0; qp_idx < num_qps; qp_idx++) {
         qp = qps[qp_idx];
+        if (qp == nullptr) continue;
         assert(qp->qp_cpu != nullptr);
         qp->qp_gpu = &(qp_gpus_d[qp_idx]);
+        if (qp->cq_type == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST)
+            qp->qp_gpu_h = &(qp_cpus[qp_idx]);
         if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
-            (qp->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)) {
+            ((qp->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) == 0)) {
             qp->qp_gpu_h = &(qp_cpus[qp_idx]);
             qp->cpu_db = &qp->qp_gpu_h->sq_wqe_pi;
         }
@@ -1102,6 +1197,7 @@ doca_error_t doca_gpu_verbs_unexport_multi_qps_dev(doca_gpu_t *gpu_dev,
 
     for (unsigned int qp_idx = 0; qp_idx < num_qps; qp_idx++) {
         struct doca_gpu_verbs_qp *qp = qps[qp_idx];
+        if (qp == nullptr) continue;
         qp->qp_gpu = nullptr;
         qp->qp_gpu_h = nullptr;
     }
@@ -1112,18 +1208,33 @@ doca_error_t doca_gpu_verbs_unexport_multi_qps_dev(doca_gpu_t *gpu_dev,
 
 static inline void priv_cpu_proxy_progress_full_assisted(struct doca_gpu_verbs_qp *qp,
                                                          bool *out_progressed) {
-    uint32_t tmp_db = 0;
     __be32 dbr_val;
     bool progressed = false;
+    bool use_free_flow =
+        (qp->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW) != 0;
+    uint64_t pi_last = qp->sq_wqe_pi_last;
+    uint64_t new_pi = pi_last;
+    const uint16_t wqe_mask = qp->qp_cpu->sq_wqe_mask;
 
-    tmp_db = (uint32_t)(reinterpret_cast<std::atomic<uint64_t> *>(qp->cpu_db)
-                            ->load(std::memory_order_relaxed));
-    if (tmp_db != qp->sq_wqe_pi_last) {
+    if (use_free_flow) {
+        while (reinterpret_cast<std::atomic<uint64_t> *>(&qp->cpu_db[new_pi & wqe_mask])
+                   ->load(std::memory_order_relaxed) == new_pi + 1) {
+            new_pi++;
+            if ((qp->free_flow_ring_db_threshold) > 0 &&
+                (new_pi - pi_last >= qp->free_flow_ring_db_threshold))
+                break;
+        }
+    } else {
+        new_pi = (reinterpret_cast<std::atomic<uint64_t> *>(qp->cpu_db)
+                      ->load(std::memory_order_relaxed));
+    }
+
+    if (new_pi > pi_last) {
         struct doca_gpunetio_ib_mlx5_wqe_ctrl_seg ctrl_seg = {
-            .opmod_idx_opcode = htobe32(tmp_db << 8), .qpn_ds = qp->sq_num_shift8_be};
+            .opmod_idx_opcode = htobe32(new_pi << 8), .qpn_ds = qp->sq_num_shift8_be};
 
         if (qp->send_dbr_mode_ext != DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_HW) {
-            dbr_val = htobe32(tmp_db & 0xffff);
+            dbr_val = htobe32(new_pi & 0xffff);
 
             // Ring the DB ASAP.
             // The second DB ringing happens after the fence. This is used when the NIC enters a
@@ -1137,7 +1248,7 @@ static inline void priv_cpu_proxy_progress_full_assisted(struct doca_gpu_verbs_q
         reinterpret_cast<std::atomic<uint64_t> *>(qp->sq_db)->store(
             *reinterpret_cast<uint64_t *>(&ctrl_seg), std::memory_order_relaxed);
 
-        qp->sq_wqe_pi_last = tmp_db;
+        qp->sq_wqe_pi_last = new_pi;
         progressed = true;
     }
     *out_progressed = progressed;
@@ -1164,18 +1275,86 @@ static inline void priv_cpu_proxy_progress_dbr_assisted(struct doca_gpu_verbs_qp
     }
 }
 
+static inline void priv_cpu_proxy_progress_cq(struct doca_gpu_verbs_qp *qp, bool *out_progressed) {
+    bool progressed = false;
+    struct doca_gpu_dev_verbs_qp *qp_cpu = qp->qp_cpu;
+    struct doca_gpu_dev_verbs_cq *cq = &qp_cpu->cq_sq;
+    uint64_t old_cqe_ci = 0;
+    uint64_t new_cqe_ci = 0;
+    uint32_t cqe_chunk = 0;
+    uint16_t wqe_counter = 0;
+    uint8_t opown = 0;
+    uint8_t opcode = 0;
+    struct doca_gpunetio_ib_mlx5_cqe64 *cqe64 =
+        reinterpret_cast<struct doca_gpunetio_ib_mlx5_cqe64 *>(cq->cqe_daddr);
+
+    [[unlikely]] if (qp->qp_gpu_h == nullptr)
+        goto out;
+
+    old_cqe_ci = cq->cqe_ci;
+
+    cqe_chunk = reinterpret_cast<std::atomic<uint32_t> *>(&cqe64->wqe_counter_sig_op_own_raw)
+                    ->load(std::memory_order_relaxed);
+    cqe_chunk = be32toh(cqe_chunk);
+    wqe_counter = cqe_chunk >> 16;
+    opown = cqe_chunk & 0xff;
+    opcode = opown >> DOCA_GPUNETIO_VERBS_MLX5_CQE_OPCODE_SHIFT;
+
+    if ((opcode == DOCA_GPUNETIO_IB_MLX5_CQE_INVALID) ||
+        ((opown & DOCA_GPUNETIO_IB_MLX5_CQE_OWNER_MASK) ^ !!(wqe_counter & cq->cqe_num)))
+        goto out;
+
+    [[unlikely]] if (opcode == DOCA_GPUNETIO_IB_MLX5_CQE_REQ_ERR) {
+        DOCA_LOG(LOG_WARNING, "CQE indicates request error");
+        goto out;
+    }
+
+    ++wqe_counter;
+    new_cqe_ci = ((old_cqe_ci & ~(0xFFFFULL)) | wqe_counter) +
+                 (((uint16_t)old_cqe_ci > wqe_counter) ? 0x10000ULL : 0x0);
+
+    if (new_cqe_ci > old_cqe_ci) {
+        uint64_t *gpu_cqe_ci = &qp->qp_gpu_h->cq_sq.cqe_ci;
+
+        if (qp->gpu_dev->open->need_mcst) {
+            (void)READ_ONCE(*gpu_cqe_ci);
+        }
+
+        WRITE_ONCE(*gpu_cqe_ci, new_cqe_ci);
+        cq->cqe_ci = new_cqe_ci;
+        progressed = true;
+    }
+
+out:
+    *out_progressed = progressed;
+}
+
 doca_error_t doca_gpu_verbs_cpu_proxy_progress(struct doca_gpu_verbs_qp *qp, bool *out_progressed) {
     bool progressed = false;
+    bool cq_progressed = false;
+    bool qp_progressed = false;
     if (qp == nullptr) return DOCA_ERROR_INVALID_VALUE;
 
-    if (qp->cpu_proxy != true) return DOCA_ERROR_NOT_SUPPORTED;
+    if (qp->cq_type == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST) {
+        priv_cpu_proxy_progress_cq(qp, &cq_progressed);
+    }
+
+    if (qp->cpu_proxy != true) {
+        if (qp->cq_type == DOCA_GPUNETIO_VERBS_CQ_64B_COLLAPSED_HOST) {
+            if (out_progressed) *out_progressed = cq_progressed;
+            return DOCA_SUCCESS;
+        }
+        return DOCA_ERROR_NOT_SUPPORTED;
+    }
 
     if ((qp->send_dbr_mode_ext == DOCA_GPUNETIO_VERBS_SEND_DBR_MODE_EXT_NO_DBR_SW_EMULATED) &&
-        (qp->qp_cpu->nic_handler != DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY)) {
+        ((qp->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) == 0)) {
         priv_cpu_proxy_progress_dbr_assisted(qp);
     } else {
-        priv_cpu_proxy_progress_full_assisted(qp, &progressed);
+        priv_cpu_proxy_progress_full_assisted(qp, &qp_progressed);
     }
+
+    progressed = cq_progressed || qp_progressed;
 
     if (out_progressed) *out_progressed = progressed;
     return DOCA_SUCCESS;
@@ -1365,8 +1544,14 @@ doca_error_t doca_gpu_verbs_reset_tracking_and_memory(struct doca_gpu_verbs_qp *
 
     if (qp_gverbs->cpu_proxy) {
         assert(qp_gverbs->sq_dbrec);
-        *qp_gverbs->sq_dbrec = 0;
-        *qp_gverbs->cpu_db = 0;
+        if (qp_gverbs->sq_dbrec) *qp_gverbs->sq_dbrec = 0;
+        if (qp_gverbs->cpu_db) {
+            uint32_t num_cpu_db_entries =
+                qp_gverbs->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_FREE_FLOW
+                    ? qp_gverbs->qp_cpu->sq_wqe_num
+                    : 1;
+            memset(qp_gverbs->cpu_db, 0, num_cpu_db_entries * sizeof(uint64_t));
+        }
     } else {
         assert(qp_gverbs->qp_cpu->sq_dbrec);
         cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
@@ -1436,4 +1621,96 @@ doca_error_t doca_gpu_verbs_check_host_code_compatibility(uint32_t host_code_ver
         (host_code_version > DOCA_GPUNETIO_VERSION))
         return DOCA_ERROR_NOT_SUPPORTED;
     return DOCA_SUCCESS;
+}
+
+doca_error_t doca_gpu_verbs_req_notify_cq(doca_gpu_t *gpu_dev, doca_verbs_cq_t *verbs_cq)
+{
+    doca_error_t status = DOCA_SUCCESS;
+    cudaError_t cuda_status;
+    cudaPointerAttributes attributes;
+    bool is_gpu_memory = false;
+    uint32_t *ci_dbr = nullptr;
+    uint32_t *arm_dbr = nullptr;
+    uint64_t *uar_db_reg = nullptr;
+    uint32_t cqn = 0;
+    __be32 dbr_val;
+    __be64 db_val;
+    cudaStream_t stream = nullptr;
+
+    if (gpu_dev == nullptr || verbs_cq == nullptr)
+        return DOCA_ERROR_INVALID_VALUE;
+
+    if (verbs_cq->type == DOCA_VERBS_SDK_LIB_TYPE_SDK) {
+        if (gpu_dev->type != DOCA_GPU_LIB_TYPE_SDK) {
+            DOCA_LOG(LOG_ERR, "Invalid DOCA GPUNetIO SDK handler provided.");
+            return DOCA_ERROR_INVALID_VALUE;
+        }
+
+        auto err = doca_gpu_sdk_wrapper_verbs_req_notify_cq(gpu_dev->sdk, verbs_cq->sdk);
+        if (err == DOCA_SDK_WRAPPER_SUCCESS) {
+            return DOCA_SUCCESS;
+        } else if (err == DOCA_SDK_WRAPPER_API_ERROR) {
+            DOCA_LOG(LOG_INFO, "DOCA SDK function returned an error", __func__);
+            return DOCA_ERROR_UNEXPECTED;
+        } else if (err == DOCA_SDK_WRAPPER_NOT_SUPPORTED) {
+            return DOCA_ERROR_NOT_SUPPORTED;
+        }
+    }
+
+    if (verbs_cq->open == nullptr) {
+        DOCA_LOG(LOG_ERR, "Invalid DOCA Verbs CQ open instance provided at %s line %d.", __func__, __LINE__);
+        return DOCA_ERROR_INVALID_VALUE;
+    }
+
+    cuda_status = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    if (cuda_status != cudaSuccess) {
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    }
+
+    status = doca_verbs_cq_get_dbr_db_addr(verbs_cq, &uar_db_reg, &ci_dbr, &arm_dbr);
+    if (status) goto out;
+
+    status = doca_verbs_cq_get_cq_num(verbs_cq, &cqn);
+    if (status) goto out;
+
+    cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(
+        cudaPointerGetAttributes(&attributes, static_cast<const void *>(arm_dbr)));
+    if (cuda_status != cudaSuccess && cuda_status != cudaErrorInvalidValue) {
+        // cudaErrorInvalidValue is expected if the pointer was not allocated in, mapped by or
+        // registered with context supporting unified addressing. In this case, the pointer is
+        // not a device pointer.
+        DOCA_LOG(LOG_ERR, "Failed to get CUDA pointer attributes");
+        status = DOCA_ERROR_DRIVER;
+        goto out;
+    } else if (cuda_status == cudaSuccess && attributes.type == cudaMemoryTypeDevice)
+        is_gpu_memory = true;
+
+    dbr_val = htobe32(MLX5_CQ_DB_REQ_NOT_SOL);
+
+    if (is_gpu_memory) {
+        cudaError_t cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaMemcpyAsync(arm_dbr, &dbr_val, sizeof(dbr_val), cudaMemcpyHostToDevice, stream));
+        if (cuda_status != cudaSuccess) {
+            DOCA_LOG(LOG_ERR, "Failed to copy CQ arm DBR to GPU memory");
+            return DOCA_ERROR_DRIVER;
+        }
+
+        cuda_status = DOCA_VERBS_CUDA_CALL_CLEAR_ERROR(cudaStreamSynchronize(stream));
+        if (cuda_status != cudaSuccess) {
+            DOCA_LOG(LOG_ERR, "Failed to synchronize GPU CQ arm DBR write");
+            status = DOCA_ERROR_DRIVER;
+            goto out;
+        }
+    } else
+        *arm_dbr = dbr_val;
+
+    std::atomic_thread_fence(std::memory_order_release);
+
+    db_val = htobe64((static_cast<uint64_t>(MLX5_CQ_DB_REQ_NOT_SOL) << 32) | cqn);
+    *reinterpret_cast<volatile __be64 *>(uar_db_reg) = db_val;
+
+out:
+    cudaStreamDestroy(stream);
+
+    return status;
 }
