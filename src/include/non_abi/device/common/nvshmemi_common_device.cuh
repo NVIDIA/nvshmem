@@ -2959,7 +2959,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
         // address must be aligned to CFT_HANDLE_TX_SIZE
         assert(nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE));
 
-        size_t smem_chunk_size = nvshmemi_handle_smem_chunk_size<SCOPE>();
+        size_t smem_chunk_size;
+        if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
+            // Preserve the block-specialized path's full-stage allocation.
+            smem_chunk_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+        } else {
+            /* Threadgroups in a block share each SMEM stage.  Give every calling
+             * threadgroup the largest non-overlapping, 16B-aligned chunk, matching
+             * the unicast handle put/get paths. */
+            uint32_t num_threadgroups =
+                NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
+                                           nvshmemi_threadgroup_size<SCOPE>());
+            smem_chunk_size = nvshmemi_tma_align_down_16(
+                nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) / num_threadgroups);
+        }
 
         // round low to nearest multiple of CFT_HANDLE_TX_SIZE
         size_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
