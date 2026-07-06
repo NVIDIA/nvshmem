@@ -1519,11 +1519,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     uint32_t pending_bytes_copy = 0;
     // Each active warp owns one data chunk per stage and one barrier slot per stage.
     uint32_t max_mbarrier = NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES;
+    /* One-shot keeps two SMEM stages so its S2G TMA copy can overlap the next
+     * pull-reduce.  Two-shot staging is optimized separately. */
     size_t smem_data_buf_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
     size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
     max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
 
-    // each warp can send 32 * (sizeof(TYPE)) bytes at a time
+    // Use one element per lane as the work-partitioning granularity; this is not
+    // the maximum byte count supported by a warp-cooperative pull-reduce.
     uint32_t warpchunk_size = warpSize * (sizeof(TYPE));
     uint32_t max_warps =
         (groupSize / warpSize) < max_mbarrier ? (groupSize / warpSize) : max_mbarrier;
@@ -1531,6 +1534,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     work_warps = work_warps ? work_warps : 1;
     uint32_t num_warps = max_warps < work_warps ? max_warps : work_warps;
     uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
+
+    /* Every warp-scope group in a block shares the registered SMEM region, so
+     * partition each one-shot stage by physical block warps rather than by
+     * warps in the calling scope. */
+    uint32_t threads_in_block = blockDim.x * blockDim.y * blockDim.z;
+    uint32_t warps_in_block = (threads_in_block + static_cast<uint32_t>(warpSize) - 1) / warpSize;
+    size_t one_shot_chunk_size = nvshmemi_tma_align_down_16(smem_data_buf_size / warps_in_block);
+    size_t handle_chunk_size = ONESHOT ? one_shot_chunk_size : NVSHMEMI_SMEM_BUF_SIZE;
+    assert(handle_chunk_size >= CFT_HANDLE_TX_SIZE);
+    assert(handle_chunk_size * warps_in_block <= smem_data_buf_size);
+
     // Work partitioning is relative to the calling threadgroup.
     uint32_t warp_idx_in_scope = myIdx / warpSize;
     size_t start_offset_warp = warp_idx_in_scope * warpchunk_size * num_warpchunks_per_warp;
@@ -1540,7 +1554,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     }
 
     int copy_bytes =
-        NVSHMEMI_SMEM_BUF_SIZE < bytes_per_warp ? NVSHMEMI_SMEM_BUF_SIZE : bytes_per_warp;
+        static_cast<int>(handle_chunk_size < bytes_per_warp ? handle_chunk_size : bytes_per_warp);
 
     uintptr_t tma_smem_base = nvshmemi_tma_smem_base();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
@@ -1557,9 +1571,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
 
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
+                           (warp_idx_in_block * handle_chunk_size);
         smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           smem_data_buf_size + (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
+                           smem_data_buf_size + (warp_idx_in_block * handle_chunk_size);
 
         handle_barrier_t *handle_bar =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
@@ -1579,9 +1593,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
 
         while (byte_offset_src < bytes_per_warp) {
             // move data from shared memory to destination global memory
-            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst)
-                             ? NVSHMEMI_SMEM_BUF_SIZE
-                             : (bytes_per_warp - byte_offset_dst);
+            copy_bytes = static_cast<int>(handle_chunk_size < (bytes_per_warp - byte_offset_dst)
+                                              ? handle_chunk_size
+                                              : (bytes_per_warp - byte_offset_dst));
             __syncwarp();
             if (myIdx % warpSize == 0) {
                 if constexpr (ONESHOT) {
@@ -1613,9 +1627,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                 }
             }
 
-            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_src)
-                             ? NVSHMEMI_SMEM_BUF_SIZE
-                             : (bytes_per_warp - byte_offset_src);
+            copy_bytes = static_cast<int>(handle_chunk_size < (bytes_per_warp - byte_offset_src)
+                                              ? handle_chunk_size
+                                              : (bytes_per_warp - byte_offset_src));
             // sync entire warp
             __syncwarp();
             // copy next chunk of data from peer global to shared memory
@@ -1626,9 +1640,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
             curr_buf_idx ^= 1;
         }
 
-        copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst)
-                         ? NVSHMEMI_SMEM_BUF_SIZE
-                         : (bytes_per_warp - byte_offset_dst);
+        copy_bytes = static_cast<int>(handle_chunk_size < (bytes_per_warp - byte_offset_dst)
+                                          ? handle_chunk_size
+                                          : (bytes_per_warp - byte_offset_dst));
         __syncwarp();
         if (myIdx % warpSize == 0) {
             if constexpr (ONESHOT) {
@@ -2011,7 +2025,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
     size_t max_warp_by_smem = smem_data_buf_size / NVSHMEMI_SMEM_BUF_SIZE;
     max_mbarrier = max_warp_by_smem < max_mbarrier ? max_warp_by_smem : max_mbarrier;
 
-    // each warp can send 32 * (sizeof(TYPE)) bytes at a time
+    // Use one element per lane as the work-partitioning granularity; this is not
+    // the maximum byte count supported by a warp-cooperative pull-reduce.
     uint32_t warpchunk_size = warpSize * (sizeof(TYPE));
     uint32_t max_warps =
         (groupSize / warpSize) < max_mbarrier ? (groupSize / warpSize) : max_mbarrier;
@@ -2019,6 +2034,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
     work_warps = work_warps ? work_warps : 1;
     uint32_t num_warps = max_warps < work_warps ? max_warps : work_warps;
     uint32_t num_warpchunks_per_warp = (len / warpchunk_size) / num_warps;
+
+    /* Warp-scope groups share the registered SMEM region with the other warps
+     * in their block.  Divide each stage by physical block warps so every warp
+     * gets the largest non-overlapping, 16B-aligned pull-reduce chunk. */
+    uint32_t threads_in_block = blockDim.x * blockDim.y * blockDim.z;
+    uint32_t warps_in_block = (threads_in_block + static_cast<uint32_t>(warpSize) - 1) / warpSize;
+    size_t handle_chunk_size = nvshmemi_tma_align_down_16(smem_data_buf_size / warps_in_block);
+    assert(handle_chunk_size >= CFT_HANDLE_TX_SIZE);
+    assert(handle_chunk_size * warps_in_block <= smem_data_buf_size);
+
     // Work partitioning is relative to the calling threadgroup.
     uint32_t warp_idx_in_scope = myIdx / warpSize;
     size_t start_offset_warp = warp_idx_in_scope * warpchunk_size * num_warpchunks_per_warp;
@@ -2028,7 +2053,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
     }
 
     int copy_bytes =
-        NVSHMEMI_SMEM_BUF_SIZE < bytes_per_warp ? NVSHMEMI_SMEM_BUF_SIZE : bytes_per_warp;
+        static_cast<int>(handle_chunk_size < bytes_per_warp ? handle_chunk_size : bytes_per_warp);
 
     uintptr_t tma_smem_base = nvshmemi_tma_smem_base();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
@@ -2045,9 +2070,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
 
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
+                           (warp_idx_in_block * handle_chunk_size);
         smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
-                           smem_data_buf_size + (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
+                           smem_data_buf_size + (warp_idx_in_block * handle_chunk_size);
 
         handle_barrier_t *handle_bar =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
@@ -2065,9 +2090,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
 
         while (byte_offset_src < bytes_per_warp) {
             // move data from shared memory to destination global memory
-            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst)
-                             ? NVSHMEMI_SMEM_BUF_SIZE
-                             : (bytes_per_warp - byte_offset_dst);
+            copy_bytes = static_cast<int>(handle_chunk_size < (bytes_per_warp - byte_offset_dst)
+                                              ? handle_chunk_size
+                                              : (bytes_per_warp - byte_offset_dst));
             if (myIdx % warpSize == 0) {
                 // copy reduced data to local global memory
                 nvshmemi_tma_s2g_copy_thread<1>(
@@ -2077,9 +2102,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
             }
             __syncwarp();
 
-            copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_src)
-                             ? NVSHMEMI_SMEM_BUF_SIZE
-                             : (bytes_per_warp - byte_offset_src);
+            copy_bytes = static_cast<int>(handle_chunk_size < (bytes_per_warp - byte_offset_src)
+                                              ? handle_chunk_size
+                                              : (bytes_per_warp - byte_offset_src));
 
             // copy next chunk of data from peer global to shared memory
             nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
@@ -2090,9 +2115,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
             curr_buf_idx ^= 1;
         }
 
-        copy_bytes = NVSHMEMI_SMEM_BUF_SIZE < (bytes_per_warp - byte_offset_dst)
-                         ? NVSHMEMI_SMEM_BUF_SIZE
-                         : (bytes_per_warp - byte_offset_dst);
+        copy_bytes = static_cast<int>(handle_chunk_size < (bytes_per_warp - byte_offset_dst)
+                                          ? handle_chunk_size
+                                          : (bytes_per_warp - byte_offset_dst));
         if (myIdx % warpSize == 0) {
             // copy reduced data to local global memory
             nvshmemi_tma_s2g_copy_thread<0>(myIdx, smem_data_buf[curr_buf_idx],
