@@ -11,40 +11,40 @@
 extern "C" {
 #endif
 
-#define CALL_FCOLLECT(TYPENAME, TYPE, TG_PRE, THREADGROUP, THREAD_COMP, ELEM_COMP)                 \
-    __global__ void test_##TYPENAME##_fcollect_call_kern##THREADGROUP(                             \
-        nvshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int mype, int iter) {     \
-        int i;                                                                                     \
-                                                                                                   \
-        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {                  \
-            for (i = 0; i < iter; i++) {                                                           \
-                nvshmem##TG_PRE##_##TYPENAME##_fcollect##THREADGROUP(team, dest, source, nelems);  \
-            }                                                                                      \
-        }                                                                                          \
-    }                                                                                              \
-    void test_##TYPENAME##_fcollect_call_kern##THREADGROUP##_cubin(                                \
-        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                        \
-        CUfunction test_cubin;                                                                     \
-                                                                                                   \
-        init_test_case_kernel(                                                                     \
-            &test_cubin,                                                                           \
-            NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_fcollect_call_kern##THREADGROUP));           \
-        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, num_blocks, 1, 1, num_tpb, 1, 1, 0, stream, \
-                                           arglist));                                              \
+#define CALL_FCOLLECT(TYPENAME, TYPE, TG_PRE, THREADGROUP, THREAD_COMP, ELEM_COMP)                \
+    __global__ void test_##TYPENAME##_fcollect_call_kern##THREADGROUP(                            \
+        nvshmem_team_t team, TYPE *dest, const TYPE *source, int nelems, int mype, int iter,      \
+        size_t dynamic_smem_size) {                                                               \
+        int i;                                                                                    \
+                                                                                                  \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                                \
+        if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {                 \
+            for (i = 0; i < iter; i++) {                                                          \
+                nvshmem##TG_PRE##_##TYPENAME##_fcollect##THREADGROUP(team, dest, source, nelems); \
+            }                                                                                     \
+        }                                                                                         \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                             \
+    }                                                                                             \
+    void test_##TYPENAME##_fcollect_call_kern##THREADGROUP##_cubin(                               \
+        int num_blocks, int num_tpb, cudaStream_t stream, void **arglist) {                       \
+        CUfunction test_cubin;                                                                    \
+                                                                                                  \
+        init_test_case_kernel(                                                                    \
+            &test_cubin,                                                                          \
+            NVSHMEMI_TEST_STRINGIFY(test_##TYPENAME##_fcollect_call_kern##THREADGROUP));          \
+        size_t dynamic_smem_size = *reinterpret_cast<size_t *>(arglist[6]);                       \
+        NVSHMEM_PERF_CU_LAUNCH_COOP(test_cubin, num_blocks, num_tpb, stream, arglist,             \
+                                    dynamic_smem_size);                                           \
     }
 
-#define CALL_FCOLLECT_KERNEL(TYPENAME, THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM)        \
-    if (use_cubin) {                                                                          \
-        test_##TYPENAME##_fcollect_call_kern##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM,    \
-                                                                  ARG_LIST);                  \
-    } else {                                                                                  \
-        status = nvshmemx_collective_launch(                                                  \
-            (const void *)test_##TYPENAME##_fcollect_call_kern##THREADGROUP, BLOCKS, THREADS, \
-            ARG_LIST, 0, STREAM);                                                             \
-        if (status != NVSHMEMX_SUCCESS) {                                                     \
-            fprintf(stderr, "shmemx_collective_launch failed %d \n", status);                 \
-            exit(-1);                                                                         \
-        }                                                                                     \
+#define CALL_FCOLLECT_KERNEL(TYPENAME, THREADGROUP, BLOCKS, THREADS, ARG_LIST, STREAM)            \
+    if (use_cubin) {                                                                              \
+        test_##TYPENAME##_fcollect_call_kern##THREADGROUP##_cubin(BLOCKS, THREADS, STREAM,        \
+                                                                  ARG_LIST);                      \
+    } else {                                                                                      \
+        size_t dynamic_smem_size = *reinterpret_cast<size_t *>((ARG_LIST)[6]);                    \
+        NVSHMEM_PERF_COLLECTIVE_LAUNCH(status, test_##TYPENAME##_fcollect_call_kern##THREADGROUP, \
+                                       BLOCKS, THREADS, ARG_LIST, dynamic_smem_size, STREAM);     \
     }
 
 CALL_FCOLLECT(int32, int32_t, , , 1, 512);
@@ -68,6 +68,7 @@ int fcollect_calling_kernel(nvshmem_team_t team, void *dest, const void *source,
     int i;
     int skip = warmup_iters;
     int iter = iters;
+    size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
     uint64_t *h_size_array = (uint64_t *)h_tables[0];
     double *h_thread_lat = (double *)h_tables[1];
     double *h_warp_lat = (double *)h_tables[2];
@@ -75,8 +76,8 @@ int fcollect_calling_kernel(nvshmem_team_t team, void *dest, const void *source,
     std::vector<perf_stats_t> h_thread_stats(max_size_log);
     std::vector<perf_stats_t> h_warp_stats(max_size_log);
     std::vector<perf_stats_t> h_block_stats(max_size_log);
-    void *args_1[] = {&team, &dest, &source, &num_elems, &mype, &skip};
-    void *args_2[] = {&team, &dest, &source, &num_elems, &mype, &iter};
+    void *args_1[] = {&team, &dest, &source, &num_elems, &mype, &skip, &dynamic_smem_size};
+    void *args_2[] = {&team, &dest, &source, &num_elems, &mype, &iter, &dynamic_smem_size};
 
     nvshmem_barrier_all();
     min_elems = max(static_cast<size_t>(1), min_size / (npes * sizeof(int32_t)));
