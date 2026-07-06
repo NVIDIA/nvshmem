@@ -75,6 +75,13 @@ extern "C" {
 CALL_RDXN_OPS_ALL_TG(int32, int32_t)
 CALL_RDXN_OPS_ALL_TG(int64, int64_t)
 
+#define CALL_RDXN_SUM_ALL_TG(TYPENAME, TYPE)                    \
+    CALL_RDXN(x, _block, TYPENAME, TYPE, sum, INT_MAX, INT_MAX) \
+    CALL_RDXN(x, _warp, TYPENAME, TYPE, sum, warpSize, 4096)    \
+    CALL_RDXN(, , TYPENAME, TYPE, sum, 1, 512)
+
+CALL_RDXN_SUM_ALL_TG(float, float)
+
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 }
 #endif
@@ -225,6 +232,14 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
             print_device_collective_table("device_reduction", "int64-max-t", "latency", "us", '-',
                                           size_arr, h_max_lat, j);
         }
+
+        min_elems = max(static_cast<size_t>(1), min_size / sizeof(float));
+        max_elems = max(static_cast<size_t>(1), max_size / sizeof(float));
+        RUN_ITERS_OP(float, float, , sum, 512);
+        if (!mype) {
+            print_device_collective_table("device_reduction", "float-sum-t", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+        }
     }
 
     if (run_options.run_warp) {
@@ -267,6 +282,13 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
             print_device_collective_table("device_reduction", "int64-max-w", "latency", "us", '-',
                                           size_arr, h_max_lat, j);
         }
+        min_elems = max(static_cast<size_t>(1), min_size / sizeof(float));
+        max_elems = max(static_cast<size_t>(1), max_size / sizeof(float));
+        RUN_ITERS_OP(float, float, _warp, sum, 4096);
+        if (!mype) {
+            print_device_collective_table("device_reduction", "float-sum-w", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+        }
     }
 
     if (run_options.run_block) {
@@ -308,6 +330,13 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
                                           size_arr, h_min_lat, j);
             print_device_collective_table("device_reduction", "int64-max-b", "latency", "us", '-',
                                           size_arr, h_max_lat, j);
+        }
+        min_elems = max(static_cast<size_t>(1), min_size / sizeof(float));
+        max_elems = max(static_cast<size_t>(1), max_size / sizeof(float));
+        RUN_ITERS_OP(float, float, _block, sum, max_elems);
+        if (!mype) {
+            print_device_collective_table("device_reduction", "float-sum-b", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
     }
 
