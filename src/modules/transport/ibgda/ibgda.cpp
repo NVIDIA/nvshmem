@@ -379,7 +379,8 @@ static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_s
  * Utility functions start
  * ============================================================================= */
 
-static int ibgda_parse_qp_map_by(nvshmemi_ibgda_device_qp_map_type_t *out_map_by, const char *str) {
+static int ibgda_parse_qp_map_by(nvshmemi_ibgda_device_qp_map_type_t *out_map_by, const char *str,
+                                 bool allow_none) {
     int status = 0;
     nvshmemi_ibgda_device_qp_map_type_t map_by;
     std::string req = str;
@@ -398,6 +399,8 @@ static int ibgda_parse_qp_map_by(nvshmemi_ibgda_device_qp_map_type_t *out_map_by
         map_by = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_WARP;
     } else if (req == "dct") {
         map_by = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_DCT;
+    } else if (req == "none" && allow_none) {
+        map_by = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_NONE;
     } else {
         status = NVSHMEMX_ERROR_INVALID_VALUE;
     }
@@ -3019,7 +3022,8 @@ static int ibgda_calculate_dci_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
     nvshmemi_ibgda_device_qp_map_type_t dc_map_type;
 
     /* Parse DCI mapping type start */
-    status = ibgda_parse_qp_map_by(&dc_map_type, ibgda_state->common.options->IBGDA_DCI_MAP_BY);
+    status =
+        ibgda_parse_qp_map_by(&dc_map_type, ibgda_state->common.options->IBGDA_DCI_MAP_BY, false);
     NVSHMEMI_NZ_ERROR_JMP(status, status, out, "IBGDA_DCI_MAP_BY is not valid.");
     INFO(ibgda_state->common.log_level, "IBGDA_DCI_MAP_BY is set to %s.",
          ibgda_state->common.options->IBGDA_DCI_MAP_BY);
@@ -3290,7 +3294,8 @@ static int ibgda_calculate_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
         return NVSHMEMX_SUCCESS;
     } else {
         /* Parse RC mapping type start */
-        status = ibgda_parse_qp_map_by(&rc_map_type, ibgda_state->common.options->IBGDA_RC_MAP_BY);
+        status =
+            ibgda_parse_qp_map_by(&rc_map_type, ibgda_state->common.options->IBGDA_RC_MAP_BY, true);
         NVSHMEMI_NZ_ERROR_JMP(status, status, out, "IBGDA_RC_MAP_BY is not valid.");
         INFO(ibgda_state->common.log_level, "IBGDA_RC_MAP_BY is set to %s.",
              ibgda_state->common.options->IBGDA_RC_MAP_BY);
@@ -3305,6 +3310,7 @@ static int ibgda_calculate_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
             case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_CTA:
             case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_SM:
             case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_WARP:
+            case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_NONE:
                 break;
             default:
                 NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -3706,8 +3712,7 @@ static int ibgda_setup_qp_groups_gpu_state(nvshmemt_ibgda_state_t *ibgda_state,
     /* Calculate QP groups end */
 
     /* Allocate QP group switches device memory start */
-    status =
-        cudaMalloc(qp_group_switches_d, num_qp_group_switches * sizeof(**qp_group_switches_d));
+    status = cudaMalloc(qp_group_switches_d, num_qp_group_switches * sizeof(**qp_group_switches_d));
     NVSHMEMI_NE_ERROR_JMP(status, cudaSuccess, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                           "qp_group_switches_d cudaM err.");
     /* Allocate QP group switches device memory end */

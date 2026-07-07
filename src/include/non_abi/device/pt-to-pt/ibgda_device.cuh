@@ -1825,20 +1825,27 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
                          nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() +
                      warpid;
                 break;
+            case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_NONE:
+                id = (++state->globalmem.qp_group_switches[0]) %
+                     (state->num_default_rc_per_pe * ndevices_initialized);
+                idx = id * npes + pe;
+                break;
             default:
                 assert(0);
                 break;
         }
 
-        // Rotate through NICs on each iteration
-        dev_offset = ++state->globalmem.qp_group_switches[id % state->num_qp_groups];
+        if (state->rc_map_type != NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_NONE) {
+            // Rotate through NICs on each iteration
+            dev_offset = ++state->globalmem.qp_group_switches[id % state->num_qp_groups];
 
-        // RC QPs are laid out as [NIC][QP slot][PE]. Keep the mapping ID's QP-slot
-        // calculation independent from the NIC selected by the round-robin counter.
-        uint32_t qp_slot =
-            (id / ndevices_initialized) % state->num_default_rc_per_pe;
-        uint32_t dev_idx = dev_offset % ndevices_initialized;
-        idx = (dev_idx * state->num_default_rc_per_pe + qp_slot) * npes + pe;
+            // RC QPs are laid out as [NIC][QP slot][PE]. Keep the mapping ID's QP-slot
+            // calculation independent from the NIC selected by the round-robin counter.
+            uint32_t qp_slot =
+                (id / ndevices_initialized) % state->num_default_rc_per_pe;
+            uint32_t dev_idx = dev_offset % ndevices_initialized;
+            idx = (dev_idx * state->num_default_rc_per_pe + qp_slot) * npes + pe;
+        }
     } else if (qp_index == NVSHMEMX_QP_ANY) {
         uint32_t rc_modulo = state->num_rc_per_pe * ndevices_initialized;
         // the last slot is used for switching on the QP any group
