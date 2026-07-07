@@ -164,12 +164,14 @@ NVSHMEMI_ENV_DEF(IBGDA_NUM_RC_PER_PE, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of RC QPs per peer PE used in GPU-initiated communication transport. "
                  "Set to 0 to disable RC QPs (default 2). "
                  "If set to a positive number, DCI will be used for enforcing consistency only.")
-NVSHMEMI_ENV_DEF(IBGDA_RC_MAP_BY, string, "cta", NVSHMEMI_ENV_CAT_TRANSPORT,
+NVSHMEMI_ENV_DEF(IBGDA_RC_MAP_BY, string, "none", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies how RC QPs are assigned. "
-                 "Choices are: cta, sm, warp.\n\n"
-                 "- cta: round-robin by CTA ID (default).\n"
+                 "Choices are: cta, sm, warp, none.\n\n"
+                 "- cta: round-robin by CTA ID.\n"
                  "- sm: round-robin by SM ID.\n"
-                 "- warp: round-robin by Warp ID.")
+                 "- warp: round-robin by Warp ID.\n"
+                 "- none (default): disable CTA/SM/Warp-based mapping and instead round-robin "
+                 "across all default RC QPs.")
 NVSHMEMI_ENV_DEF(IBGDA_FORCE_NIC_BUF_MEMTYPE, string, "gpumem", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Force NIC buffer memory type. Valid choices are: gpumem (default), hostmem. "
                  "For other values, use auto discovery.")
