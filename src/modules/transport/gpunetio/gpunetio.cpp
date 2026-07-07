@@ -1731,13 +1731,14 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
             int num_qp_groups = std::max(num_rc_handles / n_devs_selected / t->n_pes, 2);
             // Additional entry is for QP_ANY round-robin
             int num_qp_group_switches = num_qp_groups + 1;
-            uint8_t *qp_group_switches_d;
+            uint32_t *qp_group_switches_d;
             CUDA_RUNTIME_CHECK_RET(cudaMalloc(reinterpret_cast<void **>(&qp_group_switches_d),
-                                              num_qp_group_switches * sizeof(uint8_t)),
+                                              num_qp_group_switches * sizeof(uint32_t)),
                                    NVSHMEMX_ERROR_OUT_OF_MEMORY);
-            CUDA_RUNTIME_CHECK_RET(cudaMemsetAsync(qp_group_switches_d, 0,
-                                                   num_qp_group_switches * sizeof(uint8_t), my_stream),
-                                   NVSHMEMX_ERROR_INTERNAL);
+            CUDA_RUNTIME_CHECK_RET(
+                cudaMemsetAsync(qp_group_switches_d, 0, num_qp_group_switches * sizeof(uint32_t),
+                                my_stream),
+                NVSHMEMX_ERROR_INTERNAL);
             gpunetio_device_state_h->globalmem.qp_group_switches = qp_group_switches_d;
             gpunetio_device_state_h->num_qp_groups = num_qp_groups;
         }

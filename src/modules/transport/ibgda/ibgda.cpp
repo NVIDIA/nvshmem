@@ -3694,7 +3694,7 @@ out:
 static int ibgda_setup_qp_groups_gpu_state(nvshmemt_ibgda_state_t *ibgda_state,
                                            nvshmem_transport_t t, int num_dci_handles,
                                            int num_rc_handles, int *num_qp_groups,
-                                           uint8_t **qp_group_switches_d) {
+                                           uint32_t **qp_group_switches_d) {
     int status = 0;
     int n_devs_selected = ibgda_state->n_devs_selected;
     int n_pes = t->n_pes;
@@ -3725,7 +3725,7 @@ static int ibgda_post_gpu_device_state(
     nvshmemt_ibgda_state_t *ibgda_state, nvshmem_transport_t t,
     nvshmemi_ibgda_device_state_t *ibgda_device_state_h, nvshmemi_ibgda_device_qp_t *dci_d,
     nvshmemi_ibgda_device_qp_t *rc_d, nvshmemi_ibgda_device_dct_t *dct_d,
-    nvshmemi_ibgda_device_cq_t *cq_d, uint8_t *qp_group_switches_d, int num_qp_groups,
+    nvshmemi_ibgda_device_cq_t *cq_d, uint32_t *qp_group_switches_d, int num_qp_groups,
     int num_shared_dci_handles, int num_dci_handles, int num_dct_handles, int num_rc_handles,
     int n_devs_selected, nvshmemi_ibgda_device_qp_map_type_t dc_map_type,
     nvshmemi_ibgda_device_qp_map_type_t rc_map_type, bool support_half_av_seg) {
@@ -3904,7 +3904,7 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
 
     nvshmemi_ibgda_device_cq_t *cq_d = ibgda_device_state_h->globalmem.cqs;
 
-    uint8_t *qp_group_switches_d = NULL;
+    uint32_t *qp_group_switches_d = NULL;
 
     nvshmemi_ibgda_device_qp_map_type_t rc_map_type = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_INVALID;
     nvshmemi_ibgda_device_qp_map_type_t dc_map_type = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_INVALID;

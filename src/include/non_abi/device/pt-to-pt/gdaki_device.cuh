@@ -252,7 +252,7 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
                          warpid;
                     break;
                 case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE:
-                    id = (++state->globalmem.qp_group_switches[0]) %
+                    id = (atomicAdd(&state->globalmem.qp_group_switches[0], 1u) + 1) %
                          (state->num_default_rc_per_pe * ndevices_initialized);
                     idx = id * npes + pe;
                     break;
@@ -263,7 +263,8 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
 
             if (state->rc_map_type != NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE) {
                 // Rotate through NICs on each iteration
-                dev_offset = ++state->globalmem.qp_group_switches[id % state->num_qp_groups];
+                dev_offset =
+                    atomicAdd(&state->globalmem.qp_group_switches[id % state->num_qp_groups], 1u) + 1;
 
                 // RC QPs are laid out as [NIC][QP slot][PE]. Keep the mapping ID's QP-slot
                 // calculation independent from the NIC selected by the round-robin counter.
@@ -278,9 +279,8 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
             uint32_t qp_switch_group = state->num_qp_groups;
             // Rotate through all RC QPs. With the QP-specific API, nvshmemx_create_qp creates
             // QPs on a specific NIC on each call, so the NIC is selected in a round-robin manner.
-            // Note: Benign race since multiple threads may update the value, but acceptable since
-            // it is only used for load balancing.
-            id = (++state->globalmem.qp_group_switches[qp_switch_group]) % rc_modulo;
+            id = (atomicAdd(&state->globalmem.qp_group_switches[qp_switch_group], 1u) + 1) %
+                 rc_modulo;
             idx = id * npes + pe;
         } else {
             idx = id + pe;

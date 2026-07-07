@@ -1778,7 +1778,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
             assert(0);
             break;
     }
-    dev_offset = ++state->globalmem.qp_group_switches[id % state->num_qp_groups];
+    dev_offset = atomicAdd(&state->globalmem.qp_group_switches[id % state->num_qp_groups], 1u) + 1;
 
     /* round down */
     id = id / state->num_devices_initialized;
@@ -1826,7 +1826,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
                      warpid;
                 break;
             case NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_NONE:
-                id = (++state->globalmem.qp_group_switches[0]) %
+                id = (atomicAdd(&state->globalmem.qp_group_switches[0], 1u) + 1) %
                      (state->num_default_rc_per_pe * ndevices_initialized);
                 idx = id * npes + pe;
                 break;
@@ -1837,7 +1837,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
 
         if (state->rc_map_type != NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_NONE) {
             // Rotate through NICs on each iteration
-            dev_offset = ++state->globalmem.qp_group_switches[id % state->num_qp_groups];
+            dev_offset =
+                atomicAdd(&state->globalmem.qp_group_switches[id % state->num_qp_groups], 1u) + 1;
 
             // RC QPs are laid out as [NIC][QP slot][PE]. Keep the mapping ID's QP-slot
             // calculation independent from the NIC selected by the round-robin counter.
@@ -1852,7 +1853,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
         uint32_t qp_switch_group = state->num_qp_groups;
         // Rotate through all RC QPs (because with the QP-specific API, nvshmemx_create_qp
         // only creates QPs on a specific NIC on each call, the NIC is selected in a round-robin manner).
-        id = (++state->globalmem.qp_group_switches[qp_switch_group]) % rc_modulo;
+        id = (atomicAdd(&state->globalmem.qp_group_switches[qp_switch_group], 1u) + 1) % rc_modulo;
         idx = id * npes + pe;
     } else {
         idx = id + pe;
