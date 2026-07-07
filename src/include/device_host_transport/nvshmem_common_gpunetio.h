@@ -7,7 +7,7 @@
 #define _NVSHMEMI_GPUNETIO_COMMON_H_
 
 #define NVSHMEMI_GPUNETIO_QP_MANAGEMENT_PADDING 24
-#define NVSHMEMI_GPUNETIO_STATE_PADDING 128
+#define NVSHMEMI_GPUNETIO_STATE_PADDING 120
 
 #define NVSHMEMI_GPUNETIO_SCALAR_INVALID -1
 #define NVSHMEMI_GPUNETIO_USSCALAR_INVALID 0xFFFF
@@ -84,6 +84,8 @@
         state.globalmem.lkeys = NULL;                                         \
         state.globalmem.rkeys = NULL;                                         \
         state.extra = NULL;                                                   \
+        state.num_qp_groups = NVSHMEMI_GPUNETIO_USCALAR_INVALID;              \
+        state.rc_map_type = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_INVALID;     \
     } while (0);
 
 #else
@@ -157,6 +159,14 @@ static_assert(sizeof(nvshmemi_gpunetio_device_local_only_mhandle_v1) == 96,
 typedef nvshmemi_gpunetio_device_local_only_mhandle_v1
     nvshmemi_gpunetio_device_local_only_mhandle_t;
 
+typedef enum {
+    NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_CTA = 0,
+    NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_SM,
+    NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_WARP,
+    NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE,
+    NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_INVALID = INT_MAX
+} nvshmemi_gpunetio_device_qp_map_type_t;
+
 // This is a stable structure.
 struct nvshmemi_gpunetio_device_key_t {
     __be32 key;
@@ -193,6 +203,8 @@ struct nvshmemi_gpunetio_device_state_v1 {
         nvshmemi_gpunetio_device_key_t *rkeys;
     } globalmem;
     void *extra;
+    uint32_t num_qp_groups;
+    nvshmemi_gpunetio_device_qp_map_type_t rc_map_type;
     uint8_t reserved[NVSHMEMI_GPUNETIO_STATE_PADDING];
 };
 static_assert(sizeof(nvshmemi_gpunetio_device_state_v1) == 2256,

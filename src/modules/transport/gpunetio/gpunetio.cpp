@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cctype>
 #include <cstring>
 #include <endian.h>
 #include <memory>
@@ -405,6 +406,37 @@ static inline int gpunetio_round_up_pow2(int n) {
 
 static constexpr int gpunetio_round_up_pow2_or_0(int n) {
     return (n == 0) ? 0 : gpunetio_round_up_pow2(n);
+}
+
+static int gpunetio_parse_gpu_qp_map_by(nvshmemi_gpunetio_device_qp_map_type_t *out_map_by,
+                                        const char *str) {
+    int status = NVSHMEMX_SUCCESS;
+    nvshmemi_gpunetio_device_qp_map_type_t map_by;
+    std::string req = str;
+
+    // Trim whitespace
+    req.erase(std::remove_if(req.begin(), req.end(), ::isspace), req.end());
+
+    // To lower case
+    std::for_each(req.begin(), req.end(), [](decltype(*req.begin()) &c) { c = ::tolower(c); });
+
+    if (req == "cta") {
+        map_by = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_CTA;
+    } else if (req == "sm") {
+        map_by = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_SM;
+    } else if (req == "warp") {
+        map_by = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_WARP;
+    } else if (req == "none") {
+        map_by = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE;
+    } else {
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    if (status == NVSHMEMX_SUCCESS) {
+        *out_map_by = map_by;
+    }
+
+    return status;
 }
 
 gpunetio_ep *gpunetio_device::get_cpu_ep_from_qp_index(int pe, int qp_index, int n_pes, int mype) {
@@ -1545,6 +1577,7 @@ gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_ep(int pe, int qp_index, in
 // Populate and copy over state to GPU
 int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     int status = 0;
+    nvshmemi_gpunetio_device_qp_map_type_t rc_map_type;
 
     // Calculate total RC handle count across all devices first, before
     // dereferencing type_specific_shared_state which may be null when GDAKI=0.
@@ -1563,6 +1596,10 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
              "device-visible QP state\n");
         return NVSHMEMX_SUCCESS;
     }
+
+    status = gpunetio_parse_gpu_qp_map_by(&rc_map_type, options->GPUNETIO_RC_MAP_BY);
+    NVSHMEMI_NZ_ERROR_RET(status, status, "GPUNETIO_RC_MAP_BY is not valid.");
+    INFO(log_level, "GPUNETIO_RC_MAP_BY is set to %s.", options->GPUNETIO_RC_MAP_BY);
 
     auto *gpunetio_device_state_h =
         static_cast<nvshmemi_gpunetio_device_state_t *>(t->type_specific_shared_state);
@@ -1679,6 +1716,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     gpunetio_device_state_h->num_devices_initialized = n_devs_selected;
     gpunetio_device_state_h->num_rc_per_pe = num_rc_handles / n_devs_selected / t->n_pes;
     gpunetio_device_state_h->num_default_rc_per_pe = options->GPUNETIO_NUM_RC_PER_PE_GPU;
+    gpunetio_device_state_h->rc_map_type = rc_map_type;
     gpunetio_device_state_h->log2_cumem_granularity = t->log2_cumem_granularity;
     gpunetio_device_state_h->num_requests_in_batch = num_requests_in_batch;
 
@@ -1691,14 +1729,17 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
             options->GPUNETIO_NUM_RC_PER_PE_GPU * n_devs_selected * t->n_pes;
         if (num_rc_handles == default_num_rc_handles) {
             int num_qp_groups = std::max(num_rc_handles / n_devs_selected / t->n_pes, 2);
+            // Additional entry is for QP_ANY round-robin
+            int num_qp_group_switches = num_qp_groups + 1;
             uint8_t *qp_group_switches_d;
             CUDA_RUNTIME_CHECK_RET(cudaMalloc(reinterpret_cast<void **>(&qp_group_switches_d),
-                                              num_qp_groups * sizeof(uint8_t)),
+                                              num_qp_group_switches * sizeof(uint8_t)),
                                    NVSHMEMX_ERROR_OUT_OF_MEMORY);
-            CUDA_RUNTIME_CHECK_RET(
-                cudaMemsetAsync(qp_group_switches_d, 0, num_qp_groups * sizeof(uint8_t), my_stream),
-                NVSHMEMX_ERROR_INTERNAL);
+            CUDA_RUNTIME_CHECK_RET(cudaMemsetAsync(qp_group_switches_d, 0,
+                                                   num_qp_group_switches * sizeof(uint8_t), my_stream),
+                                   NVSHMEMX_ERROR_INTERNAL);
             gpunetio_device_state_h->globalmem.qp_group_switches = qp_group_switches_d;
+            gpunetio_device_state_h->num_qp_groups = num_qp_groups;
         }
     }
 
