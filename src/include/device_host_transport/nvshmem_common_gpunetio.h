@@ -191,7 +191,7 @@ struct nvshmemi_gpunetio_device_state_v1 {
     } constmem;
 
     struct {
-        uint8_t *qp_group_switches;
+        uint32_t *qp_group_switches;
         nvshmemi_gpunetio_device_local_only_mhandle_t *local_only_mhandle_head;
         nvshmemi_gpunetio_device_qp_t *qps;
         // For lkeys that cannot be contained in constmem.lkeys.

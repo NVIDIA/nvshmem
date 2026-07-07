@@ -257,7 +257,7 @@ typedef struct {
     } constmem;
 
     struct {
-        uint8_t *qp_group_switches;
+        uint32_t *qp_group_switches;
         nvshmemi_ibgda_device_cq_t *cqs;  // For both dcis and rcs. CQs for DCIs come first.
         nvshmemi_ibgda_device_qp_t *dcis;
         nvshmemi_ibgda_device_qp_t *rcs;
@@ -312,7 +312,7 @@ typedef struct {
     } constmem;
 
     struct {
-        uint8_t *qp_group_switches;
+        uint32_t *qp_group_switches;
         nvshmemi_ibgda_device_cq_t *cqs;  // For both dcis and rcs. CQs for DCIs come first.
         nvshmemi_ibgda_device_qp_t *dcis;
         nvshmemi_ibgda_device_qp_t *rcs;
