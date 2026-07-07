@@ -211,6 +211,14 @@ NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_GPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of GPU-data-path RC QPs per peer PE in the GPUNetIO transport "
                  "(default 2). Only takes effect when NVSHMEM_GPUNETIO_ENABLE_GDAKI=1. "
                  "Otherwise, the GPU data path is disabled and this value is ignored.")
+NVSHMEMI_ENV_DEF(GPUNETIO_RC_MAP_BY, string, "none", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Specifies how GPU-data-path RC QPs are assigned. "
+                 "Choices are: cta, sm, warp, none.\n\n"
+                 "- cta: round-robin by CTA ID.\n"
+                 "- sm: round-robin by SM ID.\n"
+                 "- warp: round-robin by Warp ID.\n"
+                 "- none (default): disable CTA/SM/Warp-based mapping and instead round-robin "
+                 "across all default GPU-data-path RC QPs.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_CPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of CPU-data-path RC QPs per peer PE in the GPUNetIO transport "
                  "(default 2). The CPU data path is always active and does not require GDAKI. "

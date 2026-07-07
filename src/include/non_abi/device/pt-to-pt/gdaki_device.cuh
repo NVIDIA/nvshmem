@@ -85,6 +85,16 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE
     return &nvshmemi_gpunetio_device_state_d;
 }
 
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint32_t gdaki_get_smid() {
+    uint32_t smid;
+    asm("mov.u32  %0, %%smid;" : "=r"(smid));
+    return smid;
+}
+
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint32_t gdaki_get_ctaid() {
+    return blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+}
+
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE int gdaki_get_proxy_pe(int pe) {
     if (nvshmemi_device_state_d.enable_rail_opt == 1) {
         return (pe / nvshmemi_device_state_d.node_npes) * nvshmemi_device_state_d.node_npes +
@@ -218,18 +228,56 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
         // Local QP is always at the same slot
         return &state->globalmem.qps[nvshmemi_device_state_d.mype];
     } else {
-        uint32_t rc_modulo;
-        int qp_switch_group;
         int npes = nvshmemi_device_state_d.npes;
         int ndevices_initialized = state->num_devices_initialized;
         uint32_t id = qp_index;
         uint32_t idx;
+        uint32_t warpid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() /
+                          nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
 
-        if (qp_index == NVSHMEMX_QP_DEFAULT || qp_index == NVSHMEMX_QP_ANY) {
-            rc_modulo = qp_index == NVSHMEMX_QP_ANY
-                            ? state->num_rc_per_pe * ndevices_initialized
-                            : state->num_default_rc_per_pe * ndevices_initialized;
-            qp_switch_group = qp_index == NVSHMEMX_QP_ANY ? 1 : 0;
+        if (qp_index == NVSHMEMX_QP_DEFAULT) {
+            uint32_t dev_offset;
+
+            switch (state->rc_map_type) {
+                case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_CTA:
+                    id = gdaki_get_ctaid();
+                    break;
+                case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_SM:
+                    id = gdaki_get_smid();
+                    break;
+                case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_WARP:
+                    id = gdaki_get_ctaid() *
+                             nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>() /
+                             nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() +
+                         warpid;
+                    break;
+                case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE:
+                    id = (++state->globalmem.qp_group_switches[0]) %
+                         (state->num_default_rc_per_pe * ndevices_initialized);
+                    idx = id * npes + pe;
+                    break;
+                default:
+                    assert(0);
+                    break;
+            }
+
+            if (state->rc_map_type != NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE) {
+                // Rotate through NICs on each iteration
+                dev_offset = ++state->globalmem.qp_group_switches[id % state->num_qp_groups];
+
+                // RC QPs are laid out as [NIC][QP slot][PE]. Keep the mapping ID's QP-slot
+                // calculation independent from the NIC selected by the round-robin counter.
+                uint32_t qp_slot =
+                    (id / ndevices_initialized) % state->num_default_rc_per_pe;
+                uint32_t dev_idx = dev_offset % ndevices_initialized;
+                idx = (dev_idx * state->num_default_rc_per_pe + qp_slot) * npes + pe;
+            }
+        } else if (qp_index == NVSHMEMX_QP_ANY) {
+            uint32_t rc_modulo = state->num_rc_per_pe * ndevices_initialized;
+            // The last slot is used for switching on the QP_ANY group.
+            uint32_t qp_switch_group = state->num_qp_groups;
+            // Rotate through all RC QPs. With the QP-specific API, nvshmemx_create_qp creates
+            // QPs on a specific NIC on each call, so the NIC is selected in a round-robin manner.
             // Note: Benign race since multiple threads may update the value, but acceptable since
             // it is only used for load balancing.
             id = (++state->globalmem.qp_group_switches[qp_switch_group]) % rc_modulo;
