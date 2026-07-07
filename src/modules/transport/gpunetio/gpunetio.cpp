@@ -73,6 +73,29 @@ constexpr int GPUNETIO_QP_HOP_LIMIT = 255;
 constexpr bool GPUNETIO_QP_ALLOW_REMOTE_WRITE = true;
 constexpr bool GPUNETIO_QP_ALLOW_REMOTE_READ = true;
 
+static int gpunetio_ibv_mtu_to_doca_mtu(enum ibv_mtu ibv_mtu,
+                                        enum doca_verbs_mtu_size *doca_mtu) {
+    switch (ibv_mtu) {
+        case IBV_MTU_256:
+            *doca_mtu = DOCA_VERBS_MTU_SIZE_256_BYTES;
+            return NVSHMEMX_SUCCESS;
+        case IBV_MTU_512:
+            *doca_mtu = DOCA_VERBS_MTU_SIZE_512_BYTES;
+            return NVSHMEMX_SUCCESS;
+        case IBV_MTU_1024:
+            *doca_mtu = DOCA_VERBS_MTU_SIZE_1K_BYTES;
+            return NVSHMEMX_SUCCESS;
+        case IBV_MTU_2048:
+            *doca_mtu = DOCA_VERBS_MTU_SIZE_2K_BYTES;
+            return NVSHMEMX_SUCCESS;
+        case IBV_MTU_4096:
+            *doca_mtu = DOCA_VERBS_MTU_SIZE_4K_BYTES;
+            return NVSHMEMX_SUCCESS;
+        default:
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+}
+
 // CPU data path WQE / CQE constants
 constexpr size_t GPUNETIO_WQE_BB = sizeof(doca_gpu_dev_verbs_wqe);  // 64 bytes
 constexpr size_t GPUNETIO_WQE_DS = 16;                              // mlx5 data-segment granularity
@@ -750,10 +773,19 @@ int gpunetio_device::create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, ui
     uint8_t max_rd_atomic = doca_verbs_device_attr_get_max_qp_rd_atom(verbs_device_attr);
     uint8_t max_dest_rd_atomic = doca_verbs_device_attr_get_max_qp_init_rd_atom(verbs_device_attr);
 
+    // Get active MTU from port and convert to DOCA MTU
+    const struct ibv_port_attr *port_attr = common_device.port_attr + (portid - 1);
+    enum doca_verbs_mtu_size path_mtu;
+    int status = gpunetio_ibv_mtu_to_doca_mtu(port_attr->active_mtu, &path_mtu);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                          "Unsupported active MTU %d for device %s port %d\n",
+                          port_attr->active_mtu, common_device.dev->name, portid);
+
+    // Set all QP attributes
     DOCA_CHECK(doca_verbs_qp_attr_set_rq_psn(verbs_qp_attr, GPUNETIO_QP_PSN));
     DOCA_CHECK(doca_verbs_qp_attr_set_sq_psn(verbs_qp_attr, GPUNETIO_QP_PSN));
     DOCA_CHECK(doca_verbs_qp_attr_set_pkey_index(verbs_qp_attr, GPUNETIO_QP_PKEY_INDEX));
-    DOCA_CHECK(doca_verbs_qp_attr_set_path_mtu(verbs_qp_attr, DOCA_VERBS_MTU_SIZE_4K_BYTES));
+    DOCA_CHECK(doca_verbs_qp_attr_set_path_mtu(verbs_qp_attr, path_mtu));
     DOCA_CHECK(doca_verbs_qp_attr_set_port_num(verbs_qp_attr, portid));
     DOCA_CHECK(
         doca_verbs_qp_attr_set_ack_timeout(verbs_qp_attr, gpunetio_state->options->IB_TIMEOUT));
