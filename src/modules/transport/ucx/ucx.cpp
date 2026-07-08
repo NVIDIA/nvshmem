@@ -1112,7 +1112,7 @@ int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int /*pe*/, int qp_index
     param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK;
     param.cb.send = nvshmemt_ucx_send_request_cb;
 
-    /* Since atomics are managed by a two-part request, we need to track them seperately. */
+    /* Since atomics are managed by a two-part request, we need to track them separately. */
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gdrcopy) {
         if (qp_index != NVSHMEMX_QP_HOST) {
