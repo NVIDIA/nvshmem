@@ -150,7 +150,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_threadgroup(nvsh
                                                                             T *dest,
                                                                             const T *source,
                                                                             size_t nelems) {
-    if (nvshmemi_use_ldst_remote_atomics_path()) {
+    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+    if (nvshmemi_use_ldst_remote_atomics_path() && teami->are_gpus_p2p_connected) {
         nvshmemi_alltoall_p2p_allpush_threadgroup<T, SCOPE>(team, dest, source, nelems);
     } else {
         nvshmemi_alltoall_allpush_threadgroup<T, SCOPE>(team, dest, source, nelems);

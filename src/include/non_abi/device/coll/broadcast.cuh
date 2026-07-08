@@ -338,6 +338,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_hierarchical_thread
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
+    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int bcast_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.bcast_algo;
     switch (bcast_algo) {
         case 0:
@@ -394,7 +395,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
 
     switch (bcast_algo) {
         case 1: /* Brutefoce algorithm: send one to all followed by barrier */
-            if (nvshmemi_use_ldst_remote_atomics_path()) {
+            if (nvshmemi_use_ldst_remote_atomics_path() && teami->are_gpus_p2p_connected) {
                 nvshmemi_bcast_put2all_direct_threadgroup<T, SCOPE>(team, dest, source, nelems,
                                                                     PE_root);
             } else {

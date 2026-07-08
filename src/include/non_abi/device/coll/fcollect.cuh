@@ -362,8 +362,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     constexpr bool is_half_prec =
         is_half<T>::value || is_bfloat<T>::value || is_uint16<T>::value || is_int16<T>::value;
     int fcollect_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_algo;
+    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int p2p_direct =
-        (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS);
+        (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS) &&
+        teami->are_gpus_p2p_connected;
     const size_t fcollect_ll_threshold =
         nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold;
     const size_t fcollect_ll128_threshold =
