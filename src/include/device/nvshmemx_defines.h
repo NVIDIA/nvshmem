@@ -100,6 +100,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
     if (nvshmemi_tma_block_is_elected()) {
         int registration_slot = nvshmemi_tma_claim_smem_registration();
         if (registration_slot < 0) return;
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+        uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
+        for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
+            nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
+        }
+        /* Publish the registration only after its deferred-completion
+         * metadata has been initialized. */
+        __threadfence_block();
+#endif
         nvshmemi_tma_publish_smem_registration(registration_slot, reinterpret_cast<uintptr_t>(smem),
                                                size);
     }
@@ -113,14 +122,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
  * Must be called by every CTA that previously called nvshmemx_give_smem(),
  * before the kernel returns.
  *
- * Call from all threads; only the elected warp-0 leader clears the registration.
- * Callers are responsible for synchronizing before reusing the shared memory.
+ * Call from all threads.  Any deferred handle PUTs are completed before the
+ * elected warp-0 leader clears the registration.
  */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     int registration_slot = nvshmemi_tma_find_smem_registration();
     if (registration_slot >= 0) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+        nvshmemi_handle_quiet_owned();
+        __syncthreads();
+#endif
         if (nvshmemi_tma_block_is_elected()) {
             nvshmemi_tma_release_smem_registration(registration_slot);
         }
