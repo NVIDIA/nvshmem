@@ -62,6 +62,8 @@ extern "C" {
     __global__ void ring_##Group(int *src, int *dest, size_t len, int nextpe,                   \
                                  size_t dynamic_smem_size) {                                    \
         NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                              \
+        /* Keep two operations outstanding on the same handle barrier. */                       \
+        nvshmemx_putmem_nbi_##Group((void *)dest, (void *)src, len * sizeof(int), nextpe);      \
         nvshmemx_putmem_nbi_##Group((void *)dest, (void *)src, len * sizeof(int), nextpe);      \
         nvshmem_quiet();                                                                        \
         NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                           \

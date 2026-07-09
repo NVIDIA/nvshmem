@@ -1564,8 +1564,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         handle_barrier_t *tma_bar_handle =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
-        // only lane 0 in warp initializes the barrier
-        tma_bar_handle->init(1, myIdx);
+        // Only lane 0 prepares the shared per-warp barrier.
+        if (myIdx % warpSize == 0) {
+            tma_bar_handle->prepare_handle(warp_idx_in_block);
+        }
 
         __syncwarp();
 
@@ -2050,8 +2052,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
         handle_barrier_t *tma_bar_handle =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
-        // only lane 0 in warp initializes the barrier
-        tma_bar_handle->init(1, myIdx);
+        // Only lane 0 prepares the shared per-warp barrier.
+        if (myIdx % warpSize == 0) {
+            tma_bar_handle->prepare_handle(warp_idx_in_block);
+        }
         __syncwarp();
 
         nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,

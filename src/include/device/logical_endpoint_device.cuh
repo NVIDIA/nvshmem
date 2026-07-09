@@ -349,27 +349,104 @@ struct mbarrier_try_wait_rdy_cnd {
 };
 
 // to be allocated in shared memory
-struct handle_barrier_t {
-    alignas(16) __mbarrier_t bar;
+struct alignas(16) handle_barrier_t {
+    __mbarrier_t bar;
 
-    // for fabric programming, mbarrier must be initialized with layout::v1
-    inline __device__ void init(int arvCnt) {
-        // SMEM address for [%0]: use b64/"l" when PTX uses .address_size 64 (e.g. sm_100+).
+    /*
+     * A handle barrier occupies a 16-byte reserved SMEM slot while the
+     * hardware mbarrier itself occupies 8 bytes.  Keep deferred PUT state in
+     * the remaining bytes so an NBI PUT can return without invalidating the
+     * barrier that will report its remote completion.
+     *
+     * pending_handle_bytes is counted in complete_tx::16B units (expressed as
+     * bytes) rather than logical payload bytes.  This matters for cp_mask
+     * operations, where a sub-16-byte PUT still reports one 16-byte
+     * completion event.
+     */
+    uint32_t pending_handle_bytes;
+    uint16_t pending_handle_owner;
+    uint8_t pending_handle_active;
+
+    inline __device__ void reset_pending_handle_state() {
+        pending_handle_bytes = 0;
+        pending_handle_owner = 0;
+        pending_handle_active = 0;
+    }
+
+    inline __device__ void init_raw(int arvCnt) {
         const unsigned long long smem_addr = static_cast<unsigned long long>(
             __cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
         asm volatile("mbarrier.init.shared.layout::v1.b64 [%0], %1;" ::"l"(smem_addr), "r"(arvCnt)
                      : "memory");
     }
 
+    inline __device__ void inval_raw() { __mbarrier_inval(&bar); }
+
+    inline __device__ uint32_t handle_completion_bytes(uint32_t size_bytes) const {
+        return ((size_bytes + (CFT_HANDLE_TX_SIZE - 1)) / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
+    }
+
+    inline __device__ bool has_pending_handle() const { return pending_handle_active != 0; }
+
+    inline __device__ bool pending_handle_is_owned_by(uint32_t owner) const {
+        return has_pending_handle() && pending_handle_owner == owner;
+    }
+
+    /* Complete the current handle operation batch.  Keeping the barrier valid advances it
+     * to the next phase so more NBI PUTs can be accumulated in the same slot. */
+    inline __device__ void drain_pending_handle(bool invalidate = true) {
+        if (!has_pending_handle()) return;
+
+        if (pending_handle_bytes != 0) {
+            uint64_t state = arrive_relaxed(pending_handle_bytes);
+            try_wait_token(state);
+            pending_handle_bytes = 0;
+        }
+
+        if (invalidate) {
+            inval_raw();
+            reset_pending_handle_state();
+        }
+    }
+
+    /* Reuse a live PUT barrier when the same threadgroup issues another NBI
+     * PUT.  A different owner implies a slot collision with another handle
+     * path, which is resolved by completing the old batch first. */
+    inline __device__ void prepare_handle(uint32_t owner) {
+        if (has_pending_handle() && pending_handle_owner != owner) drain_pending_handle(true);
+
+        if (!has_pending_handle()) {
+            init_raw(1);
+            pending_handle_bytes = 0;
+            pending_handle_owner = static_cast<uint16_t>(owner);
+            pending_handle_active = 1;
+        }
+    }
+
+    inline __device__ void ensure_handle_tx_capacity(uint32_t size_bytes) {
+        uint32_t completion_bytes = handle_completion_bytes(size_bytes);
+        if (pending_handle_bytes != 0 &&
+            pending_handle_bytes + completion_bytes >= TMA_COPY_MAX_BATCH_SIZE) {
+            drain_pending_handle(false);
+        }
+    }
+
+    inline __device__ void record_pending_handle(uint32_t size_bytes) {
+        pending_handle_bytes += handle_completion_bytes(size_bytes);
+    }
+
+    // for fabric programming, mbarrier must be initialized with layout::v1
+    inline __device__ void init(int arvCnt) {
+        /* Other handle paths share these slots.  They must not reinitialize a
+         * barrier that is still carrying deferred PUT completions. */
+        drain_pending_handle(true);
+        init_raw(arvCnt);
+    }
+
     // only 1 thread in warp initializes the barrier
     inline __device__ void init(int arvCnt, int myIdx) {
         if (myIdx % warpSize == 0) {
-            // SMEM address for [%0]: use b64/"l" when PTX uses .address_size 64 (e.g. sm_100+).
-            const unsigned long long smem_addr = static_cast<unsigned long long>(
-                __cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
-            asm volatile("mbarrier.init.shared.layout::v1.b64 [%0], %1;" ::"l"(smem_addr),
-                         "r"(arvCnt)
-                         : "memory");
+            init(arvCnt);
         }
     }
 
@@ -454,13 +531,19 @@ struct handle_barrier_t {
         asm volatile("fabric.wait.sync_restrict::reads;\n" ::: "memory");
     }
 
-    inline __device__ void inval() { __mbarrier_inval(&bar); }
+    inline __device__ void inval() {
+        inval_raw();
+        reset_pending_handle_state();
+    }
     inline __device__ void inval(int myIdx) {
-        if (myIdx % warpSize == 0) {
-            __mbarrier_inval(&bar);
-        }
+        if (myIdx % warpSize == 0) inval();
     }
 };
+
+static_assert(sizeof(handle_barrier_t) == 16,
+              "handle_barrier_t must fit in one 16-byte handle barrier SMEM slot");
+static_assert(alignof(handle_barrier_t) == 16,
+              "handle_barrier_t must be aligned to a 16-byte handle barrier SMEM slot");
 
 /*
  * Fabric operations
