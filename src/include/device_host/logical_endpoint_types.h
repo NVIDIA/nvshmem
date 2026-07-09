@@ -20,8 +20,8 @@ typedef uint32_t CUlogicalEndpointId;
 inline constexpr int CFT_HANDLE_TX_SIZE = 16;
 inline constexpr int TMA_COPY_NUM_STAGES = 2;
 
-inline constexpr std::uint64_t LE_ID_VALID_MASK = 0xFFFF0000ull;
-inline constexpr std::uint64_t LE_ID_MASK = 0x0000FFFFull;
+inline constexpr std::uint64_t LE_ID_VALID_MASK = 0xFFFFFFFF00000000ull;
+inline constexpr std::uint64_t LE_ID_MASK = 0x00000000FFFFFFFFull;
 
 __host__ __device__ constexpr std::uint64_t LE_ID_WITH_VALID_FLAG(std::uint64_t le_id) {
     return LE_ID_VALID_MASK | le_id;
