@@ -94,9 +94,11 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   endif()
 
   # Filter architectures to only those supported by the discovered Clang.
-  # Clang/LLVM 22+ supports SM 100+; older versions max out at SM 90.
+  # Clang/LLVM 22+ supports SM 100+, and CUDA 13.4+ toolchains enable SM 107.
   set(BITCODE_LIB_ARCHS "")
-  if(LLVM_VERSION_MAJOR GREATER_EQUAL 22)
+  if(LLVM_VERSION_MAJOR GREATER_EQUAL 22 AND CUDAToolkit_VERSION VERSION_GREATER_EQUAL 13.4)
+    set(_CLANG_MAX_SM 107)
+  elseif(LLVM_VERSION_MAJOR GREATER_EQUAL 22)
     set(_CLANG_MAX_SM 100)
   else()
     set(_CLANG_MAX_SM 90)
