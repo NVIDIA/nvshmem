@@ -27,7 +27,7 @@
 #   NP                          - number of MPI ranks for most tests (default: 2)
 #   NP_TEAM                     - number of MPI ranks for team tests (default: NP)
 #   NVSHMEM_HCA_LIST            - IB HCA to use (set for IBRC, e.g. mlx5_1:1)
-#   NVSHMEM_ENABLE_HCA_PE_MAPPING - enable HCA-PE mapping (set to 1 with HCA_LIST)
+#   NVSHMEM_ENABLE_NIC_PE_MAPPING - enable HCA-PE mapping (set to 1 with HCA_LIST)
 
 #SBATCH --job-name=nvshmem4py-test
 #SBATCH --ntasks=8
@@ -674,7 +674,7 @@ echo "================================================"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_NO_PIP_CUDA"
 
 # EOS-class nodes need explicit HCA configuration for IBRC transport
-export NVSHMEM_ENABLE_HCA_PE_MAPPING="${NVSHMEM_ENABLE_HCA_PE_MAPPING:-1}"
+export NVSHMEM_ENABLE_NIC_PE_MAPPING="${NVSHMEM_ENABLE_NIC_PE_MAPPING:-1}"
 export NVSHMEM_HCA_LIST="${NVSHMEM_HCA_LIST:-mlx5_0}"
 # CI cluster configs may pre-export 128, which is too small for this suite.
 # Override it here so the NVLS teams test exercises the intended configuration.
@@ -683,7 +683,7 @@ export NVSHMEM_MAX_TEAMS=1024
 # host collectives are initialized at startup but are not part of these tests,
 # and EOS CI has shown NCCL/CUDA runtime skew from Python dependencies here.
 export NVSHMEM_DISABLE_NCCL="${NVSHMEM_DISABLE_NCCL:-1}"
-NVLS_MPI_RUN="$MPI_RUN -x NVSHMEM_BOOTSTRAP -x NVSHMEM_DISABLE_NCCL -x NVSHMEM_ENABLE_HCA_PE_MAPPING -x NVSHMEM_HCA_LIST -x NVSHMEM_MAX_TEAMS -x LD_LIBRARY_PATH"
+NVLS_MPI_RUN="$MPI_RUN -x NVSHMEM_BOOTSTRAP -x NVSHMEM_DISABLE_NCCL -x NVSHMEM_ENABLE_NIC_PE_MAPPING -x NVSHMEM_HCA_LIST -x NVSHMEM_MAX_TEAMS -x LD_LIBRARY_PATH"
 echo "NVLS MPI_RUN: $NVLS_MPI_RUN"
 echo "NVLS env: NVSHMEM_DISABLE_NCCL=$NVSHMEM_DISABLE_NCCL NVSHMEM_HCA_LIST=$NVSHMEM_HCA_LIST NVSHMEM_MAX_TEAMS=$NVSHMEM_MAX_TEAMS"
 
