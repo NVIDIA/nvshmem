@@ -117,7 +117,6 @@ def free(buffer: Buffer) -> None:
     if not (isinstance(buffer, Buffer)) or not hasattr(buffer, "handle"):
         raise NvshmemInvalid("Tried to free a buffer not from NVSHmem")
 
-    buffer.memory_resource.set_freed(buffer)
     try:
         buffer.memory_resource.set_freed(buffer)
     except NvshmemError:
