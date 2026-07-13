@@ -702,12 +702,18 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
     if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
 
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
-                         &device->common_device.gid_info[portid - 1].local_gid_index,
-                         ibdevx_state->log_level, ibdevx_state->options);
-        ftable.query_gid(device->common_device.context, portid,
-                         device->common_device.gid_info[portid - 1].local_gid_index,
-                         &device->common_device.gid_info[portid - 1].local_gid);
+        status = ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
+                                  &device->common_device.gid_info[portid - 1].local_gid_index,
+                                  ibdevx_state->log_level, ibdevx_state->options);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "IBDEVX failed to select GID index for device %s devid %d port %d\n",
+                              device->common_device.dev->name, devid, portid);
+        status = ftable.query_gid(device->common_device.context, portid,
+                                  device->common_device.gid_info[portid - 1].local_gid_index,
+                                  &device->common_device.gid_info[portid - 1].local_gid);
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "IBDEVX query_gid failed for device %s devid %d port %d\n",
+                                    device->common_device.dev->name, devid, portid);
 
         status = ib_roce_get_version_num(nic_device_name, portid,
                                          device->common_device.gid_info[portid - 1].local_gid_index,

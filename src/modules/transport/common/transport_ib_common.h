@@ -293,7 +293,7 @@ int ib_roce_get_version_num(const char *deviceName, int portNum, int gidIndex, i
 struct nvshmemt_ib_qp_path nvshmemt_ib_select_qp_path(const union ibv_gid *local_gid,
                                                       uint16_t local_lid, uint16_t remote_lid,
                                                       uint64_t remote_spn, uint64_t remote_iid);
-void ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct ibv_context *context,
-                      uint8_t portNum, const struct ibv_port_attr *portAttr, int *gidIndex,
-                      int log_level, nvshmemi_options_s *options);
+int ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct ibv_context *context,
+                     uint8_t portNum, const struct ibv_port_attr *portAttr, int *gidIndex,
+                     int log_level, nvshmemi_options_s *options);
 #endif

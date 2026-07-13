@@ -101,16 +101,17 @@ static sa_family_t env_ib_addr_family(int log_level, nvshmemi_options_s *options
     return family;
 }
 
-static void *env_ib_addr_range(sa_family_t af, int *prefix_len, int log_level,
-                               nvshmemi_options_s *options) {
+static int env_ib_addr_range(sa_family_t af, int *prefix_len, void **prefix, int log_level,
+                             nvshmemi_options_s *options) {
     *prefix_len = 0;
+    *prefix = nullptr;
     static struct in_addr addr;
     static struct in6_addr addr6;
     void *ret = (af == AF_INET) ? (void *)&addr : (void *)&addr6;
 
     const char *env = options->IB_ADDR_RANGE;
     if (NULL == env || strlen(env) == 0) {
-        return NULL;
+        return NVSHMEMX_SUCCESS;
     }
 
     INFO(log_level, "NVSHMEM_IB_ADDR_RANGE set by environment to %s", env);
@@ -120,7 +121,9 @@ static void *env_ib_addr_range(sa_family_t af, int *prefix_len, int log_level,
     char *addr_str_ptr = addr_string;
     char *slash_ptr = strstr(addr_string, "/");
     if (slash_ptr == NULL) {
-        return NULL;
+        INFO(log_level, "IB: Ip address range '%s' is missing a prefix length, ignoring range",
+             env);
+        return NVSHMEMX_SUCCESS;
     }
     *slash_ptr = '\0';
     char *mask_str_ptr = slash_ptr + 1;
@@ -128,32 +131,41 @@ static void *env_ib_addr_range(sa_family_t af, int *prefix_len, int log_level,
     if (inet_pton(af, addr_str_ptr, ret) == 0) {
         INFO(log_level, "NET/IB: Ip address '%s' is invalid for family %s, ignoring address",
              addr_str_ptr, (af == AF_INET) ? "AF_INET" : "AF_INET6");
-        return NULL;
+        return NVSHMEMX_SUCCESS;
     }
 
-    *prefix_len = (int)strtol(mask_str_ptr, NULL, 10);
-    if (af == AF_INET && *prefix_len > 32) {
-        INFO(log_level, "IB: Ip address mask '%d' is invalid for family %s, ignoring mask",
-             *prefix_len, (af == AF_INET) ? "AF_INET" : "AF_INET6");
-        *prefix_len = 0;
-        ret = NULL;
-    } else if (af == AF_INET6 && *prefix_len > 128) {
-        INFO(log_level, "IB: Ip address mask '%d' is invalid for family %s, ignoring mask",
-             *prefix_len, (af == AF_INET) ? "AF_INET" : "AF_INET6");
-        *prefix_len = 0;
-        ret = NULL;
+    char *end_ptr = nullptr;
+    errno = 0;
+    long mask = strtol(mask_str_ptr, &end_ptr, 10);
+    int max_prefix_len = (af == AF_INET) ? 32 : 128;
+    if (errno != 0 || end_ptr == mask_str_ptr || *end_ptr != '\0' || mask < 0 ||
+        mask > max_prefix_len) {
+        INFO(log_level, "IB: Ip address mask '%s' is invalid for family %s, ignoring mask",
+             mask_str_ptr, (af == AF_INET) ? "AF_INET" : "AF_INET6");
+        return NVSHMEMX_SUCCESS;
     }
 
-    return ret;
+    *prefix_len = (int)mask;
+    *prefix = ret;
+    return NVSHMEMX_SUCCESS;
 }
 
 static sa_family_t get_gid_addr_family(union ibv_gid *gid) {
-    const struct in6_addr *a = (struct in6_addr *)gid->raw;
-    bool is_ipv4_mapped =
-        ((a->s6_addr32[0] | a->s6_addr32[1]) | (a->s6_addr32[2] ^ htonl(0x0000ffff))) == 0UL;
-    bool is_ipv4_mapped_multicast =
-        (a->s6_addr32[0] == htonl(0xff0e0000) &&
-         ((a->s6_addr32[1] | (a->s6_addr32[2] ^ htonl(0x0000ffff))) == 0UL));
+    const uint8_t *a = gid->raw;
+    bool is_ipv4_mapped = true;
+    bool is_ipv4_mapped_multicast = true;
+
+    for (int i = 0; i < 10; i++) {
+        is_ipv4_mapped &= (a[i] == 0);
+    }
+    is_ipv4_mapped &= (a[10] == 0xff && a[11] == 0xff);
+
+    is_ipv4_mapped_multicast &= (a[0] == 0xff && a[1] == 0x0e);
+    for (int i = 2; i < 10; i++) {
+        is_ipv4_mapped_multicast &= (a[i] == 0);
+    }
+    is_ipv4_mapped_multicast &= (a[10] == 0xff && a[11] == 0xff);
+
     return (is_ipv4_mapped || is_ipv4_mapped_multicast) ? AF_INET : AF_INET6;
 }
 
@@ -162,6 +174,14 @@ static bool match_gid_addr_prefix(sa_family_t af, void *prefix, int prefix_len,
     struct in_addr *base = NULL;
     struct in6_addr *base6 = NULL;
     struct in6_addr *addr6 = NULL;
+
+    if (prefix_len == 0) {
+        return true;
+    }
+
+    if (prefix == NULL) {
+        return false;
+    }
 
     if (af == AF_INET) {
         base = (struct in_addr *)prefix;
@@ -200,21 +220,26 @@ static bool match_gid_addr_prefix(sa_family_t af, void *prefix, int prefix_len,
 }
 
 static bool configured_gid(union ibv_gid *gid) {
-    const struct in6_addr *a = (struct in6_addr *)gid->raw;
-    int trailer = (a->s6_addr32[1] | a->s6_addr32[2] | a->s6_addr32[3]);
-    if (((a->s6_addr32[0] | trailer) == 0UL) ||
-        ((a->s6_addr32[0] == htonl(0xfe800000)) && (trailer == 0UL))) {
-        return false;
+    for (int i = 0; i < 16; i++) {
+        if (gid->raw[i] != 0) {
+            return true;
+        }
     }
-    return true;
+    return false;
 }
 
 static bool link_local_gid(union ibv_gid *gid) {
-    const struct in6_addr *a = (struct in6_addr *)gid->raw;
-    if (a->s6_addr32[0] == htonl(0xfe800000) && a->s6_addr32[1] == 0UL) {
-        return true;
+    if (gid->raw[0] != 0xfe || gid->raw[1] != 0x80) {
+        return false;
     }
-    return false;
+
+    for (int i = 2; i < 8; i++) {
+        if (gid->raw[i] != 0) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static bool valid_gid(union ibv_gid *gid) { return (configured_gid(gid) && !link_local_gid(gid)); }
@@ -290,46 +315,25 @@ int ib_roce_get_version_num(const char *deviceName, int portNum, int gidIndex, i
     return NVSHMEMX_SUCCESS;
 }
 
-static void update_gid_index(const struct nvshmemt_ibv_function_table *ftable,
-                             struct ibv_context *context, uint8_t portNum, sa_family_t af,
-                             void *prefix, int prefixlen, int roceVer, int gidIndexCandidate,
-                             int *gidIndex) {
-    union ibv_gid gid, gidCandidate;
-    ftable->query_gid(context, portNum, *gidIndex, &gid);
-    ftable->query_gid(context, portNum, gidIndexCandidate, &gidCandidate);
-
-    sa_family_t usrFam = af;
-    sa_family_t gidFam = get_gid_addr_family(&gid);
-    sa_family_t gidCandidateFam = get_gid_addr_family(&gidCandidate);
-    bool gidCandidateMatchSubnet = match_gid_addr_prefix(usrFam, prefix, prefixlen, &gidCandidate);
-
-    if (gidCandidateFam != gidFam && gidCandidateFam == usrFam && gidCandidateMatchSubnet) {
-        *gidIndex = gidIndexCandidate;
-    } else {
-        if (gidCandidateFam != usrFam || !valid_gid(&gidCandidate) || !gidCandidateMatchSubnet) {
-            return;
-        }
-        int usrRoceVer = roceVer;
-        int gidRoceVerNum = -1;
-        int gidRoceVerNumCandidate = -1;
-        const char *deviceName = ftable->get_device_name(context->device);
-        ib_roce_get_version_num(deviceName, portNum, *gidIndex, &gidRoceVerNum);
-        ib_roce_get_version_num(deviceName, portNum, gidIndexCandidate, &gidRoceVerNumCandidate);
-        if ((gidRoceVerNum != gidRoceVerNumCandidate || !valid_gid(&gid)) &&
-            gidRoceVerNumCandidate == usrRoceVer) {
-            *gidIndex = gidIndexCandidate;
-        }
-    }
-}
-
-void ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct ibv_context *context,
-                      uint8_t portNum, const struct ibv_port_attr *portAttr, int *gidIndex,
-                      int log_level, nvshmemi_options_s *options) {
+int ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct ibv_context *context,
+                     uint8_t portNum, const struct ibv_port_attr *portAttr, int *gidIndex,
+                     int log_level, nvshmemi_options_s *options) {
     int gidTblLen = portAttr->gid_tbl_len;
 
     *gidIndex = options->IB_GID_INDEX;
     if (*gidIndex >= 0) {
-        return;
+        if (*gidIndex >= gidTblLen) {
+            INFO(log_level, "IB: requested GID index %d exceeds GID table length %d", *gidIndex,
+                 gidTblLen);
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+        }
+        union ibv_gid gid = {};
+        int status = ftable->query_gid(context, portNum, *gidIndex, &gid);
+        if (status != 0) {
+            INFO(log_level, "IB: query_gid failed for requested GID index %d", *gidIndex);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        return NVSHMEMX_SUCCESS;
     }
 
     if (portAttr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
@@ -343,19 +347,49 @@ void ib_get_gid_index(const struct nvshmemt_ibv_function_table *ftable, struct i
                 *gidIndex = routableGidIndex;
             }
         }
-        return;
+        return NVSHMEMX_SUCCESS;
     }
 
     sa_family_t userAddrFamily = env_ib_addr_family(log_level, options);
     int userRoceVersion = options->IB_ROCE_VERSION_NUM;
-    int prefixlen;
-    void *prefix = env_ib_addr_range(userAddrFamily, &prefixlen, log_level, options);
-
-    *gidIndex = 0;
-    for (int gidIndexNext = 1; gidIndexNext < gidTblLen; ++gidIndexNext) {
-        update_gid_index(ftable, context, portNum, userAddrFamily, prefix, prefixlen,
-                         userRoceVersion, gidIndexNext, gidIndex);
+    int prefixlen = 0;
+    void *prefix = nullptr;
+    int status = env_ib_addr_range(userAddrFamily, &prefixlen, &prefix, log_level, options);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
     }
+
+    const char *deviceName = ftable->get_device_name(context->device);
+    for (int gidIndexNext = 0; gidIndexNext < gidTblLen; ++gidIndexNext) {
+        union ibv_gid gid = {};
+        status = ftable->query_gid(context, portNum, gidIndexNext, &gid);
+        if (status != 0) {
+            INFO(log_level, "IB: query_gid failed for device %s port %u GID index %d", deviceName,
+                 portNum, gidIndexNext);
+            continue;
+        }
+
+        if (!valid_gid(&gid) || get_gid_addr_family(&gid) != userAddrFamily ||
+            !match_gid_addr_prefix(userAddrFamily, prefix, prefixlen, &gid)) {
+            continue;
+        }
+
+        int gidRoceVerNum = -1;
+        status = ib_roce_get_version_num(deviceName, portNum, gidIndexNext, &gidRoceVerNum);
+        if (status != NVSHMEMX_SUCCESS || gidRoceVerNum != userRoceVersion) {
+            continue;
+        }
+
+        *gidIndex = gidIndexNext;
+        return NVSHMEMX_SUCCESS;
+    }
+
+    INFO(log_level,
+         "IB: no valid RoCE GID found for device %s port %u address family %s address range %s "
+         "RoCE version %d",
+         deviceName, portNum, (userAddrFamily == AF_INET) ? "AF_INET" : "AF_INET6",
+         options->IB_ADDR_RANGE ? options->IB_ADDR_RANGE : "", userRoceVersion);
+    return NVSHMEMX_ERROR_INVALID_VALUE;
 }
 
 /* =============================================================================
@@ -1277,8 +1311,21 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
                 continue;
             }
 
-            ib_get_gid_index(ftable, device->context, p, &device->port_attr[p - 1],
-                             &device->gid_info[p - 1].local_gid_index, log_level, options);
+            status = ib_get_gid_index(ftable, device->context, p, &device->port_attr[p - 1],
+                                      &device->gid_info[p - 1].local_gid_index, log_level, options);
+            if (status != NVSHMEMX_SUCCESS) {
+                if (filter.user_selection && !filter.exclude_list) {
+                    NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                                       "user selected IB device %s port %d has no usable GID\n",
+                                       name, p);
+                }
+                INFO(log_level,
+                     "Skipping IB device %s port %d because no usable GID was found for dynamic "
+                     "GID selection",
+                     name, p);
+                status = 0;
+                continue;
+            }
             status = ftable->query_gid(device->context, p, device->gid_info[p - 1].local_gid_index,
                                        &device->gid_info[p - 1].local_gid);
             NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,

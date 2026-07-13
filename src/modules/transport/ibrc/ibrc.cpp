@@ -487,12 +487,18 @@ static int ep_connect(struct ibrc_ep *ep, struct nvshmemt_ib_common_ep_handle *e
             attr.ah_attr.is_global = 0;
         }
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
-                         &device->common_device.gid_info[portid - 1].local_gid_index,
-                         ibrc_state->log_level, ibrc_state->options);
-        ftable.query_gid(device->common_device.context, portid,
-                         device->common_device.gid_info[portid - 1].local_gid_index,
-                         &device->common_device.gid_info[portid - 1].local_gid);
+        status = ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
+                                  &device->common_device.gid_info[portid - 1].local_gid_index,
+                                  ibrc_state->log_level, ibrc_state->options);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "IBRC failed to select GID index for device %s devid %d port %d\n",
+                              device->common_device.dev->name, devid, portid);
+        status = ftable.query_gid(device->common_device.context, portid,
+                                  device->common_device.gid_info[portid - 1].local_gid_index,
+                                  &device->common_device.gid_info[portid - 1].local_gid);
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "IBRC query_gid failed for device %s devid %d port %d\n",
+                                    device->common_device.dev->name, devid, portid);
         set_grh_fields();
     }
     attr.max_dest_rd_atomic = nvshmemt_ibrc_max_rd_atomic;

@@ -1783,12 +1783,19 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     } else if (port_attr->link_layer == IBV_LINK_LAYER_ETHERNET) {
         const char *nic_device_name = ftable.get_device_name(device->common_device.context->device);
 
-        ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
-                         (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
-                         ibgda_state->common.log_level, ibgda_state->common.options);
-        ftable.query_gid(device->common_device.context, portid,
-                         device->common_device.gid_info[portid - 1].local_gid_index,
-                         (ibv_gid *)&device->common_device.gid_info[portid - 1].local_gid);
+        status =
+            ib_get_gid_index(&ftable, device->common_device.context, portid, port_attr,
+                             (int *)&device->common_device.gid_info[portid - 1].local_gid_index,
+                             ibgda_state->common.log_level, ibgda_state->common.options);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "IBGDA failed to select GID index for device %s port %d\n",
+                              device->common_device.dev->name, portid);
+        status = ftable.query_gid(device->common_device.context, portid,
+                                  device->common_device.gid_info[portid - 1].local_gid_index,
+                                  (ibv_gid *)&device->common_device.gid_info[portid - 1].local_gid);
+        NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                    "IBGDA query_gid failed for device %s port %d\n",
+                                    device->common_device.dev->name, portid);
 
         status = ib_roce_get_version_num(nic_device_name, portid,
                                          device->common_device.gid_info[portid - 1].local_gid_index,
