@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
     int size;
     int nelems;
     uint64_t *data_d = NULL;
-    uint64_t set_value;
+    uint64_t set_value = 1;
     unsigned int *counter_d;
     read_args(argc, argv);
 
