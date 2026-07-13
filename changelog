@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.7.2
+
+### Bug Fixes
+
+- Fixed InfiniBand connection setup on ports that require global routing headers (GRH) in the GPUNetIO transport.
+- Fixed hangs in GPUNetIO transport on interfaces with an active MTU other than 4 KiB by configuring the queue-pair MTU from the active port.
+
 ## 3.7.1
 
 ### Bug Fixes
