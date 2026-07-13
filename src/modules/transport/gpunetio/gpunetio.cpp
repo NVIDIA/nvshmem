@@ -73,8 +73,7 @@ constexpr int GPUNETIO_QP_HOP_LIMIT = 255;
 constexpr bool GPUNETIO_QP_ALLOW_REMOTE_WRITE = true;
 constexpr bool GPUNETIO_QP_ALLOW_REMOTE_READ = true;
 
-static int gpunetio_ibv_mtu_to_doca_mtu(enum ibv_mtu ibv_mtu,
-                                        enum doca_verbs_mtu_size *doca_mtu) {
+static int gpunetio_ibv_mtu_to_doca_mtu(enum ibv_mtu ibv_mtu, enum doca_verbs_mtu_size *doca_mtu) {
     switch (ibv_mtu) {
         case IBV_MTU_256:
             *doca_mtu = DOCA_VERBS_MTU_SIZE_256_BYTES;

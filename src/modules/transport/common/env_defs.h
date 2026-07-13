@@ -60,7 +60,7 @@ NVSHMEMI_ENV_DEF(IB_ADDR_FAMILY, string, "AF_INET", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "IP address family associated to IB GID "
                  "dynamically selected by NVSHMEM when NVSHMEM_IB_GID_INDEX is left unset")
 NVSHMEMI_ENV_DEF(
-    IB_ADDR_RANGE, string, "::/0", NVSHMEMI_ENV_CAT_TRANSPORT,
+    IB_ADDR_RANGE, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
     "Defines the range of "
     "valid GIDs dynamically selected by NVSHMEM when NVSHMEM_IB_GID_INDEX is left unset")
 NVSHMEMI_ENV_DEF(IB_ROCE_VERSION_NUM, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
