@@ -1490,7 +1490,8 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
     int op_id;
     struct ibrc_atomic_op op;
 
-    ep = (struct ibrc_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    ep = (struct ibrc_ep *)nvshmemt_ib_common_get_amo_ep_from_qp_index(
+        tcurr, qp_index, pe, remote->remote_memdesc.offset);
     int selected_dev_slot = ep->common_ep.selected_dev_slot;
     assert(remote->remote_memdesc.handle);
     const struct ibrc_mem_handle *remote_mem_handle =
@@ -1716,6 +1717,60 @@ out:
     return status;
 }
 
+static int nvshmemt_ibrc_configure_multinic_amo_routing(nvshmem_transport_t t) {
+    int status = 0;
+    nvshmemt_ib_common_state_t state = (nvshmemt_ib_common_state_t)t->state;
+    bool seen_device[MAX_NUM_HCAS] = {};
+    uint8_t local_cross_hca_atomic = 1;
+    int selected_physical_devices = 0;
+
+    if (state->n_selected_dev_ids <= 1) {
+        state->use_address_stable_amo = false;
+        return status;
+    }
+
+    for (int slot = 0; slot < state->n_selected_dev_ids; ++slot) {
+        int selected_dev_id = state->selected_dev_ids[slot];
+        int dev_id = state->dev_ids[selected_dev_id];
+        if (seen_device[dev_id]) continue;
+
+        seen_device[dev_id] = true;
+        selected_physical_devices++;
+        struct ibrc_device *device = ((struct ibrc_device *)state->devices + dev_id);
+        if (device->common_device.device_attr.atomic_cap != IBV_ATOMIC_GLOB) {
+            local_cross_hca_atomic = 0;
+        }
+    }
+
+    /* Different ports on one HCA do not need cross-HCA atomic scope. */
+    if (selected_physical_devices <= 1) local_cross_hca_atomic = 1;
+
+    if (t->n_pes > 1) {
+        std::vector<uint8_t> peer_cross_hca_atomic(t->n_pes);
+        status = t->boot_handle->allgather(&local_cross_hca_atomic, peer_cross_hca_atomic.data(),
+                                           sizeof(local_cross_hca_atomic), t->boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Allgather of multi-NIC atomic capabilities failed.\n");
+
+        for (uint8_t peer_capability : peer_cross_hca_atomic) {
+            if (!peer_capability) {
+                local_cross_hca_atomic = 0;
+                break;
+            }
+        }
+    }
+
+    state->use_address_stable_amo = !local_cross_hca_atomic;
+    INFO(state->log_level, "Multi-NIC AMO routing: %s (selected NIC slots: %d, physical HCAs: %d)",
+         state->use_address_stable_amo
+             ? "address-stable fallback (global cross-HCA atomic capability unavailable)"
+             : "cross-device round-robin",
+         state->n_selected_dev_ids, selected_physical_devices);
+
+out:
+    return status;
+}
+
 static int nvshmemt_ibrc_connect_endpoints(nvshmem_transport_t t, int *candidate_dev_ids,
                                            int num_candidate_devs, int *out_qp_indices,
                                            int num_qps) {
@@ -1726,6 +1781,9 @@ static int nvshmemt_ibrc_connect_endpoints(nvshmem_transport_t t, int *candidate
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "IBRC endpoint connection failed \n");
     if (cst_eps.empty()) {
+        status = nvshmemt_ibrc_configure_multinic_amo_routing(t);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "IBRC multi-NIC AMO routing setup failed \n");
         status = nvshmemt_ibrc_setup_cst_endpoints(t);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "IBRC CST endpoint setup failed \n");

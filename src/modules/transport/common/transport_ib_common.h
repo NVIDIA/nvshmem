@@ -147,8 +147,8 @@ struct nvshmemt_ib_common_state {
     int selected_dev_ids[MAX_NUM_HCAS];
     int n_selected_dev_ids;
     int max_selected_dev_ids;
-
     int n_raw_devices;
+    bool use_address_stable_amo;
 };
 
 typedef struct nvshmemt_ib_common_state *nvshmemt_ib_common_state_t;
@@ -260,6 +260,11 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_d
 /* Helper function to get ep from qp index */
 nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,
                                                                     int qp_index, int pe_index);
+
+/* Helper function to select a default-QP AMO endpoint for a target offset. */
+nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_amo_ep_from_qp_index(nvshmem_transport_t t,
+                                                                        int qp_index, int pe_index,
+                                                                        uint64_t remote_offset);
 
 /* Helper function to filter devices based on HCA_PREFIX */
 bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *name);
