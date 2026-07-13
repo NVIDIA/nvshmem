@@ -13,8 +13,9 @@ from enum import IntEnum
 
 import numpy as np
 
+import nvshmem.core._internal_tracking as tracking
 import nvshmem.bindings as bindings
-from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode
+from nvshmem.core._internal_tracking import _mr_references, _cached_device
 
 from cuda.core import Device, system
 from cuda.core import Buffer
@@ -59,13 +60,13 @@ def _get_device() -> Device:
         Set old device back to current. If the old device is the same as the current one, this is idempotent
         If not, it matches the NVSHMEM4Py and Libnvshmem contract - return the process to the caller as they gave it to us
     """
-    if _debug_mode:
+    if tracking._debug_mode:
         # Device() excepts if no device is current
         old_device = Device()
     else:
         old_device = None
 
-    if not _debug_mode and _cached_device["device"] is not None:
+    if not tracking._debug_mode and _cached_device["device"] is not None:
         return _cached_device["device"], None
 
     # If the device is None here, we want to do the second half of the two-stage init.

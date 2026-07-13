@@ -15,7 +15,7 @@ from nvshmem.core.nvshmem_types import *
 import nvshmem.core.utils as utils
 import nvshmem.core.memory as memory
 from nvshmem import __version__
-from nvshmem.core._internal_tracking import _mr_references, _cached_device, _debug_mode, InternalInitStatus
+from nvshmem.core._internal_tracking import _mr_references, _cached_device, InternalInitStatus
 
 from cuda.pathfinder import load_nvidia_dynamic_lib, find_nvidia_header_directory
 from cuda.core import Buffer, MemoryResource
@@ -316,7 +316,7 @@ def init(device: Device = None,
 
     log_level = os.environ.get("NVSHMEM_DEBUG")
     if log_level in ("INFO", "DEBUG"):
-        _debug_mode = True
+        nvshmem.core._internal_tracking._debug_mode = True
 
     if not log_level or log_level not in ["DEBUG", "INFO", "WARNING", "ERROR", None]:
         # Default to ERROR level
