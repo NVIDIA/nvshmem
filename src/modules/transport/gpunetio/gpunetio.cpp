@@ -277,9 +277,10 @@ struct gpunetio_device {
     ~gpunetio_device();
 
     int open_net_dev();
-    int create_ah(int portid);
+    int create_ah(int portid, const doca_verbs_gid &remote_gid, uint16_t dlid, bool use_ib_grh,
+                  doca_verbs_ah_attr_t **out_ah) const;
     int create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, uint32_t dest_qp_num,
-                       int portid) const;
+                       int portid, doca_verbs_ah_attr_t *ah) const;
     int transition_qp_to_rts(doca_verbs_qp_t *qp, doca_verbs_qp_attr_t *verbs_qp_attr) const;
     int add_endpoints(nvshmem_transport_t t, int portid, int num_rc_eps_per_pe,
                       gpunetio_qp_kind kind);
@@ -307,7 +308,6 @@ struct gpunetio_device {
     // This mutex is required to avoid a race with the progress thread and the QP-specific API
     // reallocating and modifying the rc_eps vectors.
     std::unique_ptr<std::mutex> rc_eps_mtx{new std::mutex()};
-    doca_verbs_ah_attr_t *ah = nullptr;
     // Per-kind self-loopback backup QP.
     doca_gpu_verbs_qp_hl *qp_local_backup_gpu = nullptr;
     doca_gpu_verbs_qp_hl *qp_local_backup_cpu = nullptr;
@@ -573,36 +573,32 @@ int gpunetio_ep::connect(nvshmemt_gpunetio_state_t *gpunetio_state,
                          gpunetio_exch_info *remote_exch_info) {
     const struct ibv_port_attr *port_attr = device_->common_device.port_attr + (portid - 1);
     uint16_t dlid = remote_exch_info->lid;
+    bool use_ib_grh = false;
 
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
         const struct nvshmemt_ib_qp_path path = nvshmemt_ib_select_qp_path(
             &device_->common_device.gid_info[portid - 1].local_gid, port_attr->lid,
             remote_exch_info->lid, remote_exch_info->gid.global.subnet_prefix,
             remote_exch_info->gid.global.interface_id);
-        const bool use_ib_grh = gpunetio_state->options->IB_FORCE_GRH ||
-                                nvshmemt_ib_common_port_requires_grh(port_attr) ||
-                                path.grh_required;
-
-        /* The AH is shared across endpoints, so set its address type for every peer. */
-        DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(
-            device_->ah,
-            use_ib_grh ? DOCA_VERBS_ADDR_TYPE_IB_GRH : DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
-        if (use_ib_grh) {
-            DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(device_->ah, GPUNETIO_QP_HOP_LIMIT));
-        }
+        use_ib_grh = gpunetio_state->options->IB_FORCE_GRH ||
+                     nvshmemt_ib_common_port_requires_grh(port_attr) || path.grh_required;
         dlid = path.dlid;
     }
 
-    DOCA_CHECK(doca_verbs_ah_attr_set_gid(device_->ah, remote_exch_info->vgid));
-    DOCA_CHECK(doca_verbs_ah_attr_set_dlid(device_->ah, dlid));
+    doca_verbs_ah_attr_t *endpoint_ah = nullptr;
+    int rc = device_->create_ah(portid, remote_exch_info->vgid, dlid, use_ib_grh, &endpoint_ah);
+    if (rc) return rc;
+    auto ah_guard = make_scope_guard([&]() { doca_verbs_ah_attr_destroy(endpoint_ah); });
 
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
-    int rc = device_->create_qp_attr(&verbs_qp_attr, remote_exch_info->qpn, portid);
+    rc = device_->create_qp_attr(&verbs_qp_attr, remote_exch_info->qpn, portid, endpoint_ah);
     if (rc) return rc;
+    auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
     rc = device_->transition_qp_to_rts(qp->qp, verbs_qp_attr);
-    doca_verbs_qp_attr_destroy(verbs_qp_attr);
-    return rc;
+    if (rc) return rc;
+
+    return NVSHMEMX_SUCCESS;
 }
 
 gpunetio_exch_info gpunetio_ep::create_exch_info() const {
@@ -723,9 +719,12 @@ bool gpunetio_device::cst_is_required() const {
 }
 
 // QP connection logic
-int gpunetio_device::create_ah(int portid) {
+int gpunetio_device::create_ah(int portid, const doca_verbs_gid &remote_gid, uint16_t dlid,
+                               bool use_ib_grh, doca_verbs_ah_attr_t **out_ah) const {
     // DOCA_CHECK macro captures `gpunetio_state` from the enclosing scope.
     nvshmemt_gpunetio_state_t *gpunetio_state = state_;
+    if (out_ah == nullptr) return NVSHMEMX_ERROR_INVALID_VALUE;
+    *out_ah = nullptr;
 
     doca_verbs_ah_attr_t *local_ah = nullptr;
     DOCA_CHECK(doca_verbs_ah_attr_create(net_dev, &local_ah));
@@ -733,32 +732,36 @@ int gpunetio_device::create_ah(int portid) {
     std::unique_ptr<doca_verbs_ah_attr_t, decltype(ah_deleter)> ah_guard(local_ah, ah_deleter);
 
     DOCA_CHECK(doca_verbs_ah_attr_set_sl(local_ah, state_->options->IB_SL));
-    DOCA_CHECK(doca_verbs_ah_attr_set_traffic_class(local_ah, state_->options->IB_TRAFFIC_CLASS));
 
     const struct ibv_port_attr *port_attr = common_device.port_attr + (portid - 1);
-    const bool use_ib_grh =
-        state_->options->IB_FORCE_GRH || nvshmemt_ib_common_port_requires_grh(port_attr);
-
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
         DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(
             local_ah, use_ib_grh ? DOCA_VERBS_ADDR_TYPE_IB_GRH : DOCA_VERBS_ADDR_TYPE_IB_NO_GRH));
+        DOCA_CHECK(doca_verbs_ah_attr_set_dlid(local_ah, dlid));
         if (use_ib_grh) {
+            DOCA_CHECK(doca_verbs_ah_attr_set_gid(local_ah, remote_gid));
+            DOCA_CHECK(doca_verbs_ah_attr_set_sgid_index(
+                local_ah, common_device.gid_info[portid - 1].local_gid_index));
             DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(local_ah, GPUNETIO_QP_HOP_LIMIT));
+            DOCA_CHECK(
+                doca_verbs_ah_attr_set_traffic_class(local_ah, state_->options->IB_TRAFFIC_CLASS));
         }
     } else {
         DOCA_CHECK(doca_verbs_ah_attr_set_addr_type(local_ah, DOCA_VERBS_ADDR_TYPE_IPv4));
+        DOCA_CHECK(doca_verbs_ah_attr_set_gid(local_ah, remote_gid));
+        DOCA_CHECK(doca_verbs_ah_attr_set_dlid(local_ah, dlid));
+        DOCA_CHECK(doca_verbs_ah_attr_set_sgid_index(
+            local_ah, common_device.gid_info[portid - 1].local_gid_index));
         DOCA_CHECK(doca_verbs_ah_attr_set_hop_limit(local_ah, GPUNETIO_QP_HOP_LIMIT));
+        DOCA_CHECK(doca_verbs_ah_attr_set_traffic_class(local_ah, state_->options->IB_TRAFFIC_CLASS));
     }
 
-    DOCA_CHECK(doca_verbs_ah_attr_set_sgid_index(
-        local_ah, common_device.gid_info[portid - 1].local_gid_index));
-
-    ah = ah_guard.release();
+    *out_ah = ah_guard.release();
     return NVSHMEMX_SUCCESS;
 }
 
 int gpunetio_device::create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, uint32_t dest_qp_num,
-                                    int portid) const {
+                                    int portid, doca_verbs_ah_attr_t *ah) const {
     nvshmemt_gpunetio_state_t *gpunetio_state = state_;
 
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
@@ -849,21 +852,21 @@ int gpunetio_device::connect_self_loop(int portid, doca_gpu_verbs_qp_hl *qp_loca
     ibv_query_port(common_device.context, portid, &port_attr);
 
     memcpy(vgid.raw, gid->raw, sizeof(union ibv_gid));
-
-    DOCA_CHECK(doca_verbs_ah_attr_set_gid(ah, vgid));
-    if (port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
-        DOCA_CHECK(doca_verbs_ah_attr_set_dlid(ah, port_attr.lid));
-    }
+    doca_verbs_ah_attr_t *loopback_ah = nullptr;
+    int rc = create_ah(portid, vgid, port_attr.lid,
+                       port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND, &loopback_ah);
+    if (rc) return rc;
+    auto ah_guard = make_scope_guard([&]() { doca_verbs_ah_attr_destroy(loopback_ah); });
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_backup->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
-    int rc = create_qp_attr(&verbs_qp_attr, dest_qp_num, portid);
+    rc = create_qp_attr(&verbs_qp_attr, dest_qp_num, portid, loopback_ah);
     if (rc) return rc;
     auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_local->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr_backup = nullptr;
-    rc = create_qp_attr(&verbs_qp_attr_backup, dest_qp_num, portid);
+    rc = create_qp_attr(&verbs_qp_attr_backup, dest_qp_num, portid, loopback_ah);
     if (rc) return rc;
     auto qp_attr_backup_guard =
         make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr_backup); });
@@ -1149,12 +1152,6 @@ gpunetio_device::~gpunetio_device() {
         dummy_mr_lkey = 0;
     }
 
-    if (ah) {
-        int ret = doca_verbs_ah_attr_destroy(ah);
-        if (ret) {
-            NVSHMEMI_WARN_PRINT("doca_verbs_ah_attr_destroy failed: %d\n", ret);
-        }
-    }
     if (qp_local_backup_gpu) {
         int ret = doca_gpu_verbs_destroy_qp_hl(qp_local_backup_gpu);
         if (ret) {
@@ -1778,12 +1775,6 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
         int dev_idx = dev_ids[selected_dev_ids[i]];
         gpunetio_device &device = *devices[dev_idx];
         int portid = port_ids[selected_dev_ids[i]];
-
-        status = device.create_ah(portid);
-        if (status) {
-            NVSHMEMI_ERROR_PRINT("gpunetio_device::create_ah failed.\n");
-            return NVSHMEMX_ERROR_INTERNAL;
-        }
 
         if (options->GPUNETIO_NUM_RC_PER_PE_GPU > 0) {
             status = device.add_endpoints(t, portid, options->GPUNETIO_NUM_RC_PER_PE_GPU,
