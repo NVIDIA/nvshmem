@@ -35,7 +35,7 @@ __host__ __device__ constexpr bool IS_VALID_LE_ID(std::uint64_t le_id) {
     return (le_id & LE_ID_VALID_MASK) != 0;
 }
 
-// MAX_BATCH_SIZE is 1MB for try_get, and 16MB for try_put
-inline constexpr int TMA_COPY_MAX_BATCH_SIZE = 1 << 24;  // 16MB
+inline constexpr int TMA_GET_MAX_BATCH_SIZE = 1 << 20;  // 1MB
+inline constexpr int TMA_PUT_MAX_BATCH_SIZE = 1 << 24;  // 16MB
 
 #endif  // _NVSHMEM_LOGICAL_ENDPOINT_DEFINES_H_
