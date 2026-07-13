@@ -149,7 +149,7 @@ int main(int argc, char *argv[]) {
         if (use_egm) {
             memset(flag_d, 0, sizeof(uint64_t));
         } else {
-            CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+            CUDA_CHECK(cudaMemsetAsync(flag_d, 0, sizeof(uint64_t), stream));
         }
         nvshmem_barrier_all();
 
