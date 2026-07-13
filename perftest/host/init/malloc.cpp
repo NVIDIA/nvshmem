@@ -12,28 +12,43 @@
 #include <cuda.h>
 #include <sys/time.h>
 
+namespace {
+bool has_max_size_arg(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--max_size")) return true;
+        if (!strncmp(argv[i], "-e", 2) && argv[i][2] != '\0') return true;
+        if (!strncmp(argv[i], "--max_size=", strlen("--max_size="))) return true;
+    }
+    return false;
+}
+}  // namespace
+
 int main(int argc, char *argv[]) {
     int status = 0;
     int mype;
     struct timeval t_start, t_stop;
     char size_string[100];
 
+    bool use_arg_max_size = has_max_size_arg(argc, argv);
     read_args(argc, argv);
-    size_t min_malloc_size = 1 << 30;
+    size_t min_malloc_size = 1ULL << 30;
     size_t max_alloc_size;
-    uint64_t *h_size_arr;
-    double *h_time;
+    uint64_t *h_size_arr = nullptr;
+    double *h_time = nullptr;
     int loop_size = 0;
     size_t malloc_size;
     size_t total_alloc_size = 0;
     CU_CHECK(cuInit(0));
     CUdevice device;
     CU_CHECK(cuDeviceGet(&device, 0));
-    CU_CHECK(cuDeviceTotalMem(
-        &max_alloc_size, device)); /* The test assumes that all devices have same total memory */
-    max_alloc_size *= 0.4;         /* For allocacting more than half,
-                                      we need the fix in CUDA driver,
-                                      available only in r460 and later */
+    CU_CHECK(cuDeviceTotalMem(&max_alloc_size, device));
+    if (use_arg_max_size) {
+        max_alloc_size = max_size;
+    } else {
+        /* The test assumes that all devices have same total memory. For allocating more than half,
+           we need the fix in CUDA driver, available only in r460 and later. */
+        max_alloc_size *= 0.4;
+    }
     DEBUG_PRINT("symmetric size requested %lu\n", max_alloc_size);
     sprintf(size_string, "%lu", max_alloc_size);
     status = setenv("NVSHMEM_SYMMETRIC_SIZE", size_string, 1);
@@ -55,14 +70,26 @@ int main(int argc, char *argv[]) {
         loop_size++;
     }
 
+    if (loop_size == 0) goto finalize;
+
     h_size_arr = (uint64_t *)malloc(sizeof(uint64_t) * loop_size);
     h_time = (double *)malloc(sizeof(double) * loop_size);
+    if (!h_size_arr || !h_time) {
+        fprintf(stderr, "malloc failed \n");
+        status = -1;
+        goto finalize;
+    }
 
     malloc_size = min_malloc_size;
     for (int i = 0; i < loop_size; i++) {
         gettimeofday(&t_start, NULL);
-        nvshmem_malloc(malloc_size);
+        void *ptr = nvshmem_malloc(malloc_size);
         gettimeofday(&t_stop, NULL);
+        if (!ptr) {
+            fprintf(stderr, "nvshmem_malloc failed for size %lu\n", malloc_size);
+            status = -1;
+            goto finalize;
+        }
         h_size_arr[i] = malloc_size;
         h_time[i] =
             ((t_stop.tv_usec - t_start.tv_usec) + (1e+6 * (t_stop.tv_sec - t_start.tv_sec)));
@@ -73,7 +100,10 @@ int main(int argc, char *argv[]) {
                           loop_size);
     }
 
+finalize:
     finalize_wrapper();
+    free(h_size_arr);
+    free(h_time);
 out:
     return status;
 }
