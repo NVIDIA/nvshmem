@@ -1118,7 +1118,7 @@ inline void copy_from_channel(proxy_state_t *state, proxy_channel_t *ch, void *d
 
 inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
                                       int *is_processed) {
-    int pe, status = 0;
+    int status = 0;
     base_request_t *base_req;
     put_signal_request_0 *ps_req_0;
     put_signal_request_1 *ps_req_1;
@@ -1199,7 +1199,9 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     asm volatile("" : : : "memory");
 #endif
 
-    pe = ps_req_2->pe;
+    const int target_pe = ps_req_2->pe;
+    int transport_pe = target_pe;
+    NVSHMEMU_PE_TRANSLATE(transport_pe);
 
     if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
         qp_index = ps_req_2->qp_index;
@@ -1221,14 +1223,16 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
         write_bytes_desc.deststride = 1;
         write_bytes_desc.elembytes = 1;
         write_local_desc.ptr = lwrite_ptr;
-        NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(write_remote_desc.ptr, rwrite_ptr, pe);
+        int write_pe = target_pe;
+        NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(write_remote_desc.ptr, rwrite_ptr, write_pe);
+        assert(transport_pe == write_pe);
         write_remote_desc.offset = (char *)rwrite_ptr - (char *)nvshmemi_device_state.heap_base;
         local_chunk_size = size_remaining;
         remote_chunk_size = size_remaining;
         nvshmemi_get_local_mem_handle(&write_local_desc.handle, &local_chunk_size, lwrite_ptr,
-                                      state->transport_id[pe]);
-        nvshmemi_get_remote_mem_handle(&write_remote_desc, &remote_chunk_size, rwrite_ptr, pe,
-                                       state->transport_id[pe]);
+                                      state->transport_id[write_pe]);
+        nvshmemi_get_remote_mem_handle(&write_remote_desc, &remote_chunk_size, rwrite_ptr, write_pe,
+                                       state->transport_id[write_pe]);
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         write_bytes_desc.nelems = chunk_size;
 
@@ -1252,15 +1256,17 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     sig_target_desc.val = (uint64_t)(((uint64_t)(ps_req_4->sigval_high) << 32) |
                                      ((uint64_t)(ps_req_4->sigval_3) << 16) |
                                      ((uint64_t)(ps_req_4->sigval_2) << 8) | ps_req_3->sigval_low);
-    NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(sig_target_desc.remote_memdesc.ptr, rsig_ptr, pe);
-    nvshmemi_get_remote_mem_handle(&sig_target_desc.remote_memdesc, NULL, rsig_ptr, pe,
-                                   state->transport_id[pe]);
+    int signal_pe = target_pe;
+    NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(sig_target_desc.remote_memdesc.ptr, rsig_ptr, signal_pe);
+    assert(transport_pe == signal_pe);
+    nvshmemi_get_remote_mem_handle(&sig_target_desc.remote_memdesc, NULL, rsig_ptr, signal_pe,
+                                   state->transport_id[signal_pe]);
     sig_bytes_desc.elembytes = sizeof(uint64_t);
 
-    TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_ptr, pe);
+    TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_ptr, transport_pe);
 
-    tcurr = state->transport[pe];
-    status = tcurr->host_ops.put_signal(tcurr, pe, write_verb, remote_write_desc_vec,
+    tcurr = state->transport[transport_pe];
+    status = tcurr->host_ops.put_signal(tcurr, transport_pe, write_verb, remote_write_desc_vec,
                                         local_write_desc_vec, write_bytes_vec, sig_verb,
                                         &sig_target_desc, sig_bytes_desc, qp_index);
     if (unlikely(status)) {
