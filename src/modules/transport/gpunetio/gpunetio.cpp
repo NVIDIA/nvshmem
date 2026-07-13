@@ -279,8 +279,8 @@ struct gpunetio_device {
     int open_net_dev();
     int create_ah(int portid, const doca_verbs_gid &remote_gid, uint16_t dlid, bool use_ib_grh,
                   doca_verbs_ah_attr_t **out_ah) const;
-    int create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, uint32_t dest_qp_num,
-                       int portid, doca_verbs_ah_attr_t *ah) const;
+    int create_qp_attr(uint32_t dest_qp_num, int portid, doca_verbs_ah_attr_t *ah,
+                       doca_verbs_qp_attr_t **out_verbs_qp_attr) const;
     int transition_qp_to_rts(doca_verbs_qp_t *qp, doca_verbs_qp_attr_t *verbs_qp_attr) const;
     int add_endpoints(nvshmem_transport_t t, int portid, int num_rc_eps_per_pe,
                       gpunetio_qp_kind kind);
@@ -591,7 +591,7 @@ int gpunetio_ep::connect(nvshmemt_gpunetio_state_t *gpunetio_state,
     auto ah_guard = make_scope_guard([&]() { doca_verbs_ah_attr_destroy(endpoint_ah); });
 
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
-    rc = device_->create_qp_attr(&verbs_qp_attr, remote_exch_info->qpn, portid, endpoint_ah);
+    rc = device_->create_qp_attr(remote_exch_info->qpn, portid, endpoint_ah, &verbs_qp_attr);
     if (rc) return rc;
     auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
@@ -760,8 +760,8 @@ int gpunetio_device::create_ah(int portid, const doca_verbs_gid &remote_gid, uin
     return NVSHMEMX_SUCCESS;
 }
 
-int gpunetio_device::create_qp_attr(doca_verbs_qp_attr_t **out_verbs_qp_attr, uint32_t dest_qp_num,
-                                    int portid, doca_verbs_ah_attr_t *ah) const {
+int gpunetio_device::create_qp_attr(uint32_t dest_qp_num, int portid, doca_verbs_ah_attr_t *ah,
+                                    doca_verbs_qp_attr_t **out_verbs_qp_attr) const {
     nvshmemt_gpunetio_state_t *gpunetio_state = state_;
 
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
@@ -860,13 +860,13 @@ int gpunetio_device::connect_self_loop(int portid, doca_gpu_verbs_qp_hl *qp_loca
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_backup->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
-    rc = create_qp_attr(&verbs_qp_attr, dest_qp_num, portid, loopback_ah);
+    rc = create_qp_attr(dest_qp_num, portid, loopback_ah, &verbs_qp_attr);
     if (rc) return rc;
     auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_local->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr_backup = nullptr;
-    rc = create_qp_attr(&verbs_qp_attr_backup, dest_qp_num, portid, loopback_ah);
+    rc = create_qp_attr(dest_qp_num, portid, loopback_ah, &verbs_qp_attr_backup);
     if (rc) return rc;
     auto qp_attr_backup_guard =
         make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr_backup); });
