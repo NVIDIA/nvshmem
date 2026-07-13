@@ -63,6 +63,7 @@ int main(int argc, char *argv[]) {
     void *data_h_local = NULL;
     uint64_t *size_array = NULL;
     double *latency_array = NULL;
+    cudaStream_t strm = nullptr;
     int num_entries;
     int i;
     read_args(argc, argv);
@@ -125,7 +126,6 @@ int main(int argc, char *argv[]) {
     }
 #endif
 
-    cudaStream_t strm;
     CUDA_CHECK(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    CUDA_CHECK(cudaStreamDestroy(strm));
+    if (strm) CUDA_CHECK(cudaStreamDestroy(strm));
 
     if (data_d) {
         if (use_mmap) {

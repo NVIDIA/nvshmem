@@ -84,6 +84,7 @@ int main(int argc, char *argv[]) {
     int skip = warmup_iters;
     uint64_t *size_array = NULL;
     double *bandwidth_array = NULL;
+    cudaStream_t strm = nullptr;
     int num_entries;
     int i;
 
@@ -122,7 +123,6 @@ int main(int argc, char *argv[]) {
         CUDA_CHECK(cudaMemset(data_d_local, 0, max_size));
     }
 
-    cudaStream_t strm;
     CUDA_CHECK(cudaStreamCreateWithFlags(&strm, cudaStreamNonBlocking));
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -157,7 +157,7 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    CUDA_CHECK(cudaStreamDestroy(strm));
+    if (strm) CUDA_CHECK(cudaStreamDestroy(strm));
 
     if (data_d) {
         if (use_mmap) {
