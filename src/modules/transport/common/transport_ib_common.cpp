@@ -14,6 +14,7 @@
 #include <stdint.h>            // for uintptr_t, uint64_t
 #include <string.h>            // for strerror
 #include <unistd.h>            // for access, close, sysconf
+#include <vector>              // for vector
 #include "device_host_transport/nvshmem_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
 #include "non_abi/nvshmemx_error.h"            // for NVSHMEMX_ERROR_INTERNAL
@@ -1219,6 +1220,97 @@ int nvshmemt_ib_common_discover_pci_paths(
     return status;
 }
 
+static int nvshmemt_ib_common_filter_auto_link_layer(
+    const struct nvshmemt_ibv_function_table *ftable, struct nvshmemt_ib_common_state &state,
+    size_t device_struct_size, const struct nvshmemt_ib_hca_filter &filter, int num_devices) {
+    int ib_count = 0;
+    int eth_count = 0;
+    int status = NVSHMEMX_SUCCESS;
+
+    if (filter.user_selection || state.n_dev_ids <= 1) {
+        return NVSHMEMX_SUCCESS;
+    }
+
+    for (int i = 0; i < state.n_dev_ids; i++) {
+        int dev_id = state.dev_ids[i];
+        int port_id = state.port_ids[i];
+        struct nvshmemt_ib_common_device *device =
+            (struct nvshmemt_ib_common_device *)((char *)state.devices +
+                                                 dev_id * device_struct_size);
+        uint8_t link_layer = device->port_attr[port_id - 1].link_layer;
+
+        if (link_layer == IBV_LINK_LAYER_INFINIBAND) {
+            ib_count++;
+        } else if (link_layer == IBV_LINK_LAYER_ETHERNET) {
+            eth_count++;
+        }
+    }
+
+    if (ib_count == 0 || eth_count == 0) {
+        return NVSHMEMX_SUCCESS;
+    }
+
+    uint8_t selected_link_layer =
+        (ib_count >= eth_count) ? IBV_LINK_LAYER_INFINIBAND : IBV_LINK_LAYER_ETHERNET;
+    int selected_count = (selected_link_layer == IBV_LINK_LAYER_INFINIBAND) ? ib_count : eth_count;
+    uint8_t skipped_link_layer = (selected_link_layer == IBV_LINK_LAYER_INFINIBAND)
+                                     ? IBV_LINK_LAYER_ETHERNET
+                                     : IBV_LINK_LAYER_INFINIBAND;
+    int skipped_count = (selected_link_layer == IBV_LINK_LAYER_INFINIBAND) ? eth_count : ib_count;
+
+    INFO(state.log_level,
+         "Automatic HCA selection found mixed link layers; keeping %s devices (%d candidates) "
+         "and ignoring %s devices (%d candidates). Set NVSHMEM_HCA_LIST or "
+         "NVSHMEM_HCA_PE_MAPPING to override.",
+         nvshmemt_ib_common_link_layer_name(selected_link_layer), selected_count,
+         nvshmemt_ib_common_link_layer_name(skipped_link_layer), skipped_count);
+
+    int write_idx = 0;
+    std::vector<uint8_t> device_kept(num_devices, 0);
+
+    for (int read_idx = 0; read_idx < state.n_dev_ids; read_idx++) {
+        int dev_id = state.dev_ids[read_idx];
+        int port_id = state.port_ids[read_idx];
+        struct nvshmemt_ib_common_device *device =
+            (struct nvshmemt_ib_common_device *)((char *)state.devices +
+                                                 dev_id * device_struct_size);
+
+        if (device->port_attr[port_id - 1].link_layer != selected_link_layer) {
+            continue;
+        }
+
+        state.dev_ids[write_idx] = dev_id;
+        state.port_ids[write_idx] = port_id;
+        device_kept[dev_id] = 1;
+        write_idx++;
+    }
+    state.n_dev_ids = write_idx;
+
+    for (int i = 0; i < num_devices; i++) {
+        if (device_kept[i]) {
+            continue;
+        }
+
+        struct nvshmemt_ib_common_device *device =
+            (struct nvshmemt_ib_common_device *)((char *)state.devices + i * device_struct_size);
+        if (device->pd) {
+            status = ftable->dealloc_pd(device->pd);
+            device->pd = nullptr;
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_dealloc_pd failed \n");
+        }
+        if (device->context) {
+            status = ftable->close_device(device->context);
+            device->context = nullptr;
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "ibv_close_device failed \n");
+        }
+    }
+
+out:
+    return status;
+}
+
 int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_table *ftable,
                                          struct nvshmemt_ib_common_state &state,
                                          size_t device_struct_size,
@@ -1373,6 +1465,11 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
     INFO(log_level, "End - Enumerating IB devices in the system");
 
     state.n_dev_ids = offset;
+
+    status = nvshmemt_ib_common_filter_auto_link_layer(ftable, state, device_struct_size, filter,
+                                                       num_devices);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "failed filtering IB device link layers \n");
 
     if (!state.n_dev_ids) {
         INFO(log_level, "no active IB device found, exiting");
