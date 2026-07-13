@@ -940,6 +940,18 @@ out:
     return status;
 }
 
+static int nvshmemt_ib_common_advance_default_qp_index(nvshmemt_ib_common_state_t ib_state) {
+    int default_qp_count = ib_state->default_qp_count;
+    int selected_qp = ib_state->cur_default_qp_index % (default_qp_count + 1);
+    assert(ib_state->cur_default_qp_index != NVSHMEMX_QP_HOST);
+    int next_qp_index = (ib_state->cur_default_qp_index + 1) % (default_qp_count + 1);
+    if (next_qp_index == NVSHMEMX_QP_HOST) {
+        next_qp_index = NVSHMEMX_QP_DEFAULT;
+    }
+    ib_state->cur_default_qp_index = next_qp_index;
+    return selected_qp;
+}
+
 nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,
                                                                     int qp_index, int pe_index) {
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
@@ -947,14 +959,7 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
         return ib_state->ep[ib_state->host_ep_index + pe_index];
     } else if (qp_index == NVSHMEMX_QP_DEFAULT) {
         /* Round robin over default QPs */
-        int default_qp_count = ib_state->default_qp_count;
-        int selected_qp = ib_state->cur_default_qp_index % (default_qp_count + 1);
-        assert(ib_state->cur_default_qp_index != NVSHMEMX_QP_HOST);
-        int next_qp_index = (ib_state->cur_default_qp_index + 1) % (default_qp_count + 1);
-        if (next_qp_index == NVSHMEMX_QP_HOST) {
-            next_qp_index = NVSHMEMX_QP_DEFAULT;
-        }
-        ib_state->cur_default_qp_index = next_qp_index;
+        int selected_qp = nvshmemt_ib_common_advance_default_qp_index(ib_state);
         return ib_state->ep[selected_qp * t->n_pes + pe_index];
     } else if (qp_index == NVSHMEMX_QP_ANY) {
         /* Round robin over all QPs except host */
@@ -974,6 +979,40 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
     }
 
     return nullptr;
+}
+
+static uint64_t nvshmemt_ib_common_mix_amo_target(uint64_t value) {
+    value ^= value >> 30;
+    value *= UINT64_C(0xbf58476d1ce4e5b9);
+    value ^= value >> 27;
+    value *= UINT64_C(0x94d049bb133111eb);
+    return value ^ (value >> 31);
+}
+
+nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_amo_ep_from_qp_index(nvshmem_transport_t t,
+                                                                        int qp_index, int pe_index,
+                                                                        uint64_t remote_offset) {
+    nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
+
+    if (!ib_state->use_address_stable_amo || qp_index != NVSHMEMX_QP_DEFAULT ||
+        ib_state->n_selected_dev_ids <= 1) {
+        return nvshmemt_ib_common_get_ep_from_qp_index(t, qp_index, pe_index);
+    }
+
+    /*
+     * Default QPs are laid out in selected-device SPREAD order. Hashing the target
+     * PE and symmetric-heap offset to one default QP therefore keeps all AMOs to
+     * one target word on one selected HCA without changing RMA selection.
+     */
+    assert(ib_state->default_qp_count > 0);
+    /* Preserve the shared default-QP sequence used by later RMA operations. */
+    (void)nvshmemt_ib_common_advance_default_qp_index(ib_state);
+    uint64_t target =
+        (static_cast<uint64_t>(static_cast<uint32_t>(pe_index)) << 32) ^ remote_offset;
+    int selected_qp =
+        NVSHMEMX_QP_DEFAULT + static_cast<int>(nvshmemt_ib_common_mix_amo_target(target) %
+                                               static_cast<uint64_t>(ib_state->default_qp_count));
+    return ib_state->ep[selected_qp * t->n_pes + pe_index];
 }
 
 int nvshmemt_ib_iface_get_mlx_path(ibv_device *dev, ibv_context *ctx, char **path,
