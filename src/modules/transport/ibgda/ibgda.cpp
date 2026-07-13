@@ -4264,7 +4264,6 @@ out:
 int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
                                      int num_selected_devs, int *out_qp_indices, int num_qps) {
     nvshmemt_ibgda_state_t *ibgda_state = (nvshmemt_ibgda_state_t *)t->state;
-    struct nvshmemi_options_s *options = ibgda_state->common.options;
     nvshmemi_ibgda_device_state_t *ibgda_device_state_h =
         (nvshmemi_ibgda_device_state_t *)t->type_specific_shared_state;
     int status = 0;
@@ -4278,15 +4277,6 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     memset(ibgda_device_state_h, 0, sizeof(*ibgda_device_state_h));
 
     // First call: Full initialization including DCT and DCI
-    // Input validation and device count adjustment
-    if (!options->IBGDA_ENABLE_MULTI_PORT && num_selected_devs > 1) {
-        INFO(ibgda_state->common.log_level,
-             "Multi-port for IBGDA is disabled by the env. Using 1 device instead "
-             "of %d.",
-             num_selected_devs);
-        num_selected_devs = 1;
-    }
-
     if (num_selected_devs > NVSHMEMI_IBGDA_MAX_DEVICES_PER_PE) {
         NVSHMEMI_WARN_PRINT("IBGDA only supports %d devices, but the lib has requested %d.\n",
                             NVSHMEMI_IBGDA_MAX_DEVICES_PER_PE, num_selected_devs);
@@ -5091,10 +5081,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         nvshmemt_ibgda_add_device_remote_mem_handles;
     transport->host_ops.put_signal = NULL;
 
-    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
-    if (options->IBGDA_ENABLE_MULTI_PORT) {
-        transport->attr |= NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED;
-    }
+    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED | NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED;
     transport->is_successfully_initialized = true;
     transport->max_op_len = 1ULL << 30;
     transport->atomic_host_endian_min_size = atomic_host_endian_size;

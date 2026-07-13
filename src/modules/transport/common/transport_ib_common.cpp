@@ -606,6 +606,80 @@ out:
     return status;
 }
 
+static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candidate_dev_ids,
+                                             int num_candidate_devs) {
+    nvshmemt_ib_common_state_t state = (nvshmemt_ib_common_state_t)t->state;
+    int status = 0;
+    int *peer_counts = nullptr;
+    int max_selected = state->max_selected_dev_ids > 0 ? state->max_selected_dev_ids : 1;
+    bool capped = false;
+
+    if (!candidate_dev_ids || num_candidate_devs <= 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "IB endpoint connection requires at least one selected NIC.\n");
+    }
+    if (max_selected > MAX_NUM_HCAS) max_selected = MAX_NUM_HCAS;
+
+    state->n_selected_dev_ids = 0;
+    for (int i = 0; i < num_candidate_devs; ++i) {
+        int selected_dev_id = candidate_dev_ids[i];
+        if (selected_dev_id < 0 || selected_dev_id >= state->n_dev_ids) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                               "Selected NIC index %d is outside the available range [0, %d).\n",
+                               selected_dev_id, state->n_dev_ids);
+        }
+
+        bool seen = false;
+        for (int j = 0; j < state->n_selected_dev_ids; ++j) {
+            int previous = state->selected_dev_ids[j];
+            if (state->dev_ids[previous] == state->dev_ids[selected_dev_id] &&
+                state->port_ids[previous] == state->port_ids[selected_dev_id]) {
+                seen = true;
+                NVSHMEMI_WARN_PRINT("Ignoring duplicate device/port entry %d:%d\n",
+                                    state->dev_ids[previous], state->port_ids[previous]);
+                break;
+            }
+        }
+        if (seen) continue;
+        if (state->n_selected_dev_ids == max_selected) {
+            capped = true;
+            continue;
+        }
+        state->selected_dev_ids[state->n_selected_dev_ids++] = selected_dev_id;
+    }
+
+    if (capped) {
+        NVSHMEMI_WARN_PRINT("Selected NIC count exceeds the limit of %d; using the first %d.\n",
+                            max_selected, max_selected);
+    }
+
+    if (state->max_selected_dev_ids > 1 && t->n_pes > 1) {
+        peer_counts = (int *)calloc(t->n_pes, sizeof(int));
+        NVSHMEMI_NULL_ERROR_JMP(peer_counts, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "Unable to allocate selected NIC counts.\n");
+        status = t->boot_handle->allgather(&state->n_selected_dev_ids, peer_counts, sizeof(int),
+                                           t->boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Allgather of selected NIC counts failed.\n");
+        for (int pe = 0; pe < t->n_pes; ++pe) {
+            if (peer_counts[pe] != state->n_selected_dev_ids) {
+                NVSHMEMI_ERROR_JMP(
+                    status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                    "Selected NIC count differs across PEs: local PE has %d, PE %d has %d.\n",
+                    state->n_selected_dev_ids, pe, peer_counts[pe]);
+            }
+        }
+    }
+
+    state->selected_dev_id = state->selected_dev_ids[0];
+    INFO(state->log_level, "Selected %d NIC(s) for IB endpoint creation",
+         state->n_selected_dev_ids);
+
+out:
+    free(peer_counts);
+    return status;
+}
+
 int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_index) {
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)tcurr->state;
     nvshmemt_ib_common_ep_ptr_t ep;
@@ -624,7 +698,7 @@ int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_ind
 
     if (qp_index == NVSHMEMX_QP_DEFAULT) {
         /* Loop over all default QPs for this PE */
-        int default_qp_count = ib_state->options->IB_NUM_RC_PER_DEVICE;
+        int default_qp_count = ib_state->default_qp_count;
         for (int qp = 0; qp < default_qp_count; qp++) {
             ep = ib_state->ep[(qp + 1) * n_pes + pe];
             if (ep) {
@@ -675,7 +749,7 @@ int nvshmemt_ib_common_fence(nvshmem_transport_t tcurr, int pe, int qp_index, in
 
     /* Check if this will result in fencing on more than one QP per PE */
     if (qp_index == NVSHMEMX_QP_DEFAULT) {
-        multiple_qps = (ib_state->options->IB_NUM_RC_PER_DEVICE > 1);
+        multiple_qps = (ib_state->default_qp_count > 1);
     } else if (qp_index == NVSHMEMX_QP_ANY || qp_index == NVSHMEMX_QP_ALL) {
         multiple_qps = (ib_state->next_qp_index > 1);
     }
@@ -707,9 +781,8 @@ out:
     return status;
 }
 
-int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                         int /*num_selected_devs*/, int *out_qp_indices,
-                                         int num_qps) {
+int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_dev_ids,
+                                         int num_candidate_devs, int *out_qp_indices, int num_qps) {
     /* transport side */
     struct nvshmemt_ib_common_ep_handle *local_ep_handles = nullptr, *ep_handles = nullptr;
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
@@ -722,21 +795,26 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_de
     int ep_count, total_eps, qps_to_create;
 
     if (is_initial_call) {
+        status = nvshmemt_ib_common_select_devices(t, candidate_dev_ids, num_candidate_devs);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Unable to select IB devices.\n");
+
         /* Allow user to override IB_NUM_RC_PER_DEVICE if num_qps is provided */
-        if (num_qps > 0) {
-            ep_count = num_qps + 1; /* +1 for host EP */
-        } else {
-            ep_count = ib_state->options->IB_NUM_RC_PER_DEVICE + 1;
+        int qps_per_device = num_qps > 0 ? num_qps : ib_state->options->IB_NUM_RC_PER_DEVICE;
+        if (qps_per_device <= 0) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                               "IB_NUM_RC_PER_DEVICE must be greater than zero.\n");
         }
+        ib_state->default_qp_count = qps_per_device * ib_state->n_selected_dev_ids;
+        ep_count = ib_state->default_qp_count + 1; /* +1 for host EP */
         total_eps = n_pes * ep_count;
         qps_to_create = ep_count;
         ib_state->host_ep_index = NVSHMEMX_QP_HOST;
-        ib_state->selected_dev_id = selected_dev_ids[0];
         ib_state->cur_ep_index = NVSHMEMX_QP_DEFAULT;
         /* The initial call to connect endpoints will increment this to the first needed index*/
         ib_state->next_qp_index = 0;
         ib_state->cur_default_qp_index = NVSHMEMX_QP_DEFAULT;
-        ib_state->cur_any_qp_index = 0;
+        ib_state->cur_any_qp_index = NVSHMEMX_QP_DEFAULT;
 
         /* Allocate ep array for initial call */
         ib_state->ep =
@@ -776,14 +854,22 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_de
     /* Create endpoints */
     first_ep_idx = ib_state->next_qp_index / n_pes;
     for (int i = first_ep_idx; i < first_ep_idx + qps_to_create; i++) {
+        int selected_dev_slot = 0;
+        if (is_initial_call && i >= NVSHMEMX_QP_DEFAULT) {
+            selected_dev_slot = (i - NVSHMEMX_QP_DEFAULT) % ib_state->n_selected_dev_ids;
+        }
+        int selected_dev_id = ib_state->selected_dev_ids[selected_dev_slot];
+
         for (int j = 0; j < n_pes; j++) {
             int ep_idx = i * n_pes + j;
             int handle_idx = j * qps_to_create + (i - first_ep_idx);
 
-            status = ib_state->ib_transport_ftable->ep_create(&ib_state->ep[ep_idx],
-                                                              ib_state->selected_dev_id, t);
+            status =
+                ib_state->ib_transport_ftable->ep_create(&ib_state->ep[ep_idx], selected_dev_id, t);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "transport create ep failed \n");
+            ((struct nvshmemt_ib_common_ep *)ib_state->ep[ep_idx])->selected_dev_slot =
+                selected_dev_slot;
             status = ib_state->ib_transport_ftable->ep_get_handle(&local_ep_handles[handle_idx],
                                                                   ib_state->ep[ep_idx]);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -825,14 +911,16 @@ out:
     if (status) {
         if (is_initial_call) {
             ib_state->selected_dev_id = -1;
+            ib_state->n_selected_dev_ids = 0;
+            ib_state->default_qp_count = 0;
             if (ib_state->ep) {
                 free(ib_state->ep);
                 ib_state->ep = nullptr;
             }
         }
-        if (local_ep_handles) free(local_ep_handles);
-        if (ep_handles) free(ep_handles);
     }
+    free(local_ep_handles);
+    free(ep_handles);
     return status;
 }
 
@@ -843,7 +931,7 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
         return ib_state->ep[ib_state->host_ep_index + pe_index];
     } else if (qp_index == NVSHMEMX_QP_DEFAULT) {
         /* Round robin over default QPs */
-        int default_qp_count = ib_state->options->IB_NUM_RC_PER_DEVICE;
+        int default_qp_count = ib_state->default_qp_count;
         int selected_qp = ib_state->cur_default_qp_index % (default_qp_count + 1);
         assert(ib_state->cur_default_qp_index != NVSHMEMX_QP_HOST);
         int next_qp_index = (ib_state->cur_default_qp_index + 1) % (default_qp_count + 1);

@@ -79,6 +79,9 @@ NVSHMEMI_ENV_DEF(IB_NUM_RC_PER_DEVICE, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of RC qpairs to create per device in the IB proxy-based transports."
                  "A device is each enumerated IB device, either a full HCA or a single port of a "
                  "multi-port HCA.")
+NVSHMEMI_ENV_DEF(MAX_NICS_PER_PE, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Maximum number of selected NICs per PE. A value of 0 applies only the "
+                 "transport implementation limit.")
 
 NVSHMEMI_ENV_DEF(HCA_PREFIX, string, "^smi", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Prefix of HCA interface names. Example, mlx5, ibp.")
@@ -140,9 +143,6 @@ NVSHMEMI_ENV_DEF(LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT, int, 1024, NVSHMEMI_ENV_CAT_T
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_ENV_ALL)
 /** GPU-initiated communication **/
-NVSHMEMI_ENV_DEF(IBGDA_ENABLE_MULTI_PORT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
-                 "Enable multiple NICs per PE if available. Note: Enabling this on "
-                 "Hopper+ for latency sensitive applications is discouraged.")
 NVSHMEMI_ENV_DEF(IBGDA_NUM_DCT, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of DCT QPs used in GPU-initiated communication transport.")
 NVSHMEMI_ENV_DEF(IBGDA_NUM_DCI, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,

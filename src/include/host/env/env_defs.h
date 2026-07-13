@@ -346,6 +346,10 @@ NVSHMEMI_ENV_DEF(ASSERT_ATOMICS_SYNC, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
 NVSHMEMI_ENV_DEF(
     REMOTE_TRANSPORT, string, NVSHMEMI_ENV_TRANSPORT_DEFAULT, NVSHMEMI_ENV_CAT_TRANSPORT,
     "Selected transport for remote operations: ibrc, ucx, libfabric, ibdevx, gpunetio, none")
+NVSHMEMI_ENV_DEF(ENABLE_MULTI_PORT, bool, true, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Enable transports to use multiple selected NICs per PE.")
+NVSHMEMI_ENV_DEF(IBGDA_ENABLE_MULTI_PORT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Deprecated compatibility alias for ``NVSHMEM_ENABLE_MULTI_PORT``.")
 NVSHMEMI_ENV_DEF(BYPASS_FLUSH, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Bypass flush in proxy when enforcing consistency")
 NVSHMEMI_ENV_DEF(ENABLE_NIC_PE_MAPPING, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,

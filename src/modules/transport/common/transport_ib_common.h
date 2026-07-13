@@ -62,6 +62,7 @@ struct nvshmemt_ib_common_ep {
     volatile uint64_t head_op_id;
     volatile uint64_t tail_op_id;
     nvshmem_transport_t transport;
+    int selected_dev_slot;
 };
 
 #ifndef MAX_NUM_PORTS
@@ -140,6 +141,12 @@ struct nvshmemt_ib_common_state {
     int next_qp_index;        /* Next available QP index */
     int cur_default_qp_index; /* Round-robin counter for DEFAULT QPs */
     int cur_any_qp_index;     /* Round-robin counter for ANY QPs */
+
+    /* Multi-NIC fields */
+    int default_qp_count;
+    int selected_dev_ids[MAX_NUM_HCAS];
+    int n_selected_dev_ids;
+    int max_selected_dev_ids;
 };
 
 typedef struct nvshmemt_ib_common_state *nvshmemt_ib_common_state_t;
@@ -238,8 +245,8 @@ int nvshmemt_ib_common_quiet(struct nvshmem_transport *tcurr, int pe, int qp_ind
 
 int nvshmemt_ib_common_fence(nvshmem_transport_t tcurr, int pe, int qp_index, int is_multi);
 
-int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids,
-                                         int num_selected_devs, int *out_qp_indices, int num_qps);
+int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_dev_ids,
+                                         int num_candidate_devs, int *out_qp_indices, int num_qps);
 
 /* Helper function to get ep from qp index */
 nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_transport_t t,

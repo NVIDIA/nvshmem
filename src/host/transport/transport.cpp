@@ -105,6 +105,31 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
     std::call_once(transport_lib_atexit_flag,
                    []() { atexit(nvshmemi_transport_lib_fini_wrapper); });
 
+    if (nvshmemi_options.IBGDA_ENABLE_MULTI_PORT_provided) {
+        WARN(
+            "NVSHMEM_IBGDA_ENABLE_MULTI_PORT is deprecated; use "
+            "NVSHMEM_ENABLE_MULTI_PORT instead.\n");
+    }
+    if (!nvshmemi_options.ENABLE_MULTI_PORT_provided &&
+        nvshmemi_options.IBGDA_ENABLE_MULTI_PORT_provided) {
+        nvshmemi_options.ENABLE_MULTI_PORT = nvshmemi_options.IBGDA_ENABLE_MULTI_PORT;
+    } else if (nvshmemi_options.ENABLE_MULTI_PORT_provided &&
+               nvshmemi_options.IBGDA_ENABLE_MULTI_PORT_provided &&
+               nvshmemi_options.ENABLE_MULTI_PORT != nvshmemi_options.IBGDA_ENABLE_MULTI_PORT) {
+        WARN(
+            "NVSHMEM_ENABLE_MULTI_PORT and NVSHMEM_IBGDA_ENABLE_MULTI_PORT disagree; using "
+            "NVSHMEM_ENABLE_MULTI_PORT.\n");
+    }
+    nvshmemi_options.IBGDA_ENABLE_MULTI_PORT = nvshmemi_options.ENABLE_MULTI_PORT;
+
+    const char *multi_port_source =
+        nvshmemi_options.ENABLE_MULTI_PORT_provided
+            ? "NVSHMEM_ENABLE_MULTI_PORT"
+            : (nvshmemi_options.IBGDA_ENABLE_MULTI_PORT_provided ? "NVSHMEM_IBGDA_ENABLE_MULTI_PORT"
+                                                                 : "default");
+    INFO(NVSHMEM_INIT, "NVSHMEM_ENABLE_MULTI_PORT = %d (source: %s)",
+         nvshmemi_options.ENABLE_MULTI_PORT, multi_port_source);
+
     if (!state->transports)
         state->transports =
             (nvshmem_transport_t *)calloc(NVSHMEM_TRANSPORT_COUNT, sizeof(nvshmem_transport_t));
@@ -517,6 +542,14 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
         if (tcurr->n_devices > 0 && selected_devices[0] == -1) {
             NVSHMEMI_ERROR_JMP(current_status, NVSHMEMX_ERROR_INTERNAL, handle_transport_error,
                                "No devices selected.\n");
+        }
+
+        if (!nvshmemi_options.ENABLE_MULTI_PORT && found_devices > 1) {
+            INFO(NVSHMEM_INIT,
+                 "NVSHMEM_ENABLE_MULTI_PORT = 0; using dev_id = %d and ignoring %d additional "
+                 "selected NIC(s).",
+                 selected_devices[0], found_devices - 1);
+            found_devices = 1;
         }
 
         current_status = tcurr->host_ops.connect_endpoints(
