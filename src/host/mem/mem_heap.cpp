@@ -93,6 +93,44 @@ int node_local_index(const nvshmemi_state_t *state, int pe_id) {
     }
     return local_index;
 }
+
+int nvshmemi_bootstrap_aggregate_status(int local_status, int npes) {
+    int status = NVSHMEMX_SUCCESS;
+    std::vector<int> peer_statuses(npes, NVSHMEMX_SUCCESS);
+
+    status = nvshmemi_boot_handle.allgather(&local_status, peer_statuses.data(),
+                                            sizeof(local_status), &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                          "allgather of heap operation status failed\n");
+
+    for (const auto peer_status : peer_statuses) {
+        if (peer_status != NVSHMEMX_SUCCESS) {
+            return peer_status;
+        }
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+void nvshmemi_release_uncommitted_vmm_chunk(CUmemGenericAllocationHandle cumem_handle,
+                                            char *buf_start, size_t size, bool handle_created,
+                                            bool memory_mapped) {
+    int status = CUDA_SUCCESS;
+
+    if (memory_mapped) {
+        status = CUPFN(nvshmemi_cuda_syms, cuMemUnmap((CUdeviceptr)buf_start, size));
+        if (status != CUDA_SUCCESS) {
+            NVSHMEMI_WARN_PRINT("cuMemUnmap failed while rolling back VMM heap allocation");
+        }
+    }
+
+    if (handle_created) {
+        status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(cumem_handle));
+        if (status != CUDA_SUCCESS) {
+            NVSHMEMI_WARN_PRINT("cuMemRelease failed while rolling back VMM heap allocation");
+        }
+    }
+}
 }  // namespace
 
 static bool nvshmemi_should_process_nvls_team_pool_entry(size_t team_idx) {
@@ -2320,19 +2358,27 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_physical_memory_to_heap
     INFO(NVSHMEM_MEM, "type: %s adding new physical backing of size %zu bytes",
          typeid(decltype(this)).name(), size);
 
-    CUmemGenericAllocationHandle cumem_handle;
+    CUmemGenericAllocationHandle cumem_handle = {};
     CUmemAllocationProp prop = {};
-    CUmemAccessDesc access;
-    char *buf_start;
+    CUmemAccessDesc access = {};
+    char *buf_start = nullptr;
     off_t heap_offset = 0;
     off_t mmap_offset =
         0; /* CUDA doesn't support non-zero mem_offset of a UC mem handle, so force to 0 */
-    int status;
+    int status = NVSHMEMX_SUCCESS;
+    bool handle_created = false;
+    bool memory_mapped = false;
+    bool nvls_bound = false;
+#ifdef CFT_HANDLES_ENABLED
+    bool le_bound = false;
+#endif
+    bool heap_owns_allocation = false;
+    bool cleanup_heap = false;
     nvshmemi_state_t *state = get_state();
     set_cuda_mem_prop((void *)&prop, get_mem_handle_type());
 
     status = ((physical_internal_heap_size_ + get_mmap_allocated_range() + size) >= heap_size_);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, local_done,
                           "Not enough space for allocating memory\n");
 
     access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
@@ -2347,50 +2393,106 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_physical_memory_to_heap
     // creating handle for the entire size
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemCreate(&cumem_handle, size, (const CUmemAllocationProp *)&prop, 0));
-    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                             "cuMemCreate failed \n");
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                             local_done, "cuMemCreate failed \n");
+    handle_created = true;
 
     heap_offset = (off_t)(physical_internal_heap_size_);
-    cumem_handles_.push_back(
-        std::make_tuple(cumem_handle, heap_offset /*mc_offset*/, mmap_offset, size, false));
 
     status = CUPFN(nvshmemi_cuda_syms,
                    cuMemMap((CUdeviceptr)buf_start, size, mmap_offset, cumem_handle, 0));
-    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                             "cuMemMap failed \n");
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                             local_done, "cuMemMap failed \n");
+    memory_mapped = true;
 
     status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size,
                                                       (const CUmemAccessDesc *)&access, 1));
-    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                             "cuMemSetAccess failed \n");
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                             local_done, "cuMemSetAccess failed \n");
+
+local_done:
+    status = nvshmemi_bootstrap_aggregate_status(status, state->npes);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "VMM heap allocation failed on at least one PE\n");
+
     status = nvls_bind_heap_memory((nvshmem_mem_handle_t *)&cumem_handle,
                                    (off_t)(heap_offset) /*global mc_offset*/, mmap_offset, size);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "bind heap MC memory failed\n");
+    nvls_bound = (status == NVSHMEMX_SUCCESS);
+    status = nvshmemi_bootstrap_aggregate_status(status, state->npes);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "bind heap MC memory failed on at least one PE\n");
 
     // Bind Device Memory at unicast endpoint Offset.
 #ifdef CFT_HANDLES_ENABLED
     if (le_unicast_enabled_) {
-        status =
+        const int le_status =
             CUPFN(nvshmemi_cuda_syms,
                   cuLogicalEndpointBindMem(
                       PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]), state->device_id,
                       (unsigned long)(heap_offset), cumem_handle, 0, size, /* flags = */ 0));
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                              "cuLogicalEndpointBindMem failed at offset: %lu for size: %zu\n",
-                              heap_offset, size);
+        le_bound = (le_status == CUDA_SUCCESS);
+        status = le_bound ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_INTERNAL;
+        if (!le_bound) {
+            NVSHMEMI_ERROR_PRINT("cuLogicalEndpointBindMem failed at offset: %lu for size: %zu\n",
+                                 heap_offset, size);
+        }
     }
+    status = nvshmemi_bootstrap_aggregate_status(status, state->npes);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "logical endpoint bind failed on at least one PE\n");
 #endif
 
     status = register_heap_memory((nvshmem_mem_handle_t *)&cumem_handle, buf_start, size);
+    /* If registration touched heap state, whole-heap cleanup must own rollback. */
+    if (status == NVSHMEMX_SUCCESS ||
+        physical_internal_heap_size_ > static_cast<size_t>(heap_offset)) {
+        cumem_handles_.push_back(
+            std::make_tuple(cumem_handle, heap_offset /*mc_offset*/, mmap_offset, size, false));
+        heap_owns_allocation = true;
+    }
+    status = nvshmemi_bootstrap_aggregate_status(status, state->npes);
+    if (status != NVSHMEMX_SUCCESS) {
+        cleanup_heap = true;
+    }
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "register heap UC memory failed \n");
+                          "register heap UC memory failed on at least one PE\n");
 
     status = nvshmemi_boot_handle.barrier(
         &nvshmemi_boot_handle); /* Wait for all PEs to setup the new memory */
+    if (status != NVSHMEMX_SUCCESS) {
+        cleanup_heap = true;
+    }
 out:
     if (status) {
         print_cumem_handles();
-        cleanup_symmetric_heap();
+        if (!heap_owns_allocation) {
+#ifdef CFT_HANDLES_ENABLED
+            if (le_bound) {
+                const int unbind_status =
+                    CUPFN(nvshmemi_cuda_syms,
+                          cuLogicalEndpointUnbind(
+                              PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]),
+                              state->device_id, (unsigned long)(heap_offset), size));
+                if (unbind_status != CUDA_SUCCESS) {
+                    NVSHMEMI_WARN_PRINT(
+                        "cuLogicalEndpointUnbind failed while rolling back VMM heap allocation");
+                }
+            }
+#endif
+            if (nvls_bound) {
+                const int unbind_status = nvls_unbind_heap_memory_by_size(heap_offset, size);
+                if (unbind_status != NVSHMEMX_SUCCESS) {
+                    NVSHMEMI_WARN_PRINT(
+                        "nvls_unbind_heap_memory_by_size failed while rolling back VMM heap "
+                        "allocation");
+                }
+            }
+            nvshmemi_release_uncommitted_vmm_chunk(cumem_handle, buf_start, size, handle_created,
+                                                   memory_mapped);
+        }
+        if (cleanup_heap) {
+            cleanup_symmetric_heap();
+        }
     }
     return status;
 }
