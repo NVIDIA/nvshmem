@@ -234,7 +234,9 @@ __device__ __forceinline__ void nvshmemi_tma_mbarrier_init(uint64_t *mbar) {
 __device__ __forceinline__ void nvshmemi_tma_mbarrier_arrive_expect_tx(uint64_t *mbar,
                                                                        uint32_t bytes) {
     unsigned int addr = nvshmemi_tma_cvta_to_shared(mbar);
-    asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], %1;" ::"r"(addr), "r"(bytes));
+    asm volatile("mbarrier.arrive.expect_tx.release.cta.shared::cta.b64 _, [%0], %1;" ::"r"(addr),
+                 "r"(bytes)
+                 : "memory");
 }
 
 __device__ __forceinline__ void nvshmemi_tma_mbarrier_try_wait(uint64_t *mbar, int phase) {
@@ -242,7 +244,7 @@ __device__ __forceinline__ void nvshmemi_tma_mbarrier_try_wait(uint64_t *mbar, i
     asm volatile(R"({
 .reg .pred p;
 waitL_%=:
-mbarrier.try_wait.parity.shared::cta.b64 p, [%0], %1;
+mbarrier.try_wait.parity.acquire.cta.shared::cta.b64 p, [%0], %1;
 @!p bra waitL_%=;
 })" ::"r"(addr),
                  "r"(phase)

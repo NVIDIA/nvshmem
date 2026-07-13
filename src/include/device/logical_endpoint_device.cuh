@@ -354,9 +354,9 @@ struct alignas(16) handle_barrier_t {
 
     /*
      * A handle barrier occupies a 16-byte reserved SMEM slot while the
-     * hardware mbarrier itself occupies 8 bytes.  Keep deferred PUT state in
-     * the remaining bytes so an NBI PUT can return without invalidating the
-     * barrier that will report its remote completion.
+     * hardware mbarrier itself occupies 8 bytes.  Keep pending fabric handle
+     * completion state in the remaining bytes so a caller can return or defer
+     * waiting without invalidating the barrier that will report completion.
      *
      * pending_handle_bytes is counted in complete_tx::16B units (expressed as
      * bytes) rather than logical payload bytes.  This matters for cp_mask
@@ -392,8 +392,8 @@ struct alignas(16) handle_barrier_t {
         return has_pending_handle() && pending_handle_owner == owner;
     }
 
-    /* Complete the current handle operation batch.  Keeping the barrier valid advances it
-     * to the next phase so more NBI PUTs can be accumulated in the same slot. */
+    /* Complete the current handle operation batch. Keeping the barrier valid advances it
+     * to the next phase so more handle operations can be accumulated in the same slot. */
     inline __device__ void drain_pending_handle(bool invalidate = true) {
         if (!has_pending_handle()) return;
 
@@ -409,8 +409,8 @@ struct alignas(16) handle_barrier_t {
         }
     }
 
-    /* Reuse a live PUT barrier when the same threadgroup issues another NBI
-     * PUT.  A different owner implies a slot collision with another handle
+    /* Reuse a live handle barrier when the same threadgroup issues another
+     * operation. A different owner implies a slot collision with another handle
      * path, which is resolved by completing the old batch first. */
     inline __device__ void prepare_handle(uint32_t owner) {
         if (has_pending_handle() && pending_handle_owner != owner) drain_pending_handle(true);
@@ -426,7 +426,14 @@ struct alignas(16) handle_barrier_t {
     inline __device__ void ensure_handle_tx_capacity(uint32_t size_bytes) {
         uint32_t completion_bytes = handle_completion_bytes(size_bytes);
         if (pending_handle_bytes != 0 &&
-            pending_handle_bytes + completion_bytes >= TMA_COPY_MAX_BATCH_SIZE) {
+            pending_handle_bytes + completion_bytes >= TMA_PUT_MAX_BATCH_SIZE) {
+            drain_pending_handle(false);
+        }
+    }
+
+    inline __device__ void ensure_handle_get_tx_capacity(uint32_t size_bytes) {
+        if (pending_handle_bytes != 0 &&
+            pending_handle_bytes + size_bytes >= TMA_GET_MAX_BATCH_SIZE) {
             drain_pending_handle(false);
         }
     }
@@ -435,10 +442,14 @@ struct alignas(16) handle_barrier_t {
         pending_handle_bytes += handle_completion_bytes(size_bytes);
     }
 
+    inline __device__ void record_pending_get_handle(uint32_t size_bytes) {
+        pending_handle_bytes += size_bytes;
+    }
+
     // for fabric programming, mbarrier must be initialized with layout::v1
     inline __device__ void init(int arvCnt) {
         /* Other handle paths share these slots.  They must not reinitialize a
-         * barrier that is still carrying deferred PUT completions. */
+         * barrier that is still carrying pending fabric completions. */
         drain_pending_handle(true);
         init_raw(arvCnt);
     }
