@@ -18,10 +18,22 @@ from nvshmem.core.direct import ComparisonType, SignalOp
 import logging
 from enum import IntEnum
 from typing import Tuple
+from contextlib import contextmanager
 
 __all__ = ["put_signal", "signal_op", "signal_wait", "put", "get", "quiet", "SignalOp"]
 
 logger = logging.getLogger("nvshmem")
+
+
+@contextmanager
+def _rma_device_context():
+    _, other_dev = _get_device()
+
+    try:
+        yield
+    finally:
+        if other_dev is not None:
+            other_dev.set_current()
 
 
 def _get_buffers(dst, src) -> Tuple[Buffer, Buffer]:
@@ -102,35 +114,32 @@ def _call_putget(dst: object,
     if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
         raise NvshmemInvalid("NVSHMEM Library is not initialized")
 
-    user_nvshmem_dev, other_dev = _get_device()
-    dst_buf, src_buf = _get_buffers(dst, src)
-    if stream is None:
-        logger.error("Non on-stream put/get operations are not yet implemented")
-        raise NotImplemented
+    with _rma_device_context():
+        dst_buf, src_buf = _get_buffers(dst, src)
+        if stream is None:
+            logger.error("Non on-stream put/get operations are not yet implemented")
+            raise NotImplementedError
 
-    if op not in ("put", "get"):
-        raise NvshmemInvalid("Tried to call put/get function with an operation not put nor get")
+        if op not in ("put", "get"):
+            raise NvshmemInvalid("Tried to call put/get function with an operation not put nor get")
 
-    if not isinstance(src_buf, Buffer) or not isinstance(dst_buf, Buffer):
-        raise NvshmemInvalid("Called collective on an invalid Buffer")
+        if not isinstance(src_buf, Buffer) or not isinstance(dst_buf, Buffer):
+            raise NvshmemInvalid("Called RMA operation on an invalid Buffer")
 
-    f_name = f"{op}mem{'_signal' if signal else ''}_on_stream"
-    func = getattr(bindings, f_name)
-    safe_size = min(src_buf.size, dst_buf.size)
-    if signal:
-        if not isinstance(signal_var, Buffer) or signal_var.size < 8:
-            raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
-        f_args = [
-            dst_buf.handle, src_buf.handle, safe_size, signal_var.handle, signal_val, signal_op, remote_pe,
-            int(stream.__cuda_stream__()[1])
-        ]
-    else:
-        f_args = [dst_buf.handle, src_buf.handle, safe_size, remote_pe, int(stream.__cuda_stream__()[1])]
+        f_name = f"{op}mem{'_signal' if signal else ''}_on_stream"
+        func = getattr(bindings, f_name)
+        safe_size = min(src_buf.size, dst_buf.size)
+        if signal:
+            if not isinstance(signal_var, Buffer) or signal_var.size < 8:
+                raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
+            f_args = [
+                dst_buf.handle, src_buf.handle, safe_size, signal_var.handle, signal_val, signal_op, remote_pe,
+                int(stream.__cuda_stream__()[1])
+            ]
+        else:
+            f_args = [dst_buf.handle, src_buf.handle, safe_size, remote_pe, int(stream.__cuda_stream__()[1])]
 
-    func(*f_args)
-
-    if other_dev is not None:
-        other_dev.set_current()
+        func(*f_args)
 
 
 def put_signal(dst: object,
@@ -190,15 +199,15 @@ def signal_op(signal_var: Buffer,
     """
     if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
         raise NvshmemInvalid("NVSHMEM Library is not initialized")
-    user_nvshmem_dev, other_dev = _get_device()
-    if not isinstance(signal_var, Buffer) or signal_var.size < 8:
-        raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
-    if stream is None:
-        logger.error("Non on-stream signal operations are not yet implemented")
-        raise NotImplemented
-    bindings.signal_op_on_stream(signal_var.handle, signal_val, signal_op, remote_pe, int(stream.__cuda_stream__()[1]))
-    if other_dev is not None:
-        other_dev.set_current()
+
+    with _rma_device_context():
+        if not isinstance(signal_var, Buffer) or signal_var.size < 8:
+            raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
+        if stream is None:
+            logger.error("Non on-stream signal operations are not yet implemented")
+            raise NotImplementedError
+        bindings.signal_op_on_stream(signal_var.handle, signal_val, signal_op, remote_pe,
+                                     int(stream.__cuda_stream__()[1]))
 
 
 def signal_wait(signal_var: Buffer,
@@ -221,13 +230,10 @@ def signal_wait(signal_var: Buffer,
     """
     if stream is None:
         logger.error("Non on-stream put/get operations are not yet implemented")
-        raise NotImplemented
-    user_nvshmem_dev, other_dev = _get_device()
+        raise NotImplementedError
 
-    bindings.signal_wait_until_on_stream(signal_var.handle, signal_op, signal_val, int(stream.__cuda_stream__()[1]))
-
-    if other_dev is not None:
-        other_dev.set_current()
+    with _rma_device_context():
+        bindings.signal_wait_until_on_stream(signal_var.handle, signal_op, signal_val, int(stream.__cuda_stream__()[1]))
 
 
 def quiet(stream: NvshmemStreamsType = None) -> None:
@@ -245,12 +251,11 @@ def quiet(stream: NvshmemStreamsType = None) -> None:
     """
     if stream is None:
         logger.error("Non on-stream put/get operations are not yet implemented")
-        raise NotImplemented
-    user_nvshmem_dev, other_dev = _get_device()
-    # Because quiet doesn't have a datatype, it's a special case and doesn't need to use _call_putget function
-    bindings.quiet_on_stream(int(stream.__cuda_stream__()[1]))
-    if other_dev is not None:
-        other_dev.set_current()
+        raise NotImplementedError
+
+    with _rma_device_context():
+        # Because quiet doesn't have a datatype, it's a special case and doesn't need to use _call_putget function
+        bindings.quiet_on_stream(int(stream.__cuda_stream__()[1]))
 
 
 def put(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
