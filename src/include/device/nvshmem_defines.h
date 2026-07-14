@@ -578,6 +578,7 @@ nvshmem_signal_fetch(uint64_t *sig_addr) {
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 nvshmem_signal_wait_until(uint64_t *sig_addr, int cmp, uint64_t cmp_val) {
     nvshmemi_wait_until<uint64_t>(sig_addr, cmp, cmp_val);
+    nvshmemi_transfer_syncapi_update_mem();
     return *sig_addr;
 }
 

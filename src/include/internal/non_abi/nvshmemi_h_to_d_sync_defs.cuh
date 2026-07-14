@@ -66,6 +66,7 @@ static __global__ void nvshmemi_signal_wait_until_on_stream_kernel(volatile uint
                                                                    int cmp, uint64_t cmp_value) {
 #ifdef __CUDA_ARCH__
     nvshmemi_wait_until<uint64_t>(sig_addr, cmp, cmp_value);
+    nvshmemi_transfer_syncapi_update_mem();
 #endif
 }
 
