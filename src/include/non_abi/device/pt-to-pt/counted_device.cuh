@@ -47,7 +47,59 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
     void *dest, const void *source, size_t bytes, uint64_t *signal_addr, int pe) {
     int status = nvshmemi_validate_counted_put(dest, source, bytes, signal_addr, pe);
     if (status != NVSHMEMX_SUCCESS) return status;
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT) && \
+    !defined(__CUDACC_RTC__) && !defined(__clang_llvm_bitcode_lib__) &&  \
+    !defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+    if (!__isShared(source)) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    if (!nvshmemi_device_state_d.counted_operations_available ||
+        nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_ENABLE ||
+        !nvshmemi_ld_and_check_valid_le_id(pe) || !nvshmemi_tma_smem_registered() || bytes == 0 ||
+        bytes > static_cast<size_t>(TMA_COPY_MAX_BATCH_SIZE))
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+
+    unsigned int tid =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    int *cta_status = reinterpret_cast<int *>(
+        nvshmemi_counted_state_slot(smem_base, NVSHMEMI_COUNTED_STATUS_SLOT));
+    handle_barrier_t *completion = reinterpret_cast<handle_barrier_t *>(
+        nvshmemi_counted_state_slot(smem_base, NVSHMEMI_COUNTED_HANDLE_BARRIER_SLOT));
+
+    if (tid == 0) {
+        *cta_status = NVSHMEMX_SUCCESS;
+        completion->init(1);
+    }
+    __syncthreads();
+    /* Counted fabric puts read their shared-memory source through the async
+     * proxy.  Publish generic-proxy stores from every participating thread
+     * before the CTA elects thread 0 to issue the fabric operation. */
+    fence_async_proxy();
+    __syncthreads();
+
+    if (tid == 0) {
+        uint64_t token = completion->arrive_relaxed(static_cast<uint32_t>(bytes));
+        uint64_t data_off = static_cast<uint64_t>(
+            reinterpret_cast<const char *>(dest) -
+            reinterpret_cast<const char *>(nvshmemi_device_state_d.heap_base));
+        uint64_t count_off = static_cast<uint64_t>(
+            reinterpret_cast<const char *>(signal_addr) -
+            reinterpret_cast<const char *>(nvshmemi_device_state_d.heap_base));
+        fabric_try_put_counted_async(nvshmemi_ld_and_get_le_id(pe), data_off, count_off, source,
+                                     static_cast<uint32_t>(bytes), completion);
+        fabric_submit();
+        uint8_t barrier_error = 0;
+        while (!completion->try_wait_token_with_err(token, &barrier_error)) {
+            if (barrier_error) break;
+        }
+        if (barrier_error) *cta_status = NVSHMEMX_ERROR_INTERNAL;
+        completion->fabric_wait_sync_reads();
+        completion->inval();
+    }
+    __syncthreads();
+    return *cta_status;
+#else
     return NVSHMEMX_ERROR_NOT_SUPPORTED;
+#endif
 }
 
 #endif
