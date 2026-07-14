@@ -474,6 +474,16 @@ __device__ void nvshmemx_getmem_nbi_block(void *dest, const void *source, size_t
 NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op,
                                                    int pe);
 
+NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_signal_counted_reset(uint64_t *signal_addr);
+
+#if defined(NVSHMEM_ENABLE_CFT_HANDLES)
+__device__ uint64_t nvshmemx_signal_counted_load(const uint64_t *signal_addr);
+__device__ void nvshmemx_signal_counted_wait_until(const uint64_t *signal_addr, uint64_t expected);
+__device__ int nvshmemx_putmem_signal_counted_nbi_block(void *dest, const void *source,
+                                                        size_t bytes, uint64_t *signal_addr,
+                                                        int pe);
+#endif
+
 //////////////////// QP Create ////////////////////
 
 int nvshmemx_qp_create(int num_qps, nvshmemx_qp_handle_t **out_qp_array);

@@ -122,3 +122,7 @@ uint64_t nvshmem_signal_fetch(uint64_t *sig_addr) {
     CUDA_RUNTIME_CHECK(cudaMemcpy(&signal, sig_addr, sizeof(uint64_t), cudaMemcpyDeviceToHost));
     return signal;
 }
+
+void nvshmemx_signal_counted_reset(uint64_t *signal_addr) {
+    CUDA_RUNTIME_CHECK(cudaMemset(signal_addr, 0, sizeof(*signal_addr)));
+}

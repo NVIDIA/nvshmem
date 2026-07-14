@@ -994,6 +994,7 @@ set(INC_EXPORTS
     non_abi/device/wait/nvshmemi_wait_until_apis.cuh
     non_abi/device/pt-to-pt/ibgda_device.cuh
     non_abi/device/pt-to-pt/gdaki_device.cuh
+    non_abi/device/pt-to-pt/counted_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh
     non_abi/device/pt-to-pt/tma_device.cuh
     non_abi/device/pt-to-pt/utils_device.h

@@ -10,6 +10,7 @@
 #include "device/nvshmem_device_macros.h"
 #include "device_host/nvshmem_common.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
+#include "non_abi/device/pt-to-pt/counted_device.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device/nvshmemx_collective_launch_apis.h"
 
@@ -139,6 +140,34 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_signal_op(uin
                                                                              int sig_op, int pe) {
     nvshmemi_signal_op(sig_addr, signal, sig_op, pe);
 }
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_signal_counted_reset(
+    uint64_t *signal_addr) {
+    *reinterpret_cast<volatile uint64_t *>(signal_addr) = 0;
+}
+
+#if defined(NVSHMEM_ENABLE_CFT_HANDLES)
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
+nvshmemx_signal_counted_load(const uint64_t *signal_addr) {
+    return *reinterpret_cast<const volatile uint64_t *>(signal_addr);
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_signal_counted_wait_until(
+    const uint64_t *signal_addr, uint64_t expected) {
+    while ((uint64_t)(nvshmemx_signal_counted_load(signal_addr) - expected) >=
+           (static_cast<uint64_t>(1) << 63)) {
+    }
+#if LE_HW_SW_REQUIREMENTS_MET && !defined(__CUDACC_RTC__) && \
+    !defined(__clang_llvm_bitcode_lib__) && !defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+    fence_proxy_fabric2generic_acquire_system();
+#endif
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_putmem_signal_counted_nbi_block(
+    void *dest, const void *source, size_t bytes, uint64_t *signal_addr, int pe) {
+    return nvshmemi_putmem_signal_counted_nbi_block(dest, source, bytes, signal_addr, pe);
+}
+#endif
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemx_mc_ptr(nvshmem_team_t team,
                                                                            const void *ptr) {
