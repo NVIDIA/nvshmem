@@ -160,10 +160,11 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, 
         if (size == 0 || (size % CFT_HANDLE_TX_SIZE) != 0) return false;
     }
 
-    /* The handle path stages the local buffer with global<->shared TMA helpers. */
+    /* The handle path stages global local buffers through shared memory; shared
+     * local buffers can be consumed or produced by fabric directly. */
     return ((scope != NVSHMEMI_THREADGROUP_THREAD) && nvshmemi_tma_smem_registered() &&
             is_thrdgrp_smem_rsc_available(scope) &&
-            nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) && !__isShared(tma_addr) &&
+            nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) &&
             nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)tma_addr) &&
             nvshmemi_ld_and_check_valid_le_id(pe));
 #else

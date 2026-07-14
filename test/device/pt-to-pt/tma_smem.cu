@@ -33,7 +33,8 @@ __global__ void test_ask_smem(int *results) {
 
 __global__ void test_put_from_smem(int *recv_data, int elems_per_block, int mype, int npes) {
     extern __shared__ char nvshmem_smem[];
-    int *payload = (int *)nvshmem_smem;
+    int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+    int *payload = (int *)(nvshmem_smem + smem_offset);
     int tid = threadIdx.x;
     int offset = blockIdx.x * elems_per_block;
     int peer = (mype + 1) % npes;
@@ -100,7 +101,8 @@ __global__ void test_get_to_smem(int *source_data, int *recv_data, int elems_per
 __global__ void test_put_signal_from_smem(int *recv_data, uint64_t *sig_addr, int elems_per_block,
                                           int mype, int npes) {
     extern __shared__ char nvshmem_smem[];
-    int *payload = (int *)nvshmem_smem;
+    int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+    int *payload = (int *)(nvshmem_smem + smem_offset);
     int tid = threadIdx.x;
     int offset = blockIdx.x * elems_per_block;
     int peer = (mype + 1) % npes;
