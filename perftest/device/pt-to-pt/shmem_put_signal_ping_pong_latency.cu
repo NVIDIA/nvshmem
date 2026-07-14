@@ -55,6 +55,7 @@ void test_ping_pong(void **arglist, CUfunction kernel, cudaStream_t stream) {
             exit(-1);
         }
     }
+    CUDA_CHECK(cudaGetLastError());
 }
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
