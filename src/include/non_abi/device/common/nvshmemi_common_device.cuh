@@ -513,7 +513,7 @@ __device__ __forceinline__ void nvshmemi_tma_drain_if_registered() {
  *   2, 3          : block impl done_bar[0], done_bar[1]
  *   4             : direct global-to-shared get mbarrier
  *   5..31         : reserved for future TMA paths (warpgroup, deeper pipes,
- *                   reductions, counted signals, etc.)
+ *                   reductions, etc.)
  *
  * Precondition: nvshmemi_tma_smem_registered() returns true (i.e. give_smem
  * succeeded with at least NVSHMEMI_TMA_BARRIER_REGION_BYTES).
@@ -556,6 +556,18 @@ __device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(uintpt
 __device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(int slot) {
     uintptr_t base = nvshmemi_tma_smem_base();
     return nvshmemi_handle_barrier_slot(base, slot);
+}
+
+__device__ __forceinline__ char *nvshmemi_counted_state_region(uintptr_t smem_base) {
+    return nvshmemi_tma_barrier_region(smem_base) + (uintptr_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES +
+           (uintptr_t)NVSHMEMI_HANDLE_BARRIER_BYTES;
+}
+
+__device__ __forceinline__ char *nvshmemi_counted_state_slot(uintptr_t smem_base, int slot) {
+    assert(slot >= 0);
+    assert(slot < NVSHMEMI_COUNTED_NUM_STATE_SLOTS);
+    return nvshmemi_counted_state_region(smem_base) +
+           (uintptr_t)slot * NVSHMEMI_COUNTED_STATE_SLOT_BYTES;
 }
 #endif
 

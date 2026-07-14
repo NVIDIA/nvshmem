@@ -564,6 +564,30 @@ __device__ inline void fabric_try_put_async<le_fabric_handle_kind::Unicast>(
     }
 }
 
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && !defined(__clang_llvm_bitcode_lib__) && \
+    !defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+__device__ inline void fabric_try_put_counted_async(CUlogicalEndpointId dst_le_id,
+                                                    uint64_t dst_data_off, uint64_t dst_count_off,
+                                                    const void* src_in_shared_memory,
+                                                    uint32_t size_bytes, handle_barrier_t* hbar) {
+    const unsigned long long src_smem =
+        static_cast<unsigned long long>(__cvta_generic_to_shared(src_in_shared_memory));
+    const unsigned long long bar_smem = static_cast<unsigned long long>(
+        __cvta_generic_to_shared(reinterpret_cast<void*>(&(hbar->bar))));
+    if (size_bytes) {
+        asm volatile(
+            "fabric.try_put.async.shared::cta."
+            "mbarrier::complete_tx::16B.mbarrier::report::fabric."
+            "counted::bytes.relaxed.sys.b128 "
+            "[%0, %1, %2], [%3], %4, [%5];\n"
+            :
+            : "r"(dst_le_id), "l"(dst_data_off), "l"(dst_count_off), "l"(src_smem), "r"(size_bytes),
+              "l"(bar_smem)
+            : "memory");
+    }
+}
+#endif
+
 template <>
 __device__ inline void fabric_try_put_async<le_fabric_handle_kind::Multicast>(
     CUlogicalEndpointId dst_le_id, uint64_t dst_data_off, const void* src_in_shared_memory,
