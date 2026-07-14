@@ -7,6 +7,7 @@
 
 #include <cuda_runtime.h>
 #include <cuda/std/array>
+#include <cuda/std/limits>
 #if !defined __CUDACC_RTC__
 #include <stdint.h>
 #include <stddef.h>
@@ -1414,6 +1415,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_signal(
     nvshmemii_put_signal<T, SCOPE>(dest, source, nelems, sig_addr, signal, sig_op, pe, is_nbi,
                                    qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t nvshmemi_heap_offset(const void *address) {
+    return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(address) -
+                                 reinterpret_cast<uintptr_t>(nvshmemi_device_state_d.heap_base));
+}
+
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_ptr_range_overflows(const void *ptr,
+                                                                           size_t bytes) {
+    const uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
+    return bytes > cuda::std::numeric_limits<uintptr_t>::max() - address;
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *nvshmemi_mc_ptr(nvshmemi_team_t *team,

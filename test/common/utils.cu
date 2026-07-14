@@ -473,7 +473,6 @@ void read_args(int argc, char **argv) {
 
     assert(_min_size <= _max_size);
     disable_dynamic_smem_for_cubin_tests();
-
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \
