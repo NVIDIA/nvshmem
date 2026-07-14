@@ -1285,7 +1285,6 @@ void read_args(int argc, char **argv) {
     }
 
     assert(min_size <= max_size);
-
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \
