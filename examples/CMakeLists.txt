@@ -155,6 +155,10 @@ set(OPTIONAL_MPI_EXAMPLES
   tma-smem.cu
   )
 
+if(NVSHMEM_CFT_HANDLES_SUPPORT)
+  list(APPEND OPTIONAL_MPI_EXAMPLES putmem_signal_counted.cu)
+endif()
+
 set(CUTLASS_EXAMPLES
     gemm_allreduce/gemmAR_fusion_blackwell_fp16.cu
    )
@@ -193,6 +197,10 @@ foreach(example ${OPTIONAL_MPI_EXAMPLES})
   add_executable(${NAME_} ${example})
   target_link_libraries(${NAME_} nvshmem_example_helper)
 endforeach()
+
+if(NVSHMEM_MPI_SUPPORT AND NVSHMEM_CFT_HANDLES_SUPPORT)
+  target_link_libraries(putmem_signal_counted MPI::MPI_CXX)
+endif()
 
 
 foreach(example ${ALL_EXAMPLES})
