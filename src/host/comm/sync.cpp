@@ -96,7 +96,7 @@ void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_o
         // Using cuStreamWriteValue64 only for self-writes because it is not supported
         // for MNNVL (see CUDA documentation). Not using cudaMemcpyAsync for all cases
         // because for self-writes it will not be zero SM.
-        if (!nvshmemi_state->heap_obj->is_egm((void *)sig_addr) &&
+        if (!(nvshmemi_state->vmm_heap && nvshmemi_state->vmm_heap->is_egm((void *)sig_addr)) &&
             nvshmemi_can_use_cuda_64_bit_stream_memops &&
             CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64) && nvshmemi_state->mype == pe) {
             status = CUPFN(nvshmemi_cuda_syms,

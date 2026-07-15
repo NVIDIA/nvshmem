@@ -38,8 +38,8 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
     transport_p2p_state_t *p2p_state = (transport_p2p_state_t *)transport->state;
     int atomics_supported = 0;
     char remote_pcie_bus_id[NVSHMEM_PCIE_BDF_BUFFER_LEN];
-    bool is_heap_vmm = false;
     struct nvml_function_table *nvml_ftable = nvshmemi_state->p2p_transport->get_nvml_ftable();
+    const bool is_heap_vmm = (nvshmemi_state->vmm_heap != nullptr);
 
     nvmlReturn_t nvml_status;
     nvmlDevice_t local_device;
@@ -79,12 +79,6 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
             found = 1;
             break;
         }
-    }
-
-    /** Check if heap is VMM type or not */
-    if (nullptr !=
-        dynamic_cast<nvshmemi_symmetric_heap_vidmem_dynamic_vmm *>(nvshmemi_state->heap_obj)) {
-        is_heap_vmm = true;
     }
 
     /* In the case where we don't have access to the GPU directly,

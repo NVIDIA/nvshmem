@@ -234,8 +234,9 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
             transports[index]->my_pe = nvshmemi_state->mype;
             transports[index]->n_pes = nvshmemi_state->npes;
             transports[index]->cache_handle = (void *)tmp_cache_ptr;
-            transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
-            transports[index]->egm_map = state->heap_obj->get_egm_map();
+            transports[index]->alias_va_map =
+                state->vmm_heap ? state->vmm_heap->get_alias_va_map() : nullptr;
+            transports[index]->egm_map = state->vmm_heap ? state->vmm_heap->get_egm_map() : nullptr;
             if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
@@ -323,8 +324,9 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
             transports[index]->my_pe = nvshmemi_state->mype;
             transports[index]->n_pes = nvshmemi_state->npes;
             transports[index]->cache_handle = (void *)tmp_cache_ptr;
-            transports[index]->alias_va_map = state->heap_obj->get_alias_va_map();
-            transports[index]->egm_map = state->heap_obj->get_egm_map();
+            transports[index]->alias_va_map =
+                state->vmm_heap ? state->vmm_heap->get_alias_va_map() : nullptr;
+            transports[index]->egm_map = state->vmm_heap ? state->vmm_heap->get_egm_map() : nullptr;
             nvshmemi_ibgda_get_device_state(&transports[index]->type_specific_shared_state);
             if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;

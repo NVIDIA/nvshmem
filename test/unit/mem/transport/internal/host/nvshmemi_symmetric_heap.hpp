@@ -35,11 +35,11 @@ enum { NVSHMEMX_MALLOC = 0, NVSHMEMX_CALLOC, NVSHMEMX_ALIGN, NVSHMEMX_ALLOC_MAX 
  *                              nvshmemi_symmetric_heap
  *                    -------------------------------------------------
  *                  |                                                   |
- *    nvshmemi_symmetric_heap_static                     nvshmemi_symmetric_heap_dynamic
- *     |                         |                                      |
- * sysmem_static              vidmem_static                     vidmem_dynamic
- *       |                         |                                    |
- *      SHM                      PINNED                                VMM
+ *    nvshmemi_symmetric_heap_static                  vidmem_dynamic_vmm
+ *     |                         |
+ * sysmem_static              vidmem_static
+ *       |                         |
+ *      SHM                      PINNED
  *
  * Supported memory kinds: sysmem (linux shm), vidmem (cudaMalloc), vidmem (cuMemCreate)
  */
@@ -327,25 +327,6 @@ class nvshmemi_symmetric_heap_static : public nvshmemi_symmetric_heap {
    private:
 };
 
-class nvshmemi_symmetric_heap_dynamic : public nvshmemi_symmetric_heap {
-   public:
-    explicit nvshmemi_symmetric_heap_dynamic(nvshmemi_state_t *state)
-        : nvshmemi_symmetric_heap(state) {}
-    virtual ~nvshmemi_symmetric_heap_dynamic() = default;
-
-   protected:
-    /* Stubbed implementation, accessible in derived class only */
-    virtual int allocate_physical_memory_to_heap(size_t size) {
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-    virtual int export_memory(nvshmem_mem_handle_t *mem_handle,
-                              nvshmem_mem_handle_t *mem_handle_in) = 0;
-    virtual int register_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size);
-    virtual int setup_mspace();
-
-   private:
-};
-
 class nvshmemi_symmetric_heap_vidmem_static : public nvshmemi_symmetric_heap_static {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_static(nvshmemi_state_t *state) noexcept
@@ -374,17 +355,10 @@ class nvshmemi_symmetric_heap_vidmem_static_pinned final
     int release_memory(void *buf, size_t size = 0);
 };
 
-class nvshmemi_symmetric_heap_vidmem_dynamic : public nvshmemi_symmetric_heap_dynamic {
-   public:
-    explicit nvshmemi_symmetric_heap_vidmem_dynamic(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_dynamic(state) {}
-    virtual ~nvshmemi_symmetric_heap_vidmem_dynamic() = default;
-};
-
-class nvshmemi_symmetric_heap_vidmem_dynamic_vmm : public nvshmemi_symmetric_heap_vidmem_dynamic {
+class nvshmemi_symmetric_heap_vidmem_dynamic_vmm : public nvshmemi_symmetric_heap {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_dynamic_vmm(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_vidmem_dynamic(state) {}
+        : nvshmemi_symmetric_heap(state) {}
     virtual ~nvshmemi_symmetric_heap_vidmem_dynamic_vmm();
     int reserve_heap(void);
     int setup_symmetric_heap(void);
@@ -411,6 +385,8 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm : public nvshmemi_symmetric_hea
     int export_memory(nvshmem_mem_handle_t *mem_handle, nvshmem_mem_handle_t *mem_handle_in);
     int release_memory(void *buf, size_t size);
     void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment, int type);
+    int register_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size);
+    int setup_mspace();
     int allocate_physical_memory_to_heap(size_t size);
     int nvls_broadcast_heap_handle_fabric(char *shareable_handle, size_t length, int root,
                                           nvshmemi_team_t *team);

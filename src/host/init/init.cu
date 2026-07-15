@@ -584,8 +584,7 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
         goto out;
     }
 
-    if (state->heap_obj != nullptr &&
-        dynamic_cast<nvshmemi_symmetric_heap_vidmem_dynamic_vmm *>(state->heap_obj) == nullptr) {
+    if (state->heap_obj != nullptr && state->vmm_heap == nullptr) {
         WARN("NVLS: Unsupported heap kind for NVLS. Supported are: cuMemCreate\n");
         status = NVSHMEMX_SUCCESS;
         goto out;

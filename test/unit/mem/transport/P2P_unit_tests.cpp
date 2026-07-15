@@ -62,8 +62,8 @@ int nvshmemi_symmetric_heap::register_heap_memory(nvshmem_mem_handle_t *input, v
                                                   size_t size) {
     return 1;
 }
-int nvshmemi_symmetric_heap_dynamic::register_heap_memory(nvshmem_mem_handle_t *mem_handle_in,
-                                                          void *buf, size_t size) {
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::register_heap_memory(
+    nvshmem_mem_handle_t *mem_handle_in, void *buf, size_t size) {
     return 1;
 }
 void *nvshmemi_symmetric_heap::heap_allocate(size_t size, size_t count, size_t alignment,
@@ -84,7 +84,7 @@ void *nvshmemi_symmetric_heap::heap_align(size_t size, size_t alignment) {
     void *ptr = NULL;
     return ptr;
 }
-int nvshmemi_symmetric_heap_dynamic::setup_mspace() { return 1; }
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::setup_mspace() { return 1; }
 void nvshmemi_symmetric_heap::update_idx_in_handle(void *addr, size_t size) { return; }
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::setup_symmetric_heap() { return 0; }
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() { return 0; }

@@ -9,6 +9,7 @@
 #include <climits>
 #include <cstdlib>
 #include <cuda.h>
+#include <map>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
@@ -27,7 +28,9 @@ class nvshmemi_mem_remote_transport;
 
 enum { NVSHMEMX_MALLOC = 0, NVSHMEMX_CALLOC, NVSHMEMX_ALIGN, NVSHMEMX_ALLOC_MAX };
 
-/** Minimal configuration for heap construction. */
+/**
+ * Minimal configuration for heap construction.
+ */
 struct nvshmemi_heap_config {
     int mype;
     int npes;
@@ -46,13 +49,15 @@ struct nvshmemi_heap_config {
  *                              nvshmemi_symmetric_heap
  *                    -------------------------------------------------
  *                  |                                                   |
- *    nvshmemi_symmetric_heap_static                     nvshmemi_symmetric_heap_dynamic
- *     |                         |                                      |
- * sysmem_static              vidmem_static                     vidmem_dynamic
- *       |                         |                                    |
- *      SHM                      PINNED                                VMM
+ *    nvshmemi_symmetric_heap_static                  vidmem_dynamic_vmm
+ *     |                         |
+ * sysmem_static              vidmem_static
+ *       |                         |
+ *      SHM                      PINNED
  *
  * Supported memory kinds: sysmem (linux shm), vidmem (cudaMalloc), vidmem (cuMemCreate)
+ *
+ * state->vmm_heap aliases heap_obj only for an active VMM heap.
  */
 
 class nvshmemi_symmetric_heap {
@@ -136,20 +141,8 @@ class nvshmemi_symmetric_heap {
     virtual void heap_deallocate(void *ptr);
 
     virtual size_t get_mmap_allocated_range() { return 0; }
-    std::unordered_map<void *, void *> *get_alias_va_map() { return &alias_va_map_; }
-    std::unordered_map<void *, size_t> *get_egm_map() { return &egm_map_; }
-
-    /* check if passed address in within heap range*/
-    virtual bool is_egm(void * /*addr*/) { return false; }
 
    private:
-    /**
-     * This function will finalize mspace container managing virtual address range
-     * defined by device state heap base/size
-     *
-     * @param void
-     * @return On success, return 0 and on failure return non-zero NVSHMEM internal error code.
-     */
     friend class nvshmemi_mem_p2p_transport;     // friend class declaration
     friend class nvshmemi_mem_remote_transport;  // friend class declaration
 
@@ -161,7 +154,6 @@ class nvshmemi_symmetric_heap {
     void set_p2p_transport(nvshmemi_mem_p2p_transport *obj) { p2p_ref_ = obj; }
     void set_remote_transport(nvshmemi_mem_remote_transport *obj) { remote_ref_ = obj; }
     void set_mem_handle_type(CUmemAllocationHandleType type) { mem_handle_type_ = type; }
-    void update_idx_in_mmap_mc_handle(void *ptr, off_t off) { idx_in_mmap_mc_handles_[ptr] = off; }
     virtual void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment,
                                             int type) = 0;
 
@@ -245,7 +237,7 @@ class nvshmemi_symmetric_heap {
      */
     void *allocate_virtual_memory_from_mspace(size_t size, size_t count, size_t alignment,
                                               int type);
-    nvshmemi_heap_config cfg_ = {};
+    nvshmemi_heap_config cfg_ = {};      // PE topology + device, captured at construction time
     nvshmemi_state_t *state_ = nullptr;  // store a reference of device state instance
     CUmemAllocationHandleType mem_handle_type_ = CU_MEM_HANDLE_TYPE_NONE;
     size_t mem_granularity_ = 0;
@@ -375,31 +367,6 @@ class nvshmemi_symmetric_heap_static : public nvshmemi_symmetric_heap {
     bool gather_mem_handles_done_ = false;
 };
 
-class nvshmemi_symmetric_heap_dynamic : public nvshmemi_symmetric_heap {
-   public:
-    explicit nvshmemi_symmetric_heap_dynamic(nvshmemi_heap_config cfg,
-                                             nvshmemi_state_t *state) noexcept;
-    virtual ~nvshmemi_symmetric_heap_dynamic() = default;
-
-   protected:
-    /* Stubbed implementation, accessible in derived class only */
-    virtual int allocate_physical_memory_to_heap(size_t /*size*/) {
-        return (NVSHMEMX_ERROR_NOT_SUPPORTED);
-    }
-    virtual int export_memory(nvshmem_mem_handle_t *mem_handle,
-                              nvshmem_mem_handle_t *mem_handle_in) = 0;
-    /**
-     * Given a buffer, size and input memory handle, register the heap into PE address space
-     * ext_allocation indicates the input memory handle is a user buffer (resulting from mmap call)
-     * ext_allocation = false, indicates memory registered through nvshmem_malloc call
-     */
-    virtual int register_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size,
-                                     bool ext_allocation = false);
-    virtual int map_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size);
-    virtual int register_heap_chunk_by_size(void *buf, size_t size, bool ext_allocation = false);
-    virtual int setup_mspace();
-};
-
 class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symmetric_heap_static {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_static_pinned(nvshmemi_heap_config cfg,
@@ -420,16 +387,16 @@ class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symme
     int release_memory(void *buf, size_t size = 0);
 };
 
-class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetric_heap_dynamic {
+class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetric_heap {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_dynamic_vmm(nvshmemi_heap_config cfg,
-                                                        nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_dynamic(cfg, state) {}
+                                                        nvshmemi_state_t *state) noexcept;
     ~nvshmemi_symmetric_heap_vidmem_dynamic_vmm() = default;
     int reserve_heap(void);
     int setup_symmetric_heap(void);
     int cleanup_symmetric_heap(void);
-    /* Operates on a current state of the entire heap */
+
+    /* Operates on the complete heap state. */
     int nvls_create_heap_memory_by_team(nvshmemi_team_t *team);
     int nvls_bind_heap_memory_by_team(nvshmemi_team_t *team);
     int nvls_map_heap_memory_by_team(nvshmemi_team_t *team);
@@ -461,6 +428,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int nvls_unbind_multicast_endpoint(nvshmemi_team_t *team, off_t le_offset, size_t size);
     int nvls_destroy_multicast_endpoint_by_team(nvshmemi_team_t *team);
 
+    std::unordered_map<void *, void *> *get_alias_va_map() { return &alias_va_map_; }
+    std::unordered_map<void *, size_t> *get_egm_map() { return &egm_map_; }
+
    protected:
     CUmemGenericAllocationHandle get_cumem_handle_ptr(int i) {
         return (std::get<0>(cumem_handles_[i]));
@@ -477,6 +447,12 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int export_memory(nvshmem_mem_handle_t *mem_handle, nvshmem_mem_handle_t *mem_handle_in);
     int release_memory(void *buf, size_t size);
     void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment, int type);
+    int setup_mspace();
+    /** Registers a VMM chunk; ext_allocation identifies user-provided mmap memory. */
+    int register_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size,
+                             bool ext_allocation = false);
+    int map_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size);
+    int register_heap_chunk_by_size(void *buf, size_t size, bool ext_allocation = false);
     int allocate_physical_memory_to_heap(size_t size);
     int nvls_broadcast_heap_handle_fabric(char *shareable_handle, size_t length, int root,
                                           nvshmemi_team_t *team);
@@ -506,6 +482,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     }
 
     int check_user_buffer_for_mmap(void *ptr, size_t &size, unsigned int *ptr_mem_type);
+
     std::vector<std::tuple<CUmemGenericAllocationHandle, off_t, off_t, size_t, bool>>
         cumem_handles_;
     int check_logical_endpoint_support();

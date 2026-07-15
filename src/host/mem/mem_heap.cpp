@@ -191,7 +191,7 @@ int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_
     if (is_vmm) {
         auto *vmm = new nvshmemi_symmetric_heap_vidmem_dynamic_vmm(cfg, state);
         state->heap_obj = vmm;
-        state->vmm_heap = vmm;  // Store concrete pointer for NVLS/mmap operations
+        state->vmm_heap = vmm;
     } else if (heap_kind == NVSHMEMI_HEAP_KIND_SYSMEM) {
         state->heap_obj = new nvshmemi_symmetric_heap_sysmem_static_shm(cfg, state);
     } else if (heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
@@ -493,7 +493,7 @@ int nvshmemi_symmetric_heap_static::setup_mspace() {
     return 0;
 }
 
-int nvshmemi_symmetric_heap_dynamic::setup_mspace() {
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::setup_mspace() {
     heap_mspace_ = new mspace(heap_base_, physical_internal_heap_size_);
     heap_mspace_->track_large_chunks(1);
     mmap_mspace_ = new mspace(heap_base_, physical_internal_heap_size_);
@@ -510,8 +510,8 @@ nvshmemi_symmetric_heap_static::nvshmemi_symmetric_heap_static(nvshmemi_heap_con
     state->p2p_transport = get_p2pref();
 }
 
-nvshmemi_symmetric_heap_dynamic::nvshmemi_symmetric_heap_dynamic(nvshmemi_heap_config cfg,
-                                                                 nvshmemi_state_t *state) noexcept
+nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvshmemi_symmetric_heap_vidmem_dynamic_vmm(
+    nvshmemi_heap_config cfg, nvshmemi_state_t *state) noexcept
     : nvshmemi_symmetric_heap(cfg, state) {
     set_p2p_transport(nvshmemi_mem_p2p_transport::get_instance(cfg.mype, cfg.npes));
     set_remote_transport(nvshmemi_mem_remote_transport::get_instance());
@@ -1386,8 +1386,8 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_dynamic::map_heap_memory(nvshmem_mem_handle_t *mem_handle_in, void *buf,
-                                                     size_t size) {
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::map_heap_memory(nvshmem_mem_handle_t *mem_handle_in,
+                                                                void *buf, size_t size) {
     int status = 0;
     nvshmemi_state_t *state = get_state();
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
@@ -1426,8 +1426,8 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_dynamic::register_heap_chunk_by_size(void *buf, size_t size,
-                                                                 bool ext_allocation) {
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::register_heap_chunk_by_size(void *buf, size_t size,
+                                                                            bool ext_allocation) {
     int status = 0;
     nvshmemi_state_t *state = get_state();
     nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
@@ -1485,9 +1485,8 @@ out:
     return (status);
 }
 
-int nvshmemi_symmetric_heap_dynamic::register_heap_memory(nvshmem_mem_handle_t *mem_handle_in,
-                                                          void *buf, size_t size,
-                                                          bool ext_allocation) {
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::register_heap_memory(
+    nvshmem_mem_handle_t *mem_handle_in, void *buf, size_t size, bool ext_allocation) {
     if (size == 0) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
