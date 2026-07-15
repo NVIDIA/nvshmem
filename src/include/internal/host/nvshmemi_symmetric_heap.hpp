@@ -27,6 +27,14 @@ class nvshmemi_mem_remote_transport;
 
 enum { NVSHMEMX_MALLOC = 0, NVSHMEMX_CALLOC, NVSHMEMX_ALIGN, NVSHMEMX_ALLOC_MAX };
 
+/** Minimal configuration for heap construction. */
+struct nvshmemi_heap_config {
+    int mype;
+    int npes;
+    int npes_node;
+    int device_id;
+};
+
 #define NVSHMEMI_SYMMETRIC_HEAP_OFFSET(base, off) (void *)((uint8_t *)(base) + off)
 
 /**
@@ -49,7 +57,8 @@ enum { NVSHMEMX_MALLOC = 0, NVSHMEMX_CALLOC, NVSHMEMX_ALIGN, NVSHMEMX_ALLOC_MAX 
 
 class nvshmemi_symmetric_heap {
    public:
-    explicit nvshmemi_symmetric_heap(nvshmemi_state_t *state) noexcept : state_(state) {}
+    explicit nvshmemi_symmetric_heap(nvshmemi_heap_config cfg, nvshmemi_state_t *state) noexcept
+        : cfg_(cfg), state_(state) {}
     virtual ~nvshmemi_symmetric_heap();
 
     /** Getters and Setters of protected members */
@@ -236,6 +245,7 @@ class nvshmemi_symmetric_heap {
      */
     void *allocate_virtual_memory_from_mspace(size_t size, size_t count, size_t alignment,
                                               int type);
+    nvshmemi_heap_config cfg_ = {};
     nvshmemi_state_t *state_ = nullptr;  // store a reference of device state instance
     CUmemAllocationHandleType mem_handle_type_ = CU_MEM_HANDLE_TYPE_NONE;
     size_t mem_granularity_ = 0;
@@ -331,7 +341,8 @@ inline size_t nvshmemi_symmetric_heap::get_mem_handle_addr_offset(void *addr) {
 
 class nvshmemi_symmetric_heap_static : public nvshmemi_symmetric_heap {
    public:
-    explicit nvshmemi_symmetric_heap_static(nvshmemi_state_t *state) noexcept;
+    explicit nvshmemi_symmetric_heap_static(nvshmemi_heap_config cfg,
+                                            nvshmemi_state_t *state) noexcept;
     virtual ~nvshmemi_symmetric_heap_static() = default;
 
     virtual int reserve_heap(void);
@@ -366,7 +377,8 @@ class nvshmemi_symmetric_heap_static : public nvshmemi_symmetric_heap {
 
 class nvshmemi_symmetric_heap_dynamic : public nvshmemi_symmetric_heap {
    public:
-    explicit nvshmemi_symmetric_heap_dynamic(nvshmemi_state_t *state) noexcept;
+    explicit nvshmemi_symmetric_heap_dynamic(nvshmemi_heap_config cfg,
+                                             nvshmemi_state_t *state) noexcept;
     virtual ~nvshmemi_symmetric_heap_dynamic() = default;
 
    protected:
@@ -390,8 +402,9 @@ class nvshmemi_symmetric_heap_dynamic : public nvshmemi_symmetric_heap {
 
 class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symmetric_heap_static {
    public:
-    explicit nvshmemi_symmetric_heap_vidmem_static_pinned(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_static(state) {}
+    explicit nvshmemi_symmetric_heap_vidmem_static_pinned(nvshmemi_heap_config cfg,
+                                                          nvshmemi_state_t *state) noexcept
+        : nvshmemi_symmetric_heap_static(cfg, state) {}
     ~nvshmemi_symmetric_heap_vidmem_static_pinned() = default;
 
    protected:
@@ -409,8 +422,9 @@ class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symme
 
 class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetric_heap_dynamic {
    public:
-    explicit nvshmemi_symmetric_heap_vidmem_dynamic_vmm(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_dynamic(state) {}
+    explicit nvshmemi_symmetric_heap_vidmem_dynamic_vmm(nvshmemi_heap_config cfg,
+                                                        nvshmemi_state_t *state) noexcept
+        : nvshmemi_symmetric_heap_dynamic(cfg, state) {}
     ~nvshmemi_symmetric_heap_vidmem_dynamic_vmm() = default;
     int reserve_heap(void);
     int setup_symmetric_heap(void);
@@ -485,7 +499,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
         CUmemAllocationProp *memprop = (CUmemAllocationProp *)(prop);
         (*memprop).type = CU_MEM_ALLOCATION_TYPE_PINNED;
         (*memprop).location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-        (*memprop).location.id = static_cast<int>(this->state_->device_id);
+        (*memprop).location.id = static_cast<int>(this->cfg_.device_id);
         (*memprop).requestedHandleTypes = (CUmemAllocationHandleType)(mem_handle_type);
         (*memprop).allocFlags.gpuDirectRDMACapable = 1;
         return;
@@ -499,8 +513,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
 
 class nvshmemi_symmetric_heap_sysmem_static_shm final : public nvshmemi_symmetric_heap_static {
    public:
-    explicit nvshmemi_symmetric_heap_sysmem_static_shm(nvshmemi_state_t *state) noexcept
-        : nvshmemi_symmetric_heap_static(state) {}
+    explicit nvshmemi_symmetric_heap_sysmem_static_shm(nvshmemi_heap_config cfg,
+                                                       nvshmemi_state_t *state) noexcept
+        : nvshmemi_symmetric_heap_static(cfg, state) {}
     ~nvshmemi_symmetric_heap_sysmem_static_shm() = default;
     static void atexit_heap_handler(void) {
         // Iterate over all objects and close any stale fd
