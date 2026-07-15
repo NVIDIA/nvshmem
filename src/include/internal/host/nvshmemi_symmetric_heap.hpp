@@ -25,6 +25,7 @@
 /// Forward declarations for future friends
 class nvshmemi_mem_p2p_transport;
 class nvshmemi_mem_remote_transport;
+class nvshmemi_nvls_observer;
 
 enum { NVSHMEMX_MALLOC = 0, NVSHMEMX_CALLOC, NVSHMEMX_ALIGN, NVSHMEMX_ALLOC_MAX };
 
@@ -43,14 +44,14 @@ class nvshmemi_heap_observer {
    public:
     virtual ~nvshmemi_heap_observer() = default;
 
-    /** Called after a physical chunk is mapped into the heap virtual range. */
+    /** Called after a chunk is mapped and before transport registration. */
     virtual int on_chunk_mapped(nvshmem_mem_handle_t *handle, off_t mc_offset, off_t mmap_offset,
                                 size_t size) = 0;
 
-    /** Called before a physical chunk is unmapped from the heap virtual range. */
+    /** Called before a chunk is unmapped. */
     virtual int on_chunk_unmapped(off_t mc_offset, size_t size) = 0;
 
-    /** Called before heap virtual memory and CUDA handles are released. */
+    /** Called before heap teardown releases mappings or handles. */
     virtual int on_heap_teardown() = 0;
 };
 
@@ -158,13 +159,14 @@ class nvshmemi_symmetric_heap {
 
     virtual size_t get_mmap_allocated_range() { return 0; }
 
-    void register_observer(std::unique_ptr<nvshmemi_heap_observer> observer) {
-        observers_.push_back(std::move(observer));
+    void register_observer(std::unique_ptr<nvshmemi_heap_observer> obs) {
+        observers_.push_back(std::move(obs));
     }
 
    private:
     friend class nvshmemi_mem_p2p_transport;     // friend class declaration
     friend class nvshmemi_mem_remote_transport;  // friend class declaration
+    friend class nvshmemi_nvls_observer;
 
    protected:
     nvshmemi_mem_remote_transport *get_remoteref(void) { return (remote_ref_); }
@@ -257,8 +259,8 @@ class nvshmemi_symmetric_heap {
      */
     void *allocate_virtual_memory_from_mspace(size_t size, size_t count, size_t alignment,
                                               int type);
-    nvshmemi_heap_config cfg_ = {};      // PE topology + device, captured at construction time
-    nvshmemi_state_t *state_ = nullptr;  // store a reference of device state instance
+    nvshmemi_heap_config cfg_ = {};
+    nvshmemi_state_t *state_ = nullptr;
     std::vector<std::unique_ptr<nvshmemi_heap_observer>> observers_;
     CUmemAllocationHandleType mem_handle_type_ = CU_MEM_HANDLE_TYPE_NONE;
     size_t mem_granularity_ = 0;
@@ -417,16 +419,8 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int setup_symmetric_heap(void);
     int cleanup_symmetric_heap(void);
 
-    /* Operates on the complete heap state. */
-    int nvls_create_heap_memory_by_team(nvshmemi_team_t *team);
-    int nvls_bind_heap_memory_by_team(nvshmemi_team_t *team);
-    int nvls_map_heap_memory_by_team(nvshmemi_team_t *team);
-    int nvls_unmap_heap_memory_by_size(nvshmemi_team_t *team, off_t mc_offset, uint64_t size);
-    void nvls_unmap_heap_memory_by_team(nvshmemi_team_t *team);
-    int nvls_unmap_heap_memory(off_t mc_offset, uint64_t size);
-    void nvls_unbind_heap_memory_by_team(nvshmemi_team_t *team);
-    int nvls_unbind_heap_memory_by_size(off_t mc_offset, size_t size);
     size_t get_mmap_allocated_range();
+
     bool is_egm(void *addr);
     std::map<void *, size_t> *get_mmapped_buf();
 
@@ -475,23 +469,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int map_heap_memory(nvshmem_mem_handle_t *mem_handle, void *buf, size_t size);
     int register_heap_chunk_by_size(void *buf, size_t size, bool ext_allocation = false);
     int allocate_physical_memory_to_heap(size_t size);
-    int nvls_broadcast_heap_handle_fabric(char *shareable_handle, size_t length, int root,
-                                          nvshmemi_team_t *team);
-    int nvls_broadcast_heap_handle_ipc(char *shareable_handle, int root, nvshmemi_team_t *team);
-    int nvls_broadcast_heap_handle_by_team(char *shareable_handle, size_t length,
-                                           nvshmemi_team_t *team);
-    /* Operates on a given allocation request of size mem_size */
-    int nvls_create_heap_memory_by_size(nvshmemi_team_t *team, uint64_t mem_size);
-    int nvls_bind_heap_memory_by_size(nvshmemi_team_t *team, nvshmem_mem_handle_t *mem_handle,
-                                      off_t mc_offset, off_t mmap_offset, size_t mmap_size);
-    int nvls_map_heap_memory_by_size(nvshmemi_team_t *team, uint64_t mem_size, off_t mmap_offset,
-                                     off_t mc_offset);
-    int nvls_create_heap_memory(uint64_t mem_size);
-    int nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_handle, off_t mc_offset, off_t mmap_offset,
-                              size_t mmap_size);
-    int nvls_map_heap_memory(uint64_t mem_size, off_t mmap_offset, off_t mc_offset);
 
    private:
+    friend class nvshmemi_nvls_observer;
     void set_cuda_mem_prop(__attribute__((unused)) void *prop, int mem_handle_type) {
         CUmemAllocationProp *memprop = (CUmemAllocationProp *)(prop);
         (*memprop).type = CU_MEM_ALLOCATION_TYPE_PINNED;

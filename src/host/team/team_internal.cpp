@@ -32,6 +32,7 @@
 #include "internal/host/nvshmemi_coll.h"                 // for nvshmemi_barrier
 #include "internal/host/nvshmemi_symmetric_heap.hpp"     // for nvshmemi_symm...
 #include "internal/host/nvshmemi_mem_transport.hpp"      // for nvshmemi_mem_p2p_transport
+#include "internal/host/nvshmemi_nvls_observer.hpp"      // for nvshmemi_nvls_observer
 #include "internal/host/nvshmemi_team.h"                 // for N_PSYNC_BYTES
 #include "internal/host/nvshmemi_types.h"                // for nvshmemi_state
 #include "internal/host/util.h"                          // for CUDA_RUNTIME_...
@@ -751,8 +752,8 @@ static void nvshmemi_team_destroy_nvls(nvshmemi_team_t *team) {
     nvshmemi_nvls_rsc *nvls_obj = nullptr;
     nvls_obj = reinterpret_cast<nvshmemi_nvls_rsc *>(team->nvls_rsc);
     if (nvls_obj->get_refcount() == 0) { /* Last reference */
-        nvshmemi_state->vmm_heap->nvls_unmap_heap_memory_by_team(team);
-        nvshmemi_state->vmm_heap->nvls_unbind_heap_memory_by_team(team);
+        nvshmemi_state->nvls_obs->nvls_unmap_heap_memory_by_team(team);
+        nvshmemi_state->nvls_obs->nvls_unbind_heap_memory_by_team(team);
         nvshmemi_state->vmm_heap->nvls_destroy_multicast_endpoint_by_team(team);
         nvls_obj->free_group_mem();
         nvls_obj->release_owner();
@@ -812,7 +813,7 @@ static int nvshmemi_team_create_nvls(nvshmemi_team_t *team) {
         cudaMemcpy(team->nvls_rsc_base_ptr, &mc_heap_base, sizeof(void *), cudaMemcpyHostToDevice));
 
     /* Make a MC handle as large as reserved heap size (VA range) */
-    status = nvshmemi_state->vmm_heap->nvls_create_heap_memory_by_team(team);
+    status = nvshmemi_state->nvls_obs->nvls_create_heap_memory_by_team(team);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                           "Create multicast groups for UC heap failed for pe %d team ID %d\n",
                           team->my_pe, team->team_idx);
@@ -823,7 +824,7 @@ static int nvshmemi_team_create_nvls(nvshmemi_team_t *team) {
                           "Setup multicast endpoints for heap failed for pe %d team ID %d\n",
                           team->my_pe, team->team_idx);
 
-    status = nvshmemi_state->vmm_heap->nvls_map_heap_memory_by_team(team);
+    status = nvshmemi_state->nvls_obs->nvls_map_heap_memory_by_team(team);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                           "Mapping multicast groups for UC heap failed for pe %d team ID %d\n",
                           team->my_pe, team->team_idx);
@@ -847,7 +848,7 @@ static int nvshmemi_team_bind_nvls(nvshmemi_team_t *team) {
     nvls_obj = reinterpret_cast<nvshmemi_nvls_rsc *>(team->nvls_rsc);
     if (!nvls_obj->is_owner(team)) return 0;
 
-    status = nvshmemi_state->vmm_heap->nvls_bind_heap_memory_by_team(team);
+    status = nvshmemi_state->nvls_obs->nvls_bind_heap_memory_by_team(team);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                           "Binding multicast groups to UC heap failed for pe %d team ID %d\n",
                           team->my_pe, team->team_idx);

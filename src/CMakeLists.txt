@@ -607,6 +607,7 @@ set(NVSHMEM_HOST_SOURCES
     host/init/query_host.cpp
     host/mem/mem.cpp
     host/mem/mem_heap.cpp
+    host/mem/nvls_observer.cpp
     host/mem/mem_transport.cpp
     host/team/team.cu
     host/team/team_internal.cpp

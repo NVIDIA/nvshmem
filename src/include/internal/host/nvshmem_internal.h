@@ -10,6 +10,7 @@
 #include <cuda_runtime.h>
 #include <atomic>
 #include <pthread.h>
+#include <cassert>
 #include <vector>
 #include <map>
 

@@ -30,6 +30,7 @@ typedef struct nvshmemi_shared_memory_info_t {
 
 class nvshmemi_symmetric_heap;
 class nvshmemi_symmetric_heap_vidmem_dynamic_vmm;
+class nvshmemi_nvls_observer;
 class nvshmemi_mem_p2p_transport;
 
 typedef struct nvshmemi_state_dec {
@@ -44,6 +45,7 @@ typedef struct nvshmemi_state_dec {
     /*symmetric heap state*/
     nvshmemi_symmetric_heap *heap_obj;
     nvshmemi_symmetric_heap_vidmem_dynamic_vmm *vmm_heap;  // Non-null only for VMM heap type
+    nvshmemi_nvls_observer *nvls_obs;                      // Non-null only when NVLS is active
     bool host_memory_registration_supported;
     /*transport info*/
     nvshmemi_mem_p2p_transport *p2p_transport;
