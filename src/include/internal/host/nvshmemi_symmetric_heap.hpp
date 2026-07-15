@@ -38,6 +38,22 @@ struct nvshmemi_heap_config {
     int device_id;
 };
 
+/** Observer interface for symmetric heap lifecycle events. */
+class nvshmemi_heap_observer {
+   public:
+    virtual ~nvshmemi_heap_observer() = default;
+
+    /** Called after a physical chunk is mapped into the heap virtual range. */
+    virtual int on_chunk_mapped(nvshmem_mem_handle_t *handle, off_t mc_offset, off_t mmap_offset,
+                                size_t size) = 0;
+
+    /** Called before a physical chunk is unmapped from the heap virtual range. */
+    virtual int on_chunk_unmapped(off_t mc_offset, size_t size) = 0;
+
+    /** Called before heap virtual memory and CUDA handles are released. */
+    virtual int on_heap_teardown() = 0;
+};
+
 #define NVSHMEMI_SYMMETRIC_HEAP_OFFSET(base, off) (void *)((uint8_t *)(base) + off)
 
 /**
@@ -142,6 +158,10 @@ class nvshmemi_symmetric_heap {
 
     virtual size_t get_mmap_allocated_range() { return 0; }
 
+    void register_observer(std::unique_ptr<nvshmemi_heap_observer> observer) {
+        observers_.push_back(std::move(observer));
+    }
+
    private:
     friend class nvshmemi_mem_p2p_transport;     // friend class declaration
     friend class nvshmemi_mem_remote_transport;  // friend class declaration
@@ -239,6 +259,7 @@ class nvshmemi_symmetric_heap {
                                               int type);
     nvshmemi_heap_config cfg_ = {};      // PE topology + device, captured at construction time
     nvshmemi_state_t *state_ = nullptr;  // store a reference of device state instance
+    std::vector<std::unique_ptr<nvshmemi_heap_observer>> observers_;
     CUmemAllocationHandleType mem_handle_type_ = CU_MEM_HANDLE_TYPE_NONE;
     size_t mem_granularity_ = 0;
     size_t le_granularity_ = 0; /* bind alignment of Logical Endpoint*/
