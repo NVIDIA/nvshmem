@@ -210,6 +210,8 @@ out:
     return status;
 }
 
+extern "C" {
+
 int nvshmemx_collective_launch_query_gridsize(const void *func, dim3 blockDims, void **args,
                                               size_t sharedMem, int *gridsize) {
     return _nvshmemi_collective_launch_query_gridsize(func, blockDims, args, sharedMem, gridsize);
@@ -219,3 +221,5 @@ int nvshmemx_collective_launch(const void *func, dim3 gridDims, dim3 blockDims, 
                                size_t sharedMem, cudaStream_t stream) {
     return _nvshmemi_collective_launch(func, gridDims, blockDims, args, sharedMem, stream);
 }
+
+}  // extern "C"

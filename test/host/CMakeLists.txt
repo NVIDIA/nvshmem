@@ -7,6 +7,7 @@ macro(nvshmem_add_test_no_device SOURCE)
   nvshmem_add_test_prefix(${SOURCE} ${NVSHMEM_TEST_PREFIX} OFF)
 endmacro()
 
+add_subdirectory(abi)
 add_subdirectory(coll)
 add_subdirectory(bootstrap)
 add_subdirectory(init)
