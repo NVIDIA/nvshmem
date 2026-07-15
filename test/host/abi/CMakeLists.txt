@@ -17,8 +17,10 @@ file(GLOB_RECURSE NVSHMEM_HOST_PUBLIC_HEADERS CONFIGURE_DEPENDS
 set(NVSHMEM_HOST_C_API_GENERATED_SOURCE
     "${CMAKE_CURRENT_BINARY_DIR}/host_public_c_abi_generated.cu")
 
-# The generator references every public header API that is dynamically exported
-# by libnvshmem_host.so, and rejects public definitions with C++ linkage.
+# The generator validates the fixed host C ABI manifest against the public
+# headers, host/device build artifacts, and libnvshmem_host.so before
+# generating the consumer link test.
+
 add_custom_command(
   OUTPUT "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
@@ -43,6 +45,31 @@ add_custom_command(
 
 add_custom_target(generate_host_public_c_abi
                   DEPENDS "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}")
+
+if(SubBuild)
+  # This explicit target adds newly exported APIs after an intentional host C
+  # API change. Existing ABI entries are never removed automatically.
+  add_custom_target(update_host_public_c_api_manifest
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
+            --nvcc "${CMAKE_CUDA_COMPILER}"
+            --include-dir "${NVSHMEM_HOST_PUBLIC_INCLUDE_DIR}"
+            --input "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
+            --output "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
+            --expected-symbols "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_api_symbols.txt"
+            --cxx-standard "${CMAKE_CXX_STANDARD}"
+            --library "$<TARGET_FILE:nvshmem_host>"
+            --device-library "$<TARGET_FILE:nvshmem_device>"
+            --nm "${CMAKE_NM}"
+            --cxxfilt "${NVSHMEM_CXXFILT}"
+            --update-expected-symbols
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
+            ${NVSHMEM_HOST_PUBLIC_HEADERS}
+            nvshmem_host
+            nvshmem_device
+    COMMENT "Updating host public C API manifest"
+    VERBATIM)
+endif()
 
 nvshmem_add_test_no_device(host_public_c_abi.cu)
 add_dependencies(host_host_public_c_abi generate_host_public_c_abi)

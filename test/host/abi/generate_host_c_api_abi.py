@@ -17,6 +17,14 @@ PUBLIC_API_NAME = re.compile(r"\b(nvshmem(?:x|id)?_[A-Za-z0-9_]+)\s*\(")
 PUBLIC_API_SYMBOL = re.compile(r"nvshmem(?:x|id)?_[A-Za-z0-9_]+")
 DEMANGLED_FUNCTION_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(")
 LINE_DIRECTIVE = re.compile(r"^\s*#.*$", re.MULTILINE)
+MANIFEST_HEADER = """# This list is generated. Do not edit manually.
+# Public C APIs exported by libnvshmem_host.so.
+#
+# Add newly exported APIs with:
+# cmake --build <build-dir> --target update_host_public_c_api_manifest
+# Existing entries are never removed automatically.
+# Keep this sorted.
+"""
 
 
 def public_api_symbols(preprocessed: str) -> set[str]:
@@ -32,7 +40,8 @@ def expected_api_symbols(path: str) -> set[str]:
     """Read the checked-in host C ABI manifest."""
 
     symbols: set[str] = set()
-    for line_number, line in enumerate(pathlib.Path(path).read_text().splitlines(), start=1):
+    contents = pathlib.Path(path).read_text()
+    for line_number, line in enumerate(contents.splitlines(), start=1):
         symbol = line.partition("#")[0].strip()
         if not symbol:
             continue
@@ -43,7 +52,18 @@ def expected_api_symbols(path: str) -> set[str]:
         symbols.add(symbol)
     if not symbols:
         raise RuntimeError(f"did not find any expected public C APIs in {path}")
+    if contents != manifest_contents(symbols):
+        raise RuntimeError(
+            f"{path} is not in generated form; run "
+            "update_host_public_c_api_manifest to refresh it"
+        )
     return symbols
+
+
+def manifest_contents(symbols: set[str]) -> str:
+    """Return the canonical checked-in host C ABI manifest."""
+
+    return MANIFEST_HEADER + "\n".join(sorted(symbols)) + "\n"
 
 
 def preprocess(args: argparse.Namespace) -> str:
@@ -101,6 +121,24 @@ def validate_host_abi(
 ) -> None:
     """Check the expected host C ABI against headers and DSO exports."""
 
+    errors = expected_host_abi_errors(expected_symbols, public_symbols, dynamic_symbols)
+
+    unlisted_exports = (public_symbols & dynamic_symbols) - expected_symbols
+    if unlisted_exports:
+        errors.append(
+            "public APIs exported by libnvshmem_host.so but absent from the manifest:\n"
+            + format_symbols(unlisted_exports)
+        )
+
+    if errors:
+        raise RuntimeError("host public C API ABI mismatch:\n" + "\n".join(errors))
+
+
+def expected_host_abi_errors(
+    expected_symbols: set[str], public_symbols: set[str], dynamic_symbols: set[str]
+) -> list[str]:
+    """Return failures for existing manifest entries that disappeared."""
+
     errors = []
     missing_declarations = expected_symbols - public_symbols
     if missing_declarations:
@@ -114,16 +152,7 @@ def validate_host_abi(
         errors.append(
             "manifest APIs missing from libnvshmem_host.so:\n" + format_symbols(missing_exports)
         )
-
-    unlisted_exports = (public_symbols & dynamic_symbols) - expected_symbols
-    if unlisted_exports:
-        errors.append(
-            "public APIs exported by libnvshmem_host.so but absent from the manifest:\n"
-            + format_symbols(unlisted_exports)
-        )
-
-    if errors:
-        raise RuntimeError("host public C API ABI mismatch:\n" + "\n".join(errors))
+    return errors
 
 
 def mangled_public_definitions(
@@ -173,6 +202,120 @@ def validate_c_linkage(args: argparse.Namespace, public_symbols: set[str]) -> No
         )
 
 
+def source_object_files(object_dirs: list[str]) -> list[pathlib.Path]:
+    """Return source object files from the host and device library targets."""
+
+    objects = []
+    for object_dir in object_dirs:
+        path = pathlib.Path(object_dir)
+        if not path.is_dir():
+            raise RuntimeError(f"source object directory does not exist: {path}")
+        objects.extend(
+            object
+            for object in sorted(path.rglob("*.o"))
+            if object.name != "cmake_device_link.o"
+        )
+    if not objects:
+        raise RuntimeError("did not find any host/device library source object files")
+    return objects
+
+
+def source_public_definitions(nm: str, files: list[pathlib.Path]) -> set[str]:
+    """Return public C definitions emitted by host/device library sources."""
+
+    c_definitions: set[str] = set()
+    for file in files:
+        for line in nm_output(nm, "--defined-only", "--format=posix", str(file)).splitlines():
+            fields = line.split()
+            if len(fields) < 2 or fields[1] not in {"T", "W", "I", "i"}:
+                continue
+            symbol = fields[0]
+            if PUBLIC_API_SYMBOL.fullmatch(symbol):
+                c_definitions.add(symbol)
+    return c_definitions
+
+
+def mangled_public_definitions_in_files(
+    nm: str, cxxfilt: str, files: list[pathlib.Path], public_symbols: set[str]
+) -> list[str]:
+    """Return public APIs defined with C++ linkage in the supplied source objects."""
+
+    mangled: list[tuple[pathlib.Path, str]] = []
+    for file in files:
+        for line in nm_output(nm, "--defined-only", "--format=posix", str(file)).splitlines():
+            fields = line.split()
+            if fields and fields[0].startswith("_Z"):
+                mangled.append((file, fields[0]))
+    if not mangled:
+        return []
+
+    result = subprocess.run(
+        [cxxfilt],
+        input="\n".join(symbol for _, symbol in mangled) + "\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        sys.stderr.write(result.stderr)
+        raise RuntimeError("failed to demangle source object symbols")
+
+    demangled = result.stdout.splitlines()
+    if len(demangled) != len(mangled):
+        raise RuntimeError("could not demangle every source object symbol")
+
+    violations = []
+    for (file, raw), symbol in zip(mangled, demangled):
+        match = DEMANGLED_FUNCTION_NAME.match(symbol)
+        if match and match.group(1) in public_symbols:
+            violations.append(f"  {file}: {raw} ({symbol})")
+    return violations
+
+
+def validate_source_abi(
+    args: argparse.Namespace, expected_symbols: set[str], public_symbols: set[str]
+) -> None:
+    """Verify that public API definitions in source objects or artifacts match the manifest."""
+
+    if args.source_object_dir:
+        files = source_object_files(args.source_object_dir)
+        source_kind = "host/device library source objects"
+        cxx_definitions = mangled_public_definitions_in_files(
+            args.nm, args.cxxfilt, files, public_symbols
+        )
+    else:
+        files = [pathlib.Path(args.library), pathlib.Path(args.device_library)]
+        source_kind = "host/device library artifacts"
+        cxx_definitions = []
+
+    c_definitions = source_public_definitions(args.nm, files)
+    source_public_symbols = c_definitions & public_symbols
+    errors = []
+
+    unlisted_definitions = source_public_symbols - expected_symbols
+    if unlisted_definitions:
+        errors.append(
+            f"public APIs defined by {source_kind} but absent from the manifest:\n"
+            + format_symbols(unlisted_definitions)
+        )
+
+    missing_definitions = expected_symbols - source_public_symbols
+    if missing_definitions:
+        errors.append(
+            f"manifest APIs not defined by {source_kind}:\n"
+            + format_symbols(missing_definitions)
+        )
+
+    if cxx_definitions:
+        errors.append(
+            "public APIs implemented with C++ linkage in host/device library source objects:\n"
+            + "\n".join(cxx_definitions)
+        )
+
+    if errors:
+        raise RuntimeError("host public C API source mismatch:\n" + "\n".join(errors))
+
+
 def generated_source(symbols: list[str]) -> str:
     references = "\n".join(
         "[[maybe_unused]] __attribute__((used)) static auto const "
@@ -210,13 +353,37 @@ def main() -> int:
     parser.add_argument("--device-library", required=True)
     parser.add_argument("--nm", required=True)
     parser.add_argument("--cxxfilt", required=True)
+    parser.add_argument("--source-object-dir", action="append", default=[])
+    parser.add_argument("--update-expected-symbols", action="store_true")
     args = parser.parse_args()
 
     try:
         public_symbols = public_api_symbols(preprocess(args))
-        expected_symbols = expected_api_symbols(args.expected_symbols)
         validate_c_linkage(args, public_symbols)
         dynamic_symbols = dynamic_function_symbols(args.nm, args.library)
+
+        if args.update_expected_symbols:
+            expected_symbols = expected_api_symbols(args.expected_symbols)
+            errors = expected_host_abi_errors(
+                expected_symbols, public_symbols, dynamic_symbols
+            )
+            if errors:
+                raise RuntimeError("host public C API ABI mismatch:\n" + "\n".join(errors))
+            expected_symbols |= public_symbols & dynamic_symbols
+            validate_source_abi(args, expected_symbols, public_symbols)
+            validate_host_abi(expected_symbols, public_symbols, dynamic_symbols)
+            write_if_changed(
+                pathlib.Path(args.expected_symbols),
+                manifest_contents(expected_symbols),
+            )
+            print(
+                "updated "
+                f"{len(expected_symbols)} public C API manifest entries"
+            )
+            return 0
+
+        expected_symbols = expected_api_symbols(args.expected_symbols)
+        validate_source_abi(args, expected_symbols, public_symbols)
         validate_host_abi(expected_symbols, public_symbols, dynamic_symbols)
         write_if_changed(pathlib.Path(args.output), generated_source(sorted(expected_symbols)))
     except RuntimeError as error:

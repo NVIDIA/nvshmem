@@ -1,6 +1,10 @@
+# This list is generated. Do not edit manually.
 # Public C APIs exported by libnvshmem_host.so.
 #
-# Keep this sorted. Update intentionally when the host ABI changes.
+# Add newly exported APIs with:
+# cmake --build <build-dir> --target update_host_public_c_api_manifest
+# Existing entries are never removed automatically.
+# Keep this sorted.
 nvshmem_align
 nvshmem_alltoallmem
 nvshmem_barrier
