@@ -2,7 +2,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_program(NVSHMEM_CXXFILT NAMES c++filt llvm-cxxfilt REQUIRED)
 
 if(SubBuild)
-  set(NVSHMEM_HOST_PUBLIC_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/include")
+  # Use the configured headers that the test target itself consumes. In
+  # particular, nvshmem_build_options.h is generated in the build tree.
+  set(NVSHMEM_HOST_PUBLIC_INCLUDE_DIR "${CMAKE_BINARY_DIR}/src/include")
 else()
   set(NVSHMEM_HOST_PUBLIC_INCLUDE_DIR "${NVSHMEM_PREFIX}/include")
 endif()
@@ -24,6 +26,7 @@ add_custom_command(
           --include-dir "${NVSHMEM_HOST_PUBLIC_INCLUDE_DIR}"
           --input "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
           --output "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
+          --expected-symbols "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_api_symbols.txt"
           --cxx-standard "${CMAKE_CXX_STANDARD}"
           --library "$<TARGET_FILE:nvshmem_host>"
           --device-library "$<TARGET_FILE:nvshmem_device>"
@@ -31,6 +34,7 @@ add_custom_command(
           --cxxfilt "${NVSHMEM_CXXFILT}"
   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
+          "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_api_symbols.txt"
           ${NVSHMEM_HOST_PUBLIC_HEADERS}
           nvshmem_host
           nvshmem_device

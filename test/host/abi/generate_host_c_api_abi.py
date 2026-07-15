@@ -14,6 +14,7 @@ import sys
 
 
 PUBLIC_API_NAME = re.compile(r"\b(nvshmem(?:x|id)?_[A-Za-z0-9_]+)\s*\(")
+PUBLIC_API_SYMBOL = re.compile(r"nvshmem(?:x|id)?_[A-Za-z0-9_]+")
 DEMANGLED_FUNCTION_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(")
 LINE_DIRECTIVE = re.compile(r"^\s*#.*$", re.MULTILINE)
 
@@ -24,6 +25,24 @@ def public_api_symbols(preprocessed: str) -> set[str]:
     symbols = set(PUBLIC_API_NAME.findall(LINE_DIRECTIVE.sub("", preprocessed)))
     if not symbols:
         raise RuntimeError("did not find any public C API declarations")
+    return symbols
+
+
+def expected_api_symbols(path: str) -> set[str]:
+    """Read the checked-in host C ABI manifest."""
+
+    symbols: set[str] = set()
+    for line_number, line in enumerate(pathlib.Path(path).read_text().splitlines(), start=1):
+        symbol = line.partition("#")[0].strip()
+        if not symbol:
+            continue
+        if not PUBLIC_API_SYMBOL.fullmatch(symbol):
+            raise RuntimeError(f"invalid API symbol in {path}:{line_number}: {symbol}")
+        if symbol in symbols:
+            raise RuntimeError(f"duplicate API symbol in {path}:{line_number}: {symbol}")
+        symbols.add(symbol)
+    if not symbols:
+        raise RuntimeError(f"did not find any expected public C APIs in {path}")
     return symbols
 
 
@@ -71,6 +90,40 @@ def dynamic_function_symbols(nm: str, library: str) -> set[str]:
             continue
         symbols.add(fields[0].split("@", 1)[0])
     return symbols
+
+
+def format_symbols(symbols: set[str]) -> str:
+    return "\n".join(f"  {symbol}" for symbol in sorted(symbols))
+
+
+def validate_host_abi(
+    expected_symbols: set[str], public_symbols: set[str], dynamic_symbols: set[str]
+) -> None:
+    """Check the expected host C ABI against headers and DSO exports."""
+
+    errors = []
+    missing_declarations = expected_symbols - public_symbols
+    if missing_declarations:
+        errors.append(
+            "manifest APIs missing from the public headers:\n"
+            + format_symbols(missing_declarations)
+        )
+
+    missing_exports = expected_symbols - dynamic_symbols
+    if missing_exports:
+        errors.append(
+            "manifest APIs missing from libnvshmem_host.so:\n" + format_symbols(missing_exports)
+        )
+
+    unlisted_exports = (public_symbols & dynamic_symbols) - expected_symbols
+    if unlisted_exports:
+        errors.append(
+            "public APIs exported by libnvshmem_host.so but absent from the manifest:\n"
+            + format_symbols(unlisted_exports)
+        )
+
+    if errors:
+        raise RuntimeError("host public C API ABI mismatch:\n" + "\n".join(errors))
 
 
 def mangled_public_definitions(
@@ -151,6 +204,7 @@ def main() -> int:
     parser.add_argument("--include-dir", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--expected-symbols", required=True)
     parser.add_argument("--cxx-standard", required=True)
     parser.add_argument("--library", required=True)
     parser.add_argument("--device-library", required=True)
@@ -160,16 +214,16 @@ def main() -> int:
 
     try:
         public_symbols = public_api_symbols(preprocess(args))
+        expected_symbols = expected_api_symbols(args.expected_symbols)
         validate_c_linkage(args, public_symbols)
-        symbols = sorted(public_symbols & dynamic_function_symbols(args.nm, args.library))
-        if not symbols:
-            raise RuntimeError("did not find any dynamically exported public C APIs")
-        write_if_changed(pathlib.Path(args.output), generated_source(symbols))
+        dynamic_symbols = dynamic_function_symbols(args.nm, args.library)
+        validate_host_abi(expected_symbols, public_symbols, dynamic_symbols)
+        write_if_changed(pathlib.Path(args.output), generated_source(sorted(expected_symbols)))
     except RuntimeError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    print(f"generated {len(symbols)} public C API references")
+    print(f"generated {len(expected_symbols)} public C API references")
     return 0
 
 
