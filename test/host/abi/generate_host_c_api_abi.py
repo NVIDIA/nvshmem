@@ -73,9 +73,9 @@ def preprocess(args: argparse.Namespace) -> str:
         "-x",
         "cu",
         f"-std=c++{args.cxx_standard}",
-        f"-I{args.include_dir}",
-        args.input,
     ]
+    command.extend(f"-I{include_dir}" for include_dir in args.include_dir)
+    command.append(args.input)
     # CUDA's headers use #include_next.  Ambient include-path variables can
     # therefore make nvcc select an incompatible math.h before its own headers.
     environment = os.environ.copy()
@@ -344,7 +344,7 @@ def write_if_changed(path: pathlib.Path, contents: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--nvcc", required=True)
-    parser.add_argument("--include-dir", required=True)
+    parser.add_argument("--include-dir", action="append", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--expected-symbols", required=True)

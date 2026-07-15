@@ -17,6 +17,19 @@ file(GLOB_RECURSE NVSHMEM_HOST_PUBLIC_HEADERS CONFIGURE_DEPENDS
 set(NVSHMEM_HOST_C_API_GENERATED_SOURCE
     "${CMAKE_CURRENT_BINARY_DIR}/host_public_c_abi_generated.cu")
 
+set(NVSHMEM_HOST_C_API_INCLUDE_ARGS
+    --include-dir "${NVSHMEM_HOST_PUBLIC_INCLUDE_DIR}"
+    --include-dir "$<JOIN:$<TARGET_PROPERTY:nvshmem_host,INTERFACE_INCLUDE_DIRECTORIES>,$<SEMICOLON>--include-dir$<SEMICOLON>>")
+
+set(NVSHMEM_HOST_C_API_SOURCE_OBJECT_ARGS)
+if(SubBuild)
+  # The source-prep target checks each source object, so a public definition
+  # cannot disappear while being archived or linked into the shared library.
+  list(APPEND NVSHMEM_HOST_C_API_SOURCE_OBJECT_ARGS
+       --source-object-dir "${CMAKE_BINARY_DIR}/src/CMakeFiles/nvshmem_host.dir"
+       --source-object-dir "${CMAKE_BINARY_DIR}/src/device/CMakeFiles/nvshmem_device.dir")
+endif()
+
 # The generator validates the fixed host C ABI manifest against the public
 # headers, host/device build artifacts, and libnvshmem_host.so before
 # generating the consumer link test.
@@ -25,7 +38,7 @@ add_custom_command(
   OUTPUT "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
           --nvcc "${CMAKE_CUDA_COMPILER}"
-          --include-dir "${NVSHMEM_HOST_PUBLIC_INCLUDE_DIR}"
+          ${NVSHMEM_HOST_C_API_INCLUDE_ARGS}
           --input "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
           --output "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
           --expected-symbols "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_api_symbols.txt"
@@ -34,6 +47,7 @@ add_custom_command(
           --device-library "$<TARGET_FILE:nvshmem_device>"
           --nm "${CMAKE_NM}"
           --cxxfilt "${NVSHMEM_CXXFILT}"
+          ${NVSHMEM_HOST_C_API_SOURCE_OBJECT_ARGS}
   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
           "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
           "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_api_symbols.txt"
@@ -41,6 +55,7 @@ add_custom_command(
           nvshmem_host
           nvshmem_device
   COMMENT "Generating host public C ABI link test"
+  COMMAND_EXPAND_LISTS
   VERBATIM)
 
 add_custom_target(generate_host_public_c_abi
@@ -52,7 +67,7 @@ if(SubBuild)
   add_custom_target(update_host_public_c_api_manifest
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
             --nvcc "${CMAKE_CUDA_COMPILER}"
-            --include-dir "${NVSHMEM_HOST_PUBLIC_INCLUDE_DIR}"
+            ${NVSHMEM_HOST_C_API_INCLUDE_ARGS}
             --input "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
             --output "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
             --expected-symbols "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_api_symbols.txt"
@@ -61,6 +76,7 @@ if(SubBuild)
             --device-library "$<TARGET_FILE:nvshmem_device>"
             --nm "${CMAKE_NM}"
             --cxxfilt "${NVSHMEM_CXXFILT}"
+            ${NVSHMEM_HOST_C_API_SOURCE_OBJECT_ARGS}
             --update-expected-symbols
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
@@ -68,6 +84,7 @@ if(SubBuild)
             nvshmem_host
             nvshmem_device
     COMMENT "Updating host public C API manifest"
+    COMMAND_EXPAND_LISTS
     VERBATIM)
 endif()
 
