@@ -470,7 +470,8 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                         entity_index, entity_count);
                 }
 
-                bool use_block = (tcurr->attr & NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED) &&
+                bool use_block = nvshmemi_options.ENABLE_MULTI_PORT &&
+                                 (tcurr->attr & NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED) &&
                                  ((tcurr->device_assignment_mode ==
                                        NVSHMEM_TRANSPORT_DEVICE_ASSIGNMENT_HCA_LIST &&
                                    tcurr->n_devices >= entity_count) ||
