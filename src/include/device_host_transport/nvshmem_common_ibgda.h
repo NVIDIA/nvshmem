@@ -92,6 +92,7 @@
         state.num_requests_in_batch = NVSHMEMI_IBGDA_USCALAR_INVALID;      \
         state.log2_cumem_granularity = NVSHMEMI_IBGDA_ULSCALAR_INVALID;    \
         state.num_devices_initialized = NVSHMEMI_IBGDA_SCALAR_INVALID;     \
+        state.use_address_stable_amo = false;                              \
         state.nic_buf_on_gpumem = false;                                   \
         state.support_half_av_seg = false;                                 \
         state.may_skip_cst = false;                                        \
@@ -332,6 +333,7 @@ typedef struct {
         nvshmemi_ibgda_device_key_t *rkeys;
     } globalmem;
     int num_default_rc_per_pe;
+    bool use_address_stable_amo;
     void *extra;
     uint8_t reserved[NVSHMEMI_IBGDA_STATE_PADDING_V2];
 } nvshmemi_ibgda_device_state_v2;
