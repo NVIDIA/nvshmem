@@ -49,6 +49,7 @@ int main(int argc, char *argv[]) {
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_bw;
+    perf_stats_t *h_bw_stats = NULL;
     char perf_table_name[30];
 
     int iter = iters;
@@ -83,6 +84,8 @@ int main(int argc, char *argv[]) {
     alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
+    h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_bw_stats) goto finalize;
 
     if (use_mmap) {
         data_d = (uint64_t *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -214,157 +217,162 @@ int main(int argc, char *argv[]) {
             CUDA_CHECK(cudaDeviceSynchronize());
             nvshmem_barrier_all();
 
-            /* reset values in code. */
-            CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-            switch (test_amo.type) {
-                case AMO_AND: {
-                    if (use_egm) {
-                        memset(data_d, 0xFF, size);
-                    } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                /* Reset all state outside the timed region for each repetition. */
+                CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+                switch (test_amo.type) {
+                    case AMO_AND: {
+                        if (use_egm) {
+                            memset(data_d, 0xFF, size);
+                        } else {
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        }
+                        break;
                     }
-                    break;
-                }
-                case AMO_OR: {
-                    if (use_egm) {
-                        memset(data_d, 0xFF, size);
-                    } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                    case AMO_OR: {
+                        if (use_egm) {
+                            memset(data_d, 0xFF, size);
+                        } else {
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        }
+                        break;
                     }
-                    break;
-                }
-                case AMO_XOR: {
-                    set_value = 1;
-                    for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
-                        cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
-                                   cudaMemcpyHostToDevice);
+                    case AMO_XOR: {
+                        set_value = 1;
+                        for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
+                            cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
+                                       cudaMemcpyHostToDevice);
+                        }
+                        break;
                     }
-                    break;
-                }
-                case AMO_FETCH_AND: {
-                    if (use_egm) {
-                        memset(data_d, 0xFF, size);
-                    } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                    case AMO_FETCH_AND: {
+                        if (use_egm) {
+                            memset(data_d, 0xFF, size);
+                        } else {
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        }
+                        break;
                     }
-                    break;
-                }
-                case AMO_FETCH_OR: {
-                    if (use_egm) {
-                        memset(data_d, 0xFF, size);
-                    } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                    case AMO_FETCH_OR: {
+                        if (use_egm) {
+                            memset(data_d, 0xFF, size);
+                        } else {
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        }
+                        break;
                     }
-                    break;
-                }
-                case AMO_FETCH_XOR: {
-                    for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
-                        cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
-                                   cudaMemcpyHostToDevice);
+                    case AMO_FETCH_XOR: {
+                        for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
+                            cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
+                                       cudaMemcpyHostToDevice);
+                        }
+                        break;
                     }
-                    break;
+                    default: {
+                        break;
+                    }
                 }
-                default: {
-                    break;
-                }
-            }
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaDeviceSynchronize());
-            nvshmem_barrier_all();
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaDeviceSynchronize());
+                nvshmem_barrier_all();
 
-            cudaEventRecord(start);
-            switch (test_amo.type) {
-                case AMO_INC: {
-                    CALL_ATOMIC_BW_KERNEL(inc, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
+                cudaEventRecord(start);
+                switch (test_amo.type) {
+                    case AMO_INC: {
+                        CALL_ATOMIC_BW_KERNEL(inc, blocks, threads, data_d, counter_d, nelems, mype,
+                                              iter, args_iter)
+                        break;
+                    }
+                    case AMO_SET: {
+                        CALL_ATOMIC_BW_KERNEL(set, blocks, threads, data_d, counter_d, nelems, mype,
+                                              iter, args_iter)
+                        break;
+                    }
+                    case AMO_ADD: {
+                        CALL_ATOMIC_BW_KERNEL(add, blocks, threads, data_d, counter_d, nelems, mype,
+                                              iter, args_iter)
+                        break;
+                    }
+                    case AMO_AND: {
+                        CALL_ATOMIC_BW_KERNEL(and, blocks, threads, data_d, counter_d, nelems, mype,
+                                              iter, args_iter)
+                        break;
+                    }
+                    case AMO_OR: {
+                        CALL_ATOMIC_BW_KERNEL(or, blocks, threads, data_d, counter_d, nelems, mype,
+                                              iter, args_iter)
+                        break;
+                    }
+                    case AMO_XOR: {
+                        CALL_ATOMIC_BW_KERNEL(xor, blocks, threads, data_d, counter_d, nelems, mype,
+                                              iter, args_iter)
+                        break;
+                    }
+                    case AMO_FETCH_INC: {
+                        CALL_ATOMIC_BW_KERNEL(fetch_inc, blocks, threads, data_d, counter_d, nelems,
+                                              mype, iter, args_iter)
+                        break;
+                    }
+                    case AMO_FETCH_ADD: {
+                        CALL_ATOMIC_BW_KERNEL(fetch_add, blocks, threads, data_d, counter_d, nelems,
+                                              mype, iter, args_iter)
+                        break;
+                    }
+                    case AMO_FETCH_AND: {
+                        CALL_ATOMIC_BW_KERNEL(fetch_and, blocks, threads, data_d, counter_d, nelems,
+                                              mype, iter, args_iter)
+                        break;
+                    }
+                    case AMO_FETCH_OR: {
+                        CALL_ATOMIC_BW_KERNEL(fetch_or, blocks, threads, data_d, counter_d, nelems,
+                                              mype, iter, args_iter)
+                        break;
+                    }
+                    case AMO_FETCH_XOR: {
+                        CALL_ATOMIC_BW_KERNEL(fetch_xor, blocks, threads, data_d, counter_d, nelems,
+                                              mype, iter, args_iter)
+                        break;
+                    }
+                    case AMO_SWAP: {
+                        CALL_ATOMIC_BW_KERNEL(swap, blocks, threads, data_d, counter_d, nelems,
+                                              mype, iter, args_iter)
+                        break;
+                    }
+                    case AMO_COMPARE_SWAP: {
+                        CALL_ATOMIC_BW_KERNEL(compare_swap, blocks, threads, data_d, counter_d,
+                                              nelems, mype, iter, args_iter)
+                        break;
+                    }
+                    default: {
+                        /* Should be unreachable */
+                        fprintf(stderr, "Error, unsupported Atomic op %d.\n", test_amo.type);
+                        goto finalize;
+                    }
                 }
-                case AMO_SET: {
-                    CALL_ATOMIC_BW_KERNEL(set, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
-                }
-                case AMO_ADD: {
-                    CALL_ATOMIC_BW_KERNEL(add, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
-                }
-                case AMO_AND: {
-                    CALL_ATOMIC_BW_KERNEL(and, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
-                }
-                case AMO_OR: {
-                    CALL_ATOMIC_BW_KERNEL(or, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
-                }
-                case AMO_XOR: {
-                    CALL_ATOMIC_BW_KERNEL(xor, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
-                }
-                case AMO_FETCH_INC: {
-                    CALL_ATOMIC_BW_KERNEL(fetch_inc, blocks, threads, data_d, counter_d, nelems,
-                                          mype, iter, args_iter)
-                    break;
-                }
-                case AMO_FETCH_ADD: {
-                    CALL_ATOMIC_BW_KERNEL(fetch_add, blocks, threads, data_d, counter_d, nelems,
-                                          mype, iter, args_iter)
-                    break;
-                }
-                case AMO_FETCH_AND: {
-                    CALL_ATOMIC_BW_KERNEL(fetch_and, blocks, threads, data_d, counter_d, nelems,
-                                          mype, iter, args_iter)
-                    break;
-                }
-                case AMO_FETCH_OR: {
-                    CALL_ATOMIC_BW_KERNEL(fetch_or, blocks, threads, data_d, counter_d, nelems,
-                                          mype, iter, args_iter)
-                    break;
-                }
-                case AMO_FETCH_XOR: {
-                    CALL_ATOMIC_BW_KERNEL(fetch_xor, blocks, threads, data_d, counter_d, nelems,
-                                          mype, iter, args_iter)
-                    break;
-                }
-                case AMO_SWAP: {
-                    CALL_ATOMIC_BW_KERNEL(swap, blocks, threads, data_d, counter_d, nelems, mype,
-                                          iter, args_iter)
-                    break;
-                }
-                case AMO_COMPARE_SWAP: {
-                    CALL_ATOMIC_BW_KERNEL(compare_swap, blocks, threads, data_d, counter_d, nelems,
-                                          mype, iter, args_iter)
-                    break;
-                }
-                default: {
-                    /* Should be unreachable */
-                    fprintf(stderr, "Error, unsupported Atomic op %d.\n", test_amo.type);
-                    goto finalize;
-                }
-            }
-            cudaEventRecord(stop);
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaEventSynchronize(stop));
-            cudaEventElapsedTime(&milliseconds, start, stop);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&milliseconds, start, stop);
 
-            h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-            nvshmem_barrier_all();
+                h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                perf_stats_add(h_bw_stats[i], h_bw[i]);
+                nvshmem_barrier_all();
+            }
             i++;
         }
     } else {
         for (size = min_size; size <= max_size; size *= step_factor) {
             nvshmem_barrier_all();
-            nvshmem_barrier_all();
-            nvshmem_barrier_all();
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                nvshmem_barrier_all();
+                nvshmem_barrier_all();
+            }
         }
     }
 
     if (mype == 0) {
-        print_table_basic(perf_table_name, "None", "size (Bytes)", "BW", "GB/sec", '+', h_size_arr,
-                          h_bw, i);
+        print_basic_table(perf_table_name, "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
+                          h_bw_stats);
     }
 
 finalize:
@@ -377,6 +385,7 @@ finalize:
         }
     }
     free_tables(h_tables, 2);
+    free(h_bw_stats);
     finalize_wrapper();
 
     return 0;

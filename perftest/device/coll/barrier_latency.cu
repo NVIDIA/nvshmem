@@ -81,6 +81,8 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
     double *h_thread_lat = (double *)h_tables[0];
     double *h_warp_lat = (double *)h_tables[1];
     double *h_block_lat = (double *)h_tables[2];
+    perf_stats_t thread_stats = {}, warp_stats = {}, block_stats = {};
+    perf_stats_t all_thread_stats = {}, all_warp_stats = {}, all_block_stats = {};
     uint64_t tpb_size = nvshm_test_num_tpb;
     void *barrier_args_1[] = {&team, &skip};
     void *barrier_args_2[] = {&team, &iter};
@@ -98,15 +100,17 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
 
     nvshmem_barrier_all();
 
-    cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(, num_blocks, nvshm_test_num_tpb, barrier_args_2, stream, _)
-
-    cudaEventRecord(stop, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
-    if (!mype) {
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_thread_lat[0] = (milliseconds * 1000.0) / (float)iter;
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        cudaEventRecord(start, stream);
+        CALL_BARRIER_KERNEL(, num_blocks, nvshm_test_num_tpb, barrier_args_2, stream, _)
+        cudaEventRecord(stop, stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_thread_lat[0] = (milliseconds * 1000.0) / (float)iter;
+            perf_stats_add(thread_stats, h_thread_lat[0]);
+        }
+        nvshmem_barrier_all();
     }
 
     nvshmem_barrier_all();
@@ -116,15 +120,17 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
 
     nvshmem_barrier_all();
 
-    cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(_warp, num_blocks, nvshm_test_num_tpb, barrier_args_2, stream, _)
-
-    cudaEventRecord(stop, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
-    if (!mype) {
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_warp_lat[0] = (milliseconds * 1000.0) / (float)iter;
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        cudaEventRecord(start, stream);
+        CALL_BARRIER_KERNEL(_warp, num_blocks, nvshm_test_num_tpb, barrier_args_2, stream, _)
+        cudaEventRecord(stop, stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_warp_lat[0] = (milliseconds * 1000.0) / (float)iter;
+            perf_stats_add(warp_stats, h_warp_lat[0]);
+        }
+        nvshmem_barrier_all();
     }
 
     nvshmem_barrier_all();
@@ -134,24 +140,26 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
 
     nvshmem_barrier_all();
 
-    cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(_block, num_blocks, nvshm_test_num_tpb, barrier_args_2, stream, _)
-
-    cudaEventRecord(stop, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
-    if (!mype) {
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_block_lat[0] = (milliseconds * 1000.0) / (float)iter;
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        cudaEventRecord(start, stream);
+        CALL_BARRIER_KERNEL(_block, num_blocks, nvshm_test_num_tpb, barrier_args_2, stream, _)
+        cudaEventRecord(stop, stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_block_lat[0] = (milliseconds * 1000.0) / (float)iter;
+            perf_stats_add(block_stats, h_block_lat[0]);
+        }
+        nvshmem_barrier_all();
     }
 
     if (!mype) {
-        print_table_basic("barrier_device", "thread", "threads per block", "latency", "us", '-',
-                          &tpb_size, h_thread_lat, 1);
-        print_table_basic("barrier_device", "warp", "threads per block", "latency", "us", '-',
-                          &tpb_size, h_warp_lat, 1);
-        print_table_basic("barrier_device", "block", "threads per block", "latency", "us", '-',
-                          &tpb_size, h_block_lat, 1);
+        print_basic_table("barrier_device", "thread", "latency", "us", '-', &tpb_size, h_thread_lat,
+                          1, &thread_stats);
+        print_basic_table("barrier_device", "warp", "latency", "us", '-', &tpb_size, h_warp_lat, 1,
+                          &warp_stats);
+        print_basic_table("barrier_device", "block", "latency", "us", '-', &tpb_size, h_block_lat,
+                          1, &block_stats);
     }
 
     nvshmem_barrier_all();
@@ -161,15 +169,17 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
 
     nvshmem_barrier_all();
 
-    cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream, _all_)
-
-    cudaEventRecord(stop, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
-    if (!mype) {
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_thread_lat[0] = (milliseconds * 1000.0) / (float)iter;
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        cudaEventRecord(start, stream);
+        CALL_BARRIER_KERNEL(, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream, _all_)
+        cudaEventRecord(stop, stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_thread_lat[0] = (milliseconds * 1000.0) / (float)iter;
+            perf_stats_add(all_thread_stats, h_thread_lat[0]);
+        }
+        nvshmem_barrier_all();
     }
 
     nvshmem_barrier_all();
@@ -179,15 +189,18 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
 
     nvshmem_barrier_all();
 
-    cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(_warp, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream, _all_)
-
-    cudaEventRecord(stop, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
-    if (!mype) {
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_warp_lat[0] = (milliseconds * 1000.0) / (float)iter;
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        cudaEventRecord(start, stream);
+        CALL_BARRIER_KERNEL(_warp, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream,
+                            _all_)
+        cudaEventRecord(stop, stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_warp_lat[0] = (milliseconds * 1000.0) / (float)iter;
+            perf_stats_add(all_warp_stats, h_warp_lat[0]);
+        }
+        nvshmem_barrier_all();
     }
 
     nvshmem_barrier_all();
@@ -197,24 +210,27 @@ int barrier_calling_kernel(nvshmem_team_t team, cudaStream_t stream, int mype, v
 
     nvshmem_barrier_all();
 
-    cudaEventRecord(start, stream);
-    CALL_BARRIER_KERNEL(_block, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream, _all_)
-
-    cudaEventRecord(stop, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
-    if (!mype) {
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_block_lat[0] = (milliseconds * 1000.0) / (float)iter;
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        cudaEventRecord(start, stream);
+        CALL_BARRIER_KERNEL(_block, num_blocks, nvshm_test_num_tpb, barrier_all_args_2, stream,
+                            _all_)
+        cudaEventRecord(stop, stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_block_lat[0] = (milliseconds * 1000.0) / (float)iter;
+            perf_stats_add(all_block_stats, h_block_lat[0]);
+        }
+        nvshmem_barrier_all();
     }
 
     if (!mype) {
-        print_table_basic("barrier_all_device", "thread", "threads per block", "latency", "us", '-',
-                          &tpb_size, h_thread_lat, 1);
-        print_table_basic("barrier_all_device", "warp", "threads per block", "latency", "us", '-',
-                          &tpb_size, h_warp_lat, 1);
-        print_table_basic("barrier_all_device", "block", "threads per block", "latency", "us", '-',
-                          &tpb_size, h_block_lat, 1);
+        print_basic_table("barrier_all_device", "thread", "latency", "us", '-', &tpb_size,
+                          h_thread_lat, 1, &all_thread_stats);
+        print_basic_table("barrier_all_device", "warp", "latency", "us", '-', &tpb_size, h_warp_lat,
+                          1, &all_warp_stats);
+        print_basic_table("barrier_all_device", "block", "latency", "us", '-', &tpb_size,
+                          h_block_lat, 1, &all_block_stats);
     }
 
     return status;

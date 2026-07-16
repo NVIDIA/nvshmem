@@ -46,6 +46,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <getopt.h>
+#include <vector>
 #include "utils.h"
 
 /* smem layout when give_smem is in use: [barrier region 512 B][data].
@@ -125,6 +126,11 @@ int main(int argc, char *argv[]) {
     float ms_stg_quiet = 0, ms_stg_flush = 0;
     float ms_tma_quiet = 0, ms_tma_flush = 0;
     cudaEvent_t start = NULL, stop = NULL;
+    std::vector<uint64_t> size_values;
+    std::vector<perf_stats_t> stg_quiet_stats;
+    std::vector<perf_stats_t> stg_flush_stats;
+    std::vector<perf_stats_t> tma_quiet_stats;
+    std::vector<perf_stats_t> tma_flush_stats;
 
     read_args(argc, argv);
     max_threads = (int)threads_per_block;
@@ -177,7 +183,7 @@ int main(int argc, char *argv[]) {
     CUDA_CHECK(cudaFuncSetAttribute(pipelined_put_smem_src<false, false>,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
 
-    if (mype == 0) {
+    if (mype == 0 && !repetitions_requested) {
         printf("# shmem_flush_bench - pipelined put BW (source in smem)\n");
         printf("#   iters=%zu, threads=%d, CTAs=1\n", (size_t)iters, max_threads);
         printf("#   Columns: aggregate GB/s for each (transport, per-iter-sync) combo.\n");
@@ -200,64 +206,108 @@ int main(int argc, char *argv[]) {
             kernel_ptr<<<1, max_threads, smem_size>>>(dst_d, nelems, peer, n);
         };
 
+        perf_stats_t stg_quiet = {};
+        perf_stats_t stg_flush = {};
+        perf_stats_t tma_quiet = {};
+        perf_stats_t tma_flush = {};
+
         /* st.global + quiet */
         if (mype == 0) {
             run(pipelined_put_smem_src<false, false>, warmup_iters);
             CUDA_CHECK(cudaDeviceSynchronize());
-            cudaEventRecord(start);
-            run(pipelined_put_smem_src<false, false>, iters);
-            cudaEventRecord(stop);
-            CUDA_CHECK(cudaEventSynchronize(stop));
-            cudaEventElapsedTime(&ms_stg_quiet, start, stop);
         }
         nvshmem_barrier_all();
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (mype == 0) {
+                cudaEventRecord(start);
+                run(pipelined_put_smem_src<false, false>, iters);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&ms_stg_quiet, start, stop);
+                perf_stats_add(stg_quiet, bw_gbs(size, iters, ms_stg_quiet));
+            }
+            nvshmem_barrier_all();
+        }
 
         /* st.global + flush */
         if (mype == 0) {
             run(pipelined_put_smem_src<false, true>, warmup_iters);
             CUDA_CHECK(cudaDeviceSynchronize());
-            cudaEventRecord(start);
-            run(pipelined_put_smem_src<false, true>, iters);
-            cudaEventRecord(stop);
-            CUDA_CHECK(cudaEventSynchronize(stop));
-            cudaEventElapsedTime(&ms_stg_flush, start, stop);
         }
         nvshmem_barrier_all();
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (mype == 0) {
+                cudaEventRecord(start);
+                run(pipelined_put_smem_src<false, true>, iters);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&ms_stg_flush, start, stop);
+                perf_stats_add(stg_flush, bw_gbs(size, iters, ms_stg_flush));
+            }
+            nvshmem_barrier_all();
+        }
 
         /* TMA + quiet */
         if (mype == 0) {
             run(pipelined_put_smem_src<true, false>, warmup_iters);
             CUDA_CHECK(cudaDeviceSynchronize());
-            cudaEventRecord(start);
-            run(pipelined_put_smem_src<true, false>, iters);
-            cudaEventRecord(stop);
-            CUDA_CHECK(cudaEventSynchronize(stop));
-            cudaEventElapsedTime(&ms_tma_quiet, start, stop);
         }
         nvshmem_barrier_all();
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (mype == 0) {
+                cudaEventRecord(start);
+                run(pipelined_put_smem_src<true, false>, iters);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&ms_tma_quiet, start, stop);
+                perf_stats_add(tma_quiet, bw_gbs(size, iters, ms_tma_quiet));
+            }
+            nvshmem_barrier_all();
+        }
 
         /* TMA + flush */
         if (mype == 0) {
             run(pipelined_put_smem_src<true, true>, warmup_iters);
             CUDA_CHECK(cudaDeviceSynchronize());
-            cudaEventRecord(start);
-            run(pipelined_put_smem_src<true, true>, iters);
-            cudaEventRecord(stop);
-            CUDA_CHECK(cudaEventSynchronize(stop));
-            cudaEventElapsedTime(&ms_tma_flush, start, stop);
         }
         nvshmem_barrier_all();
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (mype == 0) {
+                cudaEventRecord(start);
+                run(pipelined_put_smem_src<true, true>, iters);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&ms_tma_flush, start, stop);
+                perf_stats_add(tma_flush, bw_gbs(size, iters, ms_tma_flush));
+            }
+            nvshmem_barrier_all();
+        }
 
         if (mype == 0) {
-            double g_stg_q = bw_gbs(size, iters, ms_stg_quiet);
-            double g_stg_f = bw_gbs(size, iters, ms_stg_flush);
-            double g_tma_q = bw_gbs(size, iters, ms_tma_quiet);
-            double g_tma_f = bw_gbs(size, iters, ms_tma_flush);
-            double speedup = (g_stg_f > 0.0) ? (g_tma_f / g_stg_f) : 0.0;
-            printf("  %6zu   %10.3f  %10.3f  %10.3f  %9.3f  %6.2fx\n", size, g_stg_q, g_stg_f,
-                   g_tma_q, g_tma_f, speedup);
+            if (repetitions_requested) {
+                size_values.push_back(size);
+                stg_quiet_stats.push_back(stg_quiet);
+                stg_flush_stats.push_back(stg_flush);
+                tma_quiet_stats.push_back(tma_quiet);
+                tma_flush_stats.push_back(tma_flush);
+            } else {
+                double speedup = (stg_flush.mean > 0.0) ? (tma_flush.mean / stg_flush.mean) : 0.0;
+                printf("  %6zu   %10.3f  %10.3f  %10.3f  %9.3f  %6.2fx\n", size, stg_quiet.mean,
+                       stg_flush.mean, tma_quiet.mean, tma_flush.mean, speedup);
+            }
         }
         if (size == max_size) break;
+    }
+
+    if (mype == 0 && repetitions_requested) {
+        print_basic_table("shmem_flush_bench", "st.global-quiet", "BW", "GB/sec", '+',
+                          size_values.data(), nullptr, size_values.size(), stg_quiet_stats.data());
+        print_basic_table("shmem_flush_bench", "st.global-flush", "BW", "GB/sec", '+',
+                          size_values.data(), nullptr, size_values.size(), stg_flush_stats.data());
+        print_basic_table("shmem_flush_bench", "TMA-quiet", "BW", "GB/sec", '+', size_values.data(),
+                          nullptr, size_values.size(), tma_quiet_stats.data());
+        print_basic_table("shmem_flush_bench", "TMA-flush", "BW", "GB/sec", '+', size_values.data(),
+                          nullptr, size_values.size(), tma_flush_stats.data());
     }
 
 finalize:

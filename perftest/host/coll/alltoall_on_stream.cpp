@@ -21,6 +21,7 @@ int main(int argc, char **argv) {
     char size_string[100];
     uint64_t *size_array = (uint64_t *)calloc(max_size_log, sizeof(uint64_t));
     double **latency_array = (double **)malloc(max_size_log * sizeof(double *));
+    perf_stats_t *latency_stats = (perf_stats_t *)calloc(max_size_log, sizeof(perf_stats_t));
 
     for (int i = 0; i < max_size_log; i++) {
         latency_array[i] = (double *)calloc(iters, sizeof(double));
@@ -121,8 +122,9 @@ int main(int argc, char **argv) {
             break;
     }
     if (!mype) {
-        print_table_v2("alltoall_on_stream", datatype.name.c_str(), "size (bytes)", "latency", "us",
-                       '-', size_array, latency_array, max_size_log, iters);
+        print_host_collective_table("alltoall_on_stream", datatype.name.c_str(), "latency", "us",
+                                    '-', size_array, latency_array, max_size_log, iters,
+                                    latency_stats);
     }
 
     nvshmem_barrier_all();
@@ -138,5 +140,6 @@ int main(int argc, char **argv) {
     finalize_wrapper();
 
 out:
+    free(latency_stats);
     return status;
 }

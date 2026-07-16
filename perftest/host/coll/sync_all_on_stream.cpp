@@ -11,12 +11,14 @@ int main(int c, char *v[]) {
     int mype;
     size_t size = 1;
     double latency_value;
-    int iters = MAX_ITERS;
-    int skip = MAX_SKIP;
+    read_args(c, v);
+    int iter_count = iters;
+    int skip = warmup_iters;
     struct timeval t_start, t_stop;
     float ms = 0;
     cudaEvent_t start_event, stop_event;
     cudaStream_t stream;
+    perf_stats_t latency_stats = {};
 
     init_wrapper(&c, &v);
 
@@ -30,18 +32,24 @@ int main(int c, char *v[]) {
 
     DEBUG_PRINT("SHMEM: [%d of %d] hello shmem world! \n", mype, npes);
 
-    for (iters = 0; iters < coll_max_iters + skip; iters++) {
-        if (iters == skip) CUDA_CHECK(cudaEventRecord(start_event, stream));
-
+    for (int iter = 0; iter < skip; iter++) {
         nvshmemx_sync_all_on_stream(stream);
     }
-    CUDA_CHECK(cudaEventRecord(stop_event, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
-    CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        CUDA_CHECK(cudaEventRecord(start_event, stream));
+        for (int iter = 0; iter < iter_count; iter++) {
+            nvshmemx_sync_all_on_stream(stream);
+        }
+        CUDA_CHECK(cudaEventRecord(stop_event, stream));
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));
+        latency_value = (ms / iter_count) * 1000;
+        perf_stats_add(latency_stats, latency_value);
+    }
     if (!mype) {
-        latency_value = (ms / coll_max_iters) * 1000;
-        print_table_basic("sync_all_on_stream", "None", "size (Bytes)", "latency", "us", '-', &size,
-                          &latency_value, 1);
+        print_basic_table("sync_all_on_stream", "None", "latency", "us", '-', &size, &latency_value,
+                          1, &latency_stats);
     }
 
     nvshmem_barrier_all();

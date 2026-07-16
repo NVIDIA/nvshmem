@@ -89,6 +89,7 @@ int main(int argc, char *argv[]) {
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_bw = NULL, *h_bw_total = NULL;
+    perf_stats_t *h_bw_stats = NULL;
     double *d_bw = NULL, *d_bw_sum = NULL;
 
     bw_fn_t bw_fn = use_smem ? bw<SMEMToggle::ENABLE> : bw<SMEMToggle::DISABLE>;
@@ -128,6 +129,8 @@ int main(int argc, char *argv[]) {
     alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
+    h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_bw_stats) goto finalize;
 
     if (bidirectional) {
         h_bw_total = (double *)malloc(sizeof(double) * array_size);
@@ -157,40 +160,40 @@ int main(int argc, char *argv[]) {
             bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
                                                           mype, skip);
             CUDA_CHECK(cudaDeviceSynchronize());
-            CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-
-            cudaEventRecord(start);
-            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
-                                                          mype, iter);
-            cudaEventRecord(stop);
-
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaEventSynchronize(stop));
-
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-            nvshmem_barrier_all();
-
-            /* Sum all h_bw of each PE for bidirectional mode. */
-            if (bidirectional) {
-                CUDA_CHECK(cudaMemcpy(d_bw, &h_bw[i], sizeof(double), cudaMemcpyDefault));
-                nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, d_bw_sum, d_bw, 1);
-                CUDA_CHECK(cudaMemcpy(&h_bw_total[i], d_bw_sum, sizeof(double), cudaMemcpyDefault));
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+                cudaEventRecord(start);
+                bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d,
+                                                              size / sizeof(double), mype, iter);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&milliseconds, start, stop);
+                h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                nvshmem_barrier_all();
+                if (bidirectional) {
+                    CUDA_CHECK(cudaMemcpy(d_bw, &h_bw[i], sizeof(double), cudaMemcpyDefault));
+                    nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, d_bw_sum, d_bw, 1);
+                    CUDA_CHECK(
+                        cudaMemcpy(&h_bw_total[i], d_bw_sum, sizeof(double), cudaMemcpyDefault));
+                }
+                if (!mype) perf_stats_add(h_bw_stats[i], bidirectional ? h_bw_total[i] : h_bw[i]);
             }
 
             i++;
         }
     } else {
         for (int size = min_size; size <= max_size; size *= step_factor) {
-            nvshmem_barrier_all();
+            for (size_t repetition = 0; repetition < repetitions; repetition++)
+                nvshmem_barrier_all();
         }
     }
 
     if (mype == 0) {
         double *p_h_bw_tmp = bidirectional ? h_bw_total : h_bw;
         const char *const test_name = bidirectional ? "shmem_get_bw_bidi" : "shmem_get_bw_uni";
-        print_table_basic(test_name, "None", "size (Bytes)", "BW", "GB/sec", '+', h_size_arr,
-                          p_h_bw_tmp, i);
+        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, p_h_bw_tmp, i,
+                          h_bw_stats);
     }
 
 finalize:
@@ -203,6 +206,7 @@ finalize:
         }
     }
     if (h_bw_total) free(h_bw_total);
+    free(h_bw_stats);
     if (d_bw) nvshmem_free(d_bw);
     if (d_bw_sum) nvshmem_free(d_bw_sum);
     free_tables(h_tables, 2);

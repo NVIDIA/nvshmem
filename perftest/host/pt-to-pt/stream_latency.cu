@@ -82,6 +82,8 @@ int main(int argc, char *argv[]) {
     uint64_t *size_array = NULL;
     double *offs_latency_array = NULL;
     double *ons_latency_array = NULL;
+    perf_stats_t *offs_latency_stats = NULL;
+    perf_stats_t *ons_latency_stats = NULL;
     cudaStream_t strm = nullptr;
     int num_entries;
     int i;
@@ -105,9 +107,11 @@ int main(int argc, char *argv[]) {
         goto finalize;
     }
 
+    static struct option long_options[] = {{"repetitions", required_argument, 0, 'r'},
+                                           {0, 0, 0, 0}};
     while (1) {
         int c;
-        c = getopt(argc, argv, "s:S:n:i:d:b:t:c:h");
+        c = getopt_long(argc, argv, "s:S:n:i:d:b:t:c:r:h", long_options, NULL);
         if (c == -1) break;
 
         switch (c) {
@@ -132,10 +136,22 @@ int main(int argc, char *argv[]) {
             case 'c':
                 ncycles = strtol(optarg, NULL, 0);
                 break;
+            case 'r': {
+                long parsed_repetitions = strtol(optarg, NULL, 0);
+                if (parsed_repetitions <= 0) {
+                    fprintf(stderr, "--repetitions must be greater than zero\n");
+                    status = -1;
+                    goto finalize;
+                }
+                repetitions = (size_t)parsed_repetitions;
+                repetitions_requested = true;
+                break;
+            }
             default:
             case 'h':
                 printf(
                     "-n [Iterations] -S [Max message size] -s [Min message size] -i [Put/Get issue type : ON_STREAM(0) otherwise 1] -d [Direction of copy : PUSH(0) or PULL(1)] -b [# blocks] \
+                 -r, --repetitions [Timed repetitions] \
                  -t [# threads] -c [# cycles to wait in the the kernel]\n");
                 goto finalize;
         }
@@ -156,6 +172,12 @@ int main(int argc, char *argv[]) {
 
     ons_latency_array = (double *)calloc(sizeof(double), num_entries);
     if (!ons_latency_array) {
+        status = -1;
+        goto finalize;
+    }
+    offs_latency_stats = (perf_stats_t *)calloc(num_entries, sizeof(perf_stats_t));
+    ons_latency_stats = (perf_stats_t *)calloc(num_entries, sizeof(perf_stats_t));
+    if (!offs_latency_stats || !ons_latency_stats) {
         status = -1;
         goto finalize;
     }
@@ -190,17 +212,21 @@ int main(int argc, char *argv[]) {
         i = 0;
         for (int size = min_msg_size; size <= max_msg_size; size *= 2) {
             size_array[i] = size;
-            lat(data_d, data_d_local, size, mype, iter, dir, strm, sev, eev, &ms1, &ms2, nb, nt,
-                ncycles);
-            ons_latency_array[i] = ms1 / iter * 1000;
-            offs_latency_array[i] = ms2 / iter * 1000;
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                lat(data_d, data_d_local, size, mype, iter, dir, strm, sev, eev, &ms1, &ms2, nb, nt,
+                    ncycles);
+                ons_latency_array[i] = ms1 / iter * 1000;
+                offs_latency_array[i] = ms2 / iter * 1000;
+                perf_stats_add(ons_latency_stats[i], ons_latency_array[i]);
+                perf_stats_add(offs_latency_stats[i], offs_latency_array[i]);
+            }
             i++;
         }
 
-        print_table_basic("Stream_Latency", "with _on_stream", "size (Bytes)", "latency", "us", '-',
-                          size_array, ons_latency_array, i);
-        print_table_basic("Stream_Latency", "without _on_stream", "size (Bytes)", "latency", "us",
-                          '-', size_array, offs_latency_array, i);
+        print_basic_table("Stream_Latency", "with _on_stream", "latency", "us", '-', size_array,
+                          ons_latency_array, i, ons_latency_stats);
+        print_basic_table("Stream_Latency", "without _on_stream", "latency", "us", '-', size_array,
+                          offs_latency_array, i, offs_latency_stats);
 
         CUDA_CHECK(cudaEventDestroy(sev));
         CUDA_CHECK(cudaEventDestroy(eev));
@@ -224,6 +250,8 @@ finalize:
     if (size_array) free(size_array);
     if (ons_latency_array) free(ons_latency_array);
     if (offs_latency_array) free(offs_latency_array);
+    if (ons_latency_stats) free(ons_latency_stats);
+    if (offs_latency_stats) free(offs_latency_stats);
 
     if (data_d_local) {
         if (use_mmap) {

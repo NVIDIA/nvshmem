@@ -137,16 +137,16 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
                         max_size / sizeof(half));
         RUN_ITERS(half, half, , 512, nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "fp16-sum-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "fp16-sum-t", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(VLEN), min_size / sizeof(float));
         max_elems = max(static_cast<size_t>(VLEN), max_size / sizeof(float));
         RUN_ITERS(float, float, , 512, nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "float-sum-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "float-sum-t", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
     }
 
@@ -156,16 +156,16 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
         max_elems = max(static_cast<size_t>(VLEN), max_size / sizeof(half));
         RUN_ITERS(half, half, _warp, 4096, nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "fp16-sum-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "fp16-sum-w", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(VLEN), round_up(min_size / sizeof(float), VLEN));
         max_elems = max(static_cast<size_t>(VLEN), max_size / sizeof(float));
         RUN_ITERS(float, float, _warp, 4096, nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "float-sum-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "float-sum-w", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
     }
 
@@ -176,8 +176,8 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
         RUN_ITERS(half, half, _warpgroup, 65536,
                   nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "fp16-sum-g", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "fp16-sum-g", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(VLEN), round_up(min_size / sizeof(float), VLEN));
@@ -185,8 +185,8 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
         RUN_ITERS(float, float, _warpgroup, 65536,
                   nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "float-sum-g", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "float-sum-g", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
     }
 
@@ -197,8 +197,8 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
         RUN_ITERS(half, half, _block, max_elems,
                   nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "fp16-sum-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "fp16-sum-b", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(VLEN), round_up(min_size / sizeof(float), VLEN));
@@ -206,8 +206,8 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
         RUN_ITERS(float, float, _block, max_elems,
                   nvshmemx::tile_coll_algo_t::NVLS_TWO_SHOT_PUSH_NBI);
         if (!mype) {
-            print_table_v1("device_reduction", "float-sum-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "float-sum-b", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
         }
     }
 

@@ -89,7 +89,6 @@ extern int coll_max_iters;
             cudaEvent_t t_start, t_stop;                                                          \
             CUDA_CHECK(cudaEventCreate(&t_start));                                                \
             CUDA_CHECK(cudaEventCreate(&t_stop));                                                 \
-            int latency_iters = 0;                                                                \
             auto lat_idx_array = latency_array[array_index];                                      \
             nvshmemx_barrier_all_on_stream(stream);                                               \
             for (int iter = 0; iter < warmup_iters; iter++) {                                     \
@@ -98,15 +97,19 @@ extern int coll_max_iters;
             }                                                                                     \
             CUDA_CHECK(cudaStreamSynchronize(stream));                                            \
             nvshmemx_barrier_all_on_stream(stream);                                               \
-            for (int iter = 0; iter < iters; iter++) {                                            \
-                CUDA_CHECK(cudaEventRecord(t_start, stream));                                     \
-                call_shmem_##coll##_on_stream(TYPENAME, TYPE, NVSHMEM_TEAM_WORLD, d_dest,         \
-                                              d_source, num_elems, root, stream);                 \
-                CUDA_CHECK(cudaEventRecord(t_stop, stream));                                      \
-                CUDA_CHECK(cudaStreamSynchronize(stream));                                        \
-                CUDA_CHECK(cudaEventElapsedTime(&latency, t_start, t_stop));                      \
-                lat_idx_array[latency_iters] = latency * 1e+3;                                    \
-                latency_iters++;                                                                  \
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {                 \
+                double repetition_sum = 0.0;                                                      \
+                for (size_t iter = 0; iter < iters; iter++) {                                     \
+                    CUDA_CHECK(cudaEventRecord(t_start, stream));                                 \
+                    call_shmem_##coll##_on_stream(TYPENAME, TYPE, NVSHMEM_TEAM_WORLD, d_dest,     \
+                                                  d_source, num_elems, root, stream);             \
+                    CUDA_CHECK(cudaEventRecord(t_stop, stream));                                  \
+                    CUDA_CHECK(cudaStreamSynchronize(stream));                                    \
+                    CUDA_CHECK(cudaEventElapsedTime(&latency, t_start, t_stop));                  \
+                    lat_idx_array[iter] = latency * 1e+3;                                         \
+                    repetition_sum += lat_idx_array[iter];                                        \
+                }                                                                                 \
+                perf_stats_add(latency_stats[array_index], repetition_sum / (double)iters);       \
             }                                                                                     \
             CUDA_CHECK(cudaEventDestroy(t_start));                                                \
             CUDA_CHECK(cudaEventDestroy(t_stop));                                                 \
@@ -135,16 +138,16 @@ extern int coll_max_iters;
         for (size_t num_elems = min_elems; num_elems <= max_elems; num_elems *= step_factor) {   \
             float ms = 0.0f;                                                                     \
             auto lat_idx_array = latency_array[array_index];                                     \
-            /* Run coll once as a warmup */                                                      \
-            call_shmem_##coll##_on_stream(TYPENAME, TYPE, NVSHMEM_TEAM_WORLD, d_dest, d_source,  \
-                                          num_elems, root, stream);                              \
+            for (size_t iter = 0; iter < warmup_iters; iter++)                                   \
+                call_shmem_##coll##_on_stream(TYPENAME, TYPE, NVSHMEM_TEAM_WORLD, d_dest,        \
+                                              d_source, num_elems, root, stream);                \
             nvshmemx_barrier_all_on_stream(stream);                                              \
             CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
             /* Start graph capture */                                                            \
             cudaGraph_t graph;                                                                   \
             cudaGraphExec_t graph_instance;                                                      \
             CUDA_CHECK(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));             \
-            for (int iter = 0; iter < warmup_iters + iters; iter++) {                            \
+            for (size_t iter = 0; iter < iters; iter++) {                                        \
                 call_shmem_##coll##_on_stream(TYPENAME, TYPE, NVSHMEM_TEAM_WORLD, d_dest,        \
                                               d_source, num_elems, root, stream);                \
             }                                                                                    \
@@ -153,23 +156,18 @@ extern int coll_max_iters;
             nvshmemx_barrier_all_on_stream(stream);                                              \
             CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
                                                                                                  \
-            /* Warmup launch with no timing */                                                   \
-            CUDA_CHECK(cudaGraphLaunch(graph_instance, stream));                                 \
-            nvshmemx_barrier_all_on_stream(stream);                                              \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-                                                                                                 \
-            /* Real launch with timing */                                                        \
-            CUDA_CHECK(cudaEventRecord(t_start, stream));                                        \
-            CUDA_CHECK(cudaGraphLaunch(graph_instance, stream));                                 \
-            CUDA_CHECK(cudaEventRecord(t_stop, stream));                                         \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-            CUDA_CHECK(cudaEventElapsedTime(&ms, t_start, t_stop));                              \
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {                \
+                CUDA_CHECK(cudaEventRecord(t_start, stream));                                    \
+                CUDA_CHECK(cudaGraphLaunch(graph_instance, stream));                             \
+                CUDA_CHECK(cudaEventRecord(t_stop, stream));                                     \
+                CUDA_CHECK(cudaStreamSynchronize(stream));                                       \
+                CUDA_CHECK(cudaEventElapsedTime(&ms, t_start, t_stop));                          \
+                lat_idx_array[0] = (ms * 1e+3) / (double)iters;                                  \
+                perf_stats_add(latency_stats[array_index], lat_idx_array[0]);                    \
+            }                                                                                    \
             /* Cleanup */                                                                        \
             CUDA_CHECK(cudaGraphExecDestroy(graph_instance));                                    \
             CUDA_CHECK(cudaGraphDestroy(graph));                                                 \
-            /* Divide by niters*/                                                                \
-            ms /= (iters + warmup_iters);                                                        \
-            lat_idx_array[0] = ms * 1e+3;                                                        \
             const char *op_name = #coll;                                                         \
             size_array[array_index] =                                                            \
                 calculate_collective_size(op_name, num_elems, sizeof(TYPE), npes);               \
@@ -205,16 +203,15 @@ extern int coll_max_iters;
         }                                                                                        \
         int idx = 0;                                                                             \
         for (size_t num_elems = min_elems; num_elems <= max_elems; num_elems *= step_factor) {   \
-            /* Run collective once as a warmup, per CUDA team's recommendation. Without this,    \
-             * sizes above 256K do not work. */                                                  \
-            nvshmemx_##TYPENAME##_##OP##_##coll##_on_stream(                                     \
-                team, (TYPE *)d_dest, (const TYPE *)d_source, num_elems, stream);                \
+            for (size_t iter = 0; iter < warmup_iters; iter++)                                   \
+                nvshmemx_##TYPENAME##_##OP##_##coll##_on_stream(                                 \
+                    team, (TYPE *)d_dest, (const TYPE *)d_source, num_elems, stream);            \
             nvshmemx_barrier_all_on_stream(stream);                                              \
             CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
             cudaGraph_t graph;                                                                   \
             cudaGraphExec_t graph_instance;                                                      \
             CUDA_CHECK(cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));             \
-            for (int iter = 0; iter < iters + warmup_iters; iter++) {                            \
+            for (size_t iter = 0; iter < iters; iter++) {                                        \
                 nvshmemx_##TYPENAME##_##OP##_##coll##_on_stream(                                 \
                     team, (TYPE *)d_dest, (const TYPE *)d_source, num_elems, stream);            \
             }                                                                                    \
@@ -222,23 +219,19 @@ extern int coll_max_iters;
             CUDA_CHECK(cudaGraphInstantiate(&graph_instance, graph, NULL, NULL, 0));             \
             nvshmemx_barrier_all_on_stream(stream);                                              \
             CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-            /* Warmup Launch - no timing */                                                      \
-            CUDA_CHECK(cudaGraphLaunch(graph_instance, stream));                                 \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-            nvshmemx_barrier_all_on_stream(stream);                                              \
-            /* Real launch. Start timer */                                                       \
-            CUDA_CHECK(cudaEventRecord(start_event, stream));                                    \
-            CUDA_CHECK(cudaGraphLaunch(graph_instance, stream));                                 \
-            CUDA_CHECK(cudaEventRecord(stop_event, stream));                                     \
-            nvshmemx_barrier_all_on_stream(stream);                                              \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-            CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));                      \
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {                \
+                CUDA_CHECK(cudaEventRecord(start_event, stream));                                \
+                CUDA_CHECK(cudaGraphLaunch(graph_instance, stream));                             \
+                CUDA_CHECK(cudaEventRecord(stop_event, stream));                                 \
+                nvshmemx_barrier_all_on_stream(stream);                                          \
+                CUDA_CHECK(cudaStreamSynchronize(stream));                                       \
+                CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));                  \
+                latency_array[idx][0] = (ms * 1e+3) / (double)iters;                             \
+                perf_stats_add(latency_stats[idx], latency_array[idx][0]);                       \
+            }                                                                                    \
             /* Cleanup */                                                                        \
             CUDA_CHECK(cudaGraphExecDestroy(graph_instance));                                    \
             CUDA_CHECK(cudaGraphDestroy(graph));                                                 \
-            /* Divide by niters*/                                                                \
-            ms /= (iters + warmup_iters);                                                        \
-            latency_array[idx][0] = ms * 1e+3;                                                   \
             const char *op_name = #coll;                                                         \
             size_array[idx] = calculate_collective_size(op_name, num_elems, sizeof(TYPE), npes); \
             idx++;                                                                               \
@@ -264,16 +257,23 @@ extern int coll_max_iters;
         int idx = 0;                                                                             \
         for (size_t num_elems = min_elems; num_elems <= max_elems; num_elems *= step_factor) {   \
             nvshmemx_barrier_all_on_stream(stream);                                              \
-            for (int iter = 0; iter < iters + warmup_iters; iter++) {                            \
-                if (iter >= warmup_iters) CUDA_CHECK(cudaEventRecord(start_event, stream));      \
+            for (size_t iter = 0; iter < warmup_iters; iter++)                                   \
                 nvshmemx_##TYPENAME##_##OP##_##coll##_on_stream(                                 \
                     team, (TYPE *)d_dest, (const TYPE *)d_source, num_elems, stream);            \
-                if (iter >= warmup_iters) {                                                      \
+            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {                \
+                double repetition_sum = 0.0;                                                     \
+                for (size_t iter = 0; iter < iters; iter++) {                                    \
+                    CUDA_CHECK(cudaEventRecord(start_event, stream));                            \
+                    nvshmemx_##TYPENAME##_##OP##_##coll##_on_stream(                             \
+                        team, (TYPE *)d_dest, (const TYPE *)d_source, num_elems, stream);        \
                     CUDA_CHECK(cudaEventRecord(stop_event, stream));                             \
                     CUDA_CHECK(cudaStreamSynchronize(stream));                                   \
                     CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));              \
-                    latency_array[idx][iter - warmup_iters] = ms * 1e+3;                         \
+                    latency_array[idx][iter] = ms * 1e+3;                                        \
+                    repetition_sum += latency_array[idx][iter];                                  \
                 }                                                                                \
+                perf_stats_add(latency_stats[idx], repetition_sum / (double)iters);              \
             }                                                                                    \
             const char *op_name = #coll;                                                         \
             size_array[idx] = calculate_collective_size(op_name, num_elems, sizeof(TYPE), npes); \

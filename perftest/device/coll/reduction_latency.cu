@@ -93,6 +93,11 @@ CALL_RDXN_OPS_ALL_TG(int64, int64_t)
         }                                                                                  \
     } while (0)
 
+#define STATS_FOR(VALUE) VALUE##_stats
+#define print_device_collective_table(JOB, SUBJOB, OUTPUT, UNIT, DIRECTION, SIZE, VALUE, COUNT) \
+    (print_device_collective_table)(JOB, SUBJOB, OUTPUT, UNIT, DIRECTION, SIZE, VALUE, COUNT,   \
+                                    STATS_FOR(VALUE))
+
 #define RUN_ITERS_OP(TYPENAME, TYPE, GROUP, OP, ELEM_COMP)                                       \
     do {                                                                                         \
         void *skip_arg_list[] = {&team, &dest, &source, &num_elems, &skip};                      \
@@ -111,29 +116,41 @@ CALL_RDXN_OPS_ALL_TG(int64, int64_t)
             CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
             nvshmem_barrier_all();                                                               \
                                                                                                  \
-            cudaEventRecord(start, stream);                                                      \
-            CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb, time_arg_list, \
-                             stream);                                                            \
-            cudaEventRecord(stop, stream);                                                       \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {                \
+                cudaEventRecord(start, stream);                                                  \
+                CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb,            \
+                                 time_arg_list, stream);                                         \
+                cudaEventRecord(stop, stream);                                                   \
+                CUDA_CHECK(cudaStreamSynchronize(stream));                                       \
                                                                                                  \
-            if (!mype) {                                                                         \
-                cudaEventElapsedTime(&milliseconds, start, stop);                                \
-                h_##OP##_lat[j] = (milliseconds * 1000.0) / (float)iter;                         \
+                if (!mype) {                                                                     \
+                    cudaEventElapsedTime(&milliseconds, start, stop);                            \
+                    h_##OP##_lat[j] = (milliseconds * 1000.0) / (float)iter;                     \
+                    perf_stats_add(h_##OP##_lat_stats[j], h_##OP##_lat[j]);                      \
+                }                                                                                \
+                nvshmem_barrier_all();                                                           \
             }                                                                                    \
-            nvshmem_barrier_all();                                                               \
             j++;                                                                                 \
         }                                                                                        \
     } while (0)
 
-#define RUN_ITERS(TYPENAME, TYPE, GROUP, ELEM_COMP)       \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, sum, ELEM_COMP);  \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, prod, ELEM_COMP); \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, and, ELEM_COMP);  \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, or, ELEM_COMP);   \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, xor, ELEM_COMP);  \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, min, ELEM_COMP);  \
-    RUN_ITERS_OP(TYPENAME, TYPE, GROUP, max, ELEM_COMP);
+#define RUN_ITERS(TYPENAME, TYPE, GROUP, ELEM_COMP)                          \
+    do {                                                                     \
+        std::fill(h_sum_stats.begin(), h_sum_stats.end(), perf_stats_t{});   \
+        std::fill(h_prod_stats.begin(), h_prod_stats.end(), perf_stats_t{}); \
+        std::fill(h_and_stats.begin(), h_and_stats.end(), perf_stats_t{});   \
+        std::fill(h_or_stats.begin(), h_or_stats.end(), perf_stats_t{});     \
+        std::fill(h_xor_stats.begin(), h_xor_stats.end(), perf_stats_t{});   \
+        std::fill(h_min_stats.begin(), h_min_stats.end(), perf_stats_t{});   \
+        std::fill(h_max_stats.begin(), h_max_stats.end(), perf_stats_t{});   \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, sum, ELEM_COMP);                 \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, prod, ELEM_COMP);                \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, and, ELEM_COMP);                 \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, or, ELEM_COMP);                  \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, xor, ELEM_COMP);                 \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, min, ELEM_COMP);                 \
+        RUN_ITERS_OP(TYPENAME, TYPE, GROUP, max, ELEM_COMP);                 \
+    } while (0)
 
 int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int mype,
                         cudaStream_t stream, run_opt_t run_options, void **h_tables) {
@@ -153,6 +170,17 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
     double *h_xor_lat = (double *)h_tables[5];
     double *h_min_lat = (double *)h_tables[6];
     double *h_max_lat = (double *)h_tables[7];
+    std::vector<perf_stats_t> h_sum_stats(max_size_log), h_prod_stats(max_size_log);
+    std::vector<perf_stats_t> h_and_stats(max_size_log), h_or_stats(max_size_log);
+    std::vector<perf_stats_t> h_xor_stats(max_size_log), h_min_stats(max_size_log);
+    std::vector<perf_stats_t> h_max_stats(max_size_log);
+    perf_stats_t *h_sum_lat_stats = h_sum_stats.data();
+    perf_stats_t *h_prod_lat_stats = h_prod_stats.data();
+    perf_stats_t *h_and_lat_stats = h_and_stats.data();
+    perf_stats_t *h_or_lat_stats = h_or_stats.data();
+    perf_stats_t *h_xor_lat_stats = h_xor_stats.data();
+    perf_stats_t *h_min_lat_stats = h_min_stats.data();
+    perf_stats_t *h_max_lat_stats = h_max_stats.data();
 
     // if (!mype) printf("Transfer size in bytes and latency of thread/warp/block variants of all
     // operations of reduction API in us\n");
@@ -161,40 +189,40 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(int32_t));
         RUN_ITERS(int32, int32_t, , 512);
         if (!mype) {
-            print_table_v1("device_reduction", "int32-sum-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
-            print_table_v1("device_reduction", "int32-prod-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_prod_lat, j);
-            print_table_v1("device_reduction", "int32-and-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_and_lat, j);
-            print_table_v1("device_reduction", "int32-or-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_or_lat, j);
-            print_table_v1("device_reduction", "int32-xor-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_xor_lat, j);
-            print_table_v1("device_reduction", "int32-min-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_min_lat, j);
-            print_table_v1("device_reduction", "int32-max-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_max_lat, j);
+            print_device_collective_table("device_reduction", "int32-sum-t", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "int32-prod-t", "latency", "us", '-',
+                                          size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reduction", "int32-and-t", "latency", "us", '-',
+                                          size_arr, h_and_lat, j);
+            print_device_collective_table("device_reduction", "int32-or-t", "latency", "us", '-',
+                                          size_arr, h_or_lat, j);
+            print_device_collective_table("device_reduction", "int32-xor-t", "latency", "us", '-',
+                                          size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reduction", "int32-min-t", "latency", "us", '-',
+                                          size_arr, h_min_lat, j);
+            print_device_collective_table("device_reduction", "int32-max-t", "latency", "us", '-',
+                                          size_arr, h_max_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(1), min_size / sizeof(int64_t));
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(int64_t));
         RUN_ITERS(int64, int64_t, , 512);
         if (!mype) {
-            print_table_v1("device_reduction", "int64-sum-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
-            print_table_v1("device_reduction", "int64-prod-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_prod_lat, j);
-            print_table_v1("device_reduction", "int64-and-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_and_lat, j);
-            print_table_v1("device_reduction", "int64-or-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_or_lat, j);
-            print_table_v1("device_reduction", "int64-xor-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_xor_lat, j);
-            print_table_v1("device_reduction", "int64-min-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_min_lat, j);
-            print_table_v1("device_reduction", "int64-max-t", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_max_lat, j);
+            print_device_collective_table("device_reduction", "int64-sum-t", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "int64-prod-t", "latency", "us", '-',
+                                          size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reduction", "int64-and-t", "latency", "us", '-',
+                                          size_arr, h_and_lat, j);
+            print_device_collective_table("device_reduction", "int64-or-t", "latency", "us", '-',
+                                          size_arr, h_or_lat, j);
+            print_device_collective_table("device_reduction", "int64-xor-t", "latency", "us", '-',
+                                          size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reduction", "int64-min-t", "latency", "us", '-',
+                                          size_arr, h_min_lat, j);
+            print_device_collective_table("device_reduction", "int64-max-t", "latency", "us", '-',
+                                          size_arr, h_max_lat, j);
         }
     }
 
@@ -203,40 +231,40 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(int32_t));
         RUN_ITERS(int32, int32_t, _warp, 4096);
         if (!mype) {
-            print_table_v1("device_reduction", "int32-sum-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
-            print_table_v1("device_reduction", "int32-prod-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_prod_lat, j);
-            print_table_v1("device_reduction", "int32-and-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_and_lat, j);
-            print_table_v1("device_reduction", "int32-or-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_or_lat, j);
-            print_table_v1("device_reduction", "int32-xor-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_xor_lat, j);
-            print_table_v1("device_reduction", "int32-min-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_min_lat, j);
-            print_table_v1("device_reduction", "int32-max-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_max_lat, j);
+            print_device_collective_table("device_reduction", "int32-sum-w", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "int32-prod-w", "latency", "us", '-',
+                                          size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reduction", "int32-and-w", "latency", "us", '-',
+                                          size_arr, h_and_lat, j);
+            print_device_collective_table("device_reduction", "int32-or-w", "latency", "us", '-',
+                                          size_arr, h_or_lat, j);
+            print_device_collective_table("device_reduction", "int32-xor-w", "latency", "us", '-',
+                                          size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reduction", "int32-min-w", "latency", "us", '-',
+                                          size_arr, h_min_lat, j);
+            print_device_collective_table("device_reduction", "int32-max-w", "latency", "us", '-',
+                                          size_arr, h_max_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(1), min_size / sizeof(int64_t));
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(int64_t));
         RUN_ITERS(int64, int64_t, _warp, 4096);
         if (!mype) {
-            print_table_v1("device_reduction", "int64-sum-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
-            print_table_v1("device_reduction", "int64-prod-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_prod_lat, j);
-            print_table_v1("device_reduction", "int64-and-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_and_lat, j);
-            print_table_v1("device_reduction", "int64-or-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_or_lat, j);
-            print_table_v1("device_reduction", "int64-xor-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_xor_lat, j);
-            print_table_v1("device_reduction", "int64-min-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_min_lat, j);
-            print_table_v1("device_reduction", "int64-max-w", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_max_lat, j);
+            print_device_collective_table("device_reduction", "int64-sum-w", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "int64-prod-w", "latency", "us", '-',
+                                          size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reduction", "int64-and-w", "latency", "us", '-',
+                                          size_arr, h_and_lat, j);
+            print_device_collective_table("device_reduction", "int64-or-w", "latency", "us", '-',
+                                          size_arr, h_or_lat, j);
+            print_device_collective_table("device_reduction", "int64-xor-w", "latency", "us", '-',
+                                          size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reduction", "int64-min-w", "latency", "us", '-',
+                                          size_arr, h_min_lat, j);
+            print_device_collective_table("device_reduction", "int64-max-w", "latency", "us", '-',
+                                          size_arr, h_max_lat, j);
         }
     }
 
@@ -245,40 +273,40 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(int32_t));
         RUN_ITERS(int32, int32_t, _block, max_elems);
         if (!mype) {
-            print_table_v1("device_reduction", "int32-sum-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
-            print_table_v1("device_reduction", "int32-prod-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_prod_lat, j);
-            print_table_v1("device_reduction", "int32-and-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_and_lat, j);
-            print_table_v1("device_reduction", "int32-or-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_or_lat, j);
-            print_table_v1("device_reduction", "int32-xor-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_xor_lat, j);
-            print_table_v1("device_reduction", "int32-min-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_min_lat, j);
-            print_table_v1("device_reduction", "int32-max-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_max_lat, j);
+            print_device_collective_table("device_reduction", "int32-sum-b", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "int32-prod-b", "latency", "us", '-',
+                                          size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reduction", "int32-and-b", "latency", "us", '-',
+                                          size_arr, h_and_lat, j);
+            print_device_collective_table("device_reduction", "int32-or-b", "latency", "us", '-',
+                                          size_arr, h_or_lat, j);
+            print_device_collective_table("device_reduction", "int32-xor-b", "latency", "us", '-',
+                                          size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reduction", "int32-min-b", "latency", "us", '-',
+                                          size_arr, h_min_lat, j);
+            print_device_collective_table("device_reduction", "int32-max-b", "latency", "us", '-',
+                                          size_arr, h_max_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(1), min_size / sizeof(int64_t));
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(int64_t));
         RUN_ITERS(int64, int64_t, _block, max_elems);
         if (!mype) {
-            print_table_v1("device_reduction", "int64-sum-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_sum_lat, j);
-            print_table_v1("device_reduction", "int64-prod-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_prod_lat, j);
-            print_table_v1("device_reduction", "int64-and-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_and_lat, j);
-            print_table_v1("device_reduction", "int64-or-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_or_lat, j);
-            print_table_v1("device_reduction", "int64-xor-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_xor_lat, j);
-            print_table_v1("device_reduction", "int64-min-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_min_lat, j);
-            print_table_v1("device_reduction", "int64-max-b", "size (Bytes)", "latency", "us", '-',
-                           size_arr, h_max_lat, j);
+            print_device_collective_table("device_reduction", "int64-sum-b", "latency", "us", '-',
+                                          size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reduction", "int64-prod-b", "latency", "us", '-',
+                                          size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reduction", "int64-and-b", "latency", "us", '-',
+                                          size_arr, h_and_lat, j);
+            print_device_collective_table("device_reduction", "int64-or-b", "latency", "us", '-',
+                                          size_arr, h_or_lat, j);
+            print_device_collective_table("device_reduction", "int64-xor-b", "latency", "us", '-',
+                                          size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reduction", "int64-min-b", "latency", "us", '-',
+                                          size_arr, h_min_lat, j);
+            print_device_collective_table("device_reduction", "int64-max-b", "latency", "us", '-',
+                                          size_arr, h_max_lat, j);
         }
     }
 

@@ -13,6 +13,7 @@ int main(int argc, char *argv[]) {
     read_args(argc, argv);
     float ms;
     double latency_value;
+    perf_stats_t latency_stats = {};
     cudaStream_t stream;
     cudaEvent_t start_event, stop_event;
 
@@ -34,18 +35,21 @@ int main(int argc, char *argv[]) {
     CUDA_CHECK(cudaStreamSynchronize(stream));
     nvshmem_barrier_all();
 
-    CUDA_CHECK(cudaEventRecord(start_event, stream));
-    for (size_t iter = 0; iter < iters; iter++) {
-        nvshmemx_barrier_on_stream(NVSHMEM_TEAM_WORLD, stream);
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        CUDA_CHECK(cudaEventRecord(start_event, stream));
+        for (size_t iter = 0; iter < iters; iter++) {
+            nvshmemx_barrier_on_stream(NVSHMEM_TEAM_WORLD, stream);
+        }
+        CUDA_CHECK(cudaEventRecord(stop_event, stream));
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));
+        latency_value = (ms / iters) * 1000;
+        perf_stats_add(latency_stats, latency_value);
     }
-    CUDA_CHECK(cudaEventRecord(stop_event, stream));
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-    CUDA_CHECK(cudaEventElapsedTime(&ms, start_event, stop_event));
 
     if (!mype) {
-        latency_value = (ms / iters) * 1000;
-        print_table_basic("barrier_on_stream", "None", "size (Bytes)", "latency", "us", '-', &size,
-                          &latency_value, 1);
+        print_basic_table("barrier_on_stream", "None", "latency", "us", '-', &size, &latency_value,
+                          1, &latency_stats);
     }
 
     nvshmem_barrier_all();

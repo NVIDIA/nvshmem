@@ -12,7 +12,6 @@
 #include <unistd.h>
 #include "utils.h"
 
-#define MAX_MSG_SIZE 1 * 1024 * 1024
 #define UNROLL 8
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
@@ -69,14 +68,16 @@ int main(int c, char *v[]) {
     int *data_d = NULL;
     cudaStream_t stream;
 
-    int iter = 500;
-    int skip = 50;
-    int max_msg_size = MAX_MSG_SIZE;
+    read_args(c, v);
+    int iter = iters;
+    int skip = warmup_iters;
+    size_t max_msg_size = max_size;
 
     int array_size, i;
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_lat;
+    perf_stats_t *h_lat_stats = NULL;
 
     float milliseconds;
     cudaEvent_t start, stop;
@@ -104,6 +105,12 @@ int main(int c, char *v[]) {
     alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_lat = (double *)h_tables[1];
+    h_lat_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_lat_stats) {
+        fprintf(stderr, "Failed to allocate latency statistics\n");
+        nvshmem_global_exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
+    }
     if (use_mmap) {
         data_d = (int *)allocate_mmap_buffer(max_msg_size, mem_handle_type, use_egm, true);
         flag_d = (uint64_t *)allocate_mmap_buffer(sizeof(uint64_t), mem_handle_type, use_egm, true);
@@ -145,27 +152,30 @@ int main(int c, char *v[]) {
 
         test_ping_pong(args_1, test_cubin, stream);
         CUDA_CHECK(cudaDeviceSynchronize());
-        if (use_egm) {
-            memset(flag_d, 0, sizeof(uint64_t));
-        } else {
-            CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (use_egm) {
+                memset(flag_d, 0, sizeof(uint64_t));
+            } else {
+                CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+            }
+            nvshmem_barrier_all();
+
+            cudaEventRecord(start, stream);
+            test_ping_pong(args_2, test_cubin, stream);
+            cudaEventRecord(stop, stream);
+
+            CUDA_CHECK(cudaEventSynchronize(stop));
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_lat[i] = (milliseconds * 1000) / iter;
+            if (mype == 0) perf_stats_add(h_lat_stats[i], h_lat[i]);
+            nvshmem_barrier_all();
         }
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        test_ping_pong(args_2, test_cubin, stream);
-        cudaEventRecord(stop, stream);
-
-        CUDA_CHECK(cudaEventSynchronize(stop));
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_lat[i] = (milliseconds * 1000) / iter;
-        nvshmem_barrier_all();
         i++;
     }
 
     if (mype == 0) {
-        print_table_basic("shmem_at_ping_lat", "None", "size (Bytes)", "latency", "us", '-',
-                          h_size_arr, h_lat, i);
+        print_basic_table("shmem_at_ping_lat", "None", "latency", "us", '-', h_size_arr, h_lat, i,
+                          h_lat_stats);
     }
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -186,6 +196,7 @@ finalize:
             nvshmem_free(flag_d);
         }
     }
+    free(h_lat_stats);
     free_tables(h_tables, 2);
     finalize_wrapper();
 

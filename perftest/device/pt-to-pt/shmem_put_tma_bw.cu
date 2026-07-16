@@ -187,8 +187,8 @@ int main(int argc, char *argv[]) {
                 i++;
             }
 
-            print_table_basic("shmem_put_tma_smem_bw", "None", "size (Bytes)", "BW", "GB/sec", '+',
-                              h_size_arr, h_bw, i);
+            print_basic_table("shmem_put_tma_smem_bw", "None", "BW", "GB/sec", '+', h_size_arr,
+                              h_bw, i);
         } else {
             for (size_t size = min_size; size <= max_size; size *= step_factor)
                 nvshmem_barrier_all();

@@ -96,8 +96,7 @@ int main(int argc, char *argv[]) {
         malloc_size *= 2;
     }
     if (!mype) {
-        print_table_basic("malloc", "None", "size (Bytes)", "time", "us", '-', h_size_arr, h_time,
-                          loop_size);
+        print_basic_table("malloc", "None", "time", "us", '-', h_size_arr, h_time, loop_size);
     }
 
 finalize:

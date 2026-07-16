@@ -63,6 +63,7 @@ int main(int argc, char *argv[]) {
     void *data_h_local = NULL;
     uint64_t *size_array = NULL;
     double *latency_array = NULL;
+    perf_stats_t *latency_stats = NULL;
     cudaStream_t strm = nullptr;
     int num_entries;
     int i;
@@ -91,6 +92,11 @@ int main(int argc, char *argv[]) {
 
     latency_array = (double *)calloc(sizeof(double), num_entries);
     if (!latency_array) {
+        status = -1;
+        goto finalize;
+    }
+    latency_stats = (perf_stats_t *)calloc(num_entries, sizeof(perf_stats_t));
+    if (!latency_stats) {
         status = -1;
         goto finalize;
     }
@@ -137,19 +143,22 @@ int main(int argc, char *argv[]) {
         CUDA_CHECK(cudaEventCreate(&eev));
         i = 0;
         for (int size = min_size; size <= max_size; size *= step_factor) {
-            lat(data_d, data_d_local, size, mype, iter, skip, putget_issue, dir, strm, sev, eev,
-                &ms, &us);
             size_array[i] = size;
-            if (putget_issue.type == ON_STREAM) {
-                latency_array[i] = ms * 1000 / iter;
-            } else {
-                latency_array[i] = us / iter;
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                lat(data_d, data_d_local, size, mype, iter, repetition == 0 ? skip : 0,
+                    putget_issue, dir, strm, sev, eev, &ms, &us);
+                if (putget_issue.type == ON_STREAM) {
+                    latency_array[i] = ms * 1000 / iter;
+                } else {
+                    latency_array[i] = us / iter;
+                }
+                perf_stats_add(latency_stats[i], latency_array[i]);
             }
             i++;
         }
 
-        print_table_basic("Latency", "None", "size (Bytes)", "latency", "us", '-', size_array,
-                          latency_array, i);
+        print_basic_table("Latency", "None", "latency", "us", '-', size_array, latency_array, i,
+                          latency_stats);
         CUDA_CHECK(cudaEventDestroy(sev));
         CUDA_CHECK(cudaEventDestroy(eev));
 
@@ -171,6 +180,7 @@ finalize:
     }
     if (size_array) free(size_array);
     if (latency_array) free(latency_array);
+    if (latency_stats) free(latency_stats);
 
 #ifdef _NVSHMEM_REGISTRATION_CACHE_ENABLED
     if (data_d_local) cudaFree(data_d_local);

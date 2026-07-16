@@ -20,6 +20,8 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <sys/time.h>
+#include <algorithm>
+#include <vector>
 
 using namespace std;
 
@@ -34,6 +36,35 @@ typedef struct run_opt {
     int run_warp;
     int run_block;
 } run_opt_t;
+
+template <typename WarmupFn, typename TimedFn>
+void measure_device_latency_batches(WarmupFn warmup, TimedFn timed, cudaStream_t stream, int mype,
+                                    size_t iter, double *last_value, perf_stats_t *stats) {
+    float milliseconds;
+    cudaEvent_t start, stop;
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+
+    warmup();
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    nvshmem_barrier_all();
+
+    for (size_t repetition = 0; repetition < repetitions; repetition++) {
+        CUDA_CHECK(cudaEventRecord(start, stream));
+        timed();
+        CUDA_CHECK(cudaEventRecord(stop, stream));
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        if (!mype) {
+            CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
+            *last_value = (milliseconds * 1000.0) / (double)iter;
+            perf_stats_add(*stats, *last_value);
+        }
+        nvshmem_barrier_all();
+    }
+
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
+}
 
 #define cuda_check_error()                                                                   \
     {                                                                                        \

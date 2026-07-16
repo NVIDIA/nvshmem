@@ -79,6 +79,7 @@ int main(int argc, char *argv[]) {
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_bw;
+    perf_stats_t *h_bw_stats = NULL;
 
     float milliseconds;
     cudaEvent_t start, stop;
@@ -100,6 +101,8 @@ int main(int argc, char *argv[]) {
     alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
+    h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_bw_stats) goto finalize;
 
     if (use_mmap) {
         data_d = (double *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -138,28 +141,31 @@ int main(int argc, char *argv[]) {
             bw<<<blocks, threads>>>(data_d, remote_d, counter_d, size / sizeof(double), mype, skip);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
-            CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-
-            cudaEventRecord(start);
-            bw<<<blocks, threads>>>(data_d, remote_d, counter_d, size / sizeof(double), mype, iter);
-            cudaEventRecord(stop);
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaEventSynchronize(stop));
-
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-            nvshmem_barrier_all();
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+                cudaEventRecord(start);
+                bw<<<blocks, threads>>>(data_d, remote_d, counter_d, size / sizeof(double), mype,
+                                        iter);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&milliseconds, start, stop);
+                h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                perf_stats_add(h_bw_stats[i], h_bw[i]);
+                nvshmem_barrier_all();
+            }
             i++;
         }
     } else {
         for (size = min_size; size <= max_size; size *= step_factor) {
-            nvshmem_barrier_all();
+            for (size_t repetition = 0; repetition < repetitions; repetition++)
+                nvshmem_barrier_all();
         }
     }
 
     if (mype == 0) {
-        print_table_basic("shmem_st_bw", "None", "size (Bytes)", "BW", "GB/sec", '+', h_size_arr,
-                          h_bw, i);
+        print_basic_table("shmem_st_bw", "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
+                          h_bw_stats);
     }
 
 finalize:
@@ -172,6 +178,7 @@ finalize:
         }
     }
     free_tables(h_tables, 2);
+    free(h_bw_stats);
     finalize_wrapper();
 
     return 0;

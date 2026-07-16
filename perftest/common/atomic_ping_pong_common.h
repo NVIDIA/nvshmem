@@ -134,51 +134,54 @@
         }                                                                                      \
     }
 
-#define RUN_TEST_WITHOUT_ARG(TYPE, TYPE_NAME, AMO, flag_d, mype, iter, skip, h_lat, h_size_arr, \
-                             flag_init)                                                         \
-    do {                                                                                        \
-        int size = sizeof(TYPE);                                                                \
-                                                                                                \
-        int status = 0;                                                                         \
-        h_size_arr[0] = size;                                                                   \
-        void *args_1[] = {&flag_d, &mype, &skip};                                               \
-        void *args_2[] = {&flag_d, &mype, &iter};                                               \
-                                                                                                \
-        float milliseconds;                                                                     \
-        cudaEvent_t start, stop;                                                                \
-        cudaEventCreate(&start);                                                                \
-        cudaEventCreate(&stop);                                                                 \
-        TYPE flag_init_var = flag_init;                                                         \
-                                                                                                \
-        CUDA_CHECK(cudaDeviceSynchronize());                                                    \
-        CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));   \
-        nvshmem_barrier_all();                                                                  \
-                                                                                                \
-        cudaEventRecord(start, stream);                                                         \
-        LAUNCH_KERNEL(TYPE_NAME, AMO, args_1, stream);                                          \
-        cudaEventRecord(stop, stream);                                                          \
-                                                                                                \
-        cudaStreamSynchronize(stream);                                                          \
-                                                                                                \
-        CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));   \
-        nvshmem_barrier_all();                                                                  \
-        cudaEventRecord(start, stream);                                                         \
-        LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream);                                          \
-        cudaEventRecord(stop, stream);                                                          \
-        CUDA_CHECK(cudaStreamSynchronize(stream));                                              \
-        /* give latency in us */                                                                \
-        cudaEventElapsedTime(&milliseconds, start, stop);                                       \
-        h_lat[0] = (milliseconds * 1000) / iter;                                                \
-                                                                                                \
-        nvshmem_barrier_all();                                                                  \
-                                                                                                \
-        if (mype == 0) {                                                                        \
-            print_table_v1("shmem_at_" #TYPE "_" #AMO "_ping_lat", "None", "size (Bytes)",      \
-                           "latency", "us", '-', h_size_arr, h_lat, 1);                         \
-        }                                                                                       \
-                                                                                                \
-        CUDA_CHECK(cudaDeviceSynchronize());                                                    \
-                                                                                                \
+#define RUN_TEST_WITHOUT_ARG(TYPE, TYPE_NAME, AMO, flag_d, mype, iter, skip, h_lat, h_size_arr,   \
+                             flag_init)                                                           \
+    do {                                                                                          \
+        int size = sizeof(TYPE);                                                                  \
+                                                                                                  \
+        int status = 0;                                                                           \
+        h_size_arr[0] = size;                                                                     \
+        void *args_1[] = {&flag_d, &mype, &skip};                                                 \
+        void *args_2[] = {&flag_d, &mype, &iter};                                                 \
+                                                                                                  \
+        float milliseconds;                                                                       \
+        cudaEvent_t start, stop;                                                                  \
+        cudaEventCreate(&start);                                                                  \
+        cudaEventCreate(&stop);                                                                   \
+        TYPE flag_init_var = flag_init;                                                           \
+                                                                                                  \
+        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
+        CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
+        nvshmem_barrier_all();                                                                    \
+                                                                                                  \
+        cudaEventRecord(start, stream);                                                           \
+        LAUNCH_KERNEL(TYPE_NAME, AMO, args_1, stream);                                            \
+        cudaEventRecord(stop, stream);                                                            \
+                                                                                                  \
+        cudaStreamSynchronize(stream);                                                            \
+                                                                                                  \
+        perf_stats_t latency_stats = {};                                                          \
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {                     \
+            CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice)); \
+            nvshmem_barrier_all();                                                                \
+            cudaEventRecord(start, stream);                                                       \
+            LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream);                                        \
+            cudaEventRecord(stop, stream);                                                        \
+            CUDA_CHECK(cudaStreamSynchronize(stream));                                            \
+            /* give latency in us */                                                              \
+            cudaEventElapsedTime(&milliseconds, start, stop);                                     \
+            h_lat[0] = (milliseconds * 1000) / iter;                                              \
+            if (mype == 0) perf_stats_add(latency_stats, h_lat[0]);                               \
+            nvshmem_barrier_all();                                                                \
+        }                                                                                         \
+                                                                                                  \
+        if (mype == 0) {                                                                          \
+            print_basic_table("shmem_at_" #TYPE "_" #AMO "_ping_lat", "None", "latency", "us",    \
+                              '-', h_size_arr, h_lat, 1, &latency_stats);                         \
+        }                                                                                         \
+                                                                                                  \
+        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
+                                                                                                  \
     } while (0)
 
 #define RUN_TEST_WITH_ARG(TYPE, TYPE_NAME, AMO, flag_d, mype, iter, skip, h_lat, h_size_arr, val, \
@@ -209,23 +212,26 @@
                                                                                                   \
         cudaStreamSynchronize(stream);                                                            \
                                                                                                   \
-        CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
-        nvshmem_barrier_all();                                                                    \
-        cudaEventRecord(start, stream);                                                           \
+        perf_stats_t latency_stats = {};                                                          \
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {                     \
+            CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice)); \
+            nvshmem_barrier_all();                                                                \
+            cudaEventRecord(start, stream);                                                       \
                                                                                                   \
-        LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream);                                            \
+            LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream);                                        \
                                                                                                   \
-        cudaEventRecord(stop, stream);                                                            \
-        cudaStreamSynchronize(stream);                                                            \
-        /* give latency in us */                                                                  \
-        cudaEventElapsedTime(&milliseconds, start, stop);                                         \
-        h_lat[0] = (milliseconds * 1000) / iter;                                                  \
-                                                                                                  \
-        nvshmem_barrier_all();                                                                    \
+            cudaEventRecord(stop, stream);                                                        \
+            cudaStreamSynchronize(stream);                                                        \
+            /* give latency in us */                                                              \
+            cudaEventElapsedTime(&milliseconds, start, stop);                                     \
+            h_lat[0] = (milliseconds * 1000) / iter;                                              \
+            if (mype == 0) perf_stats_add(latency_stats, h_lat[0]);                               \
+            nvshmem_barrier_all();                                                                \
+        }                                                                                         \
                                                                                                   \
         if (mype == 0) {                                                                          \
-            print_table_v1("shmem_at_" #TYPE "_" #AMO "_lat", "None", "size (Bytes)", "latency",  \
-                           "us", '-', h_size_arr, h_lat, 1);                                      \
+            print_basic_table("shmem_at_" #TYPE "_" #AMO "_lat", "None", "latency", "us", '-',    \
+                              h_size_arr, h_lat, 1, &latency_stats);                              \
         }                                                                                         \
                                                                                                   \
         CUDA_CHECK(cudaDeviceSynchronize());                                                      \

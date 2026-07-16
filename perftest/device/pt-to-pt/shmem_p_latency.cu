@@ -60,6 +60,7 @@ int main(int argc, char *argv[]) {
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_lat;
+    perf_stats_t *h_lat_stats = NULL;
 
     float milliseconds;
     cudaEvent_t start, stop;
@@ -87,6 +88,8 @@ int main(int argc, char *argv[]) {
     alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_lat = (double *)h_tables[1];
+    h_lat_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_lat_stats) goto finalize;
 
     if (use_mmap) {
         data_d = (int *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -117,16 +120,16 @@ int main(int argc, char *argv[]) {
             nelems = size / sizeof(int);
 
             test_p(data_d, nelems, mype, skip, test_cubin);
-            cudaEventRecord(start);
-            test_p(data_d, nelems, mype, iter, test_cubin);
-            cudaEventRecord(stop);
-
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaEventSynchronize(stop));
-
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            /* give latency in us */
-            h_lat[i] = (milliseconds * 1000) / iter;
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                cudaEventRecord(start);
+                test_p(data_d, nelems, mype, iter, test_cubin);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&milliseconds, start, stop);
+                h_lat[i] = (milliseconds * 1000) / iter;
+                perf_stats_add(h_lat_stats[i], h_lat[i]);
+            }
             i++;
         }
 
@@ -134,8 +137,8 @@ int main(int argc, char *argv[]) {
     }
 
     if (mype == 0) {
-        print_table_basic("shmem_p_latency", "None", "size (Bytes)", "latency", "us", '-',
-                          h_size_arr, h_lat, i);
+        print_basic_table("shmem_p_latency", "None", "latency", "us", '-', h_size_arr, h_lat, i,
+                          h_lat_stats);
     }
 
 finalize:
@@ -148,6 +151,7 @@ finalize:
         }
     }
     free_tables(h_tables, 2);
+    free(h_lat_stats);
     finalize_wrapper();
 
     return 0;

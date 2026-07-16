@@ -72,168 +72,109 @@ int fcollect_calling_kernel(nvshmem_team_t team, void *dest, const void *source,
     double *h_thread_lat = (double *)h_tables[1];
     double *h_warp_lat = (double *)h_tables[2];
     double *h_block_lat = (double *)h_tables[3];
-    float milliseconds;
+    std::vector<perf_stats_t> h_thread_stats(max_size_log);
+    std::vector<perf_stats_t> h_warp_stats(max_size_log);
+    std::vector<perf_stats_t> h_block_stats(max_size_log);
     void *args_1[] = {&team, &dest, &source, &num_elems, &mype, &skip};
     void *args_2[] = {&team, &dest, &source, &num_elems, &mype, &iter};
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
 
     nvshmem_barrier_all();
     min_elems = max(static_cast<size_t>(1), min_size / (npes * sizeof(int32_t)));
     max_elems = max(static_cast<size_t>(1), max_size / (npes * sizeof(int32_t)));
     i = 0;
     for (num_elems = min_elems; num_elems < 512; num_elems *= step_factor) {
-        CALL_FCOLLECT_KERNEL(int32, , num_blocks, nvshm_test_num_tpb, args_1, stream);
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        CALL_FCOLLECT_KERNEL(int32, , num_blocks, nvshm_test_num_tpb, args_2, stream);
-
-        cudaEventRecord(stop, stream);
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        if (!mype) {
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_thread_lat[i] = (milliseconds * 1000.0) / (float)iter;
-        }
+        measure_device_latency_batches(
+            [&] { CALL_FCOLLECT_KERNEL(int32, , num_blocks, nvshm_test_num_tpb, args_1, stream); },
+            [&] { CALL_FCOLLECT_KERNEL(int32, , num_blocks, nvshm_test_num_tpb, args_2, stream); },
+            stream, mype, iter, &h_thread_lat[i], &h_thread_stats[i]);
         i++;
-        nvshmem_barrier_all();
     }
 
     i = 0;
     for (num_elems = min_elems; num_elems < 4096; num_elems *= step_factor) {
-        CALL_FCOLLECT_KERNEL(int32, _warp, num_blocks, nvshm_test_num_tpb, args_1, stream);
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        CALL_FCOLLECT_KERNEL(int32, _warp, num_blocks, nvshm_test_num_tpb, args_2, stream);
-
-        cudaEventRecord(stop, stream);
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        if (!mype) {
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_warp_lat[i] = (milliseconds * 1000.0) / (float)iter;
-        }
+        measure_device_latency_batches(
+            [&] {
+                CALL_FCOLLECT_KERNEL(int32, _warp, num_blocks, nvshm_test_num_tpb, args_1, stream);
+            },
+            [&] {
+                CALL_FCOLLECT_KERNEL(int32, _warp, num_blocks, nvshm_test_num_tpb, args_2, stream);
+            },
+            stream, mype, iter, &h_warp_lat[i], &h_warp_stats[i]);
         i++;
-        nvshmem_barrier_all();
     }
 
     i = 0;
     for (num_elems = 1; num_elems <= max_elems; num_elems *= step_factor) {
         h_size_array[i] = calculate_collective_size("fcollect", num_elems, sizeof(int32_t), npes);
-        CALL_FCOLLECT_KERNEL(int32, _block, num_blocks, nvshm_test_num_tpb, args_1, stream);
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        CALL_FCOLLECT_KERNEL(int32, _block, num_blocks, nvshm_test_num_tpb, args_2, stream);
-
-        cudaEventRecord(stop, stream);
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        if (!mype) {
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_block_lat[i] = (milliseconds * 1000.0) / (float)iter;
-        }
+        measure_device_latency_batches(
+            [&] {
+                CALL_FCOLLECT_KERNEL(int32, _block, num_blocks, nvshm_test_num_tpb, args_1, stream);
+            },
+            [&] {
+                CALL_FCOLLECT_KERNEL(int32, _block, num_blocks, nvshm_test_num_tpb, args_2, stream);
+            },
+            stream, mype, iter, &h_block_lat[i], &h_block_stats[i]);
         i++;
-        nvshmem_barrier_all();
     }
 
     if (!mype) {
-        print_table_v1("fcollect_device", "32-bit-thread", "size (Bytes)", "latency", "us", '-',
-                       h_size_array, h_thread_lat, i);
-        print_table_v1("fcollect_device", "32-bit-warp", "size (Bytes)", "latency", "us", '-',
-                       h_size_array, h_warp_lat, i);
-        print_table_v1("fcollect_device", "32-bit-block", "size (Bytes)", "latency", "us", '-',
-                       h_size_array, h_block_lat, i);
+        print_device_collective_table("fcollect_device", "32-bit-thread", "latency", "us", '-',
+                                      h_size_array, h_thread_lat, i, h_thread_stats.data());
+        print_device_collective_table("fcollect_device", "32-bit-warp", "latency", "us", '-',
+                                      h_size_array, h_warp_lat, i, h_warp_stats.data());
+        print_device_collective_table("fcollect_device", "32-bit-block", "latency", "us", '-',
+                                      h_size_array, h_block_lat, i, h_block_stats.data());
     }
+
+    std::fill(h_thread_stats.begin(), h_thread_stats.end(), perf_stats_t{});
+    std::fill(h_warp_stats.begin(), h_warp_stats.end(), perf_stats_t{});
+    std::fill(h_block_stats.begin(), h_block_stats.end(), perf_stats_t{});
 
     min_elems = max(static_cast<size_t>(1), min_size / (npes * sizeof(int64_t)));
     max_elems = max(static_cast<size_t>(1), max_size / (npes * sizeof(int64_t)));
     i = 0;
     for (num_elems = 1; num_elems < 512; num_elems *= step_factor) {
-        CALL_FCOLLECT_KERNEL(int64, , num_blocks, nvshm_test_num_tpb, args_1, stream);
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        CALL_FCOLLECT_KERNEL(int64, , num_blocks, nvshm_test_num_tpb, args_2, stream);
-
-        cudaEventRecord(stop, stream);
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        if (!mype) {
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_thread_lat[i] = (milliseconds * 1000.0) / (float)iter;
-        }
+        measure_device_latency_batches(
+            [&] { CALL_FCOLLECT_KERNEL(int64, , num_blocks, nvshm_test_num_tpb, args_1, stream); },
+            [&] { CALL_FCOLLECT_KERNEL(int64, , num_blocks, nvshm_test_num_tpb, args_2, stream); },
+            stream, mype, iter, &h_thread_lat[i], &h_thread_stats[i]);
         i++;
-        nvshmem_barrier_all();
     }
 
     i = 0;
     for (num_elems = 1; num_elems < 4096; num_elems *= step_factor) {
-        CALL_FCOLLECT_KERNEL(int64, _warp, num_blocks, nvshm_test_num_tpb, args_1, stream);
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        CALL_FCOLLECT_KERNEL(int64, _warp, num_blocks, nvshm_test_num_tpb, args_2, stream);
-
-        cudaEventRecord(stop, stream);
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        if (!mype) {
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_warp_lat[i] = (milliseconds * 1000.0) / (float)iter;
-        }
+        measure_device_latency_batches(
+            [&] {
+                CALL_FCOLLECT_KERNEL(int64, _warp, num_blocks, nvshm_test_num_tpb, args_1, stream);
+            },
+            [&] {
+                CALL_FCOLLECT_KERNEL(int64, _warp, num_blocks, nvshm_test_num_tpb, args_2, stream);
+            },
+            stream, mype, iter, &h_warp_lat[i], &h_warp_stats[i]);
         i++;
-        nvshmem_barrier_all();
     }
 
     i = 0;
     for (num_elems = 1; num_elems < max_elems; num_elems *= step_factor) {
         h_size_array[i] = calculate_collective_size("fcollect", num_elems, sizeof(int64_t), npes);
-        CALL_FCOLLECT_KERNEL(int64, _block, num_blocks, nvshm_test_num_tpb, args_1, stream);
-
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        CALL_FCOLLECT_KERNEL(int64, _block, num_blocks, nvshm_test_num_tpb, args_2, stream);
-
-        cudaEventRecord(stop, stream);
-        CUDA_CHECK(cudaStreamSynchronize(stream));
-
-        if (!mype) {
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_block_lat[i] = (milliseconds * 1000.0) / (float)iter;
-        }
+        measure_device_latency_batches(
+            [&] {
+                CALL_FCOLLECT_KERNEL(int64, _block, num_blocks, nvshm_test_num_tpb, args_1, stream);
+            },
+            [&] {
+                CALL_FCOLLECT_KERNEL(int64, _block, num_blocks, nvshm_test_num_tpb, args_2, stream);
+            },
+            stream, mype, iter, &h_block_lat[i], &h_block_stats[i]);
         i++;
-        nvshmem_barrier_all();
     }
 
     if (!mype) {
-        print_table_v1("fcollect_device", "64-bit-thread", "size (Bytes)", "latency", "us", '-',
-                       h_size_array, h_thread_lat, i);
-        print_table_v1("fcollect_device", "64-bit-warp", "size (Bytes)", "latency", "us", '-',
-                       h_size_array, h_warp_lat, i);
-        print_table_v1("fcollect_device", "64-bit-block", "size (Bytes)", "latency", "us", '-',
-                       h_size_array, h_block_lat, i);
+        print_device_collective_table("fcollect_device", "64-bit-thread", "latency", "us", '-',
+                                      h_size_array, h_thread_lat, i, h_thread_stats.data());
+        print_device_collective_table("fcollect_device", "64-bit-warp", "latency", "us", '-',
+                                      h_size_array, h_warp_lat, i, h_warp_stats.data());
+        print_device_collective_table("fcollect_device", "64-bit-block", "latency", "us", '-',
+                                      h_size_array, h_block_lat, i, h_block_stats.data());
     }
 
     return status;

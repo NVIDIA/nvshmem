@@ -63,6 +63,7 @@ int main(int argc, char *argv[]) {
 
     void **h_tables;
     double *h_lat;
+    perf_stats_t latency_stats = {};
     uint64_t size = sizeof(uint64_t);
 
     float milliseconds;
@@ -124,27 +125,30 @@ int main(int argc, char *argv[]) {
 
         test_ping_pong(args_1, test_cubin, stream);
         CUDA_CHECK(cudaDeviceSynchronize());
-        if (use_egm) {
-            memset(flag_d, 0, sizeof(uint64_t));
-        } else {
-            CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (use_egm) {
+                memset(flag_d, 0, sizeof(uint64_t));
+            } else {
+                CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+            }
+            nvshmem_barrier_all();
+
+            cudaEventRecord(start, stream);
+            test_ping_pong(args_2, test_cubin, stream);
+            cudaEventRecord(stop, stream);
+
+            /* give latency in us */
+            CUDA_CHECK(cudaEventSynchronize(stop));
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            *h_lat = (milliseconds * 1000) / iter;
+            if (mype == 0) perf_stats_add(latency_stats, *h_lat);
+            nvshmem_barrier_all();
         }
-        nvshmem_barrier_all();
-
-        cudaEventRecord(start, stream);
-        test_ping_pong(args_2, test_cubin, stream);
-        cudaEventRecord(stop, stream);
-
-        /* give latency in us */
-        CUDA_CHECK(cudaEventSynchronize(stop));
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        *h_lat = (milliseconds * 1000) / iter;
-        nvshmem_barrier_all();
     }
 
     if (mype == 0) {
-        print_table_basic("shmem_sig_ping_lat", "None", "size (Bytes)", "latency", "us", '-', &size,
-                          h_lat, 1);
+        print_basic_table("shmem_sig_ping_lat", "None", "latency", "us", '-', &size, h_lat, 1,
+                          &latency_stats);
     }
 finalize:
 

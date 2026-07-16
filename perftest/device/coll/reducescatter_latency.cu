@@ -163,40 +163,40 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         max_elems = max(static_cast<size_t>(1), max_size / (nvshmem_n_pes() * sizeof(int32_t)));
         RUN_ITERS(int32, int32_t, , 512);
         if (!mype) {
-            print_table_v1("device_reducescatter", "int32-sum-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_sum_lat, j);
-            print_table_v1("device_reducescatter", "int32-prod-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_prod_lat, j);
-            print_table_v1("device_reducescatter", "int32-and-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_and_lat, j);
-            print_table_v1("device_reducescatter", "int32-or-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_or_lat, j);
-            print_table_v1("device_reducescatter", "int32-xor-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_xor_lat, j);
-            print_table_v1("device_reducescatter", "int32-min-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_min_lat, j);
-            print_table_v1("device_reducescatter", "int32-max-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_max_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-sum-t", "latency", "us",
+                                          '-', size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-prod-t", "latency", "us",
+                                          '-', size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-and-t", "latency", "us",
+                                          '-', size_arr, h_and_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-or-t", "latency", "us",
+                                          '-', size_arr, h_or_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-xor-t", "latency", "us",
+                                          '-', size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-min-t", "latency", "us",
+                                          '-', size_arr, h_min_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-max-t", "latency", "us",
+                                          '-', size_arr, h_max_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(1), min_size / (nvshmem_n_pes() * sizeof(int64_t)));
         max_elems = max(static_cast<size_t>(1), max_size / (nvshmem_n_pes() * sizeof(int64_t)));
         RUN_ITERS(int64, int64_t, , 512);
         if (!mype) {
-            print_table_v1("device_reducescatter", "int64-sum-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_sum_lat, j);
-            print_table_v1("device_reducescatter", "int64-prod-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_prod_lat, j);
-            print_table_v1("device_reducescatter", "int64-and-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_and_lat, j);
-            print_table_v1("device_reducescatter", "int64-or-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_or_lat, j);
-            print_table_v1("device_reducescatter", "int64-xor-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_xor_lat, j);
-            print_table_v1("device_reducescatter", "int64-min-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_min_lat, j);
-            print_table_v1("device_reducescatter", "int64-max-t", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_max_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-sum-t", "latency", "us",
+                                          '-', size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-prod-t", "latency", "us",
+                                          '-', size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-and-t", "latency", "us",
+                                          '-', size_arr, h_and_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-or-t", "latency", "us",
+                                          '-', size_arr, h_or_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-xor-t", "latency", "us",
+                                          '-', size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-min-t", "latency", "us",
+                                          '-', size_arr, h_min_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-max-t", "latency", "us",
+                                          '-', size_arr, h_max_lat, j);
         }
     }
 
@@ -205,40 +205,40 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         max_elems = max(static_cast<size_t>(1), max_size / (nvshmem_n_pes() * sizeof(int32_t)));
         RUN_ITERS(int32, int32_t, _warp, 4096);
         if (!mype) {
-            print_table_v1("device_reducescatter", "int32-sum-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_sum_lat, j);
-            print_table_v1("device_reducescatter", "int32-prod-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_prod_lat, j);
-            print_table_v1("device_reducescatter", "int32-and-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_and_lat, j);
-            print_table_v1("device_reducescatter", "int32-or-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_or_lat, j);
-            print_table_v1("device_reducescatter", "int32-xor-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_xor_lat, j);
-            print_table_v1("device_reducescatter", "int32-min-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_min_lat, j);
-            print_table_v1("device_reducescatter", "int32-max-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_max_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-sum-w", "latency", "us",
+                                          '-', size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-prod-w", "latency", "us",
+                                          '-', size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-and-w", "latency", "us",
+                                          '-', size_arr, h_and_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-or-w", "latency", "us",
+                                          '-', size_arr, h_or_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-xor-w", "latency", "us",
+                                          '-', size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-min-w", "latency", "us",
+                                          '-', size_arr, h_min_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-max-w", "latency", "us",
+                                          '-', size_arr, h_max_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(1), min_size / (nvshmem_n_pes() * sizeof(int64_t)));
         max_elems = max(static_cast<size_t>(1), max_size / (nvshmem_n_pes() * sizeof(int64_t)));
         RUN_ITERS(int64, int64_t, _warp, 4096);
         if (!mype) {
-            print_table_v1("device_reducescatter", "int64-sum-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_sum_lat, j);
-            print_table_v1("device_reducescatter", "int64-prod-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_prod_lat, j);
-            print_table_v1("device_reducescatter", "int64-and-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_and_lat, j);
-            print_table_v1("device_reducescatter", "int64-or-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_or_lat, j);
-            print_table_v1("device_reducescatter", "int64-xor-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_xor_lat, j);
-            print_table_v1("device_reducescatter", "int64-min-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_min_lat, j);
-            print_table_v1("device_reducescatter", "int64-max-w", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_max_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-sum-w", "latency", "us",
+                                          '-', size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-prod-w", "latency", "us",
+                                          '-', size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-and-w", "latency", "us",
+                                          '-', size_arr, h_and_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-or-w", "latency", "us",
+                                          '-', size_arr, h_or_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-xor-w", "latency", "us",
+                                          '-', size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-min-w", "latency", "us",
+                                          '-', size_arr, h_min_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-max-w", "latency", "us",
+                                          '-', size_arr, h_max_lat, j);
         }
     }
 
@@ -247,40 +247,40 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         max_elems = max(static_cast<size_t>(1), max_size / (nvshmem_n_pes() * sizeof(int32_t)));
         RUN_ITERS(int32, int32_t, _block, max_elems);
         if (!mype) {
-            print_table_v1("device_reducescatter", "int32-sum-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_sum_lat, j);
-            print_table_v1("device_reducescatter", "int32-prod-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_prod_lat, j);
-            print_table_v1("device_reducescatter", "int32-and-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_and_lat, j);
-            print_table_v1("device_reducescatter", "int32-or-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_or_lat, j);
-            print_table_v1("device_reducescatter", "int32-xor-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_xor_lat, j);
-            print_table_v1("device_reducescatter", "int32-min-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_min_lat, j);
-            print_table_v1("device_reducescatter", "int32-max-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_max_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-sum-b", "latency", "us",
+                                          '-', size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-prod-b", "latency", "us",
+                                          '-', size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-and-b", "latency", "us",
+                                          '-', size_arr, h_and_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-or-b", "latency", "us",
+                                          '-', size_arr, h_or_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-xor-b", "latency", "us",
+                                          '-', size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-min-b", "latency", "us",
+                                          '-', size_arr, h_min_lat, j);
+            print_device_collective_table("device_reducescatter", "int32-max-b", "latency", "us",
+                                          '-', size_arr, h_max_lat, j);
         }
 
         min_elems = max(static_cast<size_t>(1), min_size / (nvshmem_n_pes() * sizeof(int64_t)));
         max_elems = max(static_cast<size_t>(1), max_size / (nvshmem_n_pes() * sizeof(int64_t)));
         RUN_ITERS(int64, int64_t, _block, max_elems);
         if (!mype) {
-            print_table_v1("device_reducescatter", "int64-sum-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_sum_lat, j);
-            print_table_v1("device_reducescatter", "int64-prod-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_prod_lat, j);
-            print_table_v1("device_reducescatter", "int64-and-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_and_lat, j);
-            print_table_v1("device_reducescatter", "int64-or-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_or_lat, j);
-            print_table_v1("device_reducescatter", "int64-xor-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_xor_lat, j);
-            print_table_v1("device_reducescatter", "int64-min-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_min_lat, j);
-            print_table_v1("device_reducescatter", "int64-max-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_max_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-sum-b", "latency", "us",
+                                          '-', size_arr, h_sum_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-prod-b", "latency", "us",
+                                          '-', size_arr, h_prod_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-and-b", "latency", "us",
+                                          '-', size_arr, h_and_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-or-b", "latency", "us",
+                                          '-', size_arr, h_or_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-xor-b", "latency", "us",
+                                          '-', size_arr, h_xor_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-min-b", "latency", "us",
+                                          '-', size_arr, h_min_lat, j);
+            print_device_collective_table("device_reducescatter", "int64-max-b", "latency", "us",
+                                          '-', size_arr, h_max_lat, j);
         }
     }
 

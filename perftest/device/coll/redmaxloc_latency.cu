@@ -99,8 +99,8 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
     if (run_options.run_block) {
         RUN_ITERS(double2, double2, _block, max_elems);
         if (!mype) {
-            print_table_v1("device_reduction", "double2-maxloc-b", "size (Bytes)", "latency", "us",
-                           '-', size_arr, h_maxloc_lat, j);
+            print_device_collective_table("device_reduction", "double2-maxloc-b", "latency", "us",
+                                          '-', size_arr, h_maxloc_lat, j);
         }
     }
 

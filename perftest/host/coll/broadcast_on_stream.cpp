@@ -22,6 +22,7 @@ int main(int argc, char **argv) {
 
     uint64_t *size_array = (uint64_t *)calloc(max_size_log, sizeof(uint64_t));
     double **latency_array = (double **)malloc(max_size_log * sizeof(double *));
+    perf_stats_t *latency_stats = (perf_stats_t *)calloc(max_size_log, sizeof(perf_stats_t));
     cudaStream_t stream;
 
     for (int i = 0; i < max_size_log; i++) {
@@ -120,8 +121,9 @@ int main(int argc, char **argv) {
             break;
     }
     if (!mype) {
-        print_table_v2("broadcast_on_stream", datatype.name.c_str(), "size (bytes)", "latency",
-                       "us", '-', size_array, latency_array, max_size_log, iters);
+        print_host_collective_table("broadcast_on_stream", datatype.name.c_str(), "latency", "us",
+                                    '-', size_array, latency_array, max_size_log, iters,
+                                    latency_stats);
     }
 
     CUDA_CHECK(cudaFreeHost(h_buffer));
@@ -136,5 +138,6 @@ int main(int argc, char **argv) {
     finalize_wrapper();
 
 out:
+    free(latency_stats);
     return status;
 }

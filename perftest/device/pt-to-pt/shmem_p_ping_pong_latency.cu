@@ -96,6 +96,7 @@ int main(int argc, char *argv[]) {
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_lat;
+    perf_stats_t *h_lat_stats = NULL;
 
     float milliseconds;
     cudaEvent_t start, stop;
@@ -123,6 +124,8 @@ int main(int argc, char *argv[]) {
     alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_lat = (double *)h_tables[1];
+    h_lat_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_lat_stats) goto finalize;
     if (use_mmap) {
         data_d = (int *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
         flag_d = (uint64_t *)allocate_mmap_buffer(sizeof(uint64_t), mem_handle_type, use_egm);
@@ -159,31 +162,31 @@ int main(int argc, char *argv[]) {
         nvshmem_barrier_all();
         test_ping_pong(args_1, test_cubin, 0);
         CUDA_CHECK(cudaDeviceSynchronize());
-        if (use_egm) {
-            memset(flag_d, 0, sizeof(uint64_t));
-        } else {
-            CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+        for (size_t repetition = 0; repetition < repetitions; repetition++) {
+            if (use_egm) {
+                memset(flag_d, 0, sizeof(uint64_t));
+            } else {
+                CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
+            }
+            cudaEventRecord(start);
+            test_ping_pong(args_2, test_cubin, 0);
+            if (status != NVSHMEMX_SUCCESS) {
+                printf("shmemx_collective_launch failed %d \n", status);
+                exit(-1);
+            }
+            cudaEventRecord(stop);
+            CUDA_CHECK(cudaEventSynchronize(stop));
+            cudaEventElapsedTime(&milliseconds, start, stop);
+            h_lat[i] = (milliseconds * 1000) / iter;
+            if (!mype) perf_stats_add(h_lat_stats[i], h_lat[i]);
         }
-
-        cudaEventRecord(start);
-        test_ping_pong(args_2, test_cubin, 0);
-        if (status != NVSHMEMX_SUCCESS) {
-            printf("shmemx_collective_launch failed %d \n", status);
-            exit(-1);
-        }
-        cudaEventRecord(stop);
-
-        /* give latency in us */
-        CUDA_CHECK(cudaEventSynchronize(stop));
-        cudaEventElapsedTime(&milliseconds, start, stop);
-        h_lat[i] = (milliseconds * 1000) / iter;
         nvshmem_barrier_all();
         i++;
     }
 
     if (mype == 0) {
-        print_table_basic("shmem_ping_pong_lat", "None", "size (Bytes)", "latency", "us", '-',
-                          h_size_arr, h_lat, i);
+        print_basic_table("shmem_ping_pong_lat", "None", "latency", "us", '-', h_size_arr, h_lat, i,
+                          h_lat_stats);
     }
 
 finalize:
@@ -203,6 +206,7 @@ finalize:
         }
     }
     free_tables(h_tables, 2);
+    free(h_lat_stats);
     finalize_wrapper();
 
     return 0;

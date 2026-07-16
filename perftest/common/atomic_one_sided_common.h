@@ -216,8 +216,8 @@
         nvshmem_barrier_all();                                                                  \
                                                                                                 \
         if (mype == 0) {                                                                        \
-            print_table_basic("shmem_at_" #TYPE "_" #AMO "_ping_lat", "None", "size (Bytes)",   \
-                              "latency", "us", '-', h_size_arr, h_lat, 1);                      \
+            print_basic_table("shmem_at_" #TYPE "_" #AMO "_ping_lat", "None", "latency", "us",  \
+                              '-', h_size_arr, h_lat, 1);                                       \
         }                                                                                       \
                                                                                                 \
         CUDA_CHECK(cudaDeviceSynchronize());                                                    \
@@ -265,8 +265,8 @@
         nvshmem_barrier_all();                                                                    \
                                                                                                   \
         if (mype == 0) {                                                                          \
-            print_table_basic("shmem_at_" #TYPE "_" #AMO "_ping_lat", "None", "size (Bytes)",     \
-                              "latency", "us", '-', h_size_arr, h_lat, 1);                        \
+            print_basic_table("shmem_at_" #TYPE "_" #AMO "_ping_lat", "None", "latency", "us",    \
+                              '-', h_size_arr, h_lat, 1);                                         \
         }                                                                                         \
                                                                                                   \
         CUDA_CHECK(cudaDeviceSynchronize());                                                      \

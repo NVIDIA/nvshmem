@@ -124,6 +124,8 @@ int main(int argc, char *argv[]) {
     uint64_t *h_size_arr;
     double *h_bw;
     double *h_msgrate;
+    perf_stats_t *h_bw_stats = NULL;
+    perf_stats_t *h_msgrate_stats = NULL;
     bool report_msgrate = false;
 
     int iter = iters;
@@ -151,6 +153,9 @@ int main(int argc, char *argv[]) {
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
     h_msgrate = (double *)h_tables[2];
+    h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    h_msgrate_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_bw_stats || !h_msgrate_stats) goto finalize;
 
     if (use_mmap) {
         data_d = (void *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -175,33 +180,35 @@ int main(int argc, char *argv[]) {
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
             call_bw(blocks, threads, data_d, counter_d, size, element_size, mype, skip, stride);
             CUDA_CHECK(cudaDeviceSynchronize());
-            CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-
-            cudaEventRecord(start);
-            call_bw(blocks, threads, data_d, counter_d, size, element_size, mype, iter, stride);
-            cudaEventRecord(stop);
-
-            CUDA_CHECK(cudaGetLastError());
-            CUDA_CHECK(cudaEventSynchronize(stop));
-
-            cudaEventElapsedTime(&milliseconds, start, stop);
-            h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-            h_msgrate[i] = (double)(size / element_size) * iter / (milliseconds * MS_TO_S);
-            nvshmem_barrier_all();
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+                cudaEventRecord(start);
+                call_bw(blocks, threads, data_d, counter_d, size, element_size, mype, iter, stride);
+                cudaEventRecord(stop);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaEventSynchronize(stop));
+                cudaEventElapsedTime(&milliseconds, start, stop);
+                h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                h_msgrate[i] = (double)(size / element_size) * iter / (milliseconds * MS_TO_S);
+                perf_stats_add(h_bw_stats[i], h_bw[i]);
+                perf_stats_add(h_msgrate_stats[i], h_msgrate[i]);
+                nvshmem_barrier_all();
+            }
             i++;
         }
     } else {
         for (size = min_size; size <= max_size; size *= step_factor) {
-            nvshmem_barrier_all();
+            for (size_t repetition = 0; repetition < repetitions; repetition++)
+                nvshmem_barrier_all();
         }
     }
 
     if (mype == 0) {
-        print_table_basic("shmem_p_bw", "None", "size (Bytes)", "BW", "GB/sec", '+', h_size_arr,
-                          h_bw, i);
+        print_basic_table("shmem_p_bw", "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
+                          h_bw_stats);
         if (report_msgrate)
-            print_table_basic("shmem_p_bw", "None", "size (Bytes)", "msgrate", "MMPS", '+',
-                              h_size_arr, h_msgrate, i);
+            print_basic_table("shmem_p_bw", "None", "msgrate", "MMPS", '+', h_size_arr, h_msgrate,
+                              i, h_msgrate_stats);
     }
 
 finalize:
@@ -214,6 +221,8 @@ finalize:
         }
     }
     free_tables(h_tables, 3);
+    free(h_bw_stats);
+    free(h_msgrate_stats);
     finalize_wrapper();
 
     return 0;
