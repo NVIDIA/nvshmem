@@ -184,7 +184,7 @@ def collective_on_buffer(coll: str,
     if coll != "alltoall":
         size_elem = max(1, size // dtype_nbytes(dtype))
     else:
-        size_elem = max(1, size // (n_pes() * dtype_nbytes(dtype)))
+        size_elem = max(1, size // (team_n_pes(team) * dtype_nbytes(dtype)))
 
     func_name = ""
     if dtype:
