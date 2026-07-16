@@ -62,12 +62,17 @@ typedef int (*fnptr_MPI_Bcast)(void *buffer, int count, MPI_Datatype datatype, i
                                MPI_Comm comm);
 typedef int (*fnptr_MPI_Comm_rank)(MPI_Comm comm, int *rank);
 typedef int (*fnptr_MPI_Comm_size)(MPI_Comm comm, int *size);
+typedef int (*fnptr_MPI_Comm_split_type)(MPI_Comm comm, int split_type, int key, MPI_Info info,
+                                         MPI_Comm *newcomm);
+typedef int (*fnptr_MPI_Comm_free)(MPI_Comm *comm);
 typedef int (*fnptr_MPI_Finalize)(void);
 struct nvshmemi_mpi_fn_table {
     fnptr_MPI_Init fn_MPI_Init;
     fnptr_MPI_Bcast fn_MPI_Bcast;
     fnptr_MPI_Comm_rank fn_MPI_Comm_rank;
     fnptr_MPI_Comm_size fn_MPI_Comm_size;
+    fnptr_MPI_Comm_split_type fn_MPI_Comm_split_type;
+    fnptr_MPI_Comm_free fn_MPI_Comm_free;
     fnptr_MPI_Finalize fn_MPI_Finalize;
 };
 

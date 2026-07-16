@@ -159,6 +159,22 @@ void select_device() {
                 prop.pciBusID);
 }
 
+#ifdef NVSHMEMTEST_MPI_SUPPORT
+// Select device before NVSHMEM init so state->device_id is set correctly.
+// nvshmem_team_my_pe(NVSHMEMX_TEAM_NODE) requires NVSHMEM to be initialized,
+// so derive the node-local rank from a shared-memory communicator split instead.
+static void select_device_pre_init(int rank) {
+    MPI_Comm node_comm;
+    int local_rank, dev_count;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node_comm);
+    MPI_Comm_rank(node_comm, &local_rank);
+    MPI_Comm_free(&node_comm);
+    CUDA_CHECK(cudaGetDeviceCount(&dev_count));
+    if (dev_count <= 0) ERROR_EXIT("No CUDA devices available\n");
+    CUDA_CHECK(cudaSetDevice(local_rank % dev_count));
+}
+#endif
+
 static int parse_mode_by_env(const char *envname) {
     char *bootstrap_mode = getenv(envname);
     if (bootstrap_mode) {
@@ -185,11 +201,11 @@ nvshmemBootstrapMPI::nvshmemBootstrapMPI(int *c, char ***v)
         MPI_Comm_size(MPI_COMM_WORLD, &nranks);
         MPI_Comm mpi_comm = MPI_COMM_WORLD;
 
+        select_device_pre_init(rank);
         nvshmemx_init_attr_t attr = NVSHMEMX_INIT_ATTR_INITIALIZER;
         attr.mpi_comm = &mpi_comm;
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr);
         DEBUG_PRINT("NVSHMEM: [%d of %d] MPI Bootstrap! \n", rank, nranks);
-        select_device();
         /* Good to go */
 #else
         throw nvshmemBootstrapMPIException("Waiving the path as missing NVSHMEMTEST_MPI_SUPPORT\n");
@@ -218,9 +234,9 @@ nvshmemBootstrapUID::nvshmemBootstrapUID(int *c, char ***v)
 
         MPI_Bcast(&id, sizeof(nvshmemx_uniqueid_t), MPI_UINT8_T, 0, MPI_COMM_WORLD);
         nvshmemx_set_attr_uniqueid_args(rank, nranks, &id, &attr);
+        select_device_pre_init(rank);
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
         DEBUG_PRINT("NVSHMEM: [%d of %d] UID Bootstrap! \n", rank, nranks);
-        select_device();
         /* good to go */
 #else
         throw nvshmemBootstrapUIDException(

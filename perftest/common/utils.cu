@@ -192,6 +192,8 @@ int nvshmemi_load_mpi() {
     MPI_LOAD_SYM(MPI_Bcast);
     MPI_LOAD_SYM(MPI_Comm_rank);
     MPI_LOAD_SYM(MPI_Comm_size);
+    MPI_LOAD_SYM(MPI_Comm_split_type);
+    MPI_LOAD_SYM(MPI_Comm_free);
     MPI_LOAD_SYM(MPI_Finalize);
 
     return 0;
@@ -314,13 +316,27 @@ void init_wrapper(int *c, char ***v) {
         mpi_fn_table.fn_MPI_Comm_size(MPI_COMM_WORLD_PLACEHOLDER, &nranks);
         DEBUG_PRINT("MPI: [%d of %d] hello MPI world! \n", rank, nranks);
     }
+    if (use_mpi || use_uid) {
+        // Select device before NVSHMEM init so state->device_id is set correctly.
+        // nvshmem_team_my_pe(NVSHMEMX_TEAM_NODE) is unavailable pre-init, so derive
+        // node-local rank from a shared-memory communicator split.
+        MPI_Comm node_comm;
+        int local_rank, dev_count;
+        MPI_Info info_null = (MPI_Info)dlsym(nvshmemi_mpi_handle, "ompi_mpi_info_null");
+        mpi_fn_table.fn_MPI_Comm_split_type(MPI_COMM_WORLD_PLACEHOLDER, MPI_COMM_TYPE_SHARED, rank,
+                                            info_null, &node_comm);
+        mpi_fn_table.fn_MPI_Comm_rank(node_comm, &local_rank);
+        mpi_fn_table.fn_MPI_Comm_free(&node_comm);
+        CUDA_CHECK(cudaGetDeviceCount(&dev_count));
+        if (dev_count <= 0) ERROR_EXIT("No CUDA devices available\n");
+        CUDA_CHECK(cudaSetDevice(local_rank % dev_count));
+    }
     if (use_mpi) {
         MPI_Comm mpi_comm = MPI_COMM_WORLD_PLACEHOLDER;
         nvshmemx_init_attr_t attr = NVSHMEMX_INIT_ATTR_INITIALIZER;
         attr.mpi_comm = &mpi_comm;
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr);
 
-        select_device();
         nvshmem_barrier_all();
 
         return;
@@ -335,7 +351,6 @@ void init_wrapper(int *c, char ***v) {
                                   MPI_COMM_WORLD_PLACEHOLDER);
         nvshmemx_set_attr_uniqueid_args(rank, nranks, &id, &attr);
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
-        select_device();
         nvshmem_barrier_all();
         return;
     }
