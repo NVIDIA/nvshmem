@@ -112,7 +112,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_shared_source_
     return *cta_status;
 }
 
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_block(
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_block_single(
     void *dest, const void *source, size_t bytes, uint64_t *signal_addr, int pe, bool is_elected,
     uintptr_t smem_base, size_t staging_capacity, int *cta_status, handle_barrier_t *completion) {
     if (is_elected) {
@@ -168,6 +168,119 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
     __syncthreads();
     return *cta_status;
 }
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_block_pipelined(
+    void *dest, const void *source, size_t bytes, uint64_t *signal_addr, int pe, unsigned int tid,
+    bool is_elected, uintptr_t smem_base, size_t staging_capacity, int *cta_status,
+    handle_barrier_t *completion) {
+    cuda::std::array<char *, TMA_COPY_NUM_STAGES> staging{};
+    cuda::std::array<uint64_t *, TMA_COPY_NUM_STAGES> ready{};
+    cuda::std::array<uint64_t *, TMA_COPY_NUM_STAGES> reusable{};
+    char *staging_base = nvshmemi_tma_data_buffer(smem_base);
+    for (size_t stage = 0; stage < staging.size(); stage++) {
+        staging[stage] = staging_base + stage * staging_capacity;
+        ready[stage] = reinterpret_cast<uint64_t *>(nvshmemi_counted_state_slot(
+            smem_base, NVSHMEMI_COUNTED_READY_BARRIER_SLOT + static_cast<int>(stage)));
+        reusable[stage] = reinterpret_cast<uint64_t *>(nvshmemi_counted_state_slot(
+            smem_base, NVSHMEMI_COUNTED_REUSABLE_BARRIER_SLOT + static_cast<int>(stage)));
+    }
+
+    if (is_elected) {
+        for (size_t stage = 0; stage < staging.size(); stage++) {
+            nvshmemi_tma_mbarrier_init(ready[stage]);
+            nvshmemi_tma_mbarrier_init(reusable[stage]);
+        }
+        nvshmemi_tma_fence_proxy_async_shared_cta();
+    }
+    __syncthreads();
+
+    constexpr size_t max_batch_bytes =
+        static_cast<size_t>(TMA_PUT_MAX_BATCH_SIZE - CFT_HANDLE_TX_SIZE);
+    const char *src = reinterpret_cast<const char *>(source);
+    uint64_t data_off = nvshmemi_heap_offset(dest);
+    uint64_t count_off = nvshmemi_heap_offset(signal_addr);
+    CUlogicalEndpointId endpoint = nvshmemi_ld_and_get_le_id(pe);
+    size_t batch_offset = 0;
+    size_t chunk_index = 0;
+
+    while (batch_offset < bytes) {
+        size_t batch_bytes =
+            (bytes - batch_offset) < max_batch_bytes ? bytes - batch_offset : max_batch_bytes;
+
+        if (is_elected) {
+            size_t transferred = 0;
+            size_t iteration = chunk_index;
+            while (transferred < batch_bytes) {
+                size_t chunk = (batch_bytes - transferred) < staging_capacity
+                                   ? batch_bytes - transferred
+                                   : staging_capacity;
+                size_t slot = iteration % staging.size();
+                int phase = static_cast<int>((iteration / staging.size()) & 1);
+
+                if (iteration >= staging.size())
+                    nvshmemi_tma_mbarrier_try_wait(reusable[slot], phase ^ 1);
+                nvshmemi_tma_bulk_global_to_shared(staging[slot], src + batch_offset + transferred,
+                                                   static_cast<uint32_t>(chunk), ready[slot]);
+                nvshmemi_tma_mbarrier_arrive_expect_tx(ready[slot], static_cast<uint32_t>(chunk));
+
+                transferred += chunk;
+                iteration++;
+            }
+        } else if (tid == warpSize) {
+            size_t transferred = 0;
+            size_t iteration = chunk_index;
+            uint32_t pending_bytes = 0;
+            while (transferred < batch_bytes) {
+                uint32_t chunk = static_cast<uint32_t>(
+                    (batch_bytes - transferred) < staging_capacity ? batch_bytes - transferred
+                                                                   : staging_capacity);
+                size_t slot = iteration % staging.size();
+                int phase = static_cast<int>((iteration / staging.size()) & 1);
+
+                nvshmemi_tma_mbarrier_try_wait(ready[slot], phase);
+                nvshmemi_counted_submit_chunk(endpoint, data_off + batch_offset + transferred,
+                                              count_off, staging[slot], chunk, completion);
+                pending_bytes += chunk;
+                /* The producer may reuse this slot once fabric has consumed its source bytes. */
+                completion->fabric_wait_sync_reads();
+                nvshmemi_tma_mbarrier_arrive_expect_tx(reusable[slot], 1);
+                nvshmemi_tma_mbarrier_complete_tx(reusable[slot], 1);
+
+                transferred += chunk;
+                iteration++;
+            }
+            *cta_status = nvshmemi_counted_drain_batch(completion, pending_bytes);
+        }
+
+        __syncthreads();
+        if (*cta_status != NVSHMEMX_SUCCESS) break;
+        batch_offset += batch_bytes;
+        chunk_index += (batch_bytes + staging_capacity - 1) / staging_capacity;
+    }
+
+    if (is_elected) {
+        for (size_t stage = 0; stage < staging.size(); stage++) {
+            __mbarrier_inval(ready[stage]);
+            __mbarrier_inval(reusable[stage]);
+        }
+        completion->inval();
+    }
+    __syncthreads();
+    return *cta_status;
+}
+
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_block(
+    void *dest, const void *source, size_t bytes, uint64_t *signal_addr, int pe, unsigned int tid,
+    bool is_elected, uintptr_t smem_base, size_t staging_capacity, int *cta_status,
+    handle_barrier_t *completion) {
+    unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
+    if (block_threads < 2 * warpSize)
+        return nvshmemi_counted_put_global_source_block_single(
+            dest, source, bytes, signal_addr, pe, is_elected, smem_base, staging_capacity,
+            cta_status, completion);
+    return nvshmemi_counted_put_global_source_block_pipelined(
+        dest, source, bytes, signal_addr, pe, tid, is_elected, smem_base, staging_capacity,
+        cta_status, completion);
+}
 #endif
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_block(
@@ -184,6 +297,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
     if (bytes == 0) return NVSHMEMX_SUCCESS;
     if (!nvshmemi_tma_smem_registered()) return NVSHMEMX_ERROR_NOT_SUPPORTED;
 
+    const unsigned int tid =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     const bool is_elected = nvshmemi_tma_block_is_elected();
     uintptr_t smem_base = nvshmemi_tma_smem_base();
     int *cta_status = reinterpret_cast<int *>(
@@ -203,7 +318,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
     if (source_is_shared)
         return nvshmemi_counted_put_shared_source_block(dest, source, bytes, signal_addr, pe,
                                                         is_elected, cta_status, completion);
-    return nvshmemi_counted_put_global_source_block(dest, source, bytes, signal_addr, pe,
+    return nvshmemi_counted_put_global_source_block(dest, source, bytes, signal_addr, pe, tid,
                                                     is_elected, smem_base, staging_capacity,
                                                     cta_status, completion);
 #else
