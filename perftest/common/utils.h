@@ -235,6 +235,8 @@ extern size_t num_blocks;
 extern size_t threads_per_block;
 extern size_t iters;
 extern size_t warmup_iters;
+extern size_t repetitions;
+extern bool repetitions_requested;
 extern size_t step_factor;
 extern size_t max_size_log;
 extern size_t stride;
@@ -287,6 +289,17 @@ extern bool use_smem;
 
 extern int use_cubin;
 
+struct perf_stats_t {
+    size_t count;
+    double mean;
+    double m2;
+    double min;
+    double max;
+};
+
+void perf_stats_add(perf_stats_t &stats, double value);
+double perf_stats_stddev(const perf_stats_t *stats);
+
 void init_cumodule(const char *str);
 void init_wrapper(int *c, char ***v);
 void finalize_wrapper();
@@ -294,15 +307,17 @@ void alloc_tables(void ***table_mem, int num_tables, int num_entries_per_table);
 void free_tables(void **tables, int num_tables);
 uint64_t calculate_collective_size(const char *coll_name, uint64_t num_elems, uint64_t type_size,
                                    int npes);
-void print_table_basic(const char *job_name, const char *subjob_name, const char *var_name,
-                       const char *output_var, const char *units, const char plus_minus,
-                       uint64_t *size, double *value, int num_entries);
-void print_table_v1(const char *job_name, const char *subjob_name, const char *var_name,
-                    const char *output_var, const char *units, const char plus_minus,
-                    uint64_t *size, double *value, int num_entries);
-void print_table_v2(const char *job_name, const char *subjob_name, const char *var_name,
-                    const char *output_var, const char *units, const char plus_minus,
-                    uint64_t *size, double **value, int num_entries, size_t num_iters);
+void print_basic_table(const char *job_name, const char *subjob_name, const char *output_var,
+                       const char *units, const char plus_minus, uint64_t *size, double *value,
+                       int num_entries, const perf_stats_t *stats = nullptr);
+void print_device_collective_table(const char *job_name, const char *subjob_name,
+                                   const char *output_var, const char *units, const char plus_minus,
+                                   uint64_t *size, double *value, int num_entries,
+                                   const perf_stats_t *stats = nullptr);
+void print_host_collective_table(const char *job_name, const char *subjob_name,
+                                 const char *output_var, const char *units, const char plus_minus,
+                                 uint64_t *size, double **value, int num_entries, size_t num_iters,
+                                 const perf_stats_t *stats = nullptr);
 void read_args(int argc, char **argv);
 void *allocate_mmap_buffer(size_t size, int mem_handle_type, bool use_egm = false,
                            bool reset_zero = false);

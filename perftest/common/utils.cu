@@ -4,11 +4,16 @@
  */
 
 #include "utils.h"
+#include <algorithm>
 #include <charconv>
+#include <cstdio>
+#include <cstdlib>
 #include <dlfcn.h>
-#include <stdlib.h>
+#include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 #include <unordered_map>
 #include <tuple>
@@ -19,6 +24,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <cmath>
 #include <string.h>
 
 double *d_latency = NULL;
@@ -696,202 +702,330 @@ tuple<double, double, double> get_latency_metrics(double *values, int num_values
     return make_tuple(avg, min, max);
 }
 
-void print_table_basic(const char *job_name, const char *subjob_name, const char *var_name,
-                       const char *output_var, const char *units, const char plus_minus,
-                       uint64_t *size, double *value, int num_entries) {
-    bool machine_readable = false;
-    char buffer[256] = {0};
-    char *env_value = getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-    if (env_value) machine_readable = atoi(env_value);
-    int i;
+void perf_stats_add(perf_stats_t &stats, double value) {
+    ++stats.count;
+    if (stats.count == 1) {
+        stats.mean = value;
+        stats.m2 = 0.0;
+        stats.min = value;
+        stats.max = value;
+        return;
+    }
 
-    if (machine_readable) {
-        printf("%s\n", job_name);
-        for (i = 0; i < num_entries; i++) {
-            if (size[i] != 0 && value[i] != 0.00) {
-                printf("&&&& PERF %s___%s___size__%lu___%s %lf %c%s\n", job_name, subjob_name,
-                       size[i], output_var, value[i], plus_minus, units);
-            }
-        }
+    const double delta = value - stats.mean;
+    stats.mean += delta / static_cast<double>(stats.count);
+    stats.m2 += delta * (value - stats.mean);
+    stats.min = std::min(stats.min, value);
+    stats.max = std::max(stats.max, value);
+}
+
+double perf_stats_stddev(const perf_stats_t *stats) {
+    const auto &state = *stats;
+    return state.count > 1 ? std::sqrt(state.m2 / static_cast<double>(state.count - 1))
+                           : std::numeric_limits<double>::quiet_NaN();
+}
+
+template <typename T>
+static void append_column(std::ostringstream &builder, const T &value, int width) {
+    builder << std::left;
+    if constexpr (std::is_same_v<T, double>) builder << std::fixed << std::setprecision(6);
+    builder << std::setw(width) << value << "  ";
+}
+
+static void append_stddev_column(std::ostringstream &builder, const perf_stats_t &stats,
+                                 int width) {
+    if (stats.count > 1) {
+        append_column(builder, perf_stats_stddev(&stats), width);
     } else {
-        printf("#%10s\n", job_name);
-        snprintf(buffer, 256, "%s (%s)", output_var, units);
-        printf("%-10s  %-8s  %-16s\n", "size(B)", "scope", buffer);
-        for (i = 0; i < num_entries; i++) {
-            if (size[i] != 0 && value[i] != 0.00) {
-                printf("%-10lu  %-8s  %-16.6lf", size[i], subjob_name, value[i]);
-                printf("\n");
-            }
-        }
+        append_column(builder, "NA", width);
     }
 }
 
-void print_table_v1(const char *job_name, const char *subjob_name, const char *var_name,
-                    const char *output_var, const char *units, const char plus_minus,
-                    uint64_t *size, double *value, int num_entries) {
-    bool machine_readable = false;
-    char *env_value = getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-    if (env_value) machine_readable = atoi(env_value);
-    int i;
-
-    int npes = nvshmem_n_pes();
-    double avg, algbw, busbw;
-
-    const char *tokens[3] = {};
-    const char *delim = "-";
-    char copy[strlen(subjob_name) + 1];
-    strcpy(copy, subjob_name);
-    const char *token = strtok(copy, delim);
-
-    int token_count = 0;
-    while (token != NULL && token_count < 3) {
-        tokens[token_count] = token;
-        token = strtok(NULL, delim);
-        token_count++;
-    }
-
-    // Set default values for missing tokens
-    for (i = token_count; i < 3; i++) {
-        tokens[i] = "";
-    }
-
-    int datatype_size = 4;
-    if (strstr(subjob_name, "32-bit")) {
-        datatype_size = 4;
-    } else if (strstr(subjob_name, "64-bit")) {
-        datatype_size = 8;
-    } else {
-        datatype_t datatype = {NVSHMEM_INT, 4, "int"};
-        datatype_parse(tokens[0], &datatype);
-        datatype_size = datatype.size;
-    }
-
-    /* Used for automated test output. It outputs the data in a non human-friendly format. */
-    if (machine_readable) {
-        printf("%s\n", job_name);
-        for (i = 0; i < num_entries; i++) {
-            if (size[i] != 0 && value[i] != 0.00) {
-                printf("&&&& PERF %s___%s___size__%lu___%s %lf %c%s\n", job_name, subjob_name,
-                       size[i], output_var, value[i], plus_minus, units);
-            }
-        }
-    } else if (strcmp(job_name, "device_reduction") == 0 ||
-               strcmp(job_name, "device_reducescatter") == 0) {
-        printf("#%10s\n", job_name);
-        printf("%-10s  %-8s  %-8s  %-8s  %-8s  %-16s  %-12s  %-12s\n", "size(B)", "count", "type",
-               "redop", "scope", "latency(us)", "algbw(GB/s)", "busbw(GB/s)");
-        for (i = 0; i < num_entries; i++) {
-            if (size[i] != 0 && value[i] != 0.00) {
-                avg = value[i];
-                get_coll_info(&algbw, &busbw, job_name, avg, npes, size[i]);
-                printf("%-10lu  %-8lu  %-8s  %-8s  %-8s  %-16.6lf  %-12.3lf  %-12.3lf", size[i],
-                       (size[i] / datatype_size), tokens[0], tokens[1], tokens[2], avg, algbw,
-                       busbw);
-                printf("\n");
-            }
-        }
-
-    } else {
-        // recombine first two tokens of subjob_name
-        char type[50];  // setting size based on strlen caused buffer overflow
-        strcpy(type, subjob_name);
-        char *last_delim = strrchr(type, '-');
-        if (last_delim != NULL) *last_delim = '\0';
-        printf("#%10s\n", job_name);
-        printf("%-10s  %-8s  %-8s  %-8s  %-16s  %-12s  %-12s\n", "size(B)", "count", "type",
-               "scope", "latency(us)", "algbw(GB/s)", "busbw(GB/s)");
-        for (i = 0; i < num_entries; i++) {
-            if (size[i] != 0 && value[i] != 0.00) {
-                avg = value[i];
-                get_coll_info(&algbw, &busbw, job_name, avg, npes, size[i]);
-                printf("%-10lu  %-8lu  %-8s  %-8s  %-16.6lf  %-12.3lf  %-12.3lf", size[i],
-                       (size[i] / datatype_size), type, tokens[2], avg, algbw, busbw);
-                printf("\n");
-            }
-        }
-    }
+static void append_table_title(std::ostringstream &builder, std::string_view job_name) {
+    builder << '#' << std::right << std::setw(10) << job_name << '\n';
 }
 
-void print_table_v2(const char *job_name, const char *subjob_name, const char *var_name,
-                    const char *output_var, const char *units, const char plus_minus,
-                    uint64_t *size, double **values, int num_entries, size_t num_iters) {
-    bool machine_readable = false;
-    char *env_value = getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-    if (env_value) machine_readable = atoi(env_value);
-    int i;
-
-    int npes = nvshmem_n_pes();
-    double avg, min, max, algbw, busbw = 0;
-
-    /* Used for automated test output. It outputs the data in a non human-friendly format. */
-    if (machine_readable) {
-        printf("%s\n", job_name);
-        for (i = 0; i < num_entries; i++) {
-            auto value = values[i];
-            tie(avg, min, max) = get_latency_metrics(value, num_iters);
-            if (size[i] != 0 && value[0] != 0.00) {
-                printf("&&&& PERF %s___%s___size__%lu___%s %lf %c%s\n", job_name, subjob_name,
-                       size[i], output_var, avg, plus_minus, units);
-            }
-        }
-    } else if (strcmp(job_name, "reduction_on_stream") == 0 ||
-               strcmp(job_name, "reducescatter_on_stream") == 0) {
-        /* Splits subjob_name into data type and operation name */
-        char **tokens = (char **)malloc(2 * sizeof(char *));
-        const char *delim = "-";
-        char copy[strlen(subjob_name) + 1];
-        strcpy(copy, subjob_name);
-        char *token = strtok(copy, delim);
-        if (token != NULL) {
-            tokens[0] = strdup(token);
-            token = strtok(NULL, delim);
-            if (token != NULL) {
-                tokens[1] = strdup(token);
-            } else {
-                tokens[1] = strdup("None");
-            }
+static void append_perf_result(std::ostringstream &builder, std::string_view job_name,
+                               std::string_view subjob_name, uint64_t size,
+                               std::string_view output_var, std::string_view units, char plus_minus,
+                               double mean, const perf_stats_t *stats) {
+    if (stats == nullptr) {
+        // Emit the legacy machine-readable row without repetition statistics.
+        builder << "&&&& PERF " << job_name << "___" << subjob_name << "___size__" << size << "___"
+                << output_var << ' ' << std::fixed << std::setprecision(6) << mean << ' '
+                << plus_minus << units << '\n';
+    } else {
+        // Emit the machine-readable row with statistics across timed repetitions.
+        builder << "&&&& PERF_STATS " << job_name << "___" << subjob_name << "___size__" << size
+                << "___" << output_var << ' ' << plus_minus << units << " mean=" << std::fixed
+                << std::setprecision(6) << mean << " stddev=";
+        if (stats->count > 1) {
+            builder << perf_stats_stddev(stats);
         } else {
-            tokens[0] = strdup("None");
-            tokens[1] = strdup("None");
+            builder << "NA";
         }
-        datatype_t datatype = {NVSHMEM_INT, 4, "int"};
-        datatype_parse(tokens[0], &datatype);
-        printf("#%10s\n", job_name);
-        printf("%-10s  %-8s  %-8s  %-8s  %-16s  %-16s  %-16s  %-12s  %-12s\n", "size(B)", "count",
-               "type", "redop", "latency(us)", "min_lat(us)", "max_lat(us)", "algbw(GB/s)",
-               "busbw(GB/s)");
-        for (i = 0; i < num_entries; i++) {
-            auto value = values[i];
-            if (size[i] != 0 && value[0] != 0.00) {
-                tie(avg, min, max) = get_latency_metrics(value, num_iters);
-                get_coll_info(&algbw, &busbw, job_name, avg, npes, size[i]);
-                printf(
-                    "%-10.1lu  %-8lu  %-8s  %-8s  %-16.6lf  %-16.3lf  %-16.3lf  %-12.3lf  %-12.3lf",
-                    size[i], size[i] / datatype.size, datatype.name.c_str(), tokens[1], avg, min,
-                    max, algbw, busbw);
-                printf("\n");
-            }
-        }
+        builder << " min=" << stats->min << " max=" << stats->max << " repetitions=" << stats->count
+                << '\n';
+    }
+}
+
+static bool print_machine_table(std::string_view job_name, std::string_view subjob_name,
+                                std::string_view output_var, std::string_view units,
+                                char plus_minus, const uint64_t *sizes, const double *values,
+                                const perf_stats_t *stats, int num_entries) {
+    const char *machine_readable_output = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
+    if (machine_readable_output == nullptr || std::atoi(machine_readable_output) == 0) return false;
+
+    std::ostringstream builder;
+    builder << job_name << '\n';
+    for (int i = 0; i < num_entries; ++i) {
+        const perf_stats_t *entry_stats = stats != nullptr ? &stats[i] : nullptr;
+        const double value = values != nullptr ? values[i] : 0.0;
+        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0))
+            continue;
+        const double mean = entry_stats != nullptr ? entry_stats->mean : value;
+        append_perf_result(builder, job_name, subjob_name, sizes[i], output_var, units, plus_minus,
+                           mean, entry_stats);
+    }
+    std::fputs(builder.str().c_str(), stdout);
+    return true;
+}
+
+static void print_basic_table_impl(const char *job_name, const char *subjob_name,
+                                   const char *output_var, const char *units, char plus_minus,
+                                   uint64_t *sizes, const double *values, const perf_stats_t *stats,
+                                   int num_entries) {
+    if (print_machine_table(job_name, subjob_name, output_var, units, plus_minus, sizes, values,
+                            stats, num_entries))
+        return;
+
+    const bool show_stats = stats != nullptr;
+    const std::string mean_header = std::string{output_var} + " (" + units + ')';
+    std::ostringstream builder;
+    append_table_title(builder, job_name);
+    append_column(builder, "size(B)", 10);
+    append_column(builder, "scope", 8);
+    if (show_stats) {
+        append_column(builder, mean_header, 16);
+        append_column(builder, std::string{"stddev ("} + units + ')', 16);
+        append_column(builder, std::string{"min ("} + units + ')', 16);
+        append_column(builder, std::string{"max ("} + units + ')', 16);
+        builder << std::left << std::setw(12) << "repetitions" << '\n';
     } else {
-        datatype_t datatype = {NVSHMEM_INT, 4, "int"};
-        char copy[strlen(subjob_name) + 1];
-        strcpy(copy, subjob_name);
-        datatype_parse(copy, &datatype);
-        printf("#%10s\n", job_name);
-        printf("%-10s  %-8s  %-8s  %-16s  %-16s  %-16s  %-12s  %-12s\n", "size(B)", "count", "type",
-               "latency(us)", "min_lat(us)", "max_lat(us)", "algbw(GB/s)", "busbw(GB/s)");
-        for (i = 0; i < num_entries; i++) {
-            auto value = values[i];
-            if (size[i] != 0 && value[0] != 0.00) {
-                tie(avg, min, max) = get_latency_metrics(value, num_iters);
-                get_coll_info(&algbw, &busbw, job_name, avg, npes, size[i]);
-                printf("%-10.1lu  %-8lu  %-8s  %-16.6lf  %-16.3lf  %-16.3lf  %-12.3lf  %-12.3lf",
-                       size[i], size[i] / datatype.size, datatype.name.c_str(), avg, min, max,
-                       algbw, busbw);
-                printf("\n");
-            }
+        builder << std::left << std::setw(16) << mean_header << '\n';
+    }
+
+    for (int i = 0; i < num_entries; ++i) {
+        const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
+        const double value = values != nullptr ? values[i] : 0.0;
+        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0))
+            continue;
+        append_column(builder, sizes[i], 10);
+        append_column(builder, subjob_name, 8);
+        const double mean = entry_stats != nullptr ? entry_stats->mean : value;
+        if (show_stats) {
+            append_column(builder, mean, 16);
+            append_stddev_column(builder, *entry_stats, 16);
+            append_column(builder, entry_stats->min, 16);
+            append_column(builder, entry_stats->max, 16);
+            builder << std::left << std::setw(12) << entry_stats->count << '\n';
+        } else {
+            builder << std::left << std::fixed << std::setprecision(6) << std::setw(16) << mean
+                    << '\n';
         }
     }
+    std::fputs(builder.str().c_str(), stdout);
+}
+
+static void print_device_collective_table_impl(const char *job_name, const char *subjob_name,
+                                               const char *output_var, const char *units,
+                                               char plus_minus, uint64_t *sizes,
+                                               const double *values, const perf_stats_t *stats,
+                                               int num_entries) {
+    if (print_machine_table(job_name, subjob_name, output_var, units, plus_minus, sizes, values,
+                            stats, num_entries))
+        return;
+
+    const bool show_stats = stats != nullptr;
+    const std::string_view job{job_name};
+    const std::string_view subjob{subjob_name};
+    const size_t last_delimiter = subjob.rfind('-');
+    const std::string_view type_and_operation = subjob.substr(0, last_delimiter);
+    const std::string_view scope =
+        last_delimiter == std::string_view::npos ? "" : subjob.substr(last_delimiter + 1);
+    const size_t first_delimiter = type_and_operation.find('-');
+    const std::string_view datatype_name = type_and_operation.substr(0, first_delimiter);
+    const std::string_view operation = first_delimiter == std::string_view::npos
+                                           ? ""
+                                           : type_and_operation.substr(first_delimiter + 1);
+    int datatype_size = 4;
+    if (subjob.find("64-bit") != std::string_view::npos) {
+        datatype_size = 8;
+    } else if (subjob.find("32-bit") == std::string_view::npos) {
+        datatype_t parsed = {NVSHMEM_INT, 4, "int"};
+        const std::string datatype{datatype_name};
+        datatype_parse(datatype.c_str(), &parsed);
+        datatype_size = parsed.size;
+    }
+
+    const bool reduction = job == "device_reduction" || job == "device_reducescatter";
+    const std::string_view type = reduction ? datatype_name : type_and_operation;
+    const int npes = nvshmem_n_pes();
+    std::ostringstream builder;
+    append_table_title(builder, job);
+    append_column(builder, "size(B)", 10);
+    append_column(builder, "count", 8);
+    append_column(builder, "type", 8);
+    if (reduction) append_column(builder, "redop", 8);
+    append_column(builder, "scope", 8);
+    append_column(builder, "latency(us)", 16);
+    if (show_stats) {
+        append_column(builder, "stddev(us)", 16);
+        append_column(builder, "min_lat(us)", 16);
+        append_column(builder, "max_lat(us)", 16);
+        append_column(builder, "repetitions", 12);
+    }
+    append_column(builder, "algbw(GB/s)", 12);
+    builder << std::left << std::setw(12) << "busbw(GB/s)" << '\n';
+
+    for (int i = 0; i < num_entries; ++i) {
+        const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
+        const double value = values != nullptr ? values[i] : 0.0;
+        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0))
+            continue;
+        const double mean = entry_stats != nullptr ? entry_stats->mean : value;
+        double algbw = 0.0;
+        double busbw = 0.0;
+        get_coll_info(&algbw, &busbw, job_name, mean, npes, sizes[i]);
+        append_column(builder, sizes[i], 10);
+        append_column(builder, sizes[i] / datatype_size, 8);
+        append_column(builder, type, 8);
+        if (reduction) append_column(builder, operation, 8);
+        append_column(builder, scope, 8);
+        append_column(builder, mean, 16);
+        if (show_stats) {
+            append_stddev_column(builder, *entry_stats, 16);
+            append_column(builder, entry_stats->min, 16);
+            append_column(builder, entry_stats->max, 16);
+            append_column(builder, entry_stats->count, 12);
+        }
+        builder << std::left << std::fixed << std::setprecision(3) << std::setw(12) << algbw
+                << "  ";
+        builder << std::left << std::fixed << std::setprecision(3) << std::setw(12) << busbw
+                << '\n';
+    }
+    std::fputs(builder.str().c_str(), stdout);
+}
+
+static void print_host_collective_table_impl(const char *job_name, const char *subjob_name,
+                                             const char *output_var, const char *units,
+                                             char plus_minus, uint64_t *sizes, double **values,
+                                             size_t num_iters, const perf_stats_t *stats,
+                                             int num_entries) {
+    const bool show_stats = stats != nullptr;
+    const std::string_view job{job_name};
+    const std::string_view subjob{subjob_name};
+
+    const char *machine_readable_output = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
+    if (machine_readable_output != nullptr && std::atoi(machine_readable_output) != 0) {
+        std::ostringstream builder;
+        builder << job << '\n';
+        for (int i = 0; i < num_entries; ++i) {
+            const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
+            if (sizes[i] == 0 || (show_stats ? entry_stats->count == 0 : values[i][0] == 0.0))
+                continue;
+            double mean = entry_stats != nullptr ? entry_stats->mean : 0.0;
+            if (!show_stats) {
+                double min = 0.0;
+                double max = 0.0;
+                tie(mean, min, max) = get_latency_metrics(values[i], num_iters);
+            }
+            append_perf_result(builder, job, subjob, sizes[i], output_var, units, plus_minus, mean,
+                               entry_stats);
+        }
+        std::fputs(builder.str().c_str(), stdout);
+        return;
+    }
+
+    const size_t delimiter = subjob.find('-');
+    const std::string_view type = subjob.substr(0, delimiter);
+    const std::string_view operation =
+        delimiter == std::string_view::npos ? "None" : subjob.substr(delimiter + 1);
+    datatype_t parsed = {NVSHMEM_INT, 4, "int"};
+    const std::string datatype{type};
+    datatype_parse(datatype.c_str(), &parsed);
+
+    const bool reduction = job == "reduction_on_stream" || job == "reducescatter_on_stream";
+    const int npes = nvshmem_n_pes();
+    std::ostringstream builder;
+    append_table_title(builder, job);
+    append_column(builder, "size(B)", 10);
+    append_column(builder, "count", 8);
+    append_column(builder, "type", 8);
+    if (reduction) append_column(builder, "redop", 8);
+    append_column(builder, "latency(us)", 16);
+    if (show_stats) append_column(builder, "stddev(us)", 16);
+    append_column(builder, "min_lat(us)", 16);
+    append_column(builder, "max_lat(us)", 16);
+    if (show_stats) append_column(builder, "repetitions", 12);
+    append_column(builder, "algbw(GB/s)", 12);
+    builder << std::left << std::setw(12) << "busbw(GB/s)" << '\n';
+
+    for (int i = 0; i < num_entries; ++i) {
+        const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
+        if (sizes[i] == 0 || (show_stats ? entry_stats->count == 0 : values[i][0] == 0.0)) continue;
+        double mean = 0.0;
+        double min = 0.0;
+        double max = 0.0;
+        if (show_stats) {
+            mean = entry_stats->mean;
+            min = entry_stats->min;
+            max = entry_stats->max;
+        } else {
+            tie(mean, min, max) = get_latency_metrics(values[i], num_iters);
+        }
+        double algbw = 0.0;
+        double busbw = 0.0;
+        get_coll_info(&algbw, &busbw, job_name, mean, npes, sizes[i]);
+        append_column(builder, sizes[i], 10);
+        append_column(builder, sizes[i] / parsed.size, 8);
+        append_column(builder, parsed.name, 8);
+        if (reduction) append_column(builder, operation, 8);
+        append_column(builder, mean, 16);
+        if (show_stats) append_stddev_column(builder, *entry_stats, 16);
+        builder << std::left << std::fixed << std::setprecision(3) << std::setw(16) << min << "  ";
+        builder << std::left << std::fixed << std::setprecision(3) << std::setw(16) << max << "  ";
+        if (show_stats) append_column(builder, entry_stats->count, 12);
+        builder << std::left << std::fixed << std::setprecision(3) << std::setw(12) << algbw
+                << "  ";
+        builder << std::left << std::fixed << std::setprecision(3) << std::setw(12) << busbw
+                << '\n';
+    }
+    std::fputs(builder.str().c_str(), stdout);
+}
+
+void print_basic_table(const char *job_name, const char *subjob_name, const char *output_var,
+                       const char *units, const char plus_minus, uint64_t *size, double *value,
+                       int num_entries, const perf_stats_t *stats) {
+    print_basic_table_impl(job_name, subjob_name, output_var, units, plus_minus, size, value,
+                           repetitions_requested ? stats : nullptr, num_entries);
+}
+
+void print_device_collective_table(const char *job_name, const char *subjob_name,
+                                   const char *output_var, const char *units, const char plus_minus,
+                                   uint64_t *size, double *value, int num_entries,
+                                   const perf_stats_t *stats) {
+    print_device_collective_table_impl(job_name, subjob_name, output_var, units, plus_minus, size,
+                                       value, repetitions_requested ? stats : nullptr, num_entries);
+}
+
+void print_host_collective_table(const char *job_name, const char *subjob_name,
+                                 const char *output_var, const char *units, const char plus_minus,
+                                 uint64_t *size, double **values, int num_entries, size_t num_iters,
+                                 const perf_stats_t *stats) {
+    print_host_collective_table_impl(job_name, subjob_name, output_var, units, plus_minus, size,
+                                     values, num_iters, repetitions_requested ? stats : nullptr,
+                                     num_entries);
 }
 
 size_t min_size = 4;
@@ -900,6 +1034,8 @@ size_t num_blocks = 32;
 size_t threads_per_block = 256;
 size_t iters = 10;
 size_t warmup_iters = 5;
+size_t repetitions = 1;
+bool repetitions_requested = false;
 size_t step_factor = 2;
 size_t max_size_log = 1;
 size_t stride = 1;
@@ -955,6 +1091,7 @@ void read_args(int argc, char **argv) {
                                            {"step", required_argument, 0, 'f'},
                                            {"iters", required_argument, 0, 'n'},
                                            {"warmup_iters", required_argument, 0, 'w'},
+                                           {"repetitions", required_argument, 0, 'r'},
                                            {"ctas", required_argument, 0, 'c'},
                                            {"threads_per_cta", required_argument, 0, 't'},
                                            {"datatype", required_argument, 0, 'd'},
@@ -966,7 +1103,7 @@ void read_args(int argc, char **argv) {
                                            {0, 0, 0, 0}};
     /* getopt_long stores the option index here. */
     int option_index = 0;
-    while ((c = getopt_long(argc, argv, "hb:e:f:n:w:c:t:d:o:s:a:i:m:", long_options,
+    while ((c = getopt_long(argc, argv, "hb:e:f:n:w:r:c:t:d:o:s:a:i:m:", long_options,
                             &option_index)) != -1) {
         switch (c) {
             case 'h':
@@ -977,6 +1114,7 @@ void read_args(int argc, char **argv) {
                     "-f, --step <step factor for message sizes> \n"
                     "-n, --iters <number of iterations> \n"
                     "-w, --warmup_iters <number of warmup iterations> \n"
+                    "-r, --repetitions <number of timed repetitions> \n"
                     "-c, --ctas <number of CTAs to launch> (used in some device pt-to-pt tests) \n"
                     "-t, --threads_per_cta <number of threads per block> (used in some device "
                     "pt-to-pt tests) \n"
@@ -1045,6 +1183,13 @@ void read_args(int argc, char **argv) {
             case 'w':
                 atol_scaled(optarg, &warmup_iters);
                 break;
+            case 'r':
+                if (atol_scaled(optarg, &repetitions) || repetitions == 0) {
+                    fprintf(stderr, "--repetitions must be an integer greater than zero\n");
+                    exit(EXIT_FAILURE);
+                }
+                repetitions_requested = true;
+                break;
             case 'c':
                 atol_scaled(optarg, &num_blocks);
                 break;
@@ -1110,6 +1255,7 @@ void read_args(int argc, char **argv) {
         datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
         test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
         putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem);
+    if (repetitions_requested) printf("repetitions: %zu\n", repetitions);
     printf(
         "Note: Above is full list of options, any given test will use only a subset of these "
         "variables.\n");
