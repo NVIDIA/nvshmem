@@ -19,8 +19,6 @@
 #include "non_abi/nvshmemx_error.h"
 #include "pmix_common.h"
 
-#define BOOTSTRAP_PMIX_KEYSIZE 64
-
 static pmix_proc_t myproc;
 int bootstrap_debug_enable = 0;
 static struct nvshmemi_options_s env_attr;
@@ -97,7 +95,7 @@ out:
     return status;
 }
 
-static pmix_status_t bootstrap_pmix_put(char *key, void *value, size_t valuelen) {
+static pmix_status_t bootstrap_pmix_put(const pmix_key_t key, void *value, size_t valuelen) {
     pmix_value_t val;
     pmix_status_t rc;
 
@@ -114,7 +112,8 @@ static pmix_status_t bootstrap_pmix_put(char *key, void *value, size_t valuelen)
     return rc;
 }
 
-static pmix_status_t bootstrap_pmix_get(int pe, char *key, void *value, size_t valuelen) {
+static pmix_status_t bootstrap_pmix_get(int pe, const pmix_key_t key, void *value,
+                                        size_t valuelen) {
     pmix_proc_t proc;
     pmix_value_t *val;
     pmix_status_t rc;
@@ -150,15 +149,14 @@ static int bootstrap_pmix_allgather(const void *sendbuf, void *recvbuf, int leng
     static int key_index = 1;
 
     pmix_status_t status = PMIX_SUCCESS;
-    void *kvs_value;
-    char kvs_key[BOOTSTRAP_PMIX_KEYSIZE];  // FIXME: assert( 64 < PMIX_MAX_KEYLEN);
+    pmix_key_t kvs_key;
 
     if (handle->pg_size == 1) {
         memcpy(recvbuf, sendbuf, length);
         return 0;
     }
 
-    snprintf(kvs_key, BOOTSTRAP_PMIX_KEYSIZE, "BOOTSTRAP-%04x", key_index);
+    snprintf(kvs_key, sizeof(kvs_key), "BOOTSTRAP-%04x", key_index);
 
     status = bootstrap_pmix_put(kvs_key, (void *)sendbuf, length);
     BOOTSTRAP_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "bootstrap_pmix_put failed\n");
@@ -168,7 +166,7 @@ static int bootstrap_pmix_allgather(const void *sendbuf, void *recvbuf, int leng
                            "bootstrap_pmix_exchange failed\n");
 
     for (int i = 0; i < handle->pg_size; i++) {
-        snprintf(kvs_key, BOOTSTRAP_PMIX_KEYSIZE, "BOOTSTRAP-%04x", key_index);
+        snprintf(kvs_key, sizeof(kvs_key), "BOOTSTRAP-%04x", key_index);
 
         // assumes that same length is passed by all the processes
         status = bootstrap_pmix_get(i, kvs_key, (char *)recvbuf + length * i, length);
@@ -185,8 +183,7 @@ static int bootstrap_pmix_alltoall(const void *sendbuf, void *recvbuf, int lengt
     static int key_index = 1;
 
     pmix_status_t status = 0;
-    void *kvs_value;
-    char kvs_key[BOOTSTRAP_PMIX_KEYSIZE];
+    pmix_key_t kvs_key;
 
     if (handle->pg_size == 1) {
         memcpy(recvbuf, sendbuf, length);
@@ -194,7 +191,7 @@ static int bootstrap_pmix_alltoall(const void *sendbuf, void *recvbuf, int lengt
     }
 
     for (int i = 0; i < handle->pg_size; i++) {
-        snprintf(kvs_key, BOOTSTRAP_PMIX_KEYSIZE, "BOOTSTRAP-%04x-%08x", key_index, i);
+        snprintf(kvs_key, sizeof(kvs_key), "BOOTSTRAP-%04x-%08x", key_index, i);
 
         status = bootstrap_pmix_put(kvs_key, (char *)sendbuf + i * length, length);
         BOOTSTRAP_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "bootstrap_pmix_put failed\n");
@@ -205,8 +202,7 @@ static int bootstrap_pmix_alltoall(const void *sendbuf, void *recvbuf, int lengt
                            "bootstrap_pmix_exchange failed\n");
 
     for (int i = 0; i < handle->pg_size; i++) {
-        snprintf(kvs_key, BOOTSTRAP_PMIX_KEYSIZE, "BOOTSTRAP-%04x-%08x", key_index,
-                 handle->pg_rank);
+        snprintf(kvs_key, sizeof(kvs_key), "BOOTSTRAP-%04x-%08x", key_index, handle->pg_rank);
 
         // assumes that same length is passed by all the processes
         status = bootstrap_pmix_get(i, kvs_key, (char *)recvbuf + length * i, length);
@@ -244,6 +240,7 @@ int nvshmemi_bootstrap_plugin_init(void *attr, bootstrap_handle_t *handle, const
     pmix_proc_t proc;
     proc.rank = PMIX_RANK_WILDCARD;
     pmix_value_t *val;
+    pmix_key_t job_size_key;
     int bootstrap_version = NVSHMEMI_BOOTSTRAP_ABI_VERSION;
     if (!nvshmemi_is_bootstrap_compatible(bootstrap_version, abi_version, true)) {
         BOOTSTRAP_ERROR_PRINT(
@@ -260,7 +257,8 @@ int nvshmemi_bootstrap_plugin_init(void *attr, bootstrap_handle_t *handle, const
     PMIX_LOAD_NSPACE(proc.nspace, myproc.nspace);
     proc.rank = PMIX_RANK_WILDCARD;
 
-    status = PMIx_Get(&proc, PMIX_JOB_SIZE, NULL, 0, &val);
+    PMIX_LOAD_KEY(job_size_key, PMIX_JOB_SIZE);
+    status = PMIx_Get(&proc, job_size_key, NULL, 0, &val);
     BOOTSTRAP_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                            "PMIx_Get(PMIX_JOB_SIZE) failed\n");
 
