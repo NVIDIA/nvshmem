@@ -1,8 +1,8 @@
-add
-and
-compare_swap
-inc
-or
-set
-swap
-xor
+-a add --repetitions 3
+-a and --repetitions 3
+-a compare_swap --repetitions 3
+-a inc --repetitions 3
+-a or --repetitions 3
+-a set --repetitions 3
+-a swap --repetitions 3
+-a xor --repetitions 3

@@ -1,1 +1,1 @@
--e 64K -t 1024 -n 200 -w 20
+-e 64K -t 1024 -n 200 -w 20 --repetitions 3

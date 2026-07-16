@@ -1,1 +1,1 @@
--n 100 -w 10 -b 4 -e 128M --dir write --issue host
+-n 100 -w 10 -b 4 -e 128M --dir write --issue host --repetitions 3

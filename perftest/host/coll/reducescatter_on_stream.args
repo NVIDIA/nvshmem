@@ -1,2 +1,2 @@
--n 100 -w 10 -b 1 -e 4k
--n 100 -w 10 -b 1 -e 4k --cudagraph
+-n 100 -w 10 -b 1 -e 4k --repetitions 3
+-n 100 -w 10 -b 1 -e 4k --cudagraph --repetitions 3
