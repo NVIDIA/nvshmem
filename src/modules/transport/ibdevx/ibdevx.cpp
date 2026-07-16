@@ -1322,7 +1322,8 @@ static inline int nvshmemt_ibdevx_amo_32(struct nvshmem_transport *tcurr, int pe
     uint32_t swap_add_value = remote->val;
     uint32_t compare = remote->cmp;
 
-    ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_amo_ep_from_qp_index(
+        tcurr, qp_index, pe, remote->remote_memdesc.offset);
     selected_dev_slot = ep->common_ep.selected_dev_slot;
     remote_handle = ibdevx_get_dev_mem_handle(remote->remote_memdesc.handle, selected_dev_slot);
     dummy_mr = dummy_local_mem->mrs[selected_dev_slot];
@@ -1483,7 +1484,8 @@ static inline int nvshmemt_ibdevx_amo_64(struct nvshmem_transport *tcurr, int pe
     uintptr_t wqe_bb_idx_64;
     uint32_t wqe_bb_idx_32;
 
-    ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_amo_ep_from_qp_index(
+        tcurr, qp_index, pe, remote->remote_memdesc.offset);
     selected_dev_slot = ep->common_ep.selected_dev_slot;
     remote_handle = ibdevx_get_dev_mem_handle(remote->remote_memdesc.handle, selected_dev_slot);
     dummy_mr = dummy_local_mem->mrs[selected_dev_slot];
@@ -1809,6 +1811,18 @@ out:
     return status;
 }
 
+static int nvshmemt_ibdevx_configure_multinic_amo_routing(nvshmem_transport_t t) {
+    nvshmemt_ib_common_state_t state = (nvshmemt_ib_common_state_t)t->state;
+    int selected_physical_dev_ids[MAX_NUM_HCAS];
+
+    for (int slot = 0; slot < state->n_selected_dev_ids; ++slot) {
+        selected_physical_dev_ids[slot] = state->dev_ids[state->selected_dev_ids[slot]];
+    }
+    return nvshmemt_ib_common_configure_multinic_amo_routing(t, state, selected_physical_dev_ids,
+                                                             state->n_selected_dev_ids,
+                                                             sizeof(struct ibdevx_device));
+}
+
 static int nvshmemt_ibdevx_connect_endpoints(nvshmem_transport_t t, int *candidate_dev_ids,
                                              int num_candidate_devs, int *out_qp_indices,
                                              int num_qps) {
@@ -1817,6 +1831,9 @@ static int nvshmemt_ibdevx_connect_endpoints(nvshmem_transport_t t, int *candida
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "IBDevX endpoint connection failed\n");
     if (cst_eps.empty()) {
+        status = nvshmemt_ibdevx_configure_multinic_amo_routing(t);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "IBDevX multi-NIC AMO routing setup failed\n");
         status = nvshmemt_ibdevx_setup_cst_endpoints(t);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "IBDevX CST endpoint setup failed\n");

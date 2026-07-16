@@ -3757,6 +3757,7 @@ static int ibgda_post_gpu_device_state(
     ibgda_device_state_h->use_async_postsend = (ibgda_nic_handler != IBGDA_NIC_HANDLER_GPU);
     ibgda_device_state_h->num_devices_initialized = n_devs_selected;
     ibgda_device_state_h->num_default_rc_per_pe = ibgda_state->common.options->IBGDA_NUM_RC_PER_PE;
+    ibgda_device_state_h->use_address_stable_amo = ibgda_state->common.use_address_stable_amo;
     assert(ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU ||
            ibgda_nic_buf_location == IBGDA_MEM_TYPE_HOST);
     ibgda_device_state_h->nic_buf_on_gpumem = (ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU);
@@ -4135,6 +4136,13 @@ static int ibgda_connect_global_setup(nvshmemt_ibgda_state_t *ibgda_state, int n
     return status;
 }
 
+static int ibgda_configure_multinic_amo_routing(nvshmem_transport_t t,
+                                                nvshmemt_ibgda_state_t *ibgda_state) {
+    return nvshmemt_ib_common_configure_multinic_amo_routing(
+        t, &ibgda_state->common, ibgda_state->selected_dev_ids, ibgda_state->n_devs_selected,
+        sizeof(struct ibgda_device));
+}
+
 // Phase 2: Per-device calculation and validation (cached)
 static int ibgda_connect_device_calculations(nvshmemt_ibgda_state_t *ibgda_state,
                                              struct ibgda_device *device, int n_pes) {
@@ -4302,6 +4310,9 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
 
     // Phase 1: Global setup (only on first call)
     status = ibgda_connect_global_setup(ibgda_state, num_selected_devs, selected_dev_ids);
+    if (status) return status;
+
+    status = ibgda_configure_multinic_amo_routing(t, ibgda_state);
     if (status) return status;
 
     // Phase 2-4: Per-device processing (cached per device)

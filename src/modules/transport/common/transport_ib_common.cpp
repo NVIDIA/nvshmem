@@ -940,6 +940,75 @@ out:
     return status;
 }
 
+int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
+                                                      nvshmemt_ib_common_state_t state,
+                                                      const int *selected_physical_dev_ids,
+                                                      int n_selected_dev_ids,
+                                                      size_t device_struct_size) {
+    int status = 0;
+    bool seen_device[MAX_NUM_HCAS] = {};
+    uint8_t local_cross_hca_atomic = 1;
+    int selected_physical_devices = 0;
+
+    state->use_address_stable_amo = false;
+
+    if (n_selected_dev_ids > 1) {
+        if (!selected_physical_dev_ids || !state->devices || device_struct_size == 0) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                               "Invalid multi-NIC AMO routing configuration.\n");
+        }
+
+        for (int slot = 0; slot < n_selected_dev_ids; ++slot) {
+            int dev_id = selected_physical_dev_ids[slot];
+            if (dev_id < 0 || dev_id >= MAX_NUM_HCAS) {
+                NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                                   "Invalid selected HCA index %d.\n", dev_id);
+            }
+            if (seen_device[dev_id]) continue;
+
+            seen_device[dev_id] = true;
+            selected_physical_devices++;
+            struct nvshmemt_ib_common_device *device =
+                (struct nvshmemt_ib_common_device *)((char *)state->devices +
+                                                     dev_id * device_struct_size);
+            if (device->device_attr.atomic_cap != IBV_ATOMIC_GLOB) {
+                local_cross_hca_atomic = 0;
+            }
+        }
+
+        /* Different ports on one HCA do not need cross-HCA atomic scope. */
+        if (selected_physical_devices <= 1) local_cross_hca_atomic = 1;
+    }
+
+    if (state->options->FORCE_ADDRESS_STABLE_AMO) local_cross_hca_atomic = 0;
+
+    /* All PEs participate even if this PE selected only one NIC. */
+    if (t->n_pes > 1) {
+        std::vector<uint8_t> peer_cross_hca_atomic(t->n_pes);
+        status = t->boot_handle->allgather(&local_cross_hca_atomic, peer_cross_hca_atomic.data(),
+                                           sizeof(local_cross_hca_atomic), t->boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Allgather of multi-NIC atomic capabilities failed.\n");
+
+        for (uint8_t peer_capability : peer_cross_hca_atomic) {
+            if (!peer_capability) {
+                local_cross_hca_atomic = 0;
+                break;
+            }
+        }
+    }
+
+    state->use_address_stable_amo = !local_cross_hca_atomic;
+    INFO(state->log_level, "Multi-NIC AMO routing: %s (selected NIC slots: %d, physical HCAs: %d)",
+         state->use_address_stable_amo
+             ? "address-stable fallback (global cross-HCA atomic capability unavailable or forced)"
+             : "cross-device round-robin",
+         n_selected_dev_ids, selected_physical_devices);
+
+out:
+    return status;
+}
+
 static int nvshmemt_ib_common_advance_default_qp_index(nvshmemt_ib_common_state_t ib_state) {
     int default_qp_count = ib_state->default_qp_count;
     int selected_qp = ib_state->cur_default_qp_index % (default_qp_count + 1);
