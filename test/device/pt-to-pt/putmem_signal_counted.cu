@@ -22,7 +22,7 @@ static constexpr size_t kCountedWriteAlignment = 16;
 static constexpr size_t kCountedCounterAlignment = 256;
 static constexpr size_t kCountedCounterStride = kCountedCounterAlignment / sizeof(uint64_t);
 
-enum class Source { Shared };
+enum class Source { Global, Shared };
 
 // A nonzero PE- and offset-dependent pattern exposes missing or misaddressed staging chunks.
 __host__ __device__ static constexpr unsigned char payload_byte(int producer_pe, size_t offset) {
@@ -33,6 +33,14 @@ __host__ __device__ static constexpr unsigned char payload_byte(int producer_pe,
     const size_t pattern =
         static_cast<size_t>(producer_pe) * kProducerPatternStride + offset * kOffsetPatternStride;
     return static_cast<unsigned char>(1 + pattern % kNonzeroByteValueCount);
+}
+
+static size_t global_staging_capacity(nvshmemx_smem_amount_t smem_amount) {
+    constexpr size_t kStagingBuffers = 2;
+    const size_t donated = static_cast<size_t>(nvshmemx_ask_smem(smem_amount));
+    const size_t reserved = static_cast<size_t>(nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY));
+    const size_t per_buffer = (donated - reserved) / kStagingBuffers;
+    return per_buffer & ~(kCountedWriteAlignment - 1);
 }
 
 __global__ void reset_load_counter(uint64_t *counter, uint64_t *observed) {
@@ -146,13 +154,16 @@ static int check_uniform_status(int *statuses, int expected_status) {
 static int run_put_case(unsigned char *destination, unsigned char *source, uint64_t *counter,
                         int *statuses, int *errors, size_t bytes, int pe, Source source_kind,
                         int expected_status, uint64_t counter_value_before_put,
-                        int expected_producer_pe, size_t expected_source_offset = 0) {
+                        int expected_producer_pe, size_t expected_source_offset = 0,
+                        nvshmemx_smem_amount_t global_smem = NVSHMEMX_SMEM_RECOMMENDED) {
     CUDA_CHECK(cudaMemset(errors, 0, sizeof(*errors)));
     CUDA_CHECK(cudaMemset(destination, 0, bytes));
     CUDA_CHECK(cudaDeviceSynchronize());
     nvshmem_barrier_all();
-    size_t donation = (size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
-    size_t dynamic_smem = donation + bytes;
+    size_t donation = source_kind == Source::Shared
+                          ? (size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY)
+                          : (size_t)nvshmemx_ask_smem(global_smem);
+    size_t dynamic_smem = donation + (source_kind == Source::Shared ? bytes : 0);
     counted_put<<<1, kThreads, dynamic_smem>>>(destination, source, bytes, counter, pe, statuses,
                                                source_kind, donation);
     CUDA_CHECK(cudaGetLastError());
@@ -243,14 +254,9 @@ static int probe_counted_backend(counted_test_context *test, bool expect_not_sup
                              ? NVSHMEMX_ERROR_NOT_SUPPORTED
                              : NVSHMEMX_SUCCESS;
 
-    // Probe backend availability through the direct shared-memory source path.
-    nvshmemx_signal_counted_reset(&test->counters[0]);
-    CUDA_CHECK(cudaMemset(test->destination, 0, kCountedWriteAlignment));
-    nvshmem_barrier_all();
-    const size_t donation = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
-    counted_put<<<1, kThreads, donation + kCountedWriteAlignment>>>(
-        test->destination, test->source, kCountedWriteAlignment, &test->counters[0], test->peer,
-        test->statuses, Source::Shared, donation);
+    // Probe backend availability without staging or transferring a payload.
+    counted_put<<<1, kThreads>>>(test->destination, test->source, 0, &test->counters[0], test->peer,
+                                 test->statuses, Source::Global, 0);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     std::vector<int> probe_statuses(kThreads);
@@ -258,11 +264,7 @@ static int probe_counted_backend(counted_test_context *test, bool expect_not_sup
                           probe_statuses.size() * sizeof(int), cudaMemcpyDeviceToHost));
     int backend_status = probe_statuses[0];
     test->counted_available = backend_status == NVSHMEMX_SUCCESS;
-    int failed = check_uniform_status(test->statuses, test->valid_status);
-    nvshmem_barrier_all();
-    nvshmemx_signal_counted_reset(&test->counters[0]);
-    nvshmem_barrier_all();
-    return failed;
+    return check_uniform_status(test->statuses, test->valid_status);
 }
 
 static int run_ring_cases(const counted_test_context &test) {
@@ -277,6 +279,37 @@ static int run_ring_cases(const counted_test_context &test) {
                      16, test.peer, Source::Shared, test.valid_status, 0, test.previous);
     failed += report_case(test, "ring shared source (16 bytes)", isolation_failed);
 
+    // Bracket both minimum and recommended staging capacities by one alignment unit.
+    const size_t minimum_staging_bytes = global_staging_capacity(NVSHMEMX_SMEM_MINIMUM);
+    const size_t recommended_staging_bytes = global_staging_capacity(NVSHMEMX_SMEM_RECOMMENDED);
+    struct GlobalSourceCase {
+        size_t bytes;
+        nvshmemx_smem_amount_t smem;
+    };
+    const std::array<GlobalSourceCase, 8> global_source_cases = {
+        {{kCountedWriteAlignment, NVSHMEMX_SMEM_RECOMMENDED},
+         {minimum_staging_bytes - kCountedWriteAlignment, NVSHMEMX_SMEM_MINIMUM},
+         {minimum_staging_bytes, NVSHMEMX_SMEM_MINIMUM},
+         {minimum_staging_bytes + kCountedWriteAlignment, NVSHMEMX_SMEM_MINIMUM},
+         {recommended_staging_bytes - kCountedWriteAlignment, NVSHMEMX_SMEM_RECOMMENDED},
+         {recommended_staging_bytes, NVSHMEMX_SMEM_RECOMMENDED},
+         {recommended_staging_bytes + kCountedWriteAlignment, NVSHMEMX_SMEM_RECOMMENDED},
+         {size_t{1} << 16, NVSHMEMX_SMEM_RECOMMENDED}}};
+    for (const GlobalSourceCase &test_case : global_source_cases) {
+        nvshmemx_signal_counted_reset(&test.counters[0]);
+        CUDA_CHECK(cudaMemset(test.destination, 0, test_case.bytes));
+        nvshmem_barrier_all();
+        case_failures =
+            run_put_case(test.destination, test.source, &test.counters[0], test.statuses,
+                         test.errors, test_case.bytes, test.peer, Source::Global, test.valid_status,
+                         0, test.previous, 0, test_case.smem);
+        const char *smem_name = test_case.smem == NVSHMEMX_SMEM_MINIMUM ? "minimum" : "recommended";
+        char case_name[128];
+        snprintf(case_name, sizeof(case_name), "ring global source (%zu bytes, %s smem)",
+                 test_case.bytes, smem_name);
+        failed += report_case(test, case_name, case_failures);
+    }
+
     // A larger shared source still bypasses the internal global-source staging buffers.
     nvshmemx_signal_counted_reset(&test.counters[0]);
     nvshmem_barrier_all();
@@ -285,16 +318,24 @@ static int run_ring_cases(const counted_test_context &test) {
                      kSharedBytes, test.peer, Source::Shared, test.valid_status, 0, test.previous);
     failed += report_case(test, "ring shared source (256 bytes)", case_failures);
 
+    // A zero-byte put reports the normal backend status without requiring staging.
+    counted_put<<<1, kThreads>>>(test.destination, test.source, 0, &test.counters[0], test.peer,
+                                 test.statuses, Source::Global, 0);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    case_failures = check_uniform_status(test.statuses, test.valid_status);
+    failed += report_case(test, "zero-byte put", case_failures);
+
     // Distinct 256-byte-aligned counters advance independently for separate payloads.
     nvshmemx_signal_counted_reset(&test.counters[0]);
     nvshmemx_signal_counted_reset(&test.counters[kCountedCounterStride]);
     nvshmem_barrier_all();
     case_failures =
         run_put_case(test.destination, test.source, &test.counters[0], test.statuses, test.errors,
-                     16, test.peer, Source::Shared, test.valid_status, 0, test.previous);
+                     16, test.peer, Source::Global, test.valid_status, 0, test.previous);
     case_failures +=
         run_put_case(test.destination + 16, test.source + 16, &test.counters[kCountedCounterStride],
-                     test.statuses, test.errors, 16, test.peer, Source::Shared, test.valid_status,
+                     test.statuses, test.errors, 16, test.peer, Source::Global, test.valid_status,
                      0, test.previous, 16);
     failed += report_case(test, "distinct counters", case_failures);
 
@@ -304,9 +345,9 @@ static int run_ring_cases(const counted_test_context &test) {
     nvshmem_barrier_all();
     case_failures =
         run_put_case(test.destination, test.source, &test.counters[0], test.statuses, test.errors,
-                     16, test.peer, Source::Shared, test.valid_status, 0, test.previous);
+                     16, test.peer, Source::Global, test.valid_status, 0, test.previous);
     case_failures += run_put_case(test.destination + 16, test.source + 16, &test.counters[0],
-                                  test.statuses, test.errors, 16, test.peer, Source::Shared,
+                                  test.statuses, test.errors, 16, test.peer, Source::Global,
                                   test.valid_status, 16, test.previous, 16);
     failed += report_case(test, "same counter, separate payloads", case_failures);
 
@@ -317,7 +358,7 @@ static int run_ring_cases(const counted_test_context &test) {
                               sizeof(counter_value_before_wrap), cudaMemcpyHostToDevice));
         nvshmem_barrier_all();
         case_failures = run_put_case(test.destination, test.source, &test.counters[0],
-                                     test.statuses, test.errors, 32, test.peer, Source::Shared,
+                                     test.statuses, test.errors, 32, test.peer, Source::Global,
                                      NVSHMEMX_SUCCESS, counter_value_before_wrap, test.previous);
         failed += report_case(test, "counter wraparound", case_failures);
     }
@@ -339,7 +380,7 @@ static int run_fan_in_case(const counted_test_context &test) {
         size_t donation = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
         counted_put<<<1, kThreads, donation>>>(test.destination + (size_t)(test.mype - 1) * 16,
                                                test.source, 16, &test.counters[0], 0, test.statuses,
-                                               Source::Shared, donation);
+                                               Source::Global, donation);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
         failed += check_uniform_status(test.statuses, NVSHMEMX_SUCCESS);
@@ -373,6 +414,27 @@ static int run_fan_in_case(const counted_test_context &test) {
     return report_case(test, "fan-in", failed);
 }
 
+static int run_batch_boundary_cases(const counted_test_context &test) {
+    int failed = 0;
+    int case_failures = 0;
+    // Exercise batching immediately below, at, and above the 16 MiB drain boundary.
+    constexpr size_t kTmaBatchBoundary = size_t{1} << 24;
+    const std::array<size_t, 3> sizes = {kTmaBatchBoundary - kCountedWriteAlignment,
+                                         kTmaBatchBoundary,
+                                         kTmaBatchBoundary + kCountedWriteAlignment};
+    for (size_t bytes : sizes) {
+        nvshmemx_signal_counted_reset(&test.counters[0]);
+        nvshmem_barrier_all();
+        case_failures = run_put_case(test.destination, test.source, &test.counters[0],
+                                     test.statuses, test.errors, bytes, test.peer, Source::Global,
+                                     test.valid_status, 0, test.previous);
+        char case_name[96];
+        snprintf(case_name, sizeof(case_name), "batch boundary (%zu bytes)", bytes);
+        failed += report_case(test, case_name, case_failures);
+    }
+    return failed;
+}
+
 static int run_invalid_argument_cases(const counted_test_context &test) {
     if (!test.counted_available) return 0;
 
@@ -397,9 +459,9 @@ static int run_invalid_argument_cases(const counted_test_context &test) {
     }
     // A registration smaller than the barriers-only region is also unsupported.
     size_t short_donation = (size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY) - 16;
-    counted_put<<<1, kThreads, short_donation + 2 * kCountedWriteAlignment>>>(
-        test.destination, test.source, 16, &test.counters[0], 0, test.statuses, Source::Shared,
-        short_donation);
+    counted_put<<<1, kThreads, short_donation>>>(test.destination, test.source, 16,
+                                                 &test.counters[0], 0, test.statuses,
+                                                 Source::Global, short_donation);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     case_failures = check_uniform_status(test.statuses, NVSHMEMX_ERROR_NOT_SUPPORTED);
@@ -440,7 +502,7 @@ int main(int argc, char **argv) {
     int npes = nvshmem_n_pes();
     int peer = (mype + 1) % npes;
     int previous = (mype + npes - 1) % npes;
-    constexpr size_t max_bytes = size_t{1} << 16;
+    constexpr size_t max_bytes = (size_t{1} << 24) + kCountedWriteAlignment;
     unsigned char *destination = (unsigned char *)nvshmem_align(16, max_bytes * (size_t)npes);
     unsigned char *source = (unsigned char *)nvshmem_align(16, max_bytes);
     uint64_t *counters =
@@ -478,6 +540,7 @@ int main(int argc, char **argv) {
     } else {
         failed += run_ring_cases(test);
         failed += run_fan_in_case(test);
+        failed += run_batch_boundary_cases(test);
     }
     failed += run_invalid_argument_cases(test);
     failed += report_case(test, "ordinary CFT compatibility", run_ordinary_cft_sanity_case(test));
