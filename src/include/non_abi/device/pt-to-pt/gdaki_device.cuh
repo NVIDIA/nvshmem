@@ -236,8 +236,6 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
                           nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
 
         if (qp_index == NVSHMEMX_QP_DEFAULT) {
-            uint32_t dev_offset;
-
             switch (state->rc_map_type) {
                 case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_CTA:
                     id = gdaki_get_ctaid();
@@ -251,26 +249,31 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
                              nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>() +
                          warpid;
                     break;
-                case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE:
-                    id = (atomicAdd(&state->globalmem.qp_group_switches[0], 1u) + 1) %
-                         (state->num_default_rc_per_pe * ndevices_initialized);
+                case NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE: {
+                    uint32_t num_default_rcs = state->num_default_rc_per_pe * ndevices_initialized;
+                    id = num_default_rcs == 1
+                             ? 0
+                             : (atomicAdd(&state->globalmem.qp_group_switches[0], 1u) + 1) %
+                                   num_default_rcs;
                     idx = id * npes + pe;
                     break;
+                }
                 default:
                     assert(0);
                     break;
             }
 
             if (state->rc_map_type != NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_NONE) {
-                // Rotate through NICs on each iteration
-                dev_offset =
-                    atomicAdd(&state->globalmem.qp_group_switches[id % state->num_qp_groups], 1u) + 1;
-
                 // RC QPs are laid out as [NIC][QP slot][PE]. Keep the mapping ID's QP-slot
                 // calculation independent from the NIC selected by the round-robin counter.
-                uint32_t qp_slot =
-                    (id / ndevices_initialized) % state->num_default_rc_per_pe;
-                uint32_t dev_idx = dev_offset % ndevices_initialized;
+                uint32_t qp_slot = (id / ndevices_initialized) % state->num_default_rc_per_pe;
+                uint32_t dev_idx = 0;
+                if (ndevices_initialized > 1) {
+                    // Rotate through NICs on each iteration.
+                    uint32_t dev_offset =
+                        atomicAdd(&state->globalmem.qp_group_switches[qp_slot], 1u) + 1;
+                    dev_idx = dev_offset % ndevices_initialized;
+                }
                 idx = (dev_idx * state->num_default_rc_per_pe + qp_slot) * npes + pe;
             }
         } else if (qp_index == NVSHMEMX_QP_ANY) {
