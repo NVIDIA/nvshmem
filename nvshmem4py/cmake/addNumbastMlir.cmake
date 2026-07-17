@@ -39,11 +39,31 @@ function(AddNumbastMlir VERSION)
         "--bypass-parse-error" "true"
     )
 
+    # Select the CUDA-specific wheel variant of numba-cuda-mlir ([cu12]/[cu13]) to match the
+    # toolkit NVSHMEM is built against. The extra pins cuda-bindings/cuda-toolkit to the same
+    # major version; without it the base pin (cuda-bindings>=12.9.1,<14) could install a 12.x
+    # binding on a CUDA 13 toolkit. Requires >= 0.4.0 so ExternFunction lives in device_declarations.
+    if(DEFINED CUDAToolkit_VERSION_MAJOR)
+        set(NUMBA_CUDA_MLIR_PIP_SPEC "numba-cuda-mlir[cu${CUDAToolkit_VERSION_MAJOR}]>=0.4.0")
+    else()
+        set(NUMBA_CUDA_MLIR_PIP_SPEC "numba-cuda-mlir>=0.4.0")
+    endif()
+
     if(DEFINED ENV{NUMBA_CUDA_MLIR_SOURCE_DIR})
+        # A developer-provided source checkout takes precedence: use it directly via
+        # PYTHONPATH instead of installing the published wheel.
+        set(PIP_INSTALL_NUMBA_CUDA_MLIR_COMMAND
+            ${CMAKE_COMMAND} -E echo "Using numba_cuda_mlir from NUMBA_CUDA_MLIR_SOURCE_DIR=$ENV{NUMBA_CUDA_MLIR_SOURCE_DIR}"
+        )
         set(INSTALL_NUMBA_CUDA_MLIR_COMMAND
             ${CMAKE_COMMAND} -E env "${NUMBA_CUDA_MLIR_PYTHONPATH}" ${VENV_PYTHON_EXECUTABLE} -c "import numba_cuda_mlir"
         )
     else()
+        # A plain `numbast` install does not pull its optional "mlir" extra (numba-cuda-mlir),
+        # and we want the CUDA-matched wheel anyway, so install it explicitly here.
+        set(PIP_INSTALL_NUMBA_CUDA_MLIR_COMMAND
+            ${VENV_PYTHON_EXECUTABLE} -m pip install "${NUMBA_CUDA_MLIR_PIP_SPEC}"
+        )
         set(INSTALL_NUMBA_CUDA_MLIR_COMMAND
             ${VENV_PYTHON_EXECUTABLE} -c "import numba_cuda_mlir"
         )
@@ -71,6 +91,7 @@ function(AddNumbastMlir VERSION)
         COMMAND mkdir -p ${OUTPUT_DIR}
         COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install click Jinja2 PyYAML ruff "ast_canopy>=0.5.0"
         COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install --no-deps numbast==${ADDNUMBASTMLIR_VERSION}
+        COMMAND ${PIP_INSTALL_NUMBA_CUDA_MLIR_COMMAND}
         COMMAND ${INSTALL_NUMBA_CUDA_MLIR_COMMAND}
         WORKING_DIRECTORY ${WORKDIR}
         USES_TERMINAL
