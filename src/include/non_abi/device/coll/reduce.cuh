@@ -1300,6 +1300,8 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
         nvshmemi_fcollect_threadgroup<TYPE, SCOPE>(
             NVSHMEMX_TEAM_SAME_MYPE_NODE, pWrk, dest,
             nvshmemi_team_my_pe(NVSHMEMX_TEAM_SAME_MYPE_NODE) * nreduce, nreduce);
+// Before CUDA 12.5, cooperative_groups exposes libcu++ atomics only under nvcc/NVRTC.
+#if CUDART_VERSION >= 12050 || defined(__NVCC__) || defined(__CUDACC_RTC__)
         if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && OP == RDXN_OPS_SUM &&
                       sizeof(TYPE) >= 4 && sizeof(TYPE) <= 8) {
             for (int i = myIdx; i < nreduce; i += groupSize) *(dest + i) = 0;
@@ -1318,7 +1320,9 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
                         cg::plus<TYPE>());
                 }
             }
-        } else {
+        } else
+#endif
+        {
             for (int j = myIdx; j < nreduce; j += groupSize) {
                 gpu_linear_reduce_threadgroup<TYPE, OP, NVSHMEMI_THREADGROUP_THREAD>(
                     (TYPE *)pWrk + j, (TYPE *)pWrk + nreduce + j, dest + j, 1);
