@@ -44,6 +44,11 @@ NVSHMEMI_ENV_DEF(BOOTSTRAP_SHMEM_MODE, string, "auto", NVSHMEMI_ENV_CAT_BOOTSTRA
                  "Select the OpenSHMEM bootstrap collective path.\n"
                  "Allowed values: auto, legacy, teams")
 
+NVSHMEMI_ENV_DEF(BOOTSTRAP_UID_SEND_DRAIN_MS, int, 1000, NVSHMEMI_ENV_CAT_BOOTSTRAP,
+                 "Timeout in milliseconds for draining send queue before closing connection.\n"
+                 "Used to ensure proper connection ordering under RSS/softirq-induced reordering.\n"
+                 "Default: 1000ms, <=0 disables the feature")
+
 /** Debugging **/
 NVSHMEMI_ENV_DEF(DEBUG_SUBSYS, string, "", NVSHMEMI_ENV_CAT_HIDDEN,
                  "Comma separated list of debugging message sources. Prefix with '^' to exclude.\n"

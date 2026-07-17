@@ -10,8 +10,11 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <sys/resource.h>
+#include <sys/ioctl.h>
 #include <time.h>
 #include <cstring>
+#include <unistd.h>
+#include <linux/sockios.h>
 #include "bootstrap_device_host/nvshmem_uniqueid.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "bootstrap_uid_remap.h"
@@ -447,6 +450,89 @@ static void unexpected_free(struct bootstrap_state* state) {
     return;
 }
 
+/* Workaround for receiver-side accept-queue reordering.
+ *
+ * Bootstrap opens one short-lived TCP connection per message; the receiver
+ * accept()s them in kernel handshake-completion order, which (under RSS /
+ * softirq skew) can diverge from wire order. Because successive collective
+ * operations reuse the same (peer, tag) identity, a later connection that is
+ * enqueued first is mis-matched as the current message -> data corruption.
+ *
+ * Since the sender is strictly serial (one connection in flight at a time),
+ * we can restore ordering by blocking here until the receiver KERNEL has
+ * ACKed all bytes we just sent. SIOCOUTQ reports unsent + unacknowledged
+ * bytes; it reaches 0 only once the peer has ACKed everything, which is only
+ * possible after the peer socket reached ESTABLISHED -- i.e. after this
+ * connection is already in the receiver's accept queue. Draining to 0 before
+ * we return (and thus before the next connect()/SYN is issued) guarantees
+ * enqueue(N) happens-before SYN(N+1), so accept order == send order.
+ *
+ * This is fail-open: bounded by a timeout (NVSHMEM_BOOTSTRAP_UID_SEND_DRAIN_MS,
+ * default 200ms) and by abort_flag, so a lost ACK / stuck peer never hangs
+ * bootstrap. It is a localized workaround; the root fix is a monotonic
+ * sequence id in the wire header matched on the receiver.
+ */
+static void bootstrap_send_drain_txq(bootstrap_uid_socket_t* sock,
+                                     volatile uint32_t* abort_flag) {
+    // Timeout budget (milliseconds). <=0 disables the barrier entirely.
+    static int drain_ms = -2;  // -2 == not yet parsed
+    if (drain_ms == -2) {
+        drain_ms = env_attr.BOOTSTRAP_UID_SEND_DRAIN_MS;
+    }
+    if (drain_ms <= 0) return;
+
+    int fd = -1;
+    nccl_fn_table(get_fd, sock, &fd);
+    if (fd < 0) return;
+
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    while (1) {
+        int unacked = 0;
+        if (ioctl(fd, SIOCOUTQ, &unacked) != 0) {
+            // ioctl unsupported / fd in a bad state: don't block bootstrap.
+            BOOTSTRAP_DEBUG_PRINT("bootstrap_send_drain_txq: ioctl unsupported or fd in a bad state, fd=%d", fd);
+            return;
+        }
+        if (unacked == 0) {
+            BOOTSTRAP_DEBUG_PRINT("bootstrap_send_drain_txq: unacked=%d, fd=%d", unacked, fd);
+            return;  // receiver kernel has ACKed everything -> safe to close.
+        }
+        if (abort_flag != nullptr && *abort_flag != 0) {
+            return;  // honor cooperative abort.
+        }
+
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed_ms = (now.tv_sec - start.tv_sec) * 1000L +
+                          (now.tv_nsec - start.tv_nsec) / 1000000L;
+        if (elapsed_ms >= drain_ms) {
+            char peer_addr_str[SOCKET_NAME_MAXLEN] = {0};
+            char local_addr_str[SOCKET_NAME_MAXLEN] = {0};
+            fn_table.to_string(&sock->addr, peer_addr_str, 1);
+            
+            // Get local address
+            union ncclSocketAddress local_addr;
+            socklen_t addr_len = sizeof(local_addr);
+            if (getsockname(fd, &local_addr.sa, &addr_len) == 0) {
+                fn_table.to_string(&local_addr, local_addr_str, 1);
+            } else {
+                strcpy(local_addr_str, "unknown");
+            }
+            
+            fprintf(stdout, "[pid=%d][bootstrap_send_drain_txq] timeout after %ldms, "
+                    "%d bytes still unacked from local=%s to peer=%s (proceeding, ordering not guaranteed)\n",
+                    getpid(), elapsed_ms, unacked, local_addr_str, peer_addr_str);
+            fflush(stdout);
+            return;  // fail-open: never hang bootstrap.
+        }
+
+        struct timespec slp = {0, 200 * 1000};  // 200us
+        nanosleep(&slp, nullptr);
+    }
+}
+
 /**
  * P2P Communication Ops
  */
@@ -463,6 +549,13 @@ static bootstrap_result_t bootstrap_send(void* comm_state, int peer, int tag, vo
     BOOTSTRAP_CHECKGOTO(bootstrap_net_send(&sock, &state->rank, sizeof(int)), ret, fail);
     BOOTSTRAP_CHECKGOTO(bootstrap_net_send(&sock, &tag, sizeof(int)), ret, fail);
     BOOTSTRAP_CHECKGOTO(bootstrap_net_send(&sock, data, size), ret, fail);
+
+    // Wait until the receiver kernel has ACKed everything we just sent, so this
+    // connection is guaranteed to be in the receiver's accept queue before the
+    // next bootstrap_send() issues its connect()/SYN. Restores accept ordering
+    // under RSS/softirq-induced reordering. Fail-open (bounded by timeout +
+    // abort_flag). Only runs on the success path.
+    bootstrap_send_drain_txq(&sock, state->abort_flag);
 
 exit:
     BOOTSTRAP_CHECK(nccl_fn_table(close, &sock));
@@ -545,13 +638,21 @@ int bootstrap_uid_allgather(const void* send_data, void* recv_data, int size,
     return BOOTSTRAP_SUCCESS;
 }
 
+
+// Tag allocation strategy using bitmask:
+// - alltoall operations: use bit 24 (0x01000000)
+// - barrier operations: use bit 25 (0x02000000)
+// This ensures complete separation of tag ranges
+#define BOOTSTRAP_TAG_ALTOALL_FLAG    (0x1 << 24)
+#define BOOTSTRAP_TAG_BARRIER_FLAG    (0x1 << 25)
+
 int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
                            struct bootstrap_handle* handle) {
     struct bootstrap_state* state = (struct bootstrap_state*)(handle->comm_state);
     char* send_buf = (char*)send_data;
     int rank = state->rank;
     int nranks = state->nranks;
-    int tag = 0;
+    int tag = BOOTSTRAP_TAG_ALTOALL_FLAG;  // Start with alltoall flag
     int chunk_size = size;
 
     BOOTSTRAP_DEBUG_PRINT("rank %d nranks %d size %d", rank, nranks, size);
@@ -591,7 +692,7 @@ int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
 int bootstrap_uid_barrier(struct bootstrap_handle* handle) {
     struct bootstrap_state* state = (struct bootstrap_state*)(handle->comm_state);
     int rank = state->rank;
-    int tag = 0;
+    int tag = BOOTSTRAP_TAG_BARRIER_FLAG;  // Start with barrier flag
     int nranks = state->nranks;
     if (nranks == 1) {
         return BOOTSTRAP_SUCCESS;
