@@ -16,6 +16,7 @@
 #include <stdlib.h>                                          // for free, calloc, malloc
 #include <string.h>                                          // for memset, memcpy, strcmp
 #include <unistd.h>                                          // for sysconf, _SC_PAGESIZE
+#include <array>                                             // for array
 #include <cmath>                                             // for log2
 #include <map>                                               // for map, _Rb_tree_iterator
 #include <string>                                            // for string
@@ -200,11 +201,28 @@ struct ibdevx_ep {
     void *ibdevx_state;
 };
 
-struct nvshmemt_ib_common_mem_handle local_dummy_mr;
+static constexpr int NVSHMEMT_IBDEVX_MAX_NICS_PER_PE =
+    (NVSHMEM_MEM_HANDLE_SIZE - sizeof(int)) / sizeof(nvshmemt_ib_common_mem_handle);
+
+struct ibdevx_mem_handle {
+    std::array<struct nvshmemt_ib_common_mem_handle, NVSHMEMT_IBDEVX_MAX_NICS_PER_PE>
+        dev_mem_handles;
+    int num_devs;
+};
+static_assert(sizeof(struct ibdevx_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
+              "IBDevX memory handle must fit in nvshmem_mem_handle_t");
+
+struct ibdevx_dummy_local_mem {
+    void *ptr;
+    std::array<struct ibv_mr *, NVSHMEMT_IBDEVX_MAX_NICS_PER_PE> mrs;
+    int num_devs;
+};
+static struct ibdevx_dummy_local_mem *dummy_local_mem;
 
 pthread_mutex_t ibdevx_mutex_send_progress;
 
-static std::map<unsigned int, long unsigned int> qp_map;
+static std::map<std::pair<int, uint32_t>, struct ibdevx_ep *> qp_map;
+static std::vector<struct ibdevx_ep *> cst_eps;
 static uint64_t connected_qp_count;
 
 static int use_ib_native_atomics = 1;
@@ -217,6 +235,29 @@ static void *ibv_handle;
 
 static struct nvshmemt_mlx5dv_function_table mlx5dv_ftable;
 static void *mlx5dv_handle;
+
+static struct nvshmemt_ib_common_mem_handle *ibdevx_get_dev_mem_handle(
+    nvshmem_mem_handle_t *mem_handle, int selected_dev_slot) {
+    struct ibdevx_mem_handle *handle = reinterpret_cast<struct ibdevx_mem_handle *>(mem_handle);
+    assert(selected_dev_slot >= 0);
+    assert(selected_dev_slot < handle->num_devs);
+    return &handle->dev_mem_handles[selected_dev_slot];
+}
+
+static int ibdevx_release_mem_handles(struct nvshmemt_ib_common_mem_handle *handles, int count,
+                                      int log_level) {
+    int status = 0;
+
+    for (int i = 0; i < count; ++i) {
+        if (!handles[i].mr) continue;
+        int current = nvshmemt_ib_common_release_mem_handle(
+            &ftable, reinterpret_cast<nvshmem_mem_handle_t *>(&handles[i]), log_level);
+        if (!current) handles[i].mr = nullptr;
+        if (!status && current) status = current;
+    }
+
+    return status;
+}
 
 int nvshmemt_ibdevx_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
     NVSHMEMI_ERROR_PRINT("ibdevx show info not implemented");
@@ -536,7 +577,7 @@ static int ep_destroy(struct ibdevx_ep *ep) {
         NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out, "Unable to destroy ah.\n");
     }
 
-    qp_map.erase(ep->qpid);
+    qp_map.erase(std::make_pair(ep->devid, ep->qpid));
 
 out:
     free(ep);
@@ -572,10 +613,9 @@ static int ep_create(void **ep_ptr, int devid, nvshmem_transport_t t) {
     NVSHMEMI_NZ_ERROR_JMP(status, status, out,
                           "Unable to create qpair for ep in ibdevx transport.\n");
 
-    qp_map.insert(std::make_pair((unsigned int)ep->qpid, (long unsigned int)ep));
-
     ep->devid = ibdevx_state->dev_ids[devid];
     ep->ibdevx_state = ibdevx_state;
+    qp_map.emplace(std::make_pair(ep->devid, ep->qpid), ep);
 
     /* Initialize common_ep fields */
     ep->common_ep.head_op_id = 0;
@@ -948,8 +988,15 @@ int nvshmemt_ibdevx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, 
     int status = 0;
     struct nvshmem_transport *transport = (struct nvshmem_transport *)t;
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)transport->state;
-    struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices +
-                                    ibdevx_state->dev_ids[ibdevx_state->selected_dev_id]);
+    struct ibdevx_mem_handle *handle;
+    int n_devs_selected =
+        ibdevx_state->n_selected_dev_ids > 0 ? ibdevx_state->n_selected_dev_ids : 1;
+    bool dummy_created = false;
+    int registered_count = 0;
+
+    memset(mem_handle, 0, sizeof(*mem_handle));
+    handle = reinterpret_cast<struct ibdevx_mem_handle *>(mem_handle);
+    handle->num_devs = n_devs_selected;
 
     /*
      * In cases where same physical memory has been mapped to multiple VAs (say VA1 and VA2)
@@ -966,39 +1013,75 @@ int nvshmemt_ibdevx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, 
         alias_va_ptr = transport->alias_va_map->operator[](buf);
     }
 
-    INFO(ibdevx_state->log_level, "[%d] IBDEVX: device used %s, data_direct support: %d",
-         transport->my_pe, device->common_device.dev->name, device->common_device.data_direct);
-    status = nvshmemt_ib_common_reg_mem_handle(
-        &ftable, &mlx5dv_ftable, device->common_device.pd, mem_handle, buf, length, local_only,
-        ibdevx_state->dmabuf_support, ibdevx_state->table, ibdevx_state->log_level,
-        ibdevx_state->options->IB_ENABLE_RELAXED_ORDERING, device->common_device.data_direct,
-        alias_va_ptr);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "Unable to register memory handle.");
+    for (int i = 0; i < n_devs_selected; ++i) {
+        int selected_dev_id = ibdevx_state->n_selected_dev_ids > 0
+                                  ? ibdevx_state->selected_dev_ids[i]
+                                  : ibdevx_state->selected_dev_id;
+        struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices +
+                                        ibdevx_state->dev_ids[selected_dev_id]);
 
-    if (local_dummy_mr.mr == NULL) {
-        uint64_t *local_dummy_mem;
+        INFO(ibdevx_state->log_level,
+             "[%d] IBDEVX: selected slot %d uses %s, data_direct support: %d", transport->my_pe, i,
+             device->common_device.dev->name, device->common_device.data_direct);
+        status = nvshmemt_ib_common_reg_mem_handle(
+            &ftable, &mlx5dv_ftable, device->common_device.pd,
+            reinterpret_cast<nvshmem_mem_handle_t *>(&handle->dev_mem_handles[i]), buf, length,
+            local_only, ibdevx_state->dmabuf_support, ibdevx_state->table, ibdevx_state->log_level,
+            ibdevx_state->options->IB_ENABLE_RELAXED_ORDERING, device->common_device.data_direct,
+            alias_va_ptr);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Unable to register memory handle.");
+        registered_count++;
+    }
 
-        local_dummy_mem = (uint64_t *)malloc(sizeof(*local_dummy_mem));
-        NVSHMEMI_NULL_ERROR_JMP(local_dummy_mem, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "local dummy mem allocation failed \n");
-        local_dummy_mr.mr =
-            ftable.reg_mr(device->common_device.pd, local_dummy_mem, sizeof(*local_dummy_mem),
-                          IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
-                              IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
-        NVSHMEMI_NULL_ERROR_JMP(local_dummy_mr.mr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "mem registration failed \n");
-        local_dummy_mr.lkey = local_dummy_mr.mr->lkey;
-        local_dummy_mr.rkey = local_dummy_mr.mr->rkey;
+    if (!dummy_local_mem) {
+        dummy_local_mem =
+            static_cast<struct ibdevx_dummy_local_mem *>(calloc(1, sizeof(*dummy_local_mem)));
+        NVSHMEMI_NULL_ERROR_JMP(dummy_local_mem, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "dummy local memory allocation failed\n");
+        dummy_created = true;
+        dummy_local_mem->num_devs = n_devs_selected;
+        dummy_local_mem->ptr = malloc(sizeof(uint64_t));
+        NVSHMEMI_NULL_ERROR_JMP(dummy_local_mem->ptr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                                "local dummy memory allocation failed\n");
+
+        for (int i = 0; i < n_devs_selected; ++i) {
+            int selected_dev_id = ibdevx_state->n_selected_dev_ids > 0
+                                      ? ibdevx_state->selected_dev_ids[i]
+                                      : ibdevx_state->selected_dev_id;
+            struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices +
+                                            ibdevx_state->dev_ids[selected_dev_id]);
+
+            dummy_local_mem->mrs[i] =
+                ftable.reg_mr(device->common_device.pd, dummy_local_mem->ptr, sizeof(uint64_t),
+                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
+                                  IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
+            NVSHMEMI_NULL_ERROR_JMP(dummy_local_mem->mrs[i], status, NVSHMEMX_ERROR_OUT_OF_MEMORY,
+                                    out, "dummy memory registration failed\n");
+        }
     }
 
 out:
+    if (status) {
+        if (dummy_created) {
+            for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
+                if (dummy_local_mem->mrs[i]) (void)ftable.dereg_mr(dummy_local_mem->mrs[i]);
+            }
+            free(dummy_local_mem->ptr);
+            free(dummy_local_mem);
+            dummy_local_mem = nullptr;
+        }
+        (void)ibdevx_release_mem_handles(handle->dev_mem_handles.data(), registered_count,
+                                         ibdevx_state->log_level);
+    }
     return status;
 }
 
 int nvshmemt_ibdevx_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_transport_t t) {
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)t->state;
-    return nvshmemt_ib_common_release_mem_handle(&ftable, mem_handle, ibdevx_state->log_level);
+    struct ibdevx_mem_handle *handle = reinterpret_cast<struct ibdevx_mem_handle *>(mem_handle);
+    return ibdevx_release_mem_handles(handle->dev_mem_handles.data(), handle->num_devs,
+                                      ibdevx_state->log_level);
 }
 
 int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
@@ -1011,15 +1094,20 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
         ep_destroy((struct ibdevx_ep *)ibdevx_state->ep[i]);
     }
 
-    if (ibdevx_state->cst_ep) {
-        ep_destroy((struct ibdevx_ep *)ibdevx_state->cst_ep);
+    for (struct ibdevx_ep *ep : cst_eps) {
+        ep_destroy(ep);
     }
 
-    if (local_dummy_mr.mr) {
-        void *mem = local_dummy_mr.mr->addr;
-        ftable.dereg_mr(local_dummy_mr.mr);
-        free(mem);
-        memset(&local_dummy_mr, 0, sizeof(local_dummy_mr));
+    if (dummy_local_mem) {
+        for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
+            if (!dummy_local_mem->mrs[i]) continue;
+            status = ftable.dereg_mr(dummy_local_mem->mrs[i]);
+            NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out,
+                                        "Unable to deregister dummy memory.\n");
+        }
+        free(dummy_local_mem->ptr);
+        free(dummy_local_mem);
+        dummy_local_mem = nullptr;
     }
 
     if (ibdevx_state->devices) {
@@ -1086,8 +1174,11 @@ int progress_send(nvshmemt_ib_common_state_t ibdevx_state) {
             if (likely(comp_code <= MLX5_CQE_RESIZE_CQ)) {
                 unsigned int qpid =
                     ntohl(cqe_vol->sop_drop_qpn) & NVSHMEMT_IBDEVX_MASK_UPPER_BYTE_32;
-                struct ibdevx_ep *ep = (struct ibdevx_ep *)qp_map.find((unsigned int)qpid)->second;
-                assert(ep != NULL);
+                auto qp_it = qp_map.find(std::make_pair(devid, qpid));
+                struct ibdevx_ep *ep = qp_it != qp_map.end() ? qp_it->second : nullptr;
+                NVSHMEMI_NULL_ERROR_JMP(ep, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Unable to find endpoint for QP %u on device %d.\n", qpid,
+                                        devid);
                 /* Have to take 64 bit masked compare and swap into consideration. These take up 2
                  * entries in the wq. */
                 if (likely((ntohl(cqe_vol->sop_drop_qpn) & NVSHMEMT_IBDEVX_MASK_LOWER_3_BYTES_32) !=
@@ -1147,13 +1238,18 @@ int nvshmemt_ibdevx_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb
     struct ibdevx_ep *ep;
     struct ibdevx_rw_wqe *wqe;
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)tcurr->state;
+    struct nvshmemt_ib_common_mem_handle *remote_handle;
+    struct nvshmemt_ib_common_mem_handle *local_handle;
     int status = 0;
+    int selected_dev_slot;
 
     uintptr_t wqe_bb_idx_64;
     uint32_t wqe_bb_idx_32;
     size_t wqe_size;
 
     ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    selected_dev_slot = ep->common_ep.selected_dev_slot;
+    remote_handle = ibdevx_get_dev_mem_handle(remote->handle, selected_dev_slot);
 
     wqe_bb_idx_64 = ep->wqe_bb_idx;
     wqe_bb_idx_32 = ep->wqe_bb_idx;
@@ -1178,13 +1274,13 @@ int nvshmemt_ibdevx_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb
 
     /* TODO: store the rkeys in BE so we don't have to convert. */
     wqe->raddr.raddr = htobe64((uintptr_t)remote->ptr);
-    wqe->raddr.rkey = htobe32(((struct nvshmemt_ib_common_mem_handle *)remote->handle)->rkey);
+    wqe->raddr.rkey = htobe32(remote_handle->rkey);
 
     if (verb.desc != NVSHMEMI_OP_P) {
         assert(bytesdesc.nelems < (UINT32_MAX / bytesdesc.elembytes));
         wqe->data.data_seg.byte_count = htobe32((uint32_t)(bytesdesc.nelems * bytesdesc.elembytes));
-        wqe->data.data_seg.lkey =
-            htobe32(((struct nvshmemt_ib_common_mem_handle *)local->handle)->lkey);
+        local_handle = ibdevx_get_dev_mem_handle(local->handle, selected_dev_slot);
+        wqe->data.data_seg.lkey = htobe32(local_handle->lkey);
         wqe->data.data_seg.addr = htobe64((uintptr_t)local->ptr);
     } else {
         uint32_t bytecount = bytesdesc.nelems * bytesdesc.elembytes;
@@ -1235,8 +1331,11 @@ static inline int nvshmemt_ibdevx_amo_32(struct nvshmem_transport *tcurr, int pe
     struct ibdevx_ep *ep;
     struct ibdevx_atomic_32_wqe *wqe;
     struct nvshmemt_ib_common_mem_handle *ret_handle;
+    struct nvshmemt_ib_common_mem_handle *remote_handle;
+    struct ibv_mr *dummy_mr;
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)tcurr->state;
     int status = 0;
+    int selected_dev_slot;
 
     size_t wqe_size;
     uintptr_t wqe_bb_idx_64;
@@ -1245,6 +1344,9 @@ static inline int nvshmemt_ibdevx_amo_32(struct nvshmem_transport *tcurr, int pe
     uint32_t compare = remote->cmp;
 
     ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    selected_dev_slot = ep->common_ep.selected_dev_slot;
+    remote_handle = ibdevx_get_dev_mem_handle(remote->remote_memdesc.handle, selected_dev_slot);
+    dummy_mr = dummy_local_mem->mrs[selected_dev_slot];
 
     wqe_bb_idx_64 = ep->wqe_bb_idx;
     wqe_bb_idx_32 = ep->wqe_bb_idx;
@@ -1262,15 +1364,14 @@ static inline int nvshmemt_ibdevx_amo_32(struct nvshmem_transport *tcurr, int pe
     wqe->ctrl.qpn_ds =
         htobe32((uint32_t)(wqe_size / NVSHMEMT_IBDEVX_MLX5_SEND_WQE_DS) | ep->qpid << 8);
     wqe->raddr.raddr = htobe64((uintptr_t)remote->remote_memdesc.ptr);
-    wqe->raddr.rkey =
-        htobe32(((struct nvshmemt_ib_common_mem_handle *)remote->remote_memdesc.handle)->rkey);
+    wqe->raddr.rkey = htobe32(remote_handle->rkey);
     wqe->data.byte_count = htobe32((uint32_t)4);
 
     if (verb.desc < NVSHMEMI_AMO_END_OF_NONFETCH) {
-        wqe->data.lkey = htobe32(local_dummy_mr.lkey);
-        wqe->data.addr = htobe64((uintptr_t)local_dummy_mr.mr->addr);
+        wqe->data.lkey = htobe32(dummy_mr->lkey);
+        wqe->data.addr = htobe64((uintptr_t)dummy_mr->addr);
     } else {
-        ret_handle = (struct nvshmemt_ib_common_mem_handle *)remote->ret_handle;
+        ret_handle = ibdevx_get_dev_mem_handle(remote->ret_handle, selected_dev_slot);
         assert(ret_handle != NULL);
         wqe->data.lkey = htobe32(ret_handle->lkey);
         wqe->data.addr = htobe64((uintptr_t)remote->retptr);
@@ -1390,17 +1491,23 @@ static inline int nvshmemt_ibdevx_amo_64(struct nvshmem_transport *tcurr, int pe
     struct ibdevx_atomic_64_amo_wqe *wqe;
     struct ibdevx_atomic_64_masked_compare_swap_seg *cs_data, *cs_mask;
     struct nvshmemt_ib_common_mem_handle *ret_handle;
+    struct nvshmemt_ib_common_mem_handle *remote_handle;
+    struct ibv_mr *dummy_mr;
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)tcurr->state;
 
     void *wqe_1, *wqe_2;
 
     int status = 0;
+    int selected_dev_slot;
 
     size_t wqe_size;
     uintptr_t wqe_bb_idx_64;
     uint32_t wqe_bb_idx_32;
 
     ep = (struct ibdevx_ep *)nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    selected_dev_slot = ep->common_ep.selected_dev_slot;
+    remote_handle = ibdevx_get_dev_mem_handle(remote->remote_memdesc.handle, selected_dev_slot);
+    dummy_mr = dummy_local_mem->mrs[selected_dev_slot];
 
     wqe_bb_idx_64 = ep->wqe_bb_idx;
     wqe_bb_idx_32 = ep->wqe_bb_idx;
@@ -1425,8 +1532,7 @@ static inline int nvshmemt_ibdevx_amo_64(struct nvshmem_transport *tcurr, int pe
                                            sizeof(struct mlx5_wqe_raddr_seg) +
                                            sizeof(struct ibdevx_atomic_64_masked_fetch_add_seg));
     raddr->raddr = htobe64((uintptr_t)remote->remote_memdesc.ptr);
-    raddr->rkey =
-        htobe32(((struct nvshmemt_ib_common_mem_handle *)remote->remote_memdesc.handle)->rkey);
+    raddr->rkey = htobe32(remote_handle->rkey);
 
     switch (verb.desc) {
         case NVSHMEMI_AMO_FETCH_INC:
@@ -1542,10 +1648,10 @@ static inline int nvshmemt_ibdevx_amo_64(struct nvshmem_transport *tcurr, int pe
     data->byte_count = htobe32((uint32_t)8);
 
     if (verb.desc < NVSHMEMI_AMO_END_OF_NONFETCH) {
-        data->lkey = htobe32(local_dummy_mr.lkey);
-        data->addr = htobe64((uintptr_t)local_dummy_mr.mr->addr);
+        data->lkey = htobe32(dummy_mr->lkey);
+        data->addr = htobe64((uintptr_t)dummy_mr->addr);
     } else {
-        ret_handle = (struct nvshmemt_ib_common_mem_handle *)remote->ret_handle;
+        ret_handle = ibdevx_get_dev_mem_handle(remote->ret_handle, selected_dev_slot);
         assert(ret_handle != NULL);
         data->lkey = htobe32(ret_handle->lkey);
         data->addr = htobe64((uintptr_t)remote->retptr);
@@ -1591,62 +1697,48 @@ out:
 
 int nvshmemt_ibdevx_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)tcurr->state;
-    struct ibdevx_ep *ep = (struct ibdevx_ep *)ibdevx_state->cst_ep;
-    struct ibdevx_rw_wqe *wqe;
-
     int status = 0;
 
-    uintptr_t wqe_bb_idx_64 = ep->wqe_bb_idx;
-    uint32_t wqe_bb_idx_32 = ep->wqe_bb_idx;
-    size_t wqe_size;
+    for (struct ibdevx_ep *ep : cst_eps) {
+        struct ibdevx_rw_wqe *wqe;
+        struct ibv_mr *dummy_mr = dummy_local_mem->mrs[ep->common_ep.selected_dev_slot];
+        uintptr_t wqe_bb_idx_64 = ep->wqe_bb_idx;
+        uint32_t wqe_bb_idx_32 = ep->wqe_bb_idx;
+        size_t wqe_size;
 
-    wqe = (struct ibdevx_rw_wqe *)((char *)ep->wq_buf +
-                                   ((wqe_bb_idx_64 % get_ibdevx_qp_depth(ibdevx_state))
-                                    << NVSHMEMT_IBDEVX_WQE_BB_SHIFT));
-    wqe_size = sizeof(struct ibdevx_rw_wqe);
-    memset(wqe, 0, sizeof(struct ibdevx_rw_wqe));
+        wqe = (struct ibdevx_rw_wqe *)((char *)ep->wq_buf +
+                                       ((wqe_bb_idx_64 % get_ibdevx_qp_depth(ibdevx_state))
+                                        << NVSHMEMT_IBDEVX_WQE_BB_SHIFT));
+        wqe_size = sizeof(struct ibdevx_rw_wqe);
+        memset(wqe, 0, sizeof(struct ibdevx_rw_wqe));
 
-    wqe->ctrl.fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
-    wqe->ctrl.qpn_ds =
-        htobe32((uint32_t)(wqe_size / NVSHMEMT_IBDEVX_MLX5_SEND_WQE_DS) | ep->qpid << 8);
-    wqe->ctrl.opmod_idx_opcode = htobe32(MLX5_OPCODE_RDMA_READ | (wqe_bb_idx_32 << 8));
+        wqe->ctrl.fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
+        wqe->ctrl.qpn_ds =
+            htobe32((uint32_t)(wqe_size / NVSHMEMT_IBDEVX_MLX5_SEND_WQE_DS) | ep->qpid << 8);
+        wqe->ctrl.opmod_idx_opcode = htobe32(MLX5_OPCODE_RDMA_READ | (wqe_bb_idx_32 << 8));
 
-    wqe->raddr.raddr = htobe64((uintptr_t)local_dummy_mr.mr->addr);
-    wqe->raddr.rkey = htobe32(local_dummy_mr.rkey);
+        wqe->raddr.raddr = htobe64((uintptr_t)dummy_mr->addr);
+        wqe->raddr.rkey = htobe32(dummy_mr->rkey);
 
-    wqe->data.data_seg.byte_count = htobe32((uint32_t)4);
-    wqe->data.data_seg.lkey = htobe32(local_dummy_mr.lkey);
-    wqe->data.data_seg.addr = htobe64((uintptr_t)local_dummy_mr.mr->addr);
+        wqe->data.data_seg.byte_count = htobe32((uint32_t)4);
+        wqe->data.data_seg.lkey = htobe32(dummy_mr->lkey);
+        wqe->data.data_seg.addr = htobe64((uintptr_t)dummy_mr->addr);
 
-    assert(wqe_size <= MLX5_SEND_WQE_BB);
-    ep->wqe_bb_idx++;
-    nvshmemt_ibdevx_post_send(ep, (void *)wqe, 1);
+        assert(wqe_size <= MLX5_SEND_WQE_BB);
+        ep->wqe_bb_idx++;
+        nvshmemt_ibdevx_post_send(ep, (void *)wqe, 1);
+    }
 
-    status = nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");
+    for (struct ibdevx_ep *ep : cst_eps) {
+        status = nvshmemt_ib_common_check_poll_avail(tcurr, ep, NVSHMEMT_IB_COMMON_WAIT_ALL);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "check_poll failed \n");
+    }
 
 out:
     return status;
 }
 
 // Using common fence and quiet functions from transport_ib_common
-
-int nvshmemt_ibdevx_ep_create(struct ibdevx_ep **ep, int devid, nvshmem_transport_t t,
-                              nvshmemt_ib_common_state_t ibdevx_state) {
-    int status = 0;
-
-    status = ep_create((void **)ep, devid, t);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ep_create failed\n");
-
-    // setup loopback connection on the first device used.
-    if (!ibdevx_state->cst_ep) {
-        status = nvshmemt_ib_common_setup_cst_loopback(devid, t);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cst setup failed \n");
-    }
-
-out:
-    return status;
-}
 
 int nvshmemt_ibdevx_ep_get_handle(struct nvshmemt_ib_common_ep_handle *ep_handle_ptr,
                                   struct ibdevx_ep *ep) {
@@ -1687,8 +1779,7 @@ out:
 // Wrapper functions to match the function pointer signatures
 int nvshmemt_ibdevx_ep_create_wrapper(nvshmemt_ib_common_ep_ptr_t *ep, int dev_id,
                                       struct nvshmem_transport *t) {
-    nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)t->state;
-    return nvshmemt_ibdevx_ep_create((struct ibdevx_ep **)ep, dev_id, t, ibdevx_state);
+    return ep_create((void **)ep, dev_id, t);
 }
 
 int nvshmemt_ibdevx_ep_get_handle_wrapper(struct nvshmemt_ib_common_ep_handle *ep_handle,
@@ -1699,6 +1790,61 @@ int nvshmemt_ibdevx_ep_get_handle_wrapper(struct nvshmemt_ib_common_ep_handle *e
 int nvshmemt_ibdevx_ep_connect_wrapper(nvshmemt_ib_common_ep_ptr_t ep,
                                        struct nvshmemt_ib_common_ep_handle *ep_handle) {
     return nvshmemt_ibdevx_ep_connect((struct ibdevx_ep *)ep, ep_handle);
+}
+
+static int nvshmemt_ibdevx_setup_cst_endpoints(nvshmem_transport_t t) {
+    int status = 0;
+    nvshmemt_ib_common_state_t state = (nvshmemt_ib_common_state_t)t->state;
+
+    cst_eps.resize(state->n_selected_dev_ids, nullptr);
+    for (int selected_dev_slot = 0; selected_dev_slot < state->n_selected_dev_ids;
+         ++selected_dev_slot) {
+        struct ibdevx_ep *cst_ep = nullptr;
+        struct nvshmemt_ib_common_ep_handle cst_ep_handle;
+
+        status = ep_create(reinterpret_cast<void **>(&cst_ep),
+                           state->selected_dev_ids[selected_dev_slot], t);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "CST ep_create failed\n");
+        cst_ep->common_ep.selected_dev_slot = selected_dev_slot;
+        status = ep_get_handle(&cst_ep_handle, cst_ep);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cst_error,
+                              "CST ep_get_handle failed\n");
+        status = ep_connect(cst_ep, &cst_ep_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cst_error,
+                              "CST ep_connect failed\n");
+        cst_eps[selected_dev_slot] = cst_ep;
+        continue;
+
+    cst_error:
+        (void)ep_destroy(cst_ep);
+        goto out;
+    }
+
+out:
+    if (status) {
+        for (struct ibdevx_ep *cst_ep : cst_eps) {
+            if (cst_ep) (void)ep_destroy(cst_ep);
+        }
+        cst_eps.clear();
+    }
+    return status;
+}
+
+static int nvshmemt_ibdevx_connect_endpoints(nvshmem_transport_t t, int *candidate_dev_ids,
+                                             int num_candidate_devs, int *out_qp_indices,
+                                             int num_qps) {
+    int status = nvshmemt_ib_common_connect_endpoints(t, candidate_dev_ids, num_candidate_devs,
+                                                      out_qp_indices, num_qps);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "IBDevX endpoint connection failed\n");
+    if (cst_eps.empty()) {
+        status = nvshmemt_ibdevx_setup_cst_endpoints(t);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "IBDevX CST endpoint setup failed\n");
+    }
+
+out:
+    return status;
 }
 
 int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, int api_version) {
@@ -1718,8 +1864,6 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
             NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION, NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version));
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
-
-    memset(&local_dummy_mr, 0, sizeof(local_dummy_mr));
 
     transport = (struct nvshmem_transport *)malloc(sizeof(struct nvshmem_transport));
     memset(transport, 0, sizeof(struct nvshmem_transport));
@@ -1746,6 +1890,17 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     nvshmemt_ib_common_sanitize_retry_cnt(ibdevx_state->options);
 
     ibdevx_state->log_level = nvshmemt_common_get_log_level(ibdevx_state->options);
+    ibdevx_state->max_selected_dev_ids = NVSHMEMT_IBDEVX_MAX_NICS_PER_PE;
+    if (ibdevx_state->options->MAX_NICS_PER_PE < 0) {
+        NVSHMEMI_WARN_PRINT("NVSHMEM_MAX_NICS_PER_PE must be non-negative; using %d.\n",
+                            ibdevx_state->max_selected_dev_ids);
+    } else if (ibdevx_state->options->MAX_NICS_PER_PE > NVSHMEMT_IBDEVX_MAX_NICS_PER_PE) {
+        NVSHMEMI_WARN_PRINT(
+            "NVSHMEM_MAX_NICS_PER_PE=%d exceeds the IBDevX implementation limit; using %d.\n",
+            ibdevx_state->options->MAX_NICS_PER_PE, ibdevx_state->max_selected_dev_ids);
+    } else if (ibdevx_state->options->MAX_NICS_PER_PE > 0) {
+        ibdevx_state->max_selected_dev_ids = ibdevx_state->options->MAX_NICS_PER_PE;
+    }
 
     if (nvshmemt_ibv_ftable_init(&ibv_handle, &ftable, ibdevx_state->log_level)) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1894,7 +2049,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     nvshmemt_ib_common_warn_missing_hcas(hca_filter);
 
     transport->host_ops.can_reach_peer = nvshmemt_ibdevx_can_reach_peer;
-    transport->host_ops.connect_endpoints = nvshmemt_ib_common_connect_endpoints;
+    transport->host_ops.connect_endpoints = nvshmemt_ibdevx_connect_endpoints;
     transport->host_ops.get_mem_handle = nvshmemt_ibdevx_get_mem_handle;
     transport->host_ops.release_mem_handle = nvshmemt_ibdevx_release_mem_handle;
     transport->host_ops.rma = nvshmemt_ibdevx_rma;
@@ -1907,7 +2062,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.enforce_cst = nvshmemt_ibdevx_enforce_cst_at_target;
     transport->host_ops.put_signal = nvshmemt_put_signal;
 
-    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
+    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED | NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED;
     transport->is_successfully_initialized = true;
     transport->atomics_complete_on_quiet = true;
     transport->max_op_len = 1ULL << 30;
