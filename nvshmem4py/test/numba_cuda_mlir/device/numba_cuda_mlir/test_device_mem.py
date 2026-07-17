@@ -1,7 +1,6 @@
 # Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import cupy as cp
 from cuda.core import Device
 from numba_cuda_mlir import cuda
 import nvshmem.core
@@ -45,9 +44,17 @@ def test_device_get_peer_array(nvshmem_init_fini):
         for i in range(in_arr.shape[0]):
             peer_arr[i] = nvshmem.core.device.numba_cuda_mlir.my_pe()
 
-    # choose src_pe/peer
-    my_pe = nvshmem.core.my_pe()
-    peer_pe = (my_pe + 1) % nvshmem.core.n_pes()
+    node_team = nvshmem.core.Teams.TEAM_NODE
+    node_rank = nvshmem.core.team_my_pe(node_team)
+    node_size = nvshmem.core.team_n_pes(node_team)
+    peer_node_rank = (node_rank + 1) % node_size
+    peer_pe = nvshmem.core.team_translate_pe(
+        node_team, peer_node_rank, nvshmem.core.Teams.TEAM_WORLD
+    )
+    predecessor_node_rank = (node_rank - 1) % node_size
+    expected_pe = nvshmem.core.team_translate_pe(
+        node_team, predecessor_node_rank, nvshmem.core.Teams.TEAM_WORLD
+    )
 
     stream = dev.create_stream()
 
@@ -55,7 +62,8 @@ def test_device_get_peer_array(nvshmem_init_fini):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
     dev.sync()
-    assert (arr == peer_pe).all(), f"Result {arr} did not match expected {peer_pe}"
+    assert (arr == expected_pe).all(), f"Result {arr} did not match expected {expected_pe}"
+    nvshmem.core.free_array(arr)
 
 
 @pytest.mark.mpi
@@ -106,3 +114,4 @@ def test_device_get_multicast_array(nvshmem_init_fini):
     stream.sync()
     dev.sync()
     assert (arr == 1).all(), f"Multicast array result {arr} did not match expected {1}"
+    nvshmem.core.free_array(arr)

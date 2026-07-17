@@ -34,9 +34,11 @@ def _append_nvrtc_search_paths(*paths):
 
 if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
     from . import _numbast
-    from ._numbast import *
+
+    globals().update({name: getattr(_numbast, name) for name in _numbast.__all__})
     from numba_cuda_mlir import types as _types
     from numba_cuda_mlir.extending import lowering_registry as _lowering_registry
+    from numba_cuda_mlir.extending import refresh_registries as _refresh_registries
     from numba_cuda_mlir.extending import typing_registry as _typing_registry
     from numba_cuda_mlir.numba_cuda.typing import signature as _signature
     from numba_cuda_mlir.numba_cuda.typing.templates import (
@@ -113,22 +115,23 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
         return impl
 
     _register_ptr_lowering()
+    _refresh_registries()
+    __all__ = [*_numbast.__all__, "ptr"]
 
     INCLUDE_PATH = _find_nvshmem_include_path()
     PACKAGED_INCLUDE_PATH = find_nvidia_header_directory("nvshmem")
-    if "nvshmem.h" not in os.listdir(INCLUDE_PATH):
-        raise RuntimeError("nvshmem.h not found, package may not be properly installed")
-
-    if not os.path.exists(INCLUDE_PATH):
+    if not INCLUDE_PATH or not os.path.isdir(INCLUDE_PATH):
         raise RuntimeError(
-            f"NVSHMEM headers not found at {INCLUDE_PATH}. Please confirm that nvshmem is installed correctly."
+            f"NVSHMEM header directory INCLUDE_PATH={INCLUDE_PATH!r} does not exist. "
+            f"PACKAGED_INCLUDE_PATH={PACKAGED_INCLUDE_PATH!r}."
         )
+    if not os.path.isfile(os.path.join(INCLUDE_PATH, "nvshmem.h")):
+        raise RuntimeError(f"nvshmem.h not found under INCLUDE_PATH={INCLUDE_PATH!r}")
 
     CCCL_INCLUDE_PATH = find_nvidia_header_directory("cccl")
-
-    if not os.path.exists(CCCL_INCLUDE_PATH):
+    if not CCCL_INCLUDE_PATH or not os.path.isdir(CCCL_INCLUDE_PATH):
         raise RuntimeError(
-            f"CCCL headers not found at {CCCL_INCLUDE_PATH}. Please confirm that cccl is installed correctly."
+            f"CCCL header directory CCCL_INCLUDE_PATH={CCCL_INCLUDE_PATH!r} does not exist."
         )
 
     this_folder = os.path.dirname(os.path.abspath(__file__))
@@ -144,3 +147,4 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
 else:
     warnings.warn("Numba-CUDA-MLIR device bindings are not enabled", NvshmemWarning)
     _numbast = None
+    __all__ = []

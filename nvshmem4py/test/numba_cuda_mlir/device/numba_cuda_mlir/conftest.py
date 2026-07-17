@@ -5,7 +5,7 @@ import pytest
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parents[2]))
 from utils import uid_init, mpi_init, get_local_rank_per_node
 from nvshmem.core import finalize, barrier, Teams
 from cuda.core import Device

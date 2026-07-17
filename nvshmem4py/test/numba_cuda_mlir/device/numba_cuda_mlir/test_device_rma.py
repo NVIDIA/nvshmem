@@ -16,7 +16,6 @@ rma_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", 
 def test_put_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     buf_src = nvshmem.core.array((4, 4), dtype=dtype)
     buf_src[:] = nvshmem.core.my_pe() + 1
     buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
@@ -50,7 +49,6 @@ def test_put_on_array(nvshmem_init_fini, dtype):
 def test_get_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     buf_src = nvshmem.core.array((4, 4), dtype=dtype)
     buf_src[:] = 0
     buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
@@ -85,7 +83,6 @@ def test_get_on_array(nvshmem_init_fini, dtype):
 def test_put_signal_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     buf_src = nvshmem.core.array((4, 4), dtype=dtype)
     buf_src[:] = nvshmem.core.my_pe() + 1
     buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
@@ -116,6 +113,7 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
 
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
+    nvshmem.core.free_array(signal_var)
     print("Done testing put signal on Array")
 
 
@@ -124,7 +122,6 @@ def test_put_signal_on_array(nvshmem_init_fini, dtype):
 def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
     print("Testing RMA on Array")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     buf_src = nvshmem.core.array((4, 4), dtype=dtype)
     buf_src[:] = nvshmem.core.my_pe() + 1
     buf_dst = nvshmem.core.array((4, 4), dtype=dtype)
@@ -152,18 +149,17 @@ def test_put_signal_with_wait_on_array(nvshmem_init_fini, dtype):
 
     print(f"From PE {nvshmem.core.my_pe()} AFTER dst={buf_dst}, src={buf_src}")
 
-    if nvshmem.core.my_pe() == 1:
-        assert (buf_dst == nvshmem.core.my_pe() + 1).all()
+    assert (buf_dst == nvshmem.core.my_pe() + 1).all()
     nvshmem.core.free_array(buf_dst)
     nvshmem.core.free_array(buf_src)
+    nvshmem.core.free_array(signal_var)
     print("Done testing put signal with wait on Array")
 
 
 @pytest.mark.mpi
-def test_signal_op_signal_wait():
+def test_signal_op_signal_wait(nvshmem_init_fini):
     print("Testing Signal Op and Signal Wait on Array")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     signal_var = nvshmem.core.array((1, ), dtype="uint64")
     signal_var[:] = 0
     signal_val = 1
@@ -183,15 +179,15 @@ def test_signal_op_signal_wait():
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
+    nvshmem.core.free_array(signal_var)
     print("Done testing Signal Op and Signal Wait on Array")
 
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", rma_dtypes)
-def test_p(dtype):
+def test_p(nvshmem_init_fini, dtype):
     print("Testing shmem_p")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     var = nvshmem.core.array((1, ), dtype=dtype)
     var[:] = 0
     val = 1
@@ -215,15 +211,15 @@ def test_p(dtype):
 
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
+    nvshmem.core.free_array(var)
     print("Done testing shmem_p")
 
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("dtype", rma_dtypes)
-def test_g(dtype):
+def test_g(nvshmem_init_fini, dtype):
     print("Testing shmem_g")
 
-    local_rank_per_node = nvshmem.core.team_my_pe(nvshmem.core.Teams.TEAM_NODE)
     var = nvshmem.core.array((1, ), dtype=dtype)
     var[:] = 1
     dest = nvshmem.core.array((1, ), dtype=dtype)
@@ -245,4 +241,6 @@ def test_g(dtype):
     print(f"From PE {nvshmem.core.my_pe()} AFTER var={var}, dest={dest}")
     assert (dest == 1).all()
 
+    nvshmem.core.free_array(var)
+    nvshmem.core.free_array(dest)
     print("Done testing shmem_g")

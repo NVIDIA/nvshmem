@@ -26,7 +26,7 @@ def test_collective(dev: Device):
         peer = int32((mype + 1) % npes)
         lvalue = int32(mype)
 
-        for i in range(npes):
+        for _ in range(npes):
             int_p(target, lvalue, peer)
             barrier_all()
             lvalue = int32(target[0] + mype)
