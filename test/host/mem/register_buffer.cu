@@ -85,7 +85,8 @@ int main(int argc, char **argv) {
     int dev_count;
 
     requested = NVSHMEM_THREAD_SERIALIZED;
-    nvshmem_init_thread(requested, &provided);
+    init_wrapper(&argc, &argv);
+    nvshmem_query_thread(&provided);
     mype_node = nvshmem_team_my_pe(NVSHMEMX_TEAM_NODE);
     npes_node = nvshmem_team_n_pes(NVSHMEMX_TEAM_NODE);
     CUDA_CHECK(cudaGetDeviceCount(&dev_count));
@@ -330,6 +331,6 @@ out:
         free(local_array);
     }
 
-    nvshmem_finalize();
+    finalize_wrapper();
     return status;
 }
