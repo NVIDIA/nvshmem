@@ -8,15 +8,8 @@ from mpi4py import MPI
 import numpy as np
 
 import nvshmem.core
-from nvshmem.core.nvshmem_types import *
 
-from cuda.core import Device, system
-from cuda.core import Stream
-from cuda.core import MemoryResource, Buffer
-import cuda.bindings.driver as driver
-import ctypes
-
-import os
+from cuda.core import Device
 
 
 def get_local_rank_per_node():

@@ -18,6 +18,8 @@ from nvshmem.device.bindings.numba_cuda_mlir import (
 )
 
 ffi = cffi.FFI()
+NVSHMEM_CMP_GE = int(nvshmem.core.ComparisonType.CMP_GE)
+NVSHMEM_SIGNAL_ADD = int(nvshmem.core.SignalOp.SIGNAL_ADD)
 
 
 @cuda.jit(lto=True)
@@ -53,7 +55,7 @@ def ring_reduce(dst, src, nreduce, signal, chunk_size):
     for chunk in range(num_chunks):
         if mype != 0:
             if thread_id == 0:
-                signal_wait_until(signal_block, int32(5), uint64(chunk + 1))
+                signal_wait_until(signal_block, int32(NVSHMEM_CMP_GE), uint64(chunk + 1))
 
             cuda.syncthreads()
             for i in range(thread_id, chunk_elems, num_threads):
@@ -68,7 +70,7 @@ def ring_reduce(dst, src, nreduce, signal, chunk_size):
                 uint64(chunk_elems),
                 signal_block,
                 uint64(1),
-                int32(10),
+                int32(NVSHMEM_SIGNAL_ADD),
                 peer,
             )
 
@@ -90,7 +92,7 @@ def ring_reduce(dst, src, nreduce, signal, chunk_size):
         for chunk in range(num_chunks):
             if mype < npes - 1:  # Last pe already has the final result
                 expected_val = (chunk + 1) if mype == 0 else (num_chunks + chunk + 1)
-                signal_wait_until(signal_block, int32(5), uint64(expected_val))
+                signal_wait_until(signal_block, int32(NVSHMEM_CMP_GE), uint64(expected_val))
 
             if mype < npes - 2:
                 int_put_signal_nbi(
@@ -99,7 +101,7 @@ def ring_reduce(dst, src, nreduce, signal, chunk_size):
                     uint64(chunk_elems),
                     signal_block,
                     uint64(1),
-                    int32(10),
+                    int32(NVSHMEM_SIGNAL_ADD),
                     peer,
                 )
 

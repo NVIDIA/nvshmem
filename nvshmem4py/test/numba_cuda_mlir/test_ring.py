@@ -32,8 +32,8 @@ def test_ring(dev: Device):
 
     app_kernel[1, 1, 0](dest)
 
-    barrier_all()
     dev.sync()
+    barrier_all()
 
     print(f"{h_my_pe()}: received message {dest[0]}")
 

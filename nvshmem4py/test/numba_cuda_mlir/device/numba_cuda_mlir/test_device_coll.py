@@ -156,6 +156,9 @@ def test_device_fcollect(nvshmem_init_fini, team, dtype):
     print(f"Dest: {dest}")
     assert (dest == cupy.asarray(expected)).all()
 
+    nvshmem.core.free_array(src)
+    nvshmem.core.free_array(dest)
+
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_WORLD])

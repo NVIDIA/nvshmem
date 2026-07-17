@@ -28,7 +28,9 @@ def test_ptr():
 
     kernel_nvshmem[1, 1](dest)
 
+    cuda.synchronize()
     nvshmem.core.free_array(dest)
+    nvshmem.core.finalize()
 
 
 if __name__ == "__main__":

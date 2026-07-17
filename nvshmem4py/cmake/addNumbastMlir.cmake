@@ -43,17 +43,22 @@ function(AddNumbastMlir VERSION)
     # toolkit NVSHMEM is built against. The extra pins cuda-bindings/cuda-toolkit to the same
     # major version; without it the base pin (cuda-bindings>=12.9.1,<14) could install a 12.x
     # binding on a CUDA 13 toolkit. Requires >= 0.4.0 so ExternFunction lives in device_declarations.
-    if(DEFINED CUDAToolkit_VERSION_MAJOR)
+    if(CUDAToolkit_VERSION_MAJOR EQUAL 12 OR CUDAToolkit_VERSION_MAJOR EQUAL 13)
         set(NUMBA_CUDA_MLIR_PIP_SPEC "numba-cuda-mlir[cu${CUDAToolkit_VERSION_MAJOR}]>=0.4.0")
+    elseif(DEFINED CUDAToolkit_VERSION_MAJOR)
+        message(FATAL_ERROR
+            "numba-cuda-mlir supports CUDA 12 and 13, but CUDAToolkit_VERSION_MAJOR="
+            "${CUDAToolkit_VERSION_MAJOR}"
+        )
     else()
         set(NUMBA_CUDA_MLIR_PIP_SPEC "numba-cuda-mlir>=0.4.0")
     endif()
 
     if(DEFINED ENV{NUMBA_CUDA_MLIR_SOURCE_DIR})
-        # A developer-provided source checkout takes precedence: use it directly via
-        # PYTHONPATH instead of installing the published wheel.
+        # Install the published package to resolve its runtime dependencies, then
+        # let the developer-provided source checkout take precedence via PYTHONPATH.
         set(PIP_INSTALL_NUMBA_CUDA_MLIR_COMMAND
-            ${CMAKE_COMMAND} -E echo "Using numba_cuda_mlir from NUMBA_CUDA_MLIR_SOURCE_DIR=$ENV{NUMBA_CUDA_MLIR_SOURCE_DIR}"
+            ${VENV_PYTHON_EXECUTABLE} -m pip install "${NUMBA_CUDA_MLIR_PIP_SPEC}"
         )
         set(INSTALL_NUMBA_CUDA_MLIR_COMMAND
             ${CMAKE_COMMAND} -E env "${NUMBA_CUDA_MLIR_PYTHONPATH}" ${VENV_PYTHON_EXECUTABLE} -c "import numba_cuda_mlir"
@@ -95,6 +100,7 @@ function(AddNumbastMlir VERSION)
         COMMAND ${INSTALL_NUMBA_CUDA_MLIR_COMMAND}
         WORKING_DIRECTORY ${WORKDIR}
         USES_TERMINAL
+        VERBATIM
         DEPENDS clean_${PACKAGE_NAME}
         DEPENDS setup_py_bindings_env
         COMMAND touch ${OUTPUT_DIR}/install_${PACKAGE_NAME}.txt
