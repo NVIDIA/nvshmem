@@ -49,10 +49,11 @@ explicitly:
 
 ## Runtime settings
 
-`NVSHMEM_RUST_INIT=bootstrap|mpi|uid` selects the initialization method. The
+`NVSHMEM_RUST_INIT=bootstrap|uid` selects the initialization method. The
 default, `bootstrap`, lets NVSHMEM choose a bootstrap from the launch
-environment. `mpi` uses `NVSHMEMX_INIT_WITH_MPI_COMM`, and `uid` is a single-PE
-unique-ID path.
+environment, including a supported MPI launcher. `uid` is a single-PE
+unique-ID path. Programs that own an initialized MPI communicator can instead
+use `InitMethod::MpiComm` directly.
 
 Device selection defaults to the launcher-local rank filtered by
 `CUDA_OXIDE_TARGET`. Set `NVSHMEM_RUST_CUDA_DEVICE` to force a CUDA device
@@ -60,12 +61,14 @@ ordinal for a rank.
 
 After the build target produces `nvshmem_cuda_oxide_smoke.cubin`, direct MPI
 launches can set `NVSHMEM_RUST_REUSE_CUBIN=1` to reuse the linked cubin instead
-of rebuilding it in every rank:
+of rebuilding it in every rank. Without it, each direct-run process compiles
+and links its cubin in memory, so ranks do not write shared `.ltoir` or
+`.cubin` artifacts:
 
 ```bash
 export LD_LIBRARY_PATH="$PWD/install/lib:${LD_LIBRARY_PATH:-}"
 export NVSHMEM_HOST_LIB_PATH="$PWD/install/lib/libnvshmem_host.so"
-export NVSHMEM_RUST_INIT=mpi
+export NVSHMEM_RUST_INIT=bootstrap
 export NVSHMEM_RUST_REUSE_CUBIN=1
 mpirun --bind-to none -np 2 \
   "$PWD/build/nvshmem4rust/generated/cuda_oxide_smoke/target/release/nvshmem_cuda_oxide_smoke"

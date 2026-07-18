@@ -284,6 +284,7 @@ function(generateRustBindings)
                 "NVSHMEM_DEVICE_LTOIR=${NVSHMEM_RUST_TEST_DEVICE_LTOIR}"
                 "NVSHMEM_HOST_LIB_DIR=${NVSHMEM_HOST_LIB_DIR}"
                 "NVSHMEM_RUST_INIT=uid"
+                "NVSHMEM_RUST_WRITE_ARTIFACTS=1"
                 "LD_LIBRARY_PATH=${NVSHMEM_HOST_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
                 "${NVSHMEM_CARGO_OXIDE_EXECUTABLE}" run
                 --emit-nvvm-ir --arch=${NVSHMEM_RUST_TEST_ARCH}

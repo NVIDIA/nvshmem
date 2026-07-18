@@ -158,10 +158,9 @@ fn init_method_from_env() -> Result<InitMethod, Box<dyn Error>> {
         .as_str()
     {
         "bootstrap" | "env" => Ok(InitMethod::BootstrapEnv),
-        "mpi" => Ok(InitMethod::MpiCommWorld),
         "uid" => Ok(InitMethod::single_pe_uid()?),
         other => Err(format!(
-            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap, mpi, or uid"
+            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap or uid"
         )
         .into()),
     }
@@ -345,14 +344,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         shared_mem_bytes: 0,
     };
 
-    run_query_test(&ctx, &module, cfg, pe, npes)?;
-    run_ptr_test(&ctx, &module, cfg)?;
-    run_p_g_test(&ctx, &module, cfg, pe)?;
-    run_put_get_test(&ctx, &module, cfg)?;
-    run_signal_wait_test(&ctx, &module, cfg)?;
-    run_atomic_fetch_add_test(&ctx, &module, cfg)?;
-    run_ring_put_test(&ctx, &module, cfg, pe, npes)?;
-    run_ring_get_test(&ctx, &module, cfg, pe, npes)?;
+    run_query_test(&runtime, &ctx, &module, cfg, pe, npes)?;
+    run_ptr_test(&runtime, &ctx, &module, cfg)?;
+    run_p_g_test(&runtime, &ctx, &module, cfg, pe)?;
+    run_put_get_test(&runtime, &ctx, &module, cfg)?;
+    run_signal_wait_test(&runtime, &ctx, &module, cfg)?;
+    run_atomic_fetch_add_test(&runtime, &ctx, &module, cfg)?;
+    run_ring_put_test(&runtime, &ctx, &module, cfg, pe, npes)?;
+    run_ring_get_test(&runtime, &ctx, &module, cfg, pe, npes)?;
 
     nvshmem::barrier_all();
     ctx.synchronize()?;
@@ -391,7 +390,10 @@ fn build_cubin(arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
         .into());
     }
 
-    let rust_ltoir = compile_rust_ltoir(&ll_path, arch)?;
+    let write_artifacts = env::var_os("NVSHMEM_RUST_COMPILE_ONLY").is_some()
+        || env::var_os("NVSHMEM_RUST_WRITE_ARTIFACTS").is_some();
+    let ltoir_path = write_artifacts.then(|| ll_path.with_extension("ltoir"));
+    let rust_ltoir = compile_rust_ltoir(&ll_path, arch, ltoir_path.as_deref())?;
     let nvshmem_ltoir = env::var("NVSHMEM_DEVICE_LTOIR")
         .map(PathBuf::from)
         .map_err(|_| {
@@ -420,11 +422,17 @@ fn build_cubin(arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     )?;
     let cubin = linker.finish()?;
 
-    std::fs::write(&cubin_path, &cubin)?;
+    if write_artifacts {
+        std::fs::write(&cubin_path, &cubin)?;
+    }
     Ok(cubin)
 }
 
-fn compile_rust_ltoir(ll_path: &Path, arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+fn compile_rust_ltoir(
+    ll_path: &Path,
+    arch: &str,
+    output_path: Option<&Path>,
+) -> Result<Vec<u8>, Box<dyn Error>> {
     let ll_bytes = std::fs::read(ll_path)?;
     let libdevice_path = find_libdevice()?;
     let libdevice = std::fs::read(&libdevice_path)?;
@@ -441,7 +449,9 @@ fn compile_rust_ltoir(ll_path: &Path, arch: &str) -> Result<Vec<u8>, Box<dyn Err
     };
     let arch_opt = format!("-arch={compute}");
     let ltoir = program.compile(&[arch_opt.as_str(), "-gen-lto"])?;
-    std::fs::write(ll_path.with_extension("ltoir"), &ltoir)?;
+    if let Some(output_path) = output_path {
+        std::fs::write(output_path, &ltoir)?;
+    }
     Ok(ltoir)
 }
 
@@ -481,13 +491,14 @@ fn find_libdevice() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 fn run_query_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
     pe: i32,
     npes: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let out = SymmetricBuffer::<i32>::new(2)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 2)?;
     copy_to_symmetric(ctx, &out, &[0, 0])?;
     launch_one_arg(module, cfg, "nvshmem_query_smoke", out.ptr)?;
     ctx.synchronize()?;
@@ -499,12 +510,13 @@ fn run_query_test(
 }
 
 fn run_ptr_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
 ) -> Result<(), Box<dyn Error>> {
-    let buf = SymmetricBuffer::<i32>::new(1)?;
-    let out = SymmetricBuffer::<i32>::new(1)?;
+    let buf = SymmetricBuffer::<i32>::new(runtime, 1)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &out, &[0])?;
     launch_two_args(module, cfg, "nvshmem_ptr_smoke", buf.ptr, out.ptr)?;
     ctx.synchronize()?;
@@ -519,13 +531,14 @@ fn run_ptr_test(
 }
 
 fn run_p_g_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
     pe: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let buf = SymmetricBuffer::<i32>::new(1)?;
-    let out = SymmetricBuffer::<i32>::new(1)?;
+    let buf = SymmetricBuffer::<i32>::new(runtime, 1)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &buf, &[0])?;
     copy_to_symmetric(ctx, &out, &[0])?;
     launch_two_args(module, cfg, "nvshmem_p_g_smoke", buf.ptr, out.ptr)?;
@@ -541,15 +554,16 @@ fn run_p_g_test(
 }
 
 fn run_put_get_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
 ) -> Result<(), Box<dyn Error>> {
     const LEN: usize = 4;
-    let dst = SymmetricBuffer::<i32>::new(LEN)?;
-    let src = SymmetricBuffer::<i32>::new(LEN)?;
-    let tmp = SymmetricBuffer::<i32>::new(LEN)?;
-    let out = SymmetricBuffer::<i32>::new(1)?;
+    let dst = SymmetricBuffer::<i32>::new(runtime, LEN)?;
+    let src = SymmetricBuffer::<i32>::new(runtime, LEN)?;
+    let tmp = SymmetricBuffer::<i32>::new(runtime, LEN)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &src, &[3, 5, 7, 11])?;
     copy_to_symmetric(ctx, &dst, &[0; LEN])?;
     copy_to_symmetric(ctx, &tmp, &[0; LEN])?;
@@ -581,12 +595,13 @@ fn run_put_get_test(
 }
 
 fn run_signal_wait_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
 ) -> Result<(), Box<dyn Error>> {
-    let signal = SymmetricBuffer::<u64>::new(1)?;
-    let out = SymmetricBuffer::<i32>::new(1)?;
+    let signal = SymmetricBuffer::<u64>::new(runtime, 1)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &signal, &[0])?;
     copy_to_symmetric(ctx, &out, &[0])?;
     launch_two_args(
@@ -608,12 +623,13 @@ fn run_signal_wait_test(
 }
 
 fn run_atomic_fetch_add_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
 ) -> Result<(), Box<dyn Error>> {
-    let buf = SymmetricBuffer::<i32>::new(1)?;
-    let out = SymmetricBuffer::<i32>::new(2)?;
+    let buf = SymmetricBuffer::<i32>::new(runtime, 1)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 2)?;
     copy_to_symmetric(ctx, &buf, &[7])?;
     copy_to_symmetric(ctx, &out, &[0, 0])?;
     launch_two_args(
@@ -635,13 +651,14 @@ fn run_atomic_fetch_add_test(
 }
 
 fn run_ring_put_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
     pe: i32,
     npes: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let dst = SymmetricBuffer::<i32>::new(1)?;
+    let dst = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &dst, &[-1])?;
     nvshmem::barrier_all();
     launch_one_arg(module, cfg, "nvshmem_ring_put_smoke", dst.ptr)?;
@@ -659,14 +676,15 @@ fn run_ring_put_test(
 }
 
 fn run_ring_get_test(
+    runtime: &Runtime,
     ctx: &CudaContext,
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
     pe: i32,
     npes: i32,
 ) -> Result<(), Box<dyn Error>> {
-    let src = SymmetricBuffer::<i32>::new(1)?;
-    let out = SymmetricBuffer::<i32>::new(1)?;
+    let src = SymmetricBuffer::<i32>::new(runtime, 1)?;
+    let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &src, &[100 + pe])?;
     copy_to_symmetric(ctx, &out, &[0])?;
     nvshmem::barrier_all();

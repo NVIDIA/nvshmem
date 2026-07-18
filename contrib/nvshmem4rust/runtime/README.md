@@ -4,9 +4,10 @@ This `nvshmem` crate packages reusable host-side NVSHMEM runtime glue. It
 includes the generated `libnvshmem_host` Rust FFI bindings under `sys` and
 provides small wrappers for the pieces every program otherwise has to rewrite:
 
-- `NvshmemRuntime` initializes NVSHMEM through the public hostlib API with an
-  explicit `InitMethod`.
-- `SymmetricBuffer<T>` allocates and frees raw symmetric NVSHMEM memory.
+- `NvshmemRuntime` initializes the process-global NVSHMEM host state through
+  the public hostlib API with an explicit `InitMethod`.
+- `SymmetricBuffer<T>::new(&runtime, ...)` allocates and frees raw symmetric
+  NVSHMEM memory while retaining the runtime until the allocation is freed.
 - `sys` exposes the generated raw host FFI with exact `nvshmem_*` and
   `nvshmemx_*` names. `bindings` remains as a compatibility alias for `sys`.
 - The crate root re-exports generated prefix-stripped wrappers such as
@@ -39,6 +40,16 @@ assert_eq!(status, 0);
 The raw pointer wrappers are still available as
 `nvshmem::api::raw_cumodule_init(...)` and
 `nvshmem::api::raw_cumodule_finalize(...)`, with exact C names under `sys`.
+
+`NvshmemRuntime::init` returns another handle to an already initialized
+process-global runtime. NVSHMEM finalizes after the last runtime handle and
+all symmetric buffers tied to it have been dropped.
+
+MPI initialization requires a caller-provided pointer to an initialized
+`MPI_Comm`. Construct `InitMethod::MpiComm` with
+`unsafe { MpiComm::from_raw(...) }`; the caller is responsible for using the
+same MPI implementation as NVSHMEM and keeping the communicator valid while
+the runtime is live.
 
 Cargo builds need to find the host library. Set `NVSHMEM_HOST_LIB_DIR` to the
 directory containing `libnvshmem_host.so`. The generated `Cargo.toml` points

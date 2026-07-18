@@ -31,11 +31,15 @@ launcher:
 ```bash
 export LD_LIBRARY_PATH="$PWD/install/lib:${LD_LIBRARY_PATH:-}"
 export NVSHMEM_HOST_LIB_PATH="$PWD/install/lib/libnvshmem_host.so"
-export NVSHMEM_RUST_INIT=mpi
+export NVSHMEM_RUST_INIT=bootstrap
 export NVSHMEM_RUST_REUSE_CUBIN=1
 mpirun --bind-to none -np 2 \
   "$PWD/build/nvshmem4rust/generated/cuda_oxide_perf/target/release/nvshmem_cuda_oxide_perf"
 ```
+
+`NVSHMEM_RUST_REUSE_CUBIN=1` reads the cubin produced by the compile-only
+build target. Without it, each direct-run process compiles and links its cubin
+in memory, so ranks do not write shared `.ltoir` or `.cubin` artifacts.
 
 Runtime options:
 

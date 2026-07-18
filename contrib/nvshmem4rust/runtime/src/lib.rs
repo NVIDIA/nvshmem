@@ -13,6 +13,7 @@ use std::ffi::{OsStr, c_void};
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ptr;
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -75,10 +76,9 @@ pub unsafe fn cumodule_finalize(module: &CudaModule) -> i32 {
     unsafe { sys::nvshmemx_cumodule_finalize(raw_module) }
 }
 
-#[derive(Clone, Copy)]
 pub enum InitMethod {
     BootstrapEnv,
-    MpiCommWorld,
+    MpiComm(MpiComm),
     UniqueId {
         uid: sys::nvshmemx_uniqueid_t,
         rank: i32,
@@ -102,8 +102,64 @@ impl InitMethod {
     }
 }
 
+pub struct MpiComm {
+    raw: *mut c_void,
+}
+
+impl MpiComm {
+    /// Creates an MPI initialization method from a pointer to an `MPI_Comm` object.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must point to a valid initialized `MPI_Comm` while the NVSHMEM
+    /// runtime is live and must use the same MPI implementation as NVSHMEM.
+    pub unsafe fn from_raw(raw: *mut c_void) -> Self {
+        Self { raw }
+    }
+}
+
+struct RuntimeInner {
+    _uid: Option<Box<sys::nvshmemx_uniqueid_t>>,
+}
+
+enum RuntimeState {
+    Uninitialized,
+    Active(Weak<RuntimeInner>),
+    Finalizing,
+}
+
+struct RuntimeRegistry {
+    state: Mutex<RuntimeState>,
+    ready: Condvar,
+}
+
+fn runtime_registry() -> &'static RuntimeRegistry {
+    static REGISTRY: OnceLock<RuntimeRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| RuntimeRegistry {
+        state: Mutex::new(RuntimeState::Uninitialized),
+        ready: Condvar::new(),
+    })
+}
+
+impl Drop for RuntimeInner {
+    fn drop(&mut self) {
+        let registry = runtime_registry();
+        let mut state = registry
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *state = RuntimeState::Finalizing;
+        unsafe {
+            sys::nvshmemx_hostlib_finalize();
+        }
+        *state = RuntimeState::Uninitialized;
+        registry.ready.notify_all();
+    }
+}
+
+#[derive(Clone)]
 pub struct NvshmemRuntime {
-    _uid: Option<sys::nvshmemx_uniqueid_t>,
+    inner: Arc<RuntimeInner>,
 }
 
 pub type Runtime = NvshmemRuntime;
@@ -116,24 +172,57 @@ impl NvshmemRuntime {
     /// create CUDA contexts; CUDA host utilities should stay in CUDA-facing
     /// crates rather than this NVSHMEM API wrapper.
     pub fn init(init_method: InitMethod, cuda_device_id: i32) -> Result<Self> {
+        let registry = runtime_registry();
+        let mut state = registry
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+
+        loop {
+            match &*state {
+                RuntimeState::Uninitialized => break,
+                RuntimeState::Active(inner) => {
+                    if let Some(inner) = inner.upgrade() {
+                        return Ok(Self { inner });
+                    }
+                }
+                RuntimeState::Finalizing => {}
+            }
+            state = registry
+                .ready
+                .wait(state)
+                .unwrap_or_else(|error| error.into_inner());
+        }
+
         load_nvshmem_host_global()?;
 
-        match init_method {
+        let inner = match init_method {
             InitMethod::BootstrapEnv => Self::init_from_bootstrap_env(),
-            InitMethod::MpiCommWorld => Self::init_with_mpi_comm_world(cuda_device_id),
+            InitMethod::MpiComm(mpi_comm) => Self::init_with_mpi_comm(mpi_comm, cuda_device_id),
             InitMethod::UniqueId { uid, rank, nranks } => {
                 Self::init_with_unique_id(uid, rank, nranks, cuda_device_id)
             }
-        }
+        }?;
+        *state = RuntimeState::Active(Arc::downgrade(&inner));
+        Ok(Self { inner })
     }
 
-    fn init_from_bootstrap_env() -> Result<Self> {
+    fn init_from_bootstrap_env() -> Result<Arc<RuntimeInner>> {
         Self::hostlib_init(0, ptr::null_mut(), None)
     }
 
-    fn init_with_mpi_comm_world(cuda_device_id: i32) -> Result<Self> {
+    fn init_with_mpi_comm(
+        mpi_comm: MpiComm,
+        cuda_device_id: i32,
+    ) -> Result<Arc<RuntimeInner>> {
         let mut attr = sys::nvshmemx_init_attr_t::default();
         attr.args.cuda_device_id = cuda_device_id;
+        let status = unsafe { sys::nvshmemx_set_attr_mpi_comm_args(mpi_comm.raw, &mut attr) };
+        if status != 0 {
+            return Err(
+                format!("nvshmemx_set_attr_mpi_comm_args failed with status {status}").into(),
+            );
+        }
         Self::hostlib_init(sys::NVSHMEMX_INIT_WITH_MPI_COMM, &mut attr, None)
     }
 
@@ -142,10 +231,13 @@ impl NvshmemRuntime {
         rank: i32,
         nranks: i32,
         cuda_device_id: i32,
-    ) -> Result<Self> {
+    ) -> Result<Arc<RuntimeInner>> {
+        let uid = Box::new(uid);
         let mut attr = sys::nvshmemx_init_attr_t::default();
         attr.args.cuda_device_id = cuda_device_id;
-        let status = unsafe { sys::nvshmemx_set_attr_uniqueid_args(rank, nranks, &uid, &mut attr) };
+        let status = unsafe {
+            sys::nvshmemx_set_attr_uniqueid_args(rank, nranks, uid.as_ref(), &mut attr)
+        };
         if status != 0 {
             return Err(
                 format!("nvshmemx_set_attr_uniqueid_args failed with status {status}").into(),
@@ -158,22 +250,14 @@ impl NvshmemRuntime {
     fn hostlib_init(
         flags: u32,
         attr: *mut sys::nvshmemx_init_attr_t,
-        uid: Option<sys::nvshmemx_uniqueid_t>,
-    ) -> Result<Self> {
+        uid: Option<Box<sys::nvshmemx_uniqueid_t>>,
+    ) -> Result<Arc<RuntimeInner>> {
         let status = unsafe { sys::nvshmemx_hostlib_init_attr(flags, attr) };
         if status != 0 {
             return Err(format!("nvshmemx_hostlib_init_attr failed with status {status}").into());
         }
 
-        Ok(Self { _uid: uid })
-    }
-}
-
-impl Drop for NvshmemRuntime {
-    fn drop(&mut self) {
-        unsafe {
-            sys::nvshmemx_hostlib_finalize();
-        }
+        Ok(Arc::new(RuntimeInner { _uid: uid }))
     }
 }
 
@@ -209,11 +293,12 @@ pub fn load_nvshmem_host_global() -> Result<()> {
 pub struct SymmetricBuffer<T> {
     pub ptr: *mut T,
     len: usize,
+    _runtime: Arc<RuntimeInner>,
     _marker: PhantomData<T>,
 }
 
 impl<T> SymmetricBuffer<T> {
-    pub fn new(len: usize) -> Result<Self> {
+    pub fn new(runtime: &NvshmemRuntime, len: usize) -> Result<Self> {
         let bytes = len
             .checked_mul(size_of::<T>())
             .ok_or("symmetric allocation size overflow")?;
@@ -224,6 +309,7 @@ impl<T> SymmetricBuffer<T> {
         Ok(Self {
             ptr,
             len,
+            _runtime: Arc::clone(&runtime.inner),
             _marker: PhantomData,
         })
     }

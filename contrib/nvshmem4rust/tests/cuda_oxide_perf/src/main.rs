@@ -132,10 +132,9 @@ fn init_method_from_env() -> Result<InitMethod, Box<dyn Error>> {
         .as_str()
     {
         "bootstrap" | "env" => Ok(InitMethod::BootstrapEnv),
-        "mpi" => Ok(InitMethod::MpiCommWorld),
         "uid" => Ok(InitMethod::single_pe_uid()?),
         other => Err(format!(
-            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap, mpi, or uid"
+            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap or uid"
         )
         .into()),
     }
@@ -175,9 +174,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
     }
 
-    run_host_put_perf(&stream, opts, pe, npes)?;
-    run_host_reduction_perf(&stream, opts, pe)?;
-    run_device_rma_perf(&ctx, &stream, &module, opts, pe, npes)?;
+    run_host_put_perf(&runtime, &stream, opts, pe, npes)?;
+    run_host_reduction_perf(&runtime, &stream, opts, pe)?;
+    run_device_rma_perf(&runtime, &ctx, &stream, &module, opts, pe, npes)?;
 
     nvshmem::barrier_all();
     stream.synchronize()?;
@@ -191,6 +190,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn run_host_put_perf(
+    runtime: &Runtime,
     stream: &CudaStream,
     opts: PerfOptions,
     pe: i32,
@@ -203,8 +203,8 @@ fn run_host_put_perf(
         return Ok(());
     }
 
-    let src = SymmetricBuffer::<u8>::new(opts.max_size)?;
-    let dst = SymmetricBuffer::<u8>::new(opts.max_size)?;
+    let src = SymmetricBuffer::<u8>::new(runtime, opts.max_size)?;
+    let dst = SymmetricBuffer::<u8>::new(runtime, opts.max_size)?;
     memset_async(stream, &src, 1, opts.max_size)?;
     memset_async(stream, &dst, 0, opts.max_size)?;
     stream.synchronize()?;
@@ -233,13 +233,14 @@ fn run_host_put_perf(
 }
 
 fn run_host_reduction_perf(
+    runtime: &Runtime,
     stream: &CudaStream,
     opts: PerfOptions,
     pe: i32,
 ) -> Result<(), Box<dyn Error>> {
     let max_elems = (opts.max_size / size_of::<i32>()).max(1);
-    let src = SymmetricBuffer::<i32>::new(max_elems)?;
-    let dst = SymmetricBuffer::<i32>::new(max_elems)?;
+    let src = SymmetricBuffer::<i32>::new(runtime, max_elems)?;
+    let dst = SymmetricBuffer::<i32>::new(runtime, max_elems)?;
     memset_async(stream, &src, 1, max_elems * size_of::<i32>())?;
     memset_async(stream, &dst, 0, max_elems * size_of::<i32>())?;
     stream.synchronize()?;
@@ -269,6 +270,7 @@ fn run_host_reduction_perf(
 }
 
 fn run_device_rma_perf(
+    runtime: &Runtime,
     ctx: &CudaContext,
     stream: &CudaStream,
     module: &Arc<CudaModule>,
@@ -284,7 +286,7 @@ fn run_device_rma_perf(
     }
 
     let max_elems = (opts.max_size / size_of::<i32>()).max(1);
-    let buf = SymmetricBuffer::<i32>::new(max_elems)?;
+    let buf = SymmetricBuffer::<i32>::new(runtime, max_elems)?;
     memset_async(stream, &buf, 7, max_elems * size_of::<i32>())?;
     stream.synchronize()?;
 
@@ -299,6 +301,7 @@ fn run_device_rma_perf(
         block_dim: (1, 1, 1),
         shared_mem_bytes: 0,
     };
+    let function = module.load_function("nvshmem_device_rma_perf")?;
 
     for (name, op) in ops {
         if pe == 0 {
@@ -309,28 +312,42 @@ fn run_device_rma_perf(
             let nelems = (size / size_of::<i32>()).max(1);
             nvshmem::barrier_all();
             if pe == 0 {
-                launch_device_perf(
-                    module,
-                    stream,
-                    cfg,
-                    buf.ptr,
-                    nelems as u64,
-                    1,
-                    opts.warmup,
-                    op,
-                )?;
+                let mut buf_arg = buf.ptr;
+                let mut nelems_arg = nelems as u64;
+                let mut peer_arg = 1;
+                let mut iters_arg = opts.warmup;
+                let mut op_arg = op;
+                let mut args = [
+                    &mut buf_arg as *mut *mut i32 as *mut c_void,
+                    &mut nelems_arg as *mut u64 as *mut c_void,
+                    &mut peer_arg as *mut i32 as *mut c_void,
+                    &mut iters_arg as *mut u64 as *mut c_void,
+                    &mut op_arg as *mut i32 as *mut c_void,
+                ];
+                unsafe {
+                    cuda_core::launch_kernel(
+                        function.cu_function(),
+                        cfg.grid_dim,
+                        cfg.block_dim,
+                        cfg.shared_mem_bytes,
+                        stream.cu_stream(),
+                        &mut args,
+                    )?;
+                }
                 stream.synchronize()?;
+                iters_arg = opts.iters;
                 let ms = time_stream(stream, || {
-                    launch_device_perf(
-                        module,
-                        stream,
-                        cfg,
-                        buf.ptr,
-                        nelems as u64,
-                        1,
-                        opts.iters,
-                        op,
-                    )
+                    unsafe {
+                        cuda_core::launch_kernel(
+                            function.cu_function(),
+                            cfg.grid_dim,
+                            cfg.block_dim,
+                            cfg.shared_mem_bytes,
+                            stream.cu_stream(),
+                            &mut args,
+                        )?;
+                    }
+                    Ok(())
                 })?;
                 let bytes = nelems * size_of::<i32>();
                 let latency_us = (ms as f64 * 1000.0) / opts.iters as f64;
@@ -391,42 +408,6 @@ fn issue_host_reduce(
         check_nvshmem_status(status, "int_sum_reduce_on_stream")?;
     }
     stream.synchronize()?;
-    Ok(())
-}
-
-fn launch_device_perf(
-    module: &Arc<CudaModule>,
-    stream: &CudaStream,
-    cfg: LaunchConfig,
-    buf: *mut i32,
-    nelems: u64,
-    peer: i32,
-    iters: u64,
-    op: i32,
-) -> Result<(), Box<dyn Error>> {
-    let function = module.load_function("nvshmem_device_rma_perf")?;
-    let mut buf_arg = buf;
-    let mut nelems_arg = nelems;
-    let mut peer_arg = peer;
-    let mut iters_arg = iters;
-    let mut op_arg = op;
-    let mut args = vec![
-        &mut buf_arg as *mut *mut i32 as *mut c_void,
-        &mut nelems_arg as *mut u64 as *mut c_void,
-        &mut peer_arg as *mut i32 as *mut c_void,
-        &mut iters_arg as *mut u64 as *mut c_void,
-        &mut op_arg as *mut i32 as *mut c_void,
-    ];
-    unsafe {
-        cuda_core::launch_kernel(
-            function.cu_function(),
-            cfg.grid_dim,
-            cfg.block_dim,
-            cfg.shared_mem_bytes,
-            stream.cu_stream(),
-            &mut args,
-        )?;
-    }
     Ok(())
 }
 
@@ -603,7 +584,10 @@ fn build_cubin(arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
         .into());
     }
 
-    let rust_ltoir = compile_rust_ltoir(&ll_path, arch)?;
+    let write_artifacts = env::var_os("NVSHMEM_RUST_COMPILE_ONLY").is_some()
+        || env::var_os("NVSHMEM_RUST_WRITE_ARTIFACTS").is_some();
+    let ltoir_path = write_artifacts.then(|| ll_path.with_extension("ltoir"));
+    let rust_ltoir = compile_rust_ltoir(&ll_path, arch, ltoir_path.as_deref())?;
     let nvshmem_ltoir = env::var("NVSHMEM_DEVICE_LTOIR")
         .map(PathBuf::from)
         .map_err(|_| {
@@ -632,11 +616,17 @@ fn build_cubin(arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     )?;
     let cubin = linker.finish()?;
 
-    std::fs::write(&cubin_path, &cubin)?;
+    if write_artifacts {
+        std::fs::write(&cubin_path, &cubin)?;
+    }
     Ok(cubin)
 }
 
-fn compile_rust_ltoir(ll_path: &Path, arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+fn compile_rust_ltoir(
+    ll_path: &Path,
+    arch: &str,
+    output_path: Option<&Path>,
+) -> Result<Vec<u8>, Box<dyn Error>> {
     let ll_bytes = std::fs::read(ll_path)?;
     let libdevice_path = find_libdevice()?;
     let libdevice = std::fs::read(&libdevice_path)?;
@@ -653,7 +643,9 @@ fn compile_rust_ltoir(ll_path: &Path, arch: &str) -> Result<Vec<u8>, Box<dyn Err
     };
     let arch_opt = format!("-arch={compute}");
     let ltoir = program.compile(&[arch_opt.as_str(), "-gen-lto"])?;
-    std::fs::write(ll_path.with_extension("ltoir"), &ltoir)?;
+    if let Some(output_path) = output_path {
+        std::fs::write(output_path, &ltoir)?;
+    }
     Ok(ltoir)
 }
 

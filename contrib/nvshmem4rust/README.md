@@ -102,8 +102,8 @@ cmake --build build/nvshmem4rust --target test_bindings_rust_cuda_oxide_perf
 ```
 
 The smoke target runs directly in single-PE unique-ID mode. Use a supported
-NVSHMEM launcher and set `NVSHMEM_RUST_INIT` when running the generated test
-executable with multiple PEs.
+NVSHMEM launcher and set `NVSHMEM_RUST_INIT=bootstrap` when running the
+generated test executable with multiple PEs.
 
 If the normal NVSHMEM build layout is unavailable, set
 `NVSHMEM_HOST_LIB_DIR` and `NVSHMEM_RUST_TEST_DEVICE_LTOIR` explicitly. The
