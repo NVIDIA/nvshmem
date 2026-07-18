@@ -291,7 +291,7 @@ pub fn load_nvshmem_host_global() -> Result<()> {
 }
 
 pub struct SymmetricBuffer<T> {
-    pub ptr: *mut T,
+    ptr: *mut T,
     len: usize,
     _runtime: Arc<RuntimeInner>,
     _marker: PhantomData<T>,
@@ -312,6 +312,10 @@ impl<T> SymmetricBuffer<T> {
             _runtime: Arc::clone(&runtime.inner),
             _marker: PhantomData,
         })
+    }
+
+    pub fn as_mut_ptr(&self) -> *mut T {
+        self.ptr
     }
 
     pub fn len(&self) -> usize {

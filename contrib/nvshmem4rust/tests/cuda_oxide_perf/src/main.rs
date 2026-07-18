@@ -134,7 +134,7 @@ fn init_method_from_env() -> Result<InitMethod, Box<dyn Error>> {
         "bootstrap" | "env" => Ok(InitMethod::BootstrapEnv),
         "uid" => Ok(InitMethod::single_pe_uid()?),
         other => Err(format!(
-            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap or uid"
+            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap, env, or uid"
         )
         .into()),
     }
@@ -312,7 +312,7 @@ fn run_device_rma_perf(
             let nelems = (size / size_of::<i32>()).max(1);
             nvshmem::barrier_all();
             if pe == 0 {
-                let mut buf_arg = buf.ptr;
+                let mut buf_arg = buf.as_mut_ptr();
                 let mut nelems_arg = nelems as u64;
                 let mut peer_arg = 1;
                 let mut iters_arg = opts.warmup;
@@ -373,8 +373,8 @@ fn issue_host_put(
     for _ in 0..iters {
         unsafe {
             nvshmem::putmem_nbi_on_stream(
-                dst.ptr.cast::<c_void>(),
-                src.ptr.cast::<c_void>(),
+                dst.as_mut_ptr().cast::<c_void>(),
+                src.as_mut_ptr().cast::<c_void>(),
                 size as u64,
                 peer,
                 cstrm,
@@ -399,8 +399,8 @@ fn issue_host_reduce(
         let status = unsafe {
             nvshmem::int_sum_reduce_on_stream(
                 nvshmem::sys::NVSHMEM_TEAM_WORLD,
-                dst.ptr,
-                src.ptr.cast_const(),
+                dst.as_mut_ptr(),
+                src.as_mut_ptr().cast_const(),
                 nelems as u64,
                 cstrm,
             )
@@ -430,7 +430,7 @@ fn memset_async<T>(
 ) -> Result<(), DriverError> {
     unsafe {
         memory::memset_d8_async(
-            buffer.ptr as sys::CUdeviceptr,
+            buffer.as_mut_ptr() as sys::CUdeviceptr,
             value,
             bytes,
             stream.cu_stream(),

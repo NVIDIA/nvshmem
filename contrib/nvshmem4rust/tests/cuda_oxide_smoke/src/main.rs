@@ -160,7 +160,7 @@ fn init_method_from_env() -> Result<InitMethod, Box<dyn Error>> {
         "bootstrap" | "env" => Ok(InitMethod::BootstrapEnv),
         "uid" => Ok(InitMethod::single_pe_uid()?),
         other => Err(format!(
-            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap or uid"
+            "unsupported NVSHMEM_RUST_INIT={other}; expected bootstrap, env, or uid"
         )
         .into()),
     }
@@ -189,7 +189,7 @@ where
     ctx.bind_to_thread()?;
     unsafe {
         memory::memcpy_htod_sync(
-            buffer.ptr as sys::CUdeviceptr,
+            buffer.as_mut_ptr() as sys::CUdeviceptr,
             values.as_ptr(),
             values.len() * size_of::<T>(),
         )
@@ -208,7 +208,7 @@ where
     unsafe {
         memory::memcpy_dtoh_async(
             values.as_mut_ptr(),
-            buffer.ptr as sys::CUdeviceptr,
+            buffer.as_mut_ptr() as sys::CUdeviceptr,
             buffer.len() * size_of::<T>(),
             ptr::null_mut(),
         )?;
@@ -500,7 +500,7 @@ fn run_query_test(
 ) -> Result<(), Box<dyn Error>> {
     let out = SymmetricBuffer::<i32>::new(runtime, 2)?;
     copy_to_symmetric(ctx, &out, &[0, 0])?;
-    launch_one_arg(module, cfg, "nvshmem_query_smoke", out.ptr)?;
+    launch_one_arg(module, cfg, "nvshmem_query_smoke", out.as_mut_ptr())?;
     ctx.synchronize()?;
     let values = copy_from_symmetric(ctx, &out)?;
     assert_eq!(values, vec![pe, npes], "device PE query mismatch");
@@ -518,7 +518,13 @@ fn run_ptr_test(
     let buf = SymmetricBuffer::<i32>::new(runtime, 1)?;
     let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &out, &[0])?;
-    launch_two_args(module, cfg, "nvshmem_ptr_smoke", buf.ptr, out.ptr)?;
+    launch_two_args(
+        module,
+        cfg,
+        "nvshmem_ptr_smoke",
+        buf.as_mut_ptr(),
+        out.as_mut_ptr(),
+    )?;
     ctx.synchronize()?;
     assert_eq!(
         copy_from_symmetric(ctx, &out)?[0],
@@ -541,7 +547,13 @@ fn run_p_g_test(
     let out = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &buf, &[0])?;
     copy_to_symmetric(ctx, &out, &[0])?;
-    launch_two_args(module, cfg, "nvshmem_p_g_smoke", buf.ptr, out.ptr)?;
+    launch_two_args(
+        module,
+        cfg,
+        "nvshmem_p_g_smoke",
+        buf.as_mut_ptr(),
+        out.as_mut_ptr(),
+    )?;
     ctx.synchronize()?;
     assert_eq!(
         copy_from_symmetric(ctx, &out)?[0],
@@ -569,10 +581,10 @@ fn run_put_get_test(
     copy_to_symmetric(ctx, &tmp, &[0; LEN])?;
     copy_to_symmetric(ctx, &out, &[0])?;
 
-    let mut dst_arg = dst.ptr;
-    let mut src_arg = src.ptr;
-    let mut tmp_arg = tmp.ptr;
-    let mut out_arg = out.ptr;
+    let mut dst_arg = dst.as_mut_ptr();
+    let mut src_arg = src.as_mut_ptr();
+    let mut tmp_arg = tmp.as_mut_ptr();
+    let mut out_arg = out.as_mut_ptr();
     let mut len_arg = LEN as u64;
     let mut args = vec![
         &mut dst_arg as *mut *mut i32 as *mut c_void,
@@ -608,8 +620,8 @@ fn run_signal_wait_test(
         module,
         cfg,
         "nvshmem_signal_wait_smoke",
-        signal.ptr,
-        out.ptr,
+        signal.as_mut_ptr(),
+        out.as_mut_ptr(),
     )?;
     ctx.synchronize()?;
     assert_eq!(
@@ -636,8 +648,8 @@ fn run_atomic_fetch_add_test(
         module,
         cfg,
         "nvshmem_atomic_fetch_add_smoke",
-        buf.ptr,
-        out.ptr,
+        buf.as_mut_ptr(),
+        out.as_mut_ptr(),
     )?;
     ctx.synchronize()?;
     assert_eq!(
@@ -661,7 +673,7 @@ fn run_ring_put_test(
     let dst = SymmetricBuffer::<i32>::new(runtime, 1)?;
     copy_to_symmetric(ctx, &dst, &[-1])?;
     nvshmem::barrier_all();
-    launch_one_arg(module, cfg, "nvshmem_ring_put_smoke", dst.ptr)?;
+    launch_one_arg(module, cfg, "nvshmem_ring_put_smoke", dst.as_mut_ptr())?;
     ctx.synchronize()?;
     nvshmem::barrier_all();
     let expected = (pe + npes - 1) % npes;
@@ -688,7 +700,13 @@ fn run_ring_get_test(
     copy_to_symmetric(ctx, &src, &[100 + pe])?;
     copy_to_symmetric(ctx, &out, &[0])?;
     nvshmem::barrier_all();
-    launch_two_args(module, cfg, "nvshmem_ring_get_smoke", src.ptr, out.ptr)?;
+    launch_two_args(
+        module,
+        cfg,
+        "nvshmem_ring_get_smoke",
+        src.as_mut_ptr(),
+        out.as_mut_ptr(),
+    )?;
     ctx.synchronize()?;
     let expected = 100 + ((pe + 1) % npes);
     assert_eq!(
