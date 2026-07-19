@@ -1470,21 +1470,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
 template <typename TYPE, rdxn_ops_t RDX_OP>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_pullred_wrapper_thread(
     int myIdx, const nvshmemi_fabric_handle<le_fabric_handle_kind::Multicast> &src_handle,
-    int byte_offset_src, void *smem_buf, int copy_bytes, handle_barrier_t *tma_bar_handle) {
+    int byte_offset_src, void *smem_buf, int copy_bytes, handle_barrier_t *handle_bar) {
     /*
-     * tma_bar_handle should have been initialized with arrival count of 1 before calling this
+     * handle_bar should have been initialized with arrival count of 1 before calling this
      * function
      */
 
     // all threads in warp do a try_pullred to get data from peer global memory
     fabric_try_pullred_async<TYPE, RDX_OP>(src_handle.id(), src_handle.offset() + byte_offset_src,
-                                           smem_buf, copy_bytes, tma_bar_handle);
+                                           smem_buf, copy_bytes, handle_bar);
 
     if (myIdx % warpSize == 0) {
         // wait till the try_pullred is completed
         fabric_submit();
-        uint64_t curr_state = tma_bar_handle->arrive_relaxed(copy_bytes);
-        tma_bar_handle->try_wait_token(curr_state);
+        uint64_t curr_state = handle_bar->arrive_relaxed(copy_bytes);
+        handle_bar->try_wait_token(curr_state);
     }
     __syncwarp();
 }
@@ -1561,12 +1561,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
                            smem_data_buf_size + (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
 
-        handle_barrier_t *tma_bar_handle =
+        handle_barrier_t *handle_bar =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
         // Only lane 0 prepares the shared per-warp barrier.
         if (myIdx % warpSize == 0) {
-            tma_bar_handle->prepare_handle(warp_idx_in_block);
+            handle_bar->prepare_handle(warp_idx_in_block);
         }
 
         __syncwarp();
@@ -1574,7 +1574,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         // perform pullred and get data into curr_idx buffer
         nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
                                                       smem_data_buf[curr_buf_idx], copy_bytes,
-                                                      tma_bar_handle);
+                                                      handle_bar);
         byte_offset_src += copy_bytes;
 
         while (byte_offset_src < bytes_per_warp) {
@@ -1598,8 +1598,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                         nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
                             mc_le_id, (char *)dst_ptr + start_offset_warp);
                     nvshmemi_try_put_wrapper_thread<le_fabric_handle_kind::Multicast>(
-                        myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst,
-                        tma_bar_handle, copy_bytes, &pending_bytes_copy);
+                        myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, handle_bar,
+                        copy_bytes, &pending_bytes_copy);
                     byte_offset_dst += copy_bytes;
                     pending_bytes_copy += copy_bytes;
 
@@ -1607,8 +1607,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                      * so we wait till the entire mbarrier is done and we can reinit the
                      * arrival count
                      */
-                    uint64_t curr_state = tma_bar_handle->arrive_relaxed(pending_bytes_copy);
-                    tma_bar_handle->try_wait_token(curr_state);
+                    uint64_t curr_state = handle_bar->arrive_relaxed(pending_bytes_copy);
+                    handle_bar->try_wait_token(curr_state);
                     pending_bytes_copy = 0;
                 }
             }
@@ -1621,7 +1621,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
             // copy next chunk of data from peer global to shared memory
             nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
                                                           smem_data_buf[curr_buf_idx ^ 1],
-                                                          copy_bytes, tma_bar_handle);
+                                                          copy_bytes, handle_bar);
             byte_offset_src += copy_bytes;
             curr_buf_idx ^= 1;
         }
@@ -1644,7 +1644,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                     nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Multicast>(
                         mc_le_id, (char *)dst_ptr + start_offset_warp);
                 nvshmemi_try_put_wrapper_thread<le_fabric_handle_kind::Multicast>(
-                    myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, tma_bar_handle,
+                    myIdx, smem_data_buf[curr_buf_idx], dst_handle, byte_offset_dst, handle_bar,
                     copy_bytes, &pending_bytes_copy);
                 byte_offset_dst += copy_bytes;
                 pending_bytes_copy += copy_bytes;
@@ -1654,8 +1654,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
                  * arrival count
                  */
                 if (myIdx % warpSize == 0) {
-                    uint64_t curr_state = tma_bar_handle->arrive_relaxed(pending_bytes_copy);
-                    tma_bar_handle->try_wait_token(curr_state);
+                    uint64_t curr_state = handle_bar->arrive_relaxed(pending_bytes_copy);
+                    handle_bar->try_wait_token(curr_state);
                     pending_bytes_copy = 0;
                 }
             }
@@ -1669,7 +1669,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         assert(byte_offset_src == bytes_per_warp);
 
         // invalidate the barrier
-        tma_bar_handle->inval(myIdx);
+        handle_bar->inval(myIdx);
     }
 }
 #endif
@@ -2049,18 +2049,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
         smem_data_buf[1] = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(tma_smem_base)) +
                            smem_data_buf_size + (warp_idx_in_block * NVSHMEMI_SMEM_BUF_SIZE);
 
-        handle_barrier_t *tma_bar_handle =
+        handle_barrier_t *handle_bar =
             nvshmemi_handle_barrier_slot(tma_smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
         // Only lane 0 prepares the shared per-warp barrier.
         if (myIdx % warpSize == 0) {
-            tma_bar_handle->prepare_handle(warp_idx_in_block);
+            handle_bar->prepare_handle(warp_idx_in_block);
         }
         __syncwarp();
 
         nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
                                                       smem_data_buf[curr_buf_idx], copy_bytes,
-                                                      tma_bar_handle);
+                                                      handle_bar);
         byte_offset_src += copy_bytes;
 
         while (byte_offset_src < bytes_per_warp) {
@@ -2084,7 +2084,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
             // copy next chunk of data from peer global to shared memory
             nvshmemi_pullred_wrapper_thread<TYPE, RDX_OP>(myIdx, src_handle, byte_offset_src,
                                                           smem_data_buf[curr_buf_idx ^ 1],
-                                                          copy_bytes, tma_bar_handle);
+                                                          copy_bytes, handle_bar);
             byte_offset_src += copy_bytes;
 
             curr_buf_idx ^= 1;
@@ -2109,7 +2109,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
         assert(byte_offset_src == bytes_per_warp);
 
         // invalidate the barrier
-        tma_bar_handle->inval(myIdx);
+        handle_bar->inval(myIdx);
     }
 }
 #endif
