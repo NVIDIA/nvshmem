@@ -1958,25 +1958,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tma_s2g_copy_thread(int m
 template <le_fabric_handle_kind cft_handle_kind>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_put_wrapper_thread(
     int myIdx, const void *smem_buf, nvshmemi_fabric_handle<cft_handle_kind> dst_handle,
-    size_t byte_offset_dst, handle_barrier_t *tma_bar_handle, uint32_t copy_bytes,
+    size_t byte_offset_dst, handle_barrier_t *handle_bar, uint32_t copy_bytes,
     uint32_t *pending_copy_bytes = nullptr) {
     if ((myIdx % warpSize) == 0) {
         if (pending_copy_bytes) {
-            if (*pending_copy_bytes + copy_bytes >= TMA_COPY_MAX_BATCH_SIZE) {
-                uint64_t curr_state = tma_bar_handle->arrive_relaxed(*pending_copy_bytes);
-                tma_bar_handle->try_wait_token(curr_state);
+            if (*pending_copy_bytes + copy_bytes >= TMA_PUT_MAX_BATCH_SIZE) {
+                uint64_t curr_state = handle_bar->arrive_relaxed(*pending_copy_bytes);
+                handle_bar->try_wait_token(curr_state);
                 *pending_copy_bytes = 0;
             }
         } else {
-            tma_bar_handle->ensure_handle_tx_capacity(copy_bytes);
+            handle_bar->ensure_handle_tx_capacity(copy_bytes);
         }
-
         fabric_try_put_async<cft_handle_kind>(dst_handle.id(),
                                               dst_handle.offset() + byte_offset_dst, smem_buf,
-                                              copy_bytes, tma_bar_handle);
+                                              copy_bytes, handle_bar);
         fabric_submit();
         if (!pending_copy_bytes) {
-            tma_bar_handle->record_pending_handle(copy_bytes);
+            handle_bar->record_pending_handle(copy_bytes);
         }
     }
 }
@@ -1985,44 +1984,44 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_put_wrapper_thread(
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_issue_get_wrapper_thread(
     int myIdx, void *dst_smem_buf,
     nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast> src_handle, size_t byte_offset_src,
-    handle_barrier_t *tma_bar_handle, uint32_t copy_bytes) {
+    handle_barrier_t *handle_bar, uint32_t copy_bytes) {
     if ((myIdx % warpSize) == 0) {
-        tma_bar_handle->ensure_handle_get_tx_capacity(copy_bytes);
+        handle_bar->ensure_handle_get_tx_capacity(copy_bytes);
         fabric_try_get_async(src_handle.id(), src_handle.offset() + byte_offset_src, dst_smem_buf,
-                             copy_bytes, tma_bar_handle);
+                             copy_bytes, handle_bar);
         fabric_submit();
-        tma_bar_handle->record_pending_get_handle(copy_bytes);
+        handle_bar->record_pending_get_handle(copy_bytes);
     }
 }
 
 // Function waits for a previously issued try_get to complete.
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_wait_get_wrapper_thread(
-    int myIdx, handle_barrier_t *tma_bar_handle, uint32_t copy_bytes) {
+    int myIdx, handle_barrier_t *handle_bar, uint32_t copy_bytes) {
     if ((myIdx % warpSize) == 0) {
         // wait till the get is completed
-        uint64_t curr_state = tma_bar_handle->arrive_relaxed(copy_bytes);
-        tma_bar_handle->try_wait_token(curr_state);
+        uint64_t curr_state = handle_bar->arrive_relaxed(copy_bytes);
+        handle_bar->try_wait_token(curr_state);
     }
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_issue_get_arrive_wrapper_thread(
     int myIdx, void *dst_smem_buf,
     nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast> src_handle, size_t byte_offset_src,
-    handle_barrier_t *tma_bar_handle, uint32_t copy_bytes) {
-    nvshmemi_issue_get_wrapper_thread(myIdx, dst_smem_buf, src_handle, byte_offset_src,
-                                      tma_bar_handle, copy_bytes);
+    handle_barrier_t *handle_bar, uint32_t copy_bytes) {
+    nvshmemi_issue_get_wrapper_thread(myIdx, dst_smem_buf, src_handle, byte_offset_src, handle_bar,
+                                      copy_bytes);
 
     if ((myIdx % warpSize) == 0) {
-        tma_bar_handle->arrive_relaxed(copy_bytes);
+        handle_bar->arrive_relaxed(copy_bytes);
     }
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_wait_get_phase_wrapper_thread(
-    int myIdx, handle_barrier_t *tma_bar_handle, int phase) {
+    int myIdx, handle_barrier_t *handle_bar, int phase) {
     if ((myIdx % warpSize) == 0) {
         mbarrier_try_wait_rdy_cnd wait_result;
         do {
-            wait_result = tma_bar_handle->try_wait_parity_rdy_cnd(phase);
+            wait_result = handle_bar->try_wait_parity_rdy_cnd(phase);
         } while (!wait_result.rdy);
         assert(!wait_result.cnd_inv);
     }
@@ -2032,10 +2031,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_wait_get_phase_wrapper_th
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_get_wrapper_thread(
     int myIdx, void *dst_smem_buf,
     nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast> src_handle, size_t byte_offset_src,
-    handle_barrier_t *tma_bar_handle, uint32_t copy_bytes) {
-    nvshmemi_issue_get_wrapper_thread(myIdx, dst_smem_buf, src_handle, byte_offset_src,
-                                      tma_bar_handle, copy_bytes);
-    nvshmemi_wait_get_wrapper_thread(myIdx, tma_bar_handle, copy_bytes);
+    handle_barrier_t *handle_bar, uint32_t copy_bytes) {
+    nvshmemi_issue_get_wrapper_thread(myIdx, dst_smem_buf, src_handle, byte_offset_src, handle_bar,
+                                      copy_bytes);
+    nvshmemi_wait_get_wrapper_thread(myIdx, handle_bar, copy_bytes);
 }
 
 /* Multi-warp threadgroups use separate producer/consumer warp leaders, so
@@ -2070,7 +2069,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
     uintptr_t smem_base = nvshmemi_tma_smem_base();
 
-    uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
+    cuda::std::array<uint8_t *, TMA_COPY_NUM_STAGES> smem_data_buf;
     smem_data_buf[0] =
         reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base) +
                                     thrdgrp_idx_in_block * smem_chunk_size * TMA_COPY_NUM_STAGES);
@@ -2079,18 +2078,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
     /* ready_bar[i]: load leader signals that smem_data_buf[i] contains the next
      * staged chunk.  done_bar[i]: store leader signals that fabric has finished
      * reading smem_data_buf[i], so the load leader may reuse that buffer. */
-    uint64_t *ready_bar[TMA_COPY_NUM_STAGES];
-    uint64_t *done_bar[TMA_COPY_NUM_STAGES];
+    cuda::std::array<uint64_t *, TMA_COPY_NUM_STAGES> ready_bar;
+    cuda::std::array<uint64_t *, TMA_COPY_NUM_STAGES> done_bar;
     uint32_t tma_slot_base = thrdgrp_idx_in_block * 2 * TMA_COPY_NUM_STAGES;
     ready_bar[0] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base);
     ready_bar[1] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base + 1);
     done_bar[0] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base + 2);
     done_bar[1] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base + 3);
 
-    handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
+    cuda::std::array<handle_barrier_t *, TMA_COPY_NUM_STAGES> handle_bar;
     uint32_t handle_slot_base = thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES;
-    tma_bar_handle[0] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base);
-    tma_bar_handle[1] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base + 1);
+    handle_bar[0] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base);
+    handle_bar[1] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base + 1);
 
     if (is_load) {
         /* Initialize both the TMA producer/consumer barriers and the fabric
@@ -2101,8 +2100,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
             nvshmemi_tma_mbarrier_init(done_bar[0]);
             nvshmemi_tma_mbarrier_init(done_bar[1]);
         }
-        tma_bar_handle[0]->prepare_handle(warp_idx_in_block);
-        tma_bar_handle[1]->prepare_handle(warp_idx_in_block);
+        handle_bar[0]->prepare_handle(warp_idx_in_block);
+        handle_bar[1]->prepare_handle(warp_idx_in_block);
         if (!is_src_shared) {
             nvshmemi_tma_fence_proxy_async_shared_cta();
         }
@@ -2161,10 +2160,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
                 fabric_src = &(smem_data_buf[curr_buf_idx][0]);
             }
             nvshmemi_try_put_wrapper_thread<cft_handle_kind>(
-                tid, fabric_src, dst_handle, byte_offset_dst, tma_bar_handle[curr_buf_idx],
-                copy_bytes);
+                tid, fabric_src, dst_handle, byte_offset_dst, handle_bar[curr_buf_idx], copy_bytes);
 
-            tma_bar_handle[curr_buf_idx]->fabric_wait_sync_reads();
+            handle_bar[curr_buf_idx]->fabric_wait_sync_reads();
             if (!is_src_shared) {
                 nvshmemi_tma_mbarrier_arrive_expect_tx(done_bar[curr_buf_idx], 1);
                 nvshmemi_tma_mbarrier_complete_tx(done_bar[curr_buf_idx], 1);
@@ -2180,7 +2178,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
          * not owned by the point-to-point quiet path. */
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
             for (uint32_t buf_idx = 0; buf_idx < TMA_COPY_NUM_STAGES; buf_idx++) {
-                tma_bar_handle[buf_idx]->drain_pending_handle(true);
+                handle_bar[buf_idx]->drain_pending_handle(true);
             }
         }
         if (!is_src_shared) {
@@ -2255,18 +2253,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
         // Compute the per-threadgroup data buffer offset within the full data region.
         uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(
             nvshmemi_tma_data_buffer(smem_base) + thrdgrp_idx_in_block * single_buffer_size);
-        handle_barrier_t *tma_bar_handle;
+        handle_barrier_t *handle_bar;
 
         /* We use mbarriers for 2 purposes:
-         * 1. Sync fabric handle operations using tma_bar_handle
+         * 1. Sync fabric handle operations using handle_bar
          * 2. Sync TMA transfers using tma_bar_ptr
          */
-        tma_bar_handle =
+        handle_bar =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
         __mbarrier_t *tma_bar_ptr = reinterpret_cast<__mbarrier_t *>(
             nvshmemi_tma_barrier_slot(smem_base, warp_idx_in_block));
 
-        tma_bar_handle->prepare_handle(warp_idx_in_block);
+        handle_bar->prepare_handle(warp_idx_in_block);
         if (!is_src_shared) {
             __mbarrier_init(tma_bar_ptr, 1);
             nvshmemi_tma_g2s_copy_thread(myIdx, smem_data_buf, tma_bar_ptr,
@@ -2284,12 +2282,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
             const void *fabric_src =
                 is_src_shared ? nvshmemi_ptr_add(src, byte_offset_dst) : smem_data_buf;
             nvshmemi_try_put_wrapper_thread<cft_handle_kind>(
-                myIdx, fabric_src, dst_handle, byte_offset_dst, tma_bar_handle, copy_bytes);
+                myIdx, fabric_src, dst_handle, byte_offset_dst, handle_bar, copy_bytes);
 
             byte_offset_dst += copy_bytes;
 
             // Ensure fabric has consumed the source SMEM before it can be reused.
-            tma_bar_handle->fabric_wait_sync_reads();
+            handle_bar->fabric_wait_sync_reads();
 
             // load next chunk of source data into shared memory
             if (!is_src_shared && byte_offset_src < len) {
@@ -2307,7 +2305,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
         assert(is_src_shared || byte_offset_src == len);
 
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
-            tma_bar_handle->drain_pending_handle(true);
+            handle_bar->drain_pending_handle(true);
         }
         if (!is_src_shared) {
             __mbarrier_inval(tma_bar_ptr);
@@ -2397,20 +2395,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     nvshmemi_threadgroup_sync<SCOPE>();
 
     if (!myIdx) {
-        handle_barrier_t *tma_bar_handle;
+        handle_barrier_t *handle_bar;
 
-        tma_bar_handle =
+        handle_bar =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
-        tma_bar_handle->prepare_handle(warp_idx_in_block);
+        handle_bar->prepare_handle(warp_idx_in_block);
 
         auto dst_handle = nvshmemi_fabric_handle_for_le_id<cft_handle_kind>(dest_le_id, dst);
         const void *fabric_src = is_src_shared ? src : smem_data_buf;
         nvshmemi_try_put_wrapper_thread<cft_handle_kind>(myIdx, fabric_src, dst_handle, 0,
-                                                         tma_bar_handle, (uint32_t)len);
+                                                         handle_bar, (uint32_t)len);
 
-        tma_bar_handle->fabric_wait_sync_reads();
+        handle_bar->fabric_wait_sync_reads();
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
-            tma_bar_handle->drain_pending_handle(true);
+            handle_bar->drain_pending_handle(true);
         }
     }
     if (is_src_shared) {
@@ -2448,7 +2446,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
      * (for example, scalar warp 2 slot 2 collides with copy warp 1 stage 0).
      * Scalar PUTs reuse their owning warp's stage-0 barrier.
      */
-    handle_barrier_t *tma_bar_handle =
+    handle_barrier_t *handle_bar =
         nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
     /*
@@ -2497,8 +2495,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
      * and retain pending completions from this owner in the same batch.
      */
     if (lane_idx == leader_lane) {
-        tma_bar_handle->prepare_handle(warp_idx_in_block);
-        tma_bar_handle->ensure_handle_tx_capacity(completion_bytes);
+        handle_bar->prepare_handle(warp_idx_in_block);
+        handle_bar->ensure_handle_tx_capacity(completion_bytes);
     }
     __syncwarp(mask);
 
@@ -2517,20 +2515,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
     uint16_t first_bytemask =
         byte_range_to_bytemask_low_first(dst_byte_offset, first_payload_bytes);
     fabric_try_put_async<le_fabric_handle_kind::Unicast>(dst_handle.id(), aligned_dst_offset,
-                                                         smem_slot, first_bytemask, tma_bar_handle);
+                                                         smem_slot, first_bytemask, handle_bar);
     if (second_payload_bytes) {
         uint16_t second_bytemask = size_to_bytemask_low_first(second_payload_bytes);
         fabric_try_put_async<le_fabric_handle_kind::Unicast>(
             dst_handle.id(), aligned_dst_offset + CFT_HANDLE_TX_SIZE, smem_slot, second_bytemask,
-            tma_bar_handle);
+            handle_bar);
     }
     fabric_submit();
 
     __syncwarp(mask);
 
     if (lane_idx == leader_lane) {
-        tma_bar_handle->record_pending_handle(completion_bytes);
-        tma_bar_handle->drain_pending_handle(true);
+        handle_bar->record_pending_handle(completion_bytes);
+        handle_bar->drain_pending_handle(true);
     }
     __syncwarp(mask);
 }
@@ -2568,14 +2566,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(
             nvshmemi_tma_data_buffer(smem_base) + thrdgrp_idx_in_block * threadgroup_buffer_size);
         smem_data_buf[1] = smem_data_buf[0] + smem_chunk_size;
-        handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
-        tma_bar_handle[0] =
+        cuda::std::array<handle_barrier_t *, TMA_COPY_NUM_STAGES> handle_bar;
+        handle_bar[0] =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
-        tma_bar_handle[1] =
+        handle_bar[1] =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
 
-        tma_bar_handle[0]->prepare_handle(warp_idx_in_block);
-        tma_bar_handle[1]->prepare_handle(warp_idx_in_block);
+        handle_bar[0]->prepare_handle(warp_idx_in_block);
+        handle_bar[1]->prepare_handle(warp_idx_in_block);
         if (is_dst_shared) {
             nvshmemi_tma_fence_proxy_async_shared_cta();
         }
@@ -2596,7 +2594,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
                                              : &(smem_data_buf[curr_buf_idx][0]);
 
             nvshmemi_issue_get_wrapper_thread(myIdx, fabric_dst, src_handle, byte_offset_src,
-                                              tma_bar_handle[curr_buf_idx], copy_bytes);
+                                              handle_bar[curr_buf_idx], copy_bytes);
         }
 
         for (size_t i = 0; i < num_chunks; i++) {
@@ -2607,7 +2605,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
                                                                      : (len - byte_offset_dst));
 
             if ((myIdx % warpSize) == 0) {
-                tma_bar_handle[curr_buf_idx]->drain_pending_handle(false);
+                handle_bar[curr_buf_idx]->drain_pending_handle(false);
             }
             if (!is_dst_shared) {
                 unsigned int data_addr = nvshmemi_tma_cvta_to_shared(smem_data_buf[curr_buf_idx]);
@@ -2630,8 +2628,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
                     nvshmemi_tma_bulk_wait_group_read_0();
                 }
                 nvshmemi_issue_get_wrapper_thread(myIdx, next_fabric_dst, src_handle,
-                                                  next_byte_offset_src,
-                                                  tma_bar_handle[next_buf_idx], next_copy_bytes);
+                                                  next_byte_offset_src, handle_bar[next_buf_idx],
+                                                  next_copy_bytes);
             }
         }
 
@@ -2641,8 +2639,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
 
         // invalidate the barrier
         if ((myIdx % warpSize) == 0) {
-            tma_bar_handle[0]->drain_pending_handle(true);
-            tma_bar_handle[1]->drain_pending_handle(true);
+            handle_bar[0]->drain_pending_handle(true);
+            handle_bar[1]->drain_pending_handle(true);
         }
         if (is_dst_shared) {
             fence_proxy_fabric2generic_alias();
@@ -2684,35 +2682,35 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
     uintptr_t smem_base = nvshmemi_tma_smem_base();
 
-    uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
+    cuda::std::array<uint8_t *, TMA_COPY_NUM_STAGES> smem_data_buf;
     smem_data_buf[0] =
         reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base) +
                                     thrdgrp_idx_in_block * smem_chunk_size * TMA_COPY_NUM_STAGES);
     smem_data_buf[1] = smem_data_buf[0] + smem_chunk_size;
 
-    /* tma_bar_handle[i]: fabric GET has completed into smem_data_buf[i].
+    /* handle_bar[i]: fabric GET has completed into smem_data_buf[i].
      * ready_bar[i]: producer has submitted the fabric GET for this phase.
      * done_bar[i]: TMA has consumed smem_data_buf[i], so fabric may reuse it. */
-    uint64_t *ready_bar[TMA_COPY_NUM_STAGES];
-    uint64_t *done_bar[TMA_COPY_NUM_STAGES];
+    cuda::std::array<uint64_t *, TMA_COPY_NUM_STAGES> ready_bar;
+    cuda::std::array<uint64_t *, TMA_COPY_NUM_STAGES> done_bar;
     uint32_t tma_slot_base = thrdgrp_idx_in_block * 2 * TMA_COPY_NUM_STAGES;
     ready_bar[0] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base);
     ready_bar[1] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base + 1);
     done_bar[0] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base + 2);
     done_bar[1] = nvshmemi_tma_barrier_slot(smem_base, tma_slot_base + 3);
 
-    handle_barrier_t *tma_bar_handle[TMA_COPY_NUM_STAGES];
+    cuda::std::array<handle_barrier_t *, TMA_COPY_NUM_STAGES> handle_bar;
     uint32_t handle_slot_base = thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES;
-    tma_bar_handle[0] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base);
-    tma_bar_handle[1] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base + 1);
+    handle_bar[0] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base);
+    handle_bar[1] = nvshmemi_handle_barrier_slot(smem_base, handle_slot_base + 1);
 
     if (is_load) {
         nvshmemi_tma_mbarrier_init(ready_bar[0]);
         nvshmemi_tma_mbarrier_init(ready_bar[1]);
         nvshmemi_tma_mbarrier_init(done_bar[0]);
         nvshmemi_tma_mbarrier_init(done_bar[1]);
-        tma_bar_handle[0]->prepare_handle(warp_idx_in_block);
-        tma_bar_handle[1]->prepare_handle(warp_idx_in_block);
+        handle_bar[0]->prepare_handle(warp_idx_in_block);
+        handle_bar[1]->prepare_handle(warp_idx_in_block);
         nvshmemi_tma_fence_proxy_async_shared_cta();
     }
     nvshmemi_threadgroup_sync<SCOPE>();
@@ -2736,7 +2734,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
                                              : &(smem_data_buf[curr_buf_idx][0]);
 
             nvshmemi_issue_get_wrapper_thread(tid, fabric_dst, src_handle, byte_offset_src,
-                                              tma_bar_handle[curr_buf_idx], copy_bytes);
+                                              handle_bar[curr_buf_idx], copy_bytes);
             nvshmemi_tma_mbarrier_arrive_expect_tx(ready_bar[curr_buf_idx], 1);
             nvshmemi_tma_mbarrier_complete_tx(ready_bar[curr_buf_idx], 1);
         }
@@ -2757,7 +2755,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
 
             nvshmemi_tma_mbarrier_try_wait(done_bar[next_buf_idx], next_phase ^ 1);
             nvshmemi_issue_get_wrapper_thread(tid, next_fabric_dst, src_handle,
-                                              next_byte_offset_src, tma_bar_handle[next_buf_idx],
+                                              next_byte_offset_src, handle_bar[next_buf_idx],
                                               next_copy_bytes);
             nvshmemi_tma_mbarrier_arrive_expect_tx(ready_bar[next_buf_idx], 1);
             nvshmemi_tma_mbarrier_complete_tx(ready_bar[next_buf_idx], 1);
@@ -2776,7 +2774,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
 
             if ((tid % warpSize) == 0) {
                 nvshmemi_tma_mbarrier_try_wait(ready_bar[curr_buf_idx], curr_phase);
-                tma_bar_handle[curr_buf_idx]->drain_pending_handle(false);
+                handle_bar[curr_buf_idx]->drain_pending_handle(false);
             }
             if (!is_dst_shared) {
                 unsigned int data_addr = nvshmemi_tma_cvta_to_shared(smem_data_buf[curr_buf_idx]);
@@ -2797,8 +2795,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
             nvshmemi_tma_bulk_wait_group_0();
         }
         if ((tid % warpSize) == 0) {
-            tma_bar_handle[0]->drain_pending_handle(true);
-            tma_bar_handle[1]->drain_pending_handle(true);
+            handle_bar[0]->drain_pending_handle(true);
+            handle_bar[1]->drain_pending_handle(true);
             __mbarrier_inval(reinterpret_cast<__mbarrier_t *>(ready_bar[0]));
             __mbarrier_inval(reinterpret_cast<__mbarrier_t *>(ready_bar[1]));
             __mbarrier_inval(reinterpret_cast<__mbarrier_t *>(done_bar[0]));
