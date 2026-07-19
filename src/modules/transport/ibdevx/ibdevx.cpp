@@ -1097,6 +1097,7 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
     for (struct ibdevx_ep *ep : cst_eps) {
         ep_destroy(ep);
     }
+    cst_eps.clear();
 
     if (dummy_local_mem) {
         for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
