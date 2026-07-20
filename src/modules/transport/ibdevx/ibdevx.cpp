@@ -201,11 +201,8 @@ struct ibdevx_ep {
     void *ibdevx_state;
 };
 
-static constexpr int NVSHMEMT_IBDEVX_MAX_NICS_PER_PE =
-    (NVSHMEM_MEM_HANDLE_SIZE - sizeof(int)) / sizeof(nvshmemt_ib_common_mem_handle);
-
 struct ibdevx_mem_handle {
-    std::array<struct nvshmemt_ib_common_mem_handle, NVSHMEMT_IBDEVX_MAX_NICS_PER_PE>
+    std::array<struct nvshmemt_ib_common_mem_handle, NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE>
         dev_mem_handles;
     int num_devs;
 };
@@ -214,7 +211,7 @@ static_assert(sizeof(struct ibdevx_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
 
 struct ibdevx_dummy_local_mem {
     void *ptr;
-    std::array<struct ibv_mr *, NVSHMEMT_IBDEVX_MAX_NICS_PER_PE> mrs;
+    std::array<struct ibv_mr *, NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE> mrs;
     int num_devs;
 };
 static struct ibdevx_dummy_local_mem *dummy_local_mem;
@@ -242,21 +239,6 @@ static struct nvshmemt_ib_common_mem_handle *ibdevx_get_dev_mem_handle(
     assert(selected_dev_slot >= 0);
     assert(selected_dev_slot < handle->num_devs);
     return &handle->dev_mem_handles[selected_dev_slot];
-}
-
-static int ibdevx_release_mem_handles(struct nvshmemt_ib_common_mem_handle *handles, int count,
-                                      int log_level) {
-    int status = 0;
-
-    for (int i = 0; i < count; ++i) {
-        if (!handles[i].mr) continue;
-        int current = nvshmemt_ib_common_release_mem_handle(
-            &ftable, reinterpret_cast<nvshmem_mem_handle_t *>(&handles[i]), log_level);
-        if (!current) handles[i].mr = nullptr;
-        if (!status && current) status = current;
-    }
-
-    return status;
 }
 
 int nvshmemt_ibdevx_show_info(struct nvshmem_transport * /*transport*/, int /*style*/) {
@@ -1071,8 +1053,8 @@ out:
             free(dummy_local_mem);
             dummy_local_mem = nullptr;
         }
-        (void)ibdevx_release_mem_handles(handle->dev_mem_handles.data(), registered_count,
-                                         ibdevx_state->log_level);
+        (void)nvshmemt_ib_common_release_mem_handles(&ftable, handle->dev_mem_handles.data(),
+                                                     registered_count, ibdevx_state->log_level);
     }
     return status;
 }
@@ -1080,8 +1062,8 @@ out:
 int nvshmemt_ibdevx_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_transport_t t) {
     nvshmemt_ib_common_state_t ibdevx_state = (nvshmemt_ib_common_state_t)t->state;
     struct ibdevx_mem_handle *handle = reinterpret_cast<struct ibdevx_mem_handle *>(mem_handle);
-    return ibdevx_release_mem_handles(handle->dev_mem_handles.data(), handle->num_devs,
-                                      ibdevx_state->log_level);
+    return nvshmemt_ib_common_release_mem_handles(&ftable, handle->dev_mem_handles.data(),
+                                                  handle->num_devs, ibdevx_state->log_level);
 }
 
 int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
@@ -1891,11 +1873,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     nvshmemt_ib_common_sanitize_retry_cnt(ibdevx_state->options);
 
     ibdevx_state->log_level = nvshmemt_common_get_log_level(ibdevx_state->options);
-    ibdevx_state->max_selected_dev_ids = NVSHMEMT_IBDEVX_MAX_NICS_PER_PE;
+    ibdevx_state->max_selected_dev_ids = NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE;
     if (ibdevx_state->options->MAX_NICS_PER_PE < 0) {
         NVSHMEMI_WARN_PRINT("NVSHMEM_MAX_NICS_PER_PE must be non-negative; using %d.\n",
                             ibdevx_state->max_selected_dev_ids);
-    } else if (ibdevx_state->options->MAX_NICS_PER_PE > NVSHMEMT_IBDEVX_MAX_NICS_PER_PE) {
+    } else if (ibdevx_state->options->MAX_NICS_PER_PE > NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE) {
         NVSHMEMI_WARN_PRINT(
             "NVSHMEM_MAX_NICS_PER_PE=%d exceeds the IBDevX implementation limit; using %d.\n",
             ibdevx_state->options->MAX_NICS_PER_PE, ibdevx_state->max_selected_dev_ids);

@@ -540,6 +540,22 @@ out:
     return status;
 }
 
+int nvshmemt_ib_common_release_mem_handles(struct nvshmemt_ibv_function_table *ftable,
+                                           struct nvshmemt_ib_common_mem_handle *handles, int count,
+                                           int log_level) {
+    int status = 0;
+
+    for (int i = 0; i < count; ++i) {
+        if (!handles[i].mr) continue;
+        int current = nvshmemt_ib_common_release_mem_handle(
+            ftable, reinterpret_cast<nvshmem_mem_handle_t *>(&handles[i]), log_level);
+        if (!current) handles[i].mr = nullptr;
+        if (!status && current) status = current;
+    }
+
+    return status;
+}
+
 #ifdef NVSHMEM_USE_MLX5DV
 bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
                                     const struct nvshmemt_ibv_function_table *ftable,

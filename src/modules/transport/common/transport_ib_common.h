@@ -160,6 +160,9 @@ struct nvshmemt_ib_common_mem_handle {
     bool local_only;
 };
 
+static constexpr int NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE =
+    (NVSHMEM_MEM_HANDLE_SIZE - sizeof(int)) / sizeof(struct nvshmemt_ib_common_mem_handle);
+
 struct nvshmemt_ibv_function_table {
     int (*fork_init)(void);
     struct ibv_ah *(*create_ah)(struct ibv_pd *pd, struct ibv_ah_attr *ah_attr);
@@ -233,6 +236,10 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
 
 int nvshmemt_ib_common_release_mem_handle(struct nvshmemt_ibv_function_table *ftable,
                                           nvshmem_mem_handle_t *mem_handle, int log_level);
+
+int nvshmemt_ib_common_release_mem_handles(struct nvshmemt_ibv_function_table *ftable,
+                                           struct nvshmemt_ib_common_mem_handle *handles, int count,
+                                           int log_level);
 
 const char *nvshmemt_ib_common_link_layer_name(uint8_t link_layer);
 

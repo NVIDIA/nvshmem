@@ -142,11 +142,9 @@ struct ibrc_ep {
     struct ibrc_request *req;
 };
 
-static constexpr int NVSHMEMT_IBRC_MAX_NICS_PER_PE =
-    (NVSHMEM_MEM_HANDLE_SIZE - sizeof(int)) / sizeof(nvshmemt_ib_common_mem_handle);
-
 struct ibrc_mem_handle {
-    std::array<struct nvshmemt_ib_common_mem_handle, NVSHMEMT_IBRC_MAX_NICS_PER_PE> dev_mem_handles;
+    std::array<struct nvshmemt_ib_common_mem_handle, NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE>
+        dev_mem_handles;
     int num_devs;
 };
 static_assert(sizeof(struct ibrc_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
@@ -164,7 +162,7 @@ typedef struct ibrc_mem_handle_info {
 
 struct ibrc_dummy_local_mem {
     void *ptr;
-    std::array<struct ibv_mr *, NVSHMEMT_IBRC_MAX_NICS_PER_PE> mrs;
+    std::array<struct ibv_mr *, NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE> mrs;
     int num_devs;
 };
 
@@ -247,19 +245,6 @@ static int ibrc_destroy_ep(struct ibrc_ep *ep) {
     int status = ftable.destroy_qp(ep->qp);
     free(ep->req);
     free(ep);
-    return status;
-}
-
-static int ibrc_release_mem_handles(struct nvshmemt_ib_common_mem_handle *handles, int count,
-                                    int log_level) {
-    int status = 0;
-    for (int i = 0; i < count; ++i) {
-        if (!handles[i].mr) continue;
-        int current = nvshmemt_ib_common_release_mem_handle(
-            &ftable, (nvshmem_mem_handle_t *)&handles[i], log_level);
-        if (!current) handles[i].mr = nullptr;
-        if (!status && current) status = current;
-    }
     return status;
 }
 
@@ -859,8 +844,8 @@ out:
                 }
             }
         }
-        (void)ibrc_release_mem_handles(handle->dev_mem_handles.data(), registered_count,
-                                       ibrc_state->log_level);
+        (void)nvshmemt_ib_common_release_mem_handles(&ftable, handle->dev_mem_handles.data(),
+                                                     registered_count, ibrc_state->log_level);
     } else if (handle_info) {
         (void)handle_info.release();
     }
@@ -884,8 +869,8 @@ int nvshmemt_ibrc_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_t
             (ibrc_mem_handle_info_t *)nvshmemt_mem_handle_cache_get(t, state->cache, addr);
     }
 
-    status = ibrc_release_mem_handles(handle->dev_mem_handles.data(), handle->num_devs,
-                                      state->log_level);
+    status = nvshmemt_ib_common_release_mem_handles(&ftable, handle->dev_mem_handles.data(),
+                                                    handle->num_devs, state->log_level);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to dereg memory.\n");
     if (handle_info) {
         for (int i = 0; i < handle_info->mem_handle.num_devs; ++i) {
@@ -966,8 +951,9 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
                                       "gdrcopy cleanup failed\n");
             }
 #endif
-            status = ibrc_release_mem_handles(handle_info->mem_handle.dev_mem_handles.data(),
-                                              handle_info->mem_handle.num_devs, state->log_level);
+            status = nvshmemt_ib_common_release_mem_handles(
+                &ftable, handle_info->mem_handle.dev_mem_handles.data(),
+                handle_info->mem_handle.num_devs, state->log_level);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dereg_mr failed \n");
             handle_info_owner.reset(handle_info);
         }
@@ -1798,11 +1784,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     nvshmemt_ib_common_sanitize_retry_cnt(ibrc_state->options);
 
     ibrc_state->log_level = nvshmemt_common_get_log_level(ibrc_state->options);
-    ibrc_state->max_selected_dev_ids = NVSHMEMT_IBRC_MAX_NICS_PER_PE;
+    ibrc_state->max_selected_dev_ids = NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE;
     if (ibrc_state->options->MAX_NICS_PER_PE < 0) {
         NVSHMEMI_WARN_PRINT("NVSHMEM_MAX_NICS_PER_PE must be non-negative; using %d.\n",
                             ibrc_state->max_selected_dev_ids);
-    } else if (ibrc_state->options->MAX_NICS_PER_PE > NVSHMEMT_IBRC_MAX_NICS_PER_PE) {
+    } else if (ibrc_state->options->MAX_NICS_PER_PE > NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE) {
         NVSHMEMI_WARN_PRINT(
             "NVSHMEM_MAX_NICS_PER_PE=%d exceeds the IBRC implementation limit; using %d.\n",
             ibrc_state->options->MAX_NICS_PER_PE, ibrc_state->max_selected_dev_ids);
