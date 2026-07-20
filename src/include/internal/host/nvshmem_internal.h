@@ -117,6 +117,7 @@ int nvshmemi_init_g_buffer();
 int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind);
 int nvshmemi_setup_transport(nvshmemi_state_t *state);
 void nvshmemi_fini_symmetric_heap(nvshmemi_state_t *state);
+int nvshmemi_bootstrap_aggregate_status(int local_status, int npes);
 int nvshmemi_init_device_state(nvshmemi_state_t *state);
 int nvshmemi_setup_connections(nvshmemi_state_t *state);
 int nvshmemi_setup_mops_kernels(nvshmemi_state_t *state);

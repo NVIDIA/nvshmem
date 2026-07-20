@@ -159,9 +159,11 @@ int nvshmemi_heap_registration::map_p2p_chunk(nvshmem_mem_handle_t *handle, void
     for (int i = 0; i < transports_.num_transports(); i++) {
         if (!transports_.active_has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) continue;
         status = export_p2p_memory(&local_handles[i], buf, size, handle);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "export_memory failed for p2p\n");
+        if (status != NVSHMEMX_SUCCESS) break;
     }
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "export_memory failed for p2p on at least one PE\n");
 
     /* Allgather memory handles for all PEs. */
     status = nvshmemi_boot_handle.allgather(
@@ -172,12 +174,15 @@ int nvshmemi_heap_registration::map_p2p_chunk(nvshmem_mem_handle_t *handle, void
 
     /* Exchange send/receive memory handles for P2P-connected PEs. */
     status = exchange_p2p_memory_handle(&local_handles[0], gathered.data());
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "exchange_p2p_memory_handle failed\n");
 
     /* Map handles for all mapping-capable transports. */
     status = map_p2p_range(buf, size, gathered);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "map_p2p_range failed\n");
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "map_p2p_range failed on at least one PE\n");
 
     table_->push_p2p_mem_handles(std::move(gathered));
 

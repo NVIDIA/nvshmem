@@ -63,6 +63,7 @@ std::mutex &get_cs_mutex() {
     static std::mutex instance;
     return instance;
 }
+}  // namespace
 
 int nvshmemi_bootstrap_aggregate_status(int local_status, int npes) {
     int status = NVSHMEMX_SUCCESS;
@@ -81,6 +82,7 @@ int nvshmemi_bootstrap_aggregate_status(int local_status, int npes) {
 
     return NVSHMEMX_SUCCESS;
 }
+namespace {
 
 void nvshmemi_release_uncommitted_vmm_chunk(CUmemGenericAllocationHandle cumem_handle,
                                             char *buf_start, size_t size, bool handle_created,
