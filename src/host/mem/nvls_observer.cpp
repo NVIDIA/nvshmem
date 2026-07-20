@@ -1,17 +1,14 @@
 /*
- * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
+ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
-
-#include "internal/host/nvshmem_internal.h"
-#include "internal/host/nvshmemi_nvls_observer.hpp"
 
 #include <assert.h>
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <algorithm>
 #include <map>
 #include <typeinfo>
 #include <vector>
@@ -21,9 +18,9 @@
 #include "non_abi/nvshmemx_error.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
-#include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_mem_transport.hpp"
 #include "internal/host/nvshmemi_nvls_observer.hpp"
+#include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/sockets.h"
@@ -55,14 +52,27 @@ bool nvshmemi_should_process_nvls_team_pool_entry(size_t team_idx) {
 
 int nvshmemi_nvls_observer::on_chunk_mapped(nvshmem_mem_handle_t *handle, off_t mc_offset,
                                             off_t mmap_offset, size_t size) {
-    return nvls_bind_heap_memory(handle, mc_offset, mmap_offset, size);
+    int status = nvls_bind_heap_memory(handle, mc_offset, mmap_offset, size);
+    if (status == 0 && is_platform_nvls_) {
+        auto *mem_handle = reinterpret_cast<CUmemGenericAllocationHandle *>(handle);
+        mapped_chunks_.push_back({*mem_handle, mc_offset, mmap_offset, size});
+    }
+    return status;
 }
 
 int nvshmemi_nvls_observer::on_chunk_unmapped(off_t mc_offset, size_t size) {
-    if (!state_->is_platform_nvls) return 0;
+    if (!is_platform_nvls_) return 0;
     INFO(NVSHMEM_MEM, "unbinding and releasing nvls memory mc_offset: %ld size: %zu\n", mc_offset,
          size);
-    return nvls_unbind_heap_memory_by_size(mc_offset, size);
+    int status = nvls_unbind_heap_memory_by_size(mc_offset, size);
+    if (status != 0) return status;
+
+    auto removed = std::remove_if(
+        mapped_chunks_.begin(), mapped_chunks_.end(), [mc_offset, size](const mapped_chunk &chunk) {
+            return chunk.mc_offset == mc_offset && chunk.mmap_size == size;
+        });
+    mapped_chunks_.erase(removed, mapped_chunks_.end());
+    return status;
 }
 
 /* ---- Broadcast helpers ---- */
@@ -285,7 +295,7 @@ cleanup:
 int nvshmemi_nvls_observer::nvls_create_heap_memory(uint64_t mem_size) {
     nvshmemi_team_t *team = NULL;
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
-    if (!state_->is_platform_nvls) return status;
+    if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
         if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
@@ -335,7 +345,7 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_hand
                                                   off_t mmap_offset, size_t mmap_size) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
     std::vector<nvshmemi_team_t *> bound_teams;
-    if (!state_->is_platform_nvls) return status;
+    if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
         if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
@@ -402,7 +412,7 @@ out:
 int nvshmemi_nvls_observer::nvls_map_heap_memory(uint64_t size, off_t mmap_offset,
                                                  off_t mc_offset) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
-    if (!state_->is_platform_nvls) return status;
+    if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
         if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
@@ -424,34 +434,27 @@ int nvshmemi_nvls_observer::nvls_create_heap_memory_by_team(nvshmemi_team_t *tea
 
 int nvshmemi_nvls_observer::nvls_bind_heap_memory_by_team(nvshmemi_team_t *team) {
     int status = 0;
-    CUmemGenericAllocationHandle mem_handle;
-    off_t mc_offset, mmap_offset;
-    size_t mmap_size;
 
     /* Iterate over heap's list of tuple <mem_handle, mc_offset, mmap_offset, mmap_size> */
-    for (size_t i = 0; i < heap_->get_cumem_handle_count(); i++) {
-        const auto handle_info = heap_->get_cumem_handle_info(i);
-        if (handle_info.released) continue;
-        mem_handle = handle_info.handle;
-        mc_offset = handle_info.alloc_offset;
-        mmap_offset = handle_info.mmap_offset;
-        mmap_size = handle_info.mmap_size;
+    for (const auto &chunk : mapped_chunks_) {
+        auto mem_handle = chunk.handle;
         /* Bind UC handles to MC handle at heap_offset */
-        status = nvls_bind_heap_memory_by_size(team, (nvshmem_mem_handle_t *)&mem_handle, mc_offset,
-                                               mmap_offset, mmap_size);
+        status = nvls_bind_heap_memory_by_size(team, (nvshmem_mem_handle_t *)&mem_handle,
+                                               chunk.mc_offset, chunk.mmap_offset, chunk.mmap_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                               "Binding multicast groups to UC mem handle %lld, mmap size %zu, mc "
                               "offset %ld, mmap offset %ld failed for pe %d team ID %d\n",
-                              mem_handle, mmap_size, mc_offset, mmap_offset, team->my_pe,
-                              team->team_idx);
+                              mem_handle, chunk.mmap_size, chunk.mc_offset, chunk.mmap_offset,
+                              team->my_pe, team->team_idx);
         if (heap_->is_multicast_endpoint_enabled()) {
-            status = heap_->nvls_bind_multicast_endpoint(team, mem_handle, mc_offset, mmap_offset,
-                                                         mmap_size);
+            status = heap_->nvls_bind_multicast_endpoint(team, mem_handle, chunk.mc_offset,
+                                                         chunk.mmap_offset, chunk.mmap_size);
             NVSHMEMI_NZ_ERROR_JMP(
                 status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                 "Binding multicast endpoint to UC mem handle %lld, mmap size %zu, mc "
                 "offset %ld, mmap offset %ld failed for pe %d team ID %d\n",
-                mem_handle, mmap_size, mc_offset, mmap_offset, team->my_pe, team->team_idx);
+                mem_handle, chunk.mmap_size, chunk.mc_offset, chunk.mmap_offset, team->my_pe,
+                team->team_idx);
         }
     }
 
@@ -479,7 +482,7 @@ void nvshmemi_nvls_observer::nvls_unmap_heap_memory_by_team(nvshmemi_team_t *tea
 
 int nvshmemi_nvls_observer::nvls_unmap_heap_memory(off_t mc_offset, uint64_t size) {
     int status = 0;
-    if (!state_->is_platform_nvls) return status;
+    if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
         if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;

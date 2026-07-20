@@ -1,14 +1,16 @@
 /*
- * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
- *
- * See License.txt for license information
+ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 #ifndef NVSHMEMI_NVLS_OBSERVER_HPP
 #define NVSHMEMI_NVLS_OBSERVER_HPP
 
 #include <cstddef>
-#include "internal/host/nvshmemi_symmetric_heap.hpp"
+#include <cstdint>
+#include <cuda.h>
+#include <vector>
+#include "internal/host/nvshmemi_heap_observer.hpp"
 #include "internal/host/nvshmemi_types.h"
 #include "device_host/nvshmem_types.h"
 
@@ -19,8 +21,8 @@ struct nvshmemi_team_dec;
 class nvshmemi_nvls_observer : public nvshmemi_heap_observer {
    public:
     explicit nvshmemi_nvls_observer(nvshmemi_symmetric_heap_vidmem_dynamic_vmm *heap,
-                                    nvshmemi_state_t *state)
-        : heap_(heap), state_(state) {}
+                                    bool is_platform_nvls)
+        : heap_(heap), is_platform_nvls_(is_platform_nvls) {}
     ~nvshmemi_nvls_observer() = default;
 
     int on_chunk_mapped(nvshmem_mem_handle_t *handle, off_t mc_offset, off_t mmap_offset,
@@ -54,8 +56,16 @@ class nvshmemi_nvls_observer : public nvshmemi_heap_observer {
                               size_t mmap_size);
     int nvls_map_heap_memory(uint64_t mem_size, off_t mmap_offset, off_t mc_offset);
 
+    struct mapped_chunk {
+        CUmemGenericAllocationHandle handle;
+        off_t mc_offset;
+        off_t mmap_offset;
+        size_t mmap_size;
+    };
+
     nvshmemi_symmetric_heap_vidmem_dynamic_vmm *heap_;
-    nvshmemi_state_t *state_;
+    bool is_platform_nvls_;
+    std::vector<mapped_chunk> mapped_chunks_;
 };
 
 #endif /* NVSHMEMI_NVLS_OBSERVER_HPP */

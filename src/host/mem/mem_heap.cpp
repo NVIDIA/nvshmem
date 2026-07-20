@@ -160,7 +160,7 @@ int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_
         auto *vmm = new nvshmemi_symmetric_heap_vidmem_dynamic_vmm(cfg);
         state->heap_obj = vmm;
         state->vmm_heap = vmm;
-        auto *nvls_obs = new nvshmemi_nvls_observer(vmm, state);
+        auto *nvls_obs = new nvshmemi_nvls_observer(vmm, state->is_platform_nvls);
         state->nvls_obs = nvls_obs;
         vmm->register_observer(std::unique_ptr<nvshmemi_heap_observer>(nvls_obs));
     } else if (heap_kind == NVSHMEMI_HEAP_KIND_SYSMEM) {

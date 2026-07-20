@@ -15,6 +15,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include "internal/host/nvshmemi_heap_observer.hpp"
 #include "internal/host/nvshmemi_heap_registration.hpp"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_types.h"
@@ -48,22 +49,6 @@ struct nvshmemi_heap_config {
     int npes;
     int npes_node;
     int device_id;
-};
-
-/** Observer interface for symmetric heap lifecycle events. */
-class nvshmemi_heap_observer {
-   public:
-    virtual ~nvshmemi_heap_observer() = default;
-
-    /** Called after a chunk is mapped and before transport registration. */
-    virtual int on_chunk_mapped(nvshmem_mem_handle_t *handle, off_t mc_offset, off_t mmap_offset,
-                                size_t size) = 0;
-
-    /** Called before a chunk is unmapped. */
-    virtual int on_chunk_unmapped(off_t mc_offset, size_t size) = 0;
-
-    /** Called before heap teardown releases mappings or handles. */
-    virtual int on_heap_teardown() = 0;
 };
 
 #define NVSHMEMI_SYMMETRIC_HEAP_OFFSET(base, off) (void *)((uint8_t *)(base) + off)
