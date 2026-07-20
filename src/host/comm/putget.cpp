@@ -240,7 +240,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
     int status = 0;
 
     /* Mapper Peer */
-    if (nvshmemi_state->heap_obj->get_local_pe_base()[pe]) {
+    if (nvshmemi_state->heap_obj->get_local_pe_bases()[pe]) {
         status = nvshmemi_prepare_and_post_mapped_rma(verb, nelems, elembytes, sig_addr, signal,
                                                       lptr, rptr, lstride, rstride, sig_op, pe);
         goto out;

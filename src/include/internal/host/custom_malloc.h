@@ -37,7 +37,7 @@ class mspace {
     void *allocate_aligned(size_t alignment, size_t bytes);
     void *reallocate(void *ptr, size_t size);
     bool checkInuse(void *ptr, size_t size);
-    void *get_startInusePtr() {
+    void *get_startInusePtr() const {
         if (inuse_chunks.empty()) {
             return NULL;
         }
@@ -45,6 +45,7 @@ class mspace {
     }
     void *allocate_at_preferred_addr(void *ptr, size_t size);
     std::map<void *, size_t> *get_inuse_chunks() { return &inuse_chunks; }
+    const std::map<void *, size_t> *get_inuse_chunks() const { return &inuse_chunks; }
 };
 
 #endif

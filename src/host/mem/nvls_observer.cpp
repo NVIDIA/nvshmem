@@ -23,6 +23,7 @@
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_mem_transport.hpp"
+#include "internal/host/nvshmemi_nvls_observer.hpp"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/sockets.h"
@@ -71,9 +72,10 @@ int nvshmemi_nvls_observer::nvls_broadcast_heap_handle_ipc(char *shareable_handl
     pid_t pid = getpid();
     ipcHandle *myIpcHandle = NULL;
     ipcHandle *recvIpcHandle = NULL;
-    auto p2p_processes = heap_->get_p2pref()->get_proc_map();
-    pid_t root_process;
+    auto p2p_processes = heap_->get_p2p_proc_map();
+    pid_t root_process = -1;
     int fd = -1;
+    int status = NVSHMEMX_SUCCESS;
     /**
      * myIpcHandle PE0: /tmp/socket-100-100
      * recvIpcHandle PE1: /tmp/socket-100-101
@@ -95,6 +97,55 @@ int nvshmemi_nvls_observer::nvls_broadcast_heap_handle_ipc(char *shareable_handl
                 break;
             }
         }
+        if (root_process == -1) {
+            NVSHMEMI_ERROR_PRINT("Root PE %d not found in p2p_processes map\n", root);
+            status = NVSHMEMX_ERROR_INTERNAL;
+        }
+    }
+
+    {
+        long *pWrk = nvshmemi_team_get_psync(team, REDUCE);
+        char *status_slots = reinterpret_cast<char *>(pWrk);
+        char local_status = status == NVSHMEMX_SUCCESS ? 0 : 1;
+        std::vector<char> team_status(team->size, 0);
+
+        CUDA_RUNTIME_CHECK(cudaMemset(status_slots, 0, team->size));
+        CUDA_RUNTIME_CHECK(cudaMemcpy(status_slots + team->my_pe, &local_status,
+                                      sizeof(local_status), cudaMemcpyHostToDevice));
+        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
+        nvshmem_barrier(team->team_idx);
+
+        for (int i = 0; i < team->size; i++) {
+            int next_pe = nvshmemi_team_translate_pe_to_team_world_wrap(team, i);
+            nvshmemx_char_put_nbi_on_stream(status_slots + team->my_pe, status_slots + team->my_pe,
+                                            sizeof(local_status), next_pe, (cudaStream_t)0);
+        }
+        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
+        nvshmem_barrier(team->team_idx);
+
+        CUDA_RUNTIME_CHECK(
+            cudaMemcpy(team_status.data(), status_slots, team->size, cudaMemcpyDeviceToHost));
+        CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
+        for (int i = 0; i < team->size; i++) {
+            if (team_status[i] != 0) {
+                status = NVSHMEMX_ERROR_INTERNAL;
+                break;
+            }
+        }
+    }
+
+    if (status != NVSHMEMX_SUCCESS) {
+        if (myIpcHandle != NULL) {
+            NVSHMEMI_IPC_CHECK(ipcCloseSocket(myIpcHandle));
+        }
+        if (recvIpcHandle != NULL) {
+            NVSHMEMI_IPC_CHECK(ipcCloseSocket(recvIpcHandle));
+        }
+        if (team->my_pe == root) {
+            fd = *(int *)shareable_handle;
+            close(fd);
+        }
+        return status;
     }
 
     /* Wait for all processes in the team to open their sockets */
@@ -236,13 +287,14 @@ int nvshmemi_nvls_observer::nvls_create_heap_memory(uint64_t mem_size) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
     if (!state_->is_platform_nvls) return status;
 
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i), {
+    for (int i = 0; i < nvshmemi_max_teams; i++) {
+        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
         team = nvshmemi_team_pool[i];
         status = nvls_create_heap_memory_by_size(team, mem_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
                               "Creating mc handle for team ID: %d failed\n", team->team_idx);
         INFO(NVSHMEM_INIT, "Setting up mcHandle for team ID: %d\n", team->team_idx);
-    });
+    }
 
 cleanup:
     return status;
@@ -285,7 +337,8 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_hand
     std::vector<nvshmemi_team_t *> bound_teams;
     if (!state_->is_platform_nvls) return status;
 
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i), {
+    for (int i = 0; i < nvshmemi_max_teams; i++) {
+        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
         nvshmemi_team_t *team = nvshmemi_team_pool[i];
         status = nvls_bind_heap_memory_by_size(team, mem_handle, mc_offset, mmap_offset, mmap_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -293,7 +346,7 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_hand
         bound_teams.push_back(team);
         INFO(NVSHMEM_INIT, "Binding mc handle for team ID: %d\n", team->team_idx);
 
-        if (heap_->le_multicast_enabled_) {
+        if (heap_->is_multicast_endpoint_enabled()) {
             status = heap_->nvls_bind_multicast_endpoint(
                 team, *reinterpret_cast<CUmemGenericAllocationHandle *>(mem_handle), mc_offset,
                 mmap_offset, mmap_size);
@@ -302,7 +355,7 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_hand
                                   team->team_idx);
             INFO(NVSHMEM_INIT, "Binding multicast endpoint for team ID: %d\n", team->team_idx);
         }
-    });
+    }
 out:
     if (status != NVSHMEMX_SUCCESS) {
         while (!bound_teams.empty()) {
@@ -351,13 +404,14 @@ int nvshmemi_nvls_observer::nvls_map_heap_memory(uint64_t size, off_t mmap_offse
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
     if (!state_->is_platform_nvls) return status;
 
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i), {
+    for (int i = 0; i < nvshmemi_max_teams; i++) {
+        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
         status = nvls_map_heap_memory_by_size(nvshmemi_team_pool[i], size, mmap_offset, mc_offset);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Mapping MC handle for team ID: %d failed\n",
                               nvshmemi_team_pool[i]->team_idx);
         INFO(NVSHMEM_INIT, "Mapping mc handle for team ID: %d\n", nvshmemi_team_pool[i]->team_idx);
-    });
+    }
 out:
     return status;
 }
@@ -365,7 +419,7 @@ out:
 /* ---- Per-team public methods (called from team_internal.cpp) ---- */
 
 int nvshmemi_nvls_observer::nvls_create_heap_memory_by_team(nvshmemi_team_t *team) {
-    return nvls_create_heap_memory_by_size(team, heap_->heap_size_);
+    return nvls_create_heap_memory_by_size(team, heap_->get_logical_heap_size());
 }
 
 int nvshmemi_nvls_observer::nvls_bind_heap_memory_by_team(nvshmemi_team_t *team) {
@@ -375,12 +429,13 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory_by_team(nvshmemi_team_t *team)
     size_t mmap_size;
 
     /* Iterate over heap's list of tuple <mem_handle, mc_offset, mmap_offset, mmap_size> */
-    NVSHMEMU_FOR_EACH(i, heap_->get_cumem_handle_size()) {
-        if (heap_->is_cumem_handle_released(i)) continue;
-        mem_handle = heap_->get_cumem_handle_ptr(i);
-        mc_offset = heap_->get_cumem_handle_alloc_offset(i);
-        mmap_offset = heap_->get_cumem_handle_mmap_offset(i);
-        mmap_size = heap_->get_cumem_handle_mmap_size(i);
+    for (size_t i = 0; i < heap_->get_cumem_handle_count(); i++) {
+        const auto handle_info = heap_->get_cumem_handle_info(i);
+        if (handle_info.released) continue;
+        mem_handle = handle_info.handle;
+        mc_offset = handle_info.alloc_offset;
+        mmap_offset = handle_info.mmap_offset;
+        mmap_size = handle_info.mmap_size;
         /* Bind UC handles to MC handle at heap_offset */
         status = nvls_bind_heap_memory_by_size(team, (nvshmem_mem_handle_t *)&mem_handle, mc_offset,
                                                mmap_offset, mmap_size);
@@ -389,7 +444,7 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory_by_team(nvshmemi_team_t *team)
                               "offset %ld, mmap offset %ld failed for pe %d team ID %d\n",
                               mem_handle, mmap_size, mc_offset, mmap_offset, team->my_pe,
                               team->team_idx);
-        if (heap_->le_multicast_enabled_) {
+        if (heap_->is_multicast_endpoint_enabled()) {
             status = heap_->nvls_bind_multicast_endpoint(team, mem_handle, mc_offset, mmap_offset,
                                                          mmap_size);
             NVSHMEMI_NZ_ERROR_JMP(
@@ -406,7 +461,7 @@ cleanup:
 
 int nvshmemi_nvls_observer::nvls_map_heap_memory_by_team(nvshmemi_team_t *team) {
     /* Map MC handle + mmap_offset = 0 to mc base + mc_offset=0 */
-    return nvls_map_heap_memory_by_size(team, heap_->heap_size_, 0, 0);
+    return nvls_map_heap_memory_by_size(team, heap_->get_logical_heap_size(), 0, 0);
 }
 
 int nvshmemi_nvls_observer::nvls_unmap_heap_memory_by_size(nvshmemi_team_t *team, off_t mc_offset,
@@ -419,19 +474,20 @@ int nvshmemi_nvls_observer::nvls_unmap_heap_memory_by_size(nvshmemi_team_t *team
 }
 
 void nvshmemi_nvls_observer::nvls_unmap_heap_memory_by_team(nvshmemi_team_t *team) {
-    nvls_unmap_heap_memory_by_size(team, 0, heap_->heap_size_);
+    nvls_unmap_heap_memory_by_size(team, 0, heap_->get_logical_heap_size());
 }
 
 int nvshmemi_nvls_observer::nvls_unmap_heap_memory(off_t mc_offset, uint64_t size) {
     int status = 0;
     if (!state_->is_platform_nvls) return status;
 
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i), {
+    for (int i = 0; i < nvshmemi_max_teams; i++) {
+        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
         status = nvls_unmap_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unmapping MC handle for team ID: %d failed\n",
                               nvshmemi_team_pool[i]->team_idx);
-    });
+    }
 out:
     return status;
 }
@@ -444,32 +500,30 @@ void nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_team(nvshmemi_team_t *te
     /* Here we unbind for only the size that has been bound by real UC handles i.e physical heap
      * size to optimize for performance of unbind
      */
-    NVSHMEMU_FOR_EACH(i, nvls_obj->get_mc_handle_size()) {
+    const auto *mmapped_buf = heap_->get_mmapped_buf();
+    for (size_t i = 0; i < nvls_obj->get_mc_handle_size(); i++) {
         nvls_obj->unbind_group_mem(nvls_obj->get_mc_handle_ptr(i), 0,
-                                   heap_->physical_internal_heap_size_);
+                                   heap_->get_physical_heap_size());
 
         // unbind mmaped buffers
-        for (auto iter = heap_->get_mmapped_buf()->begin(); iter != heap_->get_mmapped_buf()->end();
-             ++iter) {
+        for (auto iter = mmapped_buf->begin(); iter != mmapped_buf->end(); ++iter) {
             // iter->first => ptr in heap of mmaped buffer
             // iter->second => size
-            off_t mc_offset = (char *)iter->first - (char *)heap_->heap_base_;
+            off_t mc_offset = (char *)iter->first - (char *)heap_->get_base();
             nvls_obj->unbind_group_mem(nvls_obj->get_mc_handle_ptr(i), mc_offset, iter->second);
         }
     }
 
-    if (heap_->physical_internal_heap_size_) {
-        status =
-            heap_->nvls_unbind_multicast_endpoint(team, 0, heap_->physical_internal_heap_size_);
+    if (heap_->get_physical_heap_size()) {
+        status = heap_->nvls_unbind_multicast_endpoint(team, 0, heap_->get_physical_heap_size());
         NVSHMEMI_NZ_ERROR_JMP(
             status, NVSHMEMX_ERROR_INTERNAL, out,
             "cuLogicalEndpointUnbind for multicast endpoint failed at offset: %lu for size: %zu\n",
-            0UL, heap_->physical_internal_heap_size_);
+            0UL, heap_->get_physical_heap_size());
     }
 
-    for (auto iter = heap_->get_mmapped_buf()->begin(); iter != heap_->get_mmapped_buf()->end();
-         ++iter) {
-        off_t mc_offset = (char *)iter->first - (char *)heap_->heap_base_;
+    for (auto iter = mmapped_buf->begin(); iter != mmapped_buf->end(); ++iter) {
+        off_t mc_offset = (char *)iter->first - (char *)heap_->get_base();
         status = heap_->nvls_unbind_multicast_endpoint(team, mc_offset, iter->second);
         NVSHMEMI_NZ_ERROR_JMP(
             status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -514,12 +568,13 @@ int nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_size(off_t mc_offset, siz
     int status = 0;
 
     // for all teams unbind mc_handle
-    NVSHMEMU_FOR_EACH_IF(i, nvshmemi_max_teams, nvshmemi_should_process_nvls_team_pool_entry(i), {
+    for (int i = 0; i < nvshmemi_max_teams; i++) {
+        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
         status = nvls_unbind_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unbinding NVLS memory for team ID: %d failed. Status: %d\n",
                               nvshmemi_team_pool[i]->team_idx, status);
-    });
+    }
 out:
     return status;
 }

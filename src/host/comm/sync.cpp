@@ -86,7 +86,7 @@ void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_o
                                   cudaStream_t cstrm) {
     int status = 0;
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET &&
-        nvshmemi_state->heap_obj->get_local_pe_base()[pe] != NULL) {
+        nvshmemi_state->heap_obj->get_local_pe_bases()[pe] != NULL) {
         void *peer_addr;
         NVSHMEMU_MAPPED_PTR_TRANSLATE(peer_addr, sig_addr, pe)
         // cuStreamWriteValue64 currently fails with EGM memory, so disabling it

@@ -18,6 +18,7 @@
 #include "device_host_transport/nvshmem_constants.h"
 #include "internal/host/custom_malloc.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
+#include "internal/host/nvshmemi_handle_table.hpp"
 #include "internal/host/nvshmemi_types.h"
 #include "non_abi/nvshmemx_error.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
@@ -114,6 +115,7 @@ int nvshmemi_proxy_level(nvshmemi_state_t *state);
 int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL);
 int nvshmemi_init_g_buffer();
 int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind);
+int nvshmemi_setup_transport(nvshmemi_state_t *state);
 void nvshmemi_fini_symmetric_heap(nvshmemi_state_t *state);
 int nvshmemi_init_device_state(nvshmemi_state_t *state);
 int nvshmemi_setup_connections(nvshmemi_state_t *state);
@@ -138,8 +140,8 @@ static inline void nvshmemi_get_local_mem_handle(nvshmem_mem_handle_t **handle, 
     nvshmem_transport_t transport = nvshmemi_state->transports[transport_idx];
     size_t max_len = transport->max_op_len;
 
-    *handle = nvshmemi_state->heap_obj->get_transport_mem_handle(addr, len, nvshmemi_state->mype,
-                                                                 transport_idx);
+    *handle = nvshmemi_state->handle_table->get_mem_handle(addr, len, nvshmemi_state->mype,
+                                                           transport_idx);
     if (*handle == NULL) {
         /* registered buffer lookup code */
         *handle = nvshmemi_get_registered_buffer_handle(transport, addr, len);
@@ -158,11 +160,10 @@ static inline void nvshmemi_get_remote_mem_handle(rma_memdesc_t *handle, size_t 
     nvshmem_transport_t transport = nvshmemi_state->transports[transport_idx];
     size_t max_len = transport->max_op_len;
 
-    handle->handle =
-        nvshmemi_state->heap_obj->get_transport_mem_handle(addr, len, pe, transport_idx);
-    handle->offset = nvshmemi_state->heap_obj->get_mem_handle_addr_offset(addr);
-    if (len) *len = *len < max_len ? *len : max_len;
+    handle->handle = nvshmemi_state->handle_table->get_mem_handle(addr, len, pe, transport_idx);
     assert(handle->handle != NULL);
+    handle->offset = nvshmemi_state->handle_table->get_addr_offset(addr);
+    if (len) *len = *len < max_len ? *len : max_len;
 }
 /* rptr is symmetric address on the local pe
    lptr is local address - either symmetric or not */

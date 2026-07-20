@@ -1061,7 +1061,7 @@ static int init_team_shared(bool is_mc_shared) {
             assert(nvshmemi_state->p2p_transport != nullptr);
             is_peer_connected = nvshmemi_state->p2p_transport->is_nvls_connected_pe(i);
         } else {
-            is_peer_connected = nvshmemi_state->heap_obj->get_local_pe_base()[i] != nullptr;
+            is_peer_connected = nvshmemi_state->heap_obj->get_local_pe_bases()[i] != nullptr;
         }
 
         if (is_peer_connected) {

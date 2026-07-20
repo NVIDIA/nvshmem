@@ -610,10 +610,10 @@ set(NVSHMEM_HOST_SOURCES
     host/init/nvmlwrap.cpp
     host/init/query_host.cpp
     host/mem/mem.cpp
-    host/mem/handle_table.cpp
     host/mem/mem_heap.cpp
     host/mem/heap_registration.cpp
     host/mem/nvls_observer.cpp
+    host/mem/handle_table.cpp
     host/mem/mem_transport.cpp
     host/team/team.cu
     host/team/team_internal.cpp

@@ -679,7 +679,7 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
         amo_memdesc_t memdesc;
         void *remote = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
         void *remote_actual =
-            (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_base()[pe]) + roffset);
+            (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[pe]) + roffset);
         int t = state->transport_id[pe];
         struct nvshmem_transport *tcurr = state->transport[pe];
 

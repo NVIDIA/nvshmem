@@ -1241,9 +1241,12 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     }
 
     status = state->heap_obj->setup_symmetric_heap();
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem register static heaps failed \n");
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "setup_symmetric_heap failed \n");
 
+    /* Set up heap transports after peer bases are finalized. */
+    status = nvshmemi_setup_transport(state);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "nvshmemi_setup_transport failed \n");
     /* Static VIDMEM heap registration may prune MAP capabilities after IPC-open failures. */
     nvshmemi_refresh_selected_transports(state);
 
@@ -1289,7 +1292,8 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     }
     nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
     CUDA_RUNTIME_CHECK_GOTO(
-        cudaMemcpy(heap_base_array_dptr, (const void *)state->heap_obj->get_local_pe_base(),
+        cudaMemcpy(heap_base_array_dptr,
+                   static_cast<const void *>(state->heap_obj->get_local_pe_bases().data()),
                    sizeof(void *) * state->npes, cudaMemcpyHostToDevice),
         status, out);
     // Reset job_connectivity.
@@ -1904,12 +1908,13 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "set_job_connectivity failed \n");
 
     CUDA_RUNTIME_CHECK_GOTO(
-        cudaMemcpyAsync(heap_base_array_dptr, (const void *)state->heap_obj->get_local_pe_base(),
+        cudaMemcpyAsync(heap_base_array_dptr,
+                        static_cast<const void *>(state->heap_obj->get_local_pe_bases().data()),
                         sizeof(void *) * state->npes, cudaMemcpyHostToDevice, state->my_stream),
         status, out);
     CUDA_RUNTIME_CHECK_GOTO(
         cudaMemcpyAsync(heap_base_actual_array_dptr,
-                        (const void *)state->heap_obj->get_remote_pe_base(),
+                        static_cast<const void *>(state->heap_obj->get_remote_pe_bases().data()),
                         sizeof(void *) * state->npes, cudaMemcpyHostToDevice, state->my_stream),
         status, out);
 

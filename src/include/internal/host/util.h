@@ -146,21 +146,21 @@
         exit(-1);                                                                                \
     }
 
-#define NVSHMEMU_MAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                          \
-    toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_local_pe_base()[peer]) + \
+#define NVSHMEMU_MAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                           \
+    toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_local_pe_bases()[peer]) + \
                      ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
 
 #define NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(toPtr, fromPtr, peer)                                  \
     if (nvshmemi_device_state.enable_rail_opt) {                                                  \
         int proxy_pe = (peer / nvshmemi_state->npes_node) * nvshmemi_state->npes_node +           \
                        nvshmemi_state->mype_node;                                                 \
-        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_base()[proxy_pe]) +     \
+        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[proxy_pe]) +    \
                          +((int)(peer % nvshmemi_state->npes_node) - nvshmemi_state->mype_node) * \
                              nvshmemi_device_state.heap_size +                                    \
                          ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));          \
         peer = proxy_pe;                                                                          \
     } else {                                                                                      \
-        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_base()[peer]) +         \
+        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[peer]) +        \
                          ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));          \
     }
 
