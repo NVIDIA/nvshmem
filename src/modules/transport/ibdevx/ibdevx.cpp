@@ -19,6 +19,7 @@
 #include <array>                                             // for array
 #include <cmath>                                             // for log2
 #include <map>                                               // for map, _Rb_tree_iterator
+#include <memory>                                            // for make_unique, unique_ptr
 #include <string>                                            // for string
 #include <utility>                                           // for pair, make_pair
 #include <vector>                                            // for vector
@@ -210,11 +211,11 @@ static_assert(sizeof(struct ibdevx_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
               "IBDevX memory handle must fit in nvshmem_mem_handle_t");
 
 struct ibdevx_dummy_local_mem {
-    void *ptr;
+    uint64_t value;
     std::array<struct ibv_mr *, NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE> mrs;
     int num_devs;
 };
-static struct ibdevx_dummy_local_mem *dummy_local_mem;
+static std::unique_ptr<struct ibdevx_dummy_local_mem> dummy_local_mem;
 
 pthread_mutex_t ibdevx_mutex_send_progress;
 
@@ -1017,15 +1018,9 @@ int nvshmemt_ibdevx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, 
     }
 
     if (!dummy_local_mem) {
-        dummy_local_mem =
-            static_cast<struct ibdevx_dummy_local_mem *>(calloc(1, sizeof(*dummy_local_mem)));
-        NVSHMEMI_NULL_ERROR_JMP(dummy_local_mem, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "dummy local memory allocation failed\n");
+        dummy_local_mem = std::make_unique<struct ibdevx_dummy_local_mem>();
         dummy_created = true;
         dummy_local_mem->num_devs = n_devs_selected;
-        dummy_local_mem->ptr = malloc(sizeof(uint64_t));
-        NVSHMEMI_NULL_ERROR_JMP(dummy_local_mem->ptr, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "local dummy memory allocation failed\n");
 
         for (int i = 0; i < n_devs_selected; ++i) {
             int selected_dev_id = ibdevx_state->n_selected_dev_ids > 0
@@ -1034,10 +1029,10 @@ int nvshmemt_ibdevx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, 
             struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices +
                                             ibdevx_state->dev_ids[selected_dev_id]);
 
-            dummy_local_mem->mrs[i] =
-                ftable.reg_mr(device->common_device.pd, dummy_local_mem->ptr, sizeof(uint64_t),
-                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
-                                  IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
+            dummy_local_mem->mrs[i] = ftable.reg_mr(
+                device->common_device.pd, &dummy_local_mem->value, sizeof(dummy_local_mem->value),
+                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                    IBV_ACCESS_REMOTE_ATOMIC);
             NVSHMEMI_NULL_ERROR_JMP(dummy_local_mem->mrs[i], status, NVSHMEMX_ERROR_OUT_OF_MEMORY,
                                     out, "dummy memory registration failed\n");
         }
@@ -1047,14 +1042,12 @@ out:
     if (status) {
         if (dummy_created) {
             for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
-                if (dummy_local_mem->mrs[i]) (void)ftable.dereg_mr(dummy_local_mem->mrs[i]);
+                if (dummy_local_mem->mrs[i]) ftable.dereg_mr(dummy_local_mem->mrs[i]);
             }
-            free(dummy_local_mem->ptr);
-            free(dummy_local_mem);
-            dummy_local_mem = nullptr;
+            dummy_local_mem.reset();
         }
-        (void)nvshmemt_ib_common_release_mem_handles(&ftable, handle->dev_mem_handles.data(),
-                                                     registered_count, ibdevx_state->log_level);
+        nvshmemt_ib_common_release_mem_handles(&ftable, handle->dev_mem_handles.data(),
+                                               registered_count, ibdevx_state->log_level);
     }
     return status;
 }
@@ -1088,9 +1081,7 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
             NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out,
                                         "Unable to deregister dummy memory.\n");
         }
-        free(dummy_local_mem->ptr);
-        free(dummy_local_mem);
-        dummy_local_mem = nullptr;
+        dummy_local_mem.reset();
     }
 
     if (ibdevx_state->devices) {

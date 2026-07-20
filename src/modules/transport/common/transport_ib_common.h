@@ -160,7 +160,7 @@ struct nvshmemt_ib_common_mem_handle {
     bool local_only;
 };
 
-static constexpr int NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE =
+inline constexpr int NVSHMEMT_IB_COMMON_MAX_NICS_PER_PE =
     (NVSHMEM_MEM_HANDLE_SIZE - sizeof(int)) / sizeof(struct nvshmemt_ib_common_mem_handle);
 
 struct nvshmemt_ibv_function_table {
