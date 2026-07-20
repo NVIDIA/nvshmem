@@ -617,7 +617,7 @@ fn build_cubin(arch: &str) -> Result<Vec<u8>, Box<dyn Error>> {
     let cubin = linker.finish()?;
 
     if write_artifacts {
-        std::fs::write(&cubin_path, &cubin)?;
+        write_artifact(&cubin_path, &cubin)?;
     }
     Ok(cubin)
 }
@@ -644,9 +644,32 @@ fn compile_rust_ltoir(
     let arch_opt = format!("-arch={compute}");
     let ltoir = program.compile(&[arch_opt.as_str(), "-gen-lto"])?;
     if let Some(output_path) = output_path {
-        std::fs::write(output_path, &ltoir)?;
+        write_artifact(output_path, &ltoir)?;
     }
     Ok(ltoir)
+}
+
+fn write_artifact(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("artifact");
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let temporary_path =
+        path.with_extension(format!("{extension}.{nonce}.{}.tmp", std::process::id()));
+
+    std::fs::write(&temporary_path, bytes)?;
+    if let Err(error) = std::fs::rename(&temporary_path, path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(format!(
+            "failed to atomically publish artifact {}: {error}",
+            path.display()
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn nvshmem_input_type(path: &Path, bytes: &[u8]) -> InputType {
