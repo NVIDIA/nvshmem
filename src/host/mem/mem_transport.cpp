@@ -23,6 +23,7 @@
 #include "internal/host/nvmlwrap.h"                                        // for nvmlG...
 #include "internal/host/nvshmemi_symmetric_heap.hpp"                       // for nvshm...
 #include "internal/host/nvshmemi_mem_transport.hpp"                        // for nvshm...
+#include "internal/host/nvshmemi_transport_view.hpp"                       // for nvshm...
 #include "internal/host/nvshmemi_types.h"                                  // for nvshm...
 #include "internal/host/util.h"                                            // for NVSHM...
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"  // for nvshm...
@@ -57,6 +58,12 @@ void nvshmemi_mem_p2p_transport::print_mem_handle(int pe_id, int transport_idx,
          *(obj.peer_heap_base_p2p_ + i));
 }
 
+void nvshmemi_mem_p2p_transport::print_mem_handle(nvshmem_mem_handle_t *handle, int mype) {
+    char *hex = nvshmemu_hexdump(handle, sizeof(CUipcMemHandle));
+    INFO(NVSHMEM_INIT, "[%d] cuIpcOpenMemHandle fromhandle 0x%s", mype, hex);
+    NVSHMEMU_HOST_PTR_FREE(hex);
+}
+
 int nvshmemi_mem_p2p_transport::create_proc_map(nvshmemi_symmetric_heap &obj) {
     pid_t pid = 0;
     pid_t *peer_pids = NULL;
@@ -81,6 +88,29 @@ int nvshmemi_mem_p2p_transport::create_proc_map(nvshmemi_symmetric_heap &obj) {
     INFO(NVSHMEM_MEM, "I am connected to %lu p2p processes (including myself)", proc_map_.size());
 out:
     NVSHMEMU_HOST_PTR_FREE(peer_pids);
+    return (status);
+}
+
+int nvshmemi_mem_p2p_transport::create_proc_map(int npes,
+                                                const nvshmemi_transport_view &transports) {
+    pid_t pid = getpid();
+    int status = 0;
+    if (proc_map_.size() > 0) {
+        return 0;
+    }
+    std::vector<pid_t> peer_pids(npes);
+    status = nvshmemi_boot_handle.allgather((void *)&pid, (void *)peer_pids.data(), sizeof(pid_t),
+                                            &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "allgather of pids failed \n");
+
+    NVSHMEMU_FOR_EACH(pe, npes) {
+        NVSHMEMU_FOR_EACH_IF(j, transports.num_transports(),
+                             transports.active_has_cap(j, pe, NVSHMEM_TRANSPORT_CAP_MAP),
+                             { proc_map_[peer_pids[pe]] = pe; });
+    }
+
+    INFO(NVSHMEM_MEM, "I am connected to %lu p2p processes (including myself)", proc_map_.size());
+out:
     return (status);
 }
 
@@ -338,6 +368,12 @@ int nvshmemi_mem_p2p_transport::get_num_p2p_connected_pes(nvshmemi_symmetric_hea
                                                 nvshmemi_nvl_connected_pes_.end(), uint8_t{1})));
 }
 
+int nvshmemi_mem_p2p_transport::get_num_p2p_connected_pes(int npes_node) {
+    return std::max(npes_node,
+                    static_cast<int>(std::count(nvshmemi_nvl_connected_pes_.begin(),
+                                                nvshmemi_nvl_connected_pes_.end(), uint8_t{1})));
+}
+
 nvshmemi_mem_p2p_transport::~nvshmemi_mem_p2p_transport() {
     proc_map_.clear();
     if (p2p_objref_ != nullptr) p2p_objref_ = nullptr;
@@ -376,10 +412,41 @@ out:
     return status;
 }
 
+int nvshmemi_mem_remote_transport::gather_mem_handles(const nvshmemi_transport_view &transports,
+                                                      nvshmem_mem_handle_t *handle_data,
+                                                      uint64_t heap_offset, size_t size) {
+    int status = 0;
+
+    NVSHMEMU_FOR_EACH(i, transports.num_transports()) {
+        nvshmem_transport_t tcurr = transports.transport(i);
+        if (transports.is_active(i) && transports.supports_add_device_remote_mem(i)) {
+            status = tcurr->host_ops.add_device_remote_mem_handles(
+                tcurr, transports.num_transports(), handle_data, heap_offset, size);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "add_device_remote_mem_handles failed \n");
+
+            status = nvshmemi_update_device_state();
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "nvshmemi_update_device_state() failed \n");
+        }
+    }
+out:
+    return status;
+}
+
 int nvshmemi_mem_remote_transport::register_mem_handle(nvshmem_mem_handle_t *local_handles,
                                                        int transport_idx, void *buf, size_t size,
                                                        nvshmem_transport_t current) {
     if (!NVSHMEMI_TRANSPORT_OPS_IS_GET_MEM(current)) return 0;
+    return current->host_ops.get_mem_handle((nvshmem_mem_handle_t *)(local_handles + transport_idx),
+                                            buf, size, current, false);
+}
+
+int nvshmemi_mem_remote_transport::register_mem_handle(nvshmem_mem_handle_t *local_handles,
+                                                       int transport_idx, void *buf, size_t size,
+                                                       const nvshmemi_transport_view &transports) {
+    if (!transports.supports_get_mem(transport_idx)) return 0;
+    nvshmem_transport_t current = transports.transport(transport_idx);
     return current->host_ops.get_mem_handle((nvshmem_mem_handle_t *)(local_handles + transport_idx),
                                             buf, size, current, false);
 }
@@ -395,6 +462,22 @@ int nvshmemi_mem_remote_transport::release_mem_handles(nvshmem_mem_handle_t *han
                                  status =
                                      obj.get_state()->transports[i]->host_ops.release_mem_handle(
                                          &handles[i], obj.get_state()->transports[i]);
+                                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                                       "transport release memhandle failed \n");
+                             }
+                         });
+out:
+    return status;
+}
+
+int nvshmemi_mem_remote_transport::release_mem_handles(nvshmem_mem_handle_t *handles,
+                                                       const nvshmemi_transport_view &transports) {
+    int status = 0;
+    NVSHMEMU_FOR_EACH_IF(i, transports.num_transports(),
+                         transports.is_active(i) && transports.supports_release_mem(i), {
+                             if (!is_mem_handle_null(&handles[i])) {
+                                 status = transports.transport(i)->host_ops.release_mem_handle(
+                                     &handles[i], transports.transport(i));
                                  NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                                        "transport release memhandle failed \n");
                              }

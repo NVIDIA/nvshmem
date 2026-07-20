@@ -18,6 +18,8 @@
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvmlwrap.h"
 
+class nvshmemi_transport_view;
+
 static_assert(sizeof(nvshmem_mem_handle_t) % sizeof(uint64_t) == 0,
               "nvshmem_mem_handle_t size is not a multiple of 8B");
 
@@ -45,14 +47,17 @@ class nvshmemi_mem_p2p_transport final {
     }
 
     void print_mem_handle(int pe_id, int transport_idx, nvshmemi_symmetric_heap &obj);
+    void print_mem_handle(nvshmem_mem_handle_t *handle, int mype);
 
     struct nvml_function_table *get_nvml_ftable(void) { return &nvml_ftable_; }
     CUmemAllocationHandleType get_mem_handle_type(void) const { return nvshmemi_mem_handle_type_; }
     bool is_mnnvl_fabric(void) const { return nvshmemi_has_mnnvl_fabric_; }
     bool is_initialized(void) const { return !errored_on_initialization_; }
     int create_proc_map(nvshmemi_symmetric_heap &obj);
+    int create_proc_map(int npes, const nvshmemi_transport_view &transports);
     std::map<pid_t, int> get_proc_map(void) const { return proc_map_; }
     int get_num_p2p_connected_pes(nvshmemi_symmetric_heap &obj);
+    int get_num_p2p_connected_pes(int npes_node);
     bool is_nvl_connected_pe(int pe) {
         /* Check if the peer GPU is connected via the MNNVL fabric */
         return nvshmemi_nvl_connected_pes_.at(pe) != 0;
@@ -133,10 +138,16 @@ class nvshmemi_mem_remote_transport final {
 
     int gather_mem_handles(nvshmemi_symmetric_heap &obj, uint64_t heap_offset, size_t size,
                            bool ext_allocation = false);
+    int gather_mem_handles(const nvshmemi_transport_view &transports,
+                           nvshmem_mem_handle_t *handle_data, uint64_t heap_offset, size_t size);
     /* On-demand registration and release of memory */
     int register_mem_handle(nvshmem_mem_handle_t *local_handles, int transport_idx, void *buf,
                             size_t size, nvshmem_transport_t current);
+    int register_mem_handle(nvshmem_mem_handle_t *local_handles, int transport_idx, void *buf,
+                            size_t size, const nvshmemi_transport_view &transports);
     int release_mem_handles(nvshmem_mem_handle_t *handles, nvshmemi_symmetric_heap &obj);
+    int release_mem_handles(nvshmem_mem_handle_t *handles,
+                            const nvshmemi_transport_view &transports);
 
     int is_mem_handle_null(nvshmem_mem_handle_t *handle) {
         NVSHMEMU_FOR_EACH(i, (sizeof(nvshmem_mem_handle_t) / sizeof(uint64_t))) {
