@@ -65,6 +65,13 @@ std::mutex &get_cs_mutex() {
 }
 }  // namespace
 
+struct nvshmemi_make_heap_result {
+    std::unique_ptr<nvshmemi_symmetric_heap> heap;
+    nvshmemi_symmetric_heap_vidmem_dynamic_vmm *vmm_heap = nullptr;
+    nvshmemi_nvls_observer *nvls_obs = nullptr;
+    int status = NVSHMEMX_SUCCESS;
+};
+
 int nvshmemi_bootstrap_aggregate_status(int local_status, int npes) {
     int status = NVSHMEMX_SUCCESS;
     std::vector<int> peer_statuses(npes, NVSHMEMX_SUCCESS);
@@ -144,6 +151,80 @@ void nvshmemi_symmetric_heap::set_heap_registration(
     heap_registration_ = std::move(registration);
 }
 
+namespace {
+nvshmemi_make_heap_result make_heap_failure(int status) {
+    nvshmemi_make_heap_result result;
+    result.status = status;
+    return result;
+}
+
+nvshmemi_make_heap_result make_vmm_symmetric_heap(const nvshmemi_heap_config &cfg,
+                                                  bool enable_nvls) {
+    nvshmemi_make_heap_result result;
+    int status = NVSHMEMX_SUCCESS;
+    auto heap = nvshmemi_symmetric_heap_vidmem_dynamic_vmm::create_reserved(cfg, &status);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("nvshmem reserve VMM heap failed, status: %d\n", status);
+        return make_heap_failure(NVSHMEMX_ERROR_INTERNAL);
+    }
+
+    auto *vmm = heap.get();
+    if (enable_nvls) {
+        auto nvls_obs = std::make_unique<nvshmemi_nvls_observer>(vmm, enable_nvls);
+        result.nvls_obs = nvls_obs.get();
+        vmm->register_observer(std::move(nvls_obs));
+    }
+
+    result.vmm_heap = vmm;
+    result.heap = std::move(heap);
+    return result;
+}
+
+std::unique_ptr<nvshmemi_symmetric_heap> make_static_heap_object(const nvshmemi_heap_config &cfg,
+                                                                 int heap_kind, int *status) {
+    assert(status != nullptr);
+    *status = NVSHMEMX_SUCCESS;
+
+    if (heap_kind == NVSHMEMI_HEAP_KIND_SYSMEM) {
+        return nvshmemi_symmetric_heap_sysmem_static_shm::create_reserved(cfg, status);
+    }
+    if (heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
+        return nvshmemi_symmetric_heap_vidmem_static_pinned::create_reserved(cfg, status);
+    }
+
+    *status = NVSHMEMX_ERROR_INVALID_VALUE;
+    return nullptr;
+}
+
+nvshmemi_make_heap_result make_static_symmetric_heap(const nvshmemi_heap_config &cfg,
+                                                     int heap_kind) {
+    int status = NVSHMEMX_SUCCESS;
+    auto heap = make_static_heap_object(cfg, heap_kind, &status);
+    if (status == NVSHMEMX_ERROR_INVALID_VALUE) {
+        NVSHMEMI_ERROR_PRINT(
+            "Requested Heap Kind: %d(0-VIDMEM,1-SYSMEM,>3-INVALID), with VMM: %s\n", heap_kind,
+            "No");
+        return make_heap_failure(NVSHMEMX_ERROR_INVALID_VALUE);
+    }
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("nvshmem reserve static heap failed, status: %d\n", status);
+        return make_heap_failure(NVSHMEMX_ERROR_INTERNAL);
+    }
+
+    nvshmemi_make_heap_result result;
+    result.heap = std::move(heap);
+    return result;
+}
+
+nvshmemi_make_heap_result make_symmetric_heap(const nvshmemi_heap_config &cfg, bool is_vmm,
+                                              int heap_kind, bool enable_nvls) {
+    if (is_vmm) {
+        return make_vmm_symmetric_heap(cfg, enable_nvls);
+    }
+    return make_static_symmetric_heap(cfg, heap_kind);
+}
+}  // namespace
+
 int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind) {
     int status = NVSHMEMX_SUCCESS;
 
@@ -155,28 +236,19 @@ int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_
     state->nvls_obs = nullptr;
 
     const nvshmemi_heap_config cfg{state->mype, state->npes, state->npes_node, state->device_id};
+    auto result = make_symmetric_heap(cfg, is_vmm, heap_kind, state->is_platform_nvls);
+    status = result.status;
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "nvshmem symmetric heap creation failed \n");
 
-    if (is_vmm) {
-        auto *vmm = new nvshmemi_symmetric_heap_vidmem_dynamic_vmm(cfg);
-        state->heap_obj = vmm;
-        state->vmm_heap = vmm;
-        auto *nvls_obs = new nvshmemi_nvls_observer(vmm, state->is_platform_nvls);
-        state->nvls_obs = nvls_obs;
-        vmm->register_observer(std::unique_ptr<nvshmemi_heap_observer>(nvls_obs));
-    } else if (heap_kind == NVSHMEMI_HEAP_KIND_SYSMEM) {
-        state->heap_obj = new nvshmemi_symmetric_heap_sysmem_static_shm(cfg);
-    } else if (heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM) {
-        state->heap_obj = new nvshmemi_symmetric_heap_vidmem_static_pinned(cfg);
-    }
-
-    if (state->heap_obj == nullptr) {
-        NVSHMEMI_ERROR_EXIT("Requested Heap Kind: %d(0-VIDMEM,1-SYSMEM,>3-INVALID), with VMM: %s\n",
-                            heap_kind, (is_vmm ? "Yes" : "No"));
-    }
+    state->heap_obj = result.heap.release();
+    state->vmm_heap = result.vmm_heap;
+    state->nvls_obs = result.nvls_obs;
 
     // Heap constructors initialize the p2p transport singleton; publish it to state.
     state->p2p_transport = nvshmemi_mem_p2p_transport::get_instance(state->mype, state->npes);
 
+out:
     return status;
 }
 
@@ -227,12 +299,15 @@ static std::unique_ptr<nvshmemi_handle_table> make_heap_handle_table(
         heap.get_mem_granularity(), state.num_initialized_transports, state.npes);
 }
 
-/** Sets up heap registration after heap and transport initialization. */
+/** Finalizes heap setup and transport registration. */
 int nvshmemi_setup_transport(nvshmemi_state_t *state) {
     int status = 0;
     assert(state != nullptr);
     assert(state->heap_obj != nullptr);
     auto &heap = *state->heap_obj;
+
+    status = heap.setup_symmetric_heap();
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "setup_symmetric_heap failed \n");
 
     auto table = make_heap_handle_table(*state, heap);
     auto *table_ptr = table.get();
@@ -470,6 +545,35 @@ nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvshmemi_symmetric_heap_vidmem_dynam
     set_p2p_transport(nvshmemi_mem_p2p_transport::get_instance(cfg.mype, cfg.npes));
     set_remote_transport(nvshmemi_mem_remote_transport::get_instance());
     set_mem_handle_type((get_p2pref()->get_mem_handle_type()));
+}
+
+template <typename Heap>
+std::unique_ptr<Heap> nvshmemi_symmetric_heap::create_reserved_impl(nvshmemi_heap_config cfg,
+                                                                    int *status) {
+    assert(status != nullptr);
+    auto heap = std::make_unique<Heap>(cfg);
+    nvshmemi_symmetric_heap *base_heap = heap.get();
+    *status = base_heap->reserve_heap();
+    if (*status != NVSHMEMX_SUCCESS) {
+        return nullptr;
+    }
+    return heap;
+}
+
+std::unique_ptr<nvshmemi_symmetric_heap_vidmem_static_pinned>
+nvshmemi_symmetric_heap_vidmem_static_pinned::create_reserved(nvshmemi_heap_config cfg,
+                                                              int *status) {
+    return create_reserved_impl<nvshmemi_symmetric_heap_vidmem_static_pinned>(cfg, status);
+}
+
+std::unique_ptr<nvshmemi_symmetric_heap_sysmem_static_shm>
+nvshmemi_symmetric_heap_sysmem_static_shm::create_reserved(nvshmemi_heap_config cfg, int *status) {
+    return create_reserved_impl<nvshmemi_symmetric_heap_sysmem_static_shm>(cfg, status);
+}
+
+std::unique_ptr<nvshmemi_symmetric_heap_vidmem_dynamic_vmm>
+nvshmemi_symmetric_heap_vidmem_dynamic_vmm::create_reserved(nvshmemi_heap_config cfg, int *status) {
+    return create_reserved_impl<nvshmemi_symmetric_heap_vidmem_dynamic_vmm>(cfg, status);
 }
 
 int nvshmemi_symmetric_heap_static::reserve_heap(void) {

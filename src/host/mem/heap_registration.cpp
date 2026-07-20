@@ -458,7 +458,7 @@ int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* 
     for (int i = 0; i < transports_.num_transports(); i++) {
         if (!transports_.is_active(i) || transports_.has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP))
             continue;
-        status = remotetran.register_mem_handle(&local_handles[0], i, remote_buf, remote_size,
+        status = remotetran.register_mem_handle(local_handles.data(), i, remote_buf, remote_size,
                                                 transports_);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_mem_handle failed\n");
     }

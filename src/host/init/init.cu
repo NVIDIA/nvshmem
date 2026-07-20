@@ -549,7 +549,7 @@ int nvshmemi_init_nvshmemi_state(nvshmemi_state_t *state) {
     return status;
 }
 
-static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
+static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state, bool use_cuda_vmm) {
     int status = NVSHMEMX_ERROR_INTERNAL;
     int mc_support = 0;
     int cuda_dev;
@@ -584,7 +584,8 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state) {
         goto out;
     }
 
-    if (state->heap_obj != nullptr && state->vmm_heap == nullptr) {
+    /* Heap construction happens after NVLS detection, so use the planned heap mode. */
+    if (!(use_cuda_vmm && nvshmemi_device_state.symmetric_heap_kind == NVSHMEMI_HEAP_KIND_VIDMEM)) {
         WARN("NVLS: Unsupported heap kind for NVLS. Supported are: cuMemCreate\n");
         status = NVSHMEMX_SUCCESS;
         goto out;
@@ -1180,15 +1181,10 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     }
 #endif
 
-    /* Context needs to be retrieved and memops flag need to be applied before heap is initialized
-     */
-    nvshmemi_init_symmetric_heap(state, nvshmemi_use_cuda_vmm,
-                                 nvshmemi_device_state.symmetric_heap_kind);
-
     /* Detect NVLS support before increasing max teams count for NVLS capable platform
      * Depends on heap type being discovered aprior
      */
-    status = nvshmemi_detect_nvls_support(state);
+    status = nvshmemi_detect_nvls_support(state, nvshmemi_use_cuda_vmm);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmemi_detect_nvls_support() failed\n");
 
@@ -1215,9 +1211,11 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     status = nvshmemi_coll_common_cpu_init();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cpu collective setup failed \n");
 
-    status = state->heap_obj->reserve_heap();
+    /* Configure the CUDA context before heap initialization. */
+    status = nvshmemi_init_symmetric_heap(state, nvshmemi_use_cuda_vmm,
+                                          nvshmemi_device_state.symmetric_heap_kind);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem reserve static heaps failed \n");
+                          "nvshmem heap initialization failed \n");
 
     /* nvshmemi_transport_init() will only fail if no transports including P2P are available */
     status = nvshmemi_transport_init(state);
@@ -1240,10 +1238,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
                               "building transport map failed \n");
     }
 
-    status = state->heap_obj->setup_symmetric_heap();
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "setup_symmetric_heap failed \n");
-
-    /* Set up heap transports after peer bases are finalized. */
+    /* Finalize heap setup after transports and connections are initialized. */
     status = nvshmemi_setup_transport(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmemi_setup_transport failed \n");

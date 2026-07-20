@@ -101,18 +101,6 @@ class nvshmemi_symmetric_heap {
         return (get_effective_import_handle_type() == CU_MEM_HANDLE_TYPE_FABRIC);
     }
 
-    /** Common to all memory kinds */
-    /**
-     * This function will statically reserve heap memory based on memory kind in child class
-     * For dynamic vidmem types, only virtual memory is reserved and mspace is initialized
-     * For static vidmem and sysmem, virtual and physical memory is reserved/pre-allocated and
-     * mspace is initialized
-     *
-     * @param void
-     * @return On success, return 0 and on failure return non-zero NVSHMEM internal error code.
-     */
-    virtual int reserve_heap(void) = 0;
-
     virtual int setup_symmetric_heap() = 0;
     virtual int cleanup_symmetric_heap() = 0;
 
@@ -170,6 +158,9 @@ class nvshmemi_symmetric_heap {
     }
 
    protected:
+    template <typename Heap>
+    static std::unique_ptr<Heap> create_reserved_impl(nvshmemi_heap_config cfg, int *status);
+
     nvshmemi_mem_remote_transport *get_remoteref(void) const { return (remote_ref_); }
     nvshmemi_mem_p2p_transport *get_p2pref(void) const { return (p2p_ref_); }
 
@@ -178,6 +169,9 @@ class nvshmemi_symmetric_heap {
     void set_mem_handle_type(CUmemAllocationHandleType type) { mem_handle_type_ = type; }
     virtual void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment,
                                             int type) = 0;
+
+    /** Reserves heap memory according to the memory kind. */
+    virtual int reserve_heap(void) = 0;
 
     /**
      * Given a buf, release and unmap the heap from PE address space
@@ -269,17 +263,17 @@ class nvshmemi_symmetric_heap_static : public nvshmemi_symmetric_heap {
     explicit nvshmemi_symmetric_heap_static(nvshmemi_heap_config cfg) noexcept;
     virtual ~nvshmemi_symmetric_heap_static() = default;
 
-    virtual int reserve_heap(void);
-    virtual int setup_symmetric_heap(void);
-    virtual int cleanup_symmetric_heap(void);
+    int setup_symmetric_heap(void) override;
+    int cleanup_symmetric_heap(void) override;
 
    protected:
+    int reserve_heap(void) override;
     virtual int allocate_heap_memory() = 0;
     virtual int free_heap_memory(void *addr) = 0;
 
-    virtual void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment, int type);
+    void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment, int type) override;
 
-    virtual int setup_mspace();
+    int setup_mspace() override;
 };
 
 class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symmetric_heap_static {
@@ -287,21 +281,24 @@ class nvshmemi_symmetric_heap_vidmem_static_pinned final : public nvshmemi_symme
     explicit nvshmemi_symmetric_heap_vidmem_static_pinned(nvshmemi_heap_config cfg) noexcept
         : nvshmemi_symmetric_heap_static(cfg) {}
     ~nvshmemi_symmetric_heap_vidmem_static_pinned() = default;
+    static std::unique_ptr<nvshmemi_symmetric_heap_vidmem_static_pinned> create_reserved(
+        nvshmemi_heap_config cfg, int *status);
 
    protected:
-    int allocate_heap_memory();
-    int free_heap_memory(void *addr);
+    int allocate_heap_memory() override;
+    int free_heap_memory(void *addr) override;
 
-    int release_memory(void *buf, size_t size = 0);
+    int release_memory(void *buf, size_t size = 0) override;
 };
 
 class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetric_heap {
    public:
     explicit nvshmemi_symmetric_heap_vidmem_dynamic_vmm(nvshmemi_heap_config cfg) noexcept;
     ~nvshmemi_symmetric_heap_vidmem_dynamic_vmm() = default;
-    int reserve_heap(void);
-    int setup_symmetric_heap(void);
-    int cleanup_symmetric_heap(void);
+    static std::unique_ptr<nvshmemi_symmetric_heap_vidmem_dynamic_vmm> create_reserved(
+        nvshmemi_heap_config cfg, int *status);
+    int setup_symmetric_heap(void) override;
+    int cleanup_symmetric_heap(void) override;
 
     size_t get_mmap_allocated_range() const override;
 
@@ -340,6 +337,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     std::unordered_map<void *, size_t> *get_egm_map() { return &egm_map_; }
 
    protected:
+    int reserve_heap(void) override;
     CUmemGenericAllocationHandle get_cumem_handle_ptr(int i) const {
         return (std::get<0>(cumem_handles_[i]));
     }
@@ -348,9 +346,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     size_t get_cumem_handle_mmap_size(int i) const { return std::get<3>(cumem_handles_[i]); }
     bool is_cumem_handle_released(int i) const { return std::get<4>(cumem_handles_[i]); }
     size_t get_cumem_handle_size(void) const { return cumem_handles_.size(); }
-    int release_memory(void *buf, size_t size);
-    void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment, int type);
-    int setup_mspace();
+    int release_memory(void *buf, size_t size) override;
+    void *allocate_symmetric_memory(size_t size, size_t count, size_t alignment, int type) override;
+    int setup_mspace() override;
     int allocate_physical_memory_to_heap(size_t size);
 
    private:
@@ -376,6 +374,8 @@ class nvshmemi_symmetric_heap_sysmem_static_shm final : public nvshmemi_symmetri
     explicit nvshmemi_symmetric_heap_sysmem_static_shm(nvshmemi_heap_config cfg) noexcept
         : nvshmemi_symmetric_heap_static(cfg) {}
     ~nvshmemi_symmetric_heap_sysmem_static_shm() = default;
+    static std::unique_ptr<nvshmemi_symmetric_heap_sysmem_static_shm> create_reserved(
+        nvshmemi_heap_config cfg, int *status);
     static void atexit_heap_handler(void) {
         // Iterate over all objects and close any stale fd
         for (auto i = 0U; i < nvshmemi_symmetric_heap_sysmem_static_shm::infos_.size(); i++) {
@@ -386,11 +386,11 @@ class nvshmemi_symmetric_heap_sysmem_static_shm final : public nvshmemi_symmetri
     }
 
    protected:
-    int allocate_heap_memory();
-    int free_heap_memory(void *addr);
+    int allocate_heap_memory() override;
+    int free_heap_memory(void *addr) override;
 
     /** No-op for sysmem: peer ranges are mapped at allocation time and released at cleanup. */
-    int release_memory(void *buf, size_t size = 0);
+    int release_memory(void *buf, size_t size = 0) override;
 
    private:
     char heap_name_[NAME_MAX] = {0};

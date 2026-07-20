@@ -32,17 +32,17 @@
 using namespace nvls;
 
 namespace {
-bool nvshmemi_should_process_nvls_team_pool_entry(size_t team_idx) {
-    const size_t mc_shared_idx = static_cast<size_t>(NVSHMEM_TEAM_MC_SHARED_INDEX);
-    const size_t shared_idx = static_cast<size_t>(NVSHMEM_TEAM_SHARED_INDEX);
+bool should_process_nvls_team_pool_entry(int team_idx) {
+    const int mc_shared_idx = NVSHMEM_TEAM_MC_SHARED_INDEX;
+    const int shared_idx = NVSHMEM_TEAM_SHARED_INDEX;
 
     if (nvshmemi_team_pool == NULL || nvshmemi_max_teams <= 0) return false;
+    if (team_idx < 0 || team_idx >= nvshmemi_max_teams || nvshmemi_team_pool[team_idx] == NULL)
+        return false;
 
-    const size_t max_teams = static_cast<size_t>(nvshmemi_max_teams);
-    if (team_idx >= max_teams || nvshmemi_team_pool[team_idx] == NULL) return false;
-
-    bool is_mc_shared_alias = team_idx == mc_shared_idx && max_teams > mc_shared_idx &&
-                              nvshmemi_team_pool[mc_shared_idx] == nvshmemi_team_pool[shared_idx];
+    const bool is_mc_shared_alias =
+        team_idx == mc_shared_idx && nvshmemi_max_teams > mc_shared_idx &&
+        nvshmemi_team_pool[mc_shared_idx] == nvshmemi_team_pool[shared_idx];
 
     return !is_mc_shared_alias && nvshmemi_team_support_nvls(nvshmemi_team_pool[team_idx]);
 }
@@ -298,7 +298,7 @@ int nvshmemi_nvls_observer::nvls_create_heap_memory(uint64_t mem_size) {
     if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) continue;
         team = nvshmemi_team_pool[i];
         status = nvls_create_heap_memory_by_size(team, mem_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
@@ -348,7 +348,7 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_hand
     if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) continue;
         nvshmemi_team_t *team = nvshmemi_team_pool[i];
         status = nvls_bind_heap_memory_by_size(team, mem_handle, mc_offset, mmap_offset, mmap_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -415,7 +415,7 @@ int nvshmemi_nvls_observer::nvls_map_heap_memory(uint64_t size, off_t mmap_offse
     if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) continue;
         status = nvls_map_heap_memory_by_size(nvshmemi_team_pool[i], size, mmap_offset, mc_offset);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Mapping MC handle for team ID: %d failed\n",
@@ -485,7 +485,7 @@ int nvshmemi_nvls_observer::nvls_unmap_heap_memory(off_t mc_offset, uint64_t siz
     if (!is_platform_nvls_) return status;
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) continue;
         status = nvls_unmap_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unmapping MC handle for team ID: %d failed\n",
@@ -572,7 +572,7 @@ int nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_size(off_t mc_offset, siz
 
     // for all teams unbind mc_handle
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!nvshmemi_should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) continue;
         status = nvls_unbind_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unbinding NVLS memory for team ID: %d failed. Status: %d\n",
