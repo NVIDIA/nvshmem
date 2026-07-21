@@ -155,7 +155,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     endif()
 
     add_custom_command(OUTPUT ${ARCH_BC_FILE}
-                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${NVSHMEM_FILE_PREFIX_MAP_FLAGS} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                       --cuda-gpu-arch=${ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                       -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
                       ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
@@ -244,7 +244,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
 
     add_custom_command(
       OUTPUT ${ARCH_LTOIR_FILE}
-      COMMAND cuda::nvcc -std=${LTOIR_CXX_STD} -arch=${ARCH} -dlto --ltoir
+      COMMAND cuda::nvcc ${NVSHMEM_CUDA_FILE_PREFIX_MAP_FLAGS} -std=${LTOIR_CXX_STD} -arch=${ARCH} -dlto --ltoir
               -I ${CMAKE_CURRENT_SOURCE_DIR}/include
               ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
               -DNVSHMEM_BUILD_LTOIR_LIBRARY
