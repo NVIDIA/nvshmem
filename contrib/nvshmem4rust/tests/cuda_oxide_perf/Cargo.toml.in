@@ -10,6 +10,5 @@ license = "Apache-2.0"
 cuda-core = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-core" }
 cuda-device = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-device" }
 cuda-host = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-host" }
-libnvvm-sys = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/libnvvm-sys" }
-nvjitlink-sys = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/nvjitlink-sys" }
 nvshmem = { path = "../nvshmem_host_runtime" }
+nvshmem_cuda_oxide_test_support = { path = "../cuda_oxide_test_support" }

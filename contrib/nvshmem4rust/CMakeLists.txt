@@ -51,8 +51,15 @@ set(NVSHMEM4RUST_NUMBAST_VERSION "0.9.0" CACHE STRING
     "Numbast version used to generate the Rust bindings")
 set(NVSHMEM4RUST_INSTALL_DIR "lib/nvshmem4rust" CACHE STRING
     "Install directory for generated nvshmem4rust files")
+option(NVSHMEM_BUILD_RUST_HOST_ONLY
+       "Generate raw host bindings without a CUDA-Oxide checkout" OFF)
 option(NVSHMEM_BUILD_RUST_DEVICE_TESTS
        "Configure the CUDA-Oxide smoke and performance tests" OFF)
+if(NVSHMEM_BUILD_RUST_HOST_ONLY AND NVSHMEM_BUILD_RUST_DEVICE_TESTS)
+    message(FATAL_ERROR
+        "NVSHMEM_BUILD_RUST_HOST_ONLY cannot be combined with "
+        "NVSHMEM_BUILD_RUST_DEVICE_TESTS")
+endif()
 
 set(VENV_DIR "${CMAKE_BINARY_DIR}/externals/venv")
 set(VENV_PYTHON_EXECUTABLE "${VENV_DIR}/bin/python3")
@@ -69,4 +76,8 @@ add_custom_command(
 add_custom_target(setup_py_bindings_env DEPENDS "${PYTHON_ENV_STAMP}")
 
 include(cmake/NVSHMEM4Rust.cmake)
-generateRustBindings(VERSION "${NVSHMEM4RUST_NUMBAST_VERSION}")
+if(NVSHMEM_BUILD_RUST_HOST_ONLY)
+    generateRustBindings(HOST_ONLY VERSION "${NVSHMEM4RUST_NUMBAST_VERSION}")
+else()
+    generateRustBindings(VERSION "${NVSHMEM4RUST_NUMBAST_VERSION}")
+endif()

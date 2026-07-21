@@ -10,8 +10,8 @@ provides small wrappers for the pieces every program otherwise has to rewrite:
   NVSHMEM memory while retaining the runtime until the allocation is freed.
 - `sys` exposes the generated raw host FFI with exact `nvshmem_*` and
   `nvshmemx_*` names. `bindings` remains as a compatibility alias for `sys`.
-- The crate root re-exports generated prefix-stripped wrappers such as
-  `my_pe`, `barrier_all`, and `int_put_on_stream`.
+- The crate root re-exports generated prefix-stripped aliases and safe wrappers
+  such as `my_pe`, `barrier_all`, and `int_put_on_stream`.
 - `NvshmemRuntime::register_module(&module)` returns a guard that keeps the
   runtime and CUDA-Oxide module valid through NVSHMEM finalization.
 

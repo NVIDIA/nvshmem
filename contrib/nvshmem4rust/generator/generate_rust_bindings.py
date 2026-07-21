@@ -242,6 +242,13 @@ def _generate_host_api_wrapper(function):
     ])
 
 
+def _generate_host_api_alias(function):
+    return (
+        f"pub use crate::sys::{function.name} as "
+        f"{_rust_api_name(function.name)};"
+    )
+
+
 def _host_function_allowlist():
     return rust_host_allowlist()
 
@@ -579,10 +586,9 @@ def _render_host_bindings(decls, config):
 def _render_host_api(decls, config):
     lines = _common_header_lines()
     lines.extend([
-        "// Prefix-stripped Rust wrappers around the raw NVSHMEM host FFI.",
+        "// Prefix-stripped Rust API over the raw NVSHMEM host FFI.",
         "",
         "use crate::sys;",
-        "use crate::sys::*;",
         "",
         f"// Source config: {config.get('Name', 'NVSHMEM Host Bindings')}",
     ])
@@ -596,7 +602,10 @@ def _render_host_api(decls, config):
                 "Host Rust API wrapper name collision after prefix stripping: "
                 f"{api_name}")
         lines.append("")
-        lines.append(_generate_host_api_wrapper(function))
+        if _is_safe_host_wrapper(function.name):
+            lines.append(_generate_host_api_wrapper(function))
+        else:
+            lines.append(_generate_host_api_alias(function))
         generated_count += 1
         seen.add(api_name)
 

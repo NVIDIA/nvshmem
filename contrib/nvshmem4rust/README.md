@@ -20,8 +20,8 @@ Generating the bindings requires:
 - Python 3 with `venv` support
 - An NVSHMEM source checkout or installed NVSHMEM tree with public headers
 - A CUDA Toolkit installation
-- A [CUDA-Oxide](https://github.com/NVlabs/cuda-oxide) checkout, used by the
-  generated runtime crate's `cuda-core` dependency
+- A [CUDA-Oxide](https://github.com/NVlabs/cuda-oxide) checkout for device
+  bindings and the generated runtime crate's `cuda-core` dependency
 - Network access to install Numbast and its Python dependencies from PyPI
 
 Building the generated runtime crate additionally requires:
@@ -58,10 +58,29 @@ By default, generated files are written under
 
 - `nvshmem_device_cuda_oxide.rs` — CUDA-Oxide device declarations
 - `nvshmem_host.rs` — raw host declarations
-- `nvshmem_host_api.rs` — prefix-stripped host wrappers
+- `nvshmem_host_api.rs` — prefix-stripped host API aliases and safe wrappers
 - `nvshmem_host_runtime/` — a build-tree Cargo package named `nvshmem`
 
 Set `NVSHMEM_RUST_BINDINGS_OUTPUT_DIR` to override the output directory.
+
+### Generate raw host bindings only
+
+For raw host FFI without the CUDA-Oxide device bindings or runtime crate, omit
+`NVSHMEM_CUDA_OXIDE_ROOT` and configure with
+`NVSHMEM_BUILD_RUST_HOST_ONLY=ON`:
+
+```bash
+cmake -S contrib/nvshmem4rust -B build/nvshmem4rust-host \
+  -DNVSHMEM_SOURCE_DIR="$PWD" \
+  -DNVSHMEM_HOME="$PWD/install" \
+  -DNVSHMEM_CUDA_HOME=/path/to/cuda \
+  -DNVSHMEM_BUILD_RUST_HOST_ONLY=ON
+
+cmake --build build/nvshmem4rust-host --target build_bindings_rust
+```
+
+This generates only `nvshmem_host.rs` and `nvshmem_host_api.rs`. A CUDA Toolkit
+is still required because the NVSHMEM host headers include CUDA types.
 
 ## Use the generated bindings
 
@@ -71,10 +90,10 @@ programs can depend on the generated `nvshmem_host_runtime` crate, or use the
 raw declarations directly.
 
 The runtime crate exposes exact C ABI names under `nvshmem::sys` and
-prefix-stripped wrappers such as `nvshmem::my_pe()` and
-`nvshmem::barrier_all()`. CUDA-Oxide users must register each loaded module with
-`nvshmem::cumodule_init(&module)` before launching kernels that call NVSHMEM and
-finalize the registration before dropping that module.
+prefix-stripped aliases and safe wrappers such as `nvshmem::my_pe()` and
+`nvshmem::barrier_all()`. CUDA-Oxide users should keep the guard returned by
+`unsafe { runtime.register_module(&module) }` alive while kernels call NVSHMEM;
+it finalizes the module registration before the runtime or module can drop.
 
 At Cargo build time, set `NVSHMEM_HOST_LIB_DIR` to the directory containing
 `libnvshmem_host.so`. At runtime, the dynamic loader must be able to resolve
@@ -117,7 +136,8 @@ settings.
 
 - `generator/` contains the Numbast configuration and Rust emitter.
 - `runtime/` contains the template for the generated host runtime crate.
-- `tests/` contains CUDA-Oxide smoke and performance programs.
+- `tests/` contains CUDA-Oxide smoke and performance programs plus their
+  shared support crate.
 - `cmake/` contains the standalone generation and test targets.
 
 ## Known limitations

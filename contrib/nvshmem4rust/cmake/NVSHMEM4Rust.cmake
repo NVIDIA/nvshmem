@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 function(generateRustBindings)
-    cmake_parse_arguments(PARSE_ARGV 0 GENERATERUST "" "VERSION" "")
+    cmake_parse_arguments(PARSE_ARGV 0 GENERATERUST "HOST_ONLY" "VERSION" "")
     if(NOT GENERATERUST_VERSION)
         set(GENERATERUST_VERSION "0.9.0")
     endif()
@@ -21,18 +21,20 @@ function(generateRustBindings)
 
     set(NVSHMEM_RUST_BINDINGS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/generated"
         CACHE PATH "Directory for generated NVSHMEM Rust bindings")
-    set(RUST_DEVICE_BINDINGS_OUTPUT
-        "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/${DEVICE_OUTPUT_NAME}")
     set(RUST_HOST_BINDINGS_OUTPUT
         "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/${HOST_OUTPUT_NAME}")
     set(RUST_HOST_API_OUTPUT
         "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/${HOST_API_OUTPUT_NAME}")
-    set(RUST_RUNTIME_BINARY_DIR
-        "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/nvshmem_host_runtime")
-    set(RUST_RUNTIME_HOST_BINDINGS_OUTPUT
-        "${RUST_RUNTIME_BINARY_DIR}/src/bindings.rs")
-    set(RUST_RUNTIME_HOST_API_OUTPUT
-        "${RUST_RUNTIME_BINARY_DIR}/src/api.rs")
+    if(NOT GENERATERUST_HOST_ONLY)
+        set(RUST_DEVICE_BINDINGS_OUTPUT
+            "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/${DEVICE_OUTPUT_NAME}")
+        set(RUST_RUNTIME_BINARY_DIR
+            "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/nvshmem_host_runtime")
+        set(RUST_RUNTIME_HOST_BINDINGS_OUTPUT
+            "${RUST_RUNTIME_BINARY_DIR}/src/bindings.rs")
+        set(RUST_RUNTIME_HOST_API_OUTPUT
+            "${RUST_RUNTIME_BINARY_DIR}/src/api.rs")
+    endif()
 
     set(NVSHMEM_CUDA_OXIDE_ROOT "" CACHE PATH
         "Path to a CUDA-Oxide checkout")
@@ -44,24 +46,28 @@ function(generateRustBindings)
         "NVSHMEM device LTOIR passed to the CUDA-Oxide tests")
     set(NVSHMEM_HOST_LIB_DIR "" CACHE PATH
         "Directory containing libnvshmem_host for the CUDA-Oxide tests")
-    if(NOT EXISTS "${NVSHMEM_CUDA_OXIDE_ROOT}/crates/cuda-core")
+    if(NOT GENERATERUST_HOST_ONLY AND
+       NOT EXISTS "${NVSHMEM_CUDA_OXIDE_ROOT}/crates/cuda-core")
         message(FATAL_ERROR
             "Set NVSHMEM_CUDA_OXIDE_ROOT to a CUDA-Oxide checkout so the "
             "generated runtime crate has a valid cuda-core dependency")
     endif()
 
     set(NVSHMEM_BINDING_HEADERS
-        "${NVSHMEM_INCLUDE_DIR}/nvshmem.h"
         "${NVSHMEM_INCLUDE_DIR}/nvshmem_host.h"
-        "${NVSHMEM_INCLUDE_DIR}/nvshmemx.h"
-        "${NVSHMEM_INCLUDE_DIR}/device/nvshmem_coll_defines.cuh"
-        "${NVSHMEM_INCLUDE_DIR}/device/nvshmem_defines.h"
-        "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_coll_defines.cuh"
-        "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_defines.h"
         "${NVSHMEM_INCLUDE_DIR}/host/nvshmem_api.h"
         "${NVSHMEM_INCLUDE_DIR}/host/nvshmem_coll_api.h"
         "${NVSHMEM_INCLUDE_DIR}/host/nvshmemx_api.h"
         "${NVSHMEM_INCLUDE_DIR}/host/nvshmemx_coll_api.h")
+    if(NOT GENERATERUST_HOST_ONLY)
+        list(APPEND NVSHMEM_BINDING_HEADERS
+            "${NVSHMEM_INCLUDE_DIR}/nvshmem.h"
+            "${NVSHMEM_INCLUDE_DIR}/nvshmemx.h"
+            "${NVSHMEM_INCLUDE_DIR}/device/nvshmem_coll_defines.cuh"
+            "${NVSHMEM_INCLUDE_DIR}/device/nvshmem_defines.h"
+            "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_coll_defines.cuh"
+            "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_defines.h")
+    endif()
     foreach(NVSHMEM_BINDING_HEADER IN LISTS NVSHMEM_BINDING_HEADERS)
         if(NOT EXISTS "${NVSHMEM_BINDING_HEADER}")
             message(FATAL_ERROR
@@ -82,20 +88,24 @@ function(generateRustBindings)
     file(MAKE_DIRECTORY "${WORKDIR}")
     file(MAKE_DIRECTORY "${OUTPUT_DIR}")
     file(MAKE_DIRECTORY "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}")
-    file(MAKE_DIRECTORY "${RUST_RUNTIME_BINARY_DIR}/src")
+    if(NOT GENERATERUST_HOST_ONLY)
+        file(MAKE_DIRECTORY "${RUST_RUNTIME_BINARY_DIR}/src")
+    endif()
     set(GENERATOR_SETTINGS "${WORKDIR}/generator-settings.txt")
     file(CONFIGURE OUTPUT "${GENERATOR_SETTINGS}" CONTENT
         "NVSHMEM_INCLUDE_DIR=@NVSHMEM_INCLUDE_DIR@\nNVSHMEM_CUDA_HOME=@NVSHMEM_CUDA_HOME@\nNVSHMEM_RUST_TEST_ARCH=@NVSHMEM_RUST_TEST_ARCH@\n"
         @ONLY)
 
-    configure_file("${RUNTIME_SOURCE_DIR}/Cargo.toml.in"
-                   "${RUST_RUNTIME_BINARY_DIR}/Cargo.toml" @ONLY)
-    configure_file("${RUNTIME_SOURCE_DIR}/build.rs"
-                   "${RUST_RUNTIME_BINARY_DIR}/build.rs" COPYONLY)
-    configure_file("${RUNTIME_SOURCE_DIR}/src/lib.rs"
-                   "${RUST_RUNTIME_BINARY_DIR}/src/lib.rs" COPYONLY)
-    configure_file("${RUNTIME_SOURCE_DIR}/README.md"
-                   "${RUST_RUNTIME_BINARY_DIR}/README.md" COPYONLY)
+    if(NOT GENERATERUST_HOST_ONLY)
+        configure_file("${RUNTIME_SOURCE_DIR}/Cargo.toml.in"
+                       "${RUST_RUNTIME_BINARY_DIR}/Cargo.toml" @ONLY)
+        configure_file("${RUNTIME_SOURCE_DIR}/build.rs"
+                       "${RUST_RUNTIME_BINARY_DIR}/build.rs" COPYONLY)
+        configure_file("${RUNTIME_SOURCE_DIR}/src/lib.rs"
+                       "${RUST_RUNTIME_BINARY_DIR}/src/lib.rs" COPYONLY)
+        configure_file("${RUNTIME_SOURCE_DIR}/README.md"
+                       "${RUST_RUNTIME_BINARY_DIR}/README.md" COPYONLY)
+    endif()
 
     set(NUMBAST_INSTALL_STAMP
         "${OUTPUT_DIR}/numbast-${GENERATERUST_VERSION}.stamp")
@@ -114,6 +124,62 @@ function(generateRustBindings)
         VERBATIM
     )
     add_custom_target(pip_install_numbast_rust DEPENDS "${NUMBAST_INSTALL_STAMP}")
+
+    if(GENERATERUST_HOST_ONLY)
+        add_custom_command(
+            OUTPUT "${RUST_HOST_BINDINGS_OUTPUT}"
+                   "${RUST_HOST_API_OUTPUT}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${WORKDIR}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}"
+            COMMAND "${CMAKE_COMMAND}" -E env "CUDA_HOME=${NVSHMEM_CUDA_HOME}"
+                    "${VENV_PYTHON_EXECUTABLE}" "${GENERATOR_DIR}/generate_rust_config.py"
+                    --nvshmem-include-dir "${NVSHMEM_INCLUDE_DIR}"
+                    --gpu-arch "${NVSHMEM_RUST_TEST_ARCH}"
+                    --config-version "${NUMBAST_CONFIG_VERSION}"
+                    --entry-point-path "${GENERATOR_DIR}/host_entry_point.h"
+                    --binding-name "${HOST_OUTPUT_NAME}"
+                    --input-path "${GENERATOR_DIR}/templates/config_nvshmem_host.yml.j2"
+                    --output-path "${RUST_HOST_CONFIG_PATH}"
+            COMMAND "${CMAKE_COMMAND}" -E env
+                    "CUDA_HOME=${NVSHMEM_CUDA_HOME}"
+                    "CUDA_PATH=${NVSHMEM_CUDA_HOME}"
+                    "${NUMBAST_LD_LIBRARY_PATH}"
+                    "${VENV_PYTHON_EXECUTABLE}" "${GENERATOR_DIR}/generate_rust_bindings.py"
+                    --config-path "${RUST_HOST_CONFIG_PATH}"
+                    --output-path "${RUST_HOST_BINDINGS_OUTPUT}"
+                    --binding-kind host
+            COMMAND "${CMAKE_COMMAND}" -E env
+                    "CUDA_HOME=${NVSHMEM_CUDA_HOME}"
+                    "CUDA_PATH=${NVSHMEM_CUDA_HOME}"
+                    "${NUMBAST_LD_LIBRARY_PATH}"
+                    "${VENV_PYTHON_EXECUTABLE}" "${GENERATOR_DIR}/generate_rust_bindings.py"
+                    --config-path "${RUST_HOST_CONFIG_PATH}"
+                    --output-path "${RUST_HOST_API_OUTPUT}"
+                    --binding-kind host-api
+            DEPENDS pip_install_numbast_rust
+                    "${GENERATOR_DIR}/host_entry_point.h"
+                    "${GENERATOR_DIR}/generate_rust_config.py"
+                    "${GENERATOR_DIR}/generate_rust_bindings.py"
+                    "${GENERATOR_DIR}/host_api_surface.py"
+                    "${GENERATOR_DIR}/templates/config_nvshmem_host.yml.j2"
+                    "${GENERATOR_SETTINGS}"
+                    ${NVSHMEM_BINDING_DEPENDENCIES}
+            WORKING_DIRECTORY "${NVSHMEM4RUST_SOURCE_DIR}"
+            COMMENT "Generating NVSHMEM host Rust bindings"
+            USES_TERMINAL
+            VERBATIM
+        )
+
+        add_custom_target(build_bindings_rust ALL
+            DEPENDS "${RUST_HOST_BINDINGS_OUTPUT}"
+                    "${RUST_HOST_API_OUTPUT}")
+
+        install(FILES "${RUST_HOST_BINDINGS_OUTPUT}"
+                      "${RUST_HOST_API_OUTPUT}"
+                DESTINATION "${NVSHMEM4RUST_INSTALL_DIR}" OPTIONAL)
+        return()
+    endif()
 
     add_custom_command(
         OUTPUT "${RUST_DEVICE_BINDINGS_OUTPUT}"
@@ -257,6 +323,14 @@ function(generateRustBindings)
                 "NVSHMEM_RUST_TEST_DEVICE_LTOIR does not exist: "
                 "${NVSHMEM_RUST_TEST_DEVICE_LTOIR}")
         endif()
+
+        set(RUST_TEST_SUPPORT_BINARY_DIR
+            "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/cuda_oxide_test_support")
+        file(MAKE_DIRECTORY "${RUST_TEST_SUPPORT_BINARY_DIR}/src")
+        configure_file("${TEST_SOURCE_DIR}/cuda_oxide_test_support/Cargo.toml.in"
+                       "${RUST_TEST_SUPPORT_BINARY_DIR}/Cargo.toml" @ONLY)
+        configure_file("${TEST_SOURCE_DIR}/cuda_oxide_test_support/src/lib.rs"
+                       "${RUST_TEST_SUPPORT_BINARY_DIR}/src/lib.rs" COPYONLY)
 
         set(RUST_TEST_BINARY_DIR
             "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/cuda_oxide_smoke")
