@@ -46,19 +46,9 @@ project(
   VERSION ${CUSTOM_BOOTSTRAP_VERSION_MAJOR}.${CUSTOM_BOOTSTRAP_VERSION_MINOR}.${CUSTOM_BOOTSTRAP_VERSION_PATCH}
 )
 
-# Keep standalone plugin diagnostics from exposing absolute source or build paths.
-set(NVSHMEM_FILE_PREFIX_MAP_FLAGS
-  "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
-  "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
-)
-list(REMOVE_DUPLICATES NVSHMEM_FILE_PREFIX_MAP_FLAGS)
-foreach(NVSHMEM_FILE_PREFIX_MAP_FLAG IN LISTS NVSHMEM_FILE_PREFIX_MAP_FLAGS)
-  string(APPEND CMAKE_C_FLAGS " ${NVSHMEM_FILE_PREFIX_MAP_FLAG}")
-  string(APPEND CMAKE_CXX_FLAGS " ${NVSHMEM_FILE_PREFIX_MAP_FLAG}")
-endforeach()
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
 include(NVSHMEMCxxStandard)
+nvshmem_apply_file_prefix_maps()
 
 add_subdirectory(common)
 
