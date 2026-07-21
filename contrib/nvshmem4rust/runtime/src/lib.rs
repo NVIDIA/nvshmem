@@ -52,7 +52,8 @@ pub use api::*;
 /// Register a CUDA-Oxide module with NVSHMEM.
 ///
 /// This borrows CUDA-Oxide's raw `CUmodule` handle only for the duration of the
-/// NVSHMEM registration call. CUDA-Oxide keeps ownership of the module.
+/// NVSHMEM registration call. Prefer `NvshmemRuntime::register_module` for
+/// scoped registration.
 ///
 /// # Safety
 ///
@@ -164,6 +165,20 @@ pub struct NvshmemRuntime {
 
 pub type Runtime = NvshmemRuntime;
 
+#[must_use]
+pub struct CudaModuleRegistration<'module> {
+    module: &'module CudaModule,
+    _runtime: NvshmemRuntime,
+}
+
+impl Drop for CudaModuleRegistration<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            cumodule_finalize(self.module);
+        }
+    }
+}
+
 impl NvshmemRuntime {
     /// Initialize NVSHMEM host state.
     ///
@@ -205,6 +220,26 @@ impl NvshmemRuntime {
         }?;
         *state = RuntimeState::Active(Arc::downgrade(&inner));
         Ok(Self { inner })
+    }
+
+    /// Register a CUDA-Oxide module and finalize it when the returned guard drops.
+    ///
+    /// # Safety
+    ///
+    /// The caller must satisfy CUDA's current-context requirements and ensure
+    /// kernels using NVSHMEM have completed before the guard is dropped.
+    pub unsafe fn register_module<'module>(
+        &self,
+        module: &'module CudaModule,
+    ) -> Result<CudaModuleRegistration<'module>> {
+        let status = unsafe { cumodule_init(module) };
+        if status != 0 {
+            return Err(format!("nvshmemx_cumodule_init failed with status {status}").into());
+        }
+        Ok(CudaModuleRegistration {
+            module,
+            _runtime: self.clone(),
+        })
     }
 
     fn init_from_bootstrap_env() -> Result<Arc<RuntimeInner>> {
@@ -262,32 +297,34 @@ impl NvshmemRuntime {
 }
 
 pub fn load_nvshmem_host_global() -> Result<()> {
-    let mut candidates = Vec::new();
-    if let Ok(path) = env::var("NVSHMEM_HOST_LIB_PATH") {
-        candidates.push(path);
-    }
-    candidates.push("libnvshmem_host.so.3".to_string());
-    candidates.push("libnvshmem_host.so".to_string());
+    static HOST_LIBRARY: OnceLock<std::result::Result<Library, String>> = OnceLock::new();
 
-    let mut last_error = None;
-    for candidate in candidates {
-        match unsafe { Library::open(Some(OsStr::new(&candidate)), RTLD_NOW | RTLD_GLOBAL) } {
-            Ok(library) => {
-                // Keep the RTLD_GLOBAL handle live for NVSHMEM's dependent symbol lookups.
-                std::mem::forget(library);
-                return Ok(());
-            }
-            Err(error) => {
-                last_error = Some(error.to_string());
+    match HOST_LIBRARY.get_or_init(|| {
+        let mut candidates = Vec::new();
+        if let Ok(path) = env::var("NVSHMEM_HOST_LIB_PATH") {
+            candidates.push(path);
+        }
+        candidates.push("libnvshmem_host.so.3".to_string());
+        candidates.push("libnvshmem_host.so".to_string());
+
+        let mut last_error = None;
+        for candidate in candidates {
+            match unsafe { Library::open(Some(OsStr::new(&candidate)), RTLD_NOW | RTLD_GLOBAL) } {
+                Ok(library) => return Ok(library),
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                }
             }
         }
-    }
 
-    Err(format!(
-        "failed to load libnvshmem_host with RTLD_GLOBAL: {}",
-        last_error.unwrap_or_else(|| "unknown libloading error".to_string())
-    )
-    .into())
+        Err(format!(
+            "failed to load libnvshmem_host with RTLD_GLOBAL: {}",
+            last_error.unwrap_or_else(|| "unknown libloading error".to_string())
+        ))
+    }) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(error.clone().into()),
+    }
 }
 
 pub struct SymmetricBuffer<T> {

@@ -162,7 +162,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let stream = ctx.new_stream()?;
     let module = ctx.load_module_from_image(&cubin)?;
     let runtime = Runtime::init(init_method_from_env()?, device_ordinal as i32)?;
-    check_nvshmem_status(unsafe { nvshmem::cumodule_init(&module) }, "cumodule_init")?;
+    let _module_registration = unsafe { runtime.register_module(&module) }?;
 
     let pe = nvshmem::my_pe();
     let npes = nvshmem::n_pes();
@@ -180,12 +180,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     nvshmem::barrier_all();
     stream.synchronize()?;
-    check_nvshmem_status(
-        unsafe { nvshmem::cumodule_finalize(&module) },
-        "cumodule_finalize",
-    )?;
-    drop(module);
-    drop(runtime);
     Ok(())
 }
 

@@ -12,9 +12,8 @@ provides small wrappers for the pieces every program otherwise has to rewrite:
   `nvshmemx_*` names. `bindings` remains as a compatibility alias for `sys`.
 - The crate root re-exports generated prefix-stripped wrappers such as
   `my_pe`, `barrier_all`, and `int_put_on_stream`.
-- `cumodule_init(&module)` and `cumodule_finalize(&module)` register
-  CUDA-Oxide modules without callers having to extract or cast raw `CUmodule`
-  handles.
+- `NvshmemRuntime::register_module(&module)` returns a guard that keeps the
+  runtime and CUDA-Oxide module valid through NVSHMEM finalization.
 
 This crate may depend on CUDA-linked NVSHMEM libraries or CUDA Rust crates
 internally when NVSHMEM needs them, but it should not expose CUDA utility APIs
@@ -23,18 +22,14 @@ contexts, own CUDA modules, or copy memory. CUDA-Oxide users should include the
 generated `nvshmem_device_cuda_oxide.rs` file from device code and link their
 Rust LTOIR with NVSHMEM's shipped device LTOIR or LTOIR fatbin via `nvJitLink`.
 
-Users are also responsible for registering each loaded CUDA-Oxide module before
-launching kernels that use NVSHMEM device state, and finalizing it before the
-module is dropped:
+Users must register each loaded CUDA-Oxide module before launching kernels that
+use NVSHMEM device state. The registration guard finalizes it before the module
+or runtime can be dropped:
 
 ```rust
-let status = unsafe { nvshmem::cumodule_init(&module) };
-assert_eq!(status, 0);
+let _registration = unsafe { runtime.register_module(&module) }?;
 
 // launch CUDA-Oxide kernels that call NVSHMEM device functions
-
-let status = unsafe { nvshmem::cumodule_finalize(&module) };
-assert_eq!(status, 0);
 ```
 
 The raw pointer wrappers are still available as
