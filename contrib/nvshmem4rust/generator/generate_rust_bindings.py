@@ -31,13 +31,13 @@ _TYPE_MAP = {
     "long long": "i64",
     "nvshmem_team_t": "nvshmem_team_t",
     "nvshmem_team_config_t": "nvshmem_team_config_t",
-    "nvshmem_team_config_v1": "nvshmem_team_config_t",
+    "nvshmem_team_config_v1": "nvshmem_team_config_v1",
     "nvshmem_team_config_v2": "nvshmem_team_config_t",
     "nvshmemx_init_args_t": "nvshmemx_init_args_t",
-    "nvshmemx_init_args_v1": "nvshmemx_init_args_t",
+    "nvshmemx_init_args_v1": "nvshmemx_init_args_v1",
     "nvshmemx_init_args_v2": "nvshmemx_init_args_t",
     "nvshmemx_init_attr_t": "nvshmemx_init_attr_t",
-    "nvshmemx_init_attr_v1": "nvshmemx_init_attr_t",
+    "nvshmemx_init_attr_v1": "nvshmemx_init_attr_v1",
     "nvshmemx_init_attr_v2": "nvshmemx_init_attr_t",
     "nvshmemx_team_uniqueid_t": "nvshmemx_team_uniqueid_t",
     "nvshmemx_smem_amount_t": "nvshmemx_smem_amount_t",
@@ -134,9 +134,12 @@ def _base_type(type_name):
         "__restrict__", "").replace("restrict", "").replace("*", "").strip())
 
 
-def _is_const_pointer(type_obj):
+def _pointer_kinds(type_obj, pointer_depth):
     qualified = _qualified_type_name(type_obj)
-    return "*" in qualified and bool(re.search(r"\bconst\b.*\*", qualified))
+    return [
+        "*const" if re.search(r"\bconst\b", level) else "*mut"
+        for level in qualified.split("*")[:pointer_depth]
+    ]
 
 
 def _rust_type(type_obj, *, is_return=False):
@@ -154,9 +157,8 @@ def _rust_type(type_obj, *, is_return=False):
             return None
         return rust_base
 
-    pointer_kind = "*const" if _is_const_pointer(type_obj) else "*mut"
     rust_type = rust_base
-    for _ in range(pointer_depth):
+    for pointer_kind in _pointer_kinds(type_obj, pointer_depth):
         rust_type = f"{pointer_kind} {rust_type}"
     return rust_type
 
@@ -348,7 +350,9 @@ def _host_prelude_lines(config):
         *_common_allow_lines(),
         "",
         "pub const UNIQUEID_PADDING: usize = 124;",
+        "pub const INIT_ARGS_V1_PADDING: usize = 96;",
         "pub const INIT_ARGS_V2_PADDING: usize = 92;",
+        "pub const TEAM_CONFIG_V1_PADDING: usize = 56;",
         "pub const TEAM_CONFIG_V2_PADDING: usize = 48;",
         "",
         "pub type nvshmem_team_t = i32;",
@@ -388,6 +392,14 @@ def _host_prelude_lines(config):
         "",
         "#[repr(C)]",
         "#[derive(Clone, Copy)]",
+        "pub struct nvshmemx_init_args_v1 {",
+        "    pub version: i32,",
+        "    pub uid_args: nvshmemx_uniqueid_args_t,",
+        "    pub content: [core::ffi::c_char; INIT_ARGS_V1_PADDING],",
+        "}",
+        "",
+        "#[repr(C)]",
+        "#[derive(Clone, Copy)]",
         "pub struct nvshmemx_init_args_t {",
         "    pub version: i32,",
         "    pub uid_args: nvshmemx_uniqueid_args_t,",
@@ -395,8 +407,15 @@ def _host_prelude_lines(config):
         "    pub content: [core::ffi::c_char; INIT_ARGS_V2_PADDING],",
         "}",
         "",
-        "pub type nvshmemx_init_args_v1 = nvshmemx_init_args_t;",
         "pub type nvshmemx_init_args_v2 = nvshmemx_init_args_t;",
+        "",
+        "#[repr(C)]",
+        "#[derive(Clone, Copy)]",
+        "pub struct nvshmemx_init_attr_v1 {",
+        "    pub version: i32,",
+        "    pub mpi_comm: *mut core::ffi::c_void,",
+        "    pub args: nvshmemx_init_args_t,",
+        "}",
         "",
         "#[repr(C)]",
         "#[derive(Clone, Copy)]",
@@ -406,8 +425,15 @@ def _host_prelude_lines(config):
         "    pub args: nvshmemx_init_args_t,",
         "}",
         "",
-        "pub type nvshmemx_init_attr_v1 = nvshmemx_init_attr_t;",
         "pub type nvshmemx_init_attr_v2 = nvshmemx_init_attr_t;",
+        "",
+        "#[repr(C)]",
+        "#[derive(Clone, Copy)]",
+        "pub struct nvshmem_team_config_v1 {",
+        "    pub version: i32,",
+        "    pub num_contexts: i32,",
+        "    pub padding: [core::ffi::c_char; TEAM_CONFIG_V1_PADDING],",
+        "}",
         "",
         "#[repr(C)]",
         "#[derive(Clone, Copy)]",
@@ -418,7 +444,6 @@ def _host_prelude_lines(config):
         "    pub padding: [core::ffi::c_char; TEAM_CONFIG_V2_PADDING],",
         "}",
         "",
-        "pub type nvshmem_team_config_v1 = nvshmem_team_config_t;",
         "pub type nvshmem_team_config_v2 = nvshmem_team_config_t;",
         "",
         "pub const NVSHMEMX_UNIQUEID_VERSION: i32 =",
