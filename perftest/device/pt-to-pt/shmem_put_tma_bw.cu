@@ -113,6 +113,26 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
     nvshmemx_release_smem();
 }
 
+/* One TMA put is issued for every shared-memory-sized chunk assigned to a CTA.
+ * Account for the uneven final partition so the reported rate reflects the
+ * number of logical TMA operations rather than the number of bytes. */
+static size_t tma_messages_per_iteration(size_t bytes, int num_blocks, int smem_size) {
+    if (num_blocks <= 0 || smem_size <= 0) return 0;
+
+    const size_t block_count = (size_t)num_blocks;
+    const size_t chunk_size = (size_t)smem_size;
+    const size_t base_bytes_per_block = bytes / block_count;
+    const size_t extra_blocks = bytes % block_count;
+    size_t messages = 0;
+
+    for (size_t block = 0; block < block_count; block++) {
+        const size_t bytes_per_block = base_bytes_per_block + (block < extra_blocks ? 1 : 0);
+        messages += (bytes_per_block + chunk_size - 1) / chunk_size;
+    }
+
+    return messages;
+}
+
 int main(int argc, char *argv[]) {
     int mype, npes;
     char *dst = NULL;
@@ -122,9 +142,10 @@ int main(int argc, char *argv[]) {
     int max_threads = (int)threads_per_block;
 
     int array_size;
-    void **h_tables;
-    uint64_t *h_size_arr;
+    void **h_tables = NULL;
+    uint64_t *h_size_arr = NULL;
     double *h_bw = NULL;
+    double *h_msgrate = NULL;
     float milliseconds;
     int exit_code = 0;
     cudaEvent_t start, stop;
@@ -148,9 +169,10 @@ int main(int argc, char *argv[]) {
                                         smem_size));
 
         array_size = max_size_log;
-        alloc_tables(&h_tables, 2, array_size);
+        alloc_tables(&h_tables, 3, array_size);
         h_size_arr = (uint64_t *)h_tables[0];
         h_bw = (double *)h_tables[1];
+        h_msgrate = (double *)h_tables[2];
 
         dst = (char *)nvshmem_malloc(max_size);
         if (!dst) {
@@ -182,6 +204,8 @@ int main(int argc, char *argv[]) {
 
                 cudaEventElapsedTime(&milliseconds, start, stop);
                 h_bw[i] = (double)size / (milliseconds * (B_TO_GB / ((double)iters * MS_TO_S)));
+                h_msgrate[i] = calculate_msgrate(
+                    tma_messages_per_iteration(size, max_blocks, smem_size), iters, milliseconds);
                 nvshmem_barrier_all();
 
                 i++;
@@ -189,6 +213,9 @@ int main(int argc, char *argv[]) {
 
             print_basic_table("shmem_put_tma_smem_bw", "None", "BW", "GB/sec", '+', h_size_arr,
                               h_bw, i);
+            if (report_msgrate)
+                print_basic_table("shmem_put_tma_smem_bw", "None", "msgrate", "MMPS", '+',
+                                  h_size_arr, h_msgrate, i);
         } else {
             for (size_t size = min_size; size <= max_size; size *= step_factor)
                 nvshmem_barrier_all();
@@ -258,7 +285,7 @@ int main(int argc, char *argv[]) {
 
 finalize:
     if (dst) nvshmem_free(dst);
-    if (h_bw) free_tables(h_tables, 2);
+    if (h_tables) free_tables(h_tables, 3);
     finalize_wrapper();
 
     return exit_code;

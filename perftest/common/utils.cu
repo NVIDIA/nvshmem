@@ -688,6 +688,10 @@ uint64_t calculate_collective_size(const char *coll_name, uint64_t num_elems, ui
     return size;
 }
 
+double calculate_msgrate(size_t messages_per_iteration, size_t iterations, float milliseconds) {
+    return static_cast<double>(messages_per_iteration) * iterations / (milliseconds * MS_TO_S);
+}
+
 tuple<double, double, double> get_latency_metrics(double *values, int num_values) {
     double min, max, sum;
     int i = 0;
@@ -1093,7 +1097,7 @@ static bool parse_bool_arg(const char *option, const char *arg, bool default_val
 void read_args(int argc, char **argv) {
     int c;
     static struct option long_options[] = {{"bidir", no_argument, 0, 0},
-                                           {"report_msgrate", no_argument, 0, 0},
+                                           {"msgrate", no_argument, 0, 0},
                                            {"cudagraph", no_argument, 0, 0},
                                            {"dir", required_argument, 0, 0},
                                            {"issue", required_argument, 0, 0},
@@ -1143,7 +1147,8 @@ void read_args(int argc, char **argv) {
                     "-a, --atomic_op <inc, add, and, or, xor, set, swap, fetch_<inc, add, and, or, "
                     "xor>, compare_swap> \n"
                     "--bidir: run bidirectional test \n"
-                    "--msgrate: report message rate (MMPs)\n"
+                    "--msgrate: report logical operation rate in bandwidth tests "
+                    "(MMPS for messaging, MOPS for stores)\n"
                     "--dir: <read, write> (whether to run put or get operations) \n"
                     "--issue: <on_stream, host> (applicable in some host pt-to-pt tests) \n"
                     "--mmap (Use mmaped buffer) \n"

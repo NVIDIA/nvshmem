@@ -165,13 +165,12 @@ int main(int argc, char *argv[]) {
     read_args(argc, argv);
     int max_blocks = num_blocks, max_threads = threads_per_block;
     int array_size, i;
-    void **h_tables;
+    void **h_tables = NULL;
     uint64_t *h_size_arr;
     double *h_bw;
     double *h_msgrate;
     perf_stats_t *h_bw_stats = NULL;
     perf_stats_t *h_msgrate_stats = NULL;
-    bool report_msgrate = false;
 
     int iter = iters;
     int skip = warmup_iters;
@@ -240,7 +239,7 @@ int main(int argc, char *argv[]) {
                 CUDA_CHECK(cudaEventSynchronize(stop));
                 cudaEventElapsedTime(&milliseconds, start, stop);
                 h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-                h_msgrate[i] = (double)(size / element_size) * iter / (milliseconds * MS_TO_S);
+                h_msgrate[i] = calculate_msgrate(size / element_size, iter, milliseconds);
                 perf_stats_add(h_bw_stats[i], h_bw[i]);
                 perf_stats_add(h_msgrate_stats[i], h_msgrate[i]);
                 nvshmem_barrier_all();
@@ -271,7 +270,7 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    free_tables(h_tables, 3);
+    if (h_tables) free_tables(h_tables, 3);
     free(h_bw_stats);
     free(h_msgrate_stats);
     finalize_wrapper();

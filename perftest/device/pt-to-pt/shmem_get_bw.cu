@@ -86,11 +86,14 @@ int main(int argc, char *argv[]) {
     read_args(argc, argv);
     int max_blocks = num_blocks, max_threads = threads_per_block;
     int array_size, i;
-    void **h_tables;
+    void **h_tables = NULL;
     uint64_t *h_size_arr;
     double *h_bw = NULL, *h_bw_total = NULL;
+    double *h_msgrate = NULL, *h_msgrate_total = NULL;
     perf_stats_t *h_bw_stats = NULL;
+    perf_stats_t *h_msgrate_stats = NULL;
     double *d_bw = NULL, *d_bw_sum = NULL;
+    double *d_msgrate = NULL, *d_msgrate_sum = NULL;
 
     bw_fn_t bw_fn = use_smem ? bw<SMEMToggle::ENABLE> : bw<SMEMToggle::DISABLE>;
     int smem_size = use_smem ? nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED) : 0;
@@ -126,25 +129,33 @@ int main(int argc, char *argv[]) {
     }
 
     array_size = max_size_log;
-    alloc_tables(&h_tables, 2, array_size);
+    alloc_tables(&h_tables, 3, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
+    h_msgrate = (double *)h_tables[2];
     h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_bw_stats) goto finalize;
+    if (report_msgrate) h_msgrate_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_bw_stats || (report_msgrate && !h_msgrate_stats)) goto finalize;
 
     if (bidirectional) {
         h_bw_total = (double *)malloc(sizeof(double) * array_size);
+        if (report_msgrate) h_msgrate_total = (double *)malloc(sizeof(double) * array_size);
 
-        if (!h_bw_total) {
+        if (!h_bw_total || (report_msgrate && !h_msgrate_total)) {
             fprintf(stderr, "Error: Unable to malloc on the host.\n");
             exit(1);
         }
 
         memset(h_bw_total, 0, sizeof(double) * array_size);
+        if (report_msgrate) memset(h_msgrate_total, 0, sizeof(double) * array_size);
 
         /* Allocate on GPU. */
         d_bw = (double *)nvshmem_malloc(sizeof(double));
         d_bw_sum = (double *)nvshmem_malloc(sizeof(double));
+        if (report_msgrate) {
+            d_msgrate = (double *)nvshmem_malloc(sizeof(double));
+            d_msgrate_sum = (double *)nvshmem_malloc(sizeof(double));
+        }
     }
 
     CUDA_CHECK(cudaMalloc((void **)&counter_d, sizeof(unsigned int) * 2));
@@ -170,14 +181,28 @@ int main(int argc, char *argv[]) {
                 CUDA_CHECK(cudaEventSynchronize(stop));
                 cudaEventElapsedTime(&milliseconds, start, stop);
                 h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                if (report_msgrate)
+                    h_msgrate[i] = calculate_msgrate(max_blocks, iter, milliseconds);
                 nvshmem_barrier_all();
                 if (bidirectional) {
                     CUDA_CHECK(cudaMemcpy(d_bw, &h_bw[i], sizeof(double), cudaMemcpyDefault));
                     nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, d_bw_sum, d_bw, 1);
                     CUDA_CHECK(
                         cudaMemcpy(&h_bw_total[i], d_bw_sum, sizeof(double), cudaMemcpyDefault));
+                    if (report_msgrate) {
+                        CUDA_CHECK(cudaMemcpy(d_msgrate, &h_msgrate[i], sizeof(double),
+                                              cudaMemcpyDefault));
+                        nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, d_msgrate_sum, d_msgrate, 1);
+                        CUDA_CHECK(cudaMemcpy(&h_msgrate_total[i], d_msgrate_sum, sizeof(double),
+                                              cudaMemcpyDefault));
+                    }
                 }
-                if (!mype) perf_stats_add(h_bw_stats[i], bidirectional ? h_bw_total[i] : h_bw[i]);
+                if (!mype) {
+                    perf_stats_add(h_bw_stats[i], bidirectional ? h_bw_total[i] : h_bw[i]);
+                    if (report_msgrate)
+                        perf_stats_add(h_msgrate_stats[i],
+                                       bidirectional ? h_msgrate_total[i] : h_msgrate[i]);
+                }
             }
 
             i++;
@@ -194,6 +219,11 @@ int main(int argc, char *argv[]) {
         const char *const test_name = bidirectional ? "shmem_get_bw_bidi" : "shmem_get_bw_uni";
         print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, p_h_bw_tmp, i,
                           h_bw_stats);
+        if (report_msgrate) {
+            double *p_h_msgrate_tmp = bidirectional ? h_msgrate_total : h_msgrate;
+            print_basic_table(test_name, "None", "msgrate", "MMPS", '+', h_size_arr,
+                              p_h_msgrate_tmp, i, h_msgrate_stats);
+        }
     }
 
 finalize:
@@ -206,10 +236,14 @@ finalize:
         }
     }
     if (h_bw_total) free(h_bw_total);
+    if (h_msgrate_total) free(h_msgrate_total);
     free(h_bw_stats);
+    free(h_msgrate_stats);
     if (d_bw) nvshmem_free(d_bw);
     if (d_bw_sum) nvshmem_free(d_bw_sum);
-    free_tables(h_tables, 2);
+    if (d_msgrate) nvshmem_free(d_msgrate);
+    if (d_msgrate_sum) nvshmem_free(d_msgrate_sum);
+    if (h_tables) free_tables(h_tables, 3);
     finalize_wrapper();
 
     return 0;

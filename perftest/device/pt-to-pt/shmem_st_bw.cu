@@ -76,10 +76,12 @@ int main(int argc, char *argv[]) {
     int skip = warmup_iters;
 
     int array_size, i;
-    void **h_tables;
+    void **h_tables = NULL;
     uint64_t *h_size_arr;
     double *h_bw;
+    double *h_store_rate;
     perf_stats_t *h_bw_stats = NULL;
+    perf_stats_t *h_store_rate_stats = NULL;
 
     float milliseconds;
     cudaEvent_t start, stop;
@@ -98,11 +100,13 @@ int main(int argc, char *argv[]) {
     }
 
     array_size = max_size_log;
-    alloc_tables(&h_tables, 2, array_size);
+    alloc_tables(&h_tables, 3, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
+    h_store_rate = (double *)h_tables[2];
     h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_bw_stats) goto finalize;
+    h_store_rate_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
+    if (!h_bw_stats || !h_store_rate_stats) goto finalize;
 
     if (use_mmap) {
         data_d = (double *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -151,7 +155,10 @@ int main(int argc, char *argv[]) {
                 CUDA_CHECK(cudaEventSynchronize(stop));
                 cudaEventElapsedTime(&milliseconds, start, stop);
                 h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                // This benchmark issues direct peer stores rather than NVSHMEM messages.
+                h_store_rate[i] = calculate_msgrate(size / sizeof(double), iter, milliseconds);
                 perf_stats_add(h_bw_stats[i], h_bw[i]);
+                perf_stats_add(h_store_rate_stats[i], h_store_rate[i]);
                 nvshmem_barrier_all();
             }
             i++;
@@ -166,6 +173,9 @@ int main(int argc, char *argv[]) {
     if (mype == 0) {
         print_basic_table("shmem_st_bw", "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
                           h_bw_stats);
+        if (report_msgrate)
+            print_basic_table("shmem_st_bw", "None", "store_rate", "MOPS", '+', h_size_arr,
+                              h_store_rate, i, h_store_rate_stats);
     }
 
 finalize:
@@ -177,8 +187,9 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    free_tables(h_tables, 2);
+    if (h_tables) free_tables(h_tables, 3);
     free(h_bw_stats);
+    free(h_store_rate_stats);
     finalize_wrapper();
 
     return 0;

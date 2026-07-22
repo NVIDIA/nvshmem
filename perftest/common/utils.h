@@ -247,6 +247,7 @@ extern size_t max_size_log;
 extern size_t stride;
 extern size_t mem_handle_type;
 extern bool bidirectional;
+extern bool report_msgrate;
 
 extern void *nvml_handle;
 extern struct nvml_function_table nvml_ftable;
@@ -312,6 +313,7 @@ void alloc_tables(void ***table_mem, int num_tables, int num_entries_per_table);
 void free_tables(void **tables, int num_tables);
 uint64_t calculate_collective_size(const char *coll_name, uint64_t num_elems, uint64_t type_size,
                                    int npes);
+double calculate_msgrate(size_t messages_per_iteration, size_t iterations, float milliseconds);
 void print_basic_table(const char *job_name, const char *subjob_name, const char *output_var,
                        const char *units, const char plus_minus, uint64_t *size, double *value,
                        int num_entries, const perf_stats_t *stats = nullptr);

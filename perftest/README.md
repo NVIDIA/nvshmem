@@ -13,6 +13,6 @@ any given test will use only a subset of these options.
 * -i, --stride stride between elements 
 * -a, --atomic_op <inc, add, and, or, xor, set, swap, fetch_<inc, add, and, or, xor>, compare_swap> 
 * --bidir: run bidirectional test 
-* --msgrate: report message rate (MMPs)
+* --msgrate: report logical operation rate in bandwidth tests (MMPS for messaging, MOPS for stores)
 * --dir: <read, write> (whether to run put or get operations) 
 * --issue: <on_stream, host> (applicable in some host pt-to-pt tests) 

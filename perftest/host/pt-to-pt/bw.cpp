@@ -84,7 +84,9 @@ int main(int argc, char *argv[]) {
     int skip = warmup_iters;
     uint64_t *size_array = NULL;
     double *bandwidth_array = NULL;
+    double *msgrate_array = NULL;
     perf_stats_t *bandwidth_stats = NULL;
+    perf_stats_t *msgrate_stats = NULL;
     cudaStream_t strm = nullptr;
     int num_entries;
     int i;
@@ -117,6 +119,14 @@ int main(int argc, char *argv[]) {
         status = -1;
         goto finalize;
     }
+    if (report_msgrate) {
+        msgrate_array = (double *)calloc(sizeof(double), num_entries);
+        msgrate_stats = (perf_stats_t *)calloc(num_entries, sizeof(perf_stats_t));
+        if (!msgrate_array || !msgrate_stats) {
+            status = -1;
+            goto finalize;
+        }
+    }
     if (use_mmap) {
         data_d = (char *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
         data_d_local = (char *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -146,16 +156,22 @@ int main(int argc, char *argv[]) {
                    dir, strm, sev, eev, &ms, &us);
                 if (putget_issue.type == ON_STREAM) {
                     bandwidth_array[i] = ((float)iter * (float)size) / ((ms / 1000) * B_TO_GB);
+                    if (report_msgrate) msgrate_array[i] = calculate_msgrate(1, iter, ms);
                 } else {
                     bandwidth_array[i] = ((float)iter * (float)size) / ((us / 1000000) * B_TO_GB);
+                    if (report_msgrate) msgrate_array[i] = calculate_msgrate(1, iter, us / MS_TO_S);
                 }
                 perf_stats_add(bandwidth_stats[i], bandwidth_array[i]);
+                if (report_msgrate) perf_stats_add(msgrate_stats[i], msgrate_array[i]);
             }
             i++;
         }
 
         print_basic_table("Bandwidth", "None", "Bandwidth", "GB", '+', size_array, bandwidth_array,
                           i, bandwidth_stats);
+        if (report_msgrate)
+            print_basic_table("Bandwidth", "None", "msgrate", "MMPS", '+', size_array,
+                              msgrate_array, i, msgrate_stats);
         CUDA_CHECK(cudaEventDestroy(sev));
         CUDA_CHECK(cudaEventDestroy(eev));
 
@@ -177,6 +193,8 @@ finalize:
     if (size_array) free(size_array);
     if (bandwidth_array) free(bandwidth_array);
     if (bandwidth_stats) free(bandwidth_stats);
+    if (msgrate_array) free(msgrate_array);
+    if (msgrate_stats) free(msgrate_stats);
 
     if (data_d_local) {
         if (use_mmap) {
