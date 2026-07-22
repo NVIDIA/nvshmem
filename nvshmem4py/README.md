@@ -1,47 +1,52 @@
-NVSHMEM4Py Overview
-*******************
+# NVSHMEM4Py
 
-NVSHMEM4Py is a Python package that provides a Pythonic interface to NVSHMEM
+NVSHMEM4Py exposes NVSHMEM host, device, and on-stream interfaces to Python, with interoperability
+for CUDA Python, Numba, PyTorch, CuPy, and CuTe DSL.
 
-NVSHMEM4Py follows the NVSHMEM SLA. The details of the NVSHMEM SLA [is available here](https://docs.nvidia.com/nvshmem/api/sla.html).
+## Quick Start
 
-Quick Links
-****************
+Follow the [NVSHMEM4Py installation guide][install-guide] to install the package matching the CUDA
+major version. This example requires two supported GPUs on one Linux node and `mpi4py` built for the
+active MPI installation.
 
-NVSHMEM4Py is a component of NVSHMEM™. Please see the following public links for information on building and working wih NVSHMEM:
+From the repository root:
 
-[Project Homepage](https://developer.nvidia.com/nvshmem)
+```bash
+mpirun -np 2 python nvshmem4py/examples/hello.py
+```
 
-[Release Notes](https://docs.nvidia.com/nvshmem/release-notes-install-guide/release-notes/index.html)
+The output includes one line from each PE, in either order:
 
-[Installation Guide](https://docs.nvidia.com/nvshmem/release-notes-install-guide/install-guide/index.html)
+```text
+Hello from PE 0 of 2
+Hello from PE 1 of 2
+```
 
-[Best Practice Guide](https://docs.nvidia.com/nvshmem/release-notes-install-guide/best-practice-guide/index.html)
+The [example](examples/hello.py) selects one GPU per local MPI rank and initializes NVSHMEM from
+`MPI_COMM_WORLD`. See the main [NVSHMEM quick start](../README.md#quick-start) for platform
+requirements and the [launching guide][launching-guide] for other launchers.
 
-[API Documentation](https://docs.nvidia.com/nvshmem/api/index.html)
+## Building Wheels
 
-[Devzone Topic Page](https://forums.developer.nvidia.com/tag/nvshmem)
+Wheel targets are part of the NVSHMEM CMake build. See the
+[NVSHMEM4Py CMake configuration](CMakeLists.txt) for supported options and defaults. For example,
+to build a Python 3.12 wheel for CUDA 12:
 
-The maintainers of the NVSHMEM project can also be contacted by e-mail at nvshmem@nvidia.com
+```bash
+cmake -S . -B build \
+  -DNVSHMEM4PY_BUILD_ALL_WHEELS=OFF \
+  -DNVSHMEM4PY_PYTHON_VERSIONS=3.12 \
+  -DNVSHMEM4PY_CUDA_VERSIONS=12
+cmake --build build --target build_nvshmem4py_wheel_cu12_3.12
+```
 
-Wheel Build Configuration
-*************************
+The wheel is written to `build/dist/` and can be installed as described in the
+[NVSHMEM4Py installation guide][install-guide].
 
-By default, the build system discovers all Python versions >= 3.9 on the system and builds wheels for each one against CUDA 12 and 13. The following CMake options provide control over this behavior:
+## Examples
 
-- ``NVSHMEM4PY_BUILD_ALL_WHEELS`` (default: ``ON``) — When ``OFF``, wheels are not built automatically during ``ninja``. Individual targets like ``build_nvshmem4py_wheel_cu12_3.12`` remain available.
-- ``NVSHMEM4PY_PYTHON_VERSIONS`` — Semicolon-separated list of Python versions to build for (e.g., ``3.12`` or ``3.12;3.11``). When empty, all detected versions are used.
-- ``NVSHMEM4PY_CUDA_VERSIONS`` — Semicolon-separated list of CUDA major versions (e.g., ``12`` or ``12;13``). When empty, defaults to ``12;13``.
-- ``NVSHMEM4PY_PYTHON_EXECUTABLE_<major>_<minor>`` — Override the Python executable path for a specific version (e.g., ``-DNVSHMEM4PY_PYTHON_EXECUTABLE_3_12=/opt/venv/bin/python``).
+The [examples](examples/) cover host, device, on-stream, and framework-interoperability workflows.
+See the [main NVSHMEM README](../README.md) for additional documentation and project information.
 
-Example: build only a Python 3.12 / CUDA 12 wheel::
-
-    cmake -DNVSHMEM4PY_BUILD_ALL_WHEELS=OFF \
-          -DNVSHMEM4PY_PYTHON_VERSIONS="3.12" \
-          -DNVSHMEM4PY_CUDA_VERSIONS="12" ..
-    ninja build_nvshmem4py_wheel_cu12_3.12
-
-Example: build NVSHMEM core without any wheels::
-
-    cmake -DNVSHMEM4PY_BUILD_ALL_WHEELS=OFF ..
-    ninja
+[install-guide]: https://docs.nvidia.com/nvshmem/release-notes-install-guide/install-guide/nvshmem4py-install-proc.html
+[launching-guide]: https://docs.nvidia.com/nvshmem/release-notes-install-guide/install-guide/nvshmem-install-proc.html#launching-nvshmem-programs
