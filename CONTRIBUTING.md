@@ -22,7 +22,7 @@ To help ensure your contribution can be accepted smoothly:
 3. **Commit your Changes**: Commit and push into feature branch.
    ```bash
    git add <files-to-commit>
-   git commit -s --message <descriptive message, see below>
+   git commit -s --message "<descriptive message, see below>"
    git push origin <my-feature-branch> --set-upstream
    ```
 
