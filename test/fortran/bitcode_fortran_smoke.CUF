@@ -1,0 +1,49 @@
+! Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+! SPDX-License-Identifier: Apache-2.0
+!
+! Minimal CUDA Fortran device-API coverage adapted from Yu You's NVSHMEM
+! reduction test.  It intentionally has no host-side program: the companion
+! runner compiles this source with nvfortran, links the emitted device LLVM IR
+! with an NVSHMEM bitcode artifact, and lowers the result to a cubin.
+!
+! Keep the three variants below.  They cover the single-thread, warp, and block
+! collective entry points and make the CUDA Fortran module's C symbol spelling
+! part of the bitcode artifact contract.
+
+module nvshmem_fortran_bitcode_smoke
+contains
+
+attributes(global) subroutine int32_reduce_thread(team, dest, source, nreduce, retval)
+  use nvshmem
+  implicit none
+  integer(4), value :: team
+  integer(4), device :: dest(*), source(*)
+  integer(8), value :: nreduce
+  integer(4), device :: retval(*)
+
+  retval(1) = nvshmem_int32_sum_reduce(team, dest, source, nreduce)
+end subroutine
+
+attributes(global) subroutine int32_reduce_warp(team, dest, source, nreduce, retval)
+  use nvshmem
+  implicit none
+  integer(4), value :: team
+  integer(4), device :: dest(*), source(*)
+  integer(8), value :: nreduce
+  integer(4), device :: retval(*)
+
+  retval(1) = nvshmemx_int32_sum_reduce_warp(team, dest, source, nreduce)
+end subroutine
+
+attributes(global) subroutine int32_reduce_block(team, dest, source, nreduce, retval)
+  use nvshmem
+  implicit none
+  integer(4), value :: team
+  integer(4), device :: dest(*), source(*)
+  integer(8), value :: nreduce
+  integer(4), device :: retval(*)
+
+  retval(1) = nvshmemx_int32_sum_reduce_block(team, dest, source, nreduce)
+end subroutine
+
+end module nvshmem_fortran_bitcode_smoke
