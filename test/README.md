@@ -1,10 +1,41 @@
-# Contributing to NVSHMEM tests 
+# NVSHMEM Tests
 
-## What is an unit test ?
-A unit-test under `test/unit` is limited to testing 1 top-level `nvshmem` internal API and mocking rest of the code/framework to bootstrap/teardown the aforementioned API to run either on bare-metal env or in a namespaced env (docker, VM, etc) with installed dependencies. Typically, these are rarely to never ran on GPU/NIC device. The test could include or depend directly on any nvshmem internal header files.
+The NVSHMEM test suite covers host and device APIs, initialization, transports, and
+interoperability with GPU libraries.
 
-## What is a functional test ?
-A functional-test under `test/functional` is limited to testing N top-level `nvshmem` external APIs of a given library. Typically, this should rarely to never demand mocking rest of the code/framework to bootstrap/teardown the aforementioned APIs and would run on a bare-metal env on one or multiple CPU/GPU/NIC devices (single or multi-node). The test must not include or depend directly on any nvshmem internal header file or sources.
+## Test Layout
 
-## What is an integration test ?
-A integration-test under `test/integration` is limited to testing N x M top-level `nvshmem` and other consumer libraries API/interfaces. Typically, this should rarely to never demand mocking rest of the code in its neighbourhood and would run on a bare-metal env on one or multiple CPU/GPU/NIC devices (single or multi-node). Similar to functional test, it must not include or depend directly on any nvshmem internal header file or sources.
+- `host/`: Host and on-stream API tests.
+- `device/`: CUDA kernel API tests.
+- `apps/`: Application and interoperability tests.
+- `common/`: Shared infrastructure and command-line handling.
+- `unit/`: Unit tests for internal components.
+
+Most tests exercise installed NVSHMEM interfaces; bootstrap and unit tests may use internal
+headers.
+
+## Building
+
+The test suite is built by default with NVSHMEM (`NVSHMEM_BUILD_TESTS=ON`). To build it separately
+against an existing NVSHMEM installation, configure it from the repository root with
+`NVSHMEM_PREFIX` set to that installation:
+
+```bash
+export NVSHMEM_TEST_INSTALL="$PWD/test/test_install"
+
+cmake -S test -B test/build -DNVSHMEM_PREFIX="$NVSHMEM_PREFIX"
+cmake --build test/build --parallel
+cmake --install test/build
+```
+
+## Running Tests
+
+Installed executables retain the source hierarchy under `NVSHMEM_TEST_INSTALL`. Use the launcher
+pattern from the main README's [verification example](../README.md#verify-the-installation),
+replacing the perftest command and options with the selected test binary.
+
+## Adding a Test
+
+Add new tests to the matching interface directory and its `CMakeLists.txt`. Reuse `common/` for
+initialization, options, and result reporting. Tests must run non-interactively and return a
+nonzero status on failure.
