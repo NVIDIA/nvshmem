@@ -48,6 +48,7 @@ project(
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
 include(NVSHMEMCxxStandard)
+include(NVSHMEMFilePrefixMap)
 nvshmem_apply_file_prefix_maps()
 
 add_subdirectory(common)

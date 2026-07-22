@@ -12,6 +12,7 @@ set(CMAKE_C_STANDARD_REQUIRED On)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_config")
 include(NVSHMEMVersioning)
 include(NVSHMEMCxxStandard)
+include(NVSHMEMFilePrefixMap)
 
 include(NVSHMEMEnv)
 include(CMakePackageConfigHelpers)

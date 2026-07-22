@@ -1080,6 +1080,8 @@ endforeach(SHARE ${BOOTSTRAP_CMAKE_EXPORTS})
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMCxxStandard.cmake
                ${CMAKE_CURRENT_BINARY_DIR}/share/src/bootstrap-plugins/cmake_config/NVSHMEMCxxStandard.cmake COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMFilePrefixMap.cmake
+               ${CMAKE_CURRENT_BINARY_DIR}/share/src/bootstrap-plugins/cmake_config/NVSHMEMFilePrefixMap.cmake COPYONLY)
 
 configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
                ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/nvshmem_transport.sym COPYONLY)
@@ -1154,6 +1156,8 @@ file(COPY ${CMAKE_SOURCE_DIR}/externals/gpunetio/CMakeLists.txt
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMCxxStandard.cmake
                ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/cmake_config/NVSHMEMCxxStandard.cmake COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/cmake_config/NVSHMEMFilePrefixMap.cmake
+               ${CMAKE_CURRENT_BINARY_DIR}/share/src/transport-plugins/cmake_config/NVSHMEMFilePrefixMap.cmake COPYONLY)
 # end share configuration
 
 # start custom builds for nvshmem packages
