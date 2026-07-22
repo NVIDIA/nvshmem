@@ -233,6 +233,10 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
     return true;
 }
 
+/* Count logical NVSHMEM put calls issued by the selected threadgroup scope.
+ * This is not a hardware transaction count: on NVLink the on-wire stores
+ * depend on transfer size and transport/coalescing behavior that this
+ * benchmark cannot observe. */
 static size_t put_messages_per_iteration(size_t blocks, size_t threads, threadgroup_scope_t scope) {
     switch (scope.type) {
         case NVSHMEM_THREAD:

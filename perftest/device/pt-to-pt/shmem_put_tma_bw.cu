@@ -115,7 +115,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
 
 /* One TMA put is issued for every shared-memory-sized chunk assigned to a CTA.
  * Account for the uneven final partition so the reported rate reflects the
- * number of logical TMA operations rather than the number of bytes. */
+ * number of logical TMA operations rather than the number of bytes.  TMA can
+ * translate a request into hardware-dependent memory transactions; this
+ * benchmark has no visibility into that on-wire transaction count. */
 static size_t tma_messages_per_iteration(size_t bytes, int num_blocks, int smem_size) {
     if (num_blocks <= 0 || smem_size <= 0) return 0;
 
