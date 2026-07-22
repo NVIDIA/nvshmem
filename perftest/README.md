@@ -1,18 +1,29 @@
-Performance tests accept command line arguments. Below is the full list of options, 
-any given test will use only a subset of these options.
-* -b, --min_size <minbytes> 
-* -e, --max_size <maxbytes> 
-* -f, --step <step factor for message sizes> 
-* -n, --iters <number of iterations> 
-* -w, --warmup_iters <number of warmup iterations> 
-* -c, --ctas <number of CTAs to launch> (used in some device pt-to-pt tests) 
-* -t, --threads_per_cta <number of threads per block> (used in some device pt-to-pt tests) 
-* -d, --datatype: <int, int32_t, uint32_t, int64_t, uint64_t, long, longlong, ulonglong, size, ptrdiff, float, double, fp16, bf16> 
-* -o, --reduce_op <min, max, sum, prod, and, or, xor> 
-* -s, --scope <thread, warp, block, all> 
-* -i, --stride stride between elements 
-* -a, --atomic_op <inc, add, and, or, xor, set, swap, fetch_<inc, add, and, or, xor>, compare_swap> 
-* --bidir: run bidirectional test 
-* --msgrate: report logical operation rate in bandwidth tests (MMPS for messaging, MOPS for stores)
-* --dir: <read, write> (whether to run put or get operations) 
-* --issue: <on_stream, host> (applicable in some host pt-to-pt tests) 
+# NVSHMEM Performance Tests
+
+The NVSHMEM performance tests measure latency, bandwidth, and message rate for host- and
+device-initiated operations.
+
+## Building
+
+The performance tests are built by default with NVSHMEM (`NVSHMEM_BUILD_TESTS=ON`). To build them
+separately against an existing NVSHMEM installation, configure them from the repository root with
+`NVSHMEM_PREFIX` set to that installation:
+
+```bash
+export NVSHMEM_PERFTEST_INSTALL="$PWD/perftest/perftest_install"
+
+cmake -S perftest -B perftest/build -DNVSHMEM_PREFIX="$NVSHMEM_PREFIX"
+cmake --build perftest/build --parallel
+cmake --install perftest/build
+```
+
+## Running Performance Tests
+
+Installed executables retain the source hierarchy under `NVSHMEM_PERFTEST_INSTALL`. Reuse the main
+README's [verification command](../README.md#verify-the-installation), replacing the binary with
+`$NVSHMEM_PERFTEST_INSTALL/device/pt-to-pt/shmem_put_bw`.
+
+## Command-Line Options
+
+Run an executable with `--help` for its options. The common parser and help text are defined in
+[`common/utils.cu`](common/utils.cu); each test uses only the applicable options.
