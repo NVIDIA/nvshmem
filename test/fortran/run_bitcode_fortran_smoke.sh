@@ -7,15 +7,18 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 source_file="${NVSHMEM_FORTRAN_BITCODE_SOURCE:-${script_dir}/bitcode_fortran_smoke.CUF}"
+runtime_source="${NVSHMEM_FORTRAN_BITCODE_RUNTIME_SOURCE:-${script_dir}/bitcode_fortran_runtime.cpp}"
 bitcode="${NVSHMEM_FORTRAN_BITCODE_FILE:?NVSHMEM_FORTRAN_BITCODE_FILE is required}"
 arch="${NVSHMEM_FORTRAN_BITCODE_ARCH:-80}"
 symbols="${NVSHMEM_FORTRAN_BITCODE_SYMBOLS:-nvshmem_int32_sum_reduce nvshmemx_int32_sum_reduce_warp nvshmemx_int32_sum_reduce_block nvshmem_int32_put nvshmemx_int32_put_warp nvshmemx_int32_put_block}"
+nvshmem_home="${NVSHMEM_FORTRAN_RUNTIME_HOME:-${NVSHMEM_HOME:?NVSHMEM_HOME is required for the runtime smoke}}"
 
 nvfortran="${NVFORTRAN:-nvfortran}"
 llvm_link="${LLVM_LINK:-llvm-link}"
 llvm_nm="${LLVM_NM:-llvm-nm}"
 llvm_opt="${LLVM_OPT:-opt}"
 llc="${LLC:-llc}"
+nvcc="${NVCC:-nvcc}"
 if [ -n "${PTXAS:-}" ]; then
     ptxas=$PTXAS
 elif [ -n "${CUDA_HOME:-}" ]; then
@@ -38,10 +41,14 @@ require_tool() {
 }
 
 require_file "$source_file" "CUDA Fortran source"
+require_file "$runtime_source" "runtime harness source"
 require_file "$bitcode" "bitcode artifact"
+require_file "$nvshmem_home/include/nvshmem.h" "NVSHMEM headers"
+require_file "$nvshmem_home/lib/libnvshmem_host.so" "NVSHMEM host library"
+require_file "$nvshmem_home/lib/libnvshmem_device.a" "NVSHMEM device library"
 [[ "$arch" =~ ^[0-9]+$ ]] || die "NVSHMEM_FORTRAN_BITCODE_ARCH must be numeric: $arch"
 
-for tool in "$nvfortran" "$llvm_link" "$llvm_nm" "$llvm_opt" "$llc" "$ptxas"; do
+for tool in "$nvfortran" "$nvcc" "$llvm_link" "$llvm_nm" "$llvm_opt" "$llc" "$ptxas"; do
     require_tool "$tool"
 done
 
@@ -92,5 +99,9 @@ done
 "$llvm_opt" --passes='internalize,inline,mem2reg' linked.bc -o optimized.bc
 "$llc" -mcpu="sm_${arch}" -mattr="$ptx_feature" optimized.bc -o linked.ptx
 "$ptxas" -arch="sm_${arch}" linked.ptx -o linked.cubin
+"$nvcc" -std=c++17 "$runtime_source" -I "$nvshmem_home/include" -L "$nvshmem_home/lib" \
+    -Xlinker -rpath -Xlinker "$nvshmem_home/lib" -lnvshmem_host -lnvshmem_device -lcuda \
+    -o bitcode_fortran_runtime
+./bitcode_fortran_runtime linked.cubin
 
-echo "PASS: CUDA Fortran device IR links and lowers with $bitcode (sm_${arch})"
+echo "PASS: CUDA Fortran device IR links, lowers, and runs with $bitcode (sm_${arch})"
