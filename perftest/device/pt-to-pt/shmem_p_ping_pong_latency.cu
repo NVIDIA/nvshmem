@@ -168,6 +168,8 @@ int main(int argc, char *argv[]) {
             } else {
                 CUDA_CHECK(cudaMemset(flag_d, 0, sizeof(uint64_t)));
             }
+            CUDA_CHECK(cudaDeviceSynchronize());
+            nvshmem_barrier_all();
             cudaEventRecord(start);
             test_ping_pong(args_2, test_cubin, 0);
             if (status != NVSHMEMX_SUCCESS) {
