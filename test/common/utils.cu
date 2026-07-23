@@ -205,6 +205,8 @@ nvshmemBootstrapMPI::nvshmemBootstrapMPI(int *c, char ***v)
         nvshmemx_init_attr_t attr = NVSHMEMX_INIT_ATTR_INITIALIZER;
         attr.mpi_comm = &mpi_comm;
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr);
+        mype = nvshmem_my_pe();
+        npes = nvshmem_n_pes();
         DEBUG_PRINT("NVSHMEM: [%d of %d] MPI Bootstrap! \n", rank, nranks);
         /* Good to go */
 #else
@@ -236,6 +238,8 @@ nvshmemBootstrapUID::nvshmemBootstrapUID(int *c, char ***v)
         nvshmemx_set_attr_uniqueid_args(rank, nranks, &id, &attr);
         select_device_pre_init(rank);
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
+        mype = nvshmem_my_pe();
+        npes = nvshmem_n_pes();
         DEBUG_PRINT("NVSHMEM: [%d of %d] UID Bootstrap! \n", rank, nranks);
         /* good to go */
 #else
