@@ -9,7 +9,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source_file="${NVSHMEM_FORTRAN_BITCODE_SOURCE:-${script_dir}/bitcode_fortran_smoke.CUF}"
 bitcode="${NVSHMEM_FORTRAN_BITCODE_FILE:?NVSHMEM_FORTRAN_BITCODE_FILE is required}"
 arch="${NVSHMEM_FORTRAN_BITCODE_ARCH:-80}"
-symbols="${NVSHMEM_FORTRAN_BITCODE_SYMBOLS:-nvshmem_int32_sum_reduce nvshmemx_int32_sum_reduce_warp nvshmemx_int32_sum_reduce_block}"
+symbols="${NVSHMEM_FORTRAN_BITCODE_SYMBOLS:-nvshmem_int32_sum_reduce nvshmemx_int32_sum_reduce_warp nvshmemx_int32_sum_reduce_block nvshmem_int32_put nvshmemx_int32_put_warp nvshmemx_int32_put_block}"
 
 nvfortran="${NVFORTRAN:-nvfortran}"
 llvm_link="${LLVM_LINK:-llvm-link}"

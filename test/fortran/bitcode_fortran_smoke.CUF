@@ -6,11 +6,31 @@
 ! runner compiles this source with nvfortran, links the emitted device LLVM IR
 ! with an NVSHMEM bitcode artifact, and lowers the result to a cubin.
 !
-! Keep the three variants below.  They cover the single-thread, warp, and block
-! collective entry points and make the CUDA Fortran module's C symbol spelling
-! part of the bitcode artifact contract.
+! The kernels cover single-thread, warp, and block entry points and make the
+! CUDA Fortran module's C symbol spelling part of the bitcode artifact contract.
 
 module nvshmem_fortran_bitcode_smoke
+
+interface
+  attributes(device) subroutine direct_nvshmem_int32_put(dest, source, nelems, pe) bind(C, name="nvshmem_int32_put")
+    integer(4), device :: dest(*), source(*)
+    integer(8), value :: nelems
+    integer(4), value :: pe
+  end subroutine
+
+  attributes(device) subroutine direct_nvshmemx_int32_put_warp(dest, source, nelems, pe) bind(C, name="nvshmemx_int32_put_warp")
+    integer(4), device :: dest(*), source(*)
+    integer(8), value :: nelems
+    integer(4), value :: pe
+  end subroutine
+
+  attributes(device) subroutine direct_nvshmemx_int32_put_block(dest, source, nelems, pe) bind(C, name="nvshmemx_int32_put_block")
+    integer(4), device :: dest(*), source(*)
+    integer(8), value :: nelems
+    integer(4), value :: pe
+  end subroutine
+end interface
+
 contains
 
 attributes(global) subroutine int32_reduce_thread(team, dest, source, nreduce, retval)
@@ -44,6 +64,36 @@ attributes(global) subroutine int32_reduce_block(team, dest, source, nreduce, re
   integer(4), device :: retval(*)
 
   retval(1) = nvshmemx_int32_sum_reduce_block(team, dest, source, nreduce)
+end subroutine
+
+attributes(global) subroutine int32_put_thread(dest, source, nelems, pe)
+  use nvshmem
+  implicit none
+  integer(4), device :: dest(*), source(*)
+  integer(8), value :: nelems
+  integer(4), value :: pe
+
+  call direct_nvshmem_int32_put(dest, source, nelems, pe)
+end subroutine
+
+attributes(global) subroutine int32_put_warp(dest, source, nelems, pe)
+  use nvshmem
+  implicit none
+  integer(4), device :: dest(*), source(*)
+  integer(8), value :: nelems
+  integer(4), value :: pe
+
+  call direct_nvshmemx_int32_put_warp(dest, source, nelems, pe)
+end subroutine
+
+attributes(global) subroutine int32_put_block(dest, source, nelems, pe)
+  use nvshmem
+  implicit none
+  integer(4), device :: dest(*), source(*)
+  integer(8), value :: nelems
+  integer(4), value :: pe
+
+  call direct_nvshmemx_int32_put_block(dest, source, nelems, pe)
 end subroutine
 
 end module nvshmem_fortran_bitcode_smoke
