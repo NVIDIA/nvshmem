@@ -1,0 +1,187 @@
+! Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+! SPDX-License-Identifier: Apache-2.0
+
+program bitcode_fortran_runtime
+  use iso_c_binding
+  implicit none
+
+  integer(c_int), parameter :: cuda_success = 0
+  integer(c_int), parameter :: cuda_memcpy_host_to_device = 1
+  integer(c_int), parameter :: cuda_memcpy_device_to_host = 2
+  integer(c_int), target :: expected = 42, received = 0
+  integer(c_int) :: device_count, status
+  integer(c_int), target :: pe
+  integer(c_long_long), target :: nelems
+  integer :: argument_length, i
+  character(len=:), allocatable :: cubin
+  character(kind=c_char), allocatable, target :: cubin_c(:), kernel_c(:)
+  type(c_ptr), target :: kernel_args(4)
+  type(c_ptr) :: module, kernel, dest, source
+
+  interface
+    integer(c_int) function cuModuleLoad(module, filename) bind(C, name="cuModuleLoad")
+      import :: c_int, c_ptr, c_char
+      type(c_ptr) :: module
+      character(kind=c_char) :: filename(*)
+    end function
+
+    integer(c_int) function cuModuleGetFunction(kernel, module, name) bind(C, name="cuModuleGetFunction")
+      import :: c_int, c_ptr, c_char
+      type(c_ptr) :: kernel
+      type(c_ptr), value :: module
+      character(kind=c_char) :: name(*)
+    end function
+
+    integer(c_int) function cuLaunchKernel(kernel, gx, gy, gz, bx, by, bz, shared, stream, args, extra) &
+        bind(C, name="cuLaunchKernel")
+      import :: c_int, c_ptr
+      type(c_ptr), value :: kernel, stream, args, extra
+      integer(c_int), value :: gx, gy, gz, bx, by, bz, shared
+    end function
+
+    integer(c_int) function cuModuleUnload(module) bind(C, name="cuModuleUnload")
+      import :: c_int, c_ptr
+      type(c_ptr), value :: module
+    end function
+
+    integer(c_int) function nvshmemx_cumodule_init(module) bind(C, name="nvshmemx_cumodule_init")
+      import :: c_int, c_ptr
+      type(c_ptr), value :: module
+    end function
+
+    integer(c_int) function nvshmemx_cumodule_finalize(module) bind(C, name="nvshmemx_cumodule_finalize")
+      import :: c_int, c_ptr
+      type(c_ptr), value :: module
+    end function
+
+    integer(c_int) function nvshmemx_hostlib_init_attr_c(flags, attr) &
+        bind(C, name="nvshmemx_hostlib_init_attr")
+      import :: c_int, c_ptr
+      integer(c_int), value :: flags
+      type(c_ptr), value :: attr
+    end function
+
+    integer(c_int) function nvshmem_my_pe_c() bind(C, name="nvshmem_my_pe")
+      import :: c_int
+    end function
+
+    subroutine nvshmemx_hostlib_finalize_c() bind(C, name="nvshmemx_hostlib_finalize")
+    end subroutine
+
+    type(c_ptr) function nvshmem_malloc_c(bytes) bind(C, name="nvshmem_malloc")
+      import :: c_ptr, c_size_t
+      integer(c_size_t), value :: bytes
+    end function
+
+    subroutine nvshmem_free_c(ptr) bind(C, name="nvshmem_free")
+      import :: c_ptr
+      type(c_ptr), value :: ptr
+    end subroutine
+
+    integer(c_int) function cudaMemcpy_c(dest, source, bytes, kind) bind(C, name="cudaMemcpy")
+      import :: c_int, c_ptr, c_size_t
+      type(c_ptr), value :: dest, source
+      integer(c_size_t), value :: bytes
+      integer(c_int), value :: kind
+    end function
+
+    integer(c_int) function cudaMemset_c(dest, value, bytes) bind(C, name="cudaMemset")
+      import :: c_int, c_ptr, c_size_t
+      type(c_ptr), value :: dest
+      integer(c_int), value :: value
+      integer(c_size_t), value :: bytes
+    end function
+
+    integer(c_int) function cudaGetDeviceCount_c(count) bind(C, name="cudaGetDeviceCount")
+      import :: c_int
+      integer(c_int) :: count
+    end function
+
+    integer(c_int) function cudaSetDevice_c(device) bind(C, name="cudaSetDevice")
+      import :: c_int
+      integer(c_int), value :: device
+    end function
+
+    integer(c_int) function cudaDeviceSynchronize_c() bind(C, name="cudaDeviceSynchronize")
+      import :: c_int
+    end function
+
+  end interface
+
+  call get_command_argument(1, length=argument_length)
+  if (argument_length == 0) error stop "usage: bitcode_fortran_runtime <cubin>"
+  allocate(character(len=argument_length) :: cubin)
+  call get_command_argument(1, cubin)
+  call c_string(cubin, cubin_c)
+  call c_string("nvshmem_fortran_bitcode_put", kernel_c)
+
+  status = nvshmemx_hostlib_init_attr_c(0_c_int, c_null_ptr)
+  if (status /= 0) error stop "nvshmemx_hostlib_init_attr failed"
+  status = cudaGetDeviceCount_c(device_count)
+  call check_cuda(status, "cudaGetDeviceCount")
+  if (device_count == 0) error stop "no CUDA devices available"
+  status = cudaSetDevice_c(0_c_int)
+  call check_cuda(status, "cudaSetDevice")
+
+  status = cuModuleLoad(module, cubin_c)
+  call check_cuda(status, "cuModuleLoad")
+  status = nvshmemx_cumodule_init(module)
+  if (status /= 0) error stop "nvshmemx_cumodule_init failed"
+  status = cuModuleGetFunction(kernel, module, kernel_c)
+  call check_cuda(status, "cuModuleGetFunction")
+
+  dest = nvshmem_malloc_c(c_sizeof(expected))
+  source = nvshmem_malloc_c(c_sizeof(expected))
+  if (.not. c_associated(dest) .or. .not. c_associated(source)) error stop "nvshmem_malloc failed"
+  status = cudaMemcpy_c(source, c_loc(expected), c_sizeof(expected), cuda_memcpy_host_to_device)
+  call check_cuda(status, "cudaMemcpy source")
+  status = cudaMemset_c(dest, 0_c_int, c_sizeof(expected))
+  call check_cuda(status, "cudaMemset dest")
+
+  nelems = 1
+  pe = nvshmem_my_pe_c()
+  kernel_args = [c_loc(dest), c_loc(source), c_loc(nelems), c_loc(pe)]
+  status = cuLaunchKernel(kernel, 1_c_int, 1_c_int, 1_c_int, 1_c_int, 1_c_int, 1_c_int, &
+                           0_c_int, c_null_ptr, c_loc(kernel_args(1)), c_null_ptr)
+  call check_cuda(status, "cuLaunchKernel")
+  status = cudaDeviceSynchronize_c()
+  call check_cuda(status, "cudaDeviceSynchronize")
+  status = cudaMemcpy_c(c_loc(received), dest, c_sizeof(received), cuda_memcpy_device_to_host)
+  call check_cuda(status, "cudaMemcpy result")
+
+  call nvshmem_free_c(dest)
+  call nvshmem_free_c(source)
+  status = nvshmemx_cumodule_finalize(module)
+  if (status /= 0) error stop "nvshmemx_cumodule_finalize failed"
+  status = cuModuleUnload(module)
+  call check_cuda(status, "cuModuleUnload")
+  call nvshmemx_hostlib_finalize_c()
+
+  if (received /= expected) error stop "put result mismatch"
+  print *, "PASS: CUDA Fortran cubin loaded, initialized, and executed an NVSHMEM put"
+
+contains
+
+  subroutine c_string(string, output)
+    character(len=*), intent(in) :: string
+    character(kind=c_char), allocatable, target, intent(out) :: output(:)
+    integer :: index
+
+    allocate(output(len_trim(string) + 1))
+    do index = 1, len_trim(string)
+      output(index) = string(index:index)
+    end do
+    output(len_trim(string) + 1) = c_null_char
+  end subroutine
+
+  subroutine check_cuda(code, operation)
+    integer(c_int), intent(in) :: code
+    character(len=*), intent(in) :: operation
+
+    if (code /= cuda_success) then
+      print *, trim(operation), " failed with CUDA status ", code
+      error stop
+    end if
+  end subroutine
+
+end program bitcode_fortran_runtime
