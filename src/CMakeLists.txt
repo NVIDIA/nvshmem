@@ -1,4 +1,4 @@
-# this requires cmake 3.19
+# CMake 3.20 is required by the top-level CMakeLists.txt.
 include(CheckCompilerFlag)
 include(CheckSourceCompiles)
 include(ExternalProject)

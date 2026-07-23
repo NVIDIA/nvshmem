@@ -1,5 +1,5 @@
 # Allow users to set the CUDA toolkit through the env.
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.20)
 
 include(CMakePackageConfigHelpers)
 
