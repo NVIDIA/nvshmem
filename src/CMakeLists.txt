@@ -145,6 +145,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   foreach(ARCH IN LISTS BITCODE_LIB_ARCHS)
     string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
     set(ARCH_BC_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.bc)
+    set(ARCH_BC_DEPFILE ${ARCH_BC_FILE}.d)
 
     if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
       set(ARCH_OPT_COMMAND cp libnvshmem_device_${ARCH}.bc.unoptimized libnvshmem_device_${ARCH}.bc)
@@ -155,7 +156,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     endif()
 
     add_custom_command(OUTPUT ${ARCH_BC_FILE}
-                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${NVSHMEM_FILE_PREFIX_MAP_FLAGS} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${NVSHMEM_FILE_PREFIX_MAP_FLAGS} -MMD -MF ${ARCH_BC_DEPFILE} -MT ${ARCH_BC_FILE} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                       --cuda-gpu-arch=${ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                       -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
                       ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
@@ -166,7 +167,8 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
                       COMMAND llvm::llvm-as libnvshmem_device_${ARCH}.ll.new -o ${ARCH_BC_FILE}
                       COMMAND rm libnvshmem_device_${ARCH}.bc.unoptimized libnvshmem_device_${ARCH}.ll libnvshmem_device_${ARCH}.ll.new libnvshmem_device_${ARCH}.bc
                       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
-                      DEPENDS device/init/init_device.cu)
+                      DEPENDS device/init/init_device.cu
+                      DEPFILE ${ARCH_BC_DEPFILE})
 
     list(APPEND BITCODE_ARCH_BC_FILES ${ARCH_BC_FILE})
   endforeach()
@@ -241,16 +243,18 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   foreach(ARCH IN LISTS LTOIR_LIB_ARCHS)
     string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
     set(ARCH_LTOIR_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir)
+    set(ARCH_LTOIR_DEPFILE ${ARCH_LTOIR_FILE}.d)
 
     add_custom_command(
       OUTPUT ${ARCH_LTOIR_FILE}
-      COMMAND cuda::nvcc ${NVSHMEM_CUDA_FILE_PREFIX_MAP_FLAGS} -std=${LTOIR_CXX_STD} -arch=${ARCH} -dlto --ltoir
+      COMMAND cuda::nvcc ${NVSHMEM_CUDA_FILE_PREFIX_MAP_FLAGS} -MMD -MF ${ARCH_LTOIR_DEPFILE} -MT ${ARCH_LTOIR_FILE} -std=${LTOIR_CXX_STD} -arch=${ARCH} -dlto --ltoir
               -I ${CMAKE_CURRENT_SOURCE_DIR}/include
               ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
               -DNVSHMEM_BUILD_LTOIR_LIBRARY
               -o ${ARCH_LTOIR_FILE}
               ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu
       DEPENDS device/init/init_device.cu
+      DEPFILE ${ARCH_LTOIR_DEPFILE}
       VERBATIM
     )
 
