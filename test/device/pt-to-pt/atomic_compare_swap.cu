@@ -94,9 +94,9 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_COMPARE_SWAP_KERNEL, ATOMIC_COMPARE_SWA
         TYPE new_value;                                                                     \
         TYPE old_value;                                                                     \
         bool match;                                                                         \
-        remote_h = (TYPE)0x060F0F0F0F0F0F0Full;                                             \
-        old_value = (TYPE)0x060F0F0F0F0F0F0Full;                                            \
-        new_value = (TYPE)0x60F0F0F0F0F0F0F0ull;                                            \
+        remote_h = (TYPE)0x0123456789ABCDEFull;                                             \
+        old_value = (TYPE)0x0123456789ABCDEFull;                                            \
+        new_value = (TYPE)0x1234567812345678ull;                                            \
         match = true;                                                                       \
         CUDA_CHECK(cudaMemcpy(remote, &remote_h, sizeof(TYPE), cudaMemcpyHostToDevice));    \
         nvshmem_barrier_all();                                                              \
@@ -107,8 +107,8 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_COMPARE_SWAP_KERNEL, ATOMIC_COMPARE_SWA
                                                               match);                       \
         }                                                                                   \
         cudaDeviceSynchronize();                                                            \
-        old_value = (TYPE)0x060D0D0D0D0D0D0Dull;                                            \
-        new_value = (TYPE)0x1111111111111111ull;                                            \
+        old_value = (TYPE)0x23456789ABCDEF0Full;                                            \
+        new_value = (TYPE)0x2345678923456789ull;                                            \
         match = false;                                                                      \
         nvshmem_barrier_all();                                                              \
         if (use_cubin) {                                                                    \
