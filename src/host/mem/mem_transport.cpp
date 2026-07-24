@@ -368,16 +368,22 @@ int nvshmemi_mem_remote_transport::register_mem_handle(nvshmem_mem_handle_t *loc
 
 int nvshmemi_mem_remote_transport::release_mem_handles(nvshmem_mem_handle_t *handles,
                                                        const nvshmemi_transport_view &transports) {
-    int status = 0;
+    int first_status = NVSHMEMX_SUCCESS;
     NVSHMEMU_FOR_EACH_IF(i, transports.num_transports(),
                          transports.is_active(i) && transports.supports_release_mem(i), {
                              if (!is_mem_handle_null(&handles[i])) {
-                                 status = transports.transport(i)->host_ops.release_mem_handle(
+                                 int status = transports.transport(i)->host_ops.release_mem_handle(
                                      &handles[i], transports.transport(i));
-                                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                                       "transport release memhandle failed \n");
+                                 if (status == NVSHMEMX_SUCCESS) {
+                                     memset(&handles[i], 0, sizeof(handles[i]));
+                                 } else {
+                                     if (first_status == NVSHMEMX_SUCCESS) first_status = status;
+                                     NVSHMEMI_ERROR_PRINT(
+                                         "transport %llu failed to release memory handle "
+                                         "(status=%d)",
+                                         static_cast<unsigned long long>(i), status);
+                                 }
                              }
                          });
-out:
-    return status;
+    return first_status;
 }

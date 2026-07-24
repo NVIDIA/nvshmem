@@ -481,8 +481,8 @@ int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* 
             }
         }
     } else {
-        status = remotetran.gather_mem_handles(
-            transports_, gathered.data(), ((char *)buf - (char *)geometry_.heap_base), size);
+        status = remotetran.gather_mem_handles(transports_, gathered.data(),
+                                               ((char *)buf - (char *)geometry_.heap_base), size);
     }
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gather_mem_handles failed\n");
 
