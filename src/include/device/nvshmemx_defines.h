@@ -80,9 +80,9 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * staging path that additionally requires at least two full warps in the CTA;
  * smaller CTAs fall back to P2P stores.
  *
- * Note: grids larger than NVSHMEMI_TMA_MAX_BLOCKS CTAs are supported, but
- * CTAs with block_id >= NVSHMEMI_TMA_MAX_BLOCKS cannot register and will
- * fall back to P2P stores.
+ * Note: grids larger than NVSHMEM_TMA_MAX_BLOCKS CTAs are supported, but CTAs
+ * beyond that runtime-configured limit cannot register and will fall back to
+ * P2P stores.
  *
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
@@ -96,7 +96,7 @@ __device__ inline void nvshmemx_give_smem(void *smem, size_t size) {
     uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
     size_t *smem_size = nvshmemi_device_state_d.tma_smem_size;
     if (bases == NULL || (size_t)block_id >= nvshmemi_device_state_d.tma_smem_bases_len) {
-        /* Grid is larger than NVSHMEMI_TMA_MAX_BLOCKS; this CTA cannot use TMA. */
+        /* This CTA exceeds the configured TMA block limit and cannot use TMA. */
         return;
     }
     /* Size must be at least NVSHMEMI_SMEM_DATA_REGION_OFFSET — we reserve the

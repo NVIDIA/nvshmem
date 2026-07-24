@@ -274,8 +274,6 @@ typedef enum {
     NVSHMEMX_SMEM_AMOUNT_MAX = INT_MAX
 } nvshmemx_smem_amount_t;
 
-#define NVSHMEMI_TMA_MAX_BLOCKS 4096
-
 typedef struct {
     int version;
     nvshmemx_uniqueid_args_t uid_args;

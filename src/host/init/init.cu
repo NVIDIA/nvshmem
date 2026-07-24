@@ -2039,9 +2039,20 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     /* Allocate the per-CTA smem base table and the shared smem size scalar for TMA. */
     if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
+        /* Cap the TMA_MAX_BLOCKS to prevent unreasonably large runtime configurations. */
+        constexpr size_t tma_bases_max_alloc_size = 1 << 20;
+        constexpr size_t tma_max_blocks = tma_bases_max_alloc_size / sizeof(uintptr_t);
+        if (nvshmemi_options.TMA_MAX_BLOCKS == 0 ||
+            nvshmemi_options.TMA_MAX_BLOCKS > tma_max_blocks) {
+            NVSHMEMI_ERROR_PRINT("NVSHMEM_TMA_MAX_BLOCKS must be between 1 and %zu.\n",
+                                 tma_max_blocks);
+            status = NVSHMEMX_ERROR_INVALID_VALUE;
+            goto out;
+        }
+
         uintptr_t *tma_smem_bases_dptr = NULL;
         size_t *tma_smem_size_dptr = NULL;
-        size_t tma_bases_alloc_size = NVSHMEMI_TMA_MAX_BLOCKS * sizeof(uintptr_t);
+        size_t tma_bases_alloc_size = nvshmemi_options.TMA_MAX_BLOCKS * sizeof(uintptr_t);
         CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_bases_dptr, tma_bases_alloc_size),
                                 status, out);
         nvshmemi_device_state.tma_smem_bases = tma_smem_bases_dptr;
@@ -2051,7 +2062,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                                 out);
         nvshmemi_device_state.tma_smem_size = tma_smem_size_dptr;
         CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, sizeof(size_t)), status, out);
-        nvshmemi_device_state.tma_smem_bases_len = NVSHMEMI_TMA_MAX_BLOCKS;
+        nvshmemi_device_state.tma_smem_bases_len = nvshmemi_options.TMA_MAX_BLOCKS;
     }
 
     nvshmemi_update_device_state();
