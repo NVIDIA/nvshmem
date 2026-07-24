@@ -187,7 +187,7 @@ NVSHMEMI_ENV_DEF(
     "Size of buffer used for coalescing shmem_g operations. Must be a multiple of 256B (32 * 8)."
     "NVSHMEM requires its value to be G_BUF_SIZE * 16.")
 
-NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 128l, NVSHMEMI_ENV_CAT_OTHER,
+NVSHMEMI_ENV_DEF(MAX_TEAMS, long, 256l, NVSHMEMI_ENV_CAT_OTHER,
                  "Maximum number of simultaneous teams allowed")
 
 NVSHMEMI_ENV_DEF(MAX_MEMORY_PER_GPU, size, (size_t)((size_t)256 * (1 << 30)),
