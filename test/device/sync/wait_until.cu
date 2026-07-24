@@ -52,8 +52,6 @@ __global__ void test_nvshmem_uint64_wait_until_some_kernel(uint64_t *remote, int
 
 #define TEST_NVSHMEM_WAIT_UNTIL_X(WAIT_UNTIL_X)                                                    \
     do {                                                                                           \
-        const int mype = nvshmem_my_pe();                                                          \
-        const int npes = nvshmem_n_pes();                                                          \
         uint64_t *remote;                                                                          \
         if (use_mmap) {                                                                            \
             remote = (uint64_t *)allocate_mmap_buffer(sizeof(uint64_t), _mem_handle_type, use_egm, \

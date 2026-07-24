@@ -48,8 +48,6 @@ __global__ void test_nvshmem_test_some_kernel(uint64_t *remote, int mype, int np
 
 #define TEST_NVSHMEM_TEST(TEST_X)                                                                  \
     do {                                                                                           \
-        const int mype = nvshmem_my_pe();                                                          \
-        const int npes = nvshmem_n_pes();                                                          \
         uint64_t *remote;                                                                          \
         if (use_mmap) {                                                                            \
             remote = (uint64_t *)allocate_mmap_buffer(sizeof(uint64_t), _mem_handle_type, use_egm, \
