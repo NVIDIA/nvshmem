@@ -440,6 +440,7 @@ int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* 
                                                       void *buf, size_t size,
                                                       nvshmemi_allocation_kind alloc_kind) {
     int status = NVSHMEMX_SUCCESS;
+    bool local_handles_owned = true;
     nvshmemi_mem_remote_transport &remotetran = remote_transport();
     std::vector<nvshmem_mem_handle_t> local_handles(transports_.num_transports());
     std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
@@ -469,6 +470,22 @@ int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* 
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather of mem handles failed\n");
 
+    /* Complete transport setup before publishing handles and their lookup index. */
+    if (alloc_kind == nvshmemi_allocation_kind::INTERNAL &&
+        nvshmemi_device_state.enable_rail_opt == 1) {
+        if (!gather_mem_handles_done_) {
+            status = remotetran.gather_mem_handles(transports_, gathered.data(), 0,
+                                                   geometry_.logical_heap_size * npes_node_);
+            if (status == NVSHMEMX_SUCCESS) {
+                gather_mem_handles_done_ = true;
+            }
+        }
+    } else {
+        status = remotetran.gather_mem_handles(
+            transports_, gathered.data(), ((char *)buf - (char *)geometry_.heap_base), size);
+    }
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gather_mem_handles failed\n");
+
     /* Store gathered handles in the allocation-specific registry. */
     if (alloc_kind == nvshmemi_allocation_kind::EXTERNAL) {
         table_->mmap_reg().push_mem_handles(std::move(gathered));
@@ -476,32 +493,19 @@ int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* 
         table_->internal_reg().push_mem_handles(std::move(gathered));
     }
 
-    {
-        nvshmem_mem_handle_t *handle_data =
-            alloc_kind == nvshmemi_allocation_kind::EXTERNAL
-                ? table_->mmap_reg().get_mem_handle(table_->mmap_reg().num_handle_sets() - 1, 0, 0)
-                : table_->internal_reg().get_mem_handle(
-                      table_->internal_reg().num_handle_sets() - 1, 0, 0);
-
-        /* Publish rail-optimized full-heap handles exactly once. */
-        if (alloc_kind == nvshmemi_allocation_kind::INTERNAL &&
-            nvshmemi_device_state.enable_rail_opt == 1) {
-            if (!gather_mem_handles_done_) {
-                status = remotetran.gather_mem_handles(transports_, handle_data, 0,
-                                                       geometry_.logical_heap_size * npes_node_);
-                gather_mem_handles_done_ = true;
-            }
-        } else {
-            status = remotetran.gather_mem_handles(
-                transports_, handle_data, ((char *)buf - (char *)geometry_.heap_base), size);
-        }
-    }
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gather_mem_handles failed\n");
-
     /* Update lookup state with the retrieved memory handles. */
     update_handle_index(buf, size, alloc_kind);
+    local_handles_owned = false;
 
 out:
+    if (local_handles_owned) {
+        const int cleanup_status =
+            remotetran.release_mem_handles(local_handles.data(), transports_);
+        if (cleanup_status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_WARN_PRINT("release mem handles failed after registration failure\n");
+            if (status == NVSHMEMX_SUCCESS) status = cleanup_status;
+        }
+    }
     return status;
 }
 
@@ -588,11 +592,15 @@ int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t siz
     do {
         register_size =
             remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
+        bool local_handle_set_released = false;
 
         for (size_t idx = 0; idx < register_size / granularity; ++idx) {
             addr_idx =
                 ((char *)curr_ptr - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
             addr_idx += idx;
+
+            /* A failed registration may not have published this chunk's sparse index. */
+            if (!mmap_reg.has_index(addr_idx)) continue;
 
             const auto &entry = mmap_reg.get_index(addr_idx);
             status = ((entry.start_addr != curr_ptr) || (entry.size != register_size));
@@ -600,11 +608,12 @@ int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t siz
 
             handle_idx = entry.handle_idx;
             /* Release each handle set once per registered chunk. */
-            if (!idx) {
+            if (!local_handle_set_released) {
                 nvshmem_mem_handle_t *my_handles = mmap_reg.get_mem_handle(handle_idx, mype_, 0);
                 status = remote_tran.release_mem_handles(my_handles, transports_);
                 NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                                       "release mem handles failed for mmaped buffer \n");
+                local_handle_set_released = true;
             }
             /* Clear index entries to prevent stale lookups if the buffer is remapped. */
             mmap_reg.clear_index(addr_idx);

@@ -74,7 +74,10 @@ class nvshmemi_heap_registration {
     int register_vmm_chunk(nvshmem_mem_handle_t *handle, off_t mc_offset, size_t size,
                            nvshmemi_allocation_kind alloc_kind,
                            std::optional<size_t> mmap_allocated_range);
-    /** Release remote handles and lookup entries for a user-provided VMM range. */
+    /**
+     * Release published remote handles and lookup entries for a user-provided VMM range.
+     * Chunks whose registration failed before publication are ignored.
+     */
     int unregister_vmm_chunk(off_t mc_offset, size_t size);
 
     int npes() const { return npes_; }
