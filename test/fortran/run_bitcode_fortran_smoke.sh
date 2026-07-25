@@ -15,7 +15,6 @@ nvshmem_home="${NVSHMEM_FORTRAN_RUNTIME_HOME:-${NVSHMEM_HOME:?NVSHMEM_HOME is re
 
 nvfortran="${NVFORTRAN:-nvfortran}"
 llvm_link="${LLVM_LINK:-llvm-link}"
-llvm_nm="${LLVM_NM:-llvm-nm}"
 llvm_opt="${LLVM_OPT:-opt}"
 llc="${LLC:-llc}"
 if [ -n "${PTXAS:-}" ]; then
@@ -47,7 +46,7 @@ require_file "$nvshmem_home/lib/libnvshmem_host.so" "NVSHMEM host library"
 require_file "$nvshmem_home/lib/libnvshmem_device.a" "NVSHMEM device library"
 [[ "$arch" =~ ^[0-9]+$ ]] || die "NVSHMEM_FORTRAN_BITCODE_ARCH must be numeric: $arch"
 
-for tool in "$nvfortran" "$llvm_link" "$llvm_nm" "$llvm_opt" "$llc" "$ptxas"; do
+for tool in "$nvfortran" "$llvm_link" "$llvm_opt" "$llc" "$ptxas"; do
     require_tool "$tool"
 done
 
@@ -88,9 +87,10 @@ for symbol in $symbols; do
 done
 
 "$llvm_link" --only-needed "$gpu_ir" "$bitcode" -o linked.bc
+"$llvm_opt" -S linked.bc -o linked.ll
 
 for symbol in $symbols; do
-    if "$llvm_nm" --undefined-only linked.bc | awk -v symbol="$symbol" '$NF == symbol { found = 1 } END { exit found ? 0 : 1 }'; then
+    if grep -q -E "^[[:space:]]*declare .*@${symbol}\\(" linked.ll; then
         die "$bitcode left CUDA Fortran device call unresolved: $symbol"
     fi
 done

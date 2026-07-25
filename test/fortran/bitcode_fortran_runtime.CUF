@@ -115,13 +115,13 @@ program bitcode_fortran_runtime
   call c_string(cubin, cubin_c)
   call c_string("nvshmem_fortran_bitcode_put", kernel_c)
 
-  status = nvshmemx_hostlib_init_attr_c(0_c_int, c_null_ptr)
-  if (status /= 0) error stop "nvshmemx_hostlib_init_attr failed"
   status = cudaGetDeviceCount_c(device_count)
   call check_cuda(status, "cudaGetDeviceCount")
   if (device_count == 0) error stop "no CUDA devices available"
   status = cudaSetDevice_c(0_c_int)
   call check_cuda(status, "cudaSetDevice")
+  status = nvshmemx_hostlib_init_attr_c(0_c_int, c_null_ptr)
+  if (status /= 0) error stop "nvshmemx_hostlib_init_attr failed"
 
   status = cuModuleLoad(module, cubin_c)
   call check_cuda(status, "cuModuleLoad")
