@@ -12,6 +12,9 @@ bitcode="${NVSHMEM_FORTRAN_BITCODE_FILE:?NVSHMEM_FORTRAN_BITCODE_FILE is require
 arch="${NVSHMEM_FORTRAN_BITCODE_ARCH:-80}"
 symbols="${NVSHMEM_FORTRAN_BITCODE_SYMBOLS:-nvshmem_int32_sum_reduce nvshmemx_int32_sum_reduce_warp nvshmemx_int32_sum_reduce_block nvshmem_int32_put nvshmemx_int32_put_warp nvshmemx_int32_put_block}"
 nvshmem_home="${NVSHMEM_FORTRAN_RUNTIME_HOME:-${NVSHMEM_HOME:?NVSHMEM_HOME is required for the runtime smoke}}"
+cuda_home="${CUDA_HOME:?CUDA_HOME is required for the runtime smoke}"
+cuda_stub_dir="${CUDA_STUB_DIR:-${cuda_home}/targets/x86_64-linux/lib/stubs}"
+cuda_compat_dir="${CUDA_COMPAT_DIR:-${cuda_home}/compat}"
 
 nvfortran="${NVFORTRAN:-nvfortran}"
 llvm_link="${LLVM_LINK:-llvm-link}"
@@ -43,7 +46,7 @@ require_file "$runtime_source" "runtime harness source"
 require_file "$bitcode" "bitcode artifact"
 require_file "$nvshmem_home/include/nvshmem.h" "NVSHMEM headers"
 require_file "$nvshmem_home/lib/libnvshmem_host.so" "NVSHMEM host library"
-require_file "$nvshmem_home/lib/libnvshmem_device.a" "NVSHMEM device library"
+require_file "$cuda_stub_dir/libcuda.so" "CUDA driver stub library"
 [[ "$arch" =~ ^[0-9]+$ ]] || die "NVSHMEM_FORTRAN_BITCODE_ARCH must be numeric: $arch"
 
 for tool in "$nvfortran" "$llvm_link" "$llvm_opt" "$llc" "$ptxas"; do
@@ -99,7 +102,7 @@ done
 "$llc" -mcpu="sm_${arch}" -mattr="$ptx_feature" optimized.bc -o linked.ptx
 "$ptxas" -arch="sm_${arch}" linked.ptx -o linked.cubin
 "$nvfortran" -cuda "${module_arg[@]}" "$runtime_source" -L "$nvshmem_home/lib" \
-    -lnvshmem_host -lnvshmem_device -lcuda -o bitcode_fortran_runtime
-LD_LIBRARY_PATH="$nvshmem_home/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ./bitcode_fortran_runtime linked.cubin
+    -L "$cuda_stub_dir" -lnvshmem_host -lcuda -o bitcode_fortran_runtime
+LD_LIBRARY_PATH="$nvshmem_home/lib:$cuda_compat_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ./bitcode_fortran_runtime linked.cubin
 
 echo "PASS: CUDA Fortran device IR links, lowers, and runs with $bitcode (sm_${arch})"
