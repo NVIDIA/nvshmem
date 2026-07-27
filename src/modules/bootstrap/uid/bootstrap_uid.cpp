@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <assert.h>
-#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +12,7 @@
 #include <time.h>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include "bootstrap_device_host/nvshmem_uniqueid.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
@@ -380,6 +380,23 @@ int bootstrap_get_unique_id(void* cookie) {
     return BOOTSTRAP_SUCCESS;
 }
 
+static int reserve_tags(bootstrap_state& state, uint64_t count) {
+    if (count == 0) {
+        BOOTSTRAP_ERROR_PRINT("UID bootstrap cannot reserve zero message tags");
+        return -1;
+    }
+
+    constexpr uint64_t max_tag = std::numeric_limits<int32_t>::max();
+    if (state.next_tag > max_tag || count > max_tag - state.next_tag + 1) {
+        BOOTSTRAP_ERROR_PRINT("UID bootstrap message tag space exhausted");
+        return -1;
+    }
+
+    int first_tag = static_cast<int>(state.next_tag);
+    state.next_tag += count;
+    return first_tag;
+}
+
 unexpected_connection::unexpected_connection(int peer, int tag, bootstrap_uid_socket_t& socket)
     : peer_(peer), tag_(tag), socket_(socket) {
     socket.fd = -1;
@@ -523,7 +540,6 @@ int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
     const char* send_buf = static_cast<const char*>(send_data);
     int rank = state->rank;
     int nranks = state->nranks;
-    int tag = 0;
     int chunk_size = size;
 
     BOOTSTRAP_DEBUG_PRINT("rank %d nranks %d size %d", rank, nranks, size);
@@ -531,6 +547,11 @@ int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
     if (send_data == BOOTSTRAP_IN_PLACE) {
         BOOTSTRAP_ERROR_PRINT("Unsupported inplace operation\n");
         return (BOOTSTRAP_INVALID_USAGE);
+    }
+
+    int tag = reserve_tags(*state, 1);
+    if (tag < 0) {
+        return BOOTSTRAP_INTERNAL_ERROR;
     }
 
     /* Simple ring based _alltoall
@@ -547,7 +568,6 @@ int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
             continue;
         }
 
-        tag++;
         // Send slice to the right
         BOOTSTRAP_CHECK(bootstrap_send(handle->comm_state, right, tag,
                                        (send_buf + right * chunk_size), chunk_size));
@@ -563,8 +583,13 @@ int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
 int bootstrap_uid_barrier(struct bootstrap_handle* handle) {
     struct bootstrap_state* state = (struct bootstrap_state*)(handle->comm_state);
     int rank = state->rank;
-    int tag = 0;
     int nranks = state->nranks;
+
+    int tag = reserve_tags(*state, 1);
+    if (tag < 0) {
+        return BOOTSTRAP_INTERNAL_ERROR;
+    }
+
     if (nranks == 1) {
         return BOOTSTRAP_SUCCESS;
     }
@@ -580,7 +605,6 @@ int bootstrap_uid_barrier(struct bootstrap_handle* handle) {
     for (int mask = 1; mask < nranks; mask <<= 1) {
         int src = (rank - mask + nranks) % nranks;
         int dst = (rank + mask) % nranks;
-        tag++;
         BOOTSTRAP_CHECK(bootstrap_send(handle->comm_state, dst, tag, data, sizeof(data)));
         BOOTSTRAP_CHECK(bootstrap_recv(handle->comm_state, src, tag, data, sizeof(data)));
     }

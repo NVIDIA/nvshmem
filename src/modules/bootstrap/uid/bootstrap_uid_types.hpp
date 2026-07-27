@@ -122,6 +122,7 @@ struct bootstrap_state {
     int rank;
     int nranks;
     uint64_t magic;
+    uint64_t next_tag = 1;
     volatile uint32_t* abort_flag;
 };
 
