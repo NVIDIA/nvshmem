@@ -204,6 +204,7 @@
         cudaStreamSynchronize(stream);                                                          \
                                                                                                 \
         CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));   \
+        CUDA_CHECK(cudaDeviceSynchronize());                                                    \
         nvshmem_barrier_all();                                                                  \
         cudaEventRecord(start, stream);                                                         \
         LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream)                                           \
@@ -244,15 +245,16 @@
         value = val;                                                                              \
         flag_init_var = flag_init;                                                                \
                                                                                                   \
+        CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
         CUDA_CHECK(cudaDeviceSynchronize());                                                      \
         nvshmem_barrier_all();                                                                    \
-        CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
                                                                                                   \
         LAUNCH_KERNEL(TYPE_NAME, AMO, args_1, stream)                                             \
                                                                                                   \
         cudaStreamSynchronize(stream);                                                            \
                                                                                                   \
         CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
+        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
         nvshmem_barrier_all();                                                                    \
         cudaEventRecord(start, stream);                                                           \
         LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream)                                             \

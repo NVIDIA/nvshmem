@@ -154,6 +154,7 @@ int main(int argc, char *argv[]) {
             } else {
                 CUDA_CHECK(cudaMemsetAsync(flag_d, 0, sizeof(uint64_t), stream));
             }
+            CUDA_CHECK(cudaDeviceSynchronize());
             nvshmem_barrier_all();
 
             cudaEventRecord(start, stream);

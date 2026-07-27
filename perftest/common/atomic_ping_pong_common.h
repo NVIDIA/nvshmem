@@ -150,8 +150,8 @@
         cudaEventCreate(&stop);                                                                   \
         TYPE flag_init_var = flag_init;                                                           \
                                                                                                   \
-        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
         CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
+        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
         nvshmem_barrier_all();                                                                    \
                                                                                                   \
         cudaEventRecord(start, stream);                                                           \
@@ -163,6 +163,7 @@
         perf_stats_t latency_stats = {};                                                          \
         for (size_t repetition = 0; repetition < repetitions; repetition++) {                     \
             CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice)); \
+            CUDA_CHECK(cudaDeviceSynchronize());                                                  \
             nvshmem_barrier_all();                                                                \
             cudaEventRecord(start, stream);                                                       \
             LAUNCH_KERNEL(TYPE_NAME, AMO, args_2, stream);                                        \
@@ -204,8 +205,8 @@
         value = val;                                                                              \
         flag_init_var = flag_init;                                                                \
                                                                                                   \
-        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
         CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice));     \
+        CUDA_CHECK(cudaDeviceSynchronize());                                                      \
         nvshmem_barrier_all();                                                                    \
                                                                                                   \
         LAUNCH_KERNEL(TYPE_NAME, AMO, args_1, stream);                                            \
@@ -215,6 +216,7 @@
         perf_stats_t latency_stats = {};                                                          \
         for (size_t repetition = 0; repetition < repetitions; repetition++) {                     \
             CUDA_CHECK(cudaMemcpy(flag_d, &flag_init_var, sizeof(TYPE), cudaMemcpyHostToDevice)); \
+            CUDA_CHECK(cudaDeviceSynchronize());                                                  \
             nvshmem_barrier_all();                                                                \
             cudaEventRecord(start, stream);                                                       \
                                                                                                   \
