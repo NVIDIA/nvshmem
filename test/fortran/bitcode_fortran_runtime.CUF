@@ -6,19 +6,57 @@ program bitcode_fortran_runtime
   implicit none
 
   integer(c_int), parameter :: cuda_success = 0
-  integer(c_int), parameter :: cuda_memcpy_host_to_device = 1
-  integer(c_int), parameter :: cuda_memcpy_device_to_host = 2
+  integer(c_int), parameter :: device_ordinal = 0
   integer(c_int), target :: expected = 42, received = 0
   integer(c_int) :: device_count, status
+  integer(c_int), target :: zero = 0
+  integer(c_int) :: device
   integer(c_int), target :: pe
   integer(c_long_long), target :: nelems
   integer :: argument_length, i
   character(len=:), allocatable :: cubin
   character(kind=c_char), allocatable, target :: cubin_c(:), kernel_c(:)
   type(c_ptr), target :: kernel_args(4)
-  type(c_ptr) :: module, kernel, dest, source
+  type(c_ptr) :: context, module, kernel, dest, source
 
   interface
+    integer(c_int) function cuInit(flags) bind(C, name="cuInit")
+      import :: c_int
+      integer(c_int), value :: flags
+    end function
+
+    integer(c_int) function cuDeviceGetCount(count) bind(C, name="cuDeviceGetCount")
+      import :: c_int
+      integer(c_int) :: count
+    end function
+
+    integer(c_int) function cuDeviceGet(device, ordinal) bind(C, name="cuDeviceGet")
+      import :: c_int
+      integer(c_int) :: device
+      integer(c_int), value :: ordinal
+    end function
+
+    integer(c_int) function cuDevicePrimaryCtxRetain(context, device) &
+        bind(C, name="cuDevicePrimaryCtxRetain")
+      import :: c_int, c_ptr
+      type(c_ptr) :: context
+      integer(c_int), value :: device
+    end function
+
+    integer(c_int) function cuDevicePrimaryCtxRelease(device) bind(C, name="cuDevicePrimaryCtxRelease")
+      import :: c_int
+      integer(c_int), value :: device
+    end function
+
+    integer(c_int) function cuCtxSetCurrent(context) bind(C, name="cuCtxSetCurrent")
+      import :: c_int, c_ptr
+      type(c_ptr), value :: context
+    end function
+
+    integer(c_int) function cuCtxSynchronize() bind(C, name="cuCtxSynchronize")
+      import :: c_int
+    end function
+
     integer(c_int) function cuModuleLoad(module, filename) bind(C, name="cuModuleLoad")
       import :: c_int, c_ptr, c_char
       type(c_ptr) :: module
@@ -78,32 +116,16 @@ program bitcode_fortran_runtime
       type(c_ptr), value :: ptr
     end subroutine
 
-    integer(c_int) function cudaMemcpy_c(dest, source, bytes, kind) bind(C, name="cudaMemcpy")
+    integer(c_int) function cuMemcpyHtoD(dest, source, bytes) bind(C, name="cuMemcpyHtoD_v2")
       import :: c_int, c_ptr, c_size_t
       type(c_ptr), value :: dest, source
       integer(c_size_t), value :: bytes
-      integer(c_int), value :: kind
     end function
 
-    integer(c_int) function cudaMemset_c(dest, value, bytes) bind(C, name="cudaMemset")
+    integer(c_int) function cuMemcpyDtoH(dest, source, bytes) bind(C, name="cuMemcpyDtoH_v2")
       import :: c_int, c_ptr, c_size_t
-      type(c_ptr), value :: dest
-      integer(c_int), value :: value
+      type(c_ptr), value :: dest, source
       integer(c_size_t), value :: bytes
-    end function
-
-    integer(c_int) function cudaGetDeviceCount_c(count) bind(C, name="cudaGetDeviceCount")
-      import :: c_int
-      integer(c_int) :: count
-    end function
-
-    integer(c_int) function cudaSetDevice_c(device) bind(C, name="cudaSetDevice")
-      import :: c_int
-      integer(c_int), value :: device
-    end function
-
-    integer(c_int) function cudaDeviceSynchronize_c() bind(C, name="cudaDeviceSynchronize")
-      import :: c_int
     end function
 
   end interface
@@ -115,11 +137,17 @@ program bitcode_fortran_runtime
   call c_string(cubin, cubin_c)
   call c_string("nvshmem_fortran_bitcode_put", kernel_c)
 
-  status = cudaGetDeviceCount_c(device_count)
-  call check_cuda(status, "cudaGetDeviceCount")
+  status = cuInit(0_c_int)
+  call check_cuda(status, "cuInit")
+  status = cuDeviceGetCount(device_count)
+  call check_cuda(status, "cuDeviceGetCount")
   if (device_count == 0) error stop "no CUDA devices available"
-  status = cudaSetDevice_c(0_c_int)
-  call check_cuda(status, "cudaSetDevice")
+  status = cuDeviceGet(device, device_ordinal)
+  call check_cuda(status, "cuDeviceGet")
+  status = cuDevicePrimaryCtxRetain(context, device)
+  call check_cuda(status, "cuDevicePrimaryCtxRetain")
+  status = cuCtxSetCurrent(context)
+  call check_cuda(status, "cuCtxSetCurrent")
   status = nvshmemx_hostlib_init_attr_c(0_c_int, c_null_ptr)
   if (status /= 0) error stop "nvshmemx_hostlib_init_attr failed"
 
@@ -133,10 +161,10 @@ program bitcode_fortran_runtime
   dest = nvshmem_malloc_c(c_sizeof(expected))
   source = nvshmem_malloc_c(c_sizeof(expected))
   if (.not. c_associated(dest) .or. .not. c_associated(source)) error stop "nvshmem_malloc failed"
-  status = cudaMemcpy_c(source, c_loc(expected), c_sizeof(expected), cuda_memcpy_host_to_device)
-  call check_cuda(status, "cudaMemcpy source")
-  status = cudaMemset_c(dest, 0_c_int, c_sizeof(expected))
-  call check_cuda(status, "cudaMemset dest")
+  status = cuMemcpyHtoD(source, c_loc(expected), c_sizeof(expected))
+  call check_cuda(status, "cuMemcpyHtoD source")
+  status = cuMemcpyHtoD(dest, c_loc(zero), c_sizeof(zero))
+  call check_cuda(status, "cuMemcpyHtoD dest")
 
   nelems = 1
   pe = nvshmem_my_pe_c()
@@ -144,10 +172,10 @@ program bitcode_fortran_runtime
   status = cuLaunchKernel(kernel, 1_c_int, 1_c_int, 1_c_int, 1_c_int, 1_c_int, 1_c_int, &
                            0_c_int, c_null_ptr, c_loc(kernel_args(1)), c_null_ptr)
   call check_cuda(status, "cuLaunchKernel")
-  status = cudaDeviceSynchronize_c()
-  call check_cuda(status, "cudaDeviceSynchronize")
-  status = cudaMemcpy_c(c_loc(received), dest, c_sizeof(received), cuda_memcpy_device_to_host)
-  call check_cuda(status, "cudaMemcpy result")
+  status = cuCtxSynchronize()
+  call check_cuda(status, "cuCtxSynchronize")
+  status = cuMemcpyDtoH(c_loc(received), dest, c_sizeof(received))
+  call check_cuda(status, "cuMemcpyDtoH result")
 
   call nvshmem_free_c(dest)
   call nvshmem_free_c(source)
@@ -156,6 +184,8 @@ program bitcode_fortran_runtime
   status = cuModuleUnload(module)
   call check_cuda(status, "cuModuleUnload")
   call nvshmemx_hostlib_finalize_c()
+  status = cuDevicePrimaryCtxRelease(device)
+  call check_cuda(status, "cuDevicePrimaryCtxRelease")
 
   if (received /= expected) error stop "put result mismatch"
   print *, "PASS: CUDA Fortran cubin loaded, initialized, and executed an NVSHMEM put"
@@ -179,7 +209,7 @@ contains
     character(len=*), intent(in) :: operation
 
     if (code /= cuda_success) then
-      print *, trim(operation), " failed with CUDA status ", code
+      print *, trim(operation), " failed with CUDA driver status ", code
       error stop
     end if
   end subroutine
