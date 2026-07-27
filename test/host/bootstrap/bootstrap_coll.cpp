@@ -234,7 +234,8 @@ static int test_memory_setup_buffer(int pg_rank, int pg_size, bool is_inplace,
     (*send_bufs) = (void **)calloc(msg_lens.size(), sizeof(void *));
     for (auto i = 0U; i < msg_lens.size(); i++) {
         (*send_bufs)[i] = malloc(msg_lens[i] * pg_size * sizeof(char));
-        memset((*send_bufs)[i], pg_rank, sizeof(char) * pg_size * msg_lens[i]);
+        char *begin = static_cast<char *>((*send_bufs)[i]);
+        std::fill_n(begin, pg_size * msg_lens[i], static_cast<char>(pg_rank));
         test_memory_print_buffer((*send_bufs)[i], msg_lens[i], pg_rank, pg_size);
     }
 
@@ -244,7 +245,8 @@ static int test_memory_setup_buffer(int pg_rank, int pg_size, bool is_inplace,
             (*recv_bufs)[i] = (*send_bufs)[i];
         else {
             (*recv_bufs)[i] = malloc(msg_lens[i] * pg_size * sizeof(char));
-            memset((*recv_bufs)[i], 0, sizeof(char) * pg_size * msg_lens[i]);
+            char *begin = static_cast<char *>((*recv_bufs)[i]);
+            std::fill_n(begin, pg_size * msg_lens[i], 0);
         }
     }
 

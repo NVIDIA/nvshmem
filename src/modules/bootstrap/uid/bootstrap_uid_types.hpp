@@ -6,12 +6,16 @@
 #ifndef BOOTSTRAP_UID_HPP
 #define BOOTSTRAP_UID_HPP
 
-#include <pthread.h>                         // for PTHREAD_MUTEX_INITIALIZER
-#include <stdint.h>                          // for uint64_t, uint32_t
-#include <stdio.h>                           // for fclose, fopen, fread
-#include <stdlib.h>                          // for malloc
-#include <limits.h>                          // for SIZE_MAX
-#include <cstring>                           // for NULL, memset, size_t
+#include <pthread.h>  // for PTHREAD_MUTEX_INITIALIZER
+#include <stdint.h>   // for uint64_t, uint32_t
+#include <stdio.h>    // for fclose, fopen, fread
+#include <stdlib.h>   // for malloc
+#include <algorithm>  // for fill
+#include <limits.h>   // for SIZE_MAX
+#include <cstring>    // for NULL, size_t
+#include <list>       // for list
+#include <type_traits>
+#include <vector>                            // for vector
 #include "bootstrap_uid_remap.h"             // for bootstrap_uid_socket_a...
 #include "bootstrap_util.h"                  // for BOOTSTRAP_ERROR_PRINT
 #include "ncclSocket/ncclsocket_socket.hpp"  // for MAX_IF_NAME_SIZE
@@ -19,6 +23,9 @@
 template <typename T>
 inline bootstrap_result_t bootstrap_calloc_debug(T** ptr, size_t nelem, const char* filefunc,
                                                  int line) {
+    static_assert(std::is_trivial_v<T> && std::is_standard_layout_v<T>,
+                  "BOOTSTRAP_CALLOC requires POD storage");
+
     if (ptr == NULL) {
         BOOTSTRAP_ERROR_PRINT("%s:%d allocation called with null output pointer", filefunc, line);
         return BOOTSTRAP_INVALID_ARGUMENT;
@@ -43,7 +50,8 @@ inline bootstrap_result_t bootstrap_calloc_debug(T** ptr, size_t nelem, const ch
     }
     // BOOTSTRAP_DEBUG_PRINT("%s:%d malloc Size %ld pointer %p", filefunc, line, nelem*sizeof(T),
     // p);
-    memset(p, 0, allocation_size);
+    unsigned char* begin = static_cast<unsigned char*>(p);
+    std::fill_n(begin, allocation_size, 0);
     *ptr = (T*)p;
     return BOOTSTRAP_SUCCESS;
 }
@@ -85,19 +93,32 @@ struct bootstrap_netstate {
 /* Socket Interface Selection type */
 enum bootstrapInterface_t { findSubnetIf = -1, dontCareIf = -2 };
 
-struct unex_conn {
-    int peer;
-    int tag;
-    bootstrap_uid_socket_t sock;
-    struct unex_conn* next;
+class unexpected_connection {
+   public:
+    unexpected_connection(int peer, int tag, bootstrap_uid_socket_t& socket);
+    ~unexpected_connection();
+
+    unexpected_connection(const unexpected_connection&) = delete;
+    unexpected_connection& operator=(const unexpected_connection&) = delete;
+    unexpected_connection(unexpected_connection&&) = delete;
+    unexpected_connection& operator=(unexpected_connection&&) = delete;
+
+    int peer() const { return peer_; }
+    int tag() const { return tag_; }
+    bootstrap_uid_socket_t release();
+
+   private:
+    int peer_;
+    int tag_;
+    bootstrap_uid_socket_t socket_;
 };
 
 struct bootstrap_state {
     bootstrap_uid_socket_t listen_sock;
     bootstrap_uid_socket_t ring_recv_socket;
     bootstrap_uid_socket_t ring_send_socket;
-    bootstrap_uid_socket_address_t* peer_comm_addresses;
-    struct unex_conn* unexpected_connections;
+    std::vector<bootstrap_uid_socket_address_t> peer_comm_addresses;
+    std::list<unexpected_connection> unexpected_connections;
     int rank;
     int nranks;
     uint64_t magic;

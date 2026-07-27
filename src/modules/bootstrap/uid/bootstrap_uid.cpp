@@ -11,7 +11,9 @@
 #include <strings.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <algorithm>
 #include <cstring>
+#include <memory>
 #include "bootstrap_device_host/nvshmem_uniqueid.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "bootstrap_uid_remap.h"
@@ -85,9 +87,10 @@ static int bootstrap_uid_showinfo(struct bootstrap_handle* handle, int style) {
 }
 
 // Additional sync functions
-static bootstrap_result_t bootstrap_net_send(bootstrap_uid_socket_t* sock, void* data, int size) {
+static bootstrap_result_t bootstrap_net_send(bootstrap_uid_socket_t* sock, const void* data,
+                                             int size) {
     BOOTSTRAP_CHECK(nccl_fn_table(send, sock, &size, sizeof(int)));
-    BOOTSTRAP_CHECK(nccl_fn_table(send, sock, data, size));
+    BOOTSTRAP_CHECK(nccl_fn_table(send, sock, const_cast<void*>(data), size));
     return BOOTSTRAP_SUCCESS;
 }
 
@@ -273,10 +276,8 @@ static void* bootstrap_root(void* rargs) {
         }
 
         // Save the connection handle for that rank
-        memcpy(rank_addresses_root + info.rank, &info.ext_address_listen_root,
-               sizeof(bootstrap_uid_socket_address_t));
-        memcpy(rank_addresses + info.rank, &info.ext_address_listen,
-               sizeof(bootstrap_uid_socket_address_t));
+        rank_addresses_root[info.rank] = info.ext_address_listen_root;
+        rank_addresses[info.rank] = info.ext_address_listen;
 
         ++c;
         BOOTSTRAP_DEBUG_PRINT("Received connect from rank %d total %d/%d", info.rank, c, nranks);
@@ -372,92 +373,63 @@ int bootstrap_get_unique_id(void* cookie) {
             return BOOTSTRAP_INVALID_ARGUMENT;
         }
     } else {
-        memcpy(&(handle->addr), &priv_info.bootstrap_netifaddr,
-               sizeof(bootstrap_uid_socket_address_t));
+        handle->addr = priv_info.bootstrap_netifaddr;
         BOOTSTRAP_CHECK(bootstrap_create_root(handle, 0));
     }
 
     return BOOTSTRAP_SUCCESS;
 }
 
+unexpected_connection::unexpected_connection(int peer, int tag, bootstrap_uid_socket_t& socket)
+    : peer_(peer), tag_(tag), socket_(socket) {
+    socket.fd = -1;
+}
+
+unexpected_connection::~unexpected_connection() {
+    if (socket_.fd >= 0) {
+        BOOTSTRAP_INFO(nccl_fn_table(close, &socket_));
+    }
+}
+
+bootstrap_uid_socket_t unexpected_connection::release() {
+    bootstrap_uid_socket_t socket = socket_;
+    socket_.fd = -1;
+    return socket;
+}
 // Unexpected recv/send incase of tag-matching
 static bootstrap_result_t unexpected_enqueue(struct bootstrap_state* state, int peer, int tag,
                                              bootstrap_uid_socket_t* sock) {
-    // New unex
-    struct unex_conn* unex;
-    bootstrap_result_t ret = BOOTSTRAP_SUCCESS;
-    struct unex_conn* list = state->unexpected_connections;
-    BOOTSTRAP_CHECKGOTO(BOOTSTRAP_CALLOC(&unex, 1), ret, outfp);
-    unex->peer = peer;
-    unex->tag = tag;
-    memcpy(&unex->sock, sock, sizeof(bootstrap_uid_socket_t));
-
-    // Enqueue
-    if (list == NULL) {
-        state->unexpected_connections = unex;
-        return (ret);
-    }
-
-    while (list->next) {
-        list = list->next;
-    }
-
-    list->next = unex;
-
-outfp:
-    return (ret);
+    state->unexpected_connections.emplace_back(peer, tag, *sock);
+    return BOOTSTRAP_SUCCESS;
 }
 
 static bootstrap_result_t unexpected_dequeue(struct bootstrap_state* state, int peer, int tag,
                                              bootstrap_uid_socket_t* sock, int* found) {
-    struct unex_conn* elem = state->unexpected_connections;
-    struct unex_conn* prev = NULL;
     *found = 0;
-    while (elem) {
-        if (elem->peer == peer && elem->tag == tag) {
-            if (prev == NULL) {
-                state->unexpected_connections = elem->next;
-            } else {
-                prev->next = elem->next;
-            }
-
-            memcpy(sock, &elem->sock, sizeof(bootstrap_uid_socket_t));
-            BOOTSTRAP_PTR_FREE(elem);
+    for (auto elem = state->unexpected_connections.begin();
+         elem != state->unexpected_connections.end(); ++elem) {
+        if (elem->peer() == peer && elem->tag() == tag) {
+            *sock = elem->release();
+            state->unexpected_connections.erase(elem);
             *found = 1;
             return BOOTSTRAP_SUCCESS;
         }
-
-        prev = elem;
-        elem = elem->next;
     }
 
     return BOOTSTRAP_SUCCESS;
 }
 
-static void unexpected_free(struct bootstrap_state* state) {
-    struct unex_conn* elem = state->unexpected_connections;
-    struct unex_conn* prev = NULL;
-
-    while (elem) {
-        prev = elem;
-        elem = elem->next;
-        BOOTSTRAP_PTR_FREE(prev);
-    }
-
-    return;
-}
-
 /**
  * P2P Communication Ops
  */
-static bootstrap_result_t bootstrap_send(void* comm_state, int peer, int tag, void* data,
+static bootstrap_result_t bootstrap_send(void* comm_state, int peer, int tag, const void* data,
                                          int size) {
     bootstrap_result_t ret = BOOTSTRAP_SUCCESS;
     struct bootstrap_state* state = (struct bootstrap_state*)comm_state;
     bootstrap_uid_socket_t sock;
 
-    BOOTSTRAP_CHECKGOTO(nccl_fn_table(init, &sock, state->peer_comm_addresses + peer, state->magic,
-                                      SOCKET_TYPE_BOOTSTRAP, nullptr, 0),
+    BOOTSTRAP_CHECKGOTO(nccl_fn_table(init, &sock, state->peer_comm_addresses.data() + peer,
+                                      state->magic, SOCKET_TYPE_BOOTSTRAP, nullptr, 0),
                         ret, fail);
     BOOTSTRAP_CHECKGOTO(nccl_fn_table(connect, &sock), ret, fail);
     BOOTSTRAP_CHECKGOTO(bootstrap_net_send(&sock, &state->rank, sizeof(int)), ret, fail);
@@ -519,10 +491,10 @@ int bootstrap_uid_allgather(const void* send_data, void* recv_data, int size,
     int nranks = state->nranks;
 
     BOOTSTRAP_DEBUG_PRINT("rank %d nranks %d size %d", rank, nranks, size);
-    char* send_buf = (char*)send_data;
+    const char* send_buf = static_cast<const char*>(send_data);
     if (send_data != BOOTSTRAP_IN_PLACE) {
         // As not an inplace operation - copy send_data to recv_data for myrank
-        memcpy((char*)recv_data + (rank % nranks) * size, send_buf, size);
+        std::copy_n(send_buf, size, static_cast<char*>(recv_data) + (rank % nranks) * size);
     }
 
     /* Simple ring based _allgather
@@ -548,7 +520,7 @@ int bootstrap_uid_allgather(const void* send_data, void* recv_data, int size,
 int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
                            struct bootstrap_handle* handle) {
     struct bootstrap_state* state = (struct bootstrap_state*)(handle->comm_state);
-    char* send_buf = (char*)send_data;
+    const char* send_buf = static_cast<const char*>(send_data);
     int rank = state->rank;
     int nranks = state->nranks;
     int tag = 0;
@@ -570,8 +542,8 @@ int bootstrap_uid_alltoall(const void* send_data, void* recv_data, int size,
         size_t right = (rank + i) % nranks;
 
         if (right == (size_t)rank && left == (size_t)rank) {
-            memcpy(((char*)recv_data + left * chunk_size), (send_buf + right * chunk_size),
-                   chunk_size);
+            const char* begin = send_buf + right * chunk_size;
+            std::copy_n(begin, chunk_size, static_cast<char*>(recv_data) + left * chunk_size);
             continue;
         }
 
@@ -622,8 +594,8 @@ int bootstrap_uid_barrier(struct bootstrap_handle* handle) {
  */
 int bootstrap_uid_close(struct bootstrap_handle* handle) {
     struct bootstrap_state* state = (struct bootstrap_state*)(handle->comm_state);
-    if (state->unexpected_connections != NULL) {
-        unexpected_free(state);
+    if (!state->unexpected_connections.empty()) {
+        state->unexpected_connections.clear();
         if (state->abort_flag && *(state->abort_flag) == 0) {
             BOOTSTRAP_ERROR_PRINT("Unexpected connections are not empty");
             return BOOTSTRAP_INTERNAL_ERROR;
@@ -638,8 +610,8 @@ int bootstrap_uid_close(struct bootstrap_handle* handle) {
     BOOTSTRAP_CHECK(nccl_fn_table(close, &state->listen_sock));
     BOOTSTRAP_CHECK(nccl_fn_table(close, &state->ring_send_socket));
     BOOTSTRAP_CHECK(nccl_fn_table(close, &state->ring_recv_socket));
-    BOOTSTRAP_PTR_FREE(state->peer_comm_addresses);
-    BOOTSTRAP_PTR_FREE(state);
+    std::unique_ptr<bootstrap_state> state_owner(state);
+    handle->comm_state = nullptr;
     return BOOTSTRAP_SUCCESS;
 }
 
@@ -652,8 +624,8 @@ bootstrap_result_t bootstrap_uid_abort(struct bootstrap_handle* handle) {
     BOOTSTRAP_CHECK(nccl_fn_table(close, &state->listen_sock));
     BOOTSTRAP_CHECK(nccl_fn_table(close, &state->ring_send_socket));
     BOOTSTRAP_CHECK(nccl_fn_table(close, &state->ring_recv_socket));
-    BOOTSTRAP_PTR_FREE(state->peer_comm_addresses);
-    BOOTSTRAP_PTR_FREE(state);
+    std::unique_ptr<bootstrap_state> state_owner(state);
+    handle->comm_state = nullptr;
     return BOOTSTRAP_SUCCESS;
 }
 
@@ -729,6 +701,7 @@ int nvshmemi_bootstrap_plugin_init(void* arg, bootstrap_handle_t* handle, const 
     // for non-root ranks, inherit the uid_handle from caller
     if (ops->cookie == nullptr) {
         BOOTSTRAP_CALLOC(&uid_handle, 1);
+        // The public unique ID is opaque storage containing a bootstrap_uid_handle.
         memcpy(uid_handle, uid_args->id, sizeof(bootstrap_uid_handle));
         ops->cookie = uid_handle;
         // if session ID was set and rank is 0, create a root thread to exchange peer addresses
@@ -740,12 +713,13 @@ int nvshmemi_bootstrap_plugin_init(void* arg, bootstrap_handle_t* handle, const 
         uid_handle = (struct bootstrap_uid_handle*)(ops->cookie);
     }
 
-    BOOTSTRAP_CHECK(BOOTSTRAP_CALLOC(&state, 1));
+    std::unique_ptr<bootstrap_state> state_owner = std::make_unique<bootstrap_state>();
+    state = state_owner.get();
     state->abort_flag =
         nullptr;  // TODO: add support for aborting bootstrap asynchronously in the future
     state->rank = handle->pg_rank;
     state->nranks = handle->pg_size;
-    handle->comm_state = (void*)state;  // save the bootstrap state per handle
+    handle->comm_state = (void*)state_owner.release();  // transfer ownership to the handle
     state->magic = uid_handle->magic;
 
     BOOTSTRAP_DEBUG_PRINT("rank %d nranks %d", handle->pg_rank, handle->pg_size);
@@ -807,12 +781,13 @@ int nvshmemi_bootstrap_plugin_init(void* arg, bootstrap_handle_t* handle, const 
     BOOTSTRAP_CHECK(nccl_fn_table(accept, &state->ring_recv_socket, &state->listen_sock));
 
     // _allgather all listen handlers
-    BOOTSTRAP_CHECK(BOOTSTRAP_CALLOC(&state->peer_comm_addresses, handle->pg_size));
-    BOOTSTRAP_CHECK(
-        nccl_fn_table(get_addr, &state->listen_sock, state->peer_comm_addresses + handle->pg_rank));
-    BOOTSTRAP_NEQCHECK(bootstrap_uid_allgather(BOOTSTRAP_IN_PLACE, state->peer_comm_addresses,
-                                               sizeof(bootstrap_uid_socket_address_t), handle),
-                       BOOTSTRAP_SUCCESS);
+    state->peer_comm_addresses.resize(handle->pg_size);
+    BOOTSTRAP_CHECK(nccl_fn_table(get_addr, &state->listen_sock,
+                                  state->peer_comm_addresses.data() + handle->pg_rank));
+    BOOTSTRAP_NEQCHECK(
+        bootstrap_uid_allgather(BOOTSTRAP_IN_PLACE, state->peer_comm_addresses.data(),
+                                sizeof(bootstrap_uid_socket_address_t), handle),
+        BOOTSTRAP_SUCCESS);
 
     handle->version = NVSHMEM_BOOTSTRAP_MAJOR_MINOR_VERSION(abi_version) <
                               NVSHMEM_BOOTSTRAP_MAJOR_MINOR_VERSION(bootstrap_version)
