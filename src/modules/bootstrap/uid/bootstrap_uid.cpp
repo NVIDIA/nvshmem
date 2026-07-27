@@ -601,7 +601,7 @@ int bootstrap_uid_barrier(struct bootstrap_handle* handle) {
      * "Two Algorithms for barrier Synchronization," International Journal of Parallel Programming,
      * 17(1):1-17, 1988"
      */
-    int data[1];
+    int data[1] = {0};
     for (int mask = 1; mask < nranks; mask <<= 1) {
         int src = (rank - mask + nranks) % nranks;
         int dst = (rank + mask) % nranks;
