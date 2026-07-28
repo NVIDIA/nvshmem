@@ -84,11 +84,14 @@ CALL_RDXN_OPS_ALL_TG(double2, double2)
     RUN_ITERS_OP(TYPENAME, TYPE, GROUP, maxloc, ELEM_COMP);
 
 int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int mype,
-                        cudaStream_t stream, run_opt_t run_options, void **h_tables) {
+                        size_t max_elems_arg, cudaStream_t stream, run_opt_t run_options,
+                        void **h_tables) {
     int status = 0;
     int nvshm_test_num_tpb = threads_per_block;
     int num_blocks = 1;
-    size_t num_elems = 1, min_elems, max_elems;
+    size_t num_elems = 1;
+    size_t min_elems = 1;
+    size_t max_elems = max_elems_arg;
     int iter = iters;
     int skip = warmup_iters;
     int j;
