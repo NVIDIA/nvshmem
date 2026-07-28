@@ -60,6 +60,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_for_barrier(T *des
             if (pe == nvshmemi_device_state_d.mype) {
                 *dest = value;
             } else {
+                // generic2fabric fence is done within handle_p()
+                // so only do fabric2fabric fence here
+                fence_proxy_fabric2fabric_release_system();
                 nvshmemi_handle_p<T>((void *)dest, value, pe);
             }
 
