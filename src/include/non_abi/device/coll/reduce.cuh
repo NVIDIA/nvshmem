@@ -1466,7 +1466,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
 /*
  * Function: Performs a try_pullred to get data from peer global memory and waits for it to complete
  */
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 template <typename TYPE, rdxn_ops_t RDX_OP>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_pullred_wrapper_thread(
     int myIdx, const nvshmemi_fabric_handle<le_fabric_handle_kind::Multicast> &src_handle,
@@ -1695,7 +1695,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_t
         const TYPE *source_ptr = source + elems_per_pe * my_idx_in_active_set;
 
         if (my_nelems > 0) {
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
                 /* Two-shot handle reduce reads the source and writes the partial result through
                  * multicast handles, so both heap offsets must be 16B-aligned.
@@ -1735,7 +1735,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_t
         // Case 1: elems_per_pe == 0 => no GPUs do any work.
         // Case 2: elems_per_pe != 0 => all GPUs do work for elems_per_pe
         if (elems_per_pe > 0) {
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
                 /* One-shot handle reduce reads through a multicast source handle and stores the
                  * reduced data through TMA S2G, so source heap offset and destination address need
@@ -1981,7 +1981,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 }
 
 // reducescatter handle variant
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 template <typename TYPE, threadgroup_t SCOPE, rdxn_ops_t RDX_OP>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast_threadroup(
     nvshmemi_team_t *teami, TYPE *__restrict__ dst_ptr, const TYPE *__restrict__ src_ptr,
@@ -2117,7 +2117,7 @@ template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, thread
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle_threadgroup_dim(
     nvshmem_team_t team, src_tensor_t src_tensor, dst_tensor_t dst_tensor, tuple_t start_coord,
     tuple_t boundary) {
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     using T = typename src_tensor_t::value_type;
     if constexpr (is_handle_pullred_supported<T, op>()) {
         nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];

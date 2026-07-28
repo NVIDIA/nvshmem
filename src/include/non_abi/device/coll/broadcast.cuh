@@ -427,7 +427,7 @@ template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, thread
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_threadgroup_dim(
     nvshmem_team_t team, src_tensor_t src_tensor, dst_tensor_t dst_tensor, tuple_t start_coord,
     tuple_t boundary) {
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     using T = typename src_tensor_t::value_type;
     const int size_major_dim = get_shape_element<major_dim>(src_tensor);
     const int size_minor_dim = get_shape_element<minor_dim>(src_tensor);

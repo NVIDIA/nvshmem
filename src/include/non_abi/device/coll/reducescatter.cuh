@@ -96,7 +96,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
     if constexpr (nvshmemi_device_has_nvls_multimem) {
         nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
 
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if constexpr (is_handle_pullred_supported<TYPE, OP>()) {
             if (nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(teami->mc_leid_with_flag,
                                                                    nreduce * sizeof(TYPE)) &&

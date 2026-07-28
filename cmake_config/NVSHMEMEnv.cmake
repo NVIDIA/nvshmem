@@ -98,7 +98,7 @@ nvshmem_add_default_off_option(NVSHMEM_USE_NCCL "Enable compilation of NVSHMEM N
 nvshmem_add_default_off_option(NVSHMEM_ENABLE_ALL_DEVICE_INLINING "Inline all device library code")
 nvshmem_add_default_off_option(NVSHMEM_GPU_COLL_USE_LDST "Enables Load/Store in NVSHMEM collective operations")
 nvshmem_add_default_off_option(NVSHMEM_TIMEOUT_DEVICE_POLLING "Enable timeouts for NVSHMEM device-side polling functions (e.g. wait_until)")
-nvshmem_add_default_off_option(NVSHMEM_ENABLE_CFT_HANDLES "Enable NVSHMEM Logical Endpoint support")
+nvshmem_add_default_off_option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable NVSHMEM Logical Endpoint support")
 nvshmem_add_default_off_option(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT "Prioritize logical endpoint over pointer based P2P for CFT handles")
 
 message( "\n__BUILD__\n")
@@ -214,7 +214,7 @@ NVSHMEM_USE_DLMALLOC=${NVSHMEM_USE_DLMALLOC} \
 NVSHMEM_USE_NCCL=${NVSHMEM_USE_NCCL} \
 NVSHMEM_USE_GDRCOPY=${NVSHMEM_USE_GDRCOPY} \
 NVSHMEM_USE_MLX5DV=${NVSHMEM_USE_MLX5DV} \
-NVSHMEM_ENABLE_CFT_HANDLES=${NVSHMEM_ENABLE_CFT_HANDLES} \
+NVSHMEM_CFT_HANDLES_SUPPORT=${NVSHMEM_CFT_HANDLES_SUPPORT} \
 NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT=${NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT} \
 NVSHMEM_VERBOSE=${NVSHMEM_VERBOSE} \
 CUDA_HOME=${CUDA_HOME} \

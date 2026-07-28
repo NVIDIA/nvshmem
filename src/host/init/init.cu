@@ -115,7 +115,7 @@ void *heap_base_array_dptr = NULL;
 void *heap_base_actual_array_dptr = NULL;
 int nvshmemi_job_connectivity;
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 void *unicast_le_ids_dptr = NULL;
 #endif
 
@@ -1547,7 +1547,7 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
         if (nvshmemi_device_state.tma_smem_size)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (nvshmemi_device_state.unicast_le_ids_)
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.unicast_le_ids_));
 #endif
@@ -1893,7 +1893,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     CUDA_RUNTIME_CHECK_GOTO(
         cudaMalloc(&heap_base_actual_array_dptr, (state->npes) * sizeof(void *)), status, out);
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     /* maintain 8 bytes per PE for unicast LE id <valid-4bytes|leId-4bytes> */
     CUDA_RUNTIME_CHECK_GOTO(cudaMalloc(&unicast_le_ids_dptr, (state->npes) * sizeof(uint64_t)),
                             status, out);
@@ -1913,7 +1913,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                         sizeof(void *) * state->npes, cudaMemcpyHostToDevice, state->my_stream),
         status, out);
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (state->heap_obj->get_unicast_le_ids()) {
         CUDA_RUNTIME_CHECK_GOTO(cudaMemcpyAsync(unicast_le_ids_dptr,
                                                 (const void *)state->heap_obj->get_unicast_le_ids(),
@@ -1967,7 +1967,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     nvshmemi_device_state.node_mype = state->mype_node;
     nvshmemi_device_state.node_npes = state->npes_node;
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     nvshmemi_device_state.counted_operations_available =
         state->heap_obj->counted_operations_available();
     nvshmemi_device_state.unicast_le_ids_ = (void *)unicast_le_ids_dptr;
@@ -1998,7 +1998,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     }
 
     // If CFT handles are enabled, we need to use TMA
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if ((nvshmemi_options.ENABLE_LOGICAL_ENDPOINT) &&
         (nvshmemi_device_state.tma_policy == NVSHMEMX_TMA_DISABLE)) {
         NVSHMEMI_ERROR_PRINT(
@@ -2079,7 +2079,7 @@ out:
         if (heap_base_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_array_dptr));
         if (heap_base_actual_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_actual_array_dptr));
         if (test_wait_any_start_idx_ptr) CUDA_RUNTIME_CHECK(cudaFree(test_wait_any_start_idx_ptr));
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (unicast_le_ids_dptr) CUDA_RUNTIME_CHECK(cudaFree(unicast_le_ids_dptr));
 #endif
         if (nvshmemi_device_state.tma_smem_bases)

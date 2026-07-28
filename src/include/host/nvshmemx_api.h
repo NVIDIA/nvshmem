@@ -476,7 +476,7 @@ NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_signal_op(uint64_t *sig_addr, uint64_t 
 
 NVSHMEMI_HOSTDEVICE_PREFIX void nvshmemx_signal_counted_reset(uint64_t *signal_addr);
 
-#if defined(NVSHMEM_ENABLE_CFT_HANDLES)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 __device__ uint64_t nvshmemx_signal_counted_load(const uint64_t *signal_addr);
 __device__ void nvshmemx_signal_counted_wait_until(const uint64_t *signal_addr, uint64_t expected);
 __device__ int nvshmemx_putmem_signal_counted_nbi_block(void *dest, const void *source,
