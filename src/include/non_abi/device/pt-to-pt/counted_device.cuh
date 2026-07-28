@@ -8,7 +8,7 @@
 
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 
-#if defined(__CUDA_ARCH__) && defined(NVSHMEM_ENABLE_CFT_HANDLES)
+#if defined(__CUDA_ARCH__) && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_counted_range_in_heap(const void *ptr,
                                                                              size_t bytes) {

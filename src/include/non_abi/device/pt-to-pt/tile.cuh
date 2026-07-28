@@ -259,7 +259,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_tile_cpy_threadgroup_v1(
     } /* end of if else */
 }
 
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 
 template <typename src_tensor_t, typename dst_tensor_t, typename tuple_t, threadgroup_t scope,
           int major_dim, int minor_dim>
@@ -380,7 +380,7 @@ __device__ inline bool nvshmemi_tile_try_handle_get_threadgroup_dim(src_tensor_t
     return true;
 }
 
-#endif  // LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#endif  // LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 
 // Select implementation based on the operation, datatype
 template <typename vtype, typename T, threadgroup_t scope, typename tuple_t, bool is_put,
@@ -454,7 +454,7 @@ __device__ inline void nvshmemi_tile_cpy_nvl_threadgroup_dim(src_tensor_t src_te
                                                              int pe) {
     using T = typename src_tensor_t::value_type;
 
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if constexpr (is_put) {
         if (nvshmemi_is_le_prioritized(pe) &&
             nvshmemi_tile_try_handle_put_threadgroup_dim<src_tensor_t, dst_tensor_t, tuple_t, scope,
@@ -470,7 +470,7 @@ __device__ inline void nvshmemi_tile_cpy_nvl_threadgroup_dim(src_tensor_t src_te
             return;
         }
     }
-#endif  // LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#endif  // LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 
     // check for vector len == 4
     // Conditions: ptr must be aligned to int4, shape must be a multiple of 16, stride must be a

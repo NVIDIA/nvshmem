@@ -155,7 +155,7 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_signal_counte
     *reinterpret_cast<volatile uint64_t *>(signal_addr) = 0;
 }
 
-#if defined(NVSHMEM_ENABLE_CFT_HANDLES)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 nvshmemx_signal_counted_load(const uint64_t *signal_addr) {
     return *reinterpret_cast<const volatile uint64_t *>(signal_addr);

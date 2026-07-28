@@ -946,7 +946,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
         p2p_npes = get_p2pref()->get_num_p2p_connected_pes(cfg_.npes_node);
     }
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     status = check_logical_endpoint_support();
     NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                           "check logical endpoint support failed\n");
@@ -970,7 +970,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
          heap_size_, heapextra);
     reserved_heap_size_ = p2p_npes * heap_size_;
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (le_unicast_enabled_) {
         int local_status =
             le_counted_operations_supported_ ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
@@ -1048,7 +1048,7 @@ teardown_hooks:
     }
     cumem_handles_.clear();
 
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     // release logical endpoints after mmaped memory has been unmapped
     if (le_unicast_enabled_) {
         status = destroy_unicast_endpoints();
@@ -1184,7 +1184,7 @@ int nvshmemi_symmetric_heap_sysmem_static_shm::release_memory(void * /*buf*/, si
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(nvshmemi_team_t *team,
                                                                               uint64_t mem_size) {
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     int status = 0;
     int le_query_status = 0;
     if (!le_multicast_enabled_) {
@@ -1324,7 +1324,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_bind_multicast_endpoint(
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_unbind_multicast_endpoint(
     nvshmemi_team_t *team, off_t le_offset, size_t size) {
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     int status = 0;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
 
@@ -1403,7 +1403,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::allocate_physical_memory_to_heap
     bool handle_created = false;
     bool memory_mapped = false;
     size_t observers_notified = 0;
-#ifdef CFT_HANDLES_ENABLED
+#ifdef NVSHMEM_CFT_HANDLES_SUPPORT
     bool le_bound = false;
 #endif
     bool heap_owns_allocation = false;
@@ -1462,7 +1462,7 @@ observer_done:
                           "heap observer chunk map failed on at least one PE\n");
 
     // Bind Device Memory at unicast endpoint Offset.
-#ifdef CFT_HANDLES_ENABLED
+#ifdef NVSHMEM_CFT_HANDLES_SUPPORT
     if (le_unicast_enabled_) {
         status = bind_unicast_endpoint_memory(cumem_handle, heap_offset, 0, size);
         le_bound = (status == NVSHMEMX_SUCCESS);
@@ -1499,7 +1499,7 @@ out:
     if (status) {
         print_cumem_handles();
         if (!heap_owns_allocation) {
-#ifdef CFT_HANDLES_ENABLED
+#ifdef NVSHMEM_CFT_HANDLES_SUPPORT
             if (le_bound) {
                 const int unbind_status = unbind_unicast_endpoint_memory(heap_offset, size);
                 if (unbind_status != NVSHMEMX_SUCCESS) {
@@ -1759,7 +1759,7 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                              "cuMemSetAccess failed \n");
 
-#ifdef CFT_HANDLES_ENABLED
+#ifdef NVSHMEM_CFT_HANDLES_SUPPORT
     if (le_unicast_enabled_) {
         status = is_egm;  // EGM not supported currently with logical endpoints
         NVSHMEMI_NZ_ERROR_JMP(
@@ -1862,7 +1862,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out, "Address,size not mmapped\n");
 
     // unbind memory from logical endpoint
-#if defined(CFT_HANDLES_ENABLED)
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (le_unicast_enabled_ && !is_egm(ptr)) {
         status = unbind_unicast_endpoint_memory(heap_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,

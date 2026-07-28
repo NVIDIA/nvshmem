@@ -326,7 +326,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_nvls_allpush_thr
     if constexpr (nvshmemi_device_has_nvls_multimem) {
         nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
 
-#if defined(CFT_HANDLES_ENABLED) && LE_HW_SW_REQUIREMENTS_MET
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && LE_HW_SW_REQUIREMENTS_MET
         /* Handle allpush stages from a 16B-aligned global source and writes through a multicast
          * destination handle whose heap offset must also be 16B-aligned.
          */
@@ -499,7 +499,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
     nvshmem_team_t team, T *src, T *dst, const int size_major_dim, const int size_minor_dim,
     const int src_stride_minor_dim, const int dst_stride_minor_dim, tuple_t start_coord,
     tuple_t boundary) {
-#if LE_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     const int valid_major_dim =
         nvshmemi_tile_valid_dim_size<major_dim>(size_major_dim, start_coord, boundary);
     const int valid_minor_dim =
