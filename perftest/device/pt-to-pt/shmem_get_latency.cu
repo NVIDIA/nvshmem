@@ -94,8 +94,8 @@ int main(int argc, char *argv[]) {
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
         init_test_case_kernel(&test_cubin, "latency_kern");
-        init_test_case_kernel(&test_cubin, "latency_kern_warp");
-        init_test_case_kernel(&test_cubin, "latency_kern_block");
+        init_test_case_kernel(&test_cubin_warp, "latency_kern_warp");
+        init_test_case_kernel(&test_cubin_block, "latency_kern_block");
     }
 
     cudaEventCreate(&start);
