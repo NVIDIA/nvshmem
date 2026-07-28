@@ -294,6 +294,11 @@ function(generateRustBindings)
                     "${NVSHMEM_CUDA_OXIDE_ROOT}")
             endif()
         endforeach()
+        if(NOT EXISTS "${NVSHMEM_CUDA_OXIDE_ROOT}/Cargo.lock")
+            message(FATAL_ERROR
+                "CUDA-Oxide checkout is missing Cargo.lock: "
+                "${NVSHMEM_CUDA_OXIDE_ROOT}")
+        endif()
 
         if(NOT NVSHMEM_HOST_LIB_DIR AND NVSHMEM_BUILD_DIR)
             set(NVSHMEM_HOST_LIB_DIR "${NVSHMEM_BUILD_DIR}/src/lib")
@@ -339,6 +344,8 @@ function(generateRustBindings)
                        "${RUST_TEST_BINARY_DIR}/Cargo.toml" @ONLY)
         configure_file("${TEST_SOURCE_DIR}/cuda_oxide_smoke/src/main.rs"
                        "${RUST_TEST_BINARY_DIR}/src/main.rs" COPYONLY)
+        configure_file("${NVSHMEM_CUDA_OXIDE_ROOT}/Cargo.lock"
+                       "${RUST_TEST_BINARY_DIR}/Cargo.lock" COPYONLY)
 
         set(RUST_PERF_BINARY_DIR
             "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/cuda_oxide_perf")
@@ -347,6 +354,22 @@ function(generateRustBindings)
                        "${RUST_PERF_BINARY_DIR}/Cargo.toml" @ONLY)
         configure_file("${TEST_SOURCE_DIR}/cuda_oxide_perf/src/main.rs"
                        "${RUST_PERF_BINARY_DIR}/src/main.rs" COPYONLY)
+        configure_file("${NVSHMEM_CUDA_OXIDE_ROOT}/Cargo.lock"
+                       "${RUST_PERF_BINARY_DIR}/Cargo.lock" COPYONLY)
+
+        foreach(RUST_TEST_DIR IN ITEMS "${RUST_TEST_BINARY_DIR}" "${RUST_PERF_BINARY_DIR}")
+            execute_process(
+                COMMAND "${CARGO_EXECUTABLE}" generate-lockfile --offline
+                WORKING_DIRECTORY "${RUST_TEST_DIR}"
+                RESULT_VARIABLE RUST_LOCKFILE_RESULT
+                ERROR_VARIABLE RUST_LOCKFILE_ERROR
+            )
+            if(NOT RUST_LOCKFILE_RESULT EQUAL 0)
+                message(FATAL_ERROR
+                    "Failed to generate the CUDA-Oxide test lockfile in ${RUST_TEST_DIR}: "
+                    "${RUST_LOCKFILE_ERROR}")
+            endif()
+        endforeach()
 
         add_custom_target(
             test_bindings_rust_cuda_oxide

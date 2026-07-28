@@ -169,12 +169,30 @@ pub type Runtime = NvshmemRuntime;
 pub struct CudaModuleRegistration<'module> {
     module: &'module CudaModule,
     _runtime: NvshmemRuntime,
+    finalized: bool,
+}
+
+impl<'module> CudaModuleRegistration<'module> {
+    /// Finalize the module registration and return NVSHMEM's status.
+    pub fn finalize(mut self) -> Result<()> {
+        self.finalized = true;
+        let status = unsafe { cumodule_finalize(self.module) };
+        if status != 0 {
+            return Err(format!("nvshmemx_cumodule_finalize failed with status {status}").into());
+        }
+        Ok(())
+    }
 }
 
 impl Drop for CudaModuleRegistration<'_> {
     fn drop(&mut self) {
-        unsafe {
-            cumodule_finalize(self.module);
+        if !self.finalized {
+            let status = unsafe { cumodule_finalize(self.module) };
+            if status != 0 {
+                eprintln!(
+                    "nvshmemx_cumodule_finalize during guard drop failed with status {status}"
+                );
+            }
         }
     }
 }
@@ -224,6 +242,9 @@ impl NvshmemRuntime {
 
     /// Register a CUDA-Oxide module and finalize it when the returned guard drops.
     ///
+    /// Call [`CudaModuleRegistration::finalize`] when the finalizer status must
+    /// be reported. Dropping an unfinalized guard performs best-effort cleanup.
+    ///
     /// # Safety
     ///
     /// The caller must satisfy CUDA's current-context requirements and ensure
@@ -239,6 +260,7 @@ impl NvshmemRuntime {
         Ok(CudaModuleRegistration {
             module,
             _runtime: self.clone(),
+            finalized: false,
         })
     }
 
@@ -246,10 +268,7 @@ impl NvshmemRuntime {
         Self::hostlib_init(0, ptr::null_mut(), None)
     }
 
-    fn init_with_mpi_comm(
-        mpi_comm: MpiComm,
-        cuda_device_id: i32,
-    ) -> Result<Arc<RuntimeInner>> {
+    fn init_with_mpi_comm(mpi_comm: MpiComm, cuda_device_id: i32) -> Result<Arc<RuntimeInner>> {
         let mut attr = sys::nvshmemx_init_attr_t::default();
         attr.args.cuda_device_id = cuda_device_id;
         let status = unsafe { sys::nvshmemx_set_attr_mpi_comm_args(mpi_comm.raw, &mut attr) };
@@ -270,9 +289,8 @@ impl NvshmemRuntime {
         let uid = Box::new(uid);
         let mut attr = sys::nvshmemx_init_attr_t::default();
         attr.args.cuda_device_id = cuda_device_id;
-        let status = unsafe {
-            sys::nvshmemx_set_attr_uniqueid_args(rank, nranks, uid.as_ref(), &mut attr)
-        };
+        let status =
+            unsafe { sys::nvshmemx_set_attr_uniqueid_args(rank, nranks, uid.as_ref(), &mut attr) };
         if status != 0 {
             return Err(
                 format!("nvshmemx_set_attr_uniqueid_args failed with status {status}").into(),

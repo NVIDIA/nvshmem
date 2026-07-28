@@ -94,6 +94,8 @@ prefix-stripped aliases and safe wrappers such as `nvshmem::my_pe()` and
 `nvshmem::barrier_all()`. CUDA-Oxide users should keep the guard returned by
 `unsafe { runtime.register_module(&module) }` alive while kernels call NVSHMEM;
 it finalizes the module registration before the runtime or module can drop.
+Call `registration.finalize()?` after synchronizing when the finalizer status
+must be reported.
 
 At Cargo build time, set `NVSHMEM_HOST_LIB_DIR` to the directory containing
 `libnvshmem_host.so`. At runtime, the dynamic loader must be able to resolve

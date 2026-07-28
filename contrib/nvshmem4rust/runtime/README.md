@@ -13,7 +13,8 @@ provides small wrappers for the pieces every program otherwise has to rewrite:
 - The crate root re-exports generated prefix-stripped aliases and safe wrappers
   such as `my_pe`, `barrier_all`, and `int_put_on_stream`.
 - `NvshmemRuntime::register_module(&module)` returns a guard that keeps the
-  runtime and CUDA-Oxide module valid through NVSHMEM finalization.
+  runtime and CUDA-Oxide module valid through NVSHMEM finalization. Call its
+  `finalize()` method to report finalization failures.
 
 This crate may depend on CUDA-linked NVSHMEM libraries or CUDA Rust crates
 internally when NVSHMEM needs them, but it should not expose CUDA utility APIs
@@ -24,12 +25,15 @@ Rust LTOIR with NVSHMEM's shipped device LTOIR or LTOIR fatbin via `nvJitLink`.
 
 Users must register each loaded CUDA-Oxide module before launching kernels that
 use NVSHMEM device state. The registration guard finalizes it before the module
-or runtime can be dropped:
+or runtime can be dropped. Finalize it explicitly after the last synchronized
+kernel to report errors:
 
 ```rust
-let _registration = unsafe { runtime.register_module(&module) }?;
+let registration = unsafe { runtime.register_module(&module) }?;
 
 // launch CUDA-Oxide kernels that call NVSHMEM device functions
+
+registration.finalize()?;
 ```
 
 The raw pointer wrappers are still available as

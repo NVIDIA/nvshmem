@@ -219,7 +219,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let runtime = Runtime::init(init_method, device_ordinal as i32)?;
     eprintln!("NVSHMEM CUDA-Oxide smoke: hostlib initialized");
     eprintln!("NVSHMEM CUDA-Oxide smoke: registering CUDA module");
-    let _module_registration = unsafe { runtime.register_module(&module) }?;
+    let module_registration = unsafe { runtime.register_module(&module) }?;
     eprintln!("NVSHMEM CUDA-Oxide smoke: CUDA module registered");
 
     let pe = nvshmem::my_pe();
@@ -244,6 +244,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     nvshmem::barrier_all();
     ctx.synchronize()?;
     println!("NVSHMEM CUDA-Oxide smoke tests passed on PE {pe}");
+    module_registration.finalize()?;
     Ok(())
 }
 

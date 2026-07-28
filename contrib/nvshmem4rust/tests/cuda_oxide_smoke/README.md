@@ -39,6 +39,10 @@ public host API, registers the linked CUDA module, and launches the kernels.
 The direct CMake target selects the single-PE `uid` initialization path so it
 does not require PMI launcher state.
 
+Each generated test workspace starts from the selected CUDA-Oxide checkout's
+`Cargo.lock` and completes its local path dependencies offline. This keeps its
+dependency resolution aligned with that checkout.
+
 If the normal NVSHMEM build layout is unavailable, provide these paths
 explicitly:
 
