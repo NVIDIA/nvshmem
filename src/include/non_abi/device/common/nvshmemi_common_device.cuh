@@ -393,6 +393,86 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
     for (size_t i = myIdx; i < len; i += groupSize) dst_c[i] = src_c[i];
 }
 
+/* Qualify each CTA's block index with its grid ID so concurrent grids use
+ * distinct registration slots. Owner keys follow the base-pointer table. */
+
+__device__ __forceinline__ uint64_t nvshmemi_tma_grid_id() {
+    uint64_t grid_id;
+    asm volatile("mov.u64 %0, %%gridid;" : "=l"(grid_id));
+    return grid_id;
+}
+
+__device__ __forceinline__ uint64_t nvshmemi_tma_registration_key() {
+    uint64_t grid_id = nvshmemi_tma_grid_id();
+    return grid_id == UINT64_MAX ? 0 : grid_id + 1;
+}
+
+__device__ __forceinline__ unsigned long long *nvshmemi_tma_smem_owner_keys() {
+    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
+    if (bases == NULL) return NULL;
+    return reinterpret_cast<unsigned long long *>(bases +
+                                                  nvshmemi_device_state_d.tma_smem_bases_len);
+}
+
+__device__ __forceinline__ int nvshmemi_tma_smem_registration_slot() {
+    size_t len = nvshmemi_device_state_d.tma_smem_bases_len;
+    constexpr size_t grid_namespaces = NVSHMEMI_TMA_MAX_CONCURRENT_GRIDS;
+    if (len < grid_namespaces || len % grid_namespaces != 0) return -1;
+
+    size_t blocks_per_grid = len / grid_namespaces;
+    uint32_t block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    if (block_id >= blocks_per_grid) return -1;
+
+    size_t grid_slot = nvshmemi_tma_grid_id() % grid_namespaces;
+    return static_cast<int>(grid_slot * blocks_per_grid + block_id);
+}
+
+__device__ __forceinline__ int nvshmemi_tma_find_smem_registration() {
+    unsigned long long *owners = nvshmemi_tma_smem_owner_keys();
+    uint64_t key = nvshmemi_tma_registration_key();
+    int slot = nvshmemi_tma_smem_registration_slot();
+    if (key == 0 || owners == NULL || slot < 0) return -1;
+
+    return reinterpret_cast<volatile unsigned long long *>(owners)[slot] == key ? slot : -1;
+}
+
+__device__ __forceinline__ int nvshmemi_tma_claim_smem_registration() {
+    unsigned long long *owners = nvshmemi_tma_smem_owner_keys();
+    uint64_t key = nvshmemi_tma_registration_key();
+    int slot = nvshmemi_tma_smem_registration_slot();
+    if (key == 0 || owners == NULL || slot < 0) return -1;
+
+    unsigned long long old = atomicCAS(owners + slot, 0ULL, key);
+    return old == 0 || old == key ? slot : -1;
+}
+
+__device__ __forceinline__ uintptr_t nvshmemi_tma_smem_base() {
+    int slot = nvshmemi_tma_find_smem_registration();
+    if (slot < 0) return 0;
+    return reinterpret_cast<volatile uintptr_t *>(nvshmemi_device_state_d.tma_smem_bases)[slot];
+}
+
+__device__ __forceinline__ size_t nvshmemi_tma_smem_size() {
+    int slot = nvshmemi_tma_find_smem_registration();
+    if (slot < 0 || nvshmemi_device_state_d.tma_smem_size == NULL) return 0;
+    return reinterpret_cast<volatile size_t *>(nvshmemi_device_state_d.tma_smem_size)[slot];
+}
+
+__device__ __forceinline__ void nvshmemi_tma_publish_smem_registration(int slot, uintptr_t base,
+                                                                       size_t size) {
+    nvshmemi_device_state_d.tma_smem_size[slot] = size;
+    nvshmemi_device_state_d.tma_smem_bases[slot] = base;
+    __threadfence();
+}
+
+__device__ __forceinline__ void nvshmemi_tma_release_smem_registration(int slot) {
+    unsigned long long *owners = nvshmemi_tma_smem_owner_keys();
+    nvshmemi_device_state_d.tma_smem_bases[slot] = 0;
+    nvshmemi_device_state_d.tma_smem_size[slot] = 0;
+    __threadfence();
+    atomicExch(owners + slot, 0ULL);
+}
+
 /*
  * Returns true if this CTA has registered shared memory for TMA (via
  * nvshmemx_give_smem) and TMA policy is not DISABLE.  Used to gate the
@@ -401,10 +481,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
 __device__ __forceinline__ bool nvshmemi_tma_smem_registered() {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return false;
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-    return bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len &&
-           bases[block_id] != 0;
+    return nvshmemi_tma_smem_base() != 0;
 #else
     return false;
 #endif
@@ -450,8 +527,7 @@ __device__ __forceinline__ char *nvshmemi_tma_data_buffer(uintptr_t smem_base) {
 }
 
 __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers) {
-    size_t smem_size =
-        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    size_t smem_size = nvshmemi_tma_smem_size();
     constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (num_buffers == 0 || smem_size <= kReserve) return 0;
     return nvshmemi_tma_align_down_16((smem_size - kReserve) / num_buffers);
@@ -463,8 +539,7 @@ __device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(uintptr_t smem_ba
 }
 
 __device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(int slot) {
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    uintptr_t base = nvshmemi_tma_smem_base();
     return nvshmemi_tma_barrier_slot(base, slot);
 }
 
@@ -479,8 +554,7 @@ __device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(uintpt
 }
 
 __device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(int slot) {
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
+    uintptr_t base = nvshmemi_tma_smem_base();
     return nvshmemi_handle_barrier_slot(base, slot);
 }
 #endif
@@ -508,10 +582,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void *smem_dst, const vo
     if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
     if (bytes > (size_t)UINT32_MAX) return -1;
 
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
-    size_t smem_size =
-        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    uintptr_t base = nvshmemi_tma_smem_base();
+    size_t smem_size = nvshmemi_tma_smem_size();
     constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (base == 0 || smem_size <= kReserve) return -1;
 
@@ -568,10 +640,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst, c
     if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
     if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
 
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
-    size_t smem_size =
-        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    uintptr_t base = nvshmemi_tma_smem_base();
+    size_t smem_size = nvshmemi_tma_smem_size();
     if (base == 0 || smem_size == 0) return -1;
 
     /* Barrier regions are reserved at the base by give_smem; data tile is the
@@ -667,10 +737,8 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst, const voi
     if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
     if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
 
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t base = nvshmemi_device_state_d.tma_smem_bases[block_id];
-    size_t smem_size =
-        nvshmemi_device_state_d.tma_smem_size != NULL ? *nvshmemi_device_state_d.tma_smem_size : 0;
+    uintptr_t base = nvshmemi_tma_smem_base();
+    size_t smem_size = nvshmemi_tma_smem_size();
     if (base == 0 || smem_size == 0) return -1;
 
     /* Barrier region reserved at the base by give_smem.  This impl uses slots
@@ -1857,9 +1925,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
         0;  // bytes on which try_put has been called but not yet completed (waited on)
     uint32_t copy_bytes = (uint32_t)(smem_chunk_size < len ? smem_chunk_size : len);
 
-    uint32_t blkIdx_flat = nvshmemi_get_flat_blk_idx();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
-    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx_flat];
+    uintptr_t smem_base = nvshmemi_tma_smem_base();
     // Copy-style handle operations allocate one SMEM/barrier pair per calling threadgroup.
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
@@ -1972,9 +2039,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     int groupSize = nvshmemi_threadgroup_size<SCOPE>();
 
     // TODO - check if shared and skip copy to shared memory step
-    uint32_t blkIdx_flat = nvshmemi_get_flat_blk_idx();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
-    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx_flat];
+    uintptr_t smem_base = nvshmemi_tma_smem_base();
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
     // Copy data to shared memory using threads
@@ -2024,8 +2090,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     int lane_idx = thrd_idx_in_blk % warpSize;
     int leader_lane = __ffs(mask) - 1;
-    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
-    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+    uintptr_t smem_base = nvshmemi_tma_smem_base();
     int warp_idx_in_block = thrd_idx_in_blk / warpSize;
 
     uint8_t *smem_ptr = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
@@ -2138,9 +2203,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated(
     uint32_t copy_bytes = (uint32_t)(smem_chunk_size < len ? smem_chunk_size : len);
 
     // TODO - check if shared and skip copy to shared memory step
-    uint32_t blkIdx_flat = nvshmemi_get_flat_blk_idx();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
-    uintptr_t smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx_flat];
+    uintptr_t smem_base = nvshmemi_tma_smem_base();
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
     auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);

@@ -1539,8 +1539,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
     int copy_bytes =
         NVSHMEMI_SMEM_BUF_SIZE < bytes_per_warp ? NVSHMEMI_SMEM_BUF_SIZE : bytes_per_warp;
 
-    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
-    uintptr_t tma_smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+    uintptr_t tma_smem_base = nvshmemi_tma_smem_base();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     // SMEM data chunks and handle barrier slots are allocated per thread block.
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
@@ -2023,8 +2022,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
     int copy_bytes =
         NVSHMEMI_SMEM_BUF_SIZE < bytes_per_warp ? NVSHMEMI_SMEM_BUF_SIZE : bytes_per_warp;
 
-    uint32_t blkIdx = blockIdx.x + (blockIdx.y * gridDim.x) + (blockIdx.z * gridDim.x * gridDim.y);
-    uintptr_t tma_smem_base = nvshmemi_device_state_d.tma_smem_bases[blkIdx];
+    uintptr_t tma_smem_base = nvshmemi_tma_smem_base();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     // SMEM data chunks and handle barrier slots are allocated per thread block.
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;

@@ -58,19 +58,13 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * nvshmemx_give_smem - Give a block of shared memory to the NVSHMEM runtime for
  * TMA-based transfers.
  *
- * Must be called by EVERY CTA in the grid, once per kernel launch, before
- * issuing any TMA-backed puts.  All CTAs in the grid must provide the same
- * size.  CTAs that skip this call will fall back to P2P stores for all puts
- * in that kernel.
+ * Must be called by all threads in each participating CTA before issuing
+ * TMA-backed operations. All threads in a CTA must provide the same shared
+ * memory pointer and size; different CTAs may provide different sizes.
+ * Synchronize the CTA after registration before any thread uses the TMA path.
  *
  * User contract: every CTA that calls give_smem MUST call nvshmemx_release_smem()
- * before the kernel returns.  Without this, the registration persists across
- * kernel launches: a later kernel whose CTAs share block_ids with a prior kernel
- * and omit give_smem will unexpectedly take the TMA path using a stale pointer.
- *
- * The registered smem base pointer is stored per CTA and used as the staging
- * buffer for TMA-backed transfers.  A non-zero base is also the per-CTA
- * registration gate.
+ * before the kernel returns.
  *
  * TMA-backed put routing also requires 16-byte aligned source/destination
  * pointers and a 16-byte multiple transfer size.  Operations that do not meet
@@ -80,10 +74,6 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * staging path that additionally requires at least two full warps in the CTA;
  * smaller CTAs fall back to P2P stores.
  *
- * Note: grids larger than NVSHMEM_TMA_MAX_BLOCKS CTAs are supported, but CTAs
- * beyond that runtime-configured limit cannot register and will fall back to
- * P2P stores.
- *
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
  */
@@ -92,28 +82,20 @@ __device__ inline void nvshmemx_give_smem(void *smem, size_t size) {
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
 
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-    size_t *smem_size = nvshmemi_device_state_d.tma_smem_size;
-    if (bases == NULL || (size_t)block_id >= nvshmemi_device_state_d.tma_smem_bases_len) {
-        /* This CTA exceeds the configured TMA block limit and cannot use TMA. */
-        return;
-    }
     /* Size must be at least NVSHMEMI_SMEM_DATA_REGION_OFFSET — we reserve the
      * initial bytes for mbarriers/TMA descriptors.  A smaller allocation
      * can't hold our barriers, so don't register this CTA; it falls back to
      * P2P stores for all puts. */
-    if (size < (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET) {
-        return;
-    }
+    if (size < (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET) return;
+
     /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
      * warp_id broadcast — so the compiler sees a warp-uniform predicate and
      * avoids inserting a peeling loop (which if(tid==0) would cause). */
     if (nvshmemi_tma_block_is_elected()) {
-        bases[block_id] = (uintptr_t)smem;
-        /* The API contract requires every CTA to pass the same size, so this
-         * scalar is shared across the per-CTA base table. */
-        if (smem_size != NULL) *smem_size = size;
+        int registration_slot = nvshmemi_tma_claim_smem_registration();
+        if (registration_slot < 0) return;
+        nvshmemi_tma_publish_smem_registration(registration_slot, reinterpret_cast<uintptr_t>(smem),
+                                               size);
     }
 #endif /* __CUDA_ARCH__ >= 900 */
 }
@@ -123,22 +105,18 @@ __device__ inline void nvshmemx_give_smem(void *smem, size_t size) {
  * TMA runtime.
  *
  * Must be called by every CTA that previously called nvshmemx_give_smem(),
- * before the kernel returns.  Zeroes the tma_smem_bases entry so that a later
- * kernel whose CTAs share the same block_id does not inherit a stale pointer
- * and unexpectedly take the TMA path.
+ * before the kernel returns.
  *
- * Call from all threads; only the elected warp-0 leader performs the write.
- * Must be followed by __syncthreads() if any threads still need to observe
- * the cleared state before proceeding.
+ * Call from all threads; only the elected warp-0 leader clears the registration.
+ * Callers are responsible for synchronizing before reusing the shared memory.
  */
 __device__ inline void nvshmemx_release_smem() {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
-    int block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-    uintptr_t *bases = nvshmemi_device_state_d.tma_smem_bases;
-    if (bases != NULL && (size_t)block_id < nvshmemi_device_state_d.tma_smem_bases_len) {
+    int registration_slot = nvshmemi_tma_find_smem_registration();
+    if (registration_slot >= 0) {
         if (nvshmemi_tma_block_is_elected()) {
-            bases[block_id] = 0;
+            nvshmemi_tma_release_smem_registration(registration_slot);
         }
     }
 #endif /* __CUDA_ARCH__ >= 900 */

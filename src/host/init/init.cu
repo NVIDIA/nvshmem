@@ -2042,7 +2042,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     INFO(NVSHMEM_INIT, "NVSHMEM TMA policy = %d", nvshmemi_device_state.tma_policy);
 
-    /* Allocate the per-CTA smem base table and the shared smem size scalar for TMA. */
+    /* Allocate TMA registration storage for each grid/CTA pair. */
     if (nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE) {
         /* Cap the TMA_MAX_BLOCKS to prevent unreasonably large runtime configurations. */
         constexpr size_t tma_bases_max_alloc_size = 1 << 20;
@@ -2057,17 +2057,22 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
         uintptr_t *tma_smem_bases_dptr = NULL;
         size_t *tma_smem_size_dptr = NULL;
-        size_t tma_bases_alloc_size = nvshmemi_options.TMA_MAX_BLOCKS * sizeof(uintptr_t);
+        size_t tma_registration_entries =
+            nvshmemi_options.TMA_MAX_BLOCKS * NVSHMEMI_TMA_MAX_CONCURRENT_GRIDS;
+        size_t tma_bases_alloc_size =
+            tma_registration_entries * (sizeof(uintptr_t) + sizeof(uint64_t));
+        size_t tma_sizes_alloc_size = tma_registration_entries * sizeof(size_t);
         CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_bases_dptr, tma_bases_alloc_size),
                                 status, out);
         nvshmemi_device_state.tma_smem_bases = tma_smem_bases_dptr;
         CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_bases_dptr, 0, tma_bases_alloc_size), status,
                                 out);
-        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_size_dptr, sizeof(size_t)), status,
-                                out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaMalloc((void **)&tma_smem_size_dptr, tma_sizes_alloc_size),
+                                status, out);
         nvshmemi_device_state.tma_smem_size = tma_smem_size_dptr;
-        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, sizeof(size_t)), status, out);
-        nvshmemi_device_state.tma_smem_bases_len = nvshmemi_options.TMA_MAX_BLOCKS;
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemset(tma_smem_size_dptr, 0, tma_sizes_alloc_size), status,
+                                out);
+        nvshmemi_device_state.tma_smem_bases_len = tma_registration_entries;
     }
 
     nvshmemi_update_device_state();

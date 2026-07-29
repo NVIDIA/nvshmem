@@ -17,6 +17,7 @@
  */
 #define NVSHMEMI_TMA_BARRIER_REGION_BYTES 512
 #define NVSHMEMI_TMA_NUM_BARRIER_SLOTS 32
+#define NVSHMEMI_TMA_MAX_CONCURRENT_GRIDS 4
 #define NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS 32
 #define NVSHMEMI_HANDLE_BARRIER_BYTES (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS * 16)
 
@@ -561,10 +562,11 @@ typedef struct {
     bool nvshmemi_is_nvshmem_bootstrapped;
     nvshmemi_selected_device_transport_t selected_device_transport;
 
-    int tma_policy;            /* nvshmemx_tma_policy_t: TMA usage policy */
-    uintptr_t *tma_smem_bases; /* Per-CTA shared memory base pointers for TMA */
-    size_t tma_smem_bases_len; /* Number of entries in tma_smem_bases */
-    size_t *tma_smem_size;     /* Shared memory size promised by all CTAs */
+    int tma_policy; /* nvshmemx_tma_policy_t: TMA usage policy */
+    /* Per-registration bases followed by an equal-length owner-key array. */
+    uintptr_t *tma_smem_bases;
+    size_t tma_smem_bases_len; /* Number of registration entries */
+    size_t *tma_smem_size;     /* Per-registration shared memory sizes */
     void *unicast_le_ids_;     /* LE IDs of PEs */
 } nvshmemi_device_host_state_v1;
 static_assert(sizeof(nvshmemi_device_host_state_v1) == 816,

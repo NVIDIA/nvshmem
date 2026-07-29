@@ -37,6 +37,7 @@ nvshmem_add_test(signal_add.cu)
 nvshmem_add_test(signal_set.cu)
 nvshmem_add_test(swap.cu)
 nvshmem_add_test(tma_smem.cu)
+nvshmem_add_test(tma_smem_concurrent.cu)
 nvshmem_add_test(wait.cu)
 
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
