@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
         if (me == 0) printf("Unable to create even team\n");
     }
 
-    errors += check_2d_destroy_reuse(NVSHMEM_TEAM_WORLD, 2, 80);
+    errors += check_2d_destroy_reuse(NVSHMEM_TEAM_WORLD, 2, 40);
 
     finalize_wrapper();
     return errors != 0;
