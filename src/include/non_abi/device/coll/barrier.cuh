@@ -240,6 +240,7 @@ template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_barrier_threadgroup(nvshmem_team_t team) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     nvshmemi_threadgroup_sync<SCOPE>();
+    nvshmemi_tma_drain_if_registered();
     if (!nvshmemi_use_ldst_path()) {
         nvshmemi_transfer_quiet<SCOPE>(true, NVSHMEMX_PE_ANY, NULL, NVSHMEMX_QP_ALL);
     } else if (!myIdx) {
