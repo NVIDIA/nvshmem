@@ -2563,6 +2563,11 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
      * with GRH below. */
     if (ibgda_state->common.options->IB_FORCE_GRH || port_attr->lid == 0 ||
         nvshmemt_ib_common_port_requires_grh(port_attr)) {
+        /* The self-AH is exchanged as the peers' DCT AV. GRH does not replace the
+         * target LID on InfiniBand; keep it zero for RoCE. */
+        if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
+            ah_attr.dlid = port_attr->lid;
+        }
         set_grh_fields();
         support_half_av_seg = false;
     } else {
