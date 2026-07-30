@@ -99,23 +99,27 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
             nvml_status =
                 nvml_ftable->nvmlDeviceGetHandleByPciBusId(remote_pcie_bus_id, &remote_device);
             if (nvml_status != NVML_SUCCESS) {
-                INFO(NVSHMEM_TRANSPORT, "Unable to dereference device by UUID using NVML.\n");
+                INFO(NVSHMEM_TRANSPORT,
+                     "Unable to dereference device by UUID using NVML. NVML error: %d\n",
+                     nvml_status);
                 goto out;
             }
             nvml_status =
                 nvml_ftable->nvmlDeviceGetHandleByPciBusId(p2p_state->pcie_bdf, &local_device);
             if (nvml_status != NVML_SUCCESS) {
-                INFO(NVSHMEM_TRANSPORT, "Unable to dereference device by UUID using NVML.\n");
+                INFO(NVSHMEM_TRANSPORT,
+                     "Unable to dereference device by UUID using NVML. NVML error: %d\n",
+                     nvml_status);
                 goto out;
             }
             nvml_status = nvml_ftable->nvmlDeviceGetP2PStatus(local_device, remote_device,
                                                               NVML_P2P_CAPS_INDEX_READ, &stat);
             if (nvml_status != NVML_SUCCESS) {
                 *access = 0;
-                INFO(
-                    NVSHMEM_TRANSPORT,
-                    "Unable to get read status using NVML. Disabling P2P communication for pe %d\n",
-                    peer_info->pe);
+                INFO(NVSHMEM_TRANSPORT,
+                     "Unable to get read status using NVML. Disabling P2P communication for pe %d. "
+                     "NVML error: %d\n",
+                     peer_info->pe, nvml_status);
                 goto out;
             } else if (stat == NVML_P2P_STATUS_OK) {
                 *access |= NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD;
@@ -126,8 +130,8 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
                 *access = 0;
                 INFO(NVSHMEM_TRANSPORT,
                      "Unable to get write status using NVML. Disabling P2P communication for pe "
-                     "%d\n",
-                     peer_info->pe);
+                     "%d. NVML error: %d\n",
+                     peer_info->pe, nvml_status);
                 goto out;
             } else if (stat == NVML_P2P_STATUS_OK) {
                 *access |= NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST;
@@ -135,7 +139,8 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
             nvml_status = nvml_ftable->nvmlDeviceGetP2PStatus(local_device, remote_device,
                                                               NVML_P2P_CAPS_INDEX_ATOMICS, &stat);
             if (nvml_status != NVML_SUCCESS) {
-                INFO(NVSHMEM_TRANSPORT, "Unable to get atomic status using NVML.\n");
+                INFO(NVSHMEM_TRANSPORT, "Unable to get atomic status using NVML. NVML error: %d\n",
+                     nvml_status);
             } else if (stat == NVML_P2P_STATUS_OK) {
                 *access |= NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS;
             }
@@ -191,7 +196,8 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
             nvml_ftable->nvmlDeviceGetHandleByPciBusId(remote_pcie_bus_id, &remote_device);
         if (nvml_status != NVML_SUCCESS) {
             INFO(NVSHMEM_TRANSPORT,
-                 "Unable to dereference device by UUID using NVML for NVL check.\n");
+                 "Unable to dereference device by UUID using NVML for NVL check. NVML error: %d\n",
+                 nvml_status);
             nvshmemi_state->is_platform_nvl = false;
             goto out;
         }
@@ -199,13 +205,18 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
             nvml_ftable->nvmlDeviceGetHandleByPciBusId(p2p_state->pcie_bdf, &local_device);
         if (nvml_status != NVML_SUCCESS) {
             INFO(NVSHMEM_TRANSPORT,
-                 "Unable to dereference device by UUID using NVML for NVL check.\n");
+                 "Unable to dereference device by UUID using NVML for NVL check. NVML error: %d\n",
+                 nvml_status);
             nvshmemi_state->is_platform_nvl = false;
             goto out;
         }
 
         nvml_status = nvml_ftable->nvmlDeviceGetP2PStatus(local_device, remote_device,
                                                           NVML_P2P_CAPS_INDEX_NVLINK, &stat);
+        if (nvml_status != NVML_SUCCESS) {
+            INFO(NVSHMEM_TRANSPORT, "Unable to get NVLink status using NVML. NVML error: %d\n",
+                 nvml_status);
+        }
         if (nvml_status != NVML_SUCCESS || stat != NVML_P2P_STATUS_OK) {
             nvshmemi_state->is_platform_nvl = false;
         }

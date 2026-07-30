@@ -1356,7 +1356,8 @@ bool is_mnnvl_supported(int dev_id) {
 
     nvml_status = nvml_ftable.nvmlInit();
     if (nvml_status != NVML_SUCCESS) {
-        DEBUG_PRINT("Unable to initialize NVML library, disabling MNNVL\n");
+        DEBUG_PRINT("Unable to initialize NVML library, disabling MNNVL. NVML error: %d\n",
+                    nvml_status);
         return false;
     }
 
@@ -1415,7 +1416,7 @@ bool is_mnnvl_supported(int dev_id) {
 
     nvml_status = nvml_ftable.nvmlShutdown();
     if (nvml_status != NVML_SUCCESS) {
-        DEBUG_PRINT("Unable to stop NVML library in NVSHMEM.");
+        DEBUG_PRINT("Unable to stop NVML library in NVSHMEM. NVML error: %d\n", nvml_status);
         // is this a fatal error?
         return false;
     }

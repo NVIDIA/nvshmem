@@ -107,7 +107,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         nvml_status = nvshmemi_nvml_ftable_init(&nvml_ftable_, &nvml_handle_);
         if (nvml_status != NVML_SUCCESS) {
             status = NVSHMEMX_ERROR_INTERNAL;
-            INFO(NVSHMEM_MEM, "Unable to open NVML. Some features will be disabled.");
+            INFO(NVSHMEM_MEM, "Unable to open NVML. Some features will be disabled. %d",
+                 nvml_status);
             goto out;
         }
 
@@ -160,7 +161,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         !nvshmemi_options.DISABLE_MNNVL) {
         nvml_status = nvml_ftable_.nvmlDeviceGetHandleByPciBusId(pcie_bdf, &local_device);
         NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL, out,
-                                 "nvmlDeviceGetHandleByPciBusId failed \n");
+                                 "nvmlDeviceGetHandleByPciBusId failed with NVML error %d\n",
+                                 nvml_status);
 
         /* Some platforms with older driver may not support this API, so bypass MNNVL discovery */
         if (nvml_ftable_.nvmlDeviceGetGpuFabricInfoV == NULL) {
@@ -174,7 +176,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         nvml_status = nvml_ftable_.nvmlDeviceGetGpuFabricInfoV(local_device, &fabricInfo);
         NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL, out,
                                  "nvmlDeviceGetGpuFabricInfoV() failed... Detection of MNNVL "
-                                 "environment will not be attempted");
+                                 "environment will not be attempted. NVML error: %d",
+                                 nvml_status);
 
         pe_fabricInfo = (nvmlGpuFabricInfoV_t *)std::malloc(sizeof(nvmlGpuFabricInfoV_t) * npes);
         NVSHMEMI_NULL_ERROR_JMP(pe_fabricInfo, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -195,7 +198,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             platformInfo.version = nvmlPlatformInfo_v2;
             nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
             NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL,
-                                     out, "nvmlDeviceGetPlatformInfo failed \n");
+                                     out, "nvmlDeviceGetPlatformInfo failed with NVML error %d\n",
+                                     nvml_status);
 
             pe_platformInfo[mype] = platformInfo;
 
@@ -296,7 +300,8 @@ out:
     if ((status || nvml_status) && nvml_ftable_.nvmlShutdown != NULL) {
         nvml_status = nvml_ftable_.nvmlShutdown();
         if (nvml_status != NVML_SUCCESS) {
-            INFO(NVSHMEM_MEM, "Unable to stop NVML library in NVSHMEM.");
+            INFO(NVSHMEM_MEM, "Unable to stop NVML library in NVSHMEM. NVML error: %d",
+                 nvml_status);
         }
         nvshmemi_nvml_ftable_fini(&nvml_ftable_, &nvml_handle_);
         if (status)
