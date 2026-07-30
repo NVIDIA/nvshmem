@@ -263,7 +263,7 @@ struct gpunetio_ep {
     // CPU data path tracking
     uint64_t head_op_id = 0;
     uint64_t tail_op_id = 0;
-    uint16_t wqe_bb_idx = 0;
+    uint64_t wqe_bb_idx = 0;
     uint32_t cqe_ci = 0;
 
    private:
@@ -442,12 +442,11 @@ gpunetio_ep *gpunetio_device::get_cpu_ep_from_qp_index(int pe, int qp_index, int
 // Host-side SQ post
 static inline void gpunetio_cpu_post_send(gpunetio_ep *ep, uint32_t num_wqe_consumed) {
     auto *qp = ep->qp->qp_gverbs;
-    uint32_t idx = static_cast<uint32_t>(ep->wqe_bb_idx);
+    uint64_t idx = ep->wqe_bb_idx;
 
     STORE_BARRIER();
 
-    reinterpret_cast<std::atomic<uint64_t> *>(qp->cpu_db)
-        ->store(static_cast<uint64_t>(idx), std::memory_order_release);
+    reinterpret_cast<std::atomic<uint64_t> *>(qp->cpu_db)->store(idx, std::memory_order_release);
 
     ep->head_op_id += num_wqe_consumed;
 }
@@ -2417,7 +2416,7 @@ static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, r
     if (!ep) return NVSHMEMX_SUCCESS;
 
     auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
-    uint16_t wqe_bb_idx = ep->wqe_bb_idx;
+    uint16_t wqe_bb_idx = static_cast<uint16_t>(ep->wqe_bb_idx);
 
     status = ep->check_poll_avail(false);
     if (status) return status;
@@ -2489,7 +2488,7 @@ static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, r
 static int gpunetio_amo_32(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remote) {
     gpunetio_device *device = ep->device_;
     auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
-    uint16_t wqe_bb_idx = ep->wqe_bb_idx;
+    uint16_t wqe_bb_idx = static_cast<uint16_t>(ep->wqe_bb_idx);
     uint32_t swap_add_value = static_cast<uint32_t>(remote->val);
     uint32_t compare = static_cast<uint32_t>(remote->cmp);
 
@@ -2624,7 +2623,7 @@ static int gpunetio_amo_32(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
 static int gpunetio_amo_64(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remote) {
     gpunetio_device *device = ep->device_;
     auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
-    uint16_t wqe_bb_idx = ep->wqe_bb_idx;
+    uint16_t wqe_bb_idx = static_cast<uint16_t>(ep->wqe_bb_idx);
 
     int status = ep->check_poll_avail(false, /*min_free_slots=*/2);
     if (status) return status;
