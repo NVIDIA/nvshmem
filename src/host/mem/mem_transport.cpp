@@ -192,6 +192,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
 
             pe_platformInfo.resize(npes);
 
+            platformInfo.version = nvmlPlatformInfo_v2;
             nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
             NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL,
                                      out, "nvmlDeviceGetPlatformInfo failed \n");
