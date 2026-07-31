@@ -314,6 +314,21 @@ static void check_for_cumodule_tests() {
     }
 }
 
+static void print_read_args_summary(int mype) {
+    if (mype != 0) return;
+    printf("[PE 0] Runtime options after parsing command line arguments\n");
+    printf(
+        "min_size: %zu, max_size: %zu, step_factor: %zu, min_iters: %zu, max_iters: %zu, repeat: "
+        "%zu, threadgroup_scope: %s, mmap: %d, use_egm: %d, only_p2p: %d, mem_handle_type: %zu, "
+        "dynamic_smem_size: %zu\n",
+        _min_size, _max_size, _step_factor, _min_iters, _max_iters, _repeat,
+        threadgroup_scope.name.c_str(), use_mmap, use_egm, _only_p2p, _mem_handle_type,
+        _dynamic_smem_size);
+    printf(
+        "Note: Above is full list of options, any given test will use only a subset of these "
+        "variables.\n");
+}
+
 void init_wrapper(int *c, char ***v) {
     /** Only one of the bootstrap will be valid, so we can assume
       the order of trial will be MPI > UID > DEFAULT
@@ -336,6 +351,7 @@ void init_wrapper(int *c, char ***v) {
     }
 
     nvshmem_barrier_all();
+    print_read_args_summary(nvshmem_my_pe());
     check_for_cumodule_tests();
 }
 
@@ -458,17 +474,7 @@ void read_args(int argc, char **argv) {
     assert(_min_size <= _max_size);
     disable_dynamic_smem_for_cubin_tests();
 
-    printf("Runtime options after parsing command line arguments\n");
-    printf(
-        "min_size: %zu, max_size: %zu, step_factor: %zu, min_iters: %zu, max_iters: %zu, repeat: "
-        "%zu, threadgroup_scope: %s, mmap: %d, use_egm: %d, only_p2p: %d, mem_handle_type: %zu, "
-        "dynamic_smem_size: %zu\n",
-        _min_size, _max_size, _step_factor, _min_iters, _max_iters, _repeat,
-        threadgroup_scope.name.c_str(), use_mmap, use_egm, _only_p2p, _mem_handle_type,
-        _dynamic_smem_size);
-    printf(
-        "Note: Above is full list of options, any given test will use only a subset of these "
-        "variables.\n");
+    /* Deferred to print_read_args_summary() after NVSHMEM init so only PE 0 prints. */
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \

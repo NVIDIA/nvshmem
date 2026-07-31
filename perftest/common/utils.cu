@@ -281,6 +281,25 @@ static void check_for_cumodule_tests() {
     }
 }
 
+static void print_read_args_summary(int mype) {
+    if (mype != 0) return;
+    printf("[PE 0] Runtime options after parsing command line arguments \n");
+    printf(
+        "min_size: %zu, max_size: %zu, step_factor: %zu, iterations: %zu, warmup iterations: %zu, "
+        "number of ctas: %zu, threads per cta: %zu "
+        "stride: %zu, datatype: %s, reduce_op: %s, threadgroup_scope: %s, atomic_op: %s, dir: %s, "
+        "report_msgrate: %d, bidirectional: %d, putget_issue :%s, use_graph: %d, use_mmap: %d, "
+        "mem_handle_type: %zu, use_egm: %d, use_smem: %d\n",
+        min_size, max_size, step_factor, iters, warmup_iters, num_blocks, threads_per_block, stride,
+        datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
+        test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
+        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem);
+    if (repetitions_requested) printf("repetitions: %zu\n", repetitions);
+    printf(
+        "Note: Above is full list of options, any given test will use only a subset of these "
+        "variables.\n");
+}
+
 void init_wrapper(int *c, char ***v) {
     check_for_cumodule_tests();
 #ifdef NVSHMEMTEST_MPI_SUPPORT
@@ -338,7 +357,7 @@ void init_wrapper(int *c, char ***v) {
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr);
 
         nvshmem_barrier_all();
-
+        print_read_args_summary(rank);
         return;
     } else if (use_uid) {
         nvshmemx_init_attr_t attr = NVSHMEMX_INIT_ATTR_INITIALIZER;
@@ -352,6 +371,7 @@ void init_wrapper(int *c, char ***v) {
         nvshmemx_set_attr_uniqueid_args(rank, nranks, &id, &attr);
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
         nvshmem_barrier_all();
+        print_read_args_summary(rank);
         return;
     }
 #endif
@@ -378,6 +398,7 @@ void init_wrapper(int *c, char ***v) {
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_SHMEM, &attr);
 
         nvshmem_barrier_all();
+        print_read_args_summary(shmem_fn_table.fn_shmem_my_pe());
         return;
     }
 #endif
@@ -389,6 +410,7 @@ void init_wrapper(int *c, char ***v) {
     select_device();
 
     nvshmem_barrier_all();
+    print_read_args_summary(mype);
     d_latency = (double *)nvshmem_malloc(sizeof(double));
     if (!d_latency) ERROR_EXIT("nvshmem_malloc failed \n");
 
@@ -1264,21 +1286,7 @@ void read_args(int argc, char **argv) {
 
     assert(min_size <= max_size);
 
-    printf("Runtime options after parsing command line arguments \n");
-    printf(
-        "min_size: %zu, max_size: %zu, step_factor: %zu, iterations: %zu, warmup iterations: %zu, "
-        "number of ctas: %zu, threads per cta: %zu "
-        "stride: %zu, datatype: %s, reduce_op: %s, threadgroup_scope: %s, atomic_op: %s, dir: %s, "
-        "report_msgrate: %d, bidirectional: %d, putget_issue :%s, use_graph: %d, use_mmap: %d, "
-        "mem_handle_type: %zu, use_egm: %d, use_smem: %d\n",
-        min_size, max_size, step_factor, iters, warmup_iters, num_blocks, threads_per_block, stride,
-        datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
-        test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
-        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem);
-    if (repetitions_requested) printf("repetitions: %zu\n", repetitions);
-    printf(
-        "Note: Above is full list of options, any given test will use only a subset of these "
-        "variables.\n");
+    /* Deferred to print_read_args_summary() after NVSHMEM init so only PE 0 prints. */
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \
