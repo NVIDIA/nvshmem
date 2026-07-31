@@ -97,6 +97,8 @@ typedef struct CUlogicalEndpointProp_struct {
 
 #define CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_UNICAST_SUPPORTED (CUdevice_attribute)153
 #define CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_MULTICAST_SUPPORTED (CUdevice_attribute)154
+#define CU_DEVICE_ATTRIBUTE_LOGICAL_ENDPOINT_COUNTED_OPS_SUPPORTED (CUdevice_attribute)155
+#define CU_LOGICAL_ENDPOINT_FLAG_COUNTED_OPS 0x1u
 
 typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointIdReserve_v13030)(CUlogicalEndpointId *leId,
                                                                  cuuint32_t count);
