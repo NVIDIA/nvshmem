@@ -465,6 +465,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--init-type", "-i", type=str, help="Init type to use", choices=["mpi", "uid"], default="uid")
     parser.add_argument("--skip-signalop", action="store_true", help="Skip test_signalop_wait (proxy timeout on PCIe)")
+    parser.add_argument("--skip-amo", action="store_true", help="Skip host AMO coverage on unsupported targets")
     args = parser.parse_args()
     if args.init_type == "uid":
         uid_init()
@@ -476,7 +477,10 @@ if __name__ == '__main__':
     test_rma_on_tensor()
 
     test_quiet()
-    test_host_atomic_memory_operations()
+    if args.skip_amo:
+        print("Skipping test_host_atomic_memory_operations (--skip-amo)")
+    else:
+        test_host_atomic_memory_operations()
     test_rma_nbi_on_array()
     test_put_signal_nbi_and_signal_fetch()
     test_signal_wait_array()

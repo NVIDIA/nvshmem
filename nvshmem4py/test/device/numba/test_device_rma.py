@@ -253,6 +253,9 @@ def test_g(dtype):
 def test_tma_shared_memory_management(nvshmem_init_fini):
     """Compile and execute Numba array wrappers for TMA shared memory."""
     dev = Device()
+    if dev.compute_capability < (9, 0):
+        pytest.skip("TMA shared-memory APIs require SM90+")
+
     stream = dev.create_stream()
     results = nvshmem.core.array((3, ), dtype="int32")
     results[:] = 0
@@ -266,8 +269,7 @@ def test_tma_shared_memory_management(nvshmem_init_fini):
             out[1] = nvshmem.core.device.numba.ask_smem(nvshmem.core.device.numba.SmemAmount.SMEM_MINIMUM)
             out[2] = nvshmem.core.device.numba.ask_smem(nvshmem.core.device.numba.SmemAmount.SMEM_BARRIERS_ONLY)
 
-        # All CTA threads participate in registration and release. This remains
-        # safe on pre-SM90 devices, where the native implementation is a no-op.
+        # All CTA threads participate in registration and release.
         nvshmem.core.device.numba.give_smem(smem)
         cuda.syncthreads()
         nvshmem.core.device.numba.release_smem()

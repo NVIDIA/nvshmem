@@ -482,7 +482,12 @@ fi
 # --skip-signalop: cross-PE signal_op/signal_wait hits proxy timeout on PCIe.
 # The NVLS suite (EOS) runs the full test without the skip.
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-signalop
+RMA_TEST_ARGS=(--skip-signalop)
+if [ "${NVSHMEM4PY_SKIP_AMO:-0}" = "1" ]; then
+    echo "Skipping host AMO coverage on this target"
+    RMA_TEST_ARGS+=(--skip-amo)
+fi
+$MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi "${RMA_TEST_ARGS[@]}"
 if [ $? -ne 0 ]; then
     echo "Test failed: RMA Test"
     EXIT_CODE=$((EXIT_CODE + 1))
