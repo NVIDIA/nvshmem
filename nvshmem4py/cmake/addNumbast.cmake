@@ -43,7 +43,7 @@ function(AddNumbast VERSION)
     set(ASTCANOPY_CMAKE_INSTALL_PREFIX "${ASSET_DIR}/ast_canopy/install")
     message(STATUS "ASTCANOPY_CMAKE_INSTALL_PREFIX: $ENV{LD_LIBRARY_PATH}")
     set(NUMBAST_LD_LIBRARY_PATH "LD_LIBRARY_PATH=${ASTCANOPY_CMAKE_INSTALL_PREFIX}/lib:${ASTCANOPY_CMAKE_INSTALL_PREFIX}/lib64:$ENV{LD_LIBRARY_PATH}")
-    set(NUMBAST_COMMAND "env" "${NUMBAST_LD_LIBRARY_PATH}" "${VENV_PYTHON_EXECUTABLE}" "-m" "numbast" "--cfg-path" "${ASSET_DIR}/numbast/config_nvshmem.yml" "--output-dir" "${NUMBAST_OUTPUT_DIR}" "--bypass-parse-error" "true")
+    set(NUMBAST_COMMAND "env" "${NUMBAST_LD_LIBRARY_PATH}" "${VENV_PYTHON_EXECUTABLE}" "${ASSET_DIR}/numbast/run_numbast.py" "--cfg-path" "${ASSET_DIR}/numbast/config_nvshmem.yml" "--output-dir" "${NUMBAST_OUTPUT_DIR}" "--bypass-parse-error" "true")
     
     # High Level Bindings Settings
     set(HIGH_LEVEL_BINDINGS_OUTPUT_DIR ${NUMBAST_OUTPUT_DIR}/high_level/)

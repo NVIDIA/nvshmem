@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import nvshmem.bindings.device.cute as bindings
-from nvshmem.core import Teams
+from nvshmem.core import SmemAmount, Teams
 
-__all__ = ["my_pe", "team_my_pe", "team_n_pes", "n_pes", "barrier_all", "sync_all", "signal_op", "signal_wait"]
+__all__ = [
+    "SmemAmount", "ask_smem", "give_smem", "release_smem", "my_pe", "team_my_pe", "team_n_pes", "n_pes", "barrier_all",
+    "sync_all", "signal_op", "signal_wait"
+]
 
 from cutlass import cute
 import cutlass
@@ -14,6 +17,49 @@ from cutlass.base_dsl.typing import cast as cute_cast
 @cute.jit
 def _resolve_ptr(arg):
     return arg.iterator
+
+
+@cute.jit
+def ask_smem(amount):
+    """Return the TMA dynamic shared-memory requirement for ``amount``.
+
+    Use the result as the dynamic shared-memory size when launching a kernel
+    that calls :func:`give_smem`.
+    """
+    return bindings.ask_smem(cute_cast(amount, cutlass.Int32))
+
+
+@cute.jit
+def give_smem(smem: cute.Tensor):
+    """Register a dynamic shared-memory tensor for TMA transfers in this CTA.
+
+    ``smem`` must cover the full dynamic shared-memory allocation and have a
+    16-byte-aligned base, for example a tensor constructed from
+    ``cute.arch.get_dyn_smem(cutlass.Int32, alignment=16)``. Its byte size is
+    derived from its element type and layout, so callers do not pass a
+    separate size. The allocation must be at least
+    ``ask_smem(SmemAmount.SMEM_MINIMUM)`` bytes and all threads in every CTA
+    must register an equally sized allocation. Pair every call with
+    :func:`release_smem` before the kernel returns.
+    """
+    # The generated binding uses an Int8 pointer for C ``void*``. Recast the
+    # tensor iterator without changing its shared-memory address space or
+    # alignment so tensors of any element type can be registered.
+    smem_ptr = cute.recast_ptr(_resolve_ptr(smem), dtype=cutlass.Int8)
+    size = cute.size_in_bytes(smem.element_type, smem.layout)
+    return bindings.give_smem(smem_ptr, cute_cast(size, cutlass.Uint64))
+
+
+@cute.jit
+def release_smem():
+    """Release the calling CTA's TMA shared-memory registration.
+
+    This is the no-argument counterpart to :func:`give_smem`: the native API
+    records registration per CTA rather than per array. All threads in every
+    CTA that registers a shared-memory tensor must release it before the
+    kernel exits.
+    """
+    return bindings.release_smem()
 
 
 @cute.jit

@@ -3,6 +3,7 @@
 
 from cuda.core import Device
 import numba.cuda as cuda
+import numpy as np
 import nvshmem.core
 import nvshmem.core.device.numba
 
@@ -246,3 +247,39 @@ def test_g(dtype):
     assert (dest == 1).all()
 
     print("Done testing shmem_g")
+
+
+@pytest.mark.mpi
+def test_tma_shared_memory_management(nvshmem_init_fini):
+    """Compile and execute Numba array wrappers for TMA shared memory."""
+    dev = Device()
+    stream = dev.create_stream()
+    results = nvshmem.core.array((3, ), dtype="int32")
+    results[:] = 0
+    minimum_smem = nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_MINIMUM)
+
+    @cuda.jit
+    def tma_smem_management_kernel(out):
+        smem = cuda.shared.array(0, dtype=np.int32)
+        if cuda.threadIdx.x == 0:
+            out[0] = nvshmem.core.device.numba.ask_smem(nvshmem.core.device.numba.SmemAmount.SMEM_RECOMMENDED)
+            out[1] = nvshmem.core.device.numba.ask_smem(nvshmem.core.device.numba.SmemAmount.SMEM_MINIMUM)
+            out[2] = nvshmem.core.device.numba.ask_smem(nvshmem.core.device.numba.SmemAmount.SMEM_BARRIERS_ONLY)
+
+        # All CTA threads participate in registration and release. This remains
+        # safe on pre-SM90 devices, where the native implementation is a no-op.
+        nvshmem.core.device.numba.give_smem(smem)
+        cuda.syncthreads()
+        nvshmem.core.device.numba.release_smem()
+
+    cuda.synchronize()
+    tma_smem_management_kernel[1, 32, stream, minimum_smem](results)
+    stream.sync()
+
+    expected = [
+        nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_RECOMMENDED),
+        minimum_smem,
+        nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_BARRIERS_ONLY),
+    ]
+    assert (results == expected).all(), "Numba TMA shared-memory wrapper results are incorrect"
+    nvshmem.core.free_array(results)

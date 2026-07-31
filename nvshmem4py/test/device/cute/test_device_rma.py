@@ -5,6 +5,7 @@ import os
 
 import pytest
 from cuda.core import Device
+import cutlass
 import cutlass.cute as cute
 import torch
 from cutlass.cute.runtime import from_dlpack
@@ -364,3 +365,51 @@ def test_g(dtype, nvshmem_init_fini):
 
     nvshmem.core.free_tensor(dest)
     nvshmem.core.free_tensor(var)
+
+
+@pytest.mark.mpi
+def test_tma_shared_memory_management(nvshmem_init_fini):
+    """Compile and execute CuTe tensor wrappers for TMA shared memory."""
+    stream = _nvshmem_stream()
+    dev = Device()
+    results = _make_torch_tensor((3, ), "int32", 0)
+    results_cute = _cute_from_torch(results)
+    minimum_smem = nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_MINIMUM)
+
+    @cute.kernel
+    def tma_smem_management_kernel(out: cute.Tensor):
+        tidx, _, _ = cute.arch.thread_idx()
+        smem_ptr = cute.arch.get_dyn_smem(cutlass.Int32, alignment=16)
+        smem = cute.make_tensor(smem_ptr, cute.make_layout(minimum_smem // 4))
+        if tidx == 0:
+            out[0] = nvshmem_cute.ask_smem(nvshmem_cute.SmemAmount.SMEM_RECOMMENDED)
+            out[1] = nvshmem_cute.ask_smem(nvshmem_cute.SmemAmount.SMEM_MINIMUM)
+            out[2] = nvshmem_cute.ask_smem(nvshmem_cute.SmemAmount.SMEM_BARRIERS_ONLY)
+
+        # Each thread participates. The native API naturally becomes a no-op
+        # below SM90, allowing the wrapper path to remain portable.
+        nvshmem_cute.give_smem(smem)
+        cute.arch.sync_threads()
+        nvshmem_cute.release_smem()
+
+    @cute.jit
+    def tma_smem_management_launcher(out: cute.Tensor):
+        tma_smem_management_kernel(out).launch(
+            grid=[1, 1, 1],
+            block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
+            smem=minimum_smem,
+        )
+
+    compiled = _compile_kernel(tma_smem_management_launcher, results_cute)
+    compiled(results_cute)
+    dev.sync()
+
+    expected = torch.tensor([
+        nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_RECOMMENDED),
+        minimum_smem,
+        nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_BARRIERS_ONLY),
+    ],
+                            dtype=results.dtype,
+                            device=results.device)
+    assert torch.equal(results, expected), "CuTe TMA shared-memory wrapper results are incorrect"
+    nvshmem.core.free_tensor(results)

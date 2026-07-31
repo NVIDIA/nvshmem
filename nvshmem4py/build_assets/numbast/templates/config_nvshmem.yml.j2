@@ -11,6 +11,11 @@ File List:
     - {{NVSHMEM_HOME}}/src/include/device/nvshmemx_coll_defines.cuh
     - {{NVSHMEM_HOME}}/src/include/device/nvshmemx_defines.h
 
+Extra Enum Sources:
+    - File: {{NVSHMEM_HOME}}/src/include/device_host/nvshmem_types.h
+      Names:
+          - nvshmemx_smem_amount_t
+
 GPU Arch:
    # sm_70 is used to parse the declarations of nvshmem API. When code is jitted
    # at runtime, Numba will use the runtime CC to generate code.
