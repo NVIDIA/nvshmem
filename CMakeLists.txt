@@ -118,7 +118,7 @@ endif()
 if(NVSHMEM_USE_NCCL)
   find_path(
     NCCL_INCLUDE nccl.h
-    HINTS ${CMAKE_SOURCE_DIR} ${NCCL_HOME}
+    HINTS ${NCCL_HOME} ${CMAKE_SOURCE_DIR}
     PATH_SUFFIXES include_nccl include lib64
   )
 endif()
