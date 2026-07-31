@@ -169,7 +169,7 @@ def get_peer_buffer(buffer: Buffer, pe: int):
     return peer_buffer
 
 
-def register_external_buffer(buffer: Buffer) -> Buffer:
+def register_external_buffer(buffer: Buffer, preferred_address=None) -> Buffer:
     """
     Register an external buffer with NVSHMEM.
     
@@ -179,6 +179,9 @@ def register_external_buffer(buffer: Buffer) -> Buffer:
 
     Args:
         - buffer (``cuda.core.Buffer``): A buffer to register with NVSHMEM.
+        - preferred_address (``int`` or ``cuda.core.Buffer``, optional): Preferred
+          symmetric virtual address for the mapping. All PEs must pass the same
+          address preference.
 
     Returns: 
         - ``cuda.core.Buffer``: A buffer object wrapping the registered external buffer.
@@ -192,15 +195,16 @@ def register_external_buffer(buffer: Buffer) -> Buffer:
     # _get_device() excepts if no device is current
     user_nvshmem_dev, other_dev = _get_device()
 
-    # Unlike other functions, we do not expect the buffer to be tracked by NVSHMEM
-    mr = _mr_references.get(user_nvshmem_dev.device_id)
-    if mr is None:
-        raise NvshmemInvalid("Tried to register an external buffer on a device that is not initialized with NVSHMEM")
-    registered_buffer = mr.register_external_buffer(buffer)
-    if other_dev is not None:
-        other_dev.set_current()
-    if registered_buffer is not None:
-        return registered_buffer
+    try:
+        # Unlike other functions, we do not expect the buffer to be tracked by NVSHMEM
+        mr = _mr_references.get(user_nvshmem_dev.device_id)
+        if mr is None:
+            raise NvshmemInvalid(
+                "Tried to register an external buffer on a device that is not initialized with NVSHMEM")
+        return mr.register_external_buffer(buffer, preferred_address=preferred_address)
+    finally:
+        if other_dev is not None:
+            other_dev.set_current()
 
 
 def unregister_external_buffer(buffer: Buffer) -> None:

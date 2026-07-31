@@ -6,16 +6,14 @@ from their bindings
 """
 
 import nvshmem.bindings as bindings
+from nvshmem.bindings.ask_smem import ask_smem as _ask_smem
+from cuda.pathfinder import load_nvidia_dynamic_lib
+import ctypes
 
-__all__ = ["ComparisonType", "SignalOp", "InitStatus", "my_pe", "team_my_pe", "team_n_pes", "n_pes", "init_status"]
-"""
-IntEnum which matches 1:1 with ``nvshmemx_cmp_type_t``
-"""
-ComparisonType = bindings.Cmp_type
-"""
-IntEnum which matches 1:1 with the ``nvshmem_signal_op_t``
-"""
-SignalOp = bindings.Signal_op
+__all__ = [
+    "ComparisonType", "SignalOp", "InitStatus", "ThreadSupport", "SmemAmount", "ask_smem", "query_thread", "my_pe",
+    "team_my_pe", "team_n_pes", "n_pes", "init_status"
+]
 """
 IntEnum which matches 1:1 with ``nvshmemx_cmp_type_t``
 """
@@ -28,6 +26,36 @@ SignalOp = bindings.Signal_op
 IntEnum which matches 1:1 with ``nvshmem_init_status_t``
 """
 InitStatus = bindings.Init_status
+"""
+IntEnum which matches 1:1 with ``nvshmemx_thread_support_t``.
+"""
+ThreadSupport = bindings.Thread_support
+
+# IntEnum matching ``nvshmemx_smem_amount_t``.
+SmemAmount = bindings.Smem_amount
+
+
+def ask_smem(amount: SmemAmount = SmemAmount.SMEM_RECOMMENDED) -> int:
+    """Return the dynamic shared-memory size requested by NVSHMEM TMA.
+
+    The value can be supplied as the dynamic shared-memory launch size for a
+    kernel that calls the device-side :func:`nvshmemx_give_smem` wrapper.
+    Invalid values follow the native helper and return the recommended size.
+    """
+    return _ask_smem(amount)
+
+
+def query_thread() -> ThreadSupport:
+    """Return the NVSHMEM host-library thread-support level.
+
+    This mirrors ``nvshmem_query_thread`` and can be called before NVSHMEM
+    initialization. It reports the library capability, not a guarantee about
+    the thread safety of Python code that calls it.
+    """
+    load_nvidia_dynamic_lib("nvshmem_host")
+    provided = ctypes.c_int()
+    bindings.query_thread(ctypes.addressof(provided))
+    return ThreadSupport(provided.value)
 
 
 def my_pe() -> int:

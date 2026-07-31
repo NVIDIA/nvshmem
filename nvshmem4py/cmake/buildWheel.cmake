@@ -50,7 +50,7 @@ function(BuildWheel WHEEL_TARGET PY_VER PYTHON_EXECUTABLE CUDA_VER)
         COMMAND mkdir -p ${BUILD_DIR}
         COMMAND bash -c "if [ ! -x ${VENV_PYTHON_EXECUTABLE} ]; then ${PYTHON_EXECUTABLE} -m venv ${VENV_DIR}; fi; if ! ${VENV_PYTHON_EXECUTABLE} -c 'import build, setuptools.build_meta' >/dev/null 2>&1; then ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip; ${VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt; ${VENV_PYTHON_EXECUTABLE} -m pip install --upgrade wheel setuptools; fi"
         COMMAND echo "Building whl and tgz for packages ${CUDA_VER}"
-        COMMAND ${CMAKE_COMMAND} -E env "CPPFLAGS=-I${CUDA_HOME}/include/" "PACKAGE_NAME=${WHEEL_NAME}" ${VENV_PYTHON_EXECUTABLE} -m build --outdir ${BUILD_DIR} --no-isolation
+        COMMAND ${CMAKE_COMMAND} -E env "CPPFLAGS=-I${CMAKE_BINARY_DIR}/src/include/ -I${CUDA_HOME}/include/ -I${CUDA_HOME}/include/cccl" "PACKAGE_NAME=${WHEEL_NAME}" ${VENV_PYTHON_EXECUTABLE} -m build --outdir ${BUILD_DIR} --no-isolation
         COMMAND bash -c "export PATH=${VENV_DIR}/bin:$PATH; ls ${BUILD_DIR}/${WHEEL_STR}*.whl | xargs ${VENV_PYTHON_EXECUTABLE} -m auditwheel repair --plat manylinux_2_34_${ARCH_NAME} -w ${BUILD_DIR}/"
         # Undo patching version numbers
         COMMAND sed -i -e "s/^name = \"${WHEEL_NAME}\"/name = \"nvshmem4py\"/" ${PYPROJECT_PATH}

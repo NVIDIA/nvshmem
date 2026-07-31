@@ -5,7 +5,7 @@ These are the Python datatypes for NVSHMEM
 """
 import uuid
 import logging
-from typing import Union
+from typing import Optional, Union
 from enum import Enum, IntEnum
 
 from cuda.core import MemoryResource, Buffer
@@ -14,7 +14,8 @@ from cuda.core import Stream
 from cuda.bindings.utils import get_cuda_native_handle
 import cuda.bindings.driver
 
-from nvshmem.bindings import malloc, free, ptr, mc_ptr, Team_id, buffer_register_symmetric, buffer_unregister_symmetric
+from nvshmem.bindings import (buffer_register_symmetric, buffer_register_symmetric_at_preferred_address,
+                              buffer_unregister_symmetric, free, malloc, mc_ptr, ptr, Team_id)
 from nvshmem.core._internal_tracking import _is_initialized, InternalInitStatus
 
 logger = logging.getLogger("nvshmem")
@@ -503,7 +504,10 @@ class NvshmemResource(MemoryResource):
             return
         self._mem_references[ptr]["freed"] = True
 
-    def register_external_buffer(self, buffer: Buffer, call_register: bool = True) -> Buffer:
+    def register_external_buffer(self,
+                                 buffer: Buffer,
+                                 call_register: bool = True,
+                                 preferred_address: Optional[Union[int, Buffer]] = None) -> Buffer:
         """
         Register an external buffer with NVSHMEM.
 
@@ -512,6 +516,9 @@ class NvshmemResource(MemoryResource):
             - call_register (bool, optional): Whether to call the register function on the buffer.
                                               This should be False if the buffer is already registered
                                               or was allocated via nvshmem_malloc outside of NVSHMEM4Py
+            - preferred_address (int or Buffer, optional): Symmetric virtual address
+              requested for the registered mapping. All PEs must use the same
+              address preference.
         Returns:
             Buffer: A buffer object wrapping the registered external buffer.
             Users must pass this buffer to NVSHMEM operations, rather than the original buffer.
@@ -526,9 +533,24 @@ class NvshmemResource(MemoryResource):
                 f"Found already tracked external buffer with address {ptr}. Returning it. Ref count {self._mem_references[ptr]['ref_count']}"
             )
             return self._mem_references[ptr].get("buffer", None)
+        if preferred_address is not None and not call_register:
+            raise NvshmemInvalid("preferred_address requires call_register=True")
+
         if call_register:
-            registered_ptr = buffer_register_symmetric(int(ptr), int(buffer.size), 0)
-            if registered_ptr is None:
+            if preferred_address is None:
+                registered_ptr = buffer_register_symmetric(int(ptr), int(buffer.size), 0)
+            else:
+                if isinstance(preferred_address, Buffer):
+                    preferred_address = preferred_address.handle
+                try:
+                    preferred_ptr = int(preferred_address)
+                except (TypeError, ValueError) as exc:
+                    raise NvshmemInvalid("preferred_address must be an integer address or Buffer") from exc
+                registered_ptr = buffer_register_symmetric_at_preferred_address(int(ptr), int(buffer.size),
+                                                                                preferred_ptr, 0)
+            # The C registration APIs return NULL on failure. CyBind exposes
+            # that pointer value as the integer sentinel 0.
+            if not registered_ptr:
                 raise NvshmemError("Failed to register external buffer")
             registered_ptr = int(registered_ptr)
             logger.debug(f"Registered external buffer with address {ptr}.")

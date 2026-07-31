@@ -268,7 +268,7 @@ typedef enum {
     NVSHMEMX_TMA_POLICY_MAX = INT_MAX
 } nvshmemx_tma_policy_t;
 
-typedef enum {
+typedef enum nvshmemx_smem_amount_t {
     NVSHMEMX_SMEM_RECOMMENDED = 0,
     NVSHMEMX_SMEM_MINIMUM = 1,
     NVSHMEMX_SMEM_BARRIERS_ONLY = 2,

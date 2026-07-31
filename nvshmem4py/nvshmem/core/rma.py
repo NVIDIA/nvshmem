@@ -20,7 +20,10 @@ from enum import IntEnum
 from typing import Tuple
 from contextlib import contextmanager
 
-__all__ = ["put_signal", "signal_op", "signal_wait", "put", "get", "quiet", "SignalOp"]
+__all__ = [
+    "put_signal", "put_signal_nbi", "signal_op", "signal_wait", "put", "put_nbi", "get", "get_nbi", "quiet", "flush",
+    "signal_fetch", "SignalOp"
+]
 
 logger = logging.getLogger("nvshmem")
 
@@ -82,6 +85,7 @@ def _call_putget(dst: object,
                  src: object,
                  op: str = "put",
                  signal: bool = False,
+                 nbi: bool = False,
                  signal_var: Buffer = 0,
                  signal_val: int = 0,
                  signal_op: SignalOp = 0,
@@ -99,6 +103,7 @@ def _call_putget(dst: object,
         - src (object): Source buffer (Buffer, Cupy array, or Torch tensor).
         - op (str): Either "put" or "get".
         - signal (bool): If True, invoke signal-enabled variant of the op.
+        - nbi (bool): If True, invoke the nonblocking-immediate variant.
         - signal_var (Buffer): Symmetric memory buffer used as the signal address.
                              This buffer must be >=8 bytes in size (the underlying API expects a uint64)
         - signal_val (int): Value to use in the signal operation.
@@ -126,7 +131,7 @@ def _call_putget(dst: object,
         if not isinstance(src_buf, Buffer) or not isinstance(dst_buf, Buffer):
             raise NvshmemInvalid("Called RMA operation on an invalid Buffer")
 
-        f_name = f"{op}mem{'_signal' if signal else ''}_on_stream"
+        f_name = f"{op}mem{'_signal' if signal else ''}{'_nbi' if nbi else ''}_on_stream"
         func = getattr(bindings, f_name)
         safe_size = min(src_buf.size, dst_buf.size)
         if signal:
@@ -170,6 +175,31 @@ def put_signal(dst: object,
                  src,
                  op="put",
                  signal=True,
+                 signal_var=signal_var,
+                 signal_val=signal_val,
+                 signal_op=signal_op,
+                 remote_pe=remote_pe,
+                 stream=stream)
+
+
+def put_signal_nbi(dst: object,
+                   src: object,
+                   signal_var: Buffer,
+                   signal_val: int,
+                   signal_op: SignalOp,
+                   remote_pe: int = -1,
+                   stream=None) -> None:
+    """Issue a nonblocking put-with-signal on a CUDA stream.
+
+    The source buffer must remain valid until a subsequent ``quiet(stream)``.
+    Use ``flush(stream)`` only for the source-reuse guarantee documented for
+    plain ``put_nbi`` operations.
+    """
+    _call_putget(dst,
+                 src,
+                 op="put",
+                 signal=True,
+                 nbi=True,
                  signal_var=signal_var,
                  signal_val=signal_val,
                  signal_op=signal_op,
@@ -236,6 +266,22 @@ def signal_wait(signal_var: Buffer,
         bindings.signal_wait_until_on_stream(signal_var.handle, signal_op, signal_val, int(stream.__cuda_stream__()[1]))
 
 
+def signal_fetch(signal_var: Buffer) -> int:
+    """Synchronously fetch the local value of a symmetric signal variable.
+
+    The native API performs a device-to-host copy and has no stream argument.
+    Establish completion and ordering for producer work on non-default streams
+    before calling this function.
+    """
+    if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
+        raise NvshmemInvalid("NVSHMEM Library is not initialized")
+    if not isinstance(signal_var, Buffer) or signal_var.size < 8:
+        raise NvshmemInvalid("Signal must be a Buffer >= 8 bytes allocated by NVSHMEM4Py")
+
+    with _rma_device_context():
+        return int(bindings.signal_fetch(signal_var.handle))
+
+
 def quiet(stream: NvshmemStreamsType = None) -> None:
     """
     Ensures completion of all previously issued NVSHMEM operations on the given stream.
@@ -258,6 +304,26 @@ def quiet(stream: NvshmemStreamsType = None) -> None:
         bindings.quiet_on_stream(int(stream.__cuda_stream__()[1]))
 
 
+def flush(stream: NvshmemStreamsType = None) -> None:
+    """Make sources from preceding ``put_nbi`` calls on ``stream`` safe to reuse.
+
+    ``flush`` is stream ordered. It does not guarantee remote visibility of
+    the written data; call :func:`quiet` before the remote consumer reads the
+    destination.
+
+    Args:
+        - stream (``Stream``): CUDA stream whose NBI puts should be flushed.
+    """
+    if _is_initialized["status"] != InternalInitStatus.INITIALIZED:
+        raise NvshmemInvalid("NVSHMEM Library is not initialized")
+    if stream is None:
+        logger.error("Non on-stream flush operations are not yet implemented")
+        raise NotImplementedError
+
+    with _rma_device_context():
+        bindings.flush_on_stream(int(stream.__cuda_stream__()[1]))
+
+
 def put(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
     """
     Performs a host-initiated NVSHMEM put operation on a CUDA stream.
@@ -276,6 +342,17 @@ def put(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsTyp
     _call_putget(dst, src, op="put", signal=False, remote_pe=remote_pe, stream=stream)
 
 
+def put_nbi(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
+    """Issue a nonblocking host-initiated NVSHMEM put on a CUDA stream.
+
+    The source buffer must remain valid until ``flush(stream)`` or
+    ``quiet(stream)`` has completed on the same stream. ``flush`` does not
+    imply remote visibility; use ``quiet`` when the remote PE will consume
+    the destination.
+    """
+    _call_putget(dst, src, op="put", nbi=True, remote_pe=remote_pe, stream=stream)
+
+
 def get(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
     """
     Performs a host-initiated NVSHMEM get operation on a CUDA stream.
@@ -292,3 +369,12 @@ def get(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsTyp
         - ``NvshmemError``: If any operations do not complete successfully
     """
     _call_putget(dst, src, op="get", signal=False, remote_pe=remote_pe, stream=stream)
+
+
+def get_nbi(dst: object, src: object, remote_pe: int = -1, stream: NvshmemStreamsType = None):
+    """Issue a nonblocking host-initiated NVSHMEM get on a CUDA stream.
+
+    Do not consume the destination buffer until a later operation establishes
+    completion, such as ``quiet(stream)``.
+    """
+    _call_putget(dst, src, op="get", nbi=True, remote_pe=remote_pe, stream=stream)

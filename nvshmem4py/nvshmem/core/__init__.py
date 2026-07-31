@@ -9,6 +9,7 @@ from .interop.torch import *
 from .direct import *
 from .collective import *
 from .rma import *
+from .amo import *
 from .teams import *
 
 import os
@@ -16,5 +17,5 @@ import os
 # Define public exports
 __all__ = memory.__all__ + init_fini.__all__ + nvshmem_types.__all__ + \
           interop.cupy.__all__ + interop.torch.__all__ + direct.__all__ + \
-          collective.__all__ + rma.__all__ + teams.__all__
+          collective.__all__ + rma.__all__ + amo.__all__ + teams.__all__
 # NOTE! CuTe DSL Tensor API aliases names with Torch tensors. Because of this, we do not import the cute module here. Users of the CuTe DSL Tensor API should import the cute module directly.

@@ -56,6 +56,13 @@ def calculate_modules(module):
 
 # Note: the extension attributes are overwritten in build_extension()
 ext_modules = [e for ext in ext_modules for e in calculate_modules(ext)]
+ext_modules.append(
+    Extension(
+        "nvshmem.bindings.ask_smem",
+        sources=["nvshmem/bindings/ask_smem.pyx"],
+        language="c++",
+        extra_compile_args=["-std=c++17"],
+    ))
 
 compiler_directives = {"embedsignature": True, "show_performance_hints": False}
 

@@ -16,8 +16,8 @@ import logging
 logger = logging.getLogger("nvshmem")
 
 __all__ = [
-    "team_split_strided", "team_split_2d", "team_destroy", "team_init", "team_translate_pe", "TeamConfig",
-    "TeamUniqueId", "get_team_unique_id"
+    "team_split_strided", "team_split_2d", "team_destroy", "team_init", "team_translate_pe", "team_get_config",
+    "TeamConfig", "TeamUniqueId", "get_team_unique_id"
 ]
 
 TeamUniqueId = bindings.team_uniqueid
@@ -38,6 +38,14 @@ def get_team_unique_id() -> TeamUniqueId:
     unique_id = TeamUniqueId()
     bindings.team_get_uniqueid(unique_id.ptr)
     return unique_id
+
+
+def team_get_config(team: Teams) -> TeamConfig:
+    """Return a copy of ``team``'s ``nvshmem_team_config_t``.
+    """
+    config = TeamConfig()
+    bindings.team_get_config(team, config.ptr)
+    return config
 
 
 def team_split_strided(parent_team: Teams,

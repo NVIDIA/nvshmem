@@ -24,13 +24,34 @@ from cuda.core import Device, system, Program, ProgramOptions, LinkerOptions, Ob
 import nvshmem.bindings
 
 
+def test_host_information_apis():
+    """Exercise host-library information and TMA shared-memory queries."""
+    name = nvshmem.core.get_name()
+    assert isinstance(name, str) and name, "nvshmem_info_get_name returned an empty name"
+
+    thread_support = nvshmem.core.query_thread()
+    assert int(thread_support) >= 0, "nvshmem_query_thread returned an invalid support level"
+
+    recommended = nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_RECOMMENDED)
+    minimum = nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_MINIMUM)
+    barriers_only = nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_BARRIERS_ONLY)
+    assert recommended >= minimum >= barriers_only > 0, "invalid host TMA shared-memory requirements"
+    assert nvshmem.core.ask_smem(nvshmem.core.SmemAmount.MAX) == recommended
+    print(
+        f"Host info APIs passed: name={name}, thread_support={thread_support}, smem={recommended}/{minimum}/{barriers_only}"
+    )
+
+
 def test_mpi_comm_init():
     # Test device init and bootstrap
     local_rank_per_node = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
     dev = Device(local_rank_per_node)
     dev.set_current()
     nvshmem.core.init(device=dev, uid=None, rank=None, nranks=None, mpi_comm=MPI.COMM_WORLD, initializer_method="mpi")
-    nvshmem.core.finalize()
+    try:
+        test_host_information_apis()
+    finally:
+        nvshmem.core.finalize()
     print("Init/Fini with MPI passed with cuda.core init/fini as well")
 
 
@@ -70,7 +91,10 @@ def test_uid_init():
     comm.Bcast(uniqueid._data.view(np.int8), root=0)
 
     nvshmem.core.init(device=dev, uid=uniqueid, rank=rank, nranks=nranks, mpi_comm=None, initializer_method="uid")
-    nvshmem.core.finalize()
+    try:
+        test_host_information_apis()
+    finally:
+        nvshmem.core.finalize()
     print("Init/Fini with UID passed")
 
 
@@ -85,7 +109,10 @@ def test_emulated_mpi_init():
                       nranks=None,
                       mpi_comm=MPI.COMM_WORLD,
                       initializer_method="emulated_mpi")
-    nvshmem.core.finalize()
+    try:
+        test_host_information_apis()
+    finally:
+        nvshmem.core.finalize()
     print("Init/Fini with emulated MPI passed with cuda.core init/fini as well")
 
 

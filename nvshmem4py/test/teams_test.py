@@ -137,6 +137,13 @@ def test_team_unique_id():
     print("Done testing TeamUniqueId")
 
 
+def test_team_get_config():
+    print("Testing team_get_config")
+    config = nvshmem.core.team_get_config(Teams.TEAM_WORLD)
+    assert isinstance(config, TeamConfig), "team_get_config should return a TeamConfig"
+    print("Done testing team_get_config")
+
+
 def test_team_destroy_negative():
     print("Testing team_destroy negative cases")
     # Try destroying a team that does not exist by name
@@ -303,6 +310,8 @@ if __name__ == '__main__':
     device.sync()
 
     test_team_unique_id()
+    device.sync()
+    test_team_get_config()
     device.sync()
     test_team_split_strided()
     device.sync()

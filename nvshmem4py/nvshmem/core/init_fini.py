@@ -50,7 +50,7 @@ def _import_mpi():
 
 
 __all__ = [
-    'get_unique_id', 'init', 'finalize', 'get_version', 'module_init', 'module_finalize', 'library_init',
+    'get_unique_id', 'init', 'finalize', 'get_name', 'get_version', 'module_init', 'module_finalize', 'library_init',
     'library_finalize', 'UniqueID', 'DeviceLibLanguage', 'find_device_bitcode_library'
 ]
 
@@ -75,6 +75,19 @@ class DeviceLibLanguage(enum.Enum):
 logger = logging.getLogger("nvshmem")
 
 UniqueID = bindings.uniqueid
+
+_NVSHMEM_MAX_NAME_LEN = 256
+
+
+def get_name() -> str:
+    """Return the NVSHMEM vendor name from ``nvshmem_info_get_name``.
+
+    Like the C API, this query is available before :func:`init`.
+    """
+    load_nvidia_dynamic_lib("nvshmem_host")
+    name = ctypes.create_string_buffer(_NVSHMEM_MAX_NAME_LEN)
+    bindings.info_get_name(ctypes.addressof(name))
+    return name.value.decode("utf-8")
 
 
 def get_version() -> Version:
