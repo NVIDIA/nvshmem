@@ -136,6 +136,7 @@ class nvshmemi_symmetric_heap {
             return 0;
         }
     }
+    bool counted_operations_available() const { return counted_operations_available_; }
 
     /** Top-level public facing functions */
     virtual void *heap_malloc(size_t size);
@@ -255,6 +256,8 @@ class nvshmemi_symmetric_heap {
 
     bool le_unicast_enabled_ = false;
     bool le_multicast_enabled_ = false;
+    bool le_counted_operations_supported_ = false;
+    bool counted_operations_available_ = false;
     std::vector<uint64_t> unicast_endpoint_ids_with_flag_;  // 4 bytes valid, 4 bytes for le id
 };
 
@@ -316,8 +319,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     int unmap_mem(void *ptr, size_t size);
 
     /* Functions for logical endpoints */
-    int reserve_unicast_endpoint(size_t size);
+    int reserve_unicast_endpoint(size_t size, bool counted_operations);
     int exchange_endpoints();
+    int destroy_unicast_endpoints();
     int nvls_setup_multicast_endpoint(nvshmemi_team_t *team, uint64_t mem_size);
     int nvls_setup_multicast_endpoint_by_team(nvshmemi_team_t *team);
     int nvls_bind_multicast_endpoint(nvshmemi_team_t *team, CUmemGenericAllocationHandle mem_handle,
@@ -363,7 +367,10 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
     }
 
     int check_user_buffer_for_mmap(void *ptr, size_t &size, unsigned int *ptr_mem_type);
-
+    int converge_unicast_endpoint_status(int local_status);
+    int bind_unicast_endpoint_memory(CUmemGenericAllocationHandle mem_handle, off_t heap_offset,
+                                     off_t mem_offset, size_t size);
+    int unbind_unicast_endpoint_memory(off_t heap_offset, size_t size);
     std::vector<std::tuple<CUmemGenericAllocationHandle, off_t, off_t, size_t, bool>>
         cumem_handles_;
     int check_logical_endpoint_support();

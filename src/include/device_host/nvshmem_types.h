@@ -233,7 +233,8 @@
         NULL,                                             /* tma_smem_bases */                    \
         0,                                                /* tma_smem_bases_len */                \
         NULL,                                             /* tma_smem_size */                     \
-        NULL                                              /* unicast_le_ids_ */                   \
+        NULL,                                             /* unicast_le_ids_ */                   \
+        false                                             /* counted_operations_available */      \
     }
 #else
 #include <cuda/std/cstddef>
@@ -571,9 +572,10 @@ typedef struct {
     size_t tma_smem_bases_len; /* Number of registration entries */
     size_t *tma_smem_size;     /* Per-registration shared memory sizes */
     void *unicast_le_ids_;     /* LE IDs of PEs */
+    bool counted_operations_available;
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 816,
-              "device_host_state_v1 must be 816 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 824,
+              "device_host_state_v1 must be 824 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 

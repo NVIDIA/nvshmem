@@ -1968,6 +1968,8 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     nvshmemi_device_state.node_npes = state->npes_node;
 
 #if defined(CFT_HANDLES_ENABLED)
+    nvshmemi_device_state.counted_operations_available =
+        state->heap_obj->counted_operations_available();
     nvshmemi_device_state.unicast_le_ids_ = (void *)unicast_le_ids_dptr;
 #endif
 
