@@ -7,11 +7,44 @@
 #include <algorithm>
 #include <cstdio>
 #include <cassert>
+#include <cstdint>
 #include <vector>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <getopt.h>
 #include "utils.h"
+
+namespace {
+
+constexpr int kValidationThreads = 256;
+constexpr int kValidationMaxBlocks = 4096;
+
+uint64_t validation_pattern(int sender_pe, int locality_domain, size_t message_size,
+                            size_t repetition) {
+    uint64_t pattern = 0x9e3779b97f4a7c15ULL;
+    pattern = (pattern ^ static_cast<uint64_t>(sender_pe + 1)) * 0xbf58476d1ce4e5b9ULL;
+    pattern = (pattern ^ static_cast<uint64_t>(locality_domain + 1)) * 0x94d049bb133111ebULL;
+    pattern = (pattern ^ static_cast<uint64_t>(message_size)) * 0xbf58476d1ce4e5b9ULL;
+    pattern = (pattern ^ static_cast<uint64_t>(repetition + 1)) * 0x94d049bb133111ebULL;
+    return pattern | 1ULL;
+}
+
+}  // namespace
+
+__global__ void fill_validation_pattern(uint64_t *data, size_t nelems, uint64_t pattern) {
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
+    for (size_t index = tid; index < nelems; index += stride) data[index] = pattern;
+}
+
+__global__ void validate_pattern(const uint64_t *data, size_t nelems, uint64_t expected,
+                                 unsigned long long *error_count) {
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
+    for (size_t index = tid; index < nelems; index += stride) {
+        if (data[index] != expected) atomicAdd(error_count, 1ULL);
+    }
+}
 
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                          int iter) {
@@ -220,6 +253,9 @@ int main(int argc, char *argv[]) {
 
     /* Bandwidth gathering buffers */
     double *d_bw_local = NULL, *d_bw_all = NULL;
+    int *d_validation_status = NULL;
+    unsigned long long *d_validation_errors = NULL;
+    int return_code = 0;
 
     read_args(argc, argv);
     int max_threads = threads_per_block;
@@ -520,6 +556,14 @@ int main(int argc, char *argv[]) {
 
     d_bw_local = (double *)nvshmem_malloc(sizeof(double));
     d_bw_all = (double *)nvshmem_malloc(npes * sizeof(double));
+    d_validation_status = (int *)nvshmem_malloc(2 * sizeof(int));
+    CUDA_CHECK(
+        cudaMalloc(&d_validation_errors, num_locality_domains * sizeof(*d_validation_errors)));
+    if (!d_bw_local || !d_bw_all || !d_validation_status) {
+        fprintf(stderr, "PE %d: failed to allocate benchmark result buffers\n", mype);
+        return_code = 1;
+        goto finalize;
+    }
 
     /* Print table header on PE 0 */
     if (mype == 0) {
@@ -538,6 +582,7 @@ int main(int argc, char *argv[]) {
         int peer = mype ^ (npes / 2);
         std::vector<double> h_bw_all(npes, 0.0);
         std::vector<float> elapsed_ms(num_locality_domains, 0.0f);
+        std::vector<unsigned long long> validation_errors(num_locality_domains, 0);
 
         if (blocks_per_domain * num_locality_domains != num_blocks && mype == 0) {
             fprintf(stderr,
@@ -567,6 +612,7 @@ int main(int argc, char *argv[]) {
             size_t bytes_per_domain = size / num_locality_domains;
             size_t len = bytes_per_domain / sizeof(double);
             size_t bytes_per_block = (len / blocks_per_domain) * sizeof(double);
+            size_t transferred_elements = (len / blocks_per_domain) * blocks_per_domain;
             h_size_arr[i] = size;
 
             if (!warned_split && mype == 0 &&
@@ -595,6 +641,28 @@ int main(int argc, char *argv[]) {
             }
 
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                int validation_blocks = static_cast<int>(std::min<size_t>(
+                    kValidationMaxBlocks, (len + kValidationThreads - 1) / kValidationThreads));
+
+                if (mype < npes / 2) {
+                    for (int n = 0; n < num_locality_domains; n++) {
+                        fill_validation_pattern<<<validation_blocks, kValidationThreads, 0,
+                                                  (cudaStream_t)gc_streams[n]>>>(
+                            reinterpret_cast<uint64_t *>(data_d[n]), len,
+                            validation_pattern(mype, n, size, repetition));
+                    }
+                    CUDA_CHECK(cudaGetLastError());
+                } else {
+                    for (int n = 0; n < num_locality_domains; n++) {
+                        CUDA_CHECK(cudaMemsetAsync(data_d[n], 0, bytes_per_domain,
+                                                   (cudaStream_t)gc_streams[n]));
+                    }
+                }
+                for (int n = 0; n < num_locality_domains; n++) {
+                    CU_CHECK(cuStreamSynchronize(gc_streams[n]));
+                }
+                nvshmem_barrier_all();
+
                 if (mype < npes / 2) {
                     /* timed run */
                     reset_counters();
@@ -623,6 +691,49 @@ int main(int argc, char *argv[]) {
                 } else {
                     h_bw[i] = 0.0;
                 }
+
+                /* Validate only after every timed sender stream has completed. */
+                nvshmem_barrier_all();
+                int local_validation_failed = 0;
+                std::fill(validation_errors.begin(), validation_errors.end(), 0);
+                if (mype >= npes / 2 && transferred_elements != 0) {
+                    int transferred_validation_blocks = static_cast<int>(std::min<size_t>(
+                        kValidationMaxBlocks,
+                        (transferred_elements + kValidationThreads - 1) / kValidationThreads));
+                    for (int n = 0; n < num_locality_domains; n++) {
+                        CUDA_CHECK(cudaMemsetAsync(d_validation_errors + n, 0,
+                                                   sizeof(*d_validation_errors),
+                                                   (cudaStream_t)gc_streams[n]));
+                        validate_pattern<<<transferred_validation_blocks, kValidationThreads, 0,
+                                           (cudaStream_t)gc_streams[n]>>>(
+                            reinterpret_cast<const uint64_t *>(data_d[n]), transferred_elements,
+                            validation_pattern(peer, n, size, repetition), d_validation_errors + n);
+                        CUDA_CHECK(cudaGetLastError());
+                        CUDA_CHECK(cudaMemcpyAsync(&validation_errors[n], d_validation_errors + n,
+                                                   sizeof(validation_errors[n]),
+                                                   cudaMemcpyDeviceToHost,
+                                                   (cudaStream_t)gc_streams[n]));
+                    }
+                    for (int n = 0; n < num_locality_domains; n++) {
+                        CU_CHECK(cuStreamSynchronize(gc_streams[n]));
+                        if (validation_errors[n] != 0) {
+                            fprintf(stderr,
+                                    "PE %d: validation failed for sender PE %d, domain %d, "
+                                    "size %zu, repetition %zu: %llu mismatched elements\n",
+                                    mype, peer, n, size, repetition, validation_errors[n]);
+                            local_validation_failed = 1;
+                        }
+                    }
+                }
+
+                CUDA_CHECK(cudaMemcpy(d_validation_status, &local_validation_failed, sizeof(int),
+                                      cudaMemcpyHostToDevice));
+                nvshmem_int_max_reduce(NVSHMEM_TEAM_WORLD, d_validation_status + 1,
+                                       d_validation_status, 1);
+                int global_validation_failed = 0;
+                CUDA_CHECK(cudaMemcpy(&global_validation_failed, d_validation_status + 1,
+                                      sizeof(int), cudaMemcpyDeviceToHost));
+                if (global_validation_failed) return_code = 1;
 
                 /* Gather all BW values to PE 0 */
                 CUDA_CHECK(
@@ -670,9 +781,11 @@ finalize:
 
     if (d_bw_local) nvshmem_free(d_bw_local);
     if (d_bw_all) nvshmem_free(d_bw_all);
+    if (d_validation_status) nvshmem_free(d_validation_status);
+    if (d_validation_errors) cudaFree(d_validation_errors);
 
     if (h_tables) free_tables(h_tables, 2);
     finalize_wrapper();
 
-    return 0;
+    return return_code;
 }
