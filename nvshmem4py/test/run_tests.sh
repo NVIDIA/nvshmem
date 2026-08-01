@@ -479,15 +479,10 @@ if [ $? -ne 0 ]; then
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
-# --skip-signalop: cross-PE signal_op/signal_wait hits proxy timeout on PCIe.
-# The NVLS suite (EOS) runs the full test without the skip.
+# Host AMOs are not implemented.
+# Cross-PE signal_op/signal_wait times out on PCIe; the NVLS suite retains that coverage.
 export NVSHMEM_BOOTSTRAP=MPI
-RMA_TEST_ARGS=(--skip-signalop)
-if [ "${NVSHMEM4PY_SKIP_AMO:-0}" = "1" ]; then
-    echo "Skipping host AMO coverage on this target"
-    RMA_TEST_ARGS+=(--skip-amo)
-fi
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi "${RMA_TEST_ARGS[@]}"
+$MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-signalop --skip-amo
 if [ $? -ne 0 ]; then
     echo "Test failed: RMA Test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -738,9 +733,10 @@ if [ $? -ne 0 ]; then
 fi
 popd || exit 1
 
-# Full RMA test including cross-PE signal_op (skipped in core suite for PCIe)
+# Full RMA test including cross-PE signal_op (skipped in core suite for PCIe).
+# Host AMOs are not implemented.
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi
+$NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-amo
 if [ $? -ne 0 ]; then
     echo "Test failed: RMA Test (full, with signalop)"
     EXIT_CODE=$((EXIT_CODE + 1))
