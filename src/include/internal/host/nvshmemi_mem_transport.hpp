@@ -78,6 +78,9 @@ class nvshmemi_mem_p2p_transport final {
          */
         return nvshmemi_nvls_connected_pes_.at(pe) != 0;
     }
+    bool is_mc_le_connected_pe(int pe) const noexcept {
+        return nvshmemi_mc_le_connected_pes_.at(pe) != 0;
+    }
     bool is_handle_accessible_pe(int pe) {
         /* Check if the peer GPU is accessible with handles */
         return nvshmemi_handle_accessible_pes_.at(pe) != 0;
@@ -115,6 +118,9 @@ class nvshmemi_mem_p2p_transport final {
 
     // this is a bitmap to track the PEs that are within the same multicast domain
     std::vector<uint8_t> nvshmemi_nvls_connected_pes_;
+
+    // this is a bitmap to track the PEs reachable through a multicast logical endpoint
+    std::vector<uint8_t> nvshmemi_mc_le_connected_pes_;
     bool errored_on_initialization_ = true;
     CUmemAllocationHandleType nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 };

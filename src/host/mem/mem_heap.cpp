@@ -1213,6 +1213,21 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(nv
         return 0;
     }
 
+    // Keep the endpoint invalid until clique validation and endpoint setup both succeed.
+    team->mc_leid_with_flag = 0;
+    if (get_p2pref()->has_cuda_clique_info()) {
+        for (int team_pe = 0; team_pe < team->size; team_pe++) {
+            const int world_pe = nvshmemi_team_pe(team, team_pe);
+            if (!get_p2pref()->is_mc_le_connected_pe(world_pe)) {
+                INFO(NVSHMEM_TEAM,
+                     "Multicast logical endpoints are unavailable for team %d because world PE %d "
+                     "is outside its multicast logical-endpoint clique",
+                     team->team_idx, world_pe);
+                return 0;
+            }
+        }
+    }
+
     status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdReserve(&le_multicast_id, 1 /* count */));
     NVSHMEMI_NE_ERROR_RET(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
                           "cuLogicalEndpointIdReserve for multicast team: %d failed\n",
