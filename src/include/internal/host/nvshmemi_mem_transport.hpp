@@ -11,6 +11,7 @@
 #include <memory>
 #include <map>
 #include <algorithm>
+#include <array>
 #include <stdint.h>
 #include <vector>
 #include "internal/host/nvshmem_internal.h"
@@ -18,6 +19,8 @@
 #include "internal/host/nvmlwrap.h"
 
 class nvshmemi_transport_view;
+
+enum class nvshmemi_clique_discovery_mode : uint8_t { LEGACY_NVML, CUDA_CLIQUE_API };
 
 static_assert(sizeof(nvshmem_mem_handle_t) % sizeof(uint64_t) == 0,
               "nvshmem_mem_handle_t size is not a multiple of 8B");
@@ -51,6 +54,14 @@ class nvshmemi_mem_p2p_transport final {
     CUmemAllocationHandleType get_mem_handle_type(void) const { return nvshmemi_mem_handle_type_; }
     bool is_mnnvl_fabric(void) const { return nvshmemi_has_mnnvl_fabric_; }
     bool is_initialized(void) const { return !errored_on_initialization_; }
+    bool has_cuda_clique_info(void) const {
+        return clique_discovery_mode_ == nvshmemi_clique_discovery_mode::CUDA_CLIQUE_API;
+    }
+    bool is_cuda_clique_connected_pe(CUcliqueType type, int pe) const {
+        const auto type_idx = static_cast<size_t>(type);
+        return type_idx < cuda_clique_connected_pes_.size() &&
+               cuda_clique_connected_pes_[type_idx].at(pe) != 0;
+    }
     int create_proc_map(int npes, const nvshmemi_transport_view &transports);
     std::map<pid_t, int> get_proc_map(void) const { return proc_map_; }
     int get_num_p2p_connected_pes(int npes_node);
@@ -95,6 +106,9 @@ class nvshmemi_mem_p2p_transport final {
     static void nvshmemi_nvml_ftable_fini_wrapper(void);
 
     bool nvshmemi_has_mnnvl_fabric_ = false;
+    nvshmemi_clique_discovery_mode clique_discovery_mode_ =
+        nvshmemi_clique_discovery_mode::LEGACY_NVML;
+    std::array<std::vector<uint8_t>, 4> cuda_clique_connected_pes_;
     std::vector<uint8_t> nvshmemi_nvl_connected_pes_;
 
     // list of PEs that can be accessed with handles

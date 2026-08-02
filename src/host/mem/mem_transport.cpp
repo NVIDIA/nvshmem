@@ -31,6 +31,132 @@
 #include "internal/host_transport/transport.h"                             // for nvshm...
 #include "non_abi/nvshmem_build_options.h"                                 // for NVSHM...
 
+namespace {
+
+constexpr size_t nvshmemi_num_cuda_clique_types = 4;
+static_assert(nvshmemi_num_cuda_clique_types <= 8,
+              "valid_types must have one bit for each CUDA clique type");
+
+struct nvshmemi_cuda_clique_record {
+    CUuuid cluster_uuid{};  // Fabric cluster containing this PE's CUDA device.
+    // Clique ID indexed by CUcliqueType; an entry is meaningful only when its valid_types bit is
+    // set.
+    unsigned int clique_ids[nvshmemi_num_cuda_clique_types]{};
+    uint8_t valid_types = 0;  // Bitmask of clique types returned by cuDeviceGetCliqueInfo.
+    uint8_t query_valid = 0;  // Whether all CUDA clique queries completed with consistent results.
+};
+
+const char *nvshmemi_cuda_clique_type_name(size_t type) {
+    switch (static_cast<CUcliqueType>(type)) {
+        case CU_CLIQUE_TYPE_UNICAST_POINTER:
+            return "unicast pointer";
+        case CU_CLIQUE_TYPE_MULTICAST_POINTER:
+            return "multicast pointer";
+        case CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT:
+            return "unicast logical endpoint";
+        case CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT:
+            return "multicast logical endpoint";
+        default:
+            return "unknown";
+    }
+}
+
+bool nvshmemi_cuda_clique_records_match(const nvshmemi_cuda_clique_record &lhs,
+                                        const nvshmemi_cuda_clique_record &rhs, size_t type) {
+    const uint32_t type_bit = 1u << type;
+    return lhs.query_valid && rhs.query_valid && (lhs.valid_types & type_bit) &&
+           (rhs.valid_types & type_bit) &&
+           memcmp(&lhs.cluster_uuid, &rhs.cluster_uuid, sizeof(CUuuid)) == 0 &&
+           lhs.clique_ids[type] == rhs.clique_ids[type];
+}
+
+int nvshmemi_discover_cuda_cliques(
+    CUdevice device, int mype, int npes,
+    std::array<std::vector<uint8_t>, nvshmemi_num_cuda_clique_types> &connected_pes,
+    nvshmemi_clique_discovery_mode &mode) {
+    nvshmemi_cuda_clique_record local_record{};
+    std::vector<nvshmemi_cuda_clique_record> peer_records(npes);
+    mode = nvshmemi_clique_discovery_mode::LEGACY_NVML;
+
+    if (!nvshmemi_options.DISABLE_MNNVL && nvshmemi_cuda_syms != nullptr &&
+        CUPFN(nvshmemi_cuda_syms, cuDeviceGetFabricClusterUuid) != nullptr &&
+        CUPFN(nvshmemi_cuda_syms, cuDeviceGetCliqueCount) != nullptr &&
+        CUPFN(nvshmemi_cuda_syms, cuDeviceGetCliqueInfo) != nullptr) {
+        size_t count = 0;
+        CUresult cuda_status = CUPFN(
+            nvshmemi_cuda_syms, cuDeviceGetFabricClusterUuid(&local_record.cluster_uuid, device));
+        if (cuda_status == CUDA_SUCCESS) {
+            cuda_status = CUPFN(nvshmemi_cuda_syms, cuDeviceGetCliqueCount(&count, device));
+        }
+
+        std::vector<CUcliqueInfo> clique_info;
+        if (cuda_status == CUDA_SUCCESS) {
+            try {
+                clique_info.resize(count);
+            } catch (const std::bad_alloc &) {
+                cuda_status = CUDA_ERROR_OUT_OF_MEMORY;
+            }
+        }
+
+        if (cuda_status == CUDA_SUCCESS) {
+            size_t returned_count = count;
+            cuda_status = CUPFN(nvshmemi_cuda_syms,
+                                cuDeviceGetCliqueInfo(clique_info.data(), &returned_count, device));
+            if (cuda_status == CUDA_SUCCESS && returned_count <= count) {
+                bool record_valid = true;
+                for (size_t i = 0; i < returned_count; i++) {
+                    const int type = static_cast<int>(clique_info[i].type);
+                    if (type < 0 || type >= static_cast<int>(nvshmemi_num_cuda_clique_types)) {
+                        record_valid = false;
+                        break;
+                    }
+
+                    const uint32_t type_bit = 1u << type;
+                    if ((local_record.valid_types & type_bit) &&
+                        local_record.clique_ids[type] != clique_info[i].id) {
+                        record_valid = false;
+                        break;
+                    }
+                    local_record.valid_types |= type_bit;
+                    local_record.clique_ids[type] = clique_info[i].id;
+                }
+                local_record.query_valid = record_valid;
+            }
+        }
+    }
+
+    int status =
+        nvshmemi_boot_handle.allgather(&local_record, peer_records.data(),
+                                       sizeof(nvshmemi_cuda_clique_record), &nvshmemi_boot_handle);
+    if (status != 0) return status;
+
+    if (!std::all_of(
+            peer_records.begin(), peer_records.end(),
+            [](const nvshmemi_cuda_clique_record &record) { return record.query_valid != 0; })) {
+        INFO(NVSHMEM_MEM,
+             "CUDA fabric clique discovery is unavailable on at least one PE; using legacy NVML "
+             "discovery");
+        return 0;
+    }
+
+    mode = nvshmemi_clique_discovery_mode::CUDA_CLIQUE_API;
+    const auto &my_record = peer_records.at(mype);
+    for (size_t type = 0; type < nvshmemi_num_cuda_clique_types; type++) {
+        for (int pe = 0; pe < npes; pe++) {
+            connected_pes[type][pe] =
+                nvshmemi_cuda_clique_records_match(my_record, peer_records[pe], type);
+        }
+        if (my_record.valid_types & (1u << type)) {
+            INFO(NVSHMEM_MEM, "CUDA fabric clique: type=%s id=%u",
+                 nvshmemi_cuda_clique_type_name(type), my_record.clique_ids[type]);
+        }
+    }
+    INFO(NVSHMEM_MEM, "CUDA fabric clique discovery is active");
+    return 0;
+}
+
+}  // namespace
+
 // Static member variable definitions (only the ones not defined elsewhere)
 void *nvshmemi_mem_p2p_transport::nvml_handle_ = nullptr;
 struct nvml_function_table nvshmemi_mem_p2p_transport::nvml_ftable_;
@@ -90,6 +216,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     nvshmemi_nvls_connected_pes_.resize(npes, 0);  // this is a bitmap
     nvshmemi_nvl_connected_pes_.resize(npes, 0);
     nvshmemi_handle_accessible_pes_.resize(npes, 0);
+    for (auto &connected_pes : cuda_clique_connected_pes_) connected_pes.resize(npes, 0);
     cudaDeviceProp prop;
     int flag = false;
     nvmlDevice_t local_device;
@@ -154,6 +281,11 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             }
         }
     }
+
+    status = nvshmemi_discover_cuda_cliques(cudevice, mype, npes, cuda_clique_connected_pes_,
+                                            clique_discovery_mode_);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "allgather of CUDA fabric clique information failed\n");
 
     /* For the assigned device_id, discover nvmlDevice properties */
     cudaGetDeviceProperties(&prop, device_id);
