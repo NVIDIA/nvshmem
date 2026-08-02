@@ -214,6 +214,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         true; /* By default, p2p is not initialized, so some features may be disabled */
 
     nvshmemi_nvls_connected_pes_.resize(npes, 0);  // this is a bitmap
+    nvshmemi_mc_le_connected_pes_.resize(npes, 0);
     nvshmemi_nvl_connected_pes_.resize(npes, 0);
     nvshmemi_handle_accessible_pes_.resize(npes, 0);
     for (auto &connected_pes : cuda_clique_connected_pes_) connected_pes.resize(npes, 0);
@@ -383,7 +384,6 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                 nvshmemi_nvl_connected_pes_[i] = 1;
 
                 nvshmemi_handle_accessible_pes_[i] = 1;
-
                 if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
                     // group PEs with same rackID in multicast domain (a subset of
                     // nvl_connected_pes)
@@ -396,6 +396,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                     // track nvl_connected_pes
                     nvshmemi_nvls_connected_pes_[i] = 1;
                 }
+                nvshmemi_mc_le_connected_pes_[i] = 1;
             }
         }
 
@@ -406,6 +407,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                 static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_POINTER));
             nvshmemi_handle_accessible_pes_ = cuda_clique_connected_pes_.at(
                 static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT));
+            nvshmemi_mc_le_connected_pes_ = cuda_clique_connected_pes_.at(
+                static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT));
         }
 
         if (nvshmemi_has_mnnvl_fabric_) {

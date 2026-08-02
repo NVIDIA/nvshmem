@@ -163,7 +163,7 @@
         NULL,                                           /* pe_mapping */               \
         TEAM_ULSCALAR_INVALID,                          /* p2p_sync_on_stream_count */ \
         false,                                          /* are_gpus_nvls_connected */  \
-        TEAM_ULSCALAR_INVALID,                          /* mc_leid_with_flag */        \
+        TEAM_ULSCALAR_DEFAULT,                          /* mc_leid_with_flag */        \
     }
 
 #define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                       \
