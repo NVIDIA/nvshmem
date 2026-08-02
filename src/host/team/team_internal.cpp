@@ -1054,7 +1054,8 @@ static int init_team_shared(bool is_mc_shared) {
     peer_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
 
     int my_idx_in_peer_list = 0;
-    bool use_mc_domain = is_mc_shared && nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID;
+    bool use_mc_domain = is_mc_shared && (nvshmemi_state->p2p_transport->has_cuda_clique_info() ||
+                                          nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID);
     for (int i = 0; i < nvshmemi_team_world->size; i++) {
         bool is_peer_connected = false;
         if (use_mc_domain) {
@@ -1639,10 +1640,12 @@ int nvshmemi_team_init(void) {
     status = init_team_shared(false);
     if (status) return status;
 
-    // Initialize NVSHMEM_TEAM_MC_SHARED. Without an override, the MC shared team is identical
-    // to NVSHMEM_TEAM_SHARED, so alias it and avoid another persistent device allocation.
-    status = nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID ? init_team_shared(true)
-                                                          : init_team_mc_shared_alias();
+    // CUDA clique discovery provides an authoritative multicast-pointer domain. With legacy
+    // discovery and no override, preserve the existing alias to NVSHMEM_TEAM_SHARED.
+    status = (nvshmemi_state->p2p_transport->has_cuda_clique_info() ||
+              nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID)
+                 ? init_team_shared(true)
+                 : init_team_mc_shared_alias();
     if (status) return status;
 
     status = init_team_node();
