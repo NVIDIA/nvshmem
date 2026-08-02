@@ -399,6 +399,13 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             }
         }
 
+        if (nvshmemi_has_mnnvl_fabric_ && has_cuda_clique_info()) {
+            nvshmemi_nvl_connected_pes_ = cuda_clique_connected_pes_.at(
+                static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER));
+            nvshmemi_handle_accessible_pes_ = cuda_clique_connected_pes_.at(
+                static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT));
+        }
+
         if (nvshmemi_has_mnnvl_fabric_) {
             INFO(NVSHMEM_MEM, "Multi-node NVLink is supported and enabled on this platform");
         }
