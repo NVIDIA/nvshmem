@@ -132,6 +132,27 @@ typedef CUresult(CUDAAPI *PFN_cuLogicalEndpointGetLimits_v13030)(cuuint64_t *bin
 
 #endif
 
+#if CUDART_VERSION < 13040
+
+typedef enum CUcliqueType_enum {
+    CU_CLIQUE_TYPE_UNICAST_POINTER = 0,
+    CU_CLIQUE_TYPE_MULTICAST_POINTER = 1,
+    CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT = 2,
+    CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT = 3,
+} CUcliqueType;
+
+typedef struct CUcliqueInfo_st {
+    CUcliqueType type;
+    unsigned int id;
+} CUcliqueInfo;
+
+typedef CUresult(CUDAAPI *PFN_cuDeviceGetFabricClusterUuid_v13040)(CUuuid *uuid, CUdevice dev);
+typedef CUresult(CUDAAPI *PFN_cuDeviceGetCliqueCount_v13040)(size_t *count, CUdevice dev);
+typedef CUresult(CUDAAPI *PFN_cuDeviceGetCliqueInfo_v13040)(CUcliqueInfo *cliqueInfo, size_t *count,
+                                                            CUdevice dev);
+
+#endif
+
 #include <cudaTypedefs.h>
 
 #define DEFINE_SYM(symbol, version) PFN_##symbol##_v##version pfn_##symbol;
@@ -189,6 +210,9 @@ struct nvshmemi_cuda_fn_table {
     DEFINE_SYM(cuLogicalEndpointImport, 13030)
     DEFINE_SYM(cuLogicalEndpointQuery, 13030)
     DEFINE_SYM(cuLogicalEndpointGetLimits, 13030)
+    DEFINE_SYM(cuDeviceGetFabricClusterUuid, 13040)
+    DEFINE_SYM(cuDeviceGetCliqueCount, 13040)
+    DEFINE_SYM(cuDeviceGetCliqueInfo, 13040)
 };
 #undef DEFINE_SYM
 
