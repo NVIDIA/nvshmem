@@ -62,6 +62,9 @@ class nvshmemi_mem_p2p_transport final {
         return type_idx < cuda_clique_connected_pes_.size() &&
                cuda_clique_connected_pes_[type_idx].at(pe) != 0;
     }
+    const std::vector<uint8_t> &get_unicast_pointer_connected_pes(void) const {
+        return cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER));
+    }
     int create_proc_map(int npes, const nvshmemi_transport_view &transports);
     std::map<pid_t, int> get_proc_map(void) const { return proc_map_; }
     int get_num_p2p_connected_pes(int npes_node);
@@ -87,10 +90,6 @@ class nvshmemi_mem_p2p_transport final {
         nvshmemi_nvl_connected_pes_ = updated_connected_pes;
     }
 
-    size_t get_nvls_connected_pes_count(void) const {
-        return std::count(nvshmemi_nvls_connected_pes_.begin(), nvshmemi_nvls_connected_pes_.end(),
-                          uint8_t{1});
-    }
     const std::vector<uint8_t> &get_nvls_connected_pes(void) const {
         return nvshmemi_nvls_connected_pes_;
     }

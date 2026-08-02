@@ -914,35 +914,42 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
 
     if ((nvshmemi_options.LIMIT_PTR_P2P_ACCESS) ||
         ((p2p_npes * heap_size_) > NVSHMEMI_MAX_VA_SIZE)) {
+        const bool has_cuda_clique_info = get_p2pref()->has_cuda_clique_info();
+        const auto &unicast_pointer_pes = get_p2pref()->get_unicast_pointer_connected_pes();
+        const auto &restricted_pointer_pes =
+            has_cuda_clique_info ? unicast_pointer_pes : get_p2pref()->get_nvls_connected_pes();
+        const size_t restricted_pointer_pe_count =
+            std::count(restricted_pointer_pes.begin(), restricted_pointer_pes.end(), uint8_t{1});
         // Limit number of PEs mapped to VA
         if ((p2p_npes * heap_size_) > NVSHMEMI_MAX_VA_SIZE) {
             NVSHMEMI_WARN_PRINT(
                 "[%d] Mapping %d p2p PEs would exceed maximum VA space (%lld bytes). "
-                "Limiting pointer access to PEs within same rack.\n",
-                cfg_.mype, p2p_npes, NVSHMEMI_MAX_VA_SIZE);
+                "Limiting pointer access to PEs within the %s.\n",
+                cfg_.mype, p2p_npes, NVSHMEMI_MAX_VA_SIZE,
+                has_cuda_clique_info ? "CUDA unicast-pointer clique" : "same rack");
         } else if (nvshmemi_options.LIMIT_PTR_P2P_ACCESS) {
             NVSHMEMI_WARN_PRINT(
                 "[%d] LIMIT_PTR_P2P_ACCESS is set. "
-                "Limiting pointer access to PEs within same rack.\n",
-                cfg_.mype);
+                "Limiting pointer access to PEs within the %s.\n",
+                cfg_.mype, has_cuda_clique_info ? "CUDA unicast-pointer clique" : "same rack");
         }
 
-        status = nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID ? 0 : 1;
+        status = (has_cuda_clique_info || nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) ? 0 : 1;
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Restricting pointer access to PEs within same rack requires "
-                              "MNNVL_OVERRIDE_MC_CLIQUE_ID env variable to be set to true \n");
+                              "Restricting pointer access requires CUDA fabric clique discovery "
+                              "or MNNVL_OVERRIDE_MC_CLIQUE_ID to be set to true \n");
 
-        // Override the p2p connected PE list to include only the PEs sharing same chassis
-        // Can be changed to include a different set
-        status = (get_p2pref()->get_nvls_connected_pes_count() * heap_size_ > NVSHMEMI_MAX_VA_SIZE);
+        // CUDA discovery supplies the unicast-pointer domain. In legacy discovery mode, the
+        // optional override supplies the rack-local approximation.
+        status = (restricted_pointer_pe_count * heap_size_ > NVSHMEMI_MAX_VA_SIZE);
         NVSHMEMI_NZ_ERROR_JMP(
             status, NVSHMEMX_ERROR_INTERNAL, out,
-            "Mapping PEs within rack (count: %ld) will exceed maximum VA space: %lld \n",
-            get_p2pref()->get_nvls_connected_pes_count(), NVSHMEMI_MAX_VA_SIZE);
+            "Mapping the restricted PE domain (count: %zu) will exceed maximum VA space: %lld \n",
+            restricted_pointer_pe_count, NVSHMEMI_MAX_VA_SIZE);
 
-        get_p2pref()->update_nvl_connected_pes(get_p2pref()->get_nvls_connected_pes());
+        get_p2pref()->update_nvl_connected_pes(restricted_pointer_pes);
 
-        // Updating p2p_npes to reflect the PEs within rack
+        // Update p2p_npes to reflect the restricted unicast-pointer domain.
         p2p_npes = get_p2pref()->get_num_p2p_connected_pes(cfg_.npes_node);
     }
 
