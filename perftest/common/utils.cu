@@ -281,8 +281,8 @@ static void check_for_cumodule_tests() {
     }
 }
 
-static void print_read_args_summary(int mype) {
-    if (mype != 0) return;
+static void print_read_args_summary() {
+    if (nvshmem_my_pe() != 0) return;
     printf("[PE 0] Runtime options after parsing command line arguments \n");
     printf(
         "min_size: %zu, max_size: %zu, step_factor: %zu, iterations: %zu, warmup iterations: %zu, "
@@ -357,7 +357,7 @@ void init_wrapper(int *c, char ***v) {
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_MPI_COMM, &attr);
 
         nvshmem_barrier_all();
-        print_read_args_summary(rank);
+        print_read_args_summary();
         return;
     } else if (use_uid) {
         nvshmemx_init_attr_t attr = NVSHMEMX_INIT_ATTR_INITIALIZER;
@@ -371,7 +371,7 @@ void init_wrapper(int *c, char ***v) {
         nvshmemx_set_attr_uniqueid_args(rank, nranks, &id, &attr);
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr);
         nvshmem_barrier_all();
-        print_read_args_summary(rank);
+        print_read_args_summary();
         return;
     }
 #endif
@@ -398,7 +398,7 @@ void init_wrapper(int *c, char ***v) {
         nvshmemx_init_attr(NVSHMEMX_INIT_WITH_SHMEM, &attr);
 
         nvshmem_barrier_all();
-        print_read_args_summary(shmem_fn_table.fn_shmem_my_pe());
+        print_read_args_summary();
         return;
     }
 #endif
@@ -410,7 +410,7 @@ void init_wrapper(int *c, char ***v) {
     select_device();
 
     nvshmem_barrier_all();
-    print_read_args_summary(mype);
+    print_read_args_summary();
     d_latency = (double *)nvshmem_malloc(sizeof(double));
     if (!d_latency) ERROR_EXIT("nvshmem_malloc failed \n");
 
@@ -1286,7 +1286,6 @@ void read_args(int argc, char **argv) {
 
     assert(min_size <= max_size);
 
-    /* Deferred to print_read_args_summary() after NVSHMEM init so only PE 0 prints. */
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \

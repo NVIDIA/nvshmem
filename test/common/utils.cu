@@ -314,8 +314,8 @@ static void check_for_cumodule_tests() {
     }
 }
 
-static void print_read_args_summary(int mype) {
-    if (mype != 0) return;
+static void print_read_args_summary() {
+    if (nvshmem_my_pe() != 0) return;
     printf("[PE 0] Runtime options after parsing command line arguments\n");
     printf(
         "min_size: %zu, max_size: %zu, step_factor: %zu, min_iters: %zu, max_iters: %zu, repeat: "
@@ -351,7 +351,7 @@ void init_wrapper(int *c, char ***v) {
     }
 
     nvshmem_barrier_all();
-    print_read_args_summary(nvshmem_my_pe());
+    print_read_args_summary();
     check_for_cumodule_tests();
 }
 
@@ -474,7 +474,6 @@ void read_args(int argc, char **argv) {
     assert(_min_size <= _max_size);
     disable_dynamic_smem_for_cubin_tests();
 
-    /* Deferred to print_read_args_summary() after NVSHMEM init so only PE 0 prints. */
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \
