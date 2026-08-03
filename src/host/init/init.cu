@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <list>
 #include <map>
+#include <mutex>
 #include <set>
 
 #include "host/nvshmemx_api.h"
@@ -60,6 +61,7 @@ struct nvshmemi_registered_state_info {
 
 static std::map<void *, nvshmemi_registered_state_info> registered_device_states;
 static std::set<nvshmemx_device_lib_init_cb> registered_device_state_cb;
+static std::once_flag bootstrap_atexit_flag;
 
 static size_t nvshmemi_get_device_state_symbol_size() {
     size_t state_size = sizeof(nvshmemi_device_host_state_t);
@@ -1410,7 +1412,7 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
         nvshmemi_init_msg();
 
         nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped = true;
-        atexit(bootstrap_finalize);
+        std::call_once(bootstrap_atexit_flag, []() { atexit(bootstrap_finalize); });
     }
 
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_initialized) {
@@ -1560,7 +1562,6 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         nvshmemi_default_session = nullptr;
         if (bootstrap_mode == BOOTSTRAP_UID) {
             bootstrap_finalize();
-            nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped = false;
         }
 
         nvshmemi_state = NULL;
