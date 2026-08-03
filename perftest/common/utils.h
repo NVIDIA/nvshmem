@@ -334,6 +334,9 @@ extern bool use_graph;
 extern bool use_mmap;
 extern bool use_egm;
 extern bool use_smem;
+#if CUDART_VERSION >= 13000
+extern bool use_nucs;
+#endif
 
 extern int use_cubin;
 

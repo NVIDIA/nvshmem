@@ -316,17 +316,24 @@ int main(int argc, char *argv[]) {
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    // nvshmemx_collective_launch_attr is a collective: every PE must call it.
-    // Receivers (non-senders) pass iter=0 so their kernel exits without issuing
-    // any puts.
     {
+        std::array<cudaLaunchAttribute, 1> user_attrs{};
+        int n_user_attrs = 0;
+#if CUDART_VERSION >= 13000
+        if (use_nucs) {
+            user_attrs[n_user_attrs].id = cudaLaunchAttributeNvlinkUtilCentricScheduling;
+            user_attrs[n_user_attrs].val.nvlinkUtilCentricScheduling = 1;
+            ++n_user_attrs;
+        }
+#endif
+
         nvshmemx_collective_launch_attr_t cl_attr{};
         cl_attr.cuda_config.gridDim = dim3(max_blocks);
         cl_attr.cuda_config.blockDim = dim3(max_threads);
         cl_attr.cuda_config.dynamicSmemBytes = smem_size;
         cl_attr.cuda_config.stream = 0;
-        cl_attr.cuda_config.attrs = nullptr;
-        cl_attr.cuda_config.numAttrs = 0;
+        cl_attr.cuda_config.attrs = (n_user_attrs > 0) ? user_attrs.data() : nullptr;
+        cl_attr.cuda_config.numAttrs = n_user_attrs;
 
         const int is_sender = (bidirectional || mype < npes / 2);
 
