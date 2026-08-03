@@ -311,11 +311,20 @@ static void print_read_args_summary() {
         "number of ctas: %zu, threads per cta: %zu "
         "stride: %zu, datatype: %s, reduce_op: %s, threadgroup_scope: %s, atomic_op: %s, dir: %s, "
         "report_msgrate: %d, bidirectional: %d, putget_issue :%s, use_graph: %d, use_mmap: %d, "
-        "mem_handle_type: %zu, use_egm: %d, use_smem: %d\n",
+        "mem_handle_type: %zu, use_egm: %d, use_smem: %d"
+#if CUDART_VERSION >= 13000
+        ", use_nucs: %d"
+#endif
+        "\n",
         min_size, max_size, step_factor, iters, warmup_iters, num_blocks, threads_per_block, stride,
         datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
         test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
-        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem);
+        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem
+#if CUDART_VERSION >= 13000
+        ,
+        use_nucs
+#endif
+    );
     if (repetitions_requested) printf("repetitions: %zu\n", repetitions);
     printf(
         "Note: Above is full list of options, any given test will use only a subset of these "
@@ -1109,6 +1118,9 @@ bool use_graph = false;
 bool use_mmap = false;
 bool use_egm = false;
 bool use_smem = true;
+#if CUDART_VERSION >= 13000
+bool use_nucs = false;
+#endif
 
 datatype_t datatype = {NVSHMEM_INT, 4, "int"};
 reduce_op_t reduce_op = {NVSHMEM_SUM, "sum"};
@@ -1148,6 +1160,9 @@ void read_args(int argc, char **argv) {
                                            {"mmap", no_argument, 0, 0},
                                            {"egm", no_argument, 0, 0},
                                            {"use_smem", required_argument, 0, 0},
+#if CUDART_VERSION >= 13000
+                                           {"nucs", no_argument, 0, 0},
+#endif
                                            {"help", no_argument, 0, 'h'},
                                            {"min_size", required_argument, 0, 'b'},
                                            {"max_size", required_argument, 0, 'e'},
@@ -1199,7 +1214,9 @@ void read_args(int argc, char **argv) {
                     "--egm (Use EGM memory for mmaped buffer) \n"
                     "--use_smem <0|1> (Enable shared-memory registration in TMA-capable tests) \n"
                     "-m, --mem_handle_type: <0:auto, 1:posix_fd, 2:fabric> (for mmaped buffer) \n"
-                    "--cudagraph (Use CUDA graph to amortize launch overhead) \n");
+                    "--cudagraph (Use CUDA graph to amortize launch overhead) \n"
+                    "--nucs (Enable NVLink-utilization-centric CTA scheduling on cooperative "
+                    "kernel launches) \n");
                 exit(0);
             case 0:
                 if (strcmp(long_options[option_index].name, "bidir") == 0) {
@@ -1231,6 +1248,11 @@ void read_args(int argc, char **argv) {
                 } else if (strcmp(long_options[option_index].name, "use_smem") == 0) {
                     use_smem = parse_bool_arg("--use_smem", optarg, true);
                 }
+#if CUDART_VERSION >= 13000
+                else if (strcmp(long_options[option_index].name, "nucs") == 0) {
+                    use_nucs = true;
+                }
+#endif
                 break;
             case 'b':
                 atol_scaled(optarg, &min_size);
