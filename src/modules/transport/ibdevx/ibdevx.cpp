@@ -338,7 +338,12 @@ static int nvshmemt_ibdevx_mlx5_qp_create(struct ibdevx_ep *ep, struct ibdevx_de
     bf_reg_size = 1LLU << log_bf_reg_size;
 
     // Allocate UAR. This will be used as a DB/BF register).
+    // so we fall back to NC (Non-Cacheable). NC disables BlueFlame WQE posting, which may impact
+    // small-message latency. Evaluate whether a dedicated NC posting path is needed.
     uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_BF);
+    if (!uar) {
+        uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_NC);
+    }
     NVSHMEMT_ERRNO_NULL_ERROR_JMP(uar, status, ENOMEM, out, "cannot allocate mlx5dv_devx_uar\n");
 
     // Allocate WQ buffer.
