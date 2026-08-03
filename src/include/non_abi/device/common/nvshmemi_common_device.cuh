@@ -687,8 +687,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst, c
             src += this_chunk;
             dst += this_chunk;
 
-            /* If more chunks remain, wait for outbound smem read before reuse. */
-            if (remaining > 0) nvshmemi_tma_bulk_wait_group_read_0();
+            /* Wait for the outbound smem read before reusing or releasing the staging tile. */
+            nvshmemi_tma_bulk_wait_group_read_0();
         }
         if constexpr (BLOCKING == Blocking::Yes) {
             nvshmemi_tma_bulk_wait_group_0();
