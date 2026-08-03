@@ -349,6 +349,7 @@ void perf_stats_add(perf_stats_t &stats, double value);
 double perf_stats_stddev(const perf_stats_t *stats);
 
 void init_cumodule(const char *str);
+void print_device_uuid_and_peer(int pe, int peer);
 void init_wrapper(int *c, char ***v);
 void finalize_wrapper();
 void alloc_tables(void ***table_mem, int num_tables, int num_entries_per_table);
