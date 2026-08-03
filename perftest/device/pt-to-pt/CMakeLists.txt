@@ -22,6 +22,10 @@ if(NVSHMEM_CFT_HANDLES_SUPPORT)
     nvshmem_add_perftest(shmem_putmem_signal_counted_ping_pong_latency.cu)
 endif()
 
+if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.4")
+    nvshmem_add_perftest(shmem_get_bw_locality_domains.cu)
+endif()
+
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     nvshmem_add_cubin_perftest(shmem_atomic_bw.cu)
     nvshmem_add_cubin_perftest(shmem_atomic_latency.cu)
