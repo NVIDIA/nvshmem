@@ -1112,6 +1112,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_P
     nvshmemi_tma_drain_if_registered();
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (nvshmemi_tma_smem_registered()) {
+        /* Ordering fabric operations require the earlier one to be completed before the next
+         * one can be issued.
+         * Draining pending operations here
+         */
+        nvshmemi_handle_quiet<SCOPE>();
+
         /* Order outstanding fabric PUTs without waiting for their completion;
          * completion remains the responsibility of nvshmem_quiet(). */
         fence_proxy_fabric2fabric_alias();
@@ -2102,19 +2108,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
         }
         handle_bar[0]->prepare_handle(warp_idx_in_block);
         handle_bar[1]->prepare_handle(warp_idx_in_block);
-        if (!is_src_shared) {
-            nvshmemi_tma_fence_proxy_async_shared_cta();
-        }
+        // Ensure mbarriers init visibility to async proxy
+        fence_async_proxy();
     }
 
-    // When src is in shared memory and the user chooses to prioritize the logical endpoint,
-    // the user must issue "fence.proxy.async.shared::cta;" to make the data visible to the
-    // async proxy.
-#if !defined(PRIORITIZE_LOGICAL_ENDPOINT)
-    if (is_src_shared) {
-        nvshmemi_tma_fence_proxy_async_shared_cta();
-    }
-#endif
     nvshmemi_threadgroup_sync<SCOPE>();
 
     if (is_load && !is_src_shared) {
@@ -2188,8 +2185,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
             __mbarrier_inval(reinterpret_cast<__mbarrier_t *>(done_bar[1]));
         }
     }
-
-    nvshmemi_threadgroup_sync<SCOPE>();
 }
 
 template <threadgroup_t SCOPE>
@@ -2225,8 +2220,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
     const bool is_src_shared = __isShared(src);
     if (is_src_shared) {
         assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src));
-        fence_proxy_generic2fabric_release_system();
-        nvshmemi_threadgroup_sync<SCOPE>();
     }
 
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -2247,9 +2240,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
      * block scope: thread id 0
      */
     if (!myIdx) {
-        // ensure generic proxy is visible to async proxy
-        fence_async_proxy();
-
         // Compute the per-threadgroup data buffer offset within the full data region.
         uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(
             nvshmemi_tma_data_buffer(smem_base) + thrdgrp_idx_in_block * single_buffer_size);
@@ -2265,8 +2255,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
             nvshmemi_tma_barrier_slot(smem_base, warp_idx_in_block));
 
         handle_bar->prepare_handle(warp_idx_in_block);
+        // Ensure mbarriers init visibility to async proxy
+        fence_async_proxy();
         if (!is_src_shared) {
             __mbarrier_init(tma_bar_ptr, 1);
+            nvshmemi_tma_fence_proxy_async_shared_cta();
             nvshmemi_tma_g2s_copy_thread(myIdx, smem_data_buf, tma_bar_ptr,
                                          nvshmemi_ptr_add(src, byte_offset_src), copy_bytes);
             byte_offset_src += copy_bytes;
@@ -2310,9 +2303,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
         if (!is_src_shared) {
             __mbarrier_inval(tma_bar_ptr);
         }
-    }
-    if (is_src_shared) {
-        nvshmemi_threadgroup_sync<SCOPE>();
     }
 }
 
@@ -2390,8 +2380,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
         }
     }
 
-    // Ensure generic proxy stores to shared memory are visible to fabric.
-    fence_proxy_generic2fabric_release_system();
+    fence_async_proxy();
     nvshmemi_threadgroup_sync<SCOPE>();
 
     if (!myIdx) {
@@ -2400,6 +2389,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
         handle_bar =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
         handle_bar->prepare_handle(warp_idx_in_block);
+        // Ensure mbarriers init visibility to async proxy
+        fence_async_proxy();
 
         auto dst_handle = nvshmemi_fabric_handle_for_le_id<cft_handle_kind>(dest_le_id, dst);
         const void *fabric_src = is_src_shared ? src : smem_data_buf;
@@ -2410,9 +2401,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
             handle_bar->drain_pending_handle(true);
         }
-    }
-    if (is_src_shared) {
-        nvshmemi_threadgroup_sync<SCOPE>();
     }
 }
 
@@ -2509,8 +2497,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
         smem_slot[(dst_byte_offset + i) & (CFT_HANDLE_TX_SIZE - 1)] = src_bytes[i];
     }
 
-    // Ensure generic proxy stores to shared memory are visible to fabric
-    fence_proxy_generic2fabric_release_system();
+    // Ensure async proxy can see the smem data
+    fence_async_proxy();
 
     uint16_t first_bytemask =
         byte_range_to_bytemask_low_first(dst_byte_offset, first_payload_bytes);
@@ -2574,9 +2562,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
 
         handle_bar[0]->prepare_handle(warp_idx_in_block);
         handle_bar[1]->prepare_handle(warp_idx_in_block);
-        if (is_dst_shared) {
-            nvshmemi_tma_fence_proxy_async_shared_cta();
-        }
+        // Ensure mbarriers init visibility to async proxy
+        fence_async_proxy();
 
         size_t num_chunks = NVSHMEMI_TEAM_ROUND_UP_DIV(len, smem_chunk_size);
         size_t preissue_chunks =
@@ -2647,9 +2634,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
         }
 
     }  // end
-    if (is_dst_shared) {
-        nvshmemi_threadgroup_sync<SCOPE>();
-    }
 }
 
 /* Multi-warp GET uses separate producer/consumer warp leaders.  The producer
@@ -2711,7 +2695,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
         nvshmemi_tma_mbarrier_init(done_bar[1]);
         handle_bar[0]->prepare_handle(warp_idx_in_block);
         handle_bar[1]->prepare_handle(warp_idx_in_block);
-        nvshmemi_tma_fence_proxy_async_shared_cta();
+        // Ensure mbarriers init visibility to async proxy
+        fence_async_proxy();
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 
@@ -2806,8 +2791,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
             fence_proxy_fabric2generic_alias();
         }
     }
-
-    nvshmemi_threadgroup_sync<SCOPE>();
 }
 
 template <threadgroup_t SCOPE>
