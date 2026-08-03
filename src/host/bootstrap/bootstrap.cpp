@@ -252,13 +252,14 @@ out:
 void bootstrap_finalize() {
     int status = NVSHMEMX_SUCCESS;
 
-    if (nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
-        status = bootstrap_loader_finalize(&nvshmemi_boot_handle);
-        NVSHMEMI_NZ_EXIT(status, "bootstrap finalization returned error\n");
-        // Finalize the nvshmemi_session
-        if (nvshmemi_default_session) {
-            free(nvshmemi_default_session);
-            nvshmemi_default_session = nullptr;
-        }
+    if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) return;
+
+    nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped = false;
+    status = bootstrap_loader_finalize(&nvshmemi_boot_handle);
+    NVSHMEMI_NZ_EXIT(status, "bootstrap finalization returned error\n");
+    // Finalize the nvshmemi_session
+    if (nvshmemi_default_session) {
+        free(nvshmemi_default_session);
+        nvshmemi_default_session = nullptr;
     }
 }
