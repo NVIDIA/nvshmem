@@ -24,6 +24,7 @@ endif()
 
 if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.4")
     nvshmem_add_perftest(shmem_get_bw_locality_domains.cu)
+    nvshmem_add_perftest(shmem_put_bw_locality_domains.cu)
 endif()
 
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
