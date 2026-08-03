@@ -4,6 +4,7 @@
  */
 
 #include "utils.h"
+#include <array>
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
@@ -39,6 +40,27 @@ int use_uid = 0;
 int use_cubin = 0;
 
 CUmodule mymodule = NULL;
+
+void print_device_uuid_and_peer(int pe, int peer) {
+    int dev;
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDevice(&dev));
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, dev));
+    std::array<char, 40> uuid_str{};
+    const auto &bytes = prop.uuid.bytes;
+    std::snprintf(uuid_str.data(), uuid_str.size(),
+                  "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                  static_cast<unsigned char>(bytes[0]), static_cast<unsigned char>(bytes[1]),
+                  static_cast<unsigned char>(bytes[2]), static_cast<unsigned char>(bytes[3]),
+                  static_cast<unsigned char>(bytes[4]), static_cast<unsigned char>(bytes[5]),
+                  static_cast<unsigned char>(bytes[6]), static_cast<unsigned char>(bytes[7]),
+                  static_cast<unsigned char>(bytes[8]), static_cast<unsigned char>(bytes[9]),
+                  static_cast<unsigned char>(bytes[10]), static_cast<unsigned char>(bytes[11]),
+                  static_cast<unsigned char>(bytes[12]), static_cast<unsigned char>(bytes[13]),
+                  static_cast<unsigned char>(bytes[14]), static_cast<unsigned char>(bytes[15]));
+    std::fprintf(stdout, "PE %d: GPU %d, UUID: GPU-%s, peer: %d\n", pe, dev, uuid_str.data(), peer);
+    std::fflush(stdout);
+}
 
 void init_cumodule(const char *str) {
     int init_error = 0;

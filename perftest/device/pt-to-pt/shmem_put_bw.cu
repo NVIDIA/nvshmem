@@ -3,16 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <stdio.h>
-#include <assert.h>
+#include <array>
+#include <cstdio>
+#include <cassert>
+#include <vector>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <getopt.h>
 #include "utils.h"
 
 enum class SMEMToggle { DISABLE, ENABLE };
-
-constexpr size_t WARP_SIZE = 32;
 
 template <SMEMToggle SMEM_MODE>
 class smem_registration_guard {
@@ -45,7 +45,7 @@ class smem_registration_guard {
  * flattening if that changes. */
 template <SMEMToggle SMEM_MODE>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int len, int pe,
-                         int iter, int smem_size) {
+                         int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
@@ -54,7 +54,7 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int l
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
-    peer = !pe;
+    peer = pe ^ (npes / 2);
     for (i = 0; i < iter; i++) {
         nvshmemx_double_put_nbi_block(data_d + (bid * (len / nblocks)),
                                       data_d + (bid * (len / nblocks)), len / nblocks, peer);
@@ -88,8 +88,8 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int l
 }
 
 template <SMEMToggle SMEM_MODE>
-__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter,
-                        int smem_size) {
+__global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe, int npes,
+                        int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
@@ -102,7 +102,7 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int le
     size_t put_size_per_block = len / nblocks;
     size_t put_size_per_warp = put_size_per_block / nwarps_per_block;
 
-    peer = !pe;
+    peer = pe ^ (npes / 2);
     for (i = 0; i < iter; i++) {
         nvshmemx_double_put_nbi_warp(
             data_d + (bid * put_size_per_block + warpid * put_size_per_warp),
@@ -139,7 +139,7 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int le
 
 template <SMEMToggle SMEM_MODE>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int len, int pe,
-                          int iter, int smem_size) {
+                          int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
@@ -151,7 +151,7 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int 
     size_t put_size_per_block = len / nblocks;
     size_t put_size_per_thread = put_size_per_block / nthreads_per_block;
 
-    peer = !pe;
+    peer = pe ^ (npes / 2);
     for (i = 0; i < iter; i++) {
         nvshmem_double_put_nbi(data_d + (bid * put_size_per_block + tid * put_size_per_thread),
                                data_d + (bid * put_size_per_block + tid * put_size_per_thread),
@@ -185,8 +185,8 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int 
     __syncthreads();
 }
 
-typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe, int iter,
-                        int smem_size);
+typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe, int npes,
+                        int iter, int smem_size);
 
 static SMEMToggle parse_smem_enabled() {
     return use_smem ? SMEMToggle::ENABLE : SMEMToggle::DISABLE;
@@ -216,8 +216,6 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
     }
 
     if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
-        /* If smem opt-in: request dynamic smem of size RECOMMENDED so the kernel
-         * can call give_smem and the put API can take the TMA path. */
         *smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
         CUDA_CHECK(cudaFuncSetAttribute(bw_block<SMEM_MODE>,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
@@ -226,29 +224,10 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
         CUDA_CHECK(cudaFuncSetAttribute(bw_thread<SMEM_MODE>,
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
     } else {
-        /* If opted out: launch with smem_size=0 and leave extern __shared__ unused. */
         *smem_size = 0;
     }
 
     return true;
-}
-
-/* Count logical NVSHMEM put calls issued by the selected threadgroup scope.
- * This is not a hardware transaction count: on NVLink the on-wire stores
- * depend on transfer size and transport/coalescing behavior that this
- * benchmark cannot observe. */
-static size_t put_messages_per_iteration(size_t blocks, size_t threads, threadgroup_scope_t scope) {
-    switch (scope.type) {
-        case NVSHMEM_THREAD:
-            return blocks * threads;
-        case NVSHMEM_WARP:
-            return blocks * ((threads + WARP_SIZE - 1) / WARP_SIZE);
-        case NVSHMEM_BLOCK:
-        case NVSHMEM_ALL_SCOPES:
-            return blocks;
-        default:
-            return 0;
-    }
 }
 
 int main(int argc, char *argv[]) {
@@ -262,12 +241,11 @@ int main(int argc, char *argv[]) {
     int array_size, i;
     void **h_tables = NULL;
     uint64_t *h_size_arr;
-    double *h_bw = NULL, *h_bw_total = NULL;
-    double *h_msgrate = NULL, *h_msgrate_total = NULL;
-    perf_stats_t *h_bw_stats = NULL;
-    perf_stats_t *h_msgrate_stats = NULL;
-    double *d_bw = NULL, *d_bw_sum = NULL;
-    double *d_msgrate = NULL, *d_msgrate_sum = NULL;
+    double *h_bw = NULL;
+    /* Per-PE BW gather: each PE stages its h_bw[i] in d_bw_local and writes
+     * it into d_bw_all[mype] on PE 0 every iteration. PE 0 then prints one
+     * row per size with N/2 columns (one per sender pair). */
+    double *d_bw_local = NULL, *d_bw_all = NULL;
 
     bw_fn_t bw_fn = NULL;
     /* Opt this benchmark into NVSHMEM's TMA path by registering smem at kernel
@@ -289,10 +267,12 @@ int main(int argc, char *argv[]) {
     mype = nvshmem_my_pe();
     npes = nvshmem_n_pes();
 
-    if (npes != 2) {
-        fprintf(stderr, "This test requires exactly two processes \n");
+    if (npes < 2 || (npes & (npes - 1)) != 0) {
+        fprintf(stderr, "This test requires a power-of-two number of processes (>= 2)\n");
         goto finalize;
     }
+
+    print_device_uuid_and_peer(mype, mype ^ (npes / 2));
 
     switch (smem_mode) {
         case SMEMToggle::ENABLE:
@@ -304,32 +284,22 @@ int main(int argc, char *argv[]) {
     }
 
     array_size = max_size_log;
-    alloc_tables(&h_tables, 3, array_size);
+    alloc_tables(&h_tables, 2, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
-    h_msgrate = (double *)h_tables[2];
-    h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (report_msgrate) h_msgrate_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_bw_stats || (report_msgrate && !h_msgrate_stats)) goto finalize;
 
-    if (bidirectional) {
-        h_bw_total = (double *)malloc(sizeof(double) * array_size);
-        if (report_msgrate) h_msgrate_total = (double *)malloc(sizeof(double) * array_size);
+    d_bw_local = (double *)nvshmem_malloc(sizeof(double));
+    d_bw_all = (double *)nvshmem_malloc(npes * sizeof(double));
 
-        if (!h_bw_total || (report_msgrate && !h_msgrate_total)) {
-            fprintf(stderr, "Error: Unable to malloc on the host.\n");
-            exit(1);
-        }
-
-        memset(h_bw_total, 0, sizeof(double) * array_size);
-        if (report_msgrate) memset(h_msgrate_total, 0, sizeof(double) * array_size);
-
-        d_bw = (double *)nvshmem_malloc(sizeof(double));
-        d_bw_sum = (double *)nvshmem_malloc(sizeof(double));
-        if (report_msgrate) {
-            d_msgrate = (double *)nvshmem_malloc(sizeof(double));
-            d_msgrate_sum = (double *)nvshmem_malloc(sizeof(double));
-        }
+    /* Per-pair BW table header (PE 0 only). */
+    if (mype == 0) {
+        const char *test_name = bidirectional ? "shmem_put_bw_bidi" : "shmem_put_bw_uni";
+        std::fprintf(stdout, "\n%s (GB/s)\n", test_name);
+        std::fprintf(stdout, "%14s", "size (B)");
+        for (int s = 0; s < npes / 2; s++)
+            std::fprintf(stdout, "  PE %d -> PE %d", s, s ^ (npes / 2));
+        std::fprintf(stdout, "\n");
+        std::fflush(stdout);
     }
 
     if (use_mmap) {
@@ -346,69 +316,92 @@ int main(int argc, char *argv[]) {
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    if (bidirectional || mype == 0) {
+    // nvshmemx_collective_launch_attr is a collective: every PE must call it.
+    // Receivers (non-senders) pass iter=0 so their kernel exits without issuing
+    // any puts.
+    {
+        nvshmemx_collective_launch_attr_t cl_attr{};
+        cl_attr.cuda_config.gridDim = dim3(max_blocks);
+        cl_attr.cuda_config.blockDim = dim3(max_threads);
+        cl_attr.cuda_config.dynamicSmemBytes = smem_size;
+        cl_attr.cuda_config.stream = 0;
+        cl_attr.cuda_config.attrs = nullptr;
+        cl_attr.cuda_config.numAttrs = 0;
+
+        const int is_sender = (bidirectional || mype < npes / 2);
+
         i = 0;
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
             h_size_arr[i] = size;
+            int len = static_cast<int>(size / sizeof(double));
+            int iter_warmup = is_sender ? skip : 0;
+            int iter_timed = is_sender ? iter : 0;
+            int status;
+
+            /* warmup */
             CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-            bw_fn<<<max_blocks, max_threads, smem_size>>>(data_d, counter_d, size / sizeof(double),
-                                                          mype, skip, smem_size);
-            CUDA_CHECK(cudaGetLastError());
+            {
+                void *args[] = {&data_d, &counter_d, &len, &mype, &npes, &iter_warmup, &smem_size};
+                status = nvshmemx_collective_launch_attr(&cl_attr, (const void *)bw_fn, args);
+                if (status != 0) {
+                    fprintf(stderr, "nvshmemx_collective_launch_attr (warmup) failed: %d\n",
+                            status);
+                    goto finalize;
+                }
+            }
             CUDA_CHECK(cudaDeviceSynchronize());
+
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
+                /* timed run */
                 CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
-                cudaEventRecord(start);
-                bw_fn<<<max_blocks, max_threads, smem_size>>>(
-                    data_d, counter_d, size / sizeof(double), mype, iter, smem_size);
-                cudaEventRecord(stop);
-                CUDA_CHECK(cudaGetLastError());
-                CUDA_CHECK(cudaEventSynchronize(stop));
-                cudaEventElapsedTime(&milliseconds, start, stop);
-                h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-                if (report_msgrate)
-                    h_msgrate[i] = calculate_msgrate(
-                        put_messages_per_iteration(max_blocks, max_threads, threadgroup_scope),
-                        iter, milliseconds);
-                nvshmem_barrier_all();
-                if (bidirectional) {
-                    CUDA_CHECK(cudaMemcpy(d_bw, &h_bw[i], sizeof(double), cudaMemcpyDefault));
-                    nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, d_bw_sum, d_bw, 1);
-                    CUDA_CHECK(
-                        cudaMemcpy(&h_bw_total[i], d_bw_sum, sizeof(double), cudaMemcpyDefault));
-                    if (report_msgrate) {
-                        CUDA_CHECK(cudaMemcpy(d_msgrate, &h_msgrate[i], sizeof(double),
-                                              cudaMemcpyDefault));
-                        nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, d_msgrate_sum, d_msgrate, 1);
-                        CUDA_CHECK(cudaMemcpy(&h_msgrate_total[i], d_msgrate_sum, sizeof(double),
-                                              cudaMemcpyDefault));
+                {
+                    void *args[] = {&data_d, &counter_d,  &len,      &mype,
+                                    &npes,   &iter_timed, &smem_size};
+                    if (is_sender) cudaEventRecord(start);
+                    status = nvshmemx_collective_launch_attr(&cl_attr, (const void *)bw_fn, args);
+                    if (is_sender) cudaEventRecord(stop);
+                    if (status != 0) {
+                        fprintf(stderr, "nvshmemx_collective_launch_attr (timed) failed: %d\n",
+                                status);
+                        goto finalize;
                     }
                 }
-                if (!mype) {
-                    perf_stats_add(h_bw_stats[i], bidirectional ? h_bw_total[i] : h_bw[i]);
-                    if (report_msgrate)
-                        perf_stats_add(h_msgrate_stats[i],
-                                       bidirectional ? h_msgrate_total[i] : h_msgrate[i]);
+
+                if (is_sender) {
+                    CUDA_CHECK(cudaEventSynchronize(stop));
+                    cudaEventElapsedTime(&milliseconds, start, stop);
+                    h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                } else {
+                    CUDA_CHECK(cudaDeviceSynchronize());
+                    h_bw[i] = 0.0;
+                }
+                nvshmem_barrier_all();
+
+                /* Gather every PE's h_bw[i] onto PE 0 and emit the row.
+                 * In bidirectional mode each pair contributes two flows
+                 * (sender → peer and peer → sender), so the pair-column
+                 * value is the sum of the two; otherwise only the
+                 * sender's BW is meaningful (receivers stored 0.0). */
+                CUDA_CHECK(cudaMemcpy(d_bw_local, &h_bw[i], sizeof(double), cudaMemcpyDefault));
+                nvshmem_double_put(d_bw_all + mype, d_bw_local, 1, 0);
+                nvshmem_barrier_all();
+
+                if (mype == 0) {
+                    std::vector<double> h_bw_all(npes, 0.0);
+                    CUDA_CHECK(cudaMemcpy(h_bw_all.data(), d_bw_all, npes * sizeof(double),
+                                          cudaMemcpyDeviceToHost));
+                    std::fprintf(stdout, "%14lu", (unsigned long)h_size_arr[i]);
+                    for (int s = 0; s < npes / 2; s++) {
+                        double bw =
+                            bidirectional ? (h_bw_all[s] + h_bw_all[s + npes / 2]) : h_bw_all[s];
+                        std::fprintf(stdout, "%14.2f", bw);
+                    }
+                    std::fprintf(stdout, "\n");
+                    std::fflush(stdout);
                 }
             }
 
             i++;
-        }
-    } else {
-        for (int size = min_size; size <= max_size; size *= step_factor) {
-            for (size_t repetition = 0; repetition < repetitions; repetition++)
-                nvshmem_barrier_all();
-        }
-    }
-
-    if (mype == 0) {
-        double *p_h_bw_tmp = bidirectional ? h_bw_total : h_bw;
-        const char *const test_name = bidirectional ? "shmem_put_bw_bidi" : "shmem_put_bw_uni";
-        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, p_h_bw_tmp, i,
-                          h_bw_stats);
-        if (report_msgrate) {
-            double *p_h_msgrate_tmp = bidirectional ? h_msgrate_total : h_msgrate;
-            print_basic_table(test_name, "None", "msgrate", "MMPS", '+', h_size_arr,
-                              p_h_msgrate_tmp, i, h_msgrate_stats);
         }
     }
 
@@ -422,16 +415,10 @@ finalize:
         }
     }
 
-    if (h_bw_total) free(h_bw_total);
-    if (h_msgrate_total) free(h_msgrate_total);
-    if (d_bw) nvshmem_free(d_bw);
-    free(h_bw_stats);
-    free(h_msgrate_stats);
-    if (d_bw_sum) nvshmem_free(d_bw_sum);
-    if (d_msgrate) nvshmem_free(d_msgrate);
-    if (d_msgrate_sum) nvshmem_free(d_msgrate_sum);
+    if (d_bw_local) nvshmem_free(d_bw_local);
+    if (d_bw_all) nvshmem_free(d_bw_all);
 
-    if (h_tables) free_tables(h_tables, 3);
+    if (h_tables) free_tables(h_tables, 2);
     finalize_wrapper();
 
     return 0;
