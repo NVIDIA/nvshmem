@@ -15,6 +15,7 @@
 #include <sched.h>                                   // for cpu_set_t, sched_setaffinity
 #include <stdio.h>                                   // for NULL, fclose
 #include <stdlib.h>                                  // for free, calloc
+#include <algorithm>                                 // for std::equal
 #include <string.h>                                  // for strlen
 #include <strings.h>                                 // for strcasecmp
 #include <list>                                      // for _List_iter...
@@ -766,10 +767,10 @@ int nvshmemi_detect_same_device(nvshmemi_state_t *state) {
         (state->pe_info + i)->pe = i;
         if (i == state->mype) continue;
 
+        const auto &uuid_i = (state->pe_info + i)->gpu_uuid;
         status = (((state->pe_info + i)->hostHash == my_info.hostHash) &&
-                  ((state->pe_info + i)->pcie_id.dev_id == my_info.pcie_id.dev_id) &&
-                  ((state->pe_info + i)->pcie_id.bus_id == my_info.pcie_id.bus_id) &&
-                  ((state->pe_info + i)->pcie_id.domain_id == my_info.pcie_id.domain_id));
+                  std::equal(std::begin(uuid_i.bytes), std::end(uuid_i.bytes),
+                             std::begin(my_info.gpu_uuid.bytes)));
         if (status) {
             INFO(NVSHMEM_INIT, "More than 1 PE per GPU detected. This is an MPG run.\n");
 #if defined(NVSHMEM_PPC64LE)
