@@ -2053,6 +2053,26 @@ out:
  * by external libraries (e.g. ncclMemAlloc on GB200) that request a
  * combined handle type mask (FABRIC | POSIX_FILE_DESCRIPTOR).
  */
+static nvshmemx_status check_vmm_buffer_device(
+    struct nvshmemi_cuda_fn_table *cuda_syms,
+    [[maybe_unused]] const CUmemAllocationProp &alloc_prop, void *ptr, int expected_device_id) {
+    unsigned int device_ordinal = 0;
+#if CUDART_VERSION >= 13040
+    if (alloc_prop.location.type == CU_MEM_LOCATION_TYPE_DEVICE_LOCALITY_DOMAIN) {
+        return (static_cast<int>(alloc_prop.location.localized.deviceId) != expected_device_id)
+                   ? NVSHMEMX_ERROR_INVALID_VALUE
+                   : NVSHMEMX_SUCCESS;
+    }
+#endif
+    CUresult cu_status =
+        CUPFN(cuda_syms, cuPointerGetAttribute(static_cast<void *>(&device_ordinal),
+                                               CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
+                                               reinterpret_cast<CUdeviceptr>(ptr)));
+    if (cu_status != CUDA_SUCCESS) return NVSHMEMX_ERROR_INTERNAL;
+    return (static_cast<int>(device_ordinal) != expected_device_id) ? NVSHMEMX_ERROR_INVALID_VALUE
+                                                                    : NVSHMEMX_SUCCESS;
+}
+
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     void *ptr, size_t &size, unsigned int *ptr_mem_type) {
     int status = 0;
@@ -2097,15 +2117,17 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "user buffer not allocated in device or host(EGM) memory\n");
 
+    // Get allocation properties before device check to handle localized memory nodes
+    status = CUPFN(nvshmemi_cuda_syms,
+                   cuMemGetAllocationPropertiesFromHandle(&userAllocProp, userAllocHandle));
+    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                          "Failed to get allocation properties of user buffer %p\n", ptr);
+
     // check for buffer device ordinal
     if (ptrAttr == CU_MEMORYTYPE_DEVICE) {
-        status = CUPFN(nvshmemi_cuda_syms,
-                       cuPointerGetAttribute((void *)&ptrAttr, CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
-                                             reinterpret_cast<CUdeviceptr>(ptr)));
-        NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
-                                 out, "Failed to get device ordinal of user buffer %p\n", ptr);
-        status = (int(ptrAttr) != cfg_.device_id);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        nvshmemx_status dev_status =
+            check_vmm_buffer_device(nvshmemi_cuda_syms, userAllocProp, ptr, cfg_.device_id);
+        NVSHMEMI_NZ_ERROR_JMP(dev_status, dev_status, out,
                               "user buffer %p not allocated in device %d\n", ptr, cfg_.device_id);
     }
 
@@ -2117,12 +2139,6 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     status = check_buffers_on_same_device(ptrAttr == CU_MEMORYTYPE_DEVICE, ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Cannot register user buffer %p due to device aliasing\n", ptr);
-
-    // Get allocation properties
-    status = CUPFN(nvshmemi_cuda_syms,
-                   cuMemGetAllocationPropertiesFromHandle(&userAllocProp, userAllocHandle));
-    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                             "Failed to get allocation properties of user buffer %p\n", ptr);
 
     // Check if requestedHandleTypes includes the effective handle type that will be used
     // for export/import. When the heap has a combined bitmask (FABRIC | POSIX_FILE_DESCRIPTOR),
