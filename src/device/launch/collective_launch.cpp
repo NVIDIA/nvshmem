@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <algorithm>                                 // for std::any_of, std::copy_n
+#include <array>                                     // for std::array
 #include <cuda.h>                                    // for CUDA_SUCCESS
 #include <cuda_runtime.h>                            // for cudaGetErrorString
 #include <driver_types.h>                            // for cudaError_t, cud...
@@ -73,50 +75,77 @@ out:
     return status;
 }
 
-static int _nvshmemi_collective_launch(const void *func, dim3 gridDims, dim3 blockDims, void **args,
-                                       size_t sharedMem, cudaStream_t stream) {
+/*
+ * Merged attribute buffer is stack-allocated per call. 16 leaves headroom over
+ * the size of the cudaLaunchAttributeID enum. Bump if CUDA grows it. The bound
+ * is enforced at runtime so an oversized input fails cleanly instead of
+ * corrupting the stack.
+ */
+static constexpr int NVSHMEMI_MAX_MERGED_LAUNCH_ATTRS = 16;
+
+static bool nvshmemi_attr_present(const cudaLaunchAttribute *attrs, int n,
+                                  cudaLaunchAttributeID id) {
+    return std::any_of(attrs, attrs + n, [id](const cudaLaunchAttribute &a) { return a.id == id; });
+}
+
+static int _nvshmemi_collective_launch_attr(const nvshmemx_collective_launch_attr_t *attr,
+                                            const void *func, void **args) {
     int multiProcessorCount;
-    int blockSize = blockDims.x * blockDims.y * blockDims.z;
     int maxBlocksSM;
     int gridSize = -1;
     int launchFailed = 1;
     int status = 0;
+    cudaLaunchConfig_t cfg{};
+    std::array<cudaLaunchAttribute, NVSHMEMI_MAX_MERGED_LAUNCH_ATTRS> merged_attrs{};
+    int n_merged = 0;
+    cudaStream_t user_stream;
 
-    int ret = nvshmemi_check_state_and_init_d();
-    if (ret) {
-        fprintf(stderr, "nvshmemi_check_state_and_init_d() failed");
-        status = NVSHMEMX_ERROR_INTERNAL;
+    if (attr == nullptr) {
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
         goto out;
     }
-    // XXX: Supports the user passing a non-zero grid but of differing size across ranks
-    if (gridDims.x == 0 && gridDims.y == 0 && gridDims.z == 0) {
-        gridSize = 0;
-    } else if (gridDims.x != 0 && gridDims.y != 0 && gridDims.z != 0) {
-        gridSize = gridDims.x * gridDims.y * gridDims.z;
-    }  // else
-       // some but not all grid dim being 0 is illegal
-       // XXX: if some ranks pass an illegal grid, others error out
 
-    // get min blocks per SM, error out if 0 for any GPU
-    status =
-        cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxBlocksSM, func, blockSize, sharedMem);
-    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                          "cudaOccupancyMaxActiveBlocksPerMultiprocessor failed aborting job\n");
+    cfg = attr->cuda_config;
+    user_stream = cfg.stream;
 
-    multiProcessorCount = nvshmemi_device_only_state.cu_dev_attrib.multi_processor_count;
-    if (gridSize == 0) { /*XXX : auto sizing */
-        // two alternatives - run the minimum supported grid (>0) on all GPUs (global communication
-        // needed) or run the maximum supported grid on each GPU (local decision)
-        // XXX: Launches maximum supported grid (>0) on associated GPU
-        if (maxBlocksSM > 0) { /*Launch will work only if all GPUs can run at least one CTA*/
-            launchFailed = 0;
+    {
+        int blockSize = cfg.blockDim.x * cfg.blockDim.y * cfg.blockDim.z;
+
+        int ret = nvshmemi_check_state_and_init_d();
+        if (ret) {
+            fprintf(stderr, "nvshmemi_check_state_and_init_d() failed");
+            status = NVSHMEMX_ERROR_INTERNAL;
+            goto out;
         }
-        gridDims.x = maxBlocksSM * multiProcessorCount;
-        gridDims.y = 1;
-        gridDims.z = 1;
-    } else if (gridSize > 0) { /* XXX : legal grid is provided by user*/
-        if ((maxBlocksSM > 0) && (gridSize <= maxBlocksSM * multiProcessorCount)) { /*Works*/
-            launchFailed = 0;
+        // XXX: Supports the user passing a non-zero grid but of differing size across ranks
+        if (cfg.gridDim.x == 0 && cfg.gridDim.y == 0 && cfg.gridDim.z == 0) {
+            gridSize = 0;
+        } else if (cfg.gridDim.x != 0 && cfg.gridDim.y != 0 && cfg.gridDim.z != 0) {
+            gridSize = cfg.gridDim.x * cfg.gridDim.y * cfg.gridDim.z;
+        }  // else
+           // some but not all grid dim being 0 is illegal
+           // XXX: if some ranks pass an illegal grid, others error out
+
+        // get min blocks per SM, error out if 0 for any GPU
+        status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxBlocksSM, func, blockSize,
+                                                               cfg.dynamicSmemBytes);
+        NVSHMEMI_NE_ERROR_JMP(
+            status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+            "cudaOccupancyMaxActiveBlocksPerMultiprocessor failed aborting job\n");
+
+        multiProcessorCount = nvshmemi_device_only_state.cu_dev_attrib.multi_processor_count;
+        if (gridSize == 0) { /*XXX : auto sizing */
+            // XXX: Launches maximum supported grid (>0) on associated GPU
+            if (maxBlocksSM > 0) { /*Launch will work only if all GPUs can run at least one CTA*/
+                launchFailed = 0;
+            }
+            cfg.gridDim.x = maxBlocksSM * multiProcessorCount;
+            cfg.gridDim.y = 1;
+            cfg.gridDim.z = 1;
+        } else if (gridSize > 0) { /* XXX : legal grid is provided by user*/
+            if ((maxBlocksSM > 0) && (gridSize <= maxBlocksSM * multiProcessorCount)) { /*Works*/
+                launchFailed = 0;
+            }
         }
     }
 
@@ -125,33 +154,54 @@ static int _nvshmemi_collective_launch(const void *func, dim3 gridDims, dim3 blo
     NVSHMEMI_CHECK_ERROR_JMP(launchFailed, status, NVSHMEMX_ERROR_COLLECTIVE_LAUNCH_FAILED, out,
                              "One or more PEs cannot launch \n");
 
+    /* Merge user-provided attributes with NVSHMEM's required attributes.
+     * User wins on duplicates: if the caller already specified an attribute
+     * NVSHMEM would otherwise add, NVSHMEM does not overwrite it. */
+    if (cfg.numAttrs > NVSHMEMI_MAX_MERGED_LAUNCH_ATTRS) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "user supplied %d launch attributes; max supported is %d\n",
+                           cfg.numAttrs, NVSHMEMI_MAX_MERGED_LAUNCH_ATTRS);
+    }
+    std::copy_n(cfg.attrs, cfg.numAttrs, merged_attrs.begin());
+    n_merged = cfg.numAttrs;
+    if (nvshmemi_device_only_state.cu_dev_attrib.cooperative_launch &&
+        !nvshmemi_attr_present(merged_attrs.data(), n_merged, cudaLaunchAttributeCooperative)) {
+        if (n_merged >= NVSHMEMI_MAX_MERGED_LAUNCH_ATTRS) {
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_INTERNAL, out,
+                "no room to add cudaLaunchAttributeCooperative to merged attribute list\n");
+        }
+        merged_attrs[n_merged].id = cudaLaunchAttributeCooperative;
+        merged_attrs[n_merged].val.cooperative = 1;
+        ++n_merged;
+    }
+
+    /* NVSHMEM owns the stream the kernel actually launches on. The user's
+     * stream is used as the fence point: an end-event recorded on the internal
+     * stream is waited on by the user's stream after the launch. */
+    cfg.stream = nvshmemi_device_only_state.claunch_params.stream;
+    cfg.attrs = merged_attrs.data();
+    cfg.numAttrs = n_merged;
+
     CUDA_RUNTIME_CHECK_GOTO(
-        cudaEventRecord(nvshmemi_device_only_state.claunch_params.begin_event, stream), status,
+        cudaEventRecord(nvshmemi_device_only_state.claunch_params.begin_event, user_stream), status,
         out);
     CUDA_RUNTIME_CHECK_GOTO(
         cudaStreamWaitEvent(nvshmemi_device_only_state.claunch_params.stream,
                             nvshmemi_device_only_state.claunch_params.begin_event, 0),
         status, out);
 
-    if (nvshmemi_device_only_state.cu_dev_attrib.cooperative_launch) {
-        status = cudaLaunchCooperativeKernel(func, gridDims, blockDims, args, sharedMem,
-                                             nvshmemi_device_only_state.claunch_params.stream);
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_COLLECTIVE_LAUNCH_FAILED, out,
-                              "Cooperative kernel launch failed \n");
-    } else {
-        status = cudaLaunchKernel(func, gridDims, blockDims, args, sharedMem,
-                                  nvshmemi_device_only_state.claunch_params.stream);
-        NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_COLLECTIVE_LAUNCH_FAILED, out,
-                              "Kernel launch failed \n");
-    }
+    status = cudaLaunchKernelExC(&cfg, func, args);
+    NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_COLLECTIVE_LAUNCH_FAILED, out,
+                          "cudaLaunchKernelExC failed\n");
 
     CUDA_RUNTIME_CHECK_GOTO(cudaEventRecord(nvshmemi_device_only_state.claunch_params.end_event,
                                             nvshmemi_device_only_state.claunch_params.stream),
                             status, out);
 
     CUDA_RUNTIME_CHECK_GOTO(
-        cudaStreamWaitEvent(stream, nvshmemi_device_only_state.claunch_params.end_event, 0), status,
-        out);
+        cudaStreamWaitEvent(user_stream, nvshmemi_device_only_state.claunch_params.end_event, 0),
+        status, out);
 
 out:
     return status;
@@ -219,7 +269,19 @@ int nvshmemx_collective_launch_query_gridsize(const void *func, dim3 blockDims, 
 
 int nvshmemx_collective_launch(const void *func, dim3 gridDims, dim3 blockDims, void **args,
                                size_t sharedMem, cudaStream_t stream) {
-    return _nvshmemi_collective_launch(func, gridDims, blockDims, args, sharedMem, stream);
+    nvshmemx_collective_launch_attr_t a{};
+    a.cuda_config.gridDim = gridDims;
+    a.cuda_config.blockDim = blockDims;
+    a.cuda_config.dynamicSmemBytes = sharedMem;
+    a.cuda_config.stream = stream;
+    a.cuda_config.attrs = nullptr;
+    a.cuda_config.numAttrs = 0;
+    return _nvshmemi_collective_launch_attr(&a, func, args);
+}
+
+int nvshmemx_collective_launch_attr(const nvshmemx_collective_launch_attr_t *attr, const void *func,
+                                    void **args) {
+    return _nvshmemi_collective_launch_attr(attr, func, args);
 }
 
 }  // extern "C"
