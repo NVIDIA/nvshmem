@@ -551,6 +551,61 @@ int nvshmemi_init_nvshmemi_state(nvshmemi_state_t *state) {
     return status;
 }
 
+/*
+ * Whether any pair of PEs in the run shares the same physical GPU. NVLS
+ * multicast cannot span such a configuration, so the NVLS-detection path uses
+ * this to gate is_platform_nvls off without parsing prop.name.
+ */
+enum class nvshmemi_gpu_sharing_t {
+    NONE,         // No two PEs share a physical GPU.
+    MPG,          // Two PEs see the same gpu_uuid: same physical GPU, no partition.
+    MPS_MLOPART,  // Two PEs see the same PCIe id but different gpu_uuid:
+                  // same physical GPU exposed as separate MPS-MLOPart partitions.
+};
+
+/*
+ * Classifies the run by walking the cross-PE pe_info pairs and, on a non-NONE
+ * result, logs an INFO line naming the offending pair and the reason. Detection
+ * relies only on hostHash + PCIe coordinates + UUID — fields already exchanged
+ * via nvshmemi_detect_same_device — never on prop.name.
+ */
+static nvshmemi_gpu_sharing_t nvshmemi_classify_gpu_sharing(const nvshmemi_state_t *state) {
+    if (state->pe_info == nullptr) return nvshmemi_gpu_sharing_t::NONE;
+
+    nvshmemi_gpu_sharing_t kind = nvshmemi_gpu_sharing_t::NONE;
+    int i = -1;
+    int j = -1;
+
+    for (i = 0; i < state->npes; i++) {
+        for (j = 0; j < i; j++) {
+            const auto &a = state->pe_info[i];
+            const auto &b = state->pe_info[j];
+            if (a.hostHash != b.hostHash) continue;
+            if (a.pcie_id.dev_id != b.pcie_id.dev_id || a.pcie_id.bus_id != b.pcie_id.bus_id ||
+                a.pcie_id.domain_id != b.pcie_id.domain_id)
+                continue;
+
+            const bool same_uuid =
+                std::equal(std::begin(a.gpu_uuid.bytes), std::end(a.gpu_uuid.bytes),
+                           std::begin(b.gpu_uuid.bytes));
+            kind = same_uuid ? nvshmemi_gpu_sharing_t::MPG : nvshmemi_gpu_sharing_t::MPS_MLOPART;
+            break;
+        }
+        if (kind != nvshmemi_gpu_sharing_t::NONE) break;
+    }
+
+    if (kind == nvshmemi_gpu_sharing_t::NONE) return kind;
+
+    const char *reason = (kind == nvshmemi_gpu_sharing_t::MPS_MLOPART)
+                             ? "MPS MLOPart partitions"
+                             : "multiple PEs per GPU (MPG)";
+    INFO(NVSHMEM_INIT,
+         "NVLS: disabled because PEs %d and %d share the same physical GPU "
+         "(%s); NVLS multicast cannot span this configuration\n",
+         i, j, reason);
+    return kind;
+}
+
 static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state, bool use_cuda_vmm) {
     int status = NVSHMEMX_ERROR_INTERNAL;
     int mc_support = 0;
@@ -568,6 +623,14 @@ static int nvshmemi_detect_nvls_support(nvshmemi_state_t *state, bool use_cuda_v
      * CUDA_ERROR_INVALID_VALUE on some GPU/driver combos) when the result would be unused. */
     if (nvshmemi_options.DISABLE_NVLS) {
         INFO(NVSHMEM_INIT, "NVLS: disabled by user (NVSHMEM_DISABLE_NVLS)\n");
+        status = NVSHMEMX_SUCCESS;
+        goto out;
+    }
+
+    /* Disable NVLS when this run has multiple PEs sharing the same physical GPU
+     * (MPG or MPS-MLOPart): NVLS multicast cannot span either configuration.
+     * The classifier logs the offending pair and reason on a non-NONE result. */
+    if (nvshmemi_classify_gpu_sharing(state) != nvshmemi_gpu_sharing_t::NONE) {
         status = NVSHMEMX_SUCCESS;
         goto out;
     }
@@ -1183,6 +1246,12 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     }
 #endif
 
+    /* Same-device detection allgathers pe_info (hostHash, pcie_id, gpu_uuid) and
+     * also sets nvshmemi_is_mpg_run. Run it before nvshmemi_detect_nvls_support
+     * so that pe_info is available there to gate NVLS off for MPG/MLOPart. */
+    status = nvshmemi_detect_same_device(state);
+    NZ_DEBUG_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem detect same device failed \n");
+
     /* Detect NVLS support before increasing max teams count for NVLS capable platform
      * Depends on heap type being discovered aprior
      */
@@ -1202,9 +1271,6 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
                                 transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Invalid context pointer passed to nvshmemid_hostlib_init_attr.\n");
-
-    status = nvshmemi_detect_same_device(state);
-    NZ_DEBUG_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "nvshmem detect same device failed \n");
 
     status = nvshmemi_setup_stream_priorities(state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
