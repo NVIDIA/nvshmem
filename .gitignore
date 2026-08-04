@@ -101,7 +101,6 @@ nvshmem4py/pyproject.toml
 nvshmem4py/build_assets/cute/_cuteast.py
 nvshmem4py/build_assets/cute/config_nvshmem.yml
 nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py
-nvshmem4py/nvshmem/bindings/device/cute/entry_point.h
 
 # Filesystem objects
 .DS_STORE

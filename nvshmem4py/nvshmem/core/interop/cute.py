@@ -30,7 +30,7 @@ __all__ = [
 
 try:
     from cutlass import cute
-    from cutlass.cute.typing import Pointer, Boolean, Int32, Int64, Constexpr, Float32, Int8
+    from cutlass.cute.typing import Pointer, Boolean, Int32, Int64, Float32, Int8
     from cutlass.cute import Tensor
     from cutlass.cute.runtime import from_dlpack
     _cute_enabled = True
@@ -41,7 +41,6 @@ except Exception as e:
     Boolean = None
     Int32 = None
     Int64 = None
-    Constexpr = None
     Float32 = None
     Int8 = None
     _cute_enabled = False
@@ -452,7 +451,8 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
     """
     Helper function to compile a CuTe DSL kernel function.
 
-    Finds the current device's NVSHMEM bitcode library and compiles the kernel function with it.
+    Compiles the kernel function. NVSHMEM CuTe extern declarations add the
+    device bitcode library to the generated module automatically.
 
     Runs nvshmem.core.library_init with the compiled kernel.
 
@@ -470,7 +470,6 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
 
     NOTE: This function assumes that the device being used as the NVSHMEM PE is already set current.
     """
-    nvshmem_device_bc = nvshmem.core.find_device_bitcode_library()
     # Important: If _CUTE_MLIR_MODULE exists (from tensor creation via _make_tensor_from_buffer),
     # its context is active. cute.compile() checks "if ir.Context.current is None" and if not,
     # tries to access "ir.InsertionPoint.current" which raises an error if no insertion point is active.
@@ -497,10 +496,7 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
             pass
 
     try:
-        # Build compile_kwargs with options and any user-provided kwargs
-        compile_kwargs = {"options": f" --link-libraries={nvshmem_device_bc}"}
-        if kwargs:
-            compile_kwargs.update(kwargs)
+        compile_kwargs = dict(kwargs)
 
         # Call cute.compile() - it will create its own context if needed
         compilerd_func = cute.compile(kernel_fn, *args, **compile_kwargs)

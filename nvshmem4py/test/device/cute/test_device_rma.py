@@ -1,8 +1,6 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import os
-
 import pytest
 from cuda.core import Device
 import cutlass
@@ -14,6 +12,7 @@ from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 
 import nvshmem.core
 import nvshmem.core.device.cute as nvshmem_cute
+import nvshmem.bindings.device.cute as nvshmem_cute_bindings
 
 _KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
 
@@ -56,30 +55,13 @@ def _assert_torch_tensor(tensor, value):
     assert torch.equal(tensor, expected)
 
 
-def _nvshmem_device_bc():
-    try:
-        nvshmem_device_bc = nvshmem.core.find_device_bitcode_library()
-    except Exception as e:
-        pytest.skip(f"Failed to locate NVSHMEM device bitcode library: {e}")
-
-    if not os.path.exists(nvshmem_device_bc):
-        pytest.skip(f"NVSHMEM device bitcode not found at {nvshmem_device_bc}")
-
-    return nvshmem_device_bc
-
-
 def _nvshmem_stream():
     dev = Device()
     return dev.create_stream()
 
 
 def _compile_kernel(kernel, *example_args):
-    nvshmem_device_bc = _nvshmem_device_bc()
-    compiled = cute.compile(
-        kernel,
-        *example_args,
-        options=f" --link-libraries={nvshmem_device_bc}",
-    )
+    compiled = cute.compile(kernel, *example_args)
     compiled = compiled.to(Device().device_id)
     cuda_library = compiled.jit_module.cuda_library
     nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
@@ -91,6 +73,83 @@ def _compile_kernel(kernel, *example_args):
 def _finalize_kernels():
     while _KERNEL_OBJECTS:
         nvshmem.core.library_finalize(_KERNEL_OBJECTS.pop())
+
+
+@pytest.mark.mpi
+def test_direct_externs_link_nvshmem_bitcode(nvshmem_init_fini):
+    """Link multiple typed externs without passing ``--link-libraries``."""
+    stream = _nvshmem_stream()
+    dev = Device()
+    int_src = _make_torch_tensor((1, ), "int32", nvshmem.core.my_pe() + 1)
+    int_dst = _make_torch_tensor((1, ), "int32", 0)
+    float_src = _make_torch_tensor((1, ), "float32", float(nvshmem.core.my_pe() + 1))
+    float_dst = _make_torch_tensor((1, ), "float32", 0)
+
+    int_src_cute = _cute_from_torch(int_src)
+    int_dst_cute = _cute_from_torch(int_dst)
+    float_src_cute = _cute_from_torch(float_src)
+    float_dst_cute = _cute_from_torch(float_dst)
+
+    @cute.kernel
+    def direct_externs(
+        int_dst: cute.Tensor,
+        int_src: cute.Tensor,
+        float_dst: cute.Tensor,
+        float_src: cute.Tensor,
+        pe: Int32,
+    ):
+        tidx, _, _ = cute.arch.thread_idx()
+        if tidx == 0:
+            nvshmem_cute_bindings.int32_put(
+                int_dst.iterator,
+                int_src.iterator,
+                cutlass.Uint64(1),
+                pe,
+            )
+            nvshmem_cute_bindings.float_put(
+                float_dst.iterator,
+                float_src.iterator,
+                cutlass.Uint64(1),
+                pe,
+            )
+
+    @cute.jit
+    def direct_externs_launcher(
+        int_dst: cute.Tensor,
+        int_src: cute.Tensor,
+        float_dst: cute.Tensor,
+        float_src: cute.Tensor,
+        pe: Int32,
+    ):
+        direct_externs(int_dst, int_src, float_dst, float_src, pe).launch(
+            grid=[1, 1, 1],
+            block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
+        )
+
+    compiled = _compile_kernel(
+        direct_externs_launcher,
+        int_dst_cute,
+        int_src_cute,
+        float_dst_cute,
+        float_src_cute,
+        0,
+    )
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    compiled(int_dst_cute, int_src_cute, float_dst_cute, float_src_cute, peer)
+
+    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+
+    previous_pe = (nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()
+    expected = previous_pe + 1
+    _assert_torch_tensor(int_dst, expected)
+    _assert_torch_tensor(float_dst, float(expected))
+
+    nvshmem.core.free_tensor(int_src)
+    nvshmem.core.free_tensor(int_dst)
+    nvshmem.core.free_tensor(float_src)
+    nvshmem.core.free_tensor(float_dst)
 
 
 @pytest.mark.mpi

@@ -5,6 +5,7 @@ import cutlass
 from cutlass import cute
 from cutlass.base_dsl.ast_helpers import const_expr
 from cutlass.base_dsl.typing import cast as cute_cast
+from nvshmem.bindings.device.cute._bitcode import NVSHMEM_DEVICE_BITCODE as _BC
 
 __all__ = ["get_peer_tensor", "get_multicast_tensor"]
 """
@@ -14,10 +15,15 @@ Theoretically, we could cast the returned void* , but it requires so much compli
 Since there are just two typeless functions, it's easier to just have explicit bindings for them
 """
 
-nvshmem_ptr = cute.ffi(name="nvshmem_ptr", params_types=[cutlass.Int64, cutlass.Int32], return_type=cutlass.Int64)
-nvshmemx_mc_ptr = cute.ffi(name="nvshmemx_mc_ptr",
-                           params_types=[cutlass.Int32, cutlass.Int64],
-                           return_type=cutlass.Int64)
+
+@cute.extern(name="nvshmem_ptr", source=_BC)
+def nvshmem_ptr(ptr: cutlass.Int64, pe: cutlass.Int32) -> cutlass.Int64:
+    ...
+
+
+@cute.extern(name="nvshmemx_mc_ptr", source=_BC)
+def nvshmemx_mc_ptr(team: cutlass.Int32, ptr: cutlass.Int64) -> cutlass.Int64:
+    ...
 
 
 @cute.jit

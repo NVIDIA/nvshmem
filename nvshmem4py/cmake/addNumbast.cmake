@@ -1,6 +1,8 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+include("${CMAKE_CURRENT_LIST_DIR}/ensureNumbast.cmake")
+
 function(AddNumbast VERSION)
     
     # Locate Git
@@ -68,23 +70,15 @@ function(AddNumbast VERSION)
 
         COMMAND mkdir -p ${WORKDIR}
         COMMAND mkdir -p ${OUTPUT_DIR}
+        COMMAND mkdir -p ${ASTCANOPY_CMAKE_INSTALL_PREFIX}
         COMMAND touch ${OUTPUT_DIR}/clean.txt
         COMMENT "Cleaning and recreate Numbast repository"
         # DEPENDS get_cybind_output
     )
 
-    # Step 2: install numbast from source
-    add_custom_target(
-        pip_install_numbast
-        COMMAND mkdir -p ${ASTCANOPY_CMAKE_INSTALL_PREFIX}
-        COMMAND mkdir -p ${OUTPUT_DIR}
-        COMMAND ${VENV_PYTHON_EXECUTABLE} -m pip install numbast==${ADDNUMBAST_VERSION}
-        WORKING_DIRECTORY ${WORKDIR}
-        USES_TERMINAL
-        DEPENDS clean_${PACKAGE_NAME}
-        DEPENDS setup_py_bindings_env
-        COMMAND touch ${OUTPUT_DIR}/install_from_source.txt
-        COMMENT "Installing Build Environment and Numbast"
+    nvshmem_ensure_numbast(
+        VERSION ${ADDNUMBAST_VERSION}
+        CLEAN_TARGET clean_${PACKAGE_NAME}
     )
 
     # Step 3: Copy binding generation assets into build directory

@@ -244,7 +244,11 @@ TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
 pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
 pip install "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
 pip install pytest pytest-mpi
-pip install nvidia-cutlass-dsl==4.4.2
+CUTLASS_DSL_SPEC="nvidia-cutlass-dsl>=4.5.2,<5.0"
+if [ "$CUDA_MAJOR" = "13" ]; then
+    CUTLASS_DSL_SPEC="nvidia-cutlass-dsl[cu13]>=4.5.2,<5.0"
+fi
+pip install "$CUTLASS_DSL_SPEC"
 pip install yapf
 
 # Some torch wheels can still pull incompatible CUDA component wheels into the
