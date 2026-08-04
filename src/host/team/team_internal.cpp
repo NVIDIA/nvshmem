@@ -1714,6 +1714,9 @@ int nvshmemi_team_finalize(void) {
     nvshmemi_free(nvshmemi_team_creation_psync);
     nvshmemi_team_creation_psync = NULL;
     cudaFree(nvshmemi_device_team_world);
+    if (!nvshmemi_team_mc_shared_is_alias()) {
+        cudaFree(nvshmemi_device_team_mc_shared);
+    }
     cudaFree(nvshmemi_device_team_shared);
     cudaFree(nvshmemi_device_team_node);
     cudaFree(nvshmemi_device_team_same_mype_node);
