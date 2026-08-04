@@ -43,9 +43,11 @@ cdef bint __py_nvshmem_init = False
 cdef void* __nvshmem_barrier = NULL
 cdef void* __nvshmem_barrier_all = NULL
 cdef void* __nvshmemx_init_status = NULL
+cdef void* __nvshmem_query_thread = NULL
 cdef void* __nvshmem_my_pe = NULL
 cdef void* __nvshmem_n_pes = NULL
 cdef void* __nvshmem_info_get_version = NULL
+cdef void* __nvshmem_info_get_name = NULL
 cdef void* __nvshmemx_vendor_get_version_info = NULL
 cdef void* __nvshmem_malloc = NULL
 cdef void* __nvshmem_calloc = NULL
@@ -53,6 +55,155 @@ cdef void* __nvshmem_align = NULL
 cdef void* __nvshmem_free = NULL
 cdef void* __nvshmem_ptr = NULL
 cdef void* __nvshmemx_mc_ptr = NULL
+cdef void* __nvshmem_uint_atomic_inc = NULL
+cdef void* __nvshmem_ulong_atomic_inc = NULL
+cdef void* __nvshmem_ulonglong_atomic_inc = NULL
+cdef void* __nvshmem_int32_atomic_inc = NULL
+cdef void* __nvshmem_uint32_atomic_inc = NULL
+cdef void* __nvshmem_int64_atomic_inc = NULL
+cdef void* __nvshmem_uint64_atomic_inc = NULL
+cdef void* __nvshmem_int_atomic_inc = NULL
+cdef void* __nvshmem_long_atomic_inc = NULL
+cdef void* __nvshmem_longlong_atomic_inc = NULL
+cdef void* __nvshmem_size_atomic_inc = NULL
+cdef void* __nvshmem_ptrdiff_atomic_inc = NULL
+cdef void* __nvshmem_uint_atomic_fetch_inc = NULL
+cdef void* __nvshmem_ulong_atomic_fetch_inc = NULL
+cdef void* __nvshmem_ulonglong_atomic_fetch_inc = NULL
+cdef void* __nvshmem_int32_atomic_fetch_inc = NULL
+cdef void* __nvshmem_uint32_atomic_fetch_inc = NULL
+cdef void* __nvshmem_int64_atomic_fetch_inc = NULL
+cdef void* __nvshmem_uint64_atomic_fetch_inc = NULL
+cdef void* __nvshmem_int_atomic_fetch_inc = NULL
+cdef void* __nvshmem_long_atomic_fetch_inc = NULL
+cdef void* __nvshmem_longlong_atomic_fetch_inc = NULL
+cdef void* __nvshmem_size_atomic_fetch_inc = NULL
+cdef void* __nvshmem_ptrdiff_atomic_fetch_inc = NULL
+cdef void* __nvshmem_uint_atomic_fetch = NULL
+cdef void* __nvshmem_ulong_atomic_fetch = NULL
+cdef void* __nvshmem_ulonglong_atomic_fetch = NULL
+cdef void* __nvshmem_int32_atomic_fetch = NULL
+cdef void* __nvshmem_uint32_atomic_fetch = NULL
+cdef void* __nvshmem_int64_atomic_fetch = NULL
+cdef void* __nvshmem_uint64_atomic_fetch = NULL
+cdef void* __nvshmem_int_atomic_fetch = NULL
+cdef void* __nvshmem_long_atomic_fetch = NULL
+cdef void* __nvshmem_longlong_atomic_fetch = NULL
+cdef void* __nvshmem_size_atomic_fetch = NULL
+cdef void* __nvshmem_ptrdiff_atomic_fetch = NULL
+cdef void* __nvshmem_float_atomic_fetch = NULL
+cdef void* __nvshmem_double_atomic_fetch = NULL
+cdef void* __nvshmem_uint_atomic_add = NULL
+cdef void* __nvshmem_ulong_atomic_add = NULL
+cdef void* __nvshmem_ulonglong_atomic_add = NULL
+cdef void* __nvshmem_int32_atomic_add = NULL
+cdef void* __nvshmem_uint32_atomic_add = NULL
+cdef void* __nvshmem_int64_atomic_add = NULL
+cdef void* __nvshmem_uint64_atomic_add = NULL
+cdef void* __nvshmem_int_atomic_add = NULL
+cdef void* __nvshmem_long_atomic_add = NULL
+cdef void* __nvshmem_longlong_atomic_add = NULL
+cdef void* __nvshmem_size_atomic_add = NULL
+cdef void* __nvshmem_ptrdiff_atomic_add = NULL
+cdef void* __nvshmemx_float_atomic_add = NULL
+cdef void* __nvshmemx_double_atomic_add = NULL
+cdef void* __nvshmemx_float_atomic_fetch_add = NULL
+cdef void* __nvshmemx_double_atomic_fetch_add = NULL
+cdef void* __nvshmem_uint_atomic_set = NULL
+cdef void* __nvshmem_ulong_atomic_set = NULL
+cdef void* __nvshmem_ulonglong_atomic_set = NULL
+cdef void* __nvshmem_int32_atomic_set = NULL
+cdef void* __nvshmem_uint32_atomic_set = NULL
+cdef void* __nvshmem_int64_atomic_set = NULL
+cdef void* __nvshmem_uint64_atomic_set = NULL
+cdef void* __nvshmem_int_atomic_set = NULL
+cdef void* __nvshmem_long_atomic_set = NULL
+cdef void* __nvshmem_longlong_atomic_set = NULL
+cdef void* __nvshmem_size_atomic_set = NULL
+cdef void* __nvshmem_ptrdiff_atomic_set = NULL
+cdef void* __nvshmem_float_atomic_set = NULL
+cdef void* __nvshmem_double_atomic_set = NULL
+cdef void* __nvshmem_uint_atomic_fetch_add = NULL
+cdef void* __nvshmem_ulong_atomic_fetch_add = NULL
+cdef void* __nvshmem_ulonglong_atomic_fetch_add = NULL
+cdef void* __nvshmem_int32_atomic_fetch_add = NULL
+cdef void* __nvshmem_uint32_atomic_fetch_add = NULL
+cdef void* __nvshmem_int64_atomic_fetch_add = NULL
+cdef void* __nvshmem_uint64_atomic_fetch_add = NULL
+cdef void* __nvshmem_int_atomic_fetch_add = NULL
+cdef void* __nvshmem_long_atomic_fetch_add = NULL
+cdef void* __nvshmem_longlong_atomic_fetch_add = NULL
+cdef void* __nvshmem_size_atomic_fetch_add = NULL
+cdef void* __nvshmem_ptrdiff_atomic_fetch_add = NULL
+cdef void* __nvshmem_uint_atomic_swap = NULL
+cdef void* __nvshmem_ulong_atomic_swap = NULL
+cdef void* __nvshmem_ulonglong_atomic_swap = NULL
+cdef void* __nvshmem_int32_atomic_swap = NULL
+cdef void* __nvshmem_uint32_atomic_swap = NULL
+cdef void* __nvshmem_int64_atomic_swap = NULL
+cdef void* __nvshmem_uint64_atomic_swap = NULL
+cdef void* __nvshmem_int_atomic_swap = NULL
+cdef void* __nvshmem_long_atomic_swap = NULL
+cdef void* __nvshmem_longlong_atomic_swap = NULL
+cdef void* __nvshmem_size_atomic_swap = NULL
+cdef void* __nvshmem_ptrdiff_atomic_swap = NULL
+cdef void* __nvshmem_float_atomic_swap = NULL
+cdef void* __nvshmem_double_atomic_swap = NULL
+cdef void* __nvshmem_uint_atomic_compare_swap = NULL
+cdef void* __nvshmem_ulong_atomic_compare_swap = NULL
+cdef void* __nvshmem_ulonglong_atomic_compare_swap = NULL
+cdef void* __nvshmem_int32_atomic_compare_swap = NULL
+cdef void* __nvshmem_uint32_atomic_compare_swap = NULL
+cdef void* __nvshmem_int64_atomic_compare_swap = NULL
+cdef void* __nvshmem_uint64_atomic_compare_swap = NULL
+cdef void* __nvshmem_int_atomic_compare_swap = NULL
+cdef void* __nvshmem_long_atomic_compare_swap = NULL
+cdef void* __nvshmem_longlong_atomic_compare_swap = NULL
+cdef void* __nvshmem_size_atomic_compare_swap = NULL
+cdef void* __nvshmem_ptrdiff_atomic_compare_swap = NULL
+cdef void* __nvshmem_uint_atomic_and = NULL
+cdef void* __nvshmem_ulong_atomic_and = NULL
+cdef void* __nvshmem_ulonglong_atomic_and = NULL
+cdef void* __nvshmem_int32_atomic_and = NULL
+cdef void* __nvshmem_uint32_atomic_and = NULL
+cdef void* __nvshmem_int64_atomic_and = NULL
+cdef void* __nvshmem_uint64_atomic_and = NULL
+cdef void* __nvshmem_uint_atomic_or = NULL
+cdef void* __nvshmem_ulong_atomic_or = NULL
+cdef void* __nvshmem_ulonglong_atomic_or = NULL
+cdef void* __nvshmem_int32_atomic_or = NULL
+cdef void* __nvshmem_uint32_atomic_or = NULL
+cdef void* __nvshmem_int64_atomic_or = NULL
+cdef void* __nvshmem_uint64_atomic_or = NULL
+cdef void* __nvshmem_uint_atomic_xor = NULL
+cdef void* __nvshmem_ulong_atomic_xor = NULL
+cdef void* __nvshmem_ulonglong_atomic_xor = NULL
+cdef void* __nvshmem_int32_atomic_xor = NULL
+cdef void* __nvshmem_uint32_atomic_xor = NULL
+cdef void* __nvshmem_int64_atomic_xor = NULL
+cdef void* __nvshmem_uint64_atomic_xor = NULL
+cdef void* __nvshmem_uint_atomic_fetch_and = NULL
+cdef void* __nvshmem_ulong_atomic_fetch_and = NULL
+cdef void* __nvshmem_ulonglong_atomic_fetch_and = NULL
+cdef void* __nvshmem_int32_atomic_fetch_and = NULL
+cdef void* __nvshmem_uint32_atomic_fetch_and = NULL
+cdef void* __nvshmem_int64_atomic_fetch_and = NULL
+cdef void* __nvshmem_uint64_atomic_fetch_and = NULL
+cdef void* __nvshmem_uint_atomic_fetch_or = NULL
+cdef void* __nvshmem_ulong_atomic_fetch_or = NULL
+cdef void* __nvshmem_ulonglong_atomic_fetch_or = NULL
+cdef void* __nvshmem_int32_atomic_fetch_or = NULL
+cdef void* __nvshmem_uint32_atomic_fetch_or = NULL
+cdef void* __nvshmem_int64_atomic_fetch_or = NULL
+cdef void* __nvshmem_uint64_atomic_fetch_or = NULL
+cdef void* __nvshmem_uint_atomic_fetch_xor = NULL
+cdef void* __nvshmem_ulong_atomic_fetch_xor = NULL
+cdef void* __nvshmem_ulonglong_atomic_fetch_xor = NULL
+cdef void* __nvshmem_int32_atomic_fetch_xor = NULL
+cdef void* __nvshmem_uint32_atomic_fetch_xor = NULL
+cdef void* __nvshmem_int64_atomic_fetch_xor = NULL
+cdef void* __nvshmem_uint64_atomic_fetch_xor = NULL
+cdef void* __nvshmem_signal_fetch = NULL
 cdef void* __nvshmem_team_my_pe = NULL
 cdef void* __nvshmem_team_n_pes = NULL
 cdef void* __nvshmem_team_get_config = NULL
@@ -245,13 +396,18 @@ cdef void* __nvshmemx_get_uniqueid = NULL
 cdef void* __nvshmemx_cumodule_init = NULL
 cdef void* __nvshmemx_cumodule_finalize = NULL
 cdef void* __nvshmemx_buffer_register_symmetric = NULL
+cdef void* __nvshmemx_buffer_register_symmetric_at_preferred_address = NULL
 cdef void* __nvshmemx_buffer_unregister_symmetric = NULL
 cdef void* __nvshmemx_culibrary_init = NULL
 cdef void* __nvshmemx_culibrary_finalize = NULL
 cdef void* __nvshmemx_putmem_on_stream = NULL
 cdef void* __nvshmemx_putmem_signal_on_stream = NULL
+cdef void* __nvshmemx_putmem_signal_nbi_on_stream = NULL
+cdef void* __nvshmemx_putmem_nbi_on_stream = NULL
 cdef void* __nvshmemx_getmem_on_stream = NULL
+cdef void* __nvshmemx_getmem_nbi_on_stream = NULL
 cdef void* __nvshmemx_quiet_on_stream = NULL
+cdef void* __nvshmemx_flush_on_stream = NULL
 cdef void* __nvshmemx_signal_op_on_stream = NULL
 cdef void* __nvshmemx_signal_wait_until_on_stream = NULL
 
@@ -294,6 +450,13 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_init_status = dlsym(handle, 'nvshmemx_init_status')
 
+    global __nvshmem_query_thread
+    __nvshmem_query_thread = dlsym(RTLD_DEFAULT, 'nvshmem_query_thread')
+    if __nvshmem_query_thread == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_query_thread = dlsym(handle, 'nvshmem_query_thread')
+
     global __nvshmem_my_pe
     __nvshmem_my_pe = dlsym(RTLD_DEFAULT, 'nvshmem_my_pe')
     if __nvshmem_my_pe == NULL:
@@ -314,6 +477,13 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
         if handle == NULL:
             handle = load_library()
         __nvshmem_info_get_version = dlsym(handle, 'nvshmem_info_get_version')
+
+    global __nvshmem_info_get_name
+    __nvshmem_info_get_name = dlsym(RTLD_DEFAULT, 'nvshmem_info_get_name')
+    if __nvshmem_info_get_name == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_info_get_name = dlsym(handle, 'nvshmem_info_get_name')
 
     global __nvshmemx_vendor_get_version_info
     __nvshmemx_vendor_get_version_info = dlsym(RTLD_DEFAULT, 'nvshmemx_vendor_get_version_info')
@@ -363,6 +533,1049 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
         if handle == NULL:
             handle = load_library()
         __nvshmemx_mc_ptr = dlsym(handle, 'nvshmemx_mc_ptr')
+
+    global __nvshmem_uint_atomic_inc
+    __nvshmem_uint_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_inc')
+    if __nvshmem_uint_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_inc = dlsym(handle, 'nvshmem_uint_atomic_inc')
+
+    global __nvshmem_ulong_atomic_inc
+    __nvshmem_ulong_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_inc')
+    if __nvshmem_ulong_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_inc = dlsym(handle, 'nvshmem_ulong_atomic_inc')
+
+    global __nvshmem_ulonglong_atomic_inc
+    __nvshmem_ulonglong_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_inc')
+    if __nvshmem_ulonglong_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_inc = dlsym(handle, 'nvshmem_ulonglong_atomic_inc')
+
+    global __nvshmem_int32_atomic_inc
+    __nvshmem_int32_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_inc')
+    if __nvshmem_int32_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_inc = dlsym(handle, 'nvshmem_int32_atomic_inc')
+
+    global __nvshmem_uint32_atomic_inc
+    __nvshmem_uint32_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_inc')
+    if __nvshmem_uint32_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_inc = dlsym(handle, 'nvshmem_uint32_atomic_inc')
+
+    global __nvshmem_int64_atomic_inc
+    __nvshmem_int64_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_inc')
+    if __nvshmem_int64_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_inc = dlsym(handle, 'nvshmem_int64_atomic_inc')
+
+    global __nvshmem_uint64_atomic_inc
+    __nvshmem_uint64_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_inc')
+    if __nvshmem_uint64_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_inc = dlsym(handle, 'nvshmem_uint64_atomic_inc')
+
+    global __nvshmem_int_atomic_inc
+    __nvshmem_int_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_inc')
+    if __nvshmem_int_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_inc = dlsym(handle, 'nvshmem_int_atomic_inc')
+
+    global __nvshmem_long_atomic_inc
+    __nvshmem_long_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_inc')
+    if __nvshmem_long_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_inc = dlsym(handle, 'nvshmem_long_atomic_inc')
+
+    global __nvshmem_longlong_atomic_inc
+    __nvshmem_longlong_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_inc')
+    if __nvshmem_longlong_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_inc = dlsym(handle, 'nvshmem_longlong_atomic_inc')
+
+    global __nvshmem_size_atomic_inc
+    __nvshmem_size_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_inc')
+    if __nvshmem_size_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_inc = dlsym(handle, 'nvshmem_size_atomic_inc')
+
+    global __nvshmem_ptrdiff_atomic_inc
+    __nvshmem_ptrdiff_atomic_inc = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_inc')
+    if __nvshmem_ptrdiff_atomic_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_inc = dlsym(handle, 'nvshmem_ptrdiff_atomic_inc')
+
+    global __nvshmem_uint_atomic_fetch_inc
+    __nvshmem_uint_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_fetch_inc')
+    if __nvshmem_uint_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_fetch_inc = dlsym(handle, 'nvshmem_uint_atomic_fetch_inc')
+
+    global __nvshmem_ulong_atomic_fetch_inc
+    __nvshmem_ulong_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_fetch_inc')
+    if __nvshmem_ulong_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_fetch_inc = dlsym(handle, 'nvshmem_ulong_atomic_fetch_inc')
+
+    global __nvshmem_ulonglong_atomic_fetch_inc
+    __nvshmem_ulonglong_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_fetch_inc')
+    if __nvshmem_ulonglong_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_fetch_inc = dlsym(handle, 'nvshmem_ulonglong_atomic_fetch_inc')
+
+    global __nvshmem_int32_atomic_fetch_inc
+    __nvshmem_int32_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_fetch_inc')
+    if __nvshmem_int32_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_fetch_inc = dlsym(handle, 'nvshmem_int32_atomic_fetch_inc')
+
+    global __nvshmem_uint32_atomic_fetch_inc
+    __nvshmem_uint32_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_fetch_inc')
+    if __nvshmem_uint32_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_fetch_inc = dlsym(handle, 'nvshmem_uint32_atomic_fetch_inc')
+
+    global __nvshmem_int64_atomic_fetch_inc
+    __nvshmem_int64_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_fetch_inc')
+    if __nvshmem_int64_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_fetch_inc = dlsym(handle, 'nvshmem_int64_atomic_fetch_inc')
+
+    global __nvshmem_uint64_atomic_fetch_inc
+    __nvshmem_uint64_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_fetch_inc')
+    if __nvshmem_uint64_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_fetch_inc = dlsym(handle, 'nvshmem_uint64_atomic_fetch_inc')
+
+    global __nvshmem_int_atomic_fetch_inc
+    __nvshmem_int_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_fetch_inc')
+    if __nvshmem_int_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_fetch_inc = dlsym(handle, 'nvshmem_int_atomic_fetch_inc')
+
+    global __nvshmem_long_atomic_fetch_inc
+    __nvshmem_long_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_fetch_inc')
+    if __nvshmem_long_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_fetch_inc = dlsym(handle, 'nvshmem_long_atomic_fetch_inc')
+
+    global __nvshmem_longlong_atomic_fetch_inc
+    __nvshmem_longlong_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_fetch_inc')
+    if __nvshmem_longlong_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_fetch_inc = dlsym(handle, 'nvshmem_longlong_atomic_fetch_inc')
+
+    global __nvshmem_size_atomic_fetch_inc
+    __nvshmem_size_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_fetch_inc')
+    if __nvshmem_size_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_fetch_inc = dlsym(handle, 'nvshmem_size_atomic_fetch_inc')
+
+    global __nvshmem_ptrdiff_atomic_fetch_inc
+    __nvshmem_ptrdiff_atomic_fetch_inc = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_fetch_inc')
+    if __nvshmem_ptrdiff_atomic_fetch_inc == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_fetch_inc = dlsym(handle, 'nvshmem_ptrdiff_atomic_fetch_inc')
+
+    global __nvshmem_uint_atomic_fetch
+    __nvshmem_uint_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_fetch')
+    if __nvshmem_uint_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_fetch = dlsym(handle, 'nvshmem_uint_atomic_fetch')
+
+    global __nvshmem_ulong_atomic_fetch
+    __nvshmem_ulong_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_fetch')
+    if __nvshmem_ulong_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_fetch = dlsym(handle, 'nvshmem_ulong_atomic_fetch')
+
+    global __nvshmem_ulonglong_atomic_fetch
+    __nvshmem_ulonglong_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_fetch')
+    if __nvshmem_ulonglong_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_fetch = dlsym(handle, 'nvshmem_ulonglong_atomic_fetch')
+
+    global __nvshmem_int32_atomic_fetch
+    __nvshmem_int32_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_fetch')
+    if __nvshmem_int32_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_fetch = dlsym(handle, 'nvshmem_int32_atomic_fetch')
+
+    global __nvshmem_uint32_atomic_fetch
+    __nvshmem_uint32_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_fetch')
+    if __nvshmem_uint32_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_fetch = dlsym(handle, 'nvshmem_uint32_atomic_fetch')
+
+    global __nvshmem_int64_atomic_fetch
+    __nvshmem_int64_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_fetch')
+    if __nvshmem_int64_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_fetch = dlsym(handle, 'nvshmem_int64_atomic_fetch')
+
+    global __nvshmem_uint64_atomic_fetch
+    __nvshmem_uint64_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_fetch')
+    if __nvshmem_uint64_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_fetch = dlsym(handle, 'nvshmem_uint64_atomic_fetch')
+
+    global __nvshmem_int_atomic_fetch
+    __nvshmem_int_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_fetch')
+    if __nvshmem_int_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_fetch = dlsym(handle, 'nvshmem_int_atomic_fetch')
+
+    global __nvshmem_long_atomic_fetch
+    __nvshmem_long_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_fetch')
+    if __nvshmem_long_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_fetch = dlsym(handle, 'nvshmem_long_atomic_fetch')
+
+    global __nvshmem_longlong_atomic_fetch
+    __nvshmem_longlong_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_fetch')
+    if __nvshmem_longlong_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_fetch = dlsym(handle, 'nvshmem_longlong_atomic_fetch')
+
+    global __nvshmem_size_atomic_fetch
+    __nvshmem_size_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_fetch')
+    if __nvshmem_size_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_fetch = dlsym(handle, 'nvshmem_size_atomic_fetch')
+
+    global __nvshmem_ptrdiff_atomic_fetch
+    __nvshmem_ptrdiff_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_fetch')
+    if __nvshmem_ptrdiff_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_fetch = dlsym(handle, 'nvshmem_ptrdiff_atomic_fetch')
+
+    global __nvshmem_float_atomic_fetch
+    __nvshmem_float_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_float_atomic_fetch')
+    if __nvshmem_float_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_float_atomic_fetch = dlsym(handle, 'nvshmem_float_atomic_fetch')
+
+    global __nvshmem_double_atomic_fetch
+    __nvshmem_double_atomic_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_double_atomic_fetch')
+    if __nvshmem_double_atomic_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_double_atomic_fetch = dlsym(handle, 'nvshmem_double_atomic_fetch')
+
+    global __nvshmem_uint_atomic_add
+    __nvshmem_uint_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_add')
+    if __nvshmem_uint_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_add = dlsym(handle, 'nvshmem_uint_atomic_add')
+
+    global __nvshmem_ulong_atomic_add
+    __nvshmem_ulong_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_add')
+    if __nvshmem_ulong_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_add = dlsym(handle, 'nvshmem_ulong_atomic_add')
+
+    global __nvshmem_ulonglong_atomic_add
+    __nvshmem_ulonglong_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_add')
+    if __nvshmem_ulonglong_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_add = dlsym(handle, 'nvshmem_ulonglong_atomic_add')
+
+    global __nvshmem_int32_atomic_add
+    __nvshmem_int32_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_add')
+    if __nvshmem_int32_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_add = dlsym(handle, 'nvshmem_int32_atomic_add')
+
+    global __nvshmem_uint32_atomic_add
+    __nvshmem_uint32_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_add')
+    if __nvshmem_uint32_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_add = dlsym(handle, 'nvshmem_uint32_atomic_add')
+
+    global __nvshmem_int64_atomic_add
+    __nvshmem_int64_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_add')
+    if __nvshmem_int64_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_add = dlsym(handle, 'nvshmem_int64_atomic_add')
+
+    global __nvshmem_uint64_atomic_add
+    __nvshmem_uint64_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_add')
+    if __nvshmem_uint64_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_add = dlsym(handle, 'nvshmem_uint64_atomic_add')
+
+    global __nvshmem_int_atomic_add
+    __nvshmem_int_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_add')
+    if __nvshmem_int_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_add = dlsym(handle, 'nvshmem_int_atomic_add')
+
+    global __nvshmem_long_atomic_add
+    __nvshmem_long_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_add')
+    if __nvshmem_long_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_add = dlsym(handle, 'nvshmem_long_atomic_add')
+
+    global __nvshmem_longlong_atomic_add
+    __nvshmem_longlong_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_add')
+    if __nvshmem_longlong_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_add = dlsym(handle, 'nvshmem_longlong_atomic_add')
+
+    global __nvshmem_size_atomic_add
+    __nvshmem_size_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_add')
+    if __nvshmem_size_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_add = dlsym(handle, 'nvshmem_size_atomic_add')
+
+    global __nvshmem_ptrdiff_atomic_add
+    __nvshmem_ptrdiff_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_add')
+    if __nvshmem_ptrdiff_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_add = dlsym(handle, 'nvshmem_ptrdiff_atomic_add')
+
+    global __nvshmemx_float_atomic_add
+    __nvshmemx_float_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmemx_float_atomic_add')
+    if __nvshmemx_float_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_float_atomic_add = dlsym(handle, 'nvshmemx_float_atomic_add')
+
+    global __nvshmemx_double_atomic_add
+    __nvshmemx_double_atomic_add = dlsym(RTLD_DEFAULT, 'nvshmemx_double_atomic_add')
+    if __nvshmemx_double_atomic_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_double_atomic_add = dlsym(handle, 'nvshmemx_double_atomic_add')
+
+    global __nvshmemx_float_atomic_fetch_add
+    __nvshmemx_float_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmemx_float_atomic_fetch_add')
+    if __nvshmemx_float_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_float_atomic_fetch_add = dlsym(handle, 'nvshmemx_float_atomic_fetch_add')
+
+    global __nvshmemx_double_atomic_fetch_add
+    __nvshmemx_double_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmemx_double_atomic_fetch_add')
+    if __nvshmemx_double_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_double_atomic_fetch_add = dlsym(handle, 'nvshmemx_double_atomic_fetch_add')
+
+    global __nvshmem_uint_atomic_set
+    __nvshmem_uint_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_set')
+    if __nvshmem_uint_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_set = dlsym(handle, 'nvshmem_uint_atomic_set')
+
+    global __nvshmem_ulong_atomic_set
+    __nvshmem_ulong_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_set')
+    if __nvshmem_ulong_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_set = dlsym(handle, 'nvshmem_ulong_atomic_set')
+
+    global __nvshmem_ulonglong_atomic_set
+    __nvshmem_ulonglong_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_set')
+    if __nvshmem_ulonglong_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_set = dlsym(handle, 'nvshmem_ulonglong_atomic_set')
+
+    global __nvshmem_int32_atomic_set
+    __nvshmem_int32_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_set')
+    if __nvshmem_int32_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_set = dlsym(handle, 'nvshmem_int32_atomic_set')
+
+    global __nvshmem_uint32_atomic_set
+    __nvshmem_uint32_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_set')
+    if __nvshmem_uint32_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_set = dlsym(handle, 'nvshmem_uint32_atomic_set')
+
+    global __nvshmem_int64_atomic_set
+    __nvshmem_int64_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_set')
+    if __nvshmem_int64_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_set = dlsym(handle, 'nvshmem_int64_atomic_set')
+
+    global __nvshmem_uint64_atomic_set
+    __nvshmem_uint64_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_set')
+    if __nvshmem_uint64_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_set = dlsym(handle, 'nvshmem_uint64_atomic_set')
+
+    global __nvshmem_int_atomic_set
+    __nvshmem_int_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_set')
+    if __nvshmem_int_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_set = dlsym(handle, 'nvshmem_int_atomic_set')
+
+    global __nvshmem_long_atomic_set
+    __nvshmem_long_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_set')
+    if __nvshmem_long_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_set = dlsym(handle, 'nvshmem_long_atomic_set')
+
+    global __nvshmem_longlong_atomic_set
+    __nvshmem_longlong_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_set')
+    if __nvshmem_longlong_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_set = dlsym(handle, 'nvshmem_longlong_atomic_set')
+
+    global __nvshmem_size_atomic_set
+    __nvshmem_size_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_set')
+    if __nvshmem_size_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_set = dlsym(handle, 'nvshmem_size_atomic_set')
+
+    global __nvshmem_ptrdiff_atomic_set
+    __nvshmem_ptrdiff_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_set')
+    if __nvshmem_ptrdiff_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_set = dlsym(handle, 'nvshmem_ptrdiff_atomic_set')
+
+    global __nvshmem_float_atomic_set
+    __nvshmem_float_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_float_atomic_set')
+    if __nvshmem_float_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_float_atomic_set = dlsym(handle, 'nvshmem_float_atomic_set')
+
+    global __nvshmem_double_atomic_set
+    __nvshmem_double_atomic_set = dlsym(RTLD_DEFAULT, 'nvshmem_double_atomic_set')
+    if __nvshmem_double_atomic_set == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_double_atomic_set = dlsym(handle, 'nvshmem_double_atomic_set')
+
+    global __nvshmem_uint_atomic_fetch_add
+    __nvshmem_uint_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_fetch_add')
+    if __nvshmem_uint_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_fetch_add = dlsym(handle, 'nvshmem_uint_atomic_fetch_add')
+
+    global __nvshmem_ulong_atomic_fetch_add
+    __nvshmem_ulong_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_fetch_add')
+    if __nvshmem_ulong_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_fetch_add = dlsym(handle, 'nvshmem_ulong_atomic_fetch_add')
+
+    global __nvshmem_ulonglong_atomic_fetch_add
+    __nvshmem_ulonglong_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_fetch_add')
+    if __nvshmem_ulonglong_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_fetch_add = dlsym(handle, 'nvshmem_ulonglong_atomic_fetch_add')
+
+    global __nvshmem_int32_atomic_fetch_add
+    __nvshmem_int32_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_fetch_add')
+    if __nvshmem_int32_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_fetch_add = dlsym(handle, 'nvshmem_int32_atomic_fetch_add')
+
+    global __nvshmem_uint32_atomic_fetch_add
+    __nvshmem_uint32_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_fetch_add')
+    if __nvshmem_uint32_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_fetch_add = dlsym(handle, 'nvshmem_uint32_atomic_fetch_add')
+
+    global __nvshmem_int64_atomic_fetch_add
+    __nvshmem_int64_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_fetch_add')
+    if __nvshmem_int64_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_fetch_add = dlsym(handle, 'nvshmem_int64_atomic_fetch_add')
+
+    global __nvshmem_uint64_atomic_fetch_add
+    __nvshmem_uint64_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_fetch_add')
+    if __nvshmem_uint64_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_fetch_add = dlsym(handle, 'nvshmem_uint64_atomic_fetch_add')
+
+    global __nvshmem_int_atomic_fetch_add
+    __nvshmem_int_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_fetch_add')
+    if __nvshmem_int_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_fetch_add = dlsym(handle, 'nvshmem_int_atomic_fetch_add')
+
+    global __nvshmem_long_atomic_fetch_add
+    __nvshmem_long_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_fetch_add')
+    if __nvshmem_long_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_fetch_add = dlsym(handle, 'nvshmem_long_atomic_fetch_add')
+
+    global __nvshmem_longlong_atomic_fetch_add
+    __nvshmem_longlong_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_fetch_add')
+    if __nvshmem_longlong_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_fetch_add = dlsym(handle, 'nvshmem_longlong_atomic_fetch_add')
+
+    global __nvshmem_size_atomic_fetch_add
+    __nvshmem_size_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_fetch_add')
+    if __nvshmem_size_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_fetch_add = dlsym(handle, 'nvshmem_size_atomic_fetch_add')
+
+    global __nvshmem_ptrdiff_atomic_fetch_add
+    __nvshmem_ptrdiff_atomic_fetch_add = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_fetch_add')
+    if __nvshmem_ptrdiff_atomic_fetch_add == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_fetch_add = dlsym(handle, 'nvshmem_ptrdiff_atomic_fetch_add')
+
+    global __nvshmem_uint_atomic_swap
+    __nvshmem_uint_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_swap')
+    if __nvshmem_uint_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_swap = dlsym(handle, 'nvshmem_uint_atomic_swap')
+
+    global __nvshmem_ulong_atomic_swap
+    __nvshmem_ulong_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_swap')
+    if __nvshmem_ulong_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_swap = dlsym(handle, 'nvshmem_ulong_atomic_swap')
+
+    global __nvshmem_ulonglong_atomic_swap
+    __nvshmem_ulonglong_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_swap')
+    if __nvshmem_ulonglong_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_swap = dlsym(handle, 'nvshmem_ulonglong_atomic_swap')
+
+    global __nvshmem_int32_atomic_swap
+    __nvshmem_int32_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_swap')
+    if __nvshmem_int32_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_swap = dlsym(handle, 'nvshmem_int32_atomic_swap')
+
+    global __nvshmem_uint32_atomic_swap
+    __nvshmem_uint32_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_swap')
+    if __nvshmem_uint32_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_swap = dlsym(handle, 'nvshmem_uint32_atomic_swap')
+
+    global __nvshmem_int64_atomic_swap
+    __nvshmem_int64_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_swap')
+    if __nvshmem_int64_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_swap = dlsym(handle, 'nvshmem_int64_atomic_swap')
+
+    global __nvshmem_uint64_atomic_swap
+    __nvshmem_uint64_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_swap')
+    if __nvshmem_uint64_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_swap = dlsym(handle, 'nvshmem_uint64_atomic_swap')
+
+    global __nvshmem_int_atomic_swap
+    __nvshmem_int_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_swap')
+    if __nvshmem_int_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_swap = dlsym(handle, 'nvshmem_int_atomic_swap')
+
+    global __nvshmem_long_atomic_swap
+    __nvshmem_long_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_swap')
+    if __nvshmem_long_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_swap = dlsym(handle, 'nvshmem_long_atomic_swap')
+
+    global __nvshmem_longlong_atomic_swap
+    __nvshmem_longlong_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_swap')
+    if __nvshmem_longlong_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_swap = dlsym(handle, 'nvshmem_longlong_atomic_swap')
+
+    global __nvshmem_size_atomic_swap
+    __nvshmem_size_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_swap')
+    if __nvshmem_size_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_swap = dlsym(handle, 'nvshmem_size_atomic_swap')
+
+    global __nvshmem_ptrdiff_atomic_swap
+    __nvshmem_ptrdiff_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_swap')
+    if __nvshmem_ptrdiff_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_swap = dlsym(handle, 'nvshmem_ptrdiff_atomic_swap')
+
+    global __nvshmem_float_atomic_swap
+    __nvshmem_float_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_float_atomic_swap')
+    if __nvshmem_float_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_float_atomic_swap = dlsym(handle, 'nvshmem_float_atomic_swap')
+
+    global __nvshmem_double_atomic_swap
+    __nvshmem_double_atomic_swap = dlsym(RTLD_DEFAULT, 'nvshmem_double_atomic_swap')
+    if __nvshmem_double_atomic_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_double_atomic_swap = dlsym(handle, 'nvshmem_double_atomic_swap')
+
+    global __nvshmem_uint_atomic_compare_swap
+    __nvshmem_uint_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_compare_swap')
+    if __nvshmem_uint_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_compare_swap = dlsym(handle, 'nvshmem_uint_atomic_compare_swap')
+
+    global __nvshmem_ulong_atomic_compare_swap
+    __nvshmem_ulong_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_compare_swap')
+    if __nvshmem_ulong_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_compare_swap = dlsym(handle, 'nvshmem_ulong_atomic_compare_swap')
+
+    global __nvshmem_ulonglong_atomic_compare_swap
+    __nvshmem_ulonglong_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_compare_swap')
+    if __nvshmem_ulonglong_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_compare_swap = dlsym(handle, 'nvshmem_ulonglong_atomic_compare_swap')
+
+    global __nvshmem_int32_atomic_compare_swap
+    __nvshmem_int32_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_compare_swap')
+    if __nvshmem_int32_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_compare_swap = dlsym(handle, 'nvshmem_int32_atomic_compare_swap')
+
+    global __nvshmem_uint32_atomic_compare_swap
+    __nvshmem_uint32_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_compare_swap')
+    if __nvshmem_uint32_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_compare_swap = dlsym(handle, 'nvshmem_uint32_atomic_compare_swap')
+
+    global __nvshmem_int64_atomic_compare_swap
+    __nvshmem_int64_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_compare_swap')
+    if __nvshmem_int64_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_compare_swap = dlsym(handle, 'nvshmem_int64_atomic_compare_swap')
+
+    global __nvshmem_uint64_atomic_compare_swap
+    __nvshmem_uint64_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_compare_swap')
+    if __nvshmem_uint64_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_compare_swap = dlsym(handle, 'nvshmem_uint64_atomic_compare_swap')
+
+    global __nvshmem_int_atomic_compare_swap
+    __nvshmem_int_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_int_atomic_compare_swap')
+    if __nvshmem_int_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int_atomic_compare_swap = dlsym(handle, 'nvshmem_int_atomic_compare_swap')
+
+    global __nvshmem_long_atomic_compare_swap
+    __nvshmem_long_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_long_atomic_compare_swap')
+    if __nvshmem_long_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_long_atomic_compare_swap = dlsym(handle, 'nvshmem_long_atomic_compare_swap')
+
+    global __nvshmem_longlong_atomic_compare_swap
+    __nvshmem_longlong_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_longlong_atomic_compare_swap')
+    if __nvshmem_longlong_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_longlong_atomic_compare_swap = dlsym(handle, 'nvshmem_longlong_atomic_compare_swap')
+
+    global __nvshmem_size_atomic_compare_swap
+    __nvshmem_size_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_size_atomic_compare_swap')
+    if __nvshmem_size_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_size_atomic_compare_swap = dlsym(handle, 'nvshmem_size_atomic_compare_swap')
+
+    global __nvshmem_ptrdiff_atomic_compare_swap
+    __nvshmem_ptrdiff_atomic_compare_swap = dlsym(RTLD_DEFAULT, 'nvshmem_ptrdiff_atomic_compare_swap')
+    if __nvshmem_ptrdiff_atomic_compare_swap == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ptrdiff_atomic_compare_swap = dlsym(handle, 'nvshmem_ptrdiff_atomic_compare_swap')
+
+    global __nvshmem_uint_atomic_and
+    __nvshmem_uint_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_and')
+    if __nvshmem_uint_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_and = dlsym(handle, 'nvshmem_uint_atomic_and')
+
+    global __nvshmem_ulong_atomic_and
+    __nvshmem_ulong_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_and')
+    if __nvshmem_ulong_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_and = dlsym(handle, 'nvshmem_ulong_atomic_and')
+
+    global __nvshmem_ulonglong_atomic_and
+    __nvshmem_ulonglong_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_and')
+    if __nvshmem_ulonglong_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_and = dlsym(handle, 'nvshmem_ulonglong_atomic_and')
+
+    global __nvshmem_int32_atomic_and
+    __nvshmem_int32_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_and')
+    if __nvshmem_int32_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_and = dlsym(handle, 'nvshmem_int32_atomic_and')
+
+    global __nvshmem_uint32_atomic_and
+    __nvshmem_uint32_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_and')
+    if __nvshmem_uint32_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_and = dlsym(handle, 'nvshmem_uint32_atomic_and')
+
+    global __nvshmem_int64_atomic_and
+    __nvshmem_int64_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_and')
+    if __nvshmem_int64_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_and = dlsym(handle, 'nvshmem_int64_atomic_and')
+
+    global __nvshmem_uint64_atomic_and
+    __nvshmem_uint64_atomic_and = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_and')
+    if __nvshmem_uint64_atomic_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_and = dlsym(handle, 'nvshmem_uint64_atomic_and')
+
+    global __nvshmem_uint_atomic_or
+    __nvshmem_uint_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_or')
+    if __nvshmem_uint_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_or = dlsym(handle, 'nvshmem_uint_atomic_or')
+
+    global __nvshmem_ulong_atomic_or
+    __nvshmem_ulong_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_or')
+    if __nvshmem_ulong_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_or = dlsym(handle, 'nvshmem_ulong_atomic_or')
+
+    global __nvshmem_ulonglong_atomic_or
+    __nvshmem_ulonglong_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_or')
+    if __nvshmem_ulonglong_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_or = dlsym(handle, 'nvshmem_ulonglong_atomic_or')
+
+    global __nvshmem_int32_atomic_or
+    __nvshmem_int32_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_or')
+    if __nvshmem_int32_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_or = dlsym(handle, 'nvshmem_int32_atomic_or')
+
+    global __nvshmem_uint32_atomic_or
+    __nvshmem_uint32_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_or')
+    if __nvshmem_uint32_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_or = dlsym(handle, 'nvshmem_uint32_atomic_or')
+
+    global __nvshmem_int64_atomic_or
+    __nvshmem_int64_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_or')
+    if __nvshmem_int64_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_or = dlsym(handle, 'nvshmem_int64_atomic_or')
+
+    global __nvshmem_uint64_atomic_or
+    __nvshmem_uint64_atomic_or = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_or')
+    if __nvshmem_uint64_atomic_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_or = dlsym(handle, 'nvshmem_uint64_atomic_or')
+
+    global __nvshmem_uint_atomic_xor
+    __nvshmem_uint_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_xor')
+    if __nvshmem_uint_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_xor = dlsym(handle, 'nvshmem_uint_atomic_xor')
+
+    global __nvshmem_ulong_atomic_xor
+    __nvshmem_ulong_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_xor')
+    if __nvshmem_ulong_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_xor = dlsym(handle, 'nvshmem_ulong_atomic_xor')
+
+    global __nvshmem_ulonglong_atomic_xor
+    __nvshmem_ulonglong_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_xor')
+    if __nvshmem_ulonglong_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_xor = dlsym(handle, 'nvshmem_ulonglong_atomic_xor')
+
+    global __nvshmem_int32_atomic_xor
+    __nvshmem_int32_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_xor')
+    if __nvshmem_int32_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_xor = dlsym(handle, 'nvshmem_int32_atomic_xor')
+
+    global __nvshmem_uint32_atomic_xor
+    __nvshmem_uint32_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_xor')
+    if __nvshmem_uint32_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_xor = dlsym(handle, 'nvshmem_uint32_atomic_xor')
+
+    global __nvshmem_int64_atomic_xor
+    __nvshmem_int64_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_xor')
+    if __nvshmem_int64_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_xor = dlsym(handle, 'nvshmem_int64_atomic_xor')
+
+    global __nvshmem_uint64_atomic_xor
+    __nvshmem_uint64_atomic_xor = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_xor')
+    if __nvshmem_uint64_atomic_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_xor = dlsym(handle, 'nvshmem_uint64_atomic_xor')
+
+    global __nvshmem_uint_atomic_fetch_and
+    __nvshmem_uint_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_fetch_and')
+    if __nvshmem_uint_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_fetch_and = dlsym(handle, 'nvshmem_uint_atomic_fetch_and')
+
+    global __nvshmem_ulong_atomic_fetch_and
+    __nvshmem_ulong_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_fetch_and')
+    if __nvshmem_ulong_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_fetch_and = dlsym(handle, 'nvshmem_ulong_atomic_fetch_and')
+
+    global __nvshmem_ulonglong_atomic_fetch_and
+    __nvshmem_ulonglong_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_fetch_and')
+    if __nvshmem_ulonglong_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_fetch_and = dlsym(handle, 'nvshmem_ulonglong_atomic_fetch_and')
+
+    global __nvshmem_int32_atomic_fetch_and
+    __nvshmem_int32_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_fetch_and')
+    if __nvshmem_int32_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_fetch_and = dlsym(handle, 'nvshmem_int32_atomic_fetch_and')
+
+    global __nvshmem_uint32_atomic_fetch_and
+    __nvshmem_uint32_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_fetch_and')
+    if __nvshmem_uint32_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_fetch_and = dlsym(handle, 'nvshmem_uint32_atomic_fetch_and')
+
+    global __nvshmem_int64_atomic_fetch_and
+    __nvshmem_int64_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_fetch_and')
+    if __nvshmem_int64_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_fetch_and = dlsym(handle, 'nvshmem_int64_atomic_fetch_and')
+
+    global __nvshmem_uint64_atomic_fetch_and
+    __nvshmem_uint64_atomic_fetch_and = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_fetch_and')
+    if __nvshmem_uint64_atomic_fetch_and == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_fetch_and = dlsym(handle, 'nvshmem_uint64_atomic_fetch_and')
+
+    global __nvshmem_uint_atomic_fetch_or
+    __nvshmem_uint_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_fetch_or')
+    if __nvshmem_uint_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_fetch_or = dlsym(handle, 'nvshmem_uint_atomic_fetch_or')
+
+    global __nvshmem_ulong_atomic_fetch_or
+    __nvshmem_ulong_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_fetch_or')
+    if __nvshmem_ulong_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_fetch_or = dlsym(handle, 'nvshmem_ulong_atomic_fetch_or')
+
+    global __nvshmem_ulonglong_atomic_fetch_or
+    __nvshmem_ulonglong_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_fetch_or')
+    if __nvshmem_ulonglong_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_fetch_or = dlsym(handle, 'nvshmem_ulonglong_atomic_fetch_or')
+
+    global __nvshmem_int32_atomic_fetch_or
+    __nvshmem_int32_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_fetch_or')
+    if __nvshmem_int32_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_fetch_or = dlsym(handle, 'nvshmem_int32_atomic_fetch_or')
+
+    global __nvshmem_uint32_atomic_fetch_or
+    __nvshmem_uint32_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_fetch_or')
+    if __nvshmem_uint32_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_fetch_or = dlsym(handle, 'nvshmem_uint32_atomic_fetch_or')
+
+    global __nvshmem_int64_atomic_fetch_or
+    __nvshmem_int64_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_fetch_or')
+    if __nvshmem_int64_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_fetch_or = dlsym(handle, 'nvshmem_int64_atomic_fetch_or')
+
+    global __nvshmem_uint64_atomic_fetch_or
+    __nvshmem_uint64_atomic_fetch_or = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_fetch_or')
+    if __nvshmem_uint64_atomic_fetch_or == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_fetch_or = dlsym(handle, 'nvshmem_uint64_atomic_fetch_or')
+
+    global __nvshmem_uint_atomic_fetch_xor
+    __nvshmem_uint_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_uint_atomic_fetch_xor')
+    if __nvshmem_uint_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint_atomic_fetch_xor = dlsym(handle, 'nvshmem_uint_atomic_fetch_xor')
+
+    global __nvshmem_ulong_atomic_fetch_xor
+    __nvshmem_ulong_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_ulong_atomic_fetch_xor')
+    if __nvshmem_ulong_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulong_atomic_fetch_xor = dlsym(handle, 'nvshmem_ulong_atomic_fetch_xor')
+
+    global __nvshmem_ulonglong_atomic_fetch_xor
+    __nvshmem_ulonglong_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_ulonglong_atomic_fetch_xor')
+    if __nvshmem_ulonglong_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_ulonglong_atomic_fetch_xor = dlsym(handle, 'nvshmem_ulonglong_atomic_fetch_xor')
+
+    global __nvshmem_int32_atomic_fetch_xor
+    __nvshmem_int32_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_int32_atomic_fetch_xor')
+    if __nvshmem_int32_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int32_atomic_fetch_xor = dlsym(handle, 'nvshmem_int32_atomic_fetch_xor')
+
+    global __nvshmem_uint32_atomic_fetch_xor
+    __nvshmem_uint32_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_uint32_atomic_fetch_xor')
+    if __nvshmem_uint32_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint32_atomic_fetch_xor = dlsym(handle, 'nvshmem_uint32_atomic_fetch_xor')
+
+    global __nvshmem_int64_atomic_fetch_xor
+    __nvshmem_int64_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_int64_atomic_fetch_xor')
+    if __nvshmem_int64_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_int64_atomic_fetch_xor = dlsym(handle, 'nvshmem_int64_atomic_fetch_xor')
+
+    global __nvshmem_uint64_atomic_fetch_xor
+    __nvshmem_uint64_atomic_fetch_xor = dlsym(RTLD_DEFAULT, 'nvshmem_uint64_atomic_fetch_xor')
+    if __nvshmem_uint64_atomic_fetch_xor == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_uint64_atomic_fetch_xor = dlsym(handle, 'nvshmem_uint64_atomic_fetch_xor')
+
+    global __nvshmem_signal_fetch
+    __nvshmem_signal_fetch = dlsym(RTLD_DEFAULT, 'nvshmem_signal_fetch')
+    if __nvshmem_signal_fetch == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmem_signal_fetch = dlsym(handle, 'nvshmem_signal_fetch')
 
     global __nvshmem_team_my_pe
     __nvshmem_team_my_pe = dlsym(RTLD_DEFAULT, 'nvshmem_team_my_pe')
@@ -1708,6 +2921,13 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_buffer_register_symmetric = dlsym(handle, 'nvshmemx_buffer_register_symmetric')
 
+    global __nvshmemx_buffer_register_symmetric_at_preferred_address
+    __nvshmemx_buffer_register_symmetric_at_preferred_address = dlsym(RTLD_DEFAULT, 'nvshmemx_buffer_register_symmetric_at_preferred_address')
+    if __nvshmemx_buffer_register_symmetric_at_preferred_address == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_buffer_register_symmetric_at_preferred_address = dlsym(handle, 'nvshmemx_buffer_register_symmetric_at_preferred_address')
+
     global __nvshmemx_buffer_unregister_symmetric
     __nvshmemx_buffer_unregister_symmetric = dlsym(RTLD_DEFAULT, 'nvshmemx_buffer_unregister_symmetric')
     if __nvshmemx_buffer_unregister_symmetric == NULL:
@@ -1743,6 +2963,20 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_putmem_signal_on_stream = dlsym(handle, 'nvshmemx_putmem_signal_on_stream')
 
+    global __nvshmemx_putmem_signal_nbi_on_stream
+    __nvshmemx_putmem_signal_nbi_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_putmem_signal_nbi_on_stream')
+    if __nvshmemx_putmem_signal_nbi_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_putmem_signal_nbi_on_stream = dlsym(handle, 'nvshmemx_putmem_signal_nbi_on_stream')
+
+    global __nvshmemx_putmem_nbi_on_stream
+    __nvshmemx_putmem_nbi_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_putmem_nbi_on_stream')
+    if __nvshmemx_putmem_nbi_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_putmem_nbi_on_stream = dlsym(handle, 'nvshmemx_putmem_nbi_on_stream')
+
     global __nvshmemx_getmem_on_stream
     __nvshmemx_getmem_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_getmem_on_stream')
     if __nvshmemx_getmem_on_stream == NULL:
@@ -1750,12 +2984,26 @@ cdef int _check_or_init_nvshmem() except -1 nogil:
             handle = load_library()
         __nvshmemx_getmem_on_stream = dlsym(handle, 'nvshmemx_getmem_on_stream')
 
+    global __nvshmemx_getmem_nbi_on_stream
+    __nvshmemx_getmem_nbi_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_getmem_nbi_on_stream')
+    if __nvshmemx_getmem_nbi_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_getmem_nbi_on_stream = dlsym(handle, 'nvshmemx_getmem_nbi_on_stream')
+
     global __nvshmemx_quiet_on_stream
     __nvshmemx_quiet_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_quiet_on_stream')
     if __nvshmemx_quiet_on_stream == NULL:
         if handle == NULL:
             handle = load_library()
         __nvshmemx_quiet_on_stream = dlsym(handle, 'nvshmemx_quiet_on_stream')
+
+    global __nvshmemx_flush_on_stream
+    __nvshmemx_flush_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_flush_on_stream')
+    if __nvshmemx_flush_on_stream == NULL:
+        if handle == NULL:
+            handle = load_library()
+        __nvshmemx_flush_on_stream = dlsym(handle, 'nvshmemx_flush_on_stream')
 
     global __nvshmemx_signal_op_on_stream
     __nvshmemx_signal_op_on_stream = dlsym(RTLD_DEFAULT, 'nvshmemx_signal_op_on_stream')
@@ -1795,6 +3043,9 @@ cpdef dict _inspect_function_pointers():
     global __nvshmemx_init_status
     data["__nvshmemx_init_status"] = <intptr_t>__nvshmemx_init_status
 
+    global __nvshmem_query_thread
+    data["__nvshmem_query_thread"] = <intptr_t>__nvshmem_query_thread
+
     global __nvshmem_my_pe
     data["__nvshmem_my_pe"] = <intptr_t>__nvshmem_my_pe
 
@@ -1803,6 +3054,9 @@ cpdef dict _inspect_function_pointers():
 
     global __nvshmem_info_get_version
     data["__nvshmem_info_get_version"] = <intptr_t>__nvshmem_info_get_version
+
+    global __nvshmem_info_get_name
+    data["__nvshmem_info_get_name"] = <intptr_t>__nvshmem_info_get_name
 
     global __nvshmemx_vendor_get_version_info
     data["__nvshmemx_vendor_get_version_info"] = <intptr_t>__nvshmemx_vendor_get_version_info
@@ -1824,6 +3078,453 @@ cpdef dict _inspect_function_pointers():
 
     global __nvshmemx_mc_ptr
     data["__nvshmemx_mc_ptr"] = <intptr_t>__nvshmemx_mc_ptr
+
+    global __nvshmem_uint_atomic_inc
+    data["__nvshmem_uint_atomic_inc"] = <intptr_t>__nvshmem_uint_atomic_inc
+
+    global __nvshmem_ulong_atomic_inc
+    data["__nvshmem_ulong_atomic_inc"] = <intptr_t>__nvshmem_ulong_atomic_inc
+
+    global __nvshmem_ulonglong_atomic_inc
+    data["__nvshmem_ulonglong_atomic_inc"] = <intptr_t>__nvshmem_ulonglong_atomic_inc
+
+    global __nvshmem_int32_atomic_inc
+    data["__nvshmem_int32_atomic_inc"] = <intptr_t>__nvshmem_int32_atomic_inc
+
+    global __nvshmem_uint32_atomic_inc
+    data["__nvshmem_uint32_atomic_inc"] = <intptr_t>__nvshmem_uint32_atomic_inc
+
+    global __nvshmem_int64_atomic_inc
+    data["__nvshmem_int64_atomic_inc"] = <intptr_t>__nvshmem_int64_atomic_inc
+
+    global __nvshmem_uint64_atomic_inc
+    data["__nvshmem_uint64_atomic_inc"] = <intptr_t>__nvshmem_uint64_atomic_inc
+
+    global __nvshmem_int_atomic_inc
+    data["__nvshmem_int_atomic_inc"] = <intptr_t>__nvshmem_int_atomic_inc
+
+    global __nvshmem_long_atomic_inc
+    data["__nvshmem_long_atomic_inc"] = <intptr_t>__nvshmem_long_atomic_inc
+
+    global __nvshmem_longlong_atomic_inc
+    data["__nvshmem_longlong_atomic_inc"] = <intptr_t>__nvshmem_longlong_atomic_inc
+
+    global __nvshmem_size_atomic_inc
+    data["__nvshmem_size_atomic_inc"] = <intptr_t>__nvshmem_size_atomic_inc
+
+    global __nvshmem_ptrdiff_atomic_inc
+    data["__nvshmem_ptrdiff_atomic_inc"] = <intptr_t>__nvshmem_ptrdiff_atomic_inc
+
+    global __nvshmem_uint_atomic_fetch_inc
+    data["__nvshmem_uint_atomic_fetch_inc"] = <intptr_t>__nvshmem_uint_atomic_fetch_inc
+
+    global __nvshmem_ulong_atomic_fetch_inc
+    data["__nvshmem_ulong_atomic_fetch_inc"] = <intptr_t>__nvshmem_ulong_atomic_fetch_inc
+
+    global __nvshmem_ulonglong_atomic_fetch_inc
+    data["__nvshmem_ulonglong_atomic_fetch_inc"] = <intptr_t>__nvshmem_ulonglong_atomic_fetch_inc
+
+    global __nvshmem_int32_atomic_fetch_inc
+    data["__nvshmem_int32_atomic_fetch_inc"] = <intptr_t>__nvshmem_int32_atomic_fetch_inc
+
+    global __nvshmem_uint32_atomic_fetch_inc
+    data["__nvshmem_uint32_atomic_fetch_inc"] = <intptr_t>__nvshmem_uint32_atomic_fetch_inc
+
+    global __nvshmem_int64_atomic_fetch_inc
+    data["__nvshmem_int64_atomic_fetch_inc"] = <intptr_t>__nvshmem_int64_atomic_fetch_inc
+
+    global __nvshmem_uint64_atomic_fetch_inc
+    data["__nvshmem_uint64_atomic_fetch_inc"] = <intptr_t>__nvshmem_uint64_atomic_fetch_inc
+
+    global __nvshmem_int_atomic_fetch_inc
+    data["__nvshmem_int_atomic_fetch_inc"] = <intptr_t>__nvshmem_int_atomic_fetch_inc
+
+    global __nvshmem_long_atomic_fetch_inc
+    data["__nvshmem_long_atomic_fetch_inc"] = <intptr_t>__nvshmem_long_atomic_fetch_inc
+
+    global __nvshmem_longlong_atomic_fetch_inc
+    data["__nvshmem_longlong_atomic_fetch_inc"] = <intptr_t>__nvshmem_longlong_atomic_fetch_inc
+
+    global __nvshmem_size_atomic_fetch_inc
+    data["__nvshmem_size_atomic_fetch_inc"] = <intptr_t>__nvshmem_size_atomic_fetch_inc
+
+    global __nvshmem_ptrdiff_atomic_fetch_inc
+    data["__nvshmem_ptrdiff_atomic_fetch_inc"] = <intptr_t>__nvshmem_ptrdiff_atomic_fetch_inc
+
+    global __nvshmem_uint_atomic_fetch
+    data["__nvshmem_uint_atomic_fetch"] = <intptr_t>__nvshmem_uint_atomic_fetch
+
+    global __nvshmem_ulong_atomic_fetch
+    data["__nvshmem_ulong_atomic_fetch"] = <intptr_t>__nvshmem_ulong_atomic_fetch
+
+    global __nvshmem_ulonglong_atomic_fetch
+    data["__nvshmem_ulonglong_atomic_fetch"] = <intptr_t>__nvshmem_ulonglong_atomic_fetch
+
+    global __nvshmem_int32_atomic_fetch
+    data["__nvshmem_int32_atomic_fetch"] = <intptr_t>__nvshmem_int32_atomic_fetch
+
+    global __nvshmem_uint32_atomic_fetch
+    data["__nvshmem_uint32_atomic_fetch"] = <intptr_t>__nvshmem_uint32_atomic_fetch
+
+    global __nvshmem_int64_atomic_fetch
+    data["__nvshmem_int64_atomic_fetch"] = <intptr_t>__nvshmem_int64_atomic_fetch
+
+    global __nvshmem_uint64_atomic_fetch
+    data["__nvshmem_uint64_atomic_fetch"] = <intptr_t>__nvshmem_uint64_atomic_fetch
+
+    global __nvshmem_int_atomic_fetch
+    data["__nvshmem_int_atomic_fetch"] = <intptr_t>__nvshmem_int_atomic_fetch
+
+    global __nvshmem_long_atomic_fetch
+    data["__nvshmem_long_atomic_fetch"] = <intptr_t>__nvshmem_long_atomic_fetch
+
+    global __nvshmem_longlong_atomic_fetch
+    data["__nvshmem_longlong_atomic_fetch"] = <intptr_t>__nvshmem_longlong_atomic_fetch
+
+    global __nvshmem_size_atomic_fetch
+    data["__nvshmem_size_atomic_fetch"] = <intptr_t>__nvshmem_size_atomic_fetch
+
+    global __nvshmem_ptrdiff_atomic_fetch
+    data["__nvshmem_ptrdiff_atomic_fetch"] = <intptr_t>__nvshmem_ptrdiff_atomic_fetch
+
+    global __nvshmem_float_atomic_fetch
+    data["__nvshmem_float_atomic_fetch"] = <intptr_t>__nvshmem_float_atomic_fetch
+
+    global __nvshmem_double_atomic_fetch
+    data["__nvshmem_double_atomic_fetch"] = <intptr_t>__nvshmem_double_atomic_fetch
+
+    global __nvshmem_uint_atomic_add
+    data["__nvshmem_uint_atomic_add"] = <intptr_t>__nvshmem_uint_atomic_add
+
+    global __nvshmem_ulong_atomic_add
+    data["__nvshmem_ulong_atomic_add"] = <intptr_t>__nvshmem_ulong_atomic_add
+
+    global __nvshmem_ulonglong_atomic_add
+    data["__nvshmem_ulonglong_atomic_add"] = <intptr_t>__nvshmem_ulonglong_atomic_add
+
+    global __nvshmem_int32_atomic_add
+    data["__nvshmem_int32_atomic_add"] = <intptr_t>__nvshmem_int32_atomic_add
+
+    global __nvshmem_uint32_atomic_add
+    data["__nvshmem_uint32_atomic_add"] = <intptr_t>__nvshmem_uint32_atomic_add
+
+    global __nvshmem_int64_atomic_add
+    data["__nvshmem_int64_atomic_add"] = <intptr_t>__nvshmem_int64_atomic_add
+
+    global __nvshmem_uint64_atomic_add
+    data["__nvshmem_uint64_atomic_add"] = <intptr_t>__nvshmem_uint64_atomic_add
+
+    global __nvshmem_int_atomic_add
+    data["__nvshmem_int_atomic_add"] = <intptr_t>__nvshmem_int_atomic_add
+
+    global __nvshmem_long_atomic_add
+    data["__nvshmem_long_atomic_add"] = <intptr_t>__nvshmem_long_atomic_add
+
+    global __nvshmem_longlong_atomic_add
+    data["__nvshmem_longlong_atomic_add"] = <intptr_t>__nvshmem_longlong_atomic_add
+
+    global __nvshmem_size_atomic_add
+    data["__nvshmem_size_atomic_add"] = <intptr_t>__nvshmem_size_atomic_add
+
+    global __nvshmem_ptrdiff_atomic_add
+    data["__nvshmem_ptrdiff_atomic_add"] = <intptr_t>__nvshmem_ptrdiff_atomic_add
+
+    global __nvshmemx_float_atomic_add
+    data["__nvshmemx_float_atomic_add"] = <intptr_t>__nvshmemx_float_atomic_add
+
+    global __nvshmemx_double_atomic_add
+    data["__nvshmemx_double_atomic_add"] = <intptr_t>__nvshmemx_double_atomic_add
+
+    global __nvshmemx_float_atomic_fetch_add
+    data["__nvshmemx_float_atomic_fetch_add"] = <intptr_t>__nvshmemx_float_atomic_fetch_add
+
+    global __nvshmemx_double_atomic_fetch_add
+    data["__nvshmemx_double_atomic_fetch_add"] = <intptr_t>__nvshmemx_double_atomic_fetch_add
+
+    global __nvshmem_uint_atomic_set
+    data["__nvshmem_uint_atomic_set"] = <intptr_t>__nvshmem_uint_atomic_set
+
+    global __nvshmem_ulong_atomic_set
+    data["__nvshmem_ulong_atomic_set"] = <intptr_t>__nvshmem_ulong_atomic_set
+
+    global __nvshmem_ulonglong_atomic_set
+    data["__nvshmem_ulonglong_atomic_set"] = <intptr_t>__nvshmem_ulonglong_atomic_set
+
+    global __nvshmem_int32_atomic_set
+    data["__nvshmem_int32_atomic_set"] = <intptr_t>__nvshmem_int32_atomic_set
+
+    global __nvshmem_uint32_atomic_set
+    data["__nvshmem_uint32_atomic_set"] = <intptr_t>__nvshmem_uint32_atomic_set
+
+    global __nvshmem_int64_atomic_set
+    data["__nvshmem_int64_atomic_set"] = <intptr_t>__nvshmem_int64_atomic_set
+
+    global __nvshmem_uint64_atomic_set
+    data["__nvshmem_uint64_atomic_set"] = <intptr_t>__nvshmem_uint64_atomic_set
+
+    global __nvshmem_int_atomic_set
+    data["__nvshmem_int_atomic_set"] = <intptr_t>__nvshmem_int_atomic_set
+
+    global __nvshmem_long_atomic_set
+    data["__nvshmem_long_atomic_set"] = <intptr_t>__nvshmem_long_atomic_set
+
+    global __nvshmem_longlong_atomic_set
+    data["__nvshmem_longlong_atomic_set"] = <intptr_t>__nvshmem_longlong_atomic_set
+
+    global __nvshmem_size_atomic_set
+    data["__nvshmem_size_atomic_set"] = <intptr_t>__nvshmem_size_atomic_set
+
+    global __nvshmem_ptrdiff_atomic_set
+    data["__nvshmem_ptrdiff_atomic_set"] = <intptr_t>__nvshmem_ptrdiff_atomic_set
+
+    global __nvshmem_float_atomic_set
+    data["__nvshmem_float_atomic_set"] = <intptr_t>__nvshmem_float_atomic_set
+
+    global __nvshmem_double_atomic_set
+    data["__nvshmem_double_atomic_set"] = <intptr_t>__nvshmem_double_atomic_set
+
+    global __nvshmem_uint_atomic_fetch_add
+    data["__nvshmem_uint_atomic_fetch_add"] = <intptr_t>__nvshmem_uint_atomic_fetch_add
+
+    global __nvshmem_ulong_atomic_fetch_add
+    data["__nvshmem_ulong_atomic_fetch_add"] = <intptr_t>__nvshmem_ulong_atomic_fetch_add
+
+    global __nvshmem_ulonglong_atomic_fetch_add
+    data["__nvshmem_ulonglong_atomic_fetch_add"] = <intptr_t>__nvshmem_ulonglong_atomic_fetch_add
+
+    global __nvshmem_int32_atomic_fetch_add
+    data["__nvshmem_int32_atomic_fetch_add"] = <intptr_t>__nvshmem_int32_atomic_fetch_add
+
+    global __nvshmem_uint32_atomic_fetch_add
+    data["__nvshmem_uint32_atomic_fetch_add"] = <intptr_t>__nvshmem_uint32_atomic_fetch_add
+
+    global __nvshmem_int64_atomic_fetch_add
+    data["__nvshmem_int64_atomic_fetch_add"] = <intptr_t>__nvshmem_int64_atomic_fetch_add
+
+    global __nvshmem_uint64_atomic_fetch_add
+    data["__nvshmem_uint64_atomic_fetch_add"] = <intptr_t>__nvshmem_uint64_atomic_fetch_add
+
+    global __nvshmem_int_atomic_fetch_add
+    data["__nvshmem_int_atomic_fetch_add"] = <intptr_t>__nvshmem_int_atomic_fetch_add
+
+    global __nvshmem_long_atomic_fetch_add
+    data["__nvshmem_long_atomic_fetch_add"] = <intptr_t>__nvshmem_long_atomic_fetch_add
+
+    global __nvshmem_longlong_atomic_fetch_add
+    data["__nvshmem_longlong_atomic_fetch_add"] = <intptr_t>__nvshmem_longlong_atomic_fetch_add
+
+    global __nvshmem_size_atomic_fetch_add
+    data["__nvshmem_size_atomic_fetch_add"] = <intptr_t>__nvshmem_size_atomic_fetch_add
+
+    global __nvshmem_ptrdiff_atomic_fetch_add
+    data["__nvshmem_ptrdiff_atomic_fetch_add"] = <intptr_t>__nvshmem_ptrdiff_atomic_fetch_add
+
+    global __nvshmem_uint_atomic_swap
+    data["__nvshmem_uint_atomic_swap"] = <intptr_t>__nvshmem_uint_atomic_swap
+
+    global __nvshmem_ulong_atomic_swap
+    data["__nvshmem_ulong_atomic_swap"] = <intptr_t>__nvshmem_ulong_atomic_swap
+
+    global __nvshmem_ulonglong_atomic_swap
+    data["__nvshmem_ulonglong_atomic_swap"] = <intptr_t>__nvshmem_ulonglong_atomic_swap
+
+    global __nvshmem_int32_atomic_swap
+    data["__nvshmem_int32_atomic_swap"] = <intptr_t>__nvshmem_int32_atomic_swap
+
+    global __nvshmem_uint32_atomic_swap
+    data["__nvshmem_uint32_atomic_swap"] = <intptr_t>__nvshmem_uint32_atomic_swap
+
+    global __nvshmem_int64_atomic_swap
+    data["__nvshmem_int64_atomic_swap"] = <intptr_t>__nvshmem_int64_atomic_swap
+
+    global __nvshmem_uint64_atomic_swap
+    data["__nvshmem_uint64_atomic_swap"] = <intptr_t>__nvshmem_uint64_atomic_swap
+
+    global __nvshmem_int_atomic_swap
+    data["__nvshmem_int_atomic_swap"] = <intptr_t>__nvshmem_int_atomic_swap
+
+    global __nvshmem_long_atomic_swap
+    data["__nvshmem_long_atomic_swap"] = <intptr_t>__nvshmem_long_atomic_swap
+
+    global __nvshmem_longlong_atomic_swap
+    data["__nvshmem_longlong_atomic_swap"] = <intptr_t>__nvshmem_longlong_atomic_swap
+
+    global __nvshmem_size_atomic_swap
+    data["__nvshmem_size_atomic_swap"] = <intptr_t>__nvshmem_size_atomic_swap
+
+    global __nvshmem_ptrdiff_atomic_swap
+    data["__nvshmem_ptrdiff_atomic_swap"] = <intptr_t>__nvshmem_ptrdiff_atomic_swap
+
+    global __nvshmem_float_atomic_swap
+    data["__nvshmem_float_atomic_swap"] = <intptr_t>__nvshmem_float_atomic_swap
+
+    global __nvshmem_double_atomic_swap
+    data["__nvshmem_double_atomic_swap"] = <intptr_t>__nvshmem_double_atomic_swap
+
+    global __nvshmem_uint_atomic_compare_swap
+    data["__nvshmem_uint_atomic_compare_swap"] = <intptr_t>__nvshmem_uint_atomic_compare_swap
+
+    global __nvshmem_ulong_atomic_compare_swap
+    data["__nvshmem_ulong_atomic_compare_swap"] = <intptr_t>__nvshmem_ulong_atomic_compare_swap
+
+    global __nvshmem_ulonglong_atomic_compare_swap
+    data["__nvshmem_ulonglong_atomic_compare_swap"] = <intptr_t>__nvshmem_ulonglong_atomic_compare_swap
+
+    global __nvshmem_int32_atomic_compare_swap
+    data["__nvshmem_int32_atomic_compare_swap"] = <intptr_t>__nvshmem_int32_atomic_compare_swap
+
+    global __nvshmem_uint32_atomic_compare_swap
+    data["__nvshmem_uint32_atomic_compare_swap"] = <intptr_t>__nvshmem_uint32_atomic_compare_swap
+
+    global __nvshmem_int64_atomic_compare_swap
+    data["__nvshmem_int64_atomic_compare_swap"] = <intptr_t>__nvshmem_int64_atomic_compare_swap
+
+    global __nvshmem_uint64_atomic_compare_swap
+    data["__nvshmem_uint64_atomic_compare_swap"] = <intptr_t>__nvshmem_uint64_atomic_compare_swap
+
+    global __nvshmem_int_atomic_compare_swap
+    data["__nvshmem_int_atomic_compare_swap"] = <intptr_t>__nvshmem_int_atomic_compare_swap
+
+    global __nvshmem_long_atomic_compare_swap
+    data["__nvshmem_long_atomic_compare_swap"] = <intptr_t>__nvshmem_long_atomic_compare_swap
+
+    global __nvshmem_longlong_atomic_compare_swap
+    data["__nvshmem_longlong_atomic_compare_swap"] = <intptr_t>__nvshmem_longlong_atomic_compare_swap
+
+    global __nvshmem_size_atomic_compare_swap
+    data["__nvshmem_size_atomic_compare_swap"] = <intptr_t>__nvshmem_size_atomic_compare_swap
+
+    global __nvshmem_ptrdiff_atomic_compare_swap
+    data["__nvshmem_ptrdiff_atomic_compare_swap"] = <intptr_t>__nvshmem_ptrdiff_atomic_compare_swap
+
+    global __nvshmem_uint_atomic_and
+    data["__nvshmem_uint_atomic_and"] = <intptr_t>__nvshmem_uint_atomic_and
+
+    global __nvshmem_ulong_atomic_and
+    data["__nvshmem_ulong_atomic_and"] = <intptr_t>__nvshmem_ulong_atomic_and
+
+    global __nvshmem_ulonglong_atomic_and
+    data["__nvshmem_ulonglong_atomic_and"] = <intptr_t>__nvshmem_ulonglong_atomic_and
+
+    global __nvshmem_int32_atomic_and
+    data["__nvshmem_int32_atomic_and"] = <intptr_t>__nvshmem_int32_atomic_and
+
+    global __nvshmem_uint32_atomic_and
+    data["__nvshmem_uint32_atomic_and"] = <intptr_t>__nvshmem_uint32_atomic_and
+
+    global __nvshmem_int64_atomic_and
+    data["__nvshmem_int64_atomic_and"] = <intptr_t>__nvshmem_int64_atomic_and
+
+    global __nvshmem_uint64_atomic_and
+    data["__nvshmem_uint64_atomic_and"] = <intptr_t>__nvshmem_uint64_atomic_and
+
+    global __nvshmem_uint_atomic_or
+    data["__nvshmem_uint_atomic_or"] = <intptr_t>__nvshmem_uint_atomic_or
+
+    global __nvshmem_ulong_atomic_or
+    data["__nvshmem_ulong_atomic_or"] = <intptr_t>__nvshmem_ulong_atomic_or
+
+    global __nvshmem_ulonglong_atomic_or
+    data["__nvshmem_ulonglong_atomic_or"] = <intptr_t>__nvshmem_ulonglong_atomic_or
+
+    global __nvshmem_int32_atomic_or
+    data["__nvshmem_int32_atomic_or"] = <intptr_t>__nvshmem_int32_atomic_or
+
+    global __nvshmem_uint32_atomic_or
+    data["__nvshmem_uint32_atomic_or"] = <intptr_t>__nvshmem_uint32_atomic_or
+
+    global __nvshmem_int64_atomic_or
+    data["__nvshmem_int64_atomic_or"] = <intptr_t>__nvshmem_int64_atomic_or
+
+    global __nvshmem_uint64_atomic_or
+    data["__nvshmem_uint64_atomic_or"] = <intptr_t>__nvshmem_uint64_atomic_or
+
+    global __nvshmem_uint_atomic_xor
+    data["__nvshmem_uint_atomic_xor"] = <intptr_t>__nvshmem_uint_atomic_xor
+
+    global __nvshmem_ulong_atomic_xor
+    data["__nvshmem_ulong_atomic_xor"] = <intptr_t>__nvshmem_ulong_atomic_xor
+
+    global __nvshmem_ulonglong_atomic_xor
+    data["__nvshmem_ulonglong_atomic_xor"] = <intptr_t>__nvshmem_ulonglong_atomic_xor
+
+    global __nvshmem_int32_atomic_xor
+    data["__nvshmem_int32_atomic_xor"] = <intptr_t>__nvshmem_int32_atomic_xor
+
+    global __nvshmem_uint32_atomic_xor
+    data["__nvshmem_uint32_atomic_xor"] = <intptr_t>__nvshmem_uint32_atomic_xor
+
+    global __nvshmem_int64_atomic_xor
+    data["__nvshmem_int64_atomic_xor"] = <intptr_t>__nvshmem_int64_atomic_xor
+
+    global __nvshmem_uint64_atomic_xor
+    data["__nvshmem_uint64_atomic_xor"] = <intptr_t>__nvshmem_uint64_atomic_xor
+
+    global __nvshmem_uint_atomic_fetch_and
+    data["__nvshmem_uint_atomic_fetch_and"] = <intptr_t>__nvshmem_uint_atomic_fetch_and
+
+    global __nvshmem_ulong_atomic_fetch_and
+    data["__nvshmem_ulong_atomic_fetch_and"] = <intptr_t>__nvshmem_ulong_atomic_fetch_and
+
+    global __nvshmem_ulonglong_atomic_fetch_and
+    data["__nvshmem_ulonglong_atomic_fetch_and"] = <intptr_t>__nvshmem_ulonglong_atomic_fetch_and
+
+    global __nvshmem_int32_atomic_fetch_and
+    data["__nvshmem_int32_atomic_fetch_and"] = <intptr_t>__nvshmem_int32_atomic_fetch_and
+
+    global __nvshmem_uint32_atomic_fetch_and
+    data["__nvshmem_uint32_atomic_fetch_and"] = <intptr_t>__nvshmem_uint32_atomic_fetch_and
+
+    global __nvshmem_int64_atomic_fetch_and
+    data["__nvshmem_int64_atomic_fetch_and"] = <intptr_t>__nvshmem_int64_atomic_fetch_and
+
+    global __nvshmem_uint64_atomic_fetch_and
+    data["__nvshmem_uint64_atomic_fetch_and"] = <intptr_t>__nvshmem_uint64_atomic_fetch_and
+
+    global __nvshmem_uint_atomic_fetch_or
+    data["__nvshmem_uint_atomic_fetch_or"] = <intptr_t>__nvshmem_uint_atomic_fetch_or
+
+    global __nvshmem_ulong_atomic_fetch_or
+    data["__nvshmem_ulong_atomic_fetch_or"] = <intptr_t>__nvshmem_ulong_atomic_fetch_or
+
+    global __nvshmem_ulonglong_atomic_fetch_or
+    data["__nvshmem_ulonglong_atomic_fetch_or"] = <intptr_t>__nvshmem_ulonglong_atomic_fetch_or
+
+    global __nvshmem_int32_atomic_fetch_or
+    data["__nvshmem_int32_atomic_fetch_or"] = <intptr_t>__nvshmem_int32_atomic_fetch_or
+
+    global __nvshmem_uint32_atomic_fetch_or
+    data["__nvshmem_uint32_atomic_fetch_or"] = <intptr_t>__nvshmem_uint32_atomic_fetch_or
+
+    global __nvshmem_int64_atomic_fetch_or
+    data["__nvshmem_int64_atomic_fetch_or"] = <intptr_t>__nvshmem_int64_atomic_fetch_or
+
+    global __nvshmem_uint64_atomic_fetch_or
+    data["__nvshmem_uint64_atomic_fetch_or"] = <intptr_t>__nvshmem_uint64_atomic_fetch_or
+
+    global __nvshmem_uint_atomic_fetch_xor
+    data["__nvshmem_uint_atomic_fetch_xor"] = <intptr_t>__nvshmem_uint_atomic_fetch_xor
+
+    global __nvshmem_ulong_atomic_fetch_xor
+    data["__nvshmem_ulong_atomic_fetch_xor"] = <intptr_t>__nvshmem_ulong_atomic_fetch_xor
+
+    global __nvshmem_ulonglong_atomic_fetch_xor
+    data["__nvshmem_ulonglong_atomic_fetch_xor"] = <intptr_t>__nvshmem_ulonglong_atomic_fetch_xor
+
+    global __nvshmem_int32_atomic_fetch_xor
+    data["__nvshmem_int32_atomic_fetch_xor"] = <intptr_t>__nvshmem_int32_atomic_fetch_xor
+
+    global __nvshmem_uint32_atomic_fetch_xor
+    data["__nvshmem_uint32_atomic_fetch_xor"] = <intptr_t>__nvshmem_uint32_atomic_fetch_xor
+
+    global __nvshmem_int64_atomic_fetch_xor
+    data["__nvshmem_int64_atomic_fetch_xor"] = <intptr_t>__nvshmem_int64_atomic_fetch_xor
+
+    global __nvshmem_uint64_atomic_fetch_xor
+    data["__nvshmem_uint64_atomic_fetch_xor"] = <intptr_t>__nvshmem_uint64_atomic_fetch_xor
+
+    global __nvshmem_signal_fetch
+    data["__nvshmem_signal_fetch"] = <intptr_t>__nvshmem_signal_fetch
 
     global __nvshmem_team_my_pe
     data["__nvshmem_team_my_pe"] = <intptr_t>__nvshmem_team_my_pe
@@ -2401,6 +4102,9 @@ cpdef dict _inspect_function_pointers():
     global __nvshmemx_buffer_register_symmetric
     data["__nvshmemx_buffer_register_symmetric"] = <intptr_t>__nvshmemx_buffer_register_symmetric
 
+    global __nvshmemx_buffer_register_symmetric_at_preferred_address
+    data["__nvshmemx_buffer_register_symmetric_at_preferred_address"] = <intptr_t>__nvshmemx_buffer_register_symmetric_at_preferred_address
+
     global __nvshmemx_buffer_unregister_symmetric
     data["__nvshmemx_buffer_unregister_symmetric"] = <intptr_t>__nvshmemx_buffer_unregister_symmetric
 
@@ -2416,11 +4120,23 @@ cpdef dict _inspect_function_pointers():
     global __nvshmemx_putmem_signal_on_stream
     data["__nvshmemx_putmem_signal_on_stream"] = <intptr_t>__nvshmemx_putmem_signal_on_stream
 
+    global __nvshmemx_putmem_signal_nbi_on_stream
+    data["__nvshmemx_putmem_signal_nbi_on_stream"] = <intptr_t>__nvshmemx_putmem_signal_nbi_on_stream
+
+    global __nvshmemx_putmem_nbi_on_stream
+    data["__nvshmemx_putmem_nbi_on_stream"] = <intptr_t>__nvshmemx_putmem_nbi_on_stream
+
     global __nvshmemx_getmem_on_stream
     data["__nvshmemx_getmem_on_stream"] = <intptr_t>__nvshmemx_getmem_on_stream
 
+    global __nvshmemx_getmem_nbi_on_stream
+    data["__nvshmemx_getmem_nbi_on_stream"] = <intptr_t>__nvshmemx_getmem_nbi_on_stream
+
     global __nvshmemx_quiet_on_stream
     data["__nvshmemx_quiet_on_stream"] = <intptr_t>__nvshmemx_quiet_on_stream
+
+    global __nvshmemx_flush_on_stream
+    data["__nvshmemx_flush_on_stream"] = <intptr_t>__nvshmemx_flush_on_stream
 
     global __nvshmemx_signal_op_on_stream
     data["__nvshmemx_signal_op_on_stream"] = <intptr_t>__nvshmemx_signal_op_on_stream
@@ -2473,6 +4189,16 @@ cdef int _nvshmemx_init_status() except* nogil:
         )
 
 
+cdef void _nvshmem_query_thread(int* provided) except* nogil:
+    global __nvshmem_query_thread
+    _check_or_init_nvshmem()
+    if __nvshmem_query_thread == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_query_thread is not found")
+    (<void (*)(int*) nogil>__nvshmem_query_thread)(
+        provided)
+
+
 cdef int _nvshmem_my_pe() except* nogil:
     global __nvshmem_my_pe
     _check_or_init_nvshmem()
@@ -2501,6 +4227,16 @@ cdef void _nvshmem_info_get_version(int* major, int* minor) except* nogil:
             raise FunctionNotFoundError("function nvshmem_info_get_version is not found")
     (<void (*)(int*, int*) nogil>__nvshmem_info_get_version)(
         major, minor)
+
+
+cdef void _nvshmem_info_get_name(char* name) except* nogil:
+    global __nvshmem_info_get_name
+    _check_or_init_nvshmem()
+    if __nvshmem_info_get_name == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_info_get_name is not found")
+    (<void (*)(char*) nogil>__nvshmem_info_get_name)(
+        name)
 
 
 cdef void _nvshmemx_vendor_get_version_info(int* major, int* minor, int* patch) except* nogil:
@@ -2533,14 +4269,14 @@ cdef void* _nvshmem_calloc(size_t count, size_t size) except* nogil:
         count, size)
 
 
-cdef void* _nvshmem_align(size_t count, size_t size) except* nogil:
+cdef void* _nvshmem_align(size_t alignment, size_t size) except* nogil:
     global __nvshmem_align
     _check_or_init_nvshmem()
     if __nvshmem_align == NULL:
         with gil:
             raise FunctionNotFoundError("function nvshmem_align is not found")
     return (<void* (*)(size_t, size_t) nogil>__nvshmem_align)(
-        count, size)
+        alignment, size)
 
 
 cdef void _nvshmem_free(void* ptr) except* nogil:
@@ -2571,6 +4307,1496 @@ cdef void* _nvshmemx_mc_ptr(nvshmem_team_t team, const void* ptr) except* nogil:
             raise FunctionNotFoundError("function nvshmemx_mc_ptr is not found")
     return (<void* (*)(nvshmem_team_t, const void*) nogil>__nvshmemx_mc_ptr)(
         team, ptr)
+
+
+cdef void _nvshmem_uint_atomic_inc(unsigned int* dest, int pe) except* nogil:
+    global __nvshmem_uint_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_inc is not found")
+    (<void (*)(unsigned int*, int) nogil>__nvshmem_uint_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_ulong_atomic_inc(unsigned long* dest, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_inc is not found")
+    (<void (*)(unsigned long*, int) nogil>__nvshmem_ulong_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_ulonglong_atomic_inc(unsigned long long* dest, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_inc is not found")
+    (<void (*)(unsigned long long*, int) nogil>__nvshmem_ulonglong_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_int32_atomic_inc(int32_t* dest, int pe) except* nogil:
+    global __nvshmem_int32_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_inc is not found")
+    (<void (*)(int32_t*, int) nogil>__nvshmem_int32_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_uint32_atomic_inc(uint32_t* dest, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_inc is not found")
+    (<void (*)(uint32_t*, int) nogil>__nvshmem_uint32_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_int64_atomic_inc(int64_t* dest, int pe) except* nogil:
+    global __nvshmem_int64_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_inc is not found")
+    (<void (*)(int64_t*, int) nogil>__nvshmem_int64_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_uint64_atomic_inc(uint64_t* dest, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_inc is not found")
+    (<void (*)(uint64_t*, int) nogil>__nvshmem_uint64_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_int_atomic_inc(int* dest, int pe) except* nogil:
+    global __nvshmem_int_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_inc is not found")
+    (<void (*)(int*, int) nogil>__nvshmem_int_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_long_atomic_inc(long* dest, int pe) except* nogil:
+    global __nvshmem_long_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_inc is not found")
+    (<void (*)(long*, int) nogil>__nvshmem_long_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_longlong_atomic_inc(long long* dest, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_inc is not found")
+    (<void (*)(long long*, int) nogil>__nvshmem_longlong_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_size_atomic_inc(size_t* dest, int pe) except* nogil:
+    global __nvshmem_size_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_inc is not found")
+    (<void (*)(size_t*, int) nogil>__nvshmem_size_atomic_inc)(
+        dest, pe)
+
+
+cdef void _nvshmem_ptrdiff_atomic_inc(ptrdiff_t* dest, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_inc is not found")
+    (<void (*)(ptrdiff_t*, int) nogil>__nvshmem_ptrdiff_atomic_inc)(
+        dest, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_fetch_inc(unsigned int* dest, int pe) except* nogil:
+    global __nvshmem_uint_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_fetch_inc is not found")
+    return (<unsigned int (*)(unsigned int*, int) nogil>__nvshmem_uint_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_fetch_inc(unsigned long* dest, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_fetch_inc is not found")
+    return (<unsigned long (*)(unsigned long*, int) nogil>__nvshmem_ulong_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_fetch_inc(unsigned long long* dest, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_fetch_inc is not found")
+    return (<unsigned long long (*)(unsigned long long*, int) nogil>__nvshmem_ulonglong_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_fetch_inc(int32_t* dest, int pe) except* nogil:
+    global __nvshmem_int32_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_fetch_inc is not found")
+    return (<int32_t (*)(int32_t*, int) nogil>__nvshmem_int32_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_fetch_inc(uint32_t* dest, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_fetch_inc is not found")
+    return (<uint32_t (*)(uint32_t*, int) nogil>__nvshmem_uint32_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_fetch_inc(int64_t* dest, int pe) except* nogil:
+    global __nvshmem_int64_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_fetch_inc is not found")
+    return (<int64_t (*)(int64_t*, int) nogil>__nvshmem_int64_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_fetch_inc(uint64_t* dest, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_fetch_inc is not found")
+    return (<uint64_t (*)(uint64_t*, int) nogil>__nvshmem_uint64_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef int _nvshmem_int_atomic_fetch_inc(int* dest, int pe) except* nogil:
+    global __nvshmem_int_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_fetch_inc is not found")
+    return (<int (*)(int*, int) nogil>__nvshmem_int_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef long _nvshmem_long_atomic_fetch_inc(long* dest, int pe) except* nogil:
+    global __nvshmem_long_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_fetch_inc is not found")
+    return (<long (*)(long*, int) nogil>__nvshmem_long_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef long long _nvshmem_longlong_atomic_fetch_inc(long long* dest, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_fetch_inc is not found")
+    return (<long long (*)(long long*, int) nogil>__nvshmem_longlong_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef size_t _nvshmem_size_atomic_fetch_inc(size_t* dest, int pe) except* nogil:
+    global __nvshmem_size_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_fetch_inc is not found")
+    return (<size_t (*)(size_t*, int) nogil>__nvshmem_size_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef ptrdiff_t _nvshmem_ptrdiff_atomic_fetch_inc(ptrdiff_t* dest, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_fetch_inc
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_fetch_inc == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_fetch_inc is not found")
+    return (<ptrdiff_t (*)(ptrdiff_t*, int) nogil>__nvshmem_ptrdiff_atomic_fetch_inc)(
+        dest, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_fetch(const unsigned int* dest, int pe) except* nogil:
+    global __nvshmem_uint_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_fetch is not found")
+    return (<unsigned int (*)(const unsigned int*, int) nogil>__nvshmem_uint_atomic_fetch)(
+        dest, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_fetch(const unsigned long* dest, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_fetch is not found")
+    return (<unsigned long (*)(const unsigned long*, int) nogil>__nvshmem_ulong_atomic_fetch)(
+        dest, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_fetch(const unsigned long long* dest, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_fetch is not found")
+    return (<unsigned long long (*)(const unsigned long long*, int) nogil>__nvshmem_ulonglong_atomic_fetch)(
+        dest, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_fetch(const int32_t* dest, int pe) except* nogil:
+    global __nvshmem_int32_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_fetch is not found")
+    return (<int32_t (*)(const int32_t*, int) nogil>__nvshmem_int32_atomic_fetch)(
+        dest, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_fetch(const uint32_t* dest, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_fetch is not found")
+    return (<uint32_t (*)(const uint32_t*, int) nogil>__nvshmem_uint32_atomic_fetch)(
+        dest, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_fetch(const int64_t* dest, int pe) except* nogil:
+    global __nvshmem_int64_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_fetch is not found")
+    return (<int64_t (*)(const int64_t*, int) nogil>__nvshmem_int64_atomic_fetch)(
+        dest, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_fetch(const uint64_t* dest, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_fetch is not found")
+    return (<uint64_t (*)(const uint64_t*, int) nogil>__nvshmem_uint64_atomic_fetch)(
+        dest, pe)
+
+
+cdef int _nvshmem_int_atomic_fetch(const int* dest, int pe) except* nogil:
+    global __nvshmem_int_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_fetch is not found")
+    return (<int (*)(const int*, int) nogil>__nvshmem_int_atomic_fetch)(
+        dest, pe)
+
+
+cdef long _nvshmem_long_atomic_fetch(const long* dest, int pe) except* nogil:
+    global __nvshmem_long_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_fetch is not found")
+    return (<long (*)(const long*, int) nogil>__nvshmem_long_atomic_fetch)(
+        dest, pe)
+
+
+cdef long long _nvshmem_longlong_atomic_fetch(const long long* dest, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_fetch is not found")
+    return (<long long (*)(const long long*, int) nogil>__nvshmem_longlong_atomic_fetch)(
+        dest, pe)
+
+
+cdef size_t _nvshmem_size_atomic_fetch(const size_t* dest, int pe) except* nogil:
+    global __nvshmem_size_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_fetch is not found")
+    return (<size_t (*)(const size_t*, int) nogil>__nvshmem_size_atomic_fetch)(
+        dest, pe)
+
+
+cdef ptrdiff_t _nvshmem_ptrdiff_atomic_fetch(const ptrdiff_t* dest, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_fetch is not found")
+    return (<ptrdiff_t (*)(const ptrdiff_t*, int) nogil>__nvshmem_ptrdiff_atomic_fetch)(
+        dest, pe)
+
+
+cdef float _nvshmem_float_atomic_fetch(const float* dest, int pe) except* nogil:
+    global __nvshmem_float_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_float_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_float_atomic_fetch is not found")
+    return (<float (*)(const float*, int) nogil>__nvshmem_float_atomic_fetch)(
+        dest, pe)
+
+
+cdef double _nvshmem_double_atomic_fetch(const double* dest, int pe) except* nogil:
+    global __nvshmem_double_atomic_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_double_atomic_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_double_atomic_fetch is not found")
+    return (<double (*)(const double*, int) nogil>__nvshmem_double_atomic_fetch)(
+        dest, pe)
+
+
+cdef void _nvshmem_uint_atomic_add(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_add is not found")
+    (<void (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulong_atomic_add(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_add is not found")
+    (<void (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulonglong_atomic_add(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_add is not found")
+    (<void (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int32_atomic_add(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_add is not found")
+    (<void (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint32_atomic_add(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_add is not found")
+    (<void (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int64_atomic_add(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_add is not found")
+    (<void (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint64_atomic_add(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_add is not found")
+    (<void (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int_atomic_add(int* dest, int value, int pe) except* nogil:
+    global __nvshmem_int_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_add is not found")
+    (<void (*)(int*, int, int) nogil>__nvshmem_int_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_long_atomic_add(long* dest, long value, int pe) except* nogil:
+    global __nvshmem_long_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_add is not found")
+    (<void (*)(long*, long, int) nogil>__nvshmem_long_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_longlong_atomic_add(long long* dest, long long value, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_add is not found")
+    (<void (*)(long long*, long long, int) nogil>__nvshmem_longlong_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_size_atomic_add(size_t* dest, size_t value, int pe) except* nogil:
+    global __nvshmem_size_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_add is not found")
+    (<void (*)(size_t*, size_t, int) nogil>__nvshmem_size_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ptrdiff_atomic_add(ptrdiff_t* dest, ptrdiff_t value, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_add is not found")
+    (<void (*)(ptrdiff_t*, ptrdiff_t, int) nogil>__nvshmem_ptrdiff_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmemx_float_atomic_add(float* dest, float value, int pe) except* nogil:
+    global __nvshmemx_float_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmemx_float_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_float_atomic_add is not found")
+    (<void (*)(float*, float, int) nogil>__nvshmemx_float_atomic_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmemx_double_atomic_add(double* dest, double value, int pe) except* nogil:
+    global __nvshmemx_double_atomic_add
+    _check_or_init_nvshmem()
+    if __nvshmemx_double_atomic_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_double_atomic_add is not found")
+    (<void (*)(double*, double, int) nogil>__nvshmemx_double_atomic_add)(
+        dest, value, pe)
+
+
+cdef float _nvshmemx_float_atomic_fetch_add(float* dest, float value, int pe) except* nogil:
+    global __nvshmemx_float_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmemx_float_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_float_atomic_fetch_add is not found")
+    return (<float (*)(float*, float, int) nogil>__nvshmemx_float_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef double _nvshmemx_double_atomic_fetch_add(double* dest, double value, int pe) except* nogil:
+    global __nvshmemx_double_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmemx_double_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_double_atomic_fetch_add is not found")
+    return (<double (*)(double*, double, int) nogil>__nvshmemx_double_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint_atomic_set(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_set is not found")
+    (<void (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulong_atomic_set(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_set is not found")
+    (<void (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulonglong_atomic_set(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_set is not found")
+    (<void (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int32_atomic_set(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_set is not found")
+    (<void (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint32_atomic_set(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_set is not found")
+    (<void (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int64_atomic_set(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_set is not found")
+    (<void (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint64_atomic_set(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_set is not found")
+    (<void (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int_atomic_set(int* dest, int value, int pe) except* nogil:
+    global __nvshmem_int_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_set is not found")
+    (<void (*)(int*, int, int) nogil>__nvshmem_int_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_long_atomic_set(long* dest, long value, int pe) except* nogil:
+    global __nvshmem_long_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_set is not found")
+    (<void (*)(long*, long, int) nogil>__nvshmem_long_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_longlong_atomic_set(long long* dest, long long value, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_set is not found")
+    (<void (*)(long long*, long long, int) nogil>__nvshmem_longlong_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_size_atomic_set(size_t* dest, size_t value, int pe) except* nogil:
+    global __nvshmem_size_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_set is not found")
+    (<void (*)(size_t*, size_t, int) nogil>__nvshmem_size_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ptrdiff_atomic_set(ptrdiff_t* dest, ptrdiff_t value, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_set is not found")
+    (<void (*)(ptrdiff_t*, ptrdiff_t, int) nogil>__nvshmem_ptrdiff_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_float_atomic_set(float* dest, float value, int pe) except* nogil:
+    global __nvshmem_float_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_float_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_float_atomic_set is not found")
+    (<void (*)(float*, float, int) nogil>__nvshmem_float_atomic_set)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_double_atomic_set(double* dest, double value, int pe) except* nogil:
+    global __nvshmem_double_atomic_set
+    _check_or_init_nvshmem()
+    if __nvshmem_double_atomic_set == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_double_atomic_set is not found")
+    (<void (*)(double*, double, int) nogil>__nvshmem_double_atomic_set)(
+        dest, value, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_fetch_add(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_fetch_add is not found")
+    return (<unsigned int (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_fetch_add(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_fetch_add is not found")
+    return (<unsigned long (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_fetch_add(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_fetch_add is not found")
+    return (<unsigned long long (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_fetch_add(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_fetch_add is not found")
+    return (<int32_t (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_fetch_add(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_fetch_add is not found")
+    return (<uint32_t (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_fetch_add(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_fetch_add is not found")
+    return (<int64_t (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_fetch_add(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_fetch_add is not found")
+    return (<uint64_t (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef int _nvshmem_int_atomic_fetch_add(int* dest, int value, int pe) except* nogil:
+    global __nvshmem_int_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_fetch_add is not found")
+    return (<int (*)(int*, int, int) nogil>__nvshmem_int_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef long _nvshmem_long_atomic_fetch_add(long* dest, long value, int pe) except* nogil:
+    global __nvshmem_long_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_fetch_add is not found")
+    return (<long (*)(long*, long, int) nogil>__nvshmem_long_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef long long _nvshmem_longlong_atomic_fetch_add(long long* dest, long long value, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_fetch_add is not found")
+    return (<long long (*)(long long*, long long, int) nogil>__nvshmem_longlong_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef size_t _nvshmem_size_atomic_fetch_add(size_t* dest, size_t value, int pe) except* nogil:
+    global __nvshmem_size_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_fetch_add is not found")
+    return (<size_t (*)(size_t*, size_t, int) nogil>__nvshmem_size_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef ptrdiff_t _nvshmem_ptrdiff_atomic_fetch_add(ptrdiff_t* dest, ptrdiff_t value, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_fetch_add
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_fetch_add == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_fetch_add is not found")
+    return (<ptrdiff_t (*)(ptrdiff_t*, ptrdiff_t, int) nogil>__nvshmem_ptrdiff_atomic_fetch_add)(
+        dest, value, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_swap(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_swap is not found")
+    return (<unsigned int (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_swap)(
+        dest, value, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_swap(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_swap is not found")
+    return (<unsigned long (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_swap)(
+        dest, value, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_swap(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_swap is not found")
+    return (<unsigned long long (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_swap)(
+        dest, value, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_swap(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_swap is not found")
+    return (<int32_t (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_swap)(
+        dest, value, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_swap(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_swap is not found")
+    return (<uint32_t (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_swap)(
+        dest, value, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_swap(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_swap is not found")
+    return (<int64_t (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_swap)(
+        dest, value, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_swap(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_swap is not found")
+    return (<uint64_t (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_swap)(
+        dest, value, pe)
+
+
+cdef int _nvshmem_int_atomic_swap(int* dest, int value, int pe) except* nogil:
+    global __nvshmem_int_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_swap is not found")
+    return (<int (*)(int*, int, int) nogil>__nvshmem_int_atomic_swap)(
+        dest, value, pe)
+
+
+cdef long _nvshmem_long_atomic_swap(long* dest, long value, int pe) except* nogil:
+    global __nvshmem_long_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_swap is not found")
+    return (<long (*)(long*, long, int) nogil>__nvshmem_long_atomic_swap)(
+        dest, value, pe)
+
+
+cdef long long _nvshmem_longlong_atomic_swap(long long* dest, long long value, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_swap is not found")
+    return (<long long (*)(long long*, long long, int) nogil>__nvshmem_longlong_atomic_swap)(
+        dest, value, pe)
+
+
+cdef size_t _nvshmem_size_atomic_swap(size_t* dest, size_t value, int pe) except* nogil:
+    global __nvshmem_size_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_swap is not found")
+    return (<size_t (*)(size_t*, size_t, int) nogil>__nvshmem_size_atomic_swap)(
+        dest, value, pe)
+
+
+cdef ptrdiff_t _nvshmem_ptrdiff_atomic_swap(ptrdiff_t* dest, ptrdiff_t value, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_swap is not found")
+    return (<ptrdiff_t (*)(ptrdiff_t*, ptrdiff_t, int) nogil>__nvshmem_ptrdiff_atomic_swap)(
+        dest, value, pe)
+
+
+cdef float _nvshmem_float_atomic_swap(float* dest, float value, int pe) except* nogil:
+    global __nvshmem_float_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_float_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_float_atomic_swap is not found")
+    return (<float (*)(float*, float, int) nogil>__nvshmem_float_atomic_swap)(
+        dest, value, pe)
+
+
+cdef double _nvshmem_double_atomic_swap(double* dest, double value, int pe) except* nogil:
+    global __nvshmem_double_atomic_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_double_atomic_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_double_atomic_swap is not found")
+    return (<double (*)(double*, double, int) nogil>__nvshmem_double_atomic_swap)(
+        dest, value, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_compare_swap(unsigned int* dest, unsigned int cond, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_compare_swap is not found")
+    return (<unsigned int (*)(unsigned int*, unsigned int, unsigned int, int) nogil>__nvshmem_uint_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_compare_swap(unsigned long* dest, unsigned long cond, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_compare_swap is not found")
+    return (<unsigned long (*)(unsigned long*, unsigned long, unsigned long, int) nogil>__nvshmem_ulong_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_compare_swap(unsigned long long* dest, unsigned long long cond, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_compare_swap is not found")
+    return (<unsigned long long (*)(unsigned long long*, unsigned long long, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_compare_swap(int32_t* dest, int32_t cond, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_compare_swap is not found")
+    return (<int32_t (*)(int32_t*, int32_t, int32_t, int) nogil>__nvshmem_int32_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_compare_swap(uint32_t* dest, uint32_t cond, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_compare_swap is not found")
+    return (<uint32_t (*)(uint32_t*, uint32_t, uint32_t, int) nogil>__nvshmem_uint32_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_compare_swap(int64_t* dest, int64_t cond, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_compare_swap is not found")
+    return (<int64_t (*)(int64_t*, int64_t, int64_t, int) nogil>__nvshmem_int64_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_compare_swap(uint64_t* dest, uint64_t cond, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_compare_swap is not found")
+    return (<uint64_t (*)(uint64_t*, uint64_t, uint64_t, int) nogil>__nvshmem_uint64_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef int _nvshmem_int_atomic_compare_swap(int* dest, int cond, int value, int pe) except* nogil:
+    global __nvshmem_int_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_int_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int_atomic_compare_swap is not found")
+    return (<int (*)(int*, int, int, int) nogil>__nvshmem_int_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef long _nvshmem_long_atomic_compare_swap(long* dest, long cond, long value, int pe) except* nogil:
+    global __nvshmem_long_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_long_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_long_atomic_compare_swap is not found")
+    return (<long (*)(long*, long, long, int) nogil>__nvshmem_long_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef long long _nvshmem_longlong_atomic_compare_swap(long long* dest, long long cond, long long value, int pe) except* nogil:
+    global __nvshmem_longlong_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_longlong_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_longlong_atomic_compare_swap is not found")
+    return (<long long (*)(long long*, long long, long long, int) nogil>__nvshmem_longlong_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef size_t _nvshmem_size_atomic_compare_swap(size_t* dest, size_t cond, size_t value, int pe) except* nogil:
+    global __nvshmem_size_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_size_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_size_atomic_compare_swap is not found")
+    return (<size_t (*)(size_t*, size_t, size_t, int) nogil>__nvshmem_size_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef ptrdiff_t _nvshmem_ptrdiff_atomic_compare_swap(ptrdiff_t* dest, ptrdiff_t cond, ptrdiff_t value, int pe) except* nogil:
+    global __nvshmem_ptrdiff_atomic_compare_swap
+    _check_or_init_nvshmem()
+    if __nvshmem_ptrdiff_atomic_compare_swap == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ptrdiff_atomic_compare_swap is not found")
+    return (<ptrdiff_t (*)(ptrdiff_t*, ptrdiff_t, ptrdiff_t, int) nogil>__nvshmem_ptrdiff_atomic_compare_swap)(
+        dest, cond, value, pe)
+
+
+cdef void _nvshmem_uint_atomic_and(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_and is not found")
+    (<void (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulong_atomic_and(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_and is not found")
+    (<void (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulonglong_atomic_and(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_and is not found")
+    (<void (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int32_atomic_and(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_and is not found")
+    (<void (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint32_atomic_and(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_and is not found")
+    (<void (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int64_atomic_and(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_and is not found")
+    (<void (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint64_atomic_and(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_and
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_and is not found")
+    (<void (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_and)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint_atomic_or(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_or is not found")
+    (<void (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulong_atomic_or(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_or is not found")
+    (<void (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulonglong_atomic_or(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_or is not found")
+    (<void (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int32_atomic_or(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_or is not found")
+    (<void (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint32_atomic_or(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_or is not found")
+    (<void (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int64_atomic_or(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_or is not found")
+    (<void (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint64_atomic_or(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_or
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_or is not found")
+    (<void (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_or)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint_atomic_xor(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_xor is not found")
+    (<void (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_xor)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulong_atomic_xor(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_xor is not found")
+    (<void (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_xor)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_ulonglong_atomic_xor(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_xor is not found")
+    (<void (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_xor)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int32_atomic_xor(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_xor is not found")
+    (<void (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_xor)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint32_atomic_xor(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_xor is not found")
+    (<void (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_xor)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_int64_atomic_xor(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_xor is not found")
+    (<void (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_xor)(
+        dest, value, pe)
+
+
+cdef void _nvshmem_uint64_atomic_xor(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_xor is not found")
+    (<void (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_xor)(
+        dest, value, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_fetch_and(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_fetch_and is not found")
+    return (<unsigned int (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_fetch_and(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_fetch_and is not found")
+    return (<unsigned long (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_fetch_and(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_fetch_and is not found")
+    return (<unsigned long long (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_fetch_and(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_fetch_and is not found")
+    return (<int32_t (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_fetch_and(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_fetch_and is not found")
+    return (<uint32_t (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_fetch_and(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_fetch_and is not found")
+    return (<int64_t (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_fetch_and(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_fetch_and
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_fetch_and == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_fetch_and is not found")
+    return (<uint64_t (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_fetch_and)(
+        dest, value, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_fetch_or(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_fetch_or is not found")
+    return (<unsigned int (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_fetch_or(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_fetch_or is not found")
+    return (<unsigned long (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_fetch_or(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_fetch_or is not found")
+    return (<unsigned long long (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_fetch_or(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_fetch_or is not found")
+    return (<int32_t (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_fetch_or(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_fetch_or is not found")
+    return (<uint32_t (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_fetch_or(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_fetch_or is not found")
+    return (<int64_t (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_fetch_or(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_fetch_or
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_fetch_or == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_fetch_or is not found")
+    return (<uint64_t (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_fetch_or)(
+        dest, value, pe)
+
+
+cdef unsigned int _nvshmem_uint_atomic_fetch_xor(unsigned int* dest, unsigned int value, int pe) except* nogil:
+    global __nvshmem_uint_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_uint_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint_atomic_fetch_xor is not found")
+    return (<unsigned int (*)(unsigned int*, unsigned int, int) nogil>__nvshmem_uint_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef unsigned long _nvshmem_ulong_atomic_fetch_xor(unsigned long* dest, unsigned long value, int pe) except* nogil:
+    global __nvshmem_ulong_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_ulong_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulong_atomic_fetch_xor is not found")
+    return (<unsigned long (*)(unsigned long*, unsigned long, int) nogil>__nvshmem_ulong_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef unsigned long long _nvshmem_ulonglong_atomic_fetch_xor(unsigned long long* dest, unsigned long long value, int pe) except* nogil:
+    global __nvshmem_ulonglong_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_ulonglong_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_ulonglong_atomic_fetch_xor is not found")
+    return (<unsigned long long (*)(unsigned long long*, unsigned long long, int) nogil>__nvshmem_ulonglong_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef int32_t _nvshmem_int32_atomic_fetch_xor(int32_t* dest, int32_t value, int pe) except* nogil:
+    global __nvshmem_int32_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_int32_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int32_atomic_fetch_xor is not found")
+    return (<int32_t (*)(int32_t*, int32_t, int) nogil>__nvshmem_int32_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef uint32_t _nvshmem_uint32_atomic_fetch_xor(uint32_t* dest, uint32_t value, int pe) except* nogil:
+    global __nvshmem_uint32_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_uint32_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint32_atomic_fetch_xor is not found")
+    return (<uint32_t (*)(uint32_t*, uint32_t, int) nogil>__nvshmem_uint32_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef int64_t _nvshmem_int64_atomic_fetch_xor(int64_t* dest, int64_t value, int pe) except* nogil:
+    global __nvshmem_int64_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_int64_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_int64_atomic_fetch_xor is not found")
+    return (<int64_t (*)(int64_t*, int64_t, int) nogil>__nvshmem_int64_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef uint64_t _nvshmem_uint64_atomic_fetch_xor(uint64_t* dest, uint64_t value, int pe) except* nogil:
+    global __nvshmem_uint64_atomic_fetch_xor
+    _check_or_init_nvshmem()
+    if __nvshmem_uint64_atomic_fetch_xor == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_uint64_atomic_fetch_xor is not found")
+    return (<uint64_t (*)(uint64_t*, uint64_t, int) nogil>__nvshmem_uint64_atomic_fetch_xor)(
+        dest, value, pe)
+
+
+cdef uint64_t _nvshmem_signal_fetch(uint64_t* sig_addr) except* nogil:
+    global __nvshmem_signal_fetch
+    _check_or_init_nvshmem()
+    if __nvshmem_signal_fetch == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmem_signal_fetch is not found")
+    return (<uint64_t (*)(uint64_t*) nogil>__nvshmem_signal_fetch)(
+        sig_addr)
 
 
 cdef int _nvshmem_team_my_pe(nvshmem_team_t team) except* nogil:
@@ -4493,6 +7719,16 @@ cdef void* _nvshmemx_buffer_register_symmetric(void* buf_ptr, size_t size, int f
         buf_ptr, size, flags)
 
 
+cdef void* _nvshmemx_buffer_register_symmetric_at_preferred_address(void* buf_ptr, size_t size, void* preferred_addr, int flags) except* nogil:
+    global __nvshmemx_buffer_register_symmetric_at_preferred_address
+    _check_or_init_nvshmem()
+    if __nvshmemx_buffer_register_symmetric_at_preferred_address == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_buffer_register_symmetric_at_preferred_address is not found")
+    return (<void* (*)(void*, size_t, void*, int) nogil>__nvshmemx_buffer_register_symmetric_at_preferred_address)(
+        buf_ptr, size, preferred_addr, flags)
+
+
 cdef int _nvshmemx_buffer_unregister_symmetric(void* mmap_ptr, size_t size) except* nogil:
     global __nvshmemx_buffer_unregister_symmetric
     _check_or_init_nvshmem()
@@ -4543,6 +7779,26 @@ cdef void _nvshmemx_putmem_signal_on_stream(void* dest, const void* source, size
         dest, source, bytes, sig_addr, signal, sig_op, pe, cstrm)
 
 
+cdef void _nvshmemx_putmem_signal_nbi_on_stream(void* dest, const void* source, size_t bytes, uint64_t* sig_addr, uint64_t signal, int sig_op, int pe, cudaStream_t cstrm) except* nogil:
+    global __nvshmemx_putmem_signal_nbi_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_putmem_signal_nbi_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_putmem_signal_nbi_on_stream is not found")
+    (<void (*)(void*, const void*, size_t, uint64_t*, uint64_t, int, int, cudaStream_t) nogil>__nvshmemx_putmem_signal_nbi_on_stream)(
+        dest, source, bytes, sig_addr, signal, sig_op, pe, cstrm)
+
+
+cdef void _nvshmemx_putmem_nbi_on_stream(void* dest, const void* source, size_t bytes, int pe, cudaStream_t cstrm) except* nogil:
+    global __nvshmemx_putmem_nbi_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_putmem_nbi_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_putmem_nbi_on_stream is not found")
+    (<void (*)(void*, const void*, size_t, int, cudaStream_t) nogil>__nvshmemx_putmem_nbi_on_stream)(
+        dest, source, bytes, pe, cstrm)
+
+
 cdef void _nvshmemx_getmem_on_stream(void* dest, const void* source, size_t bytes, int pe, cudaStream_t cstrm) except* nogil:
     global __nvshmemx_getmem_on_stream
     _check_or_init_nvshmem()
@@ -4553,6 +7809,16 @@ cdef void _nvshmemx_getmem_on_stream(void* dest, const void* source, size_t byte
         dest, source, bytes, pe, cstrm)
 
 
+cdef void _nvshmemx_getmem_nbi_on_stream(void* dest, const void* source, size_t bytes, int pe, cudaStream_t cstrm) except* nogil:
+    global __nvshmemx_getmem_nbi_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_getmem_nbi_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_getmem_nbi_on_stream is not found")
+    (<void (*)(void*, const void*, size_t, int, cudaStream_t) nogil>__nvshmemx_getmem_nbi_on_stream)(
+        dest, source, bytes, pe, cstrm)
+
+
 cdef void _nvshmemx_quiet_on_stream(cudaStream_t cstrm) except* nogil:
     global __nvshmemx_quiet_on_stream
     _check_or_init_nvshmem()
@@ -4560,6 +7826,16 @@ cdef void _nvshmemx_quiet_on_stream(cudaStream_t cstrm) except* nogil:
         with gil:
             raise FunctionNotFoundError("function nvshmemx_quiet_on_stream is not found")
     (<void (*)(cudaStream_t) nogil>__nvshmemx_quiet_on_stream)(
+        cstrm)
+
+
+cdef void _nvshmemx_flush_on_stream(cudaStream_t cstrm) except* nogil:
+    global __nvshmemx_flush_on_stream
+    _check_or_init_nvshmem()
+    if __nvshmemx_flush_on_stream == NULL:
+        with gil:
+            raise FunctionNotFoundError("function nvshmemx_flush_on_stream is not found")
+    (<void (*)(cudaStream_t) nogil>__nvshmemx_flush_on_stream)(
         cstrm)
 
 

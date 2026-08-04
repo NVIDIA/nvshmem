@@ -441,6 +441,10 @@ cpdef int init_status() except? 0:
     return nvshmemx_init_status()
 
 
+cpdef void query_thread(intptr_t provided) except*:
+    nvshmem_query_thread(<int*>provided)
+
+
 cpdef int my_pe() except? -1:
     return nvshmem_my_pe()
 
@@ -451,6 +455,10 @@ cpdef int n_pes() except? -1:
 
 cpdef void info_get_version(intptr_t major, intptr_t minor) except*:
     nvshmem_info_get_version(<int*>major, <int*>minor)
+
+
+cpdef void info_get_name(intptr_t name) except*:
+    nvshmem_info_get_name(<char*>name)
 
 
 cpdef void vendor_get_version_info(intptr_t major, intptr_t minor, intptr_t patch) except*:
@@ -465,8 +473,8 @@ cpdef intptr_t calloc(size_t count, size_t size) except? 0:
     return <intptr_t>nvshmem_calloc(count, size)
 
 
-cpdef intptr_t align(size_t count, size_t size) except? 0:
-    return <intptr_t>nvshmem_align(count, size)
+cpdef intptr_t align(size_t alignment, size_t size) except? 0:
+    return <intptr_t>nvshmem_align(alignment, size)
 
 
 cpdef void free(intptr_t ptr) except*:
@@ -479,6 +487,602 @@ cpdef intptr_t ptr(intptr_t dest, int pe) except? 0:
 
 cpdef intptr_t mc_ptr(int32_t team, intptr_t ptr) except? 0:
     return <intptr_t>nvshmemx_mc_ptr(<nvshmem_team_t>team, <const void*>ptr)
+
+
+cpdef void uint_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_uint_atomic_inc(<unsigned int*>dest, pe)
+
+
+cpdef void ulong_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_ulong_atomic_inc(<unsigned long*>dest, pe)
+
+
+cpdef void ulonglong_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_ulonglong_atomic_inc(<unsigned long long*>dest, pe)
+
+
+cpdef void int32_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_int32_atomic_inc(<int32_t*>dest, pe)
+
+
+cpdef void uint32_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_uint32_atomic_inc(<uint32_t*>dest, pe)
+
+
+cpdef void int64_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_int64_atomic_inc(<int64_t*>dest, pe)
+
+
+cpdef void uint64_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_uint64_atomic_inc(<uint64_t*>dest, pe)
+
+
+cpdef void int_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_int_atomic_inc(<int*>dest, pe)
+
+
+cpdef void long_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_long_atomic_inc(<long*>dest, pe)
+
+
+cpdef void longlong_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_longlong_atomic_inc(<long long*>dest, pe)
+
+
+cpdef void size_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_size_atomic_inc(<size_t*>dest, pe)
+
+
+cpdef void ptrdiff_atomic_inc(intptr_t dest, int pe) except*:
+    nvshmem_ptrdiff_atomic_inc(<ptrdiff_t*>dest, pe)
+
+
+cpdef unsigned int uint_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_uint_atomic_fetch_inc(<unsigned int*>dest, pe)
+
+
+cpdef unsigned long ulong_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_ulong_atomic_fetch_inc(<unsigned long*>dest, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_fetch_inc(<unsigned long long*>dest, pe)
+
+
+cpdef int32_t int32_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_int32_atomic_fetch_inc(<int32_t*>dest, pe)
+
+
+cpdef uint32_t uint32_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_uint32_atomic_fetch_inc(<uint32_t*>dest, pe)
+
+
+cpdef int64_t int64_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_int64_atomic_fetch_inc(<int64_t*>dest, pe)
+
+
+cpdef uint64_t uint64_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_uint64_atomic_fetch_inc(<uint64_t*>dest, pe)
+
+
+cpdef int int_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_int_atomic_fetch_inc(<int*>dest, pe)
+
+
+cpdef long long_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_long_atomic_fetch_inc(<long*>dest, pe)
+
+
+cpdef long long longlong_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_longlong_atomic_fetch_inc(<long long*>dest, pe)
+
+
+cpdef size_t size_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_size_atomic_fetch_inc(<size_t*>dest, pe)
+
+
+cpdef ptrdiff_t ptrdiff_atomic_fetch_inc(intptr_t dest, int pe) except? -1:
+    return nvshmem_ptrdiff_atomic_fetch_inc(<ptrdiff_t*>dest, pe)
+
+
+cpdef unsigned int uint_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_uint_atomic_fetch(<const unsigned int*>dest, pe)
+
+
+cpdef unsigned long ulong_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_ulong_atomic_fetch(<const unsigned long*>dest, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_fetch(<const unsigned long long*>dest, pe)
+
+
+cpdef int32_t int32_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_int32_atomic_fetch(<const int32_t*>dest, pe)
+
+
+cpdef uint32_t uint32_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_uint32_atomic_fetch(<const uint32_t*>dest, pe)
+
+
+cpdef int64_t int64_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_int64_atomic_fetch(<const int64_t*>dest, pe)
+
+
+cpdef uint64_t uint64_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_uint64_atomic_fetch(<const uint64_t*>dest, pe)
+
+
+cpdef int int_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_int_atomic_fetch(<const int*>dest, pe)
+
+
+cpdef long long_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_long_atomic_fetch(<const long*>dest, pe)
+
+
+cpdef long long longlong_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_longlong_atomic_fetch(<const long long*>dest, pe)
+
+
+cpdef size_t size_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_size_atomic_fetch(<const size_t*>dest, pe)
+
+
+cpdef ptrdiff_t ptrdiff_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_ptrdiff_atomic_fetch(<const ptrdiff_t*>dest, pe)
+
+
+cpdef float float_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_float_atomic_fetch(<const float*>dest, pe)
+
+
+cpdef double double_atomic_fetch(intptr_t dest, int pe) except? -1:
+    return nvshmem_double_atomic_fetch(<const double*>dest, pe)
+
+
+cpdef void uint_atomic_add(intptr_t dest, unsigned int value, int pe) except*:
+    nvshmem_uint_atomic_add(<unsigned int*>dest, value, pe)
+
+
+cpdef void ulong_atomic_add(intptr_t dest, unsigned long value, int pe) except*:
+    nvshmem_ulong_atomic_add(<unsigned long*>dest, value, pe)
+
+
+cpdef void ulonglong_atomic_add(intptr_t dest, unsigned long long value, int pe) except*:
+    nvshmem_ulonglong_atomic_add(<unsigned long long*>dest, value, pe)
+
+
+cpdef void int32_atomic_add(intptr_t dest, int32_t value, int pe) except*:
+    nvshmem_int32_atomic_add(<int32_t*>dest, value, pe)
+
+
+cpdef void uint32_atomic_add(intptr_t dest, uint32_t value, int pe) except*:
+    nvshmem_uint32_atomic_add(<uint32_t*>dest, value, pe)
+
+
+cpdef void int64_atomic_add(intptr_t dest, int64_t value, int pe) except*:
+    nvshmem_int64_atomic_add(<int64_t*>dest, value, pe)
+
+
+cpdef void uint64_atomic_add(intptr_t dest, uint64_t value, int pe) except*:
+    nvshmem_uint64_atomic_add(<uint64_t*>dest, value, pe)
+
+
+cpdef void int_atomic_add(intptr_t dest, int value, int pe) except*:
+    nvshmem_int_atomic_add(<int*>dest, value, pe)
+
+
+cpdef void long_atomic_add(intptr_t dest, long value, int pe) except*:
+    nvshmem_long_atomic_add(<long*>dest, value, pe)
+
+
+cpdef void longlong_atomic_add(intptr_t dest, long long value, int pe) except*:
+    nvshmem_longlong_atomic_add(<long long*>dest, value, pe)
+
+
+cpdef void size_atomic_add(intptr_t dest, size_t value, int pe) except*:
+    nvshmem_size_atomic_add(<size_t*>dest, value, pe)
+
+
+cpdef void ptrdiff_atomic_add(intptr_t dest, ptrdiff_t value, int pe) except*:
+    nvshmem_ptrdiff_atomic_add(<ptrdiff_t*>dest, value, pe)
+
+
+cpdef void float_atomic_add(intptr_t dest, float value, int pe) except*:
+    nvshmemx_float_atomic_add(<float*>dest, value, pe)
+
+
+cpdef void double_atomic_add(intptr_t dest, double value, int pe) except*:
+    nvshmemx_double_atomic_add(<double*>dest, value, pe)
+
+
+cpdef float float_atomic_fetch_add(intptr_t dest, float value, int pe) except? -1:
+    return nvshmemx_float_atomic_fetch_add(<float*>dest, value, pe)
+
+
+cpdef double double_atomic_fetch_add(intptr_t dest, double value, int pe) except? -1:
+    return nvshmemx_double_atomic_fetch_add(<double*>dest, value, pe)
+
+
+cpdef void uint_atomic_set(intptr_t dest, unsigned int value, int pe) except*:
+    nvshmem_uint_atomic_set(<unsigned int*>dest, value, pe)
+
+
+cpdef void ulong_atomic_set(intptr_t dest, unsigned long value, int pe) except*:
+    nvshmem_ulong_atomic_set(<unsigned long*>dest, value, pe)
+
+
+cpdef void ulonglong_atomic_set(intptr_t dest, unsigned long long value, int pe) except*:
+    nvshmem_ulonglong_atomic_set(<unsigned long long*>dest, value, pe)
+
+
+cpdef void int32_atomic_set(intptr_t dest, int32_t value, int pe) except*:
+    nvshmem_int32_atomic_set(<int32_t*>dest, value, pe)
+
+
+cpdef void uint32_atomic_set(intptr_t dest, uint32_t value, int pe) except*:
+    nvshmem_uint32_atomic_set(<uint32_t*>dest, value, pe)
+
+
+cpdef void int64_atomic_set(intptr_t dest, int64_t value, int pe) except*:
+    nvshmem_int64_atomic_set(<int64_t*>dest, value, pe)
+
+
+cpdef void uint64_atomic_set(intptr_t dest, uint64_t value, int pe) except*:
+    nvshmem_uint64_atomic_set(<uint64_t*>dest, value, pe)
+
+
+cpdef void int_atomic_set(intptr_t dest, int value, int pe) except*:
+    nvshmem_int_atomic_set(<int*>dest, value, pe)
+
+
+cpdef void long_atomic_set(intptr_t dest, long value, int pe) except*:
+    nvshmem_long_atomic_set(<long*>dest, value, pe)
+
+
+cpdef void longlong_atomic_set(intptr_t dest, long long value, int pe) except*:
+    nvshmem_longlong_atomic_set(<long long*>dest, value, pe)
+
+
+cpdef void size_atomic_set(intptr_t dest, size_t value, int pe) except*:
+    nvshmem_size_atomic_set(<size_t*>dest, value, pe)
+
+
+cpdef void ptrdiff_atomic_set(intptr_t dest, ptrdiff_t value, int pe) except*:
+    nvshmem_ptrdiff_atomic_set(<ptrdiff_t*>dest, value, pe)
+
+
+cpdef void float_atomic_set(intptr_t dest, float value, int pe) except*:
+    nvshmem_float_atomic_set(<float*>dest, value, pe)
+
+
+cpdef void double_atomic_set(intptr_t dest, double value, int pe) except*:
+    nvshmem_double_atomic_set(<double*>dest, value, pe)
+
+
+cpdef unsigned int uint_atomic_fetch_add(intptr_t dest, unsigned int value, int pe) except? -1:
+    return nvshmem_uint_atomic_fetch_add(<unsigned int*>dest, value, pe)
+
+
+cpdef unsigned long ulong_atomic_fetch_add(intptr_t dest, unsigned long value, int pe) except? -1:
+    return nvshmem_ulong_atomic_fetch_add(<unsigned long*>dest, value, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_fetch_add(intptr_t dest, unsigned long long value, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_fetch_add(<unsigned long long*>dest, value, pe)
+
+
+cpdef int32_t int32_atomic_fetch_add(intptr_t dest, int32_t value, int pe) except? -1:
+    return nvshmem_int32_atomic_fetch_add(<int32_t*>dest, value, pe)
+
+
+cpdef uint32_t uint32_atomic_fetch_add(intptr_t dest, uint32_t value, int pe) except? -1:
+    return nvshmem_uint32_atomic_fetch_add(<uint32_t*>dest, value, pe)
+
+
+cpdef int64_t int64_atomic_fetch_add(intptr_t dest, int64_t value, int pe) except? -1:
+    return nvshmem_int64_atomic_fetch_add(<int64_t*>dest, value, pe)
+
+
+cpdef uint64_t uint64_atomic_fetch_add(intptr_t dest, uint64_t value, int pe) except? -1:
+    return nvshmem_uint64_atomic_fetch_add(<uint64_t*>dest, value, pe)
+
+
+cpdef int int_atomic_fetch_add(intptr_t dest, int value, int pe) except? -1:
+    return nvshmem_int_atomic_fetch_add(<int*>dest, value, pe)
+
+
+cpdef long long_atomic_fetch_add(intptr_t dest, long value, int pe) except? -1:
+    return nvshmem_long_atomic_fetch_add(<long*>dest, value, pe)
+
+
+cpdef long long longlong_atomic_fetch_add(intptr_t dest, long long value, int pe) except? -1:
+    return nvshmem_longlong_atomic_fetch_add(<long long*>dest, value, pe)
+
+
+cpdef size_t size_atomic_fetch_add(intptr_t dest, size_t value, int pe) except? -1:
+    return nvshmem_size_atomic_fetch_add(<size_t*>dest, value, pe)
+
+
+cpdef ptrdiff_t ptrdiff_atomic_fetch_add(intptr_t dest, ptrdiff_t value, int pe) except? -1:
+    return nvshmem_ptrdiff_atomic_fetch_add(<ptrdiff_t*>dest, value, pe)
+
+
+cpdef unsigned int uint_atomic_swap(intptr_t dest, unsigned int value, int pe) except? -1:
+    return nvshmem_uint_atomic_swap(<unsigned int*>dest, value, pe)
+
+
+cpdef unsigned long ulong_atomic_swap(intptr_t dest, unsigned long value, int pe) except? -1:
+    return nvshmem_ulong_atomic_swap(<unsigned long*>dest, value, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_swap(intptr_t dest, unsigned long long value, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_swap(<unsigned long long*>dest, value, pe)
+
+
+cpdef int32_t int32_atomic_swap(intptr_t dest, int32_t value, int pe) except? -1:
+    return nvshmem_int32_atomic_swap(<int32_t*>dest, value, pe)
+
+
+cpdef uint32_t uint32_atomic_swap(intptr_t dest, uint32_t value, int pe) except? -1:
+    return nvshmem_uint32_atomic_swap(<uint32_t*>dest, value, pe)
+
+
+cpdef int64_t int64_atomic_swap(intptr_t dest, int64_t value, int pe) except? -1:
+    return nvshmem_int64_atomic_swap(<int64_t*>dest, value, pe)
+
+
+cpdef uint64_t uint64_atomic_swap(intptr_t dest, uint64_t value, int pe) except? -1:
+    return nvshmem_uint64_atomic_swap(<uint64_t*>dest, value, pe)
+
+
+cpdef int int_atomic_swap(intptr_t dest, int value, int pe) except? -1:
+    return nvshmem_int_atomic_swap(<int*>dest, value, pe)
+
+
+cpdef long long_atomic_swap(intptr_t dest, long value, int pe) except? -1:
+    return nvshmem_long_atomic_swap(<long*>dest, value, pe)
+
+
+cpdef long long longlong_atomic_swap(intptr_t dest, long long value, int pe) except? -1:
+    return nvshmem_longlong_atomic_swap(<long long*>dest, value, pe)
+
+
+cpdef size_t size_atomic_swap(intptr_t dest, size_t value, int pe) except? -1:
+    return nvshmem_size_atomic_swap(<size_t*>dest, value, pe)
+
+
+cpdef ptrdiff_t ptrdiff_atomic_swap(intptr_t dest, ptrdiff_t value, int pe) except? -1:
+    return nvshmem_ptrdiff_atomic_swap(<ptrdiff_t*>dest, value, pe)
+
+
+cpdef float float_atomic_swap(intptr_t dest, float value, int pe) except? -1:
+    return nvshmem_float_atomic_swap(<float*>dest, value, pe)
+
+
+cpdef double double_atomic_swap(intptr_t dest, double value, int pe) except? -1:
+    return nvshmem_double_atomic_swap(<double*>dest, value, pe)
+
+
+cpdef unsigned int uint_atomic_compare_swap(intptr_t dest, unsigned int cond, unsigned int value, int pe) except? -1:
+    return nvshmem_uint_atomic_compare_swap(<unsigned int*>dest, cond, value, pe)
+
+
+cpdef unsigned long ulong_atomic_compare_swap(intptr_t dest, unsigned long cond, unsigned long value, int pe) except? -1:
+    return nvshmem_ulong_atomic_compare_swap(<unsigned long*>dest, cond, value, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_compare_swap(intptr_t dest, unsigned long long cond, unsigned long long value, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_compare_swap(<unsigned long long*>dest, cond, value, pe)
+
+
+cpdef int32_t int32_atomic_compare_swap(intptr_t dest, int32_t cond, int32_t value, int pe) except? -1:
+    return nvshmem_int32_atomic_compare_swap(<int32_t*>dest, cond, value, pe)
+
+
+cpdef uint32_t uint32_atomic_compare_swap(intptr_t dest, uint32_t cond, uint32_t value, int pe) except? -1:
+    return nvshmem_uint32_atomic_compare_swap(<uint32_t*>dest, cond, value, pe)
+
+
+cpdef int64_t int64_atomic_compare_swap(intptr_t dest, int64_t cond, int64_t value, int pe) except? -1:
+    return nvshmem_int64_atomic_compare_swap(<int64_t*>dest, cond, value, pe)
+
+
+cpdef uint64_t uint64_atomic_compare_swap(intptr_t dest, uint64_t cond, uint64_t value, int pe) except? -1:
+    return nvshmem_uint64_atomic_compare_swap(<uint64_t*>dest, cond, value, pe)
+
+
+cpdef int int_atomic_compare_swap(intptr_t dest, int cond, int value, int pe) except? -1:
+    return nvshmem_int_atomic_compare_swap(<int*>dest, cond, value, pe)
+
+
+cpdef long long_atomic_compare_swap(intptr_t dest, long cond, long value, int pe) except? -1:
+    return nvshmem_long_atomic_compare_swap(<long*>dest, cond, value, pe)
+
+
+cpdef long long longlong_atomic_compare_swap(intptr_t dest, long long cond, long long value, int pe) except? -1:
+    return nvshmem_longlong_atomic_compare_swap(<long long*>dest, cond, value, pe)
+
+
+cpdef size_t size_atomic_compare_swap(intptr_t dest, size_t cond, size_t value, int pe) except? -1:
+    return nvshmem_size_atomic_compare_swap(<size_t*>dest, cond, value, pe)
+
+
+cpdef ptrdiff_t ptrdiff_atomic_compare_swap(intptr_t dest, ptrdiff_t cond, ptrdiff_t value, int pe) except? -1:
+    return nvshmem_ptrdiff_atomic_compare_swap(<ptrdiff_t*>dest, cond, value, pe)
+
+
+cpdef void uint_atomic_and(intptr_t dest, unsigned int value, int pe) except*:
+    nvshmem_uint_atomic_and(<unsigned int*>dest, value, pe)
+
+
+cpdef void ulong_atomic_and(intptr_t dest, unsigned long value, int pe) except*:
+    nvshmem_ulong_atomic_and(<unsigned long*>dest, value, pe)
+
+
+cpdef void ulonglong_atomic_and(intptr_t dest, unsigned long long value, int pe) except*:
+    nvshmem_ulonglong_atomic_and(<unsigned long long*>dest, value, pe)
+
+
+cpdef void int32_atomic_and(intptr_t dest, int32_t value, int pe) except*:
+    nvshmem_int32_atomic_and(<int32_t*>dest, value, pe)
+
+
+cpdef void uint32_atomic_and(intptr_t dest, uint32_t value, int pe) except*:
+    nvshmem_uint32_atomic_and(<uint32_t*>dest, value, pe)
+
+
+cpdef void int64_atomic_and(intptr_t dest, int64_t value, int pe) except*:
+    nvshmem_int64_atomic_and(<int64_t*>dest, value, pe)
+
+
+cpdef void uint64_atomic_and(intptr_t dest, uint64_t value, int pe) except*:
+    nvshmem_uint64_atomic_and(<uint64_t*>dest, value, pe)
+
+
+cpdef void uint_atomic_or(intptr_t dest, unsigned int value, int pe) except*:
+    nvshmem_uint_atomic_or(<unsigned int*>dest, value, pe)
+
+
+cpdef void ulong_atomic_or(intptr_t dest, unsigned long value, int pe) except*:
+    nvshmem_ulong_atomic_or(<unsigned long*>dest, value, pe)
+
+
+cpdef void ulonglong_atomic_or(intptr_t dest, unsigned long long value, int pe) except*:
+    nvshmem_ulonglong_atomic_or(<unsigned long long*>dest, value, pe)
+
+
+cpdef void int32_atomic_or(intptr_t dest, int32_t value, int pe) except*:
+    nvshmem_int32_atomic_or(<int32_t*>dest, value, pe)
+
+
+cpdef void uint32_atomic_or(intptr_t dest, uint32_t value, int pe) except*:
+    nvshmem_uint32_atomic_or(<uint32_t*>dest, value, pe)
+
+
+cpdef void int64_atomic_or(intptr_t dest, int64_t value, int pe) except*:
+    nvshmem_int64_atomic_or(<int64_t*>dest, value, pe)
+
+
+cpdef void uint64_atomic_or(intptr_t dest, uint64_t value, int pe) except*:
+    nvshmem_uint64_atomic_or(<uint64_t*>dest, value, pe)
+
+
+cpdef void uint_atomic_xor(intptr_t dest, unsigned int value, int pe) except*:
+    nvshmem_uint_atomic_xor(<unsigned int*>dest, value, pe)
+
+
+cpdef void ulong_atomic_xor(intptr_t dest, unsigned long value, int pe) except*:
+    nvshmem_ulong_atomic_xor(<unsigned long*>dest, value, pe)
+
+
+cpdef void ulonglong_atomic_xor(intptr_t dest, unsigned long long value, int pe) except*:
+    nvshmem_ulonglong_atomic_xor(<unsigned long long*>dest, value, pe)
+
+
+cpdef void int32_atomic_xor(intptr_t dest, int32_t value, int pe) except*:
+    nvshmem_int32_atomic_xor(<int32_t*>dest, value, pe)
+
+
+cpdef void uint32_atomic_xor(intptr_t dest, uint32_t value, int pe) except*:
+    nvshmem_uint32_atomic_xor(<uint32_t*>dest, value, pe)
+
+
+cpdef void int64_atomic_xor(intptr_t dest, int64_t value, int pe) except*:
+    nvshmem_int64_atomic_xor(<int64_t*>dest, value, pe)
+
+
+cpdef void uint64_atomic_xor(intptr_t dest, uint64_t value, int pe) except*:
+    nvshmem_uint64_atomic_xor(<uint64_t*>dest, value, pe)
+
+
+cpdef unsigned int uint_atomic_fetch_and(intptr_t dest, unsigned int value, int pe) except? -1:
+    return nvshmem_uint_atomic_fetch_and(<unsigned int*>dest, value, pe)
+
+
+cpdef unsigned long ulong_atomic_fetch_and(intptr_t dest, unsigned long value, int pe) except? -1:
+    return nvshmem_ulong_atomic_fetch_and(<unsigned long*>dest, value, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_fetch_and(intptr_t dest, unsigned long long value, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_fetch_and(<unsigned long long*>dest, value, pe)
+
+
+cpdef int32_t int32_atomic_fetch_and(intptr_t dest, int32_t value, int pe) except? -1:
+    return nvshmem_int32_atomic_fetch_and(<int32_t*>dest, value, pe)
+
+
+cpdef uint32_t uint32_atomic_fetch_and(intptr_t dest, uint32_t value, int pe) except? -1:
+    return nvshmem_uint32_atomic_fetch_and(<uint32_t*>dest, value, pe)
+
+
+cpdef int64_t int64_atomic_fetch_and(intptr_t dest, int64_t value, int pe) except? -1:
+    return nvshmem_int64_atomic_fetch_and(<int64_t*>dest, value, pe)
+
+
+cpdef uint64_t uint64_atomic_fetch_and(intptr_t dest, uint64_t value, int pe) except? -1:
+    return nvshmem_uint64_atomic_fetch_and(<uint64_t*>dest, value, pe)
+
+
+cpdef unsigned int uint_atomic_fetch_or(intptr_t dest, unsigned int value, int pe) except? -1:
+    return nvshmem_uint_atomic_fetch_or(<unsigned int*>dest, value, pe)
+
+
+cpdef unsigned long ulong_atomic_fetch_or(intptr_t dest, unsigned long value, int pe) except? -1:
+    return nvshmem_ulong_atomic_fetch_or(<unsigned long*>dest, value, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_fetch_or(intptr_t dest, unsigned long long value, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_fetch_or(<unsigned long long*>dest, value, pe)
+
+
+cpdef int32_t int32_atomic_fetch_or(intptr_t dest, int32_t value, int pe) except? -1:
+    return nvshmem_int32_atomic_fetch_or(<int32_t*>dest, value, pe)
+
+
+cpdef uint32_t uint32_atomic_fetch_or(intptr_t dest, uint32_t value, int pe) except? -1:
+    return nvshmem_uint32_atomic_fetch_or(<uint32_t*>dest, value, pe)
+
+
+cpdef int64_t int64_atomic_fetch_or(intptr_t dest, int64_t value, int pe) except? -1:
+    return nvshmem_int64_atomic_fetch_or(<int64_t*>dest, value, pe)
+
+
+cpdef uint64_t uint64_atomic_fetch_or(intptr_t dest, uint64_t value, int pe) except? -1:
+    return nvshmem_uint64_atomic_fetch_or(<uint64_t*>dest, value, pe)
+
+
+cpdef unsigned int uint_atomic_fetch_xor(intptr_t dest, unsigned int value, int pe) except? -1:
+    return nvshmem_uint_atomic_fetch_xor(<unsigned int*>dest, value, pe)
+
+
+cpdef unsigned long ulong_atomic_fetch_xor(intptr_t dest, unsigned long value, int pe) except? -1:
+    return nvshmem_ulong_atomic_fetch_xor(<unsigned long*>dest, value, pe)
+
+
+cpdef unsigned long long ulonglong_atomic_fetch_xor(intptr_t dest, unsigned long long value, int pe) except? -1:
+    return nvshmem_ulonglong_atomic_fetch_xor(<unsigned long long*>dest, value, pe)
+
+
+cpdef int32_t int32_atomic_fetch_xor(intptr_t dest, int32_t value, int pe) except? -1:
+    return nvshmem_int32_atomic_fetch_xor(<int32_t*>dest, value, pe)
+
+
+cpdef uint32_t uint32_atomic_fetch_xor(intptr_t dest, uint32_t value, int pe) except? -1:
+    return nvshmem_uint32_atomic_fetch_xor(<uint32_t*>dest, value, pe)
+
+
+cpdef int64_t int64_atomic_fetch_xor(intptr_t dest, int64_t value, int pe) except? -1:
+    return nvshmem_int64_atomic_fetch_xor(<int64_t*>dest, value, pe)
+
+
+cpdef uint64_t uint64_atomic_fetch_xor(intptr_t dest, uint64_t value, int pe) except? -1:
+    return nvshmem_uint64_atomic_fetch_xor(<uint64_t*>dest, value, pe)
+
+
+cpdef uint64_t signal_fetch(intptr_t sig_addr) except? -1:
+    return nvshmem_signal_fetch(<uint64_t*>sig_addr)
 
 
 cpdef int team_my_pe(int32_t team) except? -1:
@@ -1609,6 +2213,10 @@ cpdef intptr_t buffer_register_symmetric(intptr_t buf_ptr, size_t size, int flag
     return <intptr_t>nvshmemx_buffer_register_symmetric(<void*>buf_ptr, size, flags)
 
 
+cpdef intptr_t buffer_register_symmetric_at_preferred_address(intptr_t buf_ptr, size_t size, intptr_t preferred_addr, int flags) except? 0:
+    return <intptr_t>nvshmemx_buffer_register_symmetric_at_preferred_address(<void*>buf_ptr, size, <void*>preferred_addr, flags)
+
+
 cpdef int buffer_unregister_symmetric(intptr_t mmap_ptr, size_t size) except? 0:
     return nvshmemx_buffer_unregister_symmetric(<void*>mmap_ptr, size)
 
@@ -1629,12 +2237,28 @@ cpdef void putmem_signal_on_stream(intptr_t dest, intptr_t source, size_t bytes,
     nvshmemx_putmem_signal_on_stream(<void*>dest, <const void*>source, bytes, <uint64_t*>sig_addr, signal, sig_op, pe, <Stream>cstrm)
 
 
+cpdef void putmem_signal_nbi_on_stream(intptr_t dest, intptr_t source, size_t bytes, intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*:
+    nvshmemx_putmem_signal_nbi_on_stream(<void*>dest, <const void*>source, bytes, <uint64_t*>sig_addr, signal, sig_op, pe, <Stream>cstrm)
+
+
+cpdef void putmem_nbi_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*:
+    nvshmemx_putmem_nbi_on_stream(<void*>dest, <const void*>source, bytes, pe, <Stream>cstrm)
+
+
 cpdef void getmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*:
     nvshmemx_getmem_on_stream(<void*>dest, <const void*>source, bytes, pe, <Stream>cstrm)
 
 
+cpdef void getmem_nbi_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*:
+    nvshmemx_getmem_nbi_on_stream(<void*>dest, <const void*>source, bytes, pe, <Stream>cstrm)
+
+
 cpdef void quiet_on_stream(intptr_t cstrm) except*:
     nvshmemx_quiet_on_stream(<Stream>cstrm)
+
+
+cpdef void flush_on_stream(intptr_t cstrm) except*:
+    nvshmemx_flush_on_stream(<Stream>cstrm)
 
 
 cpdef void signal_op_on_stream(intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*:

@@ -50,16 +50,167 @@ ctypedef flags _Flags
 cpdef barrier(int32_t team)
 cpdef void barrier_all() except*
 cpdef int init_status() except? 0
+cpdef void query_thread(intptr_t provided) except*
 cpdef int my_pe() except? -1
 cpdef int n_pes() except? -1
 cpdef void info_get_version(intptr_t major, intptr_t minor) except*
+cpdef void info_get_name(intptr_t name) except*
 cpdef void vendor_get_version_info(intptr_t major, intptr_t minor, intptr_t patch) except*
 cpdef intptr_t malloc(size_t size) except? 0
 cpdef intptr_t calloc(size_t count, size_t size) except? 0
-cpdef intptr_t align(size_t count, size_t size) except? 0
+cpdef intptr_t align(size_t alignment, size_t size) except? 0
 cpdef void free(intptr_t ptr) except*
 cpdef intptr_t ptr(intptr_t dest, int pe) except? 0
 cpdef intptr_t mc_ptr(int32_t team, intptr_t ptr) except? 0
+cpdef void uint_atomic_inc(intptr_t dest, int pe) except*
+cpdef void ulong_atomic_inc(intptr_t dest, int pe) except*
+cpdef void ulonglong_atomic_inc(intptr_t dest, int pe) except*
+cpdef void int32_atomic_inc(intptr_t dest, int pe) except*
+cpdef void uint32_atomic_inc(intptr_t dest, int pe) except*
+cpdef void int64_atomic_inc(intptr_t dest, int pe) except*
+cpdef void uint64_atomic_inc(intptr_t dest, int pe) except*
+cpdef void int_atomic_inc(intptr_t dest, int pe) except*
+cpdef void long_atomic_inc(intptr_t dest, int pe) except*
+cpdef void longlong_atomic_inc(intptr_t dest, int pe) except*
+cpdef void size_atomic_inc(intptr_t dest, int pe) except*
+cpdef void ptrdiff_atomic_inc(intptr_t dest, int pe) except*
+cpdef unsigned int uint_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef unsigned long ulong_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef int32_t int32_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef uint32_t uint32_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef int64_t int64_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef uint64_t uint64_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef int int_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef long long_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef long long longlong_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef size_t size_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef ptrdiff_t ptrdiff_atomic_fetch_inc(intptr_t dest, int pe) except? -1
+cpdef unsigned int uint_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef unsigned long ulong_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef int32_t int32_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef uint32_t uint32_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef int64_t int64_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef uint64_t uint64_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef int int_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef long long_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef long long longlong_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef size_t size_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef ptrdiff_t ptrdiff_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef float float_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef double double_atomic_fetch(intptr_t dest, int pe) except? -1
+cpdef void uint_atomic_add(intptr_t dest, unsigned int value, int pe) except*
+cpdef void ulong_atomic_add(intptr_t dest, unsigned long value, int pe) except*
+cpdef void ulonglong_atomic_add(intptr_t dest, unsigned long long value, int pe) except*
+cpdef void int32_atomic_add(intptr_t dest, int32_t value, int pe) except*
+cpdef void uint32_atomic_add(intptr_t dest, uint32_t value, int pe) except*
+cpdef void int64_atomic_add(intptr_t dest, int64_t value, int pe) except*
+cpdef void uint64_atomic_add(intptr_t dest, uint64_t value, int pe) except*
+cpdef void int_atomic_add(intptr_t dest, int value, int pe) except*
+cpdef void long_atomic_add(intptr_t dest, long value, int pe) except*
+cpdef void longlong_atomic_add(intptr_t dest, long long value, int pe) except*
+cpdef void size_atomic_add(intptr_t dest, size_t value, int pe) except*
+cpdef void ptrdiff_atomic_add(intptr_t dest, ptrdiff_t value, int pe) except*
+cpdef void float_atomic_add(intptr_t dest, float value, int pe) except*
+cpdef void double_atomic_add(intptr_t dest, double value, int pe) except*
+cpdef float float_atomic_fetch_add(intptr_t dest, float value, int pe) except? -1
+cpdef double double_atomic_fetch_add(intptr_t dest, double value, int pe) except? -1
+cpdef void uint_atomic_set(intptr_t dest, unsigned int value, int pe) except*
+cpdef void ulong_atomic_set(intptr_t dest, unsigned long value, int pe) except*
+cpdef void ulonglong_atomic_set(intptr_t dest, unsigned long long value, int pe) except*
+cpdef void int32_atomic_set(intptr_t dest, int32_t value, int pe) except*
+cpdef void uint32_atomic_set(intptr_t dest, uint32_t value, int pe) except*
+cpdef void int64_atomic_set(intptr_t dest, int64_t value, int pe) except*
+cpdef void uint64_atomic_set(intptr_t dest, uint64_t value, int pe) except*
+cpdef void int_atomic_set(intptr_t dest, int value, int pe) except*
+cpdef void long_atomic_set(intptr_t dest, long value, int pe) except*
+cpdef void longlong_atomic_set(intptr_t dest, long long value, int pe) except*
+cpdef void size_atomic_set(intptr_t dest, size_t value, int pe) except*
+cpdef void ptrdiff_atomic_set(intptr_t dest, ptrdiff_t value, int pe) except*
+cpdef void float_atomic_set(intptr_t dest, float value, int pe) except*
+cpdef void double_atomic_set(intptr_t dest, double value, int pe) except*
+cpdef unsigned int uint_atomic_fetch_add(intptr_t dest, unsigned int value, int pe) except? -1
+cpdef unsigned long ulong_atomic_fetch_add(intptr_t dest, unsigned long value, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_fetch_add(intptr_t dest, unsigned long long value, int pe) except? -1
+cpdef int32_t int32_atomic_fetch_add(intptr_t dest, int32_t value, int pe) except? -1
+cpdef uint32_t uint32_atomic_fetch_add(intptr_t dest, uint32_t value, int pe) except? -1
+cpdef int64_t int64_atomic_fetch_add(intptr_t dest, int64_t value, int pe) except? -1
+cpdef uint64_t uint64_atomic_fetch_add(intptr_t dest, uint64_t value, int pe) except? -1
+cpdef int int_atomic_fetch_add(intptr_t dest, int value, int pe) except? -1
+cpdef long long_atomic_fetch_add(intptr_t dest, long value, int pe) except? -1
+cpdef long long longlong_atomic_fetch_add(intptr_t dest, long long value, int pe) except? -1
+cpdef size_t size_atomic_fetch_add(intptr_t dest, size_t value, int pe) except? -1
+cpdef ptrdiff_t ptrdiff_atomic_fetch_add(intptr_t dest, ptrdiff_t value, int pe) except? -1
+cpdef unsigned int uint_atomic_swap(intptr_t dest, unsigned int value, int pe) except? -1
+cpdef unsigned long ulong_atomic_swap(intptr_t dest, unsigned long value, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_swap(intptr_t dest, unsigned long long value, int pe) except? -1
+cpdef int32_t int32_atomic_swap(intptr_t dest, int32_t value, int pe) except? -1
+cpdef uint32_t uint32_atomic_swap(intptr_t dest, uint32_t value, int pe) except? -1
+cpdef int64_t int64_atomic_swap(intptr_t dest, int64_t value, int pe) except? -1
+cpdef uint64_t uint64_atomic_swap(intptr_t dest, uint64_t value, int pe) except? -1
+cpdef int int_atomic_swap(intptr_t dest, int value, int pe) except? -1
+cpdef long long_atomic_swap(intptr_t dest, long value, int pe) except? -1
+cpdef long long longlong_atomic_swap(intptr_t dest, long long value, int pe) except? -1
+cpdef size_t size_atomic_swap(intptr_t dest, size_t value, int pe) except? -1
+cpdef ptrdiff_t ptrdiff_atomic_swap(intptr_t dest, ptrdiff_t value, int pe) except? -1
+cpdef float float_atomic_swap(intptr_t dest, float value, int pe) except? -1
+cpdef double double_atomic_swap(intptr_t dest, double value, int pe) except? -1
+cpdef unsigned int uint_atomic_compare_swap(intptr_t dest, unsigned int cond, unsigned int value, int pe) except? -1
+cpdef unsigned long ulong_atomic_compare_swap(intptr_t dest, unsigned long cond, unsigned long value, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_compare_swap(intptr_t dest, unsigned long long cond, unsigned long long value, int pe) except? -1
+cpdef int32_t int32_atomic_compare_swap(intptr_t dest, int32_t cond, int32_t value, int pe) except? -1
+cpdef uint32_t uint32_atomic_compare_swap(intptr_t dest, uint32_t cond, uint32_t value, int pe) except? -1
+cpdef int64_t int64_atomic_compare_swap(intptr_t dest, int64_t cond, int64_t value, int pe) except? -1
+cpdef uint64_t uint64_atomic_compare_swap(intptr_t dest, uint64_t cond, uint64_t value, int pe) except? -1
+cpdef int int_atomic_compare_swap(intptr_t dest, int cond, int value, int pe) except? -1
+cpdef long long_atomic_compare_swap(intptr_t dest, long cond, long value, int pe) except? -1
+cpdef long long longlong_atomic_compare_swap(intptr_t dest, long long cond, long long value, int pe) except? -1
+cpdef size_t size_atomic_compare_swap(intptr_t dest, size_t cond, size_t value, int pe) except? -1
+cpdef ptrdiff_t ptrdiff_atomic_compare_swap(intptr_t dest, ptrdiff_t cond, ptrdiff_t value, int pe) except? -1
+cpdef void uint_atomic_and(intptr_t dest, unsigned int value, int pe) except*
+cpdef void ulong_atomic_and(intptr_t dest, unsigned long value, int pe) except*
+cpdef void ulonglong_atomic_and(intptr_t dest, unsigned long long value, int pe) except*
+cpdef void int32_atomic_and(intptr_t dest, int32_t value, int pe) except*
+cpdef void uint32_atomic_and(intptr_t dest, uint32_t value, int pe) except*
+cpdef void int64_atomic_and(intptr_t dest, int64_t value, int pe) except*
+cpdef void uint64_atomic_and(intptr_t dest, uint64_t value, int pe) except*
+cpdef void uint_atomic_or(intptr_t dest, unsigned int value, int pe) except*
+cpdef void ulong_atomic_or(intptr_t dest, unsigned long value, int pe) except*
+cpdef void ulonglong_atomic_or(intptr_t dest, unsigned long long value, int pe) except*
+cpdef void int32_atomic_or(intptr_t dest, int32_t value, int pe) except*
+cpdef void uint32_atomic_or(intptr_t dest, uint32_t value, int pe) except*
+cpdef void int64_atomic_or(intptr_t dest, int64_t value, int pe) except*
+cpdef void uint64_atomic_or(intptr_t dest, uint64_t value, int pe) except*
+cpdef void uint_atomic_xor(intptr_t dest, unsigned int value, int pe) except*
+cpdef void ulong_atomic_xor(intptr_t dest, unsigned long value, int pe) except*
+cpdef void ulonglong_atomic_xor(intptr_t dest, unsigned long long value, int pe) except*
+cpdef void int32_atomic_xor(intptr_t dest, int32_t value, int pe) except*
+cpdef void uint32_atomic_xor(intptr_t dest, uint32_t value, int pe) except*
+cpdef void int64_atomic_xor(intptr_t dest, int64_t value, int pe) except*
+cpdef void uint64_atomic_xor(intptr_t dest, uint64_t value, int pe) except*
+cpdef unsigned int uint_atomic_fetch_and(intptr_t dest, unsigned int value, int pe) except? -1
+cpdef unsigned long ulong_atomic_fetch_and(intptr_t dest, unsigned long value, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_fetch_and(intptr_t dest, unsigned long long value, int pe) except? -1
+cpdef int32_t int32_atomic_fetch_and(intptr_t dest, int32_t value, int pe) except? -1
+cpdef uint32_t uint32_atomic_fetch_and(intptr_t dest, uint32_t value, int pe) except? -1
+cpdef int64_t int64_atomic_fetch_and(intptr_t dest, int64_t value, int pe) except? -1
+cpdef uint64_t uint64_atomic_fetch_and(intptr_t dest, uint64_t value, int pe) except? -1
+cpdef unsigned int uint_atomic_fetch_or(intptr_t dest, unsigned int value, int pe) except? -1
+cpdef unsigned long ulong_atomic_fetch_or(intptr_t dest, unsigned long value, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_fetch_or(intptr_t dest, unsigned long long value, int pe) except? -1
+cpdef int32_t int32_atomic_fetch_or(intptr_t dest, int32_t value, int pe) except? -1
+cpdef uint32_t uint32_atomic_fetch_or(intptr_t dest, uint32_t value, int pe) except? -1
+cpdef int64_t int64_atomic_fetch_or(intptr_t dest, int64_t value, int pe) except? -1
+cpdef uint64_t uint64_atomic_fetch_or(intptr_t dest, uint64_t value, int pe) except? -1
+cpdef unsigned int uint_atomic_fetch_xor(intptr_t dest, unsigned int value, int pe) except? -1
+cpdef unsigned long ulong_atomic_fetch_xor(intptr_t dest, unsigned long value, int pe) except? -1
+cpdef unsigned long long ulonglong_atomic_fetch_xor(intptr_t dest, unsigned long long value, int pe) except? -1
+cpdef int32_t int32_atomic_fetch_xor(intptr_t dest, int32_t value, int pe) except? -1
+cpdef uint32_t uint32_atomic_fetch_xor(intptr_t dest, uint32_t value, int pe) except? -1
+cpdef int64_t int64_atomic_fetch_xor(intptr_t dest, int64_t value, int pe) except? -1
+cpdef uint64_t uint64_atomic_fetch_xor(intptr_t dest, uint64_t value, int pe) except? -1
+cpdef uint64_t signal_fetch(intptr_t sig_addr) except? -1
 cpdef int team_my_pe(int32_t team) except? -1
 cpdef int team_n_pes(int32_t team) except? -1
 cpdef void team_get_config(int32_t team, intptr_t config) except*
@@ -252,12 +403,17 @@ cpdef get_uniqueid(intptr_t uniqueid)
 cpdef int cumodule_init(intptr_t module) except? -1
 cpdef int cumodule_finalize(intptr_t module) except? -1
 cpdef intptr_t buffer_register_symmetric(intptr_t buf_ptr, size_t size, int flags) except? 0
+cpdef intptr_t buffer_register_symmetric_at_preferred_address(intptr_t buf_ptr, size_t size, intptr_t preferred_addr, int flags) except? 0
 cpdef int buffer_unregister_symmetric(intptr_t mmap_ptr, size_t size) except? 0
 cpdef int culibrary_init(intptr_t library) except? -1
 cpdef int culibrary_finalize(intptr_t library) except? -1
 cpdef void putmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*
 cpdef void putmem_signal_on_stream(intptr_t dest, intptr_t source, size_t bytes, intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*
+cpdef void putmem_signal_nbi_on_stream(intptr_t dest, intptr_t source, size_t bytes, intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*
+cpdef void putmem_nbi_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*
 cpdef void getmem_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*
+cpdef void getmem_nbi_on_stream(intptr_t dest, intptr_t source, size_t bytes, int pe, intptr_t cstrm) except*
 cpdef void quiet_on_stream(intptr_t cstrm) except*
+cpdef void flush_on_stream(intptr_t cstrm) except*
 cpdef void signal_op_on_stream(intptr_t sig_addr, uint64_t signal, int sig_op, int pe, intptr_t cstrm) except*
 cpdef void signal_wait_until_on_stream(intptr_t sig_addr, int cmp, uint64_t cmp_value, intptr_t cstream) except*
