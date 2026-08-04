@@ -72,7 +72,7 @@ numba = [
     "numba-cuda[<NUMBA_CUDA_VERSION_PLACEHOLDER>]>=0.28.0",
 ]
 cute = [
-    "nvidia-cutlass-dsl==4.4.2",
+    "nvidia-cutlass-dsl<CUTLASS_DSL_EXTRA_PLACEHOLDER>>=4.5.2,<5.0",
 ]
 
 [tool.black]
@@ -105,6 +105,8 @@ def update_pyproject(cuda_ver, nvshmem4py_path):
         new_content = content + "\n" + dep_block
 
     new_content = new_content.replace("<NUMBA_CUDA_VERSION_PLACEHOLDER>", f"cu{cuda_ver}")
+    cutlass_extra = "[cu13]" if cuda_ver == "13" else ""
+    new_content = new_content.replace("<CUTLASS_DSL_EXTRA_PLACEHOLDER>", cutlass_extra)
 
     print(new_content)
 

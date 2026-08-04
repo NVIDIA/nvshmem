@@ -12,6 +12,10 @@ import warnings
 from nvshmem.core.nvshmem_types import NvshmemWarning
 
 if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cuteast.py")):
+    if not hasattr(cute, "extern"):
+        raise RuntimeError("NVSHMEM CuTe DSL bindings require nvidia-cutlass-dsl>=4.5.2; "
+                           "the installed version does not provide cute.extern.")
+
     from ._cuteast import *
     from nvshmem.core.nvshmem_types import Teams
 
@@ -28,11 +32,6 @@ if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cut
     if not os.path.exists(CCCL_INCLUDE_PATH):
         raise RuntimeError(
             f"CCCL headers not found at {CCCL_INCLUDE_PATH}. Please confirm that cccl is installed correctly.")
-
-    # Path to this folder to look for entry point file
-    this_folder = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.exists(os.path.join(this_folder, "entry_point.h")):
-        raise RuntimeError("entry_point.h not found, package may not be properly installed")
 
 else:
     warnings.warn("CuTe DSL device bindings are not enabled", NvshmemWarning)

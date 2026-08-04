@@ -11,7 +11,7 @@ import torch
 import cutlass.cute as cute
 from cutlass.cute.runtime import from_dlpack
 from cutlass._mlir.dialects import llvm
-from cutlass.cute.typing import Pointer, Boolean, Int32, Int, Int64, Constexpr
+from cutlass.cute.typing import Pointer, Boolean, Int32, Int, Int64
 from cutlass.cutlass_dsl import T, dsl_user_op
 from cutlass.cute.arch.nvvm_wrappers import FULL_MASK, WARP_SIZE
 import cutlass
@@ -57,13 +57,7 @@ def run():
     tensor_dlpack = from_dlpack(tensor).mark_layout_dynamic()
     print(tensor_dlpack)
 
-    nvshmem_device_bc = nvshmem.core.find_device_bitcode_library()
-
-    compilerd_func = cute.compile(
-        simple_shift,
-        tensor_dlpack,
-        options=f" --link-libraries={nvshmem_device_bc}",
-    )
+    compilerd_func = cute.compile(simple_shift, tensor_dlpack)
 
     compilerd_func = compilerd_func.to(my_pe)
     cuda_library = compilerd_func.jit_module.cuda_library

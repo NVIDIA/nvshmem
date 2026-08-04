@@ -74,9 +74,35 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BU
     )
 endif()
 
-# Generate CuTe Bindings. Follows the same requirements as the Numba bindings
-# Separate build step because users may want one but not the other
-if (EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py"))
+set(CUTEAST_OUTPUT "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py")
+set(CUTE_BINDINGS_ASSET_DIR "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute")
+set(CUTE_BINDINGS_INPUTS
+    "${CUTE_BINDINGS_ASSET_DIR}/entry_point.h"
+    "${CUTE_BINDINGS_ASSET_DIR}/generate_amo.py"
+    "${CUTE_BINDINGS_ASSET_DIR}/generate_collective.py"
+    "${CUTE_BINDINGS_ASSET_DIR}/generate_cute_bindings.py"
+    "${CUTE_BINDINGS_ASSET_DIR}/generate_cute_config.py"
+    "${CUTE_BINDINGS_ASSET_DIR}/generate_rma.py"
+    "${CUTE_BINDINGS_ASSET_DIR}/templates/config_nvshmem.yml.j2"
+    "${CUTE_BINDINGS_ASSET_DIR}/templates/core/device/cute/amo.py.j2"
+    "${CUTE_BINDINGS_ASSET_DIR}/templates/core/device/cute/collective.py.j2"
+    "${CUTE_BINDINGS_ASSET_DIR}/templates/core/device/cute/rma.py.j2"
+    "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/numbast_common.py"
+)
+set(CUTE_BINDINGS_GENERATOR_AVAILABLE TRUE)
+foreach(CUTE_BINDINGS_INPUT IN LISTS CUTE_BINDINGS_INPUTS)
+    if(NOT EXISTS "${CUTE_BINDINGS_INPUT}")
+        set(CUTE_BINDINGS_GENERATOR_AVAILABLE FALSE)
+    endif()
+endforeach()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND
+   CUTE_BINDINGS_GENERATOR_AVAILABLE AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+    if(NVSHMEM_FORCE_REBUILD_PYTHON_LIB AND EXISTS "${CUTEAST_OUTPUT}")
+        file(REMOVE "${CUTEAST_OUTPUT}")
+        message(STATUS "Force rebuild: removed ${CUTEAST_OUTPUT}")
+    endif()
+
     include(cmake/generateCuteBindings.cmake)
     generateCuteBindings()
 endif()
@@ -196,7 +222,7 @@ foreach(LINE IN LISTS PYTHON_LINE_LIST)
             add_dependencies(${WHEEL_TARGET} build_bindings_numbast)
         endif()
 
-        if(TARGET build_bindings_cute AND TARGET build_bindings_numbast AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+        if(TARGET build_bindings_cute AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
             add_dependencies(${WHEEL_TARGET} build_bindings_cute)
         endif()
 

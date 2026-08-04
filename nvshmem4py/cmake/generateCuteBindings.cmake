@@ -1,138 +1,100 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-function(generateCuteBindings)
-    
-    # Locate Git
-    find_package(Git REQUIRED)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+include("${CMAKE_CURRENT_LIST_DIR}/ensureNumbast.cmake")
 
-    if(NOT GIT_EXECUTABLE)
-        message(FATAL_ERROR "Git not found on the system!")
-    else()
-        message(STATUS "Git found: ${GIT_EXECUTABLE}")
-    endif()
+function(generateCuteBindings)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
     set(VENV_DIR "${CMAKE_BINARY_DIR}/externals/venv")
     set(VENV_PYTHON_EXECUTABLE "${VENV_DIR}/bin/python3")
+    set(NUMBAST_VERSION "0.9.0")
+    nvshmem_ensure_numbast(VERSION "${NUMBAST_VERSION}")
 
+    set(CUTE_TREE_DIR "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute")
+    set(CUTE_WORKDIR "${CMAKE_BINARY_DIR}/externals/numbast_cute")
+    set(CUTE_CONFIG_OUTPUT "${CUTE_WORKDIR}/config_nvshmem.yml")
+    set(CUTE_BINDINGS_SETTINGS "${CUTE_WORKDIR}/generator-settings.cmake")
+    set(CUTE_ASTCANOPY_INSTALL_PREFIX
+        "${CMAKE_BINARY_DIR}/externals/numbast/build_assets/ast_canopy/install")
+    set(CUTEAST_OUTPUT "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py")
+    set(CUTE_HIGH_LEVEL_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/core/device/cute")
+    set(CUTE_RMA_OUTPUT "${CUTE_HIGH_LEVEL_OUTPUT_DIR}/rma.py")
+    set(CUTE_COLLECTIVE_OUTPUT "${CUTE_HIGH_LEVEL_OUTPUT_DIR}/collective.py")
+    set(CUTE_AMO_OUTPUT "${CUTE_HIGH_LEVEL_OUTPUT_DIR}/amo.py")
+    set(CUTE_NUMBAST_LD_LIBRARY_PATH
+        "LD_LIBRARY_PATH=${CUTE_ASTCANOPY_INSTALL_PREFIX}/lib:${CUTE_ASTCANOPY_INSTALL_PREFIX}/lib64:$ENV{LD_LIBRARY_PATH}")
 
-    
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/externals")
-    
-    set(NUMBAST_CONFIG_VERSION "0.1.0")
-    
-    set(PACKAGE_NAME "numbast")
-    # WORKDIR is the directory where Numbast binding generation happens
-    # Use a separate directory for CuTe to avoid conflicts with Numbast bindings
-    set(WORKDIR "${CMAKE_BINARY_DIR}/externals/${PACKAGE_NAME}_cute")
-    # BINDGEN_TOOL_REPO is the directory where Numbast binding generation tool is cloned
-    set(BINDGEN_TOOL_REPO "${WORKDIR}/${PACKAGE_NAME}_cute")
-    # ASSET_DIR is the directory where `build_assets/numbast/` is cloned
-    set(ASSET_DIR "${WORKDIR}/build_assets")
-    # NUMBAST_OUTPUT_DIR is the directory where Numbast output is generated
-    set(NUMBAST_OUTPUT_DIR "${WORKDIR}/out")
-    # OUTPUT_NAME is the name of the output binding file
-    set(OUTPUT_NAME "nvshmem_cute_device_binding_generated.py")
-
-    # Path to install libastcanopy.so
-    set(ASTCANOPY_CMAKE_INSTALL_PREFIX "${ASSET_DIR}/ast_canopy/install")
-    set(NUMBAST_LD_LIBRARY_PATH "LD_LIBRARY_PATH=${ASTCANOPY_CMAKE_INSTALL_PREFIX}/lib:${ASTCANOPY_CMAKE_INSTALL_PREFIX}/lib64:$ENV{LD_LIBRARY_PATH}")
-    set(NUMBAST_COMMAND "env" "${NUMBAST_LD_LIBRARY_PATH}" "${VENV_PYTHON_EXECUTABLE}" ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_cute_bindings.py)
-    
-    # High Level Bindings Settings
-    set(HIGH_LEVEL_BINDINGS_OUTPUT_DIR ${NUMBAST_OUTPUT_DIR}/high_level/)
-
-    # OUTPUT_DIR is the place to store each steps output file for cmake to validate step
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/externals/output")
-
-    file(REMOVE_RECURSE "${WORKDIR}")
-    # Ensure directories are created at configure time
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/externals")
-    file(MAKE_DIRECTORY "${WORKDIR}")
-    file(MAKE_DIRECTORY "${ASSET_DIR}")
-    file(MAKE_DIRECTORY "${OUTPUT_DIR}")
-    file(MAKE_DIRECTORY "${NUMBAST_OUTPUT_DIR}")
-    file(MAKE_DIRECTORY "${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}")
-
-    set(CUTE_TREE_DIR ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/)
-
-    file(MAKE_DIRECTORY "${OUTPUT_DIR}")
-
-    # Step 1: Generate Numbast config for nvshmem/CuTe
-    add_custom_target(
-        generate_numbast_config_cute
-        # Make dirs
-        COMMAND mkdir -p ${ASSET_DIR}
-        COMMAND mkdir -p ${OUTPUT_DIR}
-        # Generate Numbast config for nvshmem (if applicable)
-        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CUTE_TREE_DIR}/generate_cute_config.py
-            --nvshmem-home ${CMAKE_SOURCE_DIR}
-            --config-version ${NUMBAST_CONFIG_VERSION}
-            --entry-point-path ${CUTE_TREE_DIR}/entry_point.h
-            --binding-name ${OUTPUT_NAME}
-            --input-path ${CUTE_TREE_DIR}/templates/config_nvshmem.yml.j2
-            --output-path ${CUTE_TREE_DIR}/config_nvshmem.yml
-
-        # Depends on the Numbast stuff being set up already.
-        DEPENDS pip_install_numbast
-        COMMAND touch ${OUTPUT_DIR}/copy_config.txt
-        COMMENT "Generating Numbast config for nvshmem"
+    set(CUTE_BINDINGS_OUTPUTS
+        "${CUTEAST_OUTPUT}"
+        "${CUTE_RMA_OUTPUT}"
+        "${CUTE_COLLECTIVE_OUTPUT}"
+        "${CUTE_AMO_OUTPUT}"
+    )
+    set(CUTE_BINDINGS_INPUTS
+        "${CUTE_TREE_DIR}/entry_point.h"
+        "${CUTE_TREE_DIR}/generate_amo.py"
+        "${CUTE_TREE_DIR}/generate_collective.py"
+        "${CUTE_TREE_DIR}/generate_cute_bindings.py"
+        "${CUTE_TREE_DIR}/generate_cute_config.py"
+        "${CUTE_TREE_DIR}/generate_rma.py"
+        "${CUTE_TREE_DIR}/templates/config_nvshmem.yml.j2"
+        "${CUTE_TREE_DIR}/templates/core/device/cute/amo.py.j2"
+        "${CUTE_TREE_DIR}/templates/core/device/cute/collective.py.j2"
+        "${CUTE_TREE_DIR}/templates/core/device/cute/rma.py.j2"
+        "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/numbast/numbast_common.py"
+        "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake"
+        "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/ensureNumbast.cmake"
+        "${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt"
+    )
+    file(GLOB_RECURSE CUTE_NVSHMEM_HEADERS CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/src/include/*.h"
+        "${CMAKE_SOURCE_DIR}/src/include/*.hpp"
+        "${CMAKE_SOURCE_DIR}/src/include/*.cuh"
     )
 
-    # Step 2: Run Numbast
-    add_custom_target(
-        run_numbast_cute
-        # Set up environment for Numbast
-        COMMAND mkdir -p ${NUMBAST_OUTPUT_DIR}
-        COMMAND ${NUMBAST_COMMAND}
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    file(MAKE_DIRECTORY "${CUTE_WORKDIR}")
+    file(CONFIGURE
+        OUTPUT "${CUTE_BINDINGS_SETTINGS}"
+        CONTENT "CUDA_HOME=@CUDA_HOME@\nNVSHMEM_SOURCE_DIR=@CMAKE_SOURCE_DIR@\nNUMBAST_CONFIG_VERSION=0.1.0\nNUMBAST_VERSION=@NUMBAST_VERSION@\n"
+        @ONLY
+    )
+
+    add_custom_command(
+        OUTPUT ${CUTE_BINDINGS_OUTPUTS}
+        BYPRODUCTS "${CUTE_CONFIG_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CUTE_WORKDIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CUTE_HIGH_LEVEL_OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E env "CUDA_HOME=${CUDA_HOME}"
+                ${VENV_PYTHON_EXECUTABLE} "${CUTE_TREE_DIR}/generate_cute_config.py"
+                --nvshmem-home ${CMAKE_SOURCE_DIR}
+                --config-version 0.1.0
+                --entry-point-path "${CUTE_TREE_DIR}/entry_point.h"
+                --binding-name nvshmem_cute_device_binding_generated.py
+                --input-path "${CUTE_TREE_DIR}/templates/config_nvshmem.yml.j2"
+                --output-path "${CUTE_CONFIG_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E env "CUDA_HOME=${CUDA_HOME}" "${CUTE_NUMBAST_LD_LIBRARY_PATH}"
+                ${VENV_PYTHON_EXECUTABLE} "${CUTE_TREE_DIR}/generate_cute_bindings.py"
+                --config-path "${CUTE_CONFIG_OUTPUT}"
+                --output-path "${CUTEAST_OUTPUT}"
+        COMMAND ${VENV_PYTHON_EXECUTABLE} "${CUTE_TREE_DIR}/generate_rma.py"
+                --output-dir "${CUTE_HIGH_LEVEL_OUTPUT_DIR}"
+        COMMAND ${VENV_PYTHON_EXECUTABLE} "${CUTE_TREE_DIR}/generate_collective.py"
+                --output-dir "${CUTE_HIGH_LEVEL_OUTPUT_DIR}"
+        COMMAND ${VENV_PYTHON_EXECUTABLE} "${CUTE_TREE_DIR}/generate_amo.py"
+                --output-dir "${CUTE_HIGH_LEVEL_OUTPUT_DIR}"
+        DEPENDS pip_install_numbast
+                ${CUTE_BINDINGS_INPUTS}
+                ${CUTE_NVSHMEM_HEADERS}
+                "${CUTE_BINDINGS_SETTINGS}"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Generating CuTe bindings"
         USES_TERMINAL
-        DEPENDS pip_install_numbast
-        DEPENDS generate_numbast_config_cute
-        COMMAND touch ${OUTPUT_DIR}/run_numbast_cute.txt
-        COMMENT "Generating Numbast bindings..."
-        COMMENT "Numbast command: ${NUMBAST_COMMAND}"
+        VERBATIM
     )
 
-
-    # Step 3: Copy generated bindings into nvshmem4py
-    add_custom_target(
-        get_numbast_output_cute
-        COMMAND cp -rvf ${CUTE_TREE_DIR}/_cuteast.py ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py
-        # entry_point.h is both the entry point for parsing decls, and the entry point for CuTe DSL runtime compilation.
-        # TODO: Do we need this with the linked bitcode?
-    	COMMAND cp -rvf ${CUTE_TREE_DIR}/entry_point.h ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/entry_point.h
-        DEPENDS run_numbast_cute
-    )
-
-    # Step 4: Generate CuTe high level bindings
-    add_custom_target(
-        generate_high_level_bindings_cute
-        COMMAND mkdir -p ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
-        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_rma.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
-        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_collective.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
-        COMMAND ${VENV_PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cute/generate_amo.py --output-dir ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}
-        COMMAND touch ${OUTPUT_DIR}/generate_cute_high_level_bindings.txt
-        COMMENT "Generating High Level Bindings..."
-        DEPENDS get_numbast_output_cute
-    )
-
-    # Step 5: Copy generated high level bindings into nvshmem4py
-    add_custom_target(
-        get_high_level_bindings_cute
-        COMMAND mkdir -p ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/core/device/cute
-        COMMAND cp -rvf ${HIGH_LEVEL_BINDINGS_OUTPUT_DIR}/* ${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/core/device/cute/
-        COMMENT "Copying High Level Bindings into nvshmem4py"
-        DEPENDS generate_high_level_bindings_cute
-    )
-
-    # Final target to trigger everything
-    # Note: build_bindings_numbast may not exist if Numbast bindings weren't generated
+    add_custom_target(build_bindings_cute DEPENDS ${CUTE_BINDINGS_OUTPUTS})
     if(TARGET build_bindings_numbast)
-        add_custom_target(build_bindings_cute DEPENDS build_bindings_numbast get_high_level_bindings_cute)
-    else()
-        add_custom_target(build_bindings_cute DEPENDS get_high_level_bindings_cute)
+        add_dependencies(build_bindings_cute build_bindings_numbast)
     endif()
-
 endfunction()
