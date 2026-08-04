@@ -65,7 +65,7 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
         add_custom_target(make_venv_libs_wheel
             COMMAND ${Python3_EXECUTABLE} -m venv "${VENV_DIR}"
             COMMAND "${VENV_PYTHON}" -m pip install --upgrade pip
-            COMMAND "${VENV_PYTHON}" -m pip install build setuptools wheel
+            COMMAND "${VENV_PYTHON}" -m pip install --upgrade build setuptools wheel
             COMMENT "Creating Python venv for libs wheel build"
             USES_TERMINAL
         )

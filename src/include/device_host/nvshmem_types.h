@@ -34,6 +34,9 @@
 #define COLL_ENV_VARS_PADDING 472
 #define COLL_ENV_VARS_V2_PADDING 416
 
+#define NVSHMEMI_TEAM_DUP_COUNT 128
+#define NVSHMEMI_NVLS_MAX_CTA_COUNT NVSHMEMI_TEAM_DUP_COUNT
+
 #define RED_REC_INVALID_SCALAR -1
 #define TEAM_CONFIG_SCALAR_INVALID -1
 #define TEAM_SCALAR_INVALID -1
@@ -115,9 +118,6 @@
     {NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER, /* version */      \
      TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
      {0}}
-
-constexpr inline int NVSHMEMI_TEAM_DUP_COUNT = 128;
-constexpr inline int NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEAM_DUP_COUNT;
 
 #define NVSHMEMI_TEAM_V4_IDENTIFIER ((4 << 16) + sizeof(nvshmemi_team_t))
 #define NVSHMEMI_TEAM_INITIALIZER                                                      \
