@@ -72,6 +72,10 @@ void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, siz
                                                               void *preferred_addr, int flags);
 int nvshmemx_buffer_unregister_symmetric(void *mmap_ptr, size_t size);
 
+int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_region_attrs_t *attrs);
+int nvshmemx_region_stop(nvshmemx_region_handle_t handle);
+int nvshmemx_region_is_active(uint32_t hints, int *active);
+
 int nvshmemx_culibrary_init(CUlibrary library);
 int nvshmemx_culibrary_finalize(CUlibrary library);
 

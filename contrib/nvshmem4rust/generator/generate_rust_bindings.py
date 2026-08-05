@@ -39,6 +39,9 @@ _TYPE_MAP = {
     "nvshmemx_init_attr_t": "nvshmemx_init_attr_t",
     "nvshmemx_init_attr_v1": "nvshmemx_init_attr_v1",
     "nvshmemx_init_attr_v2": "nvshmemx_init_attr_t",
+    "nvshmemx_region_attrs": "nvshmemx_region_attrs_t",
+    "nvshmemx_region_attrs_t": "nvshmemx_region_attrs_t",
+    "nvshmemx_region_handle_t": "nvshmemx_region_handle_t",
     "nvshmemx_team_uniqueid_t": "nvshmemx_team_uniqueid_t",
     "nvshmemx_smem_amount_t": "nvshmemx_smem_amount_t",
     "nvshmemx_team_t": "nvshmemx_team_t",
@@ -297,6 +300,22 @@ def _common_allow_lines():
     ]
 
 
+def _region_type_lines():
+    return [
+        "pub type nvshmemx_region_handle_t = u64;",
+        "pub const NVSHMEMX_REGION_ATTRS_RESERVED_BYTES: usize = 60;",
+        "pub const NVSHMEMX_REGION_HINT_NONE: u32 = 0;",
+        "pub const NVSHMEMX_REGION_HINT_BATCH_RMA: u32 = 1 << 0;",
+        "",
+        "#[repr(C)]",
+        "#[derive(Clone, Copy)]",
+        "pub struct nvshmemx_region_attrs_t {",
+        "    pub hints: u32,",
+        "    pub reserved: [i8; NVSHMEMX_REGION_ATTRS_RESERVED_BYTES],",
+        "}",
+    ]
+
+
 def _device_prelude_lines(config):
     return [
         "// Include this module from CUDA-Oxide device code and link with NVSHMEM LTOIR.",
@@ -307,6 +326,7 @@ def _device_prelude_lines(config):
         "pub type nvshmem_team_t = i32;",
         "pub type nvshmemx_team_t = nvshmem_team_t;",
         "pub type nvshmemx_smem_amount_t = i32;",
+        *_region_type_lines(),
         "",
         "#[repr(transparent)]",
         "#[derive(Clone, Copy)]",
@@ -368,6 +388,7 @@ def _host_prelude_lines(config):
         "pub type cudaStream_t = *mut core::ffi::c_void;",
         "pub type CUmodule = *mut core::ffi::c_void;",
         "pub type CUlibrary = *mut core::ffi::c_void;",
+        *_region_type_lines(),
         "",
         "#[repr(transparent)]",
         "#[derive(Clone, Copy)]",
