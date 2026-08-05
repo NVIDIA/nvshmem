@@ -1240,6 +1240,15 @@ install(FILES ${CMAKE_BINARY_DIR}/NVSHMEMConfig.cmake
         DESTINATION lib/cmake/nvshmem
 	)
 
+install(
+  FILES
+    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMClangSetup.cmake
+    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCUDAArchitectures.cmake
+    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCUDATools.cmake
+    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCxxStandard.cmake
+  DESTINATION lib/cmake/nvshmem/modules
+)
+
 export(
   EXPORT NVSHMEMTargets
   NAMESPACE nvshmem::

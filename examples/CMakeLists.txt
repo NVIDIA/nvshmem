@@ -34,10 +34,6 @@ if(NOT SubBuild)
   project(NVSHMEMExamples VERSION 1.0.0
           LANGUAGES CUDA CXX)
 
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config")
-  include(NVSHMEMCxxStandard)
-  include(NVSHMEMCUDAArchitectures)
-
   if (DEFINED ENV{NVSHMEM_PREFIX})
     set(NVSHMEM_PREFIX_DEFAULT $ENV{NVSHMEM_PREFIX})
   else()
@@ -70,12 +66,17 @@ if(NOT SubBuild)
     message(FATAL_ERROR "NVSHMEM examples require CUDA 12.0 or later.")
   endif()
 
+  find_package(NVSHMEM CONFIG REQUIRED HINTS ${NVSHMEM_PREFIX}/lib/cmake/nvshmem)
+  list(PREPEND CMAKE_MODULE_PATH "${NVSHMEM_CMAKE_MODULE_DIR}")
+
+  include(NVSHMEMCxxStandard)
+  include(NVSHMEMCUDAArchitectures)
+
   nvshmem_set_default_cuda_architectures()
 
   include(CheckCompilerFlag)
   check_compiler_flag(CUDA -t4 NVCC_THREADS)
 
-  find_package(NVSHMEM REQUIRED HINTS ${NVSHMEM_PREFIX}/lib/cmake/nvshmem)
   add_library(nvshmem_host ALIAS nvshmem::nvshmem_host)
   add_library(nvshmem_device ALIAS nvshmem::nvshmem_device)
 

@@ -43,9 +43,6 @@ if(NOT SubBuild)
   project(NVSHMEMPerftest VERSION 1.0.0
           LANGUAGES CUDA CXX)
 
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config")
-  include(NVSHMEMCxxStandard)
-
   if (DEFINED ENV{NVSHMEM_PREFIX})
     set(NVSHMEM_PREFIX_DEFAULT $ENV{NVSHMEM_PREFIX})
   else()
@@ -81,13 +78,18 @@ if(NOT SubBuild)
   if(CUDAToolkit_VERSION VERSION_LESS 12.0)
     message(FATAL_ERROR "NVSHMEM perftests require CUDA 12.0 or later.")
   endif()
-  include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config/NVSHMEMCUDATools.cmake)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config/NVSHMEMCUDAArchitectures.cmake)
+
+  find_package(NVSHMEM CONFIG REQUIRED HINTS ${NVSHMEM_PREFIX}/lib/cmake/nvshmem)
+  list(PREPEND CMAKE_MODULE_PATH "${NVSHMEM_CMAKE_MODULE_DIR}")
+
+  include(NVSHMEMCxxStandard)
+  include(NVSHMEMCUDATools)
+  include(NVSHMEMCUDAArchitectures)
 
   nvshmem_set_default_cuda_architectures()
 
   if(NVSHMEM_BUILD_BITCODE_LIBRARY)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake_config/NVSHMEMClangSetup.cmake)
+    include(NVSHMEMClangSetup)
     if(NOT NVSHMEM_LLVM_LINK_AVAILABLE OR NOT NVSHMEM_OPT_AVAILABLE OR NOT NVSHMEM_LLC_AVAILABLE)
       message(WARNING
               "llvm-link, opt, or llc not found — bitcode cubin perftest targets will be skipped")
@@ -97,7 +99,6 @@ if(NOT SubBuild)
   include(CheckCompilerFlag)
   check_compiler_flag(CUDA -t4 NVCC_THREADS)
 
-  find_package(NVSHMEM REQUIRED HINTS ${NVSHMEM_PREFIX}/lib/cmake/nvshmem)
   add_library(nvshmem_host ALIAS nvshmem::nvshmem_host)
   add_library(nvshmem_device ALIAS nvshmem::nvshmem_device)
 
