@@ -14,6 +14,10 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device/nvshmemx_collective_launch_apis.h"
 
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
+extern "C" {
+#endif
+
 /*
  * nvshmemx_ask_smem - Returns the amount of shared memory (in bytes) that NVSHMEM
  * needs for TMA-based transfers.
@@ -42,7 +46,8 @@
  *                                  if the user manages their own data in the
  *                                  remainder of their own smem buffer.
  */
-__host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
+__host__ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_ask_smem(
+    nvshmemx_smem_amount_t flag) {
     switch (flag) {
         case NVSHMEMX_SMEM_RECOMMENDED:
             return 65536; /* 64 KiB */
@@ -78,7 +83,7 @@ __host__ __device__ inline int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag) {
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
  */
-__device__ inline void nvshmemx_give_smem(void *smem, size_t size) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, size_t size) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     if (smem == NULL || size == 0) return;
@@ -111,7 +116,7 @@ __device__ inline void nvshmemx_give_smem(void *smem, size_t size) {
  * Call from all threads; only the elected warp-0 leader clears the registration.
  * Callers are responsible for synchronizing before reusing the shared memory.
  */
-__device__ inline void nvshmemx_release_smem() {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
     if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
     int registration_slot = nvshmemi_tma_find_smem_registration();
@@ -122,6 +127,10 @@ __device__ inline void nvshmemx_release_smem() {
     }
 #endif /* __CUDA_ARCH__ >= 900 */
 }
+
+#if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
+}
+#endif
 
 #ifdef __CUDA_ARCH__
 #if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
