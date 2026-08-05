@@ -9,7 +9,7 @@
 #define NVSHMEMI_IBGDA_QP_MANAGEMENT_PADDING 24
 #define NVSHMEMI_IBGDA_STATE_PADDING 64
 
-#define NVSHMEMI_IBGDA_STATE_PADDING_V2 56
+#define NVSHMEMI_IBGDA_STATE_PADDING_V2 44
 
 #define NVSHMEMI_IBGDA_SCALAR_INVALID -1
 #define NVSHMEMI_IBGDA_USSCALAR_INVALID 0xFFFF
@@ -105,6 +105,8 @@
         state.globalmem.lkeys = NULL;                                      \
         state.globalmem.rkeys = NULL;                                      \
         state.extra = NULL;                                                \
+        state.region_batch_rma_pending_qps = NULL;                         \
+        state.region_batch_rma_threshold = 0;                              \
     } while (0);
 
 #else
@@ -335,6 +337,8 @@ typedef struct {
     int num_default_rc_per_pe;
     bool use_address_stable_amo;
     void *extra;
+    void *region_batch_rma_pending_qps;
+    uint32_t region_batch_rma_threshold;
     uint8_t reserved[NVSHMEMI_IBGDA_STATE_PADDING_V2];
 } nvshmemi_ibgda_device_state_v2;
 static_assert(sizeof(nvshmemi_ibgda_device_state_v2) == 8384,

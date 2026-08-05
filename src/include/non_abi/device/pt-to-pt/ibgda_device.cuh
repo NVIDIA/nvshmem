@@ -17,6 +17,7 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host_transport/nvshmem_common_ibgda.h"
 #include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
 #include "non_abi/nvshmem_build_options.h"
 #include "utils_device.h"
 
@@ -1602,11 +1603,44 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_proxy_post_s
     }
 }
 
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint32_t nvshmemi_ibgda_batch_rma_qp_index(
+    CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state, nvshmemi_ibgda_device_qp_t *qp) {
+    uint32_t ndcis = state->num_shared_dcis + state->num_exclusive_dcis;
+    uintptr_t qp_address = reinterpret_cast<uintptr_t>(qp);
+    uintptr_t dci_address = reinterpret_cast<uintptr_t>(state->globalmem.dcis);
+    uintptr_t dci_end = dci_address + ndcis * sizeof(*qp);
+
+    if (qp_address >= dci_address && qp_address < dci_end) {
+        return static_cast<uint32_t>((qp_address - dci_address) / sizeof(*qp));
+    }
+
+    uintptr_t rc_address = reinterpret_cast<uintptr_t>(state->globalmem.rcs);
+    return ndcis + static_cast<uint32_t>((qp_address - rc_address) / sizeof(*qp));
+}
+
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void
+nvshmemi_ibgda_batch_rma_mark_qp_pending(
+    CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state, nvshmemi_ibgda_device_qp_t *qp,
+    const nvshmemi_region_info_t *region_info) {
+    uint32_t ndcis = state->num_shared_dcis + state->num_exclusive_dcis;
+    uint32_t nrcs = state->num_rc_per_pe * state->num_devices_initialized;
+    uint32_t qp_count = ndcis + nrcs * nvshmemi_device_state_d.npes;
+    uint32_t region_slot_index = nvshmemi_region_slot_index(region_info);
+    if (region_slot_index == UINT32_MAX) {
+        return;
+    }
+    void *pending_qps = nvshmemi_batch_rma_pending_qps_for_slot(state->region_batch_rma_pending_qps,
+                                                                qp_count, region_slot_index);
+    nvshmemi_batch_rma_mark_qp_pending(pending_qps, qp_count,
+                                       nvshmemi_ibgda_batch_rma_qp_index(state, qp));
+}
+
 // If `qp` is shared among CTAs, need_strong_flush must be set to true because
 // we must push prior writes from this CTA to L2 before coalescing DB.
 template <bool need_strong_flush>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_submit_requests(
-    nvshmemi_ibgda_device_qp_t *qp, uint64_t base_wqe_idx, uint16_t num_wqes) {
+    nvshmemi_ibgda_device_qp_t *qp, uint64_t base_wqe_idx, uint16_t num_wqes,
+    const nvshmemi_region_info_t *region_info = nullptr) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     nvshmemi_ibgda_device_qp_management_t *mvars = &qp->mvars;
     uint64_t mask = ~((uint64_t)(state->num_requests_in_batch - 1));
@@ -1633,12 +1667,14 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_submit_reque
         IBGDA_MFENCE();
     }
 
-    bool do_post_send =
-        (new_wqe_idx == ibgda_atomic_read(&mvars->tx_wq.resv_head))  // No concurrent submissions
-        || ((base_wqe_idx & mask) !=
-            (new_wqe_idx & mask))  // Num of not-yet-posted wqes is beyond the threshold.
-        || (num_wqes >= state->num_requests_in_batch);  // The number of wqes in this submission
-                                                        // reaches the threshold.
+    bool no_concurrent_submissions = new_wqe_idx == ibgda_atomic_read(&mvars->tx_wq.resv_head);
+    bool defer_submission =
+        state->region_batch_rma_pending_qps != nullptr &&
+        nvshmemi_region_info_has_hints(region_info, NVSHMEMI_REGION_HINT_BATCH_RMA) &&
+        nvshmemi_region_slot_index(region_info) != UINT32_MAX;
+    bool batch_limit_reached = ((base_wqe_idx & mask) != (new_wqe_idx & mask)) ||
+                               (num_wqes >= state->num_requests_in_batch);
+    bool do_post_send = batch_limit_reached || (!defer_submission && no_concurrent_submissions);
 
     if (do_post_send) {
         if (!state->use_async_postsend) {
@@ -1646,7 +1682,26 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_submit_reque
         } else {
             ibgda_proxy_post_send<need_strong_flush>(qp, new_wqe_idx);
         }
+    } else if (defer_submission) {
+        nvshmemi_ibgda_batch_rma_mark_qp_pending(state, qp, region_info);
     }
+}
+
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
+ibgda_submit_ready(nvshmemi_ibgda_device_qp_t *qp) {
+    CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
+    uint64_t ready_head = ibgda_atomic_read(&qp->mvars.tx_wq.ready_head);
+    uint64_t prod_idx = ibgda_atomic_read(&qp->mvars.tx_wq.prod_idx);
+
+    if (ready_head > prod_idx) {
+        if (!state->use_async_postsend) {
+            ibgda_post_send<true>(qp, ready_head);
+        } else {
+            ibgda_proxy_post_send<true>(qp, ready_head);
+        }
+    }
+
+    return ready_head;
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
@@ -2128,7 +2183,8 @@ template <nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    nvshmemi_ibgda_device_qp_t *selected_qp = nullptr, bool selected_qp_shared_among_ctas = false) {
+    nvshmemi_ibgda_device_qp_t *selected_qp = nullptr, bool selected_qp_shared_among_ctas = false,
+    const nvshmemi_region_info_t *region_info = nullptr) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     unsigned int amask = __activemask();
     bool can_coalesce_warp = selected_qp == nullptr && ibgda_can_coalesce_warp_pe(amask, proxy_pe);
@@ -2270,9 +2326,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
             }
 
             if (is_qp_shared_among_ctas) {
-                ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes);
+                ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes, region_info);
             } else {
-                ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
+                ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes, region_info);
             }
         }
 
@@ -2307,7 +2363,8 @@ static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64,
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
     uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
+    const nvshmemi_region_info_t *region_info = nullptr) {
     assert(SCOPE == NVSHMEMI_THREADGROUP_WARP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
 
     // Use only warp 0
@@ -2401,8 +2458,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
     // Too many chunks. Use ibgda_rma_thread to handle it instead.
     if (unlikely(chunk_idx > tg_size)) {
         if (my_tid == 0) {
-            ibgda_rma_thread<channel_op, nbi, support_half_av_seg>(req_rptr, req_lptr, bytes,
-                                                                   dst_pe, proxy_pe);
+            ibgda_rma_thread<channel_op, nbi, support_half_av_seg>(
+                req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, false, region_info);
         }
         goto out;
     }
@@ -2474,9 +2531,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
         }
 
         if (is_qp_shared_among_ctas) {
-            ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes);
+            ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes, region_info);
         } else {
-            ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
+            ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes, region_info);
         }
 
         if (!nbi) {
@@ -2841,10 +2898,14 @@ nvshmemi_ibgda_rma_g(void *rptr, int dst_pe, nvshmemx_qp_handle_t qp_index = NVS
 /**
  * RMA NBI base
  */
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_batch_rma_submit_pending_qps(
+    const nvshmemi_region_info_t *region_info);
+
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int dst_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
+    const nvshmemi_region_info_t *region_info = nullptr) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     int proxy_pe = ibgda_get_proxy_pe(dst_pe);
 #ifndef __clang_llvm_bitcode_lib__
@@ -2854,25 +2915,32 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_nbi(
 #endif
         if (state->support_half_av_seg) {
             ibgda_rma_thread<channel_op, true, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                     proxy_pe, qp_index);
+                                                     proxy_pe, qp_index, nullptr, false,
+                                                     region_info);
         } else {
             ibgda_rma_thread<channel_op, true, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                      proxy_pe, qp_index);
+                                                      proxy_pe, qp_index, nullptr, false,
+                                                      region_info);
         }
 #ifndef __clang_llvm_bitcode_lib__
     } else {
         if (state->support_half_av_seg) {
             ibgda_rma<SCOPE, channel_op, true, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                     proxy_pe, qp_index);
+                                                     proxy_pe, qp_index, region_info);
         } else {
             ibgda_rma<SCOPE, channel_op, true, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                      proxy_pe, qp_index);
+                                                      proxy_pe, qp_index, region_info);
         }
     }
 #else
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 #endif
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 &&
+        nvshmemi_region_batch_rma_reached_submission_threshold(region_info,
+                                                               state->region_batch_rma_threshold)) {
+        nvshmemi_ibgda_batch_rma_submit_pending_qps(region_info);
+    }
 }
 
 /**
@@ -3532,6 +3600,32 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put_signal(
         }
     }
 #endif
+}
+
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_batch_rma_submit_pending_qps(
+    const nvshmemi_region_info_t *region_info) {
+    CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
+    uint32_t ndcis = state->num_shared_dcis + state->num_exclusive_dcis;
+    uint32_t nrcs = state->num_rc_per_pe * state->num_devices_initialized;
+    uint32_t npes = nvshmemi_device_state_d.npes;
+    uint32_t qp_count = ndcis + nrcs * npes;
+    nvshmemi_ibgda_device_qp_t *dcis = state->globalmem.dcis;
+    nvshmemi_ibgda_device_qp_t *rcs = state->globalmem.rcs;
+    auto submit_qp = [dcis, rcs, ndcis](uint32_t qp_index) {
+        if (qp_index < ndcis) {
+            ibgda_submit_ready(&dcis[qp_index]);
+        } else {
+            ibgda_submit_ready(&rcs[qp_index - ndcis]);
+        }
+    };
+
+    uint32_t region_slot_index = nvshmemi_region_slot_index(region_info);
+    if (state->region_batch_rma_pending_qps == nullptr || region_slot_index == UINT32_MAX) {
+        return;
+    }
+    void *pending_qps = nvshmemi_batch_rma_pending_qps_for_slot(state->region_batch_rma_pending_qps,
+                                                                qp_count, region_slot_index);
+    nvshmemi_batch_rma_submit_pending_qps(pending_qps, qp_count, submit_qp);
 }
 
 template <threadgroup_t SCOPE>

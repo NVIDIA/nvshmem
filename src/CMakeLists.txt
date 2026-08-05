@@ -968,9 +968,11 @@ set(INC_EXPORTS
     device_host/nvshmem_proxy_channel.h
     device_host/nvshmem_types.h
     device_host_transport/nvshmem_common_transport.h
+    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
     non_abi/device/common/nvshmemi_common_device.cuh
     non_abi/device/common/nvshmemi_region_device.cuh
     non_abi/device/common/nvshmemi_region_state.cuh
+    non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
     non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh
     device/nvshmem_coll_defines.cuh
     device/nvshmem_defines.h
@@ -1097,6 +1099,7 @@ set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
     device_host_transport/nvshmem_common_ibgda.h
     device_host_transport/nvshmem_common_gpunetio.h
+    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
     device_host_transport/nvshmem_common_transport.h
     device_host_transport/nvshmem_constants.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h

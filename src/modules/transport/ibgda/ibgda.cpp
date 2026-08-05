@@ -26,6 +26,7 @@
 #include <string>                                        // for basic_string, string, opera...
 #include <vector>                                        // for vector
 #include "device_host_transport/nvshmem_common_ibgda.h"  // for nvshmemi_ibgda_device_state_t
+#include "device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp"
 #include "internal/host_transport/cudawrap.h"            // for CUPFN, nvshmemi_cuda_fn_table
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_options_s, nvshmem...
 #include "non_abi/nvshmemx_error.h"                      // for NVSHMEMX_ERROR_INTERNAL
@@ -343,6 +344,7 @@ static void *ibgda_device_rkeys_d = 0;
 static int ibgda_qp_depth = 0;
 static int ibgda_srq_depth;
 static int ibgda_num_requests_in_batch;
+static int ibgda_region_batch_rma_threshold;
 static int ibgda_num_fetch_slots_per_dci;
 static int ibgda_num_fetch_slots_per_rc;
 
@@ -3806,6 +3808,8 @@ static int ibgda_post_gpu_device_state(
     ibgda_device_state_h->num_rc_per_pe = num_rc_handles / n_devs_selected / n_pes;
     ibgda_device_state_h->rc_map_type = rc_map_type;
     ibgda_device_state_h->num_requests_in_batch = ibgda_num_requests_in_batch;
+    ibgda_device_state_h->region_batch_rma_threshold =
+        static_cast<uint32_t>(ibgda_region_batch_rma_threshold);
     ibgda_device_state_h->support_half_av_seg = support_half_av_seg;
     ibgda_device_state_h->may_skip_cst = ibgda_state->skip_cst;
     ibgda_device_state_h->use_async_postsend = (ibgda_nic_handler != IBGDA_NIC_HANDLER_GPU);
@@ -3963,6 +3967,8 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     nvshmemi_ibgda_device_cq_t *cq_d = ibgda_device_state_h->globalmem.cqs;
 
     uint32_t *qp_group_switches_d = NULL;
+    void *old_batch_rma_pending_qps_d = ibgda_device_state_h->region_batch_rma_pending_qps;
+    void *batch_rma_pending_qps_d = NULL;
 
     nvshmemi_ibgda_device_qp_map_type_t rc_map_type = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_INVALID;
     nvshmemi_ibgda_device_qp_map_type_t dc_map_type = NVSHMEMI_IBGDA_DEVICE_QP_MAP_TYPE_INVALID;
@@ -3975,6 +3981,8 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     int num_cq_handles = 0;
     int num_dci_handles = 0;
     int num_shared_dci_handles = 0;
+    uint32_t batch_rma_qp_count = 0;
+    size_t batch_rma_pending_qps_size = 0;
     int status = 0;
     bool support_half_av_seg = true;
 
@@ -4049,6 +4057,26 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     }
     /* Calculate remaining constants end */
 
+    batch_rma_qp_count = static_cast<uint32_t>(num_dci_handles + num_rc_handles);
+    if (!nvshmemi_batch_rma_pending_qps_storage_size(batch_rma_qp_count,
+                                                     ibgda_state->common.options->REGION_MAX_SLOTS,
+                                                     &batch_rma_pending_qps_size)) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM_REGION_MAX_SLOTS must be a positive power of two.\n");
+    }
+    status = cudaMalloc(&batch_rma_pending_qps_d, batch_rma_pending_qps_size);
+    if (status == cudaErrorMemoryAllocation) {
+        NVSHMEMI_WARN_PRINT("Unable to allocate IBGDA batch RMA state; using scalar RMA.\n");
+        status = cudaSuccess;
+    } else {
+        NVSHMEMI_NE_ERROR_JMP(status, cudaSuccess, NVSHMEMX_ERROR_INTERNAL, out,
+                              "batch RMA pending-QP state allocation failed.");
+        status = cudaMemsetAsync(batch_rma_pending_qps_d, 0, batch_rma_pending_qps_size,
+                                 ibgda_state->my_stream);
+        NVSHMEMI_NE_ERROR_JMP(status, cudaSuccess, NVSHMEMX_ERROR_INTERNAL, out,
+                              "batch RMA pending-QP state initialization failed.");
+    }
+
     /* Populate and copy data start */
     if (need_dct_setup) {
         status = ibgda_populate_dct_gpu_data(ibgda_state, dct_h, num_dct_handles);
@@ -4098,6 +4126,7 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
     /* Populate and copy data end */
 
     /* Post device state start */
+    ibgda_device_state_h->region_batch_rma_pending_qps = batch_rma_pending_qps_d;
     status = ibgda_post_gpu_device_state(
         ibgda_state, t, ibgda_device_state_h, dci_d, rc_d, dct_d, cq_d, qp_group_switches_d,
         num_qp_groups, num_shared_dci_handles, num_dci_handles, num_dct_handles, num_rc_handles,
@@ -4108,6 +4137,10 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
 
 out:
     if (status) {
+        ibgda_device_state_h->region_batch_rma_pending_qps = old_batch_rma_pending_qps_d;
+        if (batch_rma_pending_qps_d) {
+            cudaFree(batch_rma_pending_qps_d);
+        }
         if (dci_h) {
             free(dci_h);
         }
@@ -4135,6 +4168,8 @@ out:
         if (qp_group_switches_d) {
             cudaFree(qp_group_switches_d);
         }
+    } else if (old_batch_rma_pending_qps_d) {
+        cudaFree(old_batch_rma_pending_qps_d);
     }
     return status;
 }
@@ -4527,6 +4562,9 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
         }
         if (ibgda_device_state_h->globalmem.qp_group_switches) {
             cudaFree(ibgda_device_state_h->globalmem.qp_group_switches);
+        }
+        if (ibgda_device_state_h->region_batch_rma_pending_qps) {
+            cudaFree(ibgda_device_state_h->region_batch_rma_pending_qps);
         }
     }
 
@@ -4959,6 +4997,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         NVSHMEMI_ERROR_JMP(
             status, NVSHMEMX_ERROR_INVALID_VALUE, out,
             "NVSHMEM_IBGDA_NUM_REQUESTS_IN_BATCH must not be larger than QP depth.\n");
+    }
+    ibgda_region_batch_rma_threshold = options->REGION_DEVICE_BATCH_THRESHOLD;
+    if (ibgda_region_batch_rma_threshold < 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM_REGION_DEVICE_BATCH_THRESHOLD must be non-negative.\n");
     }
 
     ibgda_num_fetch_slots_per_dci = options->IBGDA_NUM_FETCH_SLOTS_PER_DCI;
