@@ -246,7 +246,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     switch (nvshmemi_device_state_d.selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
-            nvshmemi_ibgda_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index);
+            nvshmemi_ibgda_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index, region_info);
             break;
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
@@ -286,6 +286,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     switch (nvshmemi_device_state_d.selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
+            nvshmemi_ibgda_batch_rma_submit_pending_qps(region_info);
             break;
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT

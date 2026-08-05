@@ -35,6 +35,9 @@ NVSHMEMI_ENV_DEF(REGION_MAX_SLOTS, int, NVSHMEMI_REGION_MAX_SLOTS_DEFAULT, NVSHM
 NVSHMEMI_ENV_DEF(REGION_HOST_BATCH_MAX_OPS, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Maximum number of logical eligible RMA calls accumulated by a CPU transport for "
                  "one region before partial submission. A value of 0 adds no region limit.")
+NVSHMEMI_ENV_DEF(REGION_DEVICE_BATCH_THRESHOLD, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Best-effort logical RMA call threshold for partial submission by a direct device "
+                 "transport. A value of 0 disables threshold-triggered submission.")
 
 NVSHMEMI_ENV_DEF(DEBUG, string, "", NVSHMEMI_ENV_CAT_OPENSHMEM,
                  "Set to enable debugging messages.\n"
