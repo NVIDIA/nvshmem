@@ -609,6 +609,7 @@ set(NVSHMEM_HOST_SOURCES
     host/comm/putget.cpp
     host/comm/fence.cpp
     host/comm/quiet.cpp
+    host/comm/region.cpp
     host/comm/sync.cpp
     host/comm/amo.cpp
     host/proxy/proxy.cpp

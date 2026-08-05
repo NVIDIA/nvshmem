@@ -291,6 +291,22 @@ typedef enum nvshmemx_smem_amount_t {
     NVSHMEMX_SMEM_AMOUNT_MAX = INT_MAX
 } nvshmemx_smem_amount_t;
 
+typedef uint64_t nvshmemx_region_handle_t;
+
+typedef enum {
+    NVSHMEMX_REGION_HINT_NONE = 0,
+    NVSHMEMX_REGION_HINT_BATCH_RMA = 1u << 0,
+} nvshmemx_region_hint_t;
+
+#define NVSHMEMX_REGION_ATTRS_RESERVED_BYTES 60
+#define NVSHMEMX_REGION_ATTRS_INITIALIZER {NVSHMEMX_REGION_HINT_NONE, {0}}
+
+typedef struct nvshmemx_region_attrs {
+    uint32_t hints;
+    char reserved[NVSHMEMX_REGION_ATTRS_RESERVED_BYTES];
+} nvshmemx_region_attrs_t;
+static_assert(sizeof(nvshmemx_region_attrs_t) == 64, "Region attributes must be 64 bytes.");
+
 typedef struct {
     int version;
     nvshmemx_uniqueid_args_t uid_args;
