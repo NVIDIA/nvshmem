@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <stddef.h>
 #include <sys/syscall.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include <string.h>
 #include <atomic>
@@ -30,8 +31,11 @@
 #include "non_abi/nvshmem_build_options.h"
 #include "non_abi/nvshmemx_error.h"
 #include "device_host_transport/nvshmem_common_transport.h"
+#include "device_host_transport/nvshmem_constants.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
+#include "internal/host_transport/region.hpp"
+#include "rdma/fi_rma.h"
 
 #if defined(NVSHMEM_X86_64)
 #include <immintrin.h>  // IWYU pragma: keep
@@ -767,6 +771,21 @@ class SPSCRing {
     }
 };
 
+struct nvshmemt_libfabric_batch_rma_batch {
+    int pe = -1;
+    int qp_index = NVSHMEMX_QP_DEFAULT;
+    int ep_index = -1;
+    nvshmemi_op_t op = NVSHMEMI_OP_SENTINEL;
+    std::vector<struct iovec> local_iov;
+    std::vector<void *> local_desc;
+    std::vector<struct fi_rma_iov> remote_iov;
+};
+
+struct nvshmemt_libfabric_batch_rma_region {
+    std::vector<nvshmemt_libfabric_batch_rma_batch> batches;
+    size_t op_count = 0;
+};
+
 /*
  * Each index of the vectors contain a domain-specific resource. Host domain resources are first,
  * proceeded by proxy domain resources. The number of each domain type is specified by
@@ -809,6 +828,11 @@ struct nvshmemt_libfabric_state_t {
      * Slot 0 = NVSHMEMX_QP_HOST, slot 1 = proxy. Each slot is SPSC.
      * -1 = no pending batched ops. */
     std::array<int, 2> pending_batch_ep;
+    std::unique_ptr<nvshmemi_region_lifecycle<nvshmemt_libfabric_batch_rma_region,
+                                              NVSHMEM_TRANSPORT_REGION_ROLE_COUNT>>
+        batch_rma_regions;
+    size_t region_host_batch_max_ops = 0;
+    bool disable_implicit_batch_rma = false;
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;
