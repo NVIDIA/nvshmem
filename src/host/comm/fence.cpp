@@ -8,6 +8,7 @@
 #include <driver_types.h>
 
 #include "internal/host/nvshmem_internal.h"
+#include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "non_abi/nvshmemx_error.h"
@@ -18,8 +19,12 @@ void nvshmem_fence(void) {
     NVTX_FUNC_RANGE_IN_GROUP(MEMORDER);
     NVSHMEMI_CHECK_INIT_STATUS();
 
-    int status;
+    int status = 0;
     int tbitmap = nvshmemi_state->transport_bitmap;
+
+    status = nvshmemi_region_host_flush_active();
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "region flush failed in nvshmem_fence()\n");
     for (int j = 0; j < nvshmemi_state->num_initialized_transports; j++) {
         if (tbitmap & 1) {
             struct nvshmem_transport *tcurr =

@@ -22,12 +22,19 @@
 
 // for NVSHMEM_IBGDA_SUPPORT
 #include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/nvshmemi_region_constants.h"
 
 #ifndef NVSHMEM_ENV_DEFS_INTERNAL
 #include "bootstrap_host_transport/env_defs_internal.h"  // for NVSHMEMI_ENV_DEF
 #endif
 
 #ifdef NVSHMEMI_ENV_DEF
+
+NVSHMEMI_ENV_DEF(REGION_MAX_SLOTS, int, NVSHMEMI_REGION_MAX_SLOTS_DEFAULT, NVSHMEMI_ENV_CAT_OTHER,
+                 "Maximum number of concurrent device block regions")
+NVSHMEMI_ENV_DEF(REGION_HOST_BATCH_MAX_OPS, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Maximum number of logical eligible RMA calls accumulated by a CPU transport for "
+                 "one region before partial submission. A value of 0 adds no region limit.")
 
 NVSHMEMI_ENV_DEF(DEBUG, string, "", NVSHMEMI_ENV_CAT_OPENSHMEM,
                  "Set to enable debugging messages.\n"
@@ -88,7 +95,6 @@ NVSHMEMI_ENV_DEF(IB_NUM_RC_PER_DEVICE, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,
 NVSHMEMI_ENV_DEF(MAX_NICS_PER_PE, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Maximum number of selected NICs per PE. A value of 0 applies only the "
                  "transport implementation limit.")
-
 NVSHMEMI_ENV_DEF(HCA_PREFIX, string, "^smi", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Prefix of HCA interface names. Example, mlx5, ibp.")
 
@@ -141,7 +147,6 @@ NVSHMEMI_ENV_DEF(LIBFABRIC_PROXY_REQUEST_BATCH_MAX, int, 32, NVSHMEMI_ENV_CAT_TR
                  "in a single iteration of the progress loop.")
 NVSHMEMI_ENV_DEF(LIBFABRIC_DISABLE_BATCH_RMA, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable support for batched RMA with FI_MORE.")
-
 NVSHMEMI_ENV_DEF(LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT, int, 1024, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of polling iterations for pending signal-delivery work in the "
                  "libfabric transport before sleeping. Increasing this can reduce latency for "

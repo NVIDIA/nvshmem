@@ -117,6 +117,8 @@ static inline bool nvshmemt_ib_common_port_requires_grh(const struct ibv_port_at
 #endif
 }
 
+class nvshmemt_batch_rma_state;
+
 struct nvshmemt_ib_common_state {
     void *devices;
     int *dev_ids;
@@ -136,6 +138,7 @@ struct nvshmemt_ib_common_state {
     struct nvshmemi_cuda_fn_table *table;
     struct nvshmemt_ib_common_ftable *ib_transport_ftable;
     struct transport_mem_handle_info_cache *cache;
+    nvshmemt_batch_rma_state *batch_rma_state;
 
     /* Dynamic QP management fields */
     int next_qp_index;        /* Next available QP index */

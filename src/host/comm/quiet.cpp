@@ -9,6 +9,7 @@
 #include <driver_types.h>
 
 #include "internal/host/nvshmem_internal.h"
+#include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "non_abi/nvshmemx_error.h"
@@ -30,8 +31,12 @@ void nvshmem_quiet(void) {
     NVSHMEMI_CHECK_INIT_STATUS();
 
     int status = 0;
-
     int tbitmap = nvshmemi_state->transport_bitmap;
+
+    status = nvshmemi_region_host_flush_active();
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "region flush failed in nvshmem_quiet()\n");
+
     if (nvshmemi_state->used_internal_streams) {
         for (int s = 0; s < nvshmemi_options.MAX_PEER_STREAMS; s++) {
             if (nvshmemi_state->active_internal_streams[s]) {
@@ -91,6 +96,10 @@ void nvshmemx_quiet_on_stream(cudaStream_t cstrm) {
 
     int in_cuda_graph = 0;
     cudaStreamCaptureStatus status;
+    int region_status = nvshmemi_region_host_flush_active();
+    NVSHMEMI_NZ_ERROR_JMP(region_status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "region flush failed in nvshmemx_quiet_on_stream()\n");
+
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(cstrm, &status));
     if (status == cudaStreamCaptureStatusActive) {
         in_cuda_graph = 1;
@@ -117,12 +126,20 @@ void nvshmemx_quiet_on_stream(cudaStream_t cstrm) {
         }
     }
 
+out:
     return;
 }
 
 void nvshmemx_flush_on_stream(cudaStream_t cstrm) {
     NVTX_FUNC_RANGE_IN_GROUP(QUIET_ON_STREAM);
     NVSHMEMI_CHECK_INIT_STATUS();
+
+    int status = 0;
+    int tbitmap = nvshmemi_state->transport_bitmap;
+
+    status = nvshmemi_region_host_flush_active();
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "region flush failed in nvshmemx_flush_on_stream()\n");
 
     /* Ensure any internally-managed streams are ordered before cstrm. */
     nvshmemi_quiesce_internal_streams(cstrm);
@@ -135,7 +152,6 @@ void nvshmemx_flush_on_stream(cudaStream_t cstrm) {
      * is not yet available.  Fall back to the full proxy quiet.  This may also
      * guarantee remote visibility as an implementation detail; callers must
      * still use quiet for visibility by contract. */
-    int tbitmap = nvshmemi_state->transport_bitmap;
     for (int j = 0; j < nvshmemi_state->num_initialized_transports; j++) {
         if (tbitmap & 1) {
             struct nvshmem_transport *tcurr =
@@ -147,4 +163,7 @@ void nvshmemx_flush_on_stream(cudaStream_t cstrm) {
         }
         tbitmap >>= 1;
     }
+
+out:
+    return;
 }
