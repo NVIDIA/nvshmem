@@ -251,7 +251,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
-            nvshmemi_gdaki_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index);
+            nvshmemi_gdaki_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index, region_info);
             break;
 #endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
@@ -291,6 +291,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
+            nvshmemi_gdaki_batch_rma_submit_pending_qps(region_info);
             break;
 #endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:

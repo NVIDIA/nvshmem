@@ -7,7 +7,7 @@
 #define _NVSHMEMI_GPUNETIO_COMMON_H_
 
 #define NVSHMEMI_GPUNETIO_QP_MANAGEMENT_PADDING 24
-#define NVSHMEMI_GPUNETIO_STATE_PADDING 120
+#define NVSHMEMI_GPUNETIO_STATE_PADDING 108
 
 #define NVSHMEMI_GPUNETIO_SCALAR_INVALID -1
 #define NVSHMEMI_GPUNETIO_USSCALAR_INVALID 0xFFFF
@@ -87,6 +87,8 @@
         state.extra = NULL;                                                   \
         state.num_qp_groups = NVSHMEMI_GPUNETIO_USCALAR_INVALID;              \
         state.rc_map_type = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_INVALID;     \
+        state.region_batch_rma_pending_qps = NULL;                            \
+        state.region_batch_rma_threshold = 0;                                 \
     } while (0);
 
 #else
@@ -207,10 +209,12 @@ struct nvshmemi_gpunetio_device_state_v1 {
     void *extra;
     uint32_t num_qp_groups;
     nvshmemi_gpunetio_device_qp_map_type_t rc_map_type;
+    void *region_batch_rma_pending_qps;
+    uint32_t region_batch_rma_threshold;
     uint8_t reserved[NVSHMEMI_GPUNETIO_STATE_PADDING];
 };
 static_assert(sizeof(nvshmemi_gpunetio_device_state_v1) == 2256,
-              "gpunetio_device_state must be 2256 bytes.");
+              "gpunetio_device_state_v1 must be 2256 bytes.");
 
 typedef nvshmemi_gpunetio_device_state_v1 nvshmemi_gpunetio_device_state_t;
 

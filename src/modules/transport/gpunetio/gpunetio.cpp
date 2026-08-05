@@ -23,6 +23,7 @@
 #include "transport_mlx5_common.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "device_host_transport/nvshmem_common_gpunetio.h"
+#include "device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp"
 #include "gpunetio/doca_gpunetio_host.h"
 
 #define DOCA_CHECK(call)                                                \
@@ -377,6 +378,7 @@ struct nvshmemt_gpunetio_state_t {
     int qp_depth = 0;
     int num_fetch_slots_per_rc = 0;
     int num_requests_in_batch = 0;
+    int region_batch_rma_threshold = 0;
     uint32_t cpu_dev_rr = 0;
     // Function tables
     nvshmemt_ibv_function_table ftable = {};
@@ -1292,6 +1294,11 @@ int nvshmemt_gpunetio_state_t::init_populate_state(nvshmemi_options_s *options) 
             status, NVSHMEMX_ERROR_INVALID_VALUE,
             "NVSHMEM_GPUNETIO_NUM_REQUESTS_IN_BATCH must not be larger than QP depth.\n");
     }
+    region_batch_rma_threshold = options->REGION_DEVICE_BATCH_THRESHOLD;
+    if (region_batch_rma_threshold < 0) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                           "NVSHMEM_REGION_DEVICE_BATCH_THRESHOLD must be non-negative.\n");
+    }
 
     num_fetch_slots_per_rc = options->GPUNETIO_NUM_FETCH_SLOTS_PER_RC;
     if (num_fetch_slots_per_rc > 0) {
@@ -1716,6 +1723,8 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     assert(gpunetio_device_state_h != nullptr);
     nvshmemi_gpunetio_device_qp_t *qp_d = gpunetio_device_state_h->globalmem.qps;
     nvshmemi_gpunetio_device_qp_t *qp_d_temp = nullptr;
+    void *old_batch_rma_pending_qps_d = gpunetio_device_state_h->region_batch_rma_pending_qps;
+    void *batch_rma_pending_qps_d = nullptr;
 
     auto qp_d_guard = make_scope_guard([&]() {
         if (qp_d && qp_d != gpunetio_device_state_h->globalmem.qps) {
@@ -1723,6 +1732,31 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
             CUDA_RUNTIME_ERROR_STRING(err);
         }
     });
+    auto batch_rma_pending_qps_guard = make_scope_guard([&]() {
+        gpunetio_device_state_h->region_batch_rma_pending_qps = old_batch_rma_pending_qps_d;
+        if (batch_rma_pending_qps_d) {
+            cudaError_t err = cudaFree(batch_rma_pending_qps_d);
+            CUDA_RUNTIME_ERROR_STRING(err);
+        }
+    });
+
+    size_t batch_rma_pending_qps_size = 0;
+    if (!nvshmemi_batch_rma_pending_qps_storage_size(static_cast<uint32_t>(num_rc_handles),
+                                                     options->REGION_MAX_SLOTS,
+                                                     &batch_rma_pending_qps_size)) {
+        NVSHMEMI_ERROR_PRINT("NVSHMEM_REGION_MAX_SLOTS must be a positive power of two.\n");
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    cudaError_t batch_rma_alloc_status =
+        cudaMalloc(&batch_rma_pending_qps_d, batch_rma_pending_qps_size);
+    if (batch_rma_alloc_status == cudaErrorMemoryAllocation) {
+        NVSHMEMI_WARN_PRINT("Unable to allocate GPUNetIO batch RMA state; using scalar RMA.\n");
+    } else {
+        CUDA_RUNTIME_CHECK_RET(batch_rma_alloc_status, NVSHMEMX_ERROR_INTERNAL);
+        CUDA_RUNTIME_CHECK_RET(
+            cudaMemsetAsync(batch_rma_pending_qps_d, 0, batch_rma_pending_qps_size, my_stream),
+            NVSHMEMX_ERROR_INTERNAL);
+    }
 
     doca_gpu_dev_verbs_qp *qp_tmp;
 
@@ -1830,6 +1864,8 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     gpunetio_device_state_h->rc_map_type = rc_map_type;
     gpunetio_device_state_h->log2_cumem_granularity = t->log2_cumem_granularity;
     gpunetio_device_state_h->num_requests_in_batch = num_requests_in_batch;
+    gpunetio_device_state_h->region_batch_rma_threshold =
+        static_cast<uint32_t>(region_batch_rma_threshold);
 
     INFO(log_level, "num_rc_per_pe %d num_rc_handles %d n_devs_selected %d n_pes %d",
          gpunetio_device_state_h->num_rc_per_pe, num_rc_handles, n_devs_selected, t->n_pes);
@@ -1857,8 +1893,14 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
 
     last_num_rcs = num_rc_handles;
 
+    gpunetio_device_state_h->region_batch_rma_pending_qps = batch_rma_pending_qps_d;
     CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream), NVSHMEMX_ERROR_INTERNAL);
 
+    if (old_batch_rma_pending_qps_d) {
+        cudaError_t err = cudaFree(old_batch_rma_pending_qps_d);
+        CUDA_RUNTIME_ERROR_STRING(err);
+    }
+    batch_rma_pending_qps_guard.dismiss();
     qp_d_guard.dismiss();
     return NVSHMEMX_SUCCESS;
 }
@@ -2061,6 +2103,11 @@ static int nvshmemt_gpunetio_finalize(nvshmem_transport_t transport) {
             cudaError_t err = cudaFree(gpunetio_device_state_h->globalmem.qp_group_switches);
             CUDA_RUNTIME_ERROR_STRING(err);
             gpunetio_device_state_h->globalmem.qp_group_switches = nullptr;
+        }
+        if (gpunetio_device_state_h->region_batch_rma_pending_qps) {
+            cudaError_t err = cudaFree(gpunetio_device_state_h->region_batch_rma_pending_qps);
+            CUDA_RUNTIME_ERROR_STRING(err);
+            gpunetio_device_state_h->region_batch_rma_pending_qps = nullptr;
         }
     }
 
