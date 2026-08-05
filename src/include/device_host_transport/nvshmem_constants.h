@@ -79,6 +79,9 @@ typedef enum {
 #define PROXY_CHANNEL_ENTRY_CONTROL_BYTES 1
 #define PROXY_CHANNEL_ENTRY_DATA_BYTES (CHANNEL_ENTRY_BYTES - PROXY_CHANNEL_ENTRY_CONTROL_BYTES)
 #define PROXY_GROUP_SIZE_SINGLE 0x01
+/* groupsize uses the low seven bits for its count and reserves the high bit for region metadata. */
+#define PROXY_GROUP_COUNT_MAX 0x7f
+#define PROXY_GROUP_REGION 0x80
 #define PROXY_AMO_REQ_BYTES 40
 #define PROXY_INLINE_REQ_BYTES 24
 #define PROXY_PUT_WITH_SIG_REQ_BYTES 48

@@ -13,6 +13,8 @@
 #include <cuda_fp16.h>
 #include "utils_device.h"
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
+#include "non_abi/nvshmemi_region_constants.h"
+#include "non_abi/nvshmemi_region_types.h"
 /* this file does not directly use the definitions from device_host/nvshmem_proxy_channel.h */
 /* But the way the requests are filled in directly represents those structures. */
 #include "device_host/nvshmem_proxy_channel.h"  // IWYU pragma: keep
@@ -214,11 +216,39 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void copy_to_channel(vo
     *channel_ptr = bounce.whole_buffer;
 }
 
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void
+nvshmemi_proxy_write_region_metadata(uint64_t idx, const nvshmemi_region_info_t *region_info) {
+    const uint8_t *src = reinterpret_cast<const uint8_t *>(region_info);
+    int remaining = sizeof(*region_info);
+
+    for (size_t entry = 0; entry < PROXY_REGION_METADATA_ENTRIES; entry++) {
+        channel_bounce_buffer_t bounce = {};
+        int data_bytes =
+            remaining < PROXY_CHANNEL_ENTRY_DATA_BYTES ? remaining : PROXY_CHANNEL_ENTRY_DATA_BYTES;
+        for (int i = 0; i < data_bytes; i++) {
+            bounce.bytes[i + PROXY_CHANNEL_ENTRY_CONTROL_BYTES] = src[i];
+        }
+        bounce.bytes[0] =
+            static_cast<char>(!((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1));
+        uint8_t *request_address =
+            static_cast<uint8_t *>(nvshmemi_device_state_d.proxy_channels_buf) +
+            (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1));
+        volatile uint64_t *req = reinterpret_cast<volatile uint64_t *>(request_address);
+        *req = bounce.whole_buffer;
+        src += data_bytes;
+        remaining -= data_bytes;
+        idx += CHANNEL_ENTRY_BYTES;
+    }
+}
+
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma(
-    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index) {
+    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index,
+    const nvshmemi_region_info_t *region_info) {
+    bool batch_rma_region =
+        region_info != nullptr && (region_info->hints & NVSHMEMI_REGION_HINT_BATCH_RMA) != 0;
     uint64_t idx, tail_idx, *req;
-    int size = PROXY_DMA_REQ_BYTES;
-    int group_size = 1;
+    int size = batch_rma_region ? PROXY_REGION_DMA_REQ_BYTES : PROXY_DMA_REQ_BYTES;
+    int group_size = PROXY_GROUP_SIZE_SINGLE | (batch_rma_region ? PROXY_GROUP_REGION : 0);
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
     const uint64_t mask_lowest_byte = 0xFFFFFFFFFFFFFF00u;
@@ -285,6 +315,10 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
     curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
     *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_index) << 32) |
                                              (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
+
+    if (batch_rma_region) {
+        nvshmemi_proxy_write_region_metadata(idx + CHANNEL_ENTRY_BYTES, region_info);
+    }
 }
 
 /*XXX : Only no const version is used*/
@@ -300,11 +334,29 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_rma
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
+    const nvshmemi_region_info_t *region_info = NULL) {
     if (!bytes) {
         return;
     }
-    transfer_dma(rptr, lptr, bytes, pe, op, qp_index);
+    transfer_dma(rptr, lptr, bytes, pe, op, qp_index, region_info);
+}
+
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_region_end(
+    const nvshmemi_region_info_t *region_info) {
+    uint64_t idx = atomicAdd(
+        reinterpret_cast<unsigned long long int *>(nvshmemi_device_state_d.proxy_channels_issue),
+        PROXY_REGION_END_REQ_BYTES);
+    uint64_t tail_idx = idx + PROXY_REGION_END_REQ_BYTES - 1;
+    check_channel_availability(tail_idx);
+
+    uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
+    uint8_t *request_address = static_cast<uint8_t *>(nvshmemi_device_state_d.proxy_channels_buf) +
+                               (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1));
+    volatile uint64_t *req = reinterpret_cast<volatile uint64_t *>(request_address);
+    *req = (static_cast<uint64_t>(NVSHMEMI_OP_REGION_END) << 16) |
+           (static_cast<uint64_t>(PROXY_GROUP_REGION) << 8) | curr_flag;
+    nvshmemi_proxy_write_region_metadata(idx + CHANNEL_ENTRY_BYTES, region_info);
 }
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_put_signal_nbi(

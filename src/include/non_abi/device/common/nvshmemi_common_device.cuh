@@ -35,6 +35,7 @@
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
 #endif
 #include "non_abi/device/common/nvshmemi_path_predicates.cuh"
+#include "non_abi/device/common/nvshmemi_region_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 #include "device/logical_endpoint_device.cuh"
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
@@ -1327,7 +1328,8 @@ nvshmemi_g(const T *source, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1360,8 +1362,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
-        nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
-                                                          nelems * sizeof(T), pe, qp_index);
+        if (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+            nvshmemi_region_info_t region_info = nvshmemi_region_resolve<SCOPE, REGION_OPERATION>();
+            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>(
+                (void *)source, (void *)dest, nelems * sizeof(T), pe, qp_index,
+                region_info.region_id ? &region_info : NULL);
+        } else {
+            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
+                                                              nelems * sizeof(T), pe, qp_index);
+        }
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 }
@@ -1429,7 +1438,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1455,17 +1465,25 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
-        nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
-                                                          nelems * sizeof(T), pe, qp_index);
+        if (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+            nvshmemi_region_info_t region_info = nvshmemi_region_resolve<SCOPE, REGION_OPERATION>();
+            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>(
+                (void *)dest, (void *)source, nelems * sizeof(T), pe, qp_index,
+                region_info.region_id ? &region_info : NULL);
+        } else {
+            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
+                                                              nelems * sizeof(T), pe, qp_index);
+        }
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_nbi<T, SCOPE>(dest, source, nelems, pe, qp_index);
+    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION>(dest, source, nelems, pe, qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 

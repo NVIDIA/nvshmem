@@ -28,6 +28,9 @@
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmem_nvtx.hpp"
+#include "internal/host/scope_guard.h"
+#include "internal/host_transport/region.hpp"
+#include "non_abi/nvshmemi_region_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/nvshmemi_bootstrap_library.h"
 #include "non_abi/nvshmem_build_options.h"
@@ -1656,6 +1659,16 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         if (nvshmemi_device_state.tma_smem_size) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
         }
+        if (nvshmemi_device_state.region_slots) {
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.region_slots));
+            nvshmemi_device_state.region_slots = NULL;
+            nvshmemi_device_state.region_slots_len = 0;
+            nvshmemi_device_state.region_slot_probe_limit = 0;
+        }
+        if (nvshmemi_device_state.region_active_count) {
+            CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.region_active_count));
+            nvshmemi_device_state.region_active_count = NULL;
+        }
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (nvshmemi_device_state.unicast_le_ids_) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.unicast_le_ids_));
@@ -1998,6 +2011,20 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     int cuda_dev_cap_major = 0;
     int cuda_dev_cap_minor = 0;
     unsigned long long *test_wait_any_start_idx_ptr = NULL;
+    nvshmemi_region_slot_t *region_slots_dptr = NULL;
+    uint32_t *region_active_count_dptr = NULL;
+    size_t region_slots_bytes = 0;
+    uint32_t region_slots_len = 0;
+    uint32_t region_slot_probe_limit = 0;
+    bool region_slots_published = false;
+    auto region_slots_guard = make_scope_guard([&]() {
+        if (region_slots_dptr) {
+            CUDA_RUNTIME_CHECK(cudaFree(region_slots_dptr));
+        }
+        if (region_active_count_dptr) {
+            CUDA_RUNTIME_CHECK(cudaFree(region_active_count_dptr));
+        }
+    });
 
     CUDA_RUNTIME_CHECK_GOTO(
         cudaDeviceGetAttribute(&warp_size, cudaDevAttrWarpSize, state->device_id), status, out);
@@ -2103,6 +2130,25 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     nvshmemi_device_state.test_wait_any_start_idx_ptr = test_wait_any_start_idx_ptr;
 
+    if (!nvshmemi_region_table_capacity_is_valid(nvshmemi_options.REGION_MAX_SLOTS)) {
+        NVSHMEMI_ERROR_PRINT("NVSHMEM_REGION_MAX_SLOTS must be a positive power of two\n");
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
+    }
+    region_slots_bytes =
+        static_cast<size_t>(nvshmemi_options.REGION_MAX_SLOTS) * sizeof(nvshmemi_region_slot_t);
+    CUDA_RUNTIME_CHECK_GOTO(
+        cudaMalloc(reinterpret_cast<void **>(&region_slots_dptr), region_slots_bytes), status, out);
+    CUDA_RUNTIME_CHECK_GOTO(cudaMemset(region_slots_dptr, 0, region_slots_bytes), status, out);
+    CUDA_RUNTIME_CHECK_GOTO(
+        cudaMalloc(reinterpret_cast<void **>(&region_active_count_dptr), sizeof(uint32_t)), status,
+        out);
+    CUDA_RUNTIME_CHECK_GOTO(cudaMemset(region_active_count_dptr, 0, sizeof(uint32_t)), status, out);
+    region_slots_len = static_cast<uint32_t>(nvshmemi_options.REGION_MAX_SLOTS);
+    region_slot_probe_limit = region_slots_len < NVSHMEMI_REGION_SLOT_PROBE_LIMIT
+                                  ? region_slots_len
+                                  : NVSHMEMI_REGION_SLOT_PROBE_LIMIT;
+
     /* TMA policy */
     nvshmemi_device_state.tma_policy = NVSHMEMX_TMA_DISABLE;
     if (nvshmemi_options.TMA_POLICY_provided) {
@@ -2193,10 +2239,25 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
         nvshmemi_device_state.tma_smem_bases_len = tma_registration_entries;
     }
 
-    nvshmemi_update_device_state();
+    nvshmemi_device_state.region_slots = region_slots_dptr;
+    nvshmemi_device_state.region_active_count = region_active_count_dptr;
+    nvshmemi_device_state.region_slots_len = region_slots_len;
+    nvshmemi_device_state.region_slot_probe_limit = region_slot_probe_limit;
+    region_slots_published = true;
+
+    status = nvshmemi_update_device_state();
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "nvshmemi_update_device_state failed\n");
+    region_slots_guard.dismiss();
 
 out:
     if (status) {
+        if (region_slots_published) {
+            nvshmemi_device_state.region_slots = NULL;
+            nvshmemi_device_state.region_active_count = NULL;
+            nvshmemi_device_state.region_slots_len = 0;
+            nvshmemi_device_state.region_slot_probe_limit = 0;
+        }
         if (heap_base_array_dptr) {
             CUDA_RUNTIME_CHECK(cudaFree(heap_base_array_dptr));
         }

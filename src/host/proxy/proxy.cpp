@@ -2,6 +2,7 @@
  * Copyright (c) 2016-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+#include <algorithm>                       // for copy
 #include <assert.h>                        // for assert
 #include <cuda.h>                          // for CUDA_SUCCESS
 #include <cuda_runtime.h>                  // for cudaFreeHost
@@ -16,13 +17,15 @@
 #include <unistd.h>                        // IWYU pragma: keep for getpid in NVSHMEM_TRACE case
 #include "device_host/nvshmem_types.h"     // for nvshmemi_devi...
 #include "device_host/nvshmem_common.cuh"  // for nvshmemi_devi...
-#include "device_host_transport/nvshmem_constants.h"                       // for CHANNEL_BUF_S...
-#include "host/nvshmem_api.h"                                              // for nvshmem_globa...
-#include "non_abi/nvshmemx_error.h"                                        // for NVSHMEMI_ERRO...
-#include "non_abi/nvshmem_build_options.h"                                 // IWYU pragma: keep
-#include "device_host_transport/nvshmem_common_transport.h"                // for g_elem_t, NVS...
-#include "internal/host/debug.h"                                           // for TRACE, INFO
-#include "internal/host/nvshmem_internal.h"                                // for nvshmemi_cuda...
+#include "device_host_transport/nvshmem_constants.h"         // for CHANNEL_BUF_S...
+#include "host/nvshmem_api.h"                                // for nvshmem_globa...
+#include "non_abi/nvshmemx_error.h"                          // for NVSHMEMI_ERRO...
+#include "non_abi/nvshmem_build_options.h"                   // IWYU pragma: keep
+#include "device_host_transport/nvshmem_common_transport.h"  // for g_elem_t, NVS...
+#include "internal/host/debug.h"                             // for TRACE, INFO
+#include "internal/host/nvshmem_internal.h"                  // for nvshmemi_cuda...
+
+#include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"                       // for nvshmemi_symm...
 #include "internal/host/nvshmemi_types.h"                                  // for nvshmemi_state_t
 #include "internal/host/nvtx3.hpp"                                         // for message
@@ -33,6 +36,7 @@
 #include "internal/host_transport/transport.h"                             // for nvshmem_trans...
 #include "proxy_host.h"                                                    // for proxy_state_t
 #include "device_host/nvshmem_proxy_channel.h"
+#include "non_abi/nvshmemi_region_types.h"
 
 // use a different NVTX domain ("NVSHMEM_PROXY") for proxy activities
 #define NVSHMEM_NVTX_DOMAIN NVSHMEM_PROXY
@@ -188,7 +192,8 @@ static inline bool proxy_dma_more_follows(proxy_state_t *state, proxy_channel_t 
     base_request_t *next_req =
         reinterpret_cast<base_request_t *>(WRAPPED_CHANNEL_BUF(state, ch, next_ctr));
     uint8_t next_flag_val = __atomic_load_n(&next_req->flag, __ATOMIC_ACQUIRE) & 1;
-    if (next_flag_val != next_flag || proxy_base_op(next_req->op) != NVSHMEMI_OP_PUT) {
+    if (next_flag_val != next_flag || (next_req->groupsize & PROXY_GROUP_REGION) ||
+        proxy_base_op(next_req->op) != NVSHMEMI_OP_PUT) {
         return false;
     }
 
@@ -211,6 +216,29 @@ static inline bool proxy_dma_more_follows(proxy_state_t *state, proxy_channel_t 
     }
 
     return next_pe == pe && next_qp_index == qp_index && state->transport[next_pe] == tcurr;
+}
+
+static inline void proxy_read_region_metadata(proxy_state_t *state, proxy_channel_t *ch,
+                                              uint64_t counter,
+                                              nvshmemi_region_info_t *region_info) {
+    uint8_t *dest = reinterpret_cast<uint8_t *>(region_info);
+    int remaining = sizeof(*region_info);
+
+    for (size_t entry = 0; entry < PROXY_REGION_METADATA_ENTRIES; entry++) {
+        volatile uint64_t *request =
+            reinterpret_cast<volatile uint64_t *>(WRAPPED_CHANNEL_BUF(state, ch, counter));
+        uint8_t flag = COUNTER_TO_FLAG(state, counter);
+        while ((*request & 1) != flag);
+
+        channel_bounce_buffer_t bounce;
+        bounce.whole_buffer = *request;
+        int data_bytes =
+            remaining < PROXY_CHANNEL_ENTRY_DATA_BYTES ? remaining : PROXY_CHANNEL_ENTRY_DATA_BYTES;
+        std::copy_n(bounce.bytes + PROXY_CHANNEL_ENTRY_CONTROL_BYTES, data_bytes, dest);
+        dest += data_bytes;
+        remaining -= data_bytes;
+        counter += CHANNEL_ENTRY_BYTES;
+    }
 }
 
 int nvshmemi_proxy_create_channels(proxy_state_t *proxy_state) {
@@ -463,8 +491,10 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
     size_t size;
     uint8_t flag;
     uint64_t roffset, laddr;
+    bool explicit_region;
 
     base_req = (base_request_t *)WRAPPED_CHANNEL_BUF(state, ch, ch->processed);
+    explicit_region = base_req->groupsize & PROXY_GROUP_REGION;
     roffset = (uint64_t)(((uint64_t)(base_req->roffset_high) << 8) | (base_req->roffset_low));
 
     dma_req_0 = (put_dma_request_0_t *)WRAPPED_CHANNEL_BUF(state, ch, (ch->processed + 8));
@@ -506,16 +536,31 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
         verb.is_stream = 0;
         verb.cstrm = NULL;
         struct nvshmem_transport *tcurr = state->transport[pe];
-        void *rptr = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
-        if (tcurr->host_ops.rma_with_hints &&
-            proxy_dma_more_follows(state, ch, proxy_request_batch_idx, tcurr, pe, qp_index, verb)) {
+        void *rptr = static_cast<char *>(nvshmemi_device_state.heap_base) + roffset;
+        if (explicit_region) {
+            nvshmemi_region_info_t region_info{};
+            proxy_read_region_metadata(state, ch, ch->processed + PROXY_DMA_REQ_BYTES,
+                                       &region_info);
+            nvshmem_transport_op_attrs_t attrs{};
+            attrs.hints = region_info.hints;
+            attrs.issuer_id = region_info.issuer_id;
+            attrs.region_id = region_info.region_id;
+            nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
+                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index,
+                                           &attrs);
+        } else if (tcurr->host_ops.rma_with_hints &&
+                   proxy_dma_more_follows(state, ch, proxy_request_batch_idx, tcurr, pe, qp_index,
+                                          verb)) {
+            // Mark adjacent compatible requests for opportunistic implicit transport batching.
             nvshmem_transport_op_attrs_t attrs{};
             attrs.flags = NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
             nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                           rptr, (void *)laddr, size, qp_index, &attrs);
+                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index,
+                                           &attrs);
         } else {
             nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                           rptr, (void *)laddr, size, qp_index, nullptr);
+                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index,
+                                           nullptr);
         }
     }
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
@@ -525,12 +570,30 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
 
     *is_processed = 1;
 
-    proxy_update_processed(ch, PROXY_DMA_REQ_BYTES);
+    proxy_update_processed(ch, explicit_region ? PROXY_REGION_DMA_REQ_BYTES : PROXY_DMA_REQ_BYTES);
     TRACE(NVSHMEM_PROXY,
           "[%d] process_channel_put_dma/proxy_update_processed processed %ld complete %ld",
           state->nvshmemi_state->mype, ch->processed, *ch->complete);
 
     return status;
+}
+
+inline int process_channel_region_end(proxy_state_t *state, proxy_channel_t *ch) {
+    nvshmemi_region_info_t region_info{};
+    proxy_read_region_metadata(state, ch, ch->processed + CHANNEL_ENTRY_BYTES, &region_info);
+
+    TRACE(NVSHMEM_PROXY, "Proxy region end: issuer=%llu region=%llu",
+          static_cast<unsigned long long>(region_info.issuer_id),
+          static_cast<unsigned long long>(region_info.region_id));
+
+    int status = nvshmemi_region_flush(state->nvshmemi_state, NVSHMEM_TRANSPORT_REGION_ROLE_PROXY,
+                                       region_info.issuer_id, region_info.region_id);
+    if (status) {
+        return status;
+    }
+
+    proxy_update_processed(ch, PROXY_REGION_END_REQ_BYTES);
+    return 0;
 }
 
 inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int *is_processed) {
@@ -1421,6 +1484,11 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                         TRACE(NVSHMEM_PROXY, "host proxy: received NVSHMEMI_OP_PUT_SIGNAL \n");
                         status = process_channel_put_signal(proxy_state, ch, &is_processed);
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_put_signal\n");
+                        break;
+                    case NVSHMEMI_OP_REGION_END:
+                        TRACE(NVSHMEM_PROXY, "host proxy: received region end\n");
+                        status = process_channel_region_end(proxy_state, ch);
+                        NVSHMEMI_NZ_EXIT(status, "error in process_channel_region_end\n");
                         break;
                     default:
                         fprintf(stderr, "invalid op type encountered in proxy \n");

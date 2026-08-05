@@ -22,10 +22,10 @@ typedef union channel_bounce_buffer {
 
 /* base_request
  * 32 | 8 | 8 | 8 | 8
- * roffset_high | roffset_low | op | group_size | flag */
+ * roffset_high | roffset_low | op | region:1, group_size:7 | flag */
 typedef struct __attribute__((packed)) base_request {
     volatile uint8_t flag;
-    uint8_t groupsize;
+    uint8_t groupsize;  // Low seven bits hold the count; the high bit marks region metadata.
     uint8_t op;
     uint8_t roffset_low;   // target is remote
     uint32_t roffset_high; /*used as pe for base-only requests*/

@@ -969,6 +969,8 @@ set(INC_EXPORTS
     device_host/nvshmem_types.h
     device_host_transport/nvshmem_common_transport.h
     non_abi/device/common/nvshmemi_common_device.cuh
+    non_abi/device/common/nvshmemi_region_device.cuh
+    non_abi/device/common/nvshmemi_region_state.cuh
     non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh
     device/nvshmem_coll_defines.cuh
     device/nvshmem_defines.h
@@ -976,6 +978,7 @@ set(INC_EXPORTS
     device/logical_endpoint_device.cuh
     device/nvshmemx_collective_launch_apis.h
     device/nvshmemx_coll_defines.cuh
+    non_abi/nvshmemi_region_types.h
     device/nvshmemx_defines.h
     device/tile/nvshmemx_tile_api.hpp
     device/tile/nvshmemx_tile_api_defines.cuh
@@ -1103,6 +1106,7 @@ set(TRANSPORT_INC_EXPORTS
     internal/host_transport/region.hpp
     internal/host_transport/transport.h
     non_abi/nvshmemi_region_constants.h
+    non_abi/nvshmemi_region_types.h
     non_abi/nvshmem_version.h
     non_abi/nvshmemx_error.h
     non_abi/nvshmem_build_options.h
