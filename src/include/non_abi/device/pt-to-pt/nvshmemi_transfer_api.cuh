@@ -6,6 +6,7 @@
 #include <cuda_runtime.h>
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/nvshmemi_region_types.h"
 
 #ifndef NVSHMEMI_NOINLINE
 #if defined(__clang_llvm_bitcode_lib__)
@@ -52,7 +53,12 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
+    const nvshmemi_region_info_t *region_info = NULL);
+
+template <threadgroup_t SCOPE>
+NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_region_end(
+    const nvshmemi_region_info_t *region_info);
 
 template <typename T>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ T

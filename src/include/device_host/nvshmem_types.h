@@ -246,7 +246,11 @@
         0,                                                /* tma_smem_bases_len */                \
         NULL,                                             /* tma_smem_size */                     \
         NULL,                                             /* unicast_le_ids_ */                   \
-        false                                             /* counted_operations_available */      \
+        false,                                            /* counted_operations_available */      \
+        NULL,                                             /* region_slots */                      \
+        NULL,                                             /* region_active_count */               \
+        0,                                                /* region_slots_len */                  \
+        0                                                 /* region_slot_probe_limit */           \
     }
 #else
 #include <cuda/std/cstddef>
@@ -306,6 +310,8 @@ typedef struct nvshmemx_region_attrs {
     char reserved[NVSHMEMX_REGION_ATTRS_RESERVED_BYTES];
 } nvshmemx_region_attrs_t;
 static_assert(sizeof(nvshmemx_region_attrs_t) == 64, "Region attributes must be 64 bytes.");
+
+typedef struct nvshmemi_region_slot nvshmemi_region_slot_t;
 
 typedef struct {
     int version;
@@ -601,9 +607,13 @@ typedef struct {
     size_t *tma_smem_size;     /* Per-registration shared memory sizes */
     void *unicast_le_ids_;     /* LE IDs of PEs */
     bool counted_operations_available;
+    nvshmemi_region_slot_t *region_slots;
+    uint32_t *region_active_count;
+    uint32_t region_slots_len;
+    uint32_t region_slot_probe_limit;
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 824,
-              "device_host_state_v1 must be 824 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 848,
+              "device_host_state_v1 must be 848 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 

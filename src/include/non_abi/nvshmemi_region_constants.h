@@ -9,6 +9,8 @@
 #define NVSHMEMI_REGION_MAX_SLOTS_DEFAULT 4096
 /* Tolerate short collision clusters while bounding source-path lookup work. */
 #define NVSHMEMI_REGION_SLOT_PROBE_LIMIT 8
+/* Keep each slot in its own 64-byte-aligned record; table allocation uses this stride. */
+#define NVSHMEMI_REGION_SLOT_BYTES 64
 #define NVSHMEMI_REGION_HINT_BATCH_RMA (1u << 0)
 
 #endif

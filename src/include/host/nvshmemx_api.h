@@ -74,7 +74,11 @@ int nvshmemx_buffer_unregister_symmetric(void *mmap_ptr, size_t size);
 
 int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_region_attrs_t *attrs);
 int nvshmemx_region_stop(nvshmemx_region_handle_t handle);
-int nvshmemx_region_is_active(uint32_t hints, int *active);
+NVSHMEMI_HOSTDEVICE_PREFIX int nvshmemx_region_is_active(uint32_t hints, int *active);
+
+__device__ int nvshmemx_region_start_block(nvshmemx_region_handle_t *handle,
+                                           const nvshmemx_region_attrs_t *attrs);
+__device__ int nvshmemx_region_stop_block(nvshmemx_region_handle_t handle);
 
 int nvshmemx_culibrary_init(CUlibrary library);
 int nvshmemx_culibrary_finalize(CUlibrary library);

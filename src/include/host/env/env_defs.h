@@ -25,6 +25,7 @@
 #include "bootstrap_host_transport/env_defs_internal.h"  // IWYU pragma: keep
 #endif
 #include "non_abi/nvshmem_build_options.h"  // for NVSHMEM_IBGDA_SUPPORT
+#include "non_abi/nvshmemi_region_constants.h"
 #include "non_abi/nvshmem_version.h"
 
 #define ENV_DEFS_STRINGIFY(x) #x
@@ -379,6 +380,8 @@ NVSHMEMI_ENV_DEF(TRANSPORT_BATCH_MAX_OPS, int, 16, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Maximum number of consecutive proxy requests to mark with a transport batching "
                  "hint before ending the current transport-level batch. Applies only to transports "
                  "and operation types that implement batching hints.")
+NVSHMEMI_ENV_DEF(REGION_MAX_SLOTS, int, NVSHMEMI_REGION_MAX_SLOTS_DEFAULT, NVSHMEMI_ENV_CAT_OTHER,
+                 "Maximum number of concurrent device block regions")
 
 /** NVTX instrumentation **/
 NVSHMEMI_ENV_DEF(NVTX, string, "off", NVSHMEMI_ENV_CAT_NVTX,

@@ -15,6 +15,7 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device/nvshmem_device_macros.h"
 #include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/nvshmemi_region_types.h"
 
 #ifndef _NVSHMEMI_TRANSFER_H_
 #define _NVSHMEMI_TRANSFER_H_
@@ -46,7 +47,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_put_signal(
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_rma_nbi(
     void* /*rptr*/, void* /*lptr*/, size_t /*bytes*/, int /*pe*/,
-    nvshmemx_qp_handle_t /*qp_index*/ = NVSHMEMX_QP_DEFAULT) {}
+    nvshmemx_qp_handle_t /*qp_index*/ = NVSHMEMX_QP_DEFAULT,
+    const nvshmemi_region_info_t* /*region_info*/ = NULL) {}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_region_end(
+    const nvshmemi_region_info_t* /*region_info*/) {}
 
 template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_transfer_amo_fetch(
