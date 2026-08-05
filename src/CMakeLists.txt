@@ -1011,6 +1011,7 @@ set(INC_EXPORTS
     host/nvshmemx_api.h
     host/nvshmemx_coll_api.h
     non_abi/nvshmemi_cccl_compat.h
+    non_abi/nvshmemi_region_constants.h
     non_abi/nvshmemx_error.h
     non_abi/nvshmem_build_options.h
     non_abi/nvshmem_version.h
@@ -1101,6 +1102,7 @@ set(TRANSPORT_INC_EXPORTS
     internal/host_transport/nvshmemi_transport_defines.h
     internal/host_transport/region.hpp
     internal/host_transport/transport.h
+    non_abi/nvshmemi_region_constants.h
     non_abi/nvshmem_version.h
     non_abi/nvshmemx_error.h
     non_abi/nvshmem_build_options.h
@@ -1125,6 +1127,7 @@ set(TRANSPORT_EXPORTS
     common/transport_ib_common.h
     common/transport_mlx5_common.cpp
     common/transport_mlx5_common.h
+    common/transport_batch_rma.hpp
     ibdevx/ibdevx.cpp
     ibdevx/ibdevx.h
     gpunetio/gpunetio.cpp

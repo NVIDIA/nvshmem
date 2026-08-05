@@ -21,6 +21,7 @@
 #include "internal/host/nvshmemi_types.h"                    // for nvshmemi_state
 #include "internal/host/util.h"                              // for CUDA_RUNTIME_CH...
 #include "internal/host_transport/transport.h"               // for rma_bytesdesc_t
+#include "internal/host/nvshmemi_region.h"
 
 #define NOT_A_CUDA_STREAM ((cudaStream_t)0)
 
@@ -280,8 +281,14 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                 exit(-1);
             }
         } else {
+            nvshmem_transport_op_attrs_t attrs{};
+            const nvshmem_transport_op_attrs_t *attrs_ptr = nullptr;
+            if (verb.is_nbi && (verb.desc == NVSHMEMI_OP_PUT || verb.desc == NVSHMEMI_OP_GET) &&
+                lstride == 1 && rstride == 1 && nvshmemi_region_host_prepare_rma_attrs(&attrs)) {
+                attrs_ptr = &attrs;
+            }
             nvshmemi_process_multisend_rma(tcurr, t, pe, verb, rptr, lptr, nelems * elembytes,
-                                           NVSHMEMX_QP_HOST, nullptr);
+                                           NVSHMEMX_QP_HOST, attrs_ptr);
         }
         goto out;
     }

@@ -87,7 +87,17 @@ typedef enum {
 
 typedef struct nvshmem_transport_op_attrs {
     uint32_t flags;
+    uint32_t hints;
+    uint64_t issuer_id;
+    uint64_t region_id;
 } nvshmem_transport_op_attrs_t;
+
+typedef enum {
+    NVSHMEM_TRANSPORT_REGION_ROLE_HOST = 0,
+    NVSHMEM_TRANSPORT_REGION_ROLE_PROXY = 1,
+    NVSHMEM_TRANSPORT_REGION_ROLE_COUNT = 2,
+    NVSHMEM_TRANSPORT_REGION_ROLE_MAX = INT_MAX,
+} nvshmem_transport_region_role_t;
 
 typedef struct nvshmem_transport_pe_info {
     pcie_id_t pcie_id;
@@ -147,6 +157,9 @@ typedef int (*rma_with_hints_handle)(struct nvshmem_transport *tcurr, int pe, rm
                                      rma_memdesc_t *remote, rma_memdesc_t *local,
                                      rma_bytesdesc_t bytesdesc, int qp_index,
                                      const nvshmem_transport_op_attrs_t *attrs);
+typedef int (*region_flush_handle)(struct nvshmem_transport *tcurr,
+                                   nvshmem_transport_region_role_t role, uint64_t issuer_id,
+                                   uint64_t region_id);
 typedef int (*amo_handle)(struct nvshmem_transport *tcurr, int pe, void *curetptr, amo_verb_t verb,
                           amo_memdesc_t *target, amo_bytesdesc_t bytesdesc, int qp_index);
 typedef int (*fence_handle)(struct nvshmem_transport *tcurr, int pe, int qp_index, int is_multi);
@@ -189,6 +202,7 @@ struct nvshmem_transport_host_ops {
      * must not depend on batching. Callers must fall back to rma when rma_with_hints is NULL.
      */
     rma_with_hints_handle rma_with_hints;
+    region_flush_handle region_flush;
 };
 
 typedef struct nvshmem_transport {

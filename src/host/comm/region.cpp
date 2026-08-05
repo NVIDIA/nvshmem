@@ -8,8 +8,11 @@
 #include "host/nvshmemx_api.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
+#include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "internal/host/nvshmemi_types.h"
+#include "internal/host_transport/transport.h"
+#include "non_abi/nvshmemi_region_constants.h"
 #include "non_abi/nvshmemx_error.h"
 
 namespace {
@@ -56,6 +59,50 @@ uint64_t nvshmemi_region_next_id() {
 }
 }  // namespace
 
+bool nvshmemi_region_host_prepare_rma_attrs(nvshmem_transport_op_attrs_t *attrs) {
+    if (!region_state.has_hints(NVSHMEMI_REGION_HINT_BATCH_RMA)) {
+        return false;
+    }
+
+    attrs->flags = NVSHMEM_TRANSPORT_OP_FLAG_NONE;
+    attrs->hints = NVSHMEMI_REGION_HINT_BATCH_RMA;
+    attrs->issuer_id = nvshmemi_region_host_issuer_id;
+    attrs->region_id = region_state.region_id();
+    return true;
+}
+
+int nvshmemi_region_flush(nvshmemi_state_t *state, nvshmem_transport_region_role_t role,
+                          uint64_t issuer_id, uint64_t region_id) {
+    int tbitmap = state->transport_bitmap;
+    for (int j = 0; j < state->num_initialized_transports; j++) {
+        if (tbitmap & 1) {
+            struct nvshmem_transport *tcurr = state->transports[j];
+            if (tcurr->host_ops.region_flush) {
+                int status = tcurr->host_ops.region_flush(tcurr, role, issuer_id, region_id);
+                if (status) {
+                    return status;
+                }
+            }
+        }
+        tbitmap >>= 1;
+    }
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemi_region_host_flush_active() {
+    if (!region_state.has_hints(NVSHMEMI_REGION_HINT_BATCH_RMA)) {
+        return NVSHMEMX_SUCCESS;
+    }
+
+    TRACE(NVSHMEM_P2P, "Host batched RMA region flush: issuer=%llu region=%llu",
+          static_cast<unsigned long long>(nvshmemi_region_host_issuer_id),
+          static_cast<unsigned long long>(region_state.region_id()));
+
+    int status = nvshmemi_region_flush(nvshmemi_state, NVSHMEM_TRANSPORT_REGION_ROLE_HOST,
+                                       nvshmemi_region_host_issuer_id, region_state.region_id());
+    return status;
+}
+
 int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_region_attrs_t *attrs) {
     NVTX_FUNC_RANGE_IN_GROUP(RMA_NONBLOCKING);
     NVSHMEMI_CHECK_INIT_STATUS();
@@ -87,8 +134,15 @@ int nvshmemx_region_stop(nvshmemx_region_handle_t handle) {
     NVTX_FUNC_RANGE_IN_GROUP(RMA_NONBLOCKING);
     NVSHMEMI_CHECK_INIT_STATUS();
 
+    int status;
+
     if (!region_state.active() || handle != region_state.region_id()) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    status = nvshmemi_region_host_flush_active();
+    if (status) {
+        return status;
     }
 
     TRACE(NVSHMEM_P2P, "Host region stop: issuer=%llu region=%llu",

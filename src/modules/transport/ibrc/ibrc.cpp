@@ -41,6 +41,7 @@
 #include "transport_gdr_common.h"
 #endif
 #include "transport_ib_common.h"
+#include "transport_batch_rma.hpp"
 
 #ifdef NVSHMEM_X86_64
 #include <immintrin.h>  // IWYU pragma: keep
@@ -1026,6 +1027,7 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     if (state->options) {
         free(state->options);
     }
+    delete state->batch_rma_state;
     free(state);
 
     nvshmemt_ibv_ftable_fini(&ibv_handle);
@@ -1454,6 +1456,133 @@ out:
     return status;
 }
 
+static int nvshmemt_ibrc_submit_batch_rma_region(struct nvshmem_transport *tcurr,
+                                                 nvshmemt_batch_rma_region &region) {
+    nvshmemt_ib_common_state_t state = static_cast<nvshmemt_ib_common_state_t>(tcurr->state);
+    const uint64_t qp_depth = static_cast<uint64_t>(get_ibrc_qp_depth(state));
+    const uint64_t max_outstanding = qp_depth > 1 ? qp_depth - 1 : 1;
+
+    TRACE(state->log_level, "IBRC batched RMA submit: entries=%zu", region.entries.size());
+
+    while (region.next_entry < region.entries.size()) {
+        size_t first_entry = region.next_entry;
+        nvshmemt_batch_rma_entry &first = region.entries[first_entry];
+        struct ibrc_ep *ep = static_cast<struct ibrc_ep *>(first.transport_domain);
+        size_t count = 1;
+        /* Link only adjacent operations on the same QP so region submission does not reorder
+         * operations. Round-robin selection across multiple RC QPs can therefore reduce the
+         * effective native batch size. */
+        while (first_entry + count < region.entries.size() && count < max_outstanding) {
+            nvshmemt_batch_rma_entry &entry = region.entries[first_entry + count];
+            struct ibrc_ep *candidate = static_cast<struct ibrc_ep *>(entry.transport_domain);
+            if (candidate != ep) {
+                break;
+            }
+            count++;
+        }
+
+        while ((ep->common_ep.head_op_id - ep->common_ep.tail_op_id) + count > max_outstanding) {
+            int status = state->ib_transport_ftable->progress(tcurr);
+            if (status) {
+                return status;
+            }
+            if (state->ib_transport_ftable->progress_recv) {
+                status =
+                    state->ib_transport_ftable->progress_recv(tcurr, NVSHMEMT_IB_COMMON_WAIT_NONE);
+                if (status) {
+                    return status;
+                }
+            }
+        }
+
+        struct ibv_send_wr *head = NULL;
+        struct ibv_send_wr *previous = NULL;
+        int selected_dev_slot = ep->common_ep.selected_dev_slot;
+        for (size_t i = 0; i < count; i++) {
+            nvshmemt_batch_rma_entry &entry = region.entries[first_entry + i];
+            int op_id = (ep->common_ep.head_op_id + i) & IBRC_REQUEST_QUEUE_MASK(state);
+            struct ibv_send_wr *wr = &(ep->req + op_id)->sr;
+            struct ibv_sge *sge = &(ep->req + op_id)->sge;
+            memset(wr, 0, sizeof(*wr));
+
+            wr->send_flags = IBV_SEND_SIGNALED;
+            wr->wr_id = NVSHMEMI_OP_PUT;
+            wr->num_sge = 1;
+            wr->sg_list = sge;
+            wr->wr.rdma.remote_addr = reinterpret_cast<uint64_t>(entry.remote.ptr);
+            const struct ibrc_mem_handle *remote_handle =
+                reinterpret_cast<const struct ibrc_mem_handle *>(entry.remote.handle);
+            const struct ibrc_mem_handle *local_handle =
+                reinterpret_cast<const struct ibrc_mem_handle *>(entry.local.handle);
+            wr->wr.rdma.rkey = remote_handle->dev_mem_handles[selected_dev_slot].rkey;
+            wr->opcode = entry.verb.desc == NVSHMEMI_OP_GET ? IBV_WR_RDMA_READ : IBV_WR_RDMA_WRITE;
+
+            sge->length = entry.bytes.nelems * entry.bytes.elembytes;
+            sge->addr = reinterpret_cast<uintptr_t>(entry.local.ptr);
+            sge->lkey = local_handle->dev_mem_handles[selected_dev_slot].lkey;
+
+            if (previous) {
+                previous->next = wr;
+            }
+            if (head == NULL) {
+                head = wr;
+            }
+            previous = wr;
+        }
+
+        struct ibv_send_wr *bad_wr = NULL;
+        int post_status = ibv_post_send(ep->qp, head, &bad_wr);
+        size_t posted = 0;
+        for (struct ibv_send_wr *wr = head; wr != NULL && wr != bad_wr; wr = wr->next) {
+            posted++;
+        }
+        ep->common_ep.head_op_id += posted;
+        region.next_entry += posted;
+        if (post_status) {
+            NVSHMEMI_ERROR_PRINT("ibv_post_send failed while submitting batched RMA region: %d\n",
+                                 post_status);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+    }
+    return 0;
+}
+
+static int nvshmemt_ibrc_rma_with_hints(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
+                                        rma_memdesc_t *remote, rma_memdesc_t *local,
+                                        rma_bytesdesc_t bytesdesc, int qp_index,
+                                        const nvshmem_transport_op_attrs_t *attrs) {
+    nvshmemt_ib_common_state_t state = static_cast<nvshmemt_ib_common_state_t>(tcurr->state);
+    nvshmemt_batch_rma_state *batch_rma_state = state->batch_rma_state;
+    if (batch_rma_state == nullptr) {
+        return nvshmemt_ibrc_rma(tcurr, pe, verb, remote, local, bytesdesc, qp_index);
+    }
+    void *ep = nvshmemt_ib_common_get_ep_from_qp_index(tcurr, qp_index, pe);
+    bool handled = false;
+    int status = batch_rma_state->try_accumulate(
+        pe, verb, remote, local, bytesdesc, qp_index, attrs, ep,
+        [tcurr](nvshmemt_batch_rma_region &region) {
+            return nvshmemt_ibrc_submit_batch_rma_region(tcurr, region);
+        },
+        &handled);
+    if (handled || status) {
+        return status;
+    }
+    return nvshmemt_ibrc_rma(tcurr, pe, verb, remote, local, bytesdesc, qp_index);
+}
+
+static int nvshmemt_ibrc_region_flush(struct nvshmem_transport *tcurr,
+                                      nvshmem_transport_region_role_t role, uint64_t issuer_id,
+                                      uint64_t region_id) {
+    nvshmemt_ib_common_state_t state = static_cast<nvshmemt_ib_common_state_t>(tcurr->state);
+    if (state->batch_rma_state == nullptr) {
+        return 0;
+    }
+    return state->batch_rma_state->flush(
+        role, issuer_id, region_id, [tcurr](nvshmemt_batch_rma_region &region) {
+            return nvshmemt_ibrc_submit_batch_rma_region(tcurr, region);
+        });
+}
+
 int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr*/, amo_verb_t verb,
                       amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc, int qp_index) {
     int status = 0;
@@ -1739,6 +1868,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     int status = 0;
     struct nvshmem_transport *transport = NULL;
     nvshmemt_ib_common_state_t ibrc_state = NULL;
+    std::unique_ptr<nvshmemt_batch_rma_state> batch_rma_state_guard;
     struct ibv_device **dev_list = NULL;
     int num_devices;
     struct nvshmemt_ib_hca_filter hca_filter;
@@ -1773,6 +1903,21 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = nvshmemi_env_options_init(ibrc_state->options);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize transport options.");
+    if (!nvshmemi_region_table_capacity_is_valid(ibrc_state->options->REGION_MAX_SLOTS)) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM_REGION_MAX_SLOTS must be a positive power of two.\n");
+    }
+    if (ibrc_state->options->REGION_HOST_BATCH_MAX_OPS < 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM_REGION_HOST_BATCH_MAX_OPS must be non-negative.\n");
+    }
+    batch_rma_state_guard = nvshmemt_make_batch_rma_state(
+        ibrc_state->options->REGION_MAX_SLOTS,
+        static_cast<size_t>(ibrc_state->options->REGION_HOST_BATCH_MAX_OPS));
+    ibrc_state->batch_rma_state = batch_rma_state_guard.get();
+    if (ibrc_state->batch_rma_state == nullptr) {
+        NVSHMEMI_WARN_PRINT("Unable to allocate IBRC batched RMA state; using scalar RMA.\n");
+    }
 
     nvshmemt_ib_common_sanitize_timeout(ibrc_state->options);
     nvshmemt_ib_common_sanitize_retry_cnt(ibrc_state->options);
@@ -1905,6 +2050,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.get_mem_handle = nvshmemt_ibrc_get_mem_handle;
     transport->host_ops.release_mem_handle = nvshmemt_ibrc_release_mem_handle;
     transport->host_ops.rma = nvshmemt_ibrc_rma;
+    transport->host_ops.rma_with_hints = nvshmemt_ibrc_rma_with_hints;
+    transport->host_ops.region_flush = nvshmemt_ibrc_region_flush;
     transport->host_ops.amo = nvshmemt_ibrc_amo;
     transport->host_ops.fence = nvshmemt_ib_common_fence;
     transport->host_ops.quiet = nvshmemt_ib_common_quiet;
@@ -1953,6 +2100,8 @@ out:
         if (transport) {
             free(transport);
         }
+    } else {
+        batch_rma_state_guard.release();
     }
     return status;
 }
