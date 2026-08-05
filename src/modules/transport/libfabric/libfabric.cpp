@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <algorithm>
 #include <mutex>
 #include <new>
 #include <unordered_map>
@@ -43,6 +44,7 @@
 #include "rdma/fi_rma.h"
 #include "internal/host_transport/transport.h"
 #include "transport_common.h"
+#include "transport_batch_rma.hpp"
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
@@ -1587,6 +1589,158 @@ out:
     return status;
 }
 
+static int nvshmemt_libfabric_prepare_rma_imm(struct nvshmem_transport *tcurr,
+                                              nvshmemt_libfabric_state_t *libfabric_state,
+                                              nvshmemt_libfabric_endpoint_t &ep, int pe,
+                                              rma_verb_t verb, int qp_index,
+                                              uint32_t *imm_data_value, uint32_t **imm_data) {
+    *imm_data = NULL;
+    if (!libfabric_state->use_staged_atomics ||
+        (verb.desc != NVSHMEMI_OP_P && verb.desc != NVSHMEMI_OP_PUT)) {
+        return 0;
+    }
+
+    auto [signal_state, sig_lk] = get_signal_state_locked(libfabric_state, ep);
+    auto &seq_counter = signal_state->put_signal_seq_counter[pe];
+    uint32_t sequence_count;
+    int status =
+        get_next_seq_num_with_retry(tcurr, seq_counter, &sequence_count, qp_index,
+                                    NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT);
+    if (status) {
+        return status;
+    }
+
+    seq_counter.put_count++;
+    nvshmemt_libfabric_imm_cq_data_hdr_t header;
+    uint8_t put_ack_count = 0;
+    if (seq_counter.put_count >= seq_counter.put_ack_freq) {
+        assert(seq_counter.put_count == seq_counter.put_ack_freq);
+        put_ack_count = seq_counter.put_count;
+        header = NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ;
+        seq_counter.put_count = 0;
+        ep.submitted_ops++;
+    } else {
+        header = NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT;
+    }
+
+    *imm_data_value = (static_cast<uint32_t>(header) << imm_header_bit_shift) |
+                      (static_cast<uint32_t>(put_ack_count)
+                       << nvshmemt_libfabric_endpoint_seq_counter_t::bit_shift) |
+                      (sequence_count & nvshmemt_libfabric_endpoint_seq_counter_t::bit_mask);
+    *imm_data = imm_data_value;
+    return 0;
+}
+
+static int nvshmemt_libfabric_submit_batch_rma_batch(struct nvshmem_transport *tcurr,
+                                                     nvshmemt_libfabric_batch_rma_batch *batch) {
+    if (batch->local_iov.empty()) {
+        return 0;
+    }
+
+    nvshmemt_libfabric_state_t *state = get_libfabric_state(tcurr);
+    nvshmemt_libfabric_endpoint_t &ep = *state->eps[batch->ep_index];
+    int domain_idx = ep.domain_index;
+    fi_addr_t target_ep = batch->pe * state->eps.size() + batch->ep_index;
+    uint64_t num_retries = 0;
+    int status = 0;
+    void *context = NULL;
+
+    host_ep_submit_guard host_guard(state, ep);
+    if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+        nvshmemt_libfabric_gdr_op_ctx_t *gdr_ctx;
+        do {
+            status = state->op_queue[domain_idx]->getNextSends(&gdr_ctx, 1);
+        } while (try_again(tcurr, &status, &num_retries,
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_GET_NEXT_SENDS,
+                           ep.qp_index, progress_type::All));
+        if (status || gdr_ctx == NULL) {
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        context = &gdr_ctx->ofi_context;
+        gdr_ctx->type = NVSHMEMT_LIBFABRIC_RMA;
+    }
+
+    rma_verb_t verb = {batch->op, 1, 0, NULL};
+    uint32_t imm_data_value = 0;
+    uint32_t *imm_data = NULL;
+    status = nvshmemt_libfabric_prepare_rma_imm(tcurr, state, ep, batch->pe, verb, batch->qp_index,
+                                                &imm_data_value, &imm_data);
+    if (status) {
+        return status;
+    }
+
+    struct fi_msg_rma message = {};
+    message.msg_iov = batch->local_iov.data();
+    message.desc = batch->local_desc.data();
+    message.iov_count = batch->local_iov.size();
+    message.addr = target_ep;
+    message.rma_iov = batch->remote_iov.data();
+    message.rma_iov_count = batch->remote_iov.size();
+    message.context = context;
+
+    uint64_t flags = 0;
+    if (imm_data) {
+        message.data = *imm_data;
+        flags |= FI_REMOTE_CQ_DATA;
+    }
+
+    num_retries = 0;
+    if (batch->op == NVSHMEMI_OP_PUT) {
+        do {
+            status = fi_writemsg(ep.endpoint, &message, flags);
+        } while (try_again(tcurr, &status, &num_retries,
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT, ep.qp_index,
+                           progress_type::All));
+    } else {
+        do {
+            status = fi_readmsg(ep.endpoint, &message, flags);
+        } while (try_again(tcurr, &status, &num_retries,
+                           NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_GET, ep.qp_index,
+                           progress_type::All));
+    }
+    if (status) {
+        return status;
+    }
+
+    ep.submitted_ops++;
+    batch->local_iov.clear();
+    batch->local_desc.clear();
+    batch->remote_iov.clear();
+    return 0;
+}
+
+static int nvshmemt_libfabric_flush_batch_rma_region(struct nvshmem_transport *tcurr,
+                                                     nvshmemt_libfabric_batch_rma_region *region) {
+    nvshmemt_libfabric_state_t *state = get_libfabric_state(tcurr);
+    TRACE(state->log_level, "libfabric batched RMA submit: batches=%zu", region->batches.size());
+    for (nvshmemt_libfabric_batch_rma_batch &batch : region->batches) {
+        int status = nvshmemt_libfabric_submit_batch_rma_batch(tcurr, &batch);
+        if (status) {
+            return status;
+        }
+    }
+    region->batches.clear();
+    region->op_count = 0;
+    return 0;
+}
+
+static int nvshmemt_libfabric_region_flush(struct nvshmem_transport *tcurr,
+                                           nvshmem_transport_region_role_t role, uint64_t issuer_id,
+                                           uint64_t region_id) {
+    if (!nvshmemt_region_role_is_valid(role)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    nvshmemt_libfabric_state_t *state = get_libfabric_state(tcurr);
+    if (state->batch_rma_regions == nullptr) {
+        return 0;
+    }
+    nvshmemi_region_key key = {issuer_id, region_id};
+    return state->batch_rma_regions->flush(
+        role, key, [tcurr](nvshmemt_libfabric_batch_rma_region &region) {
+            return nvshmemt_libfabric_flush_batch_rma_region(tcurr, &region);
+        });
+}
+
 static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/, int qp_index) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
     int ep_start_idx;
@@ -1839,12 +1993,146 @@ out:
     return status;
 }
 
+static size_t nvshmemt_libfabric_batch_rma_iov_limit(nvshmemt_libfabric_state_t *state,
+                                                     int domain_idx) {
+    struct fi_tx_attr *tx_attr = state->prov_infos[domain_idx]->tx_attr;
+    if (tx_attr == NULL) {
+        return 1;
+    }
+    size_t limit = std::min(tx_attr->iov_limit, tx_attr->rma_iov_limit);
+    return limit ? limit : 1;
+}
+
+static int nvshmemt_libfabric_accumulate_batch_rma_impl(struct nvshmem_transport *tcurr, int pe,
+                                                        rma_verb_t verb, rma_memdesc_t *remote,
+                                                        rma_memdesc_t *local,
+                                                        rma_bytesdesc_t bytesdesc, int qp_index,
+                                                        const nvshmem_transport_op_attrs_t *attrs,
+                                                        bool *handled) {
+    *handled = false;
+    if ((attrs->hints & NVSHMEMI_REGION_HINT_BATCH_RMA) == 0 || attrs->issuer_id == 0 ||
+        attrs->region_id == 0 || local->handle == NULL || remote->handle == NULL ||
+        (verb.desc != NVSHMEMI_OP_PUT && verb.desc != NVSHMEMI_OP_GET)) {
+        return 0;
+    }
+
+    nvshmemt_libfabric_state_t *state = get_libfabric_state(tcurr);
+    nvshmem_transport_region_role_t role = nvshmemt_region_role_from_qp_index(qp_index);
+    if (state->batch_rma_regions == nullptr) {
+        return 0;
+    }
+    nvshmemi_region_key key = {attrs->issuer_id, attrs->region_id};
+    nvshmemt_libfabric_batch_rma_region *region =
+        state->batch_rma_regions->find_or_create(role, key);
+    if (region == NULL) {
+        return 0;
+    }
+
+    nvshmemt_libfabric_batch_rma_batch *batch = NULL;
+    if (!region->batches.empty()) {
+        nvshmemt_libfabric_batch_rma_batch &candidate = region->batches.back();
+        if (candidate.pe == pe && candidate.qp_index == qp_index && candidate.op == verb.desc) {
+            batch = &candidate;
+        }
+    }
+
+    if (batch == NULL) {
+        region->batches.emplace_back();
+        batch = &region->batches.back();
+        batch->pe = pe;
+        batch->qp_index = qp_index;
+        batch->ep_index = get_next_ep(state, qp_index);
+        batch->op = verb.desc;
+    }
+
+    nvshmemt_libfabric_endpoint_t *ep = state->eps[batch->ep_index].get();
+    size_t iov_limit = nvshmemt_libfabric_batch_rma_iov_limit(state, ep->domain_index);
+    if (batch->local_iov.size() >= iov_limit) {
+        int status = nvshmemt_libfabric_submit_batch_rma_batch(tcurr, batch);
+        *handled = true;
+        if (status) {
+            return status;
+        }
+        batch->ep_index = get_next_ep(state, qp_index);
+        ep = state->eps[batch->ep_index].get();
+        iov_limit = nvshmemt_libfabric_batch_rma_iov_limit(state, ep->domain_index);
+    }
+
+    if (batch->local_iov.capacity() < iov_limit || batch->local_desc.capacity() < iov_limit ||
+        batch->remote_iov.capacity() < iov_limit) {
+        batch->local_iov.reserve(iov_limit);
+        batch->local_desc.reserve(iov_limit);
+        batch->remote_iov.reserve(iov_limit);
+    }
+
+    int domain_idx = ep->domain_index;
+    nvshmemt_libfabric_mem_handle_ep_t *local_handle =
+        &reinterpret_cast<nvshmemt_libfabric_mem_handle_t *>(local->handle)->hdls[domain_idx];
+    nvshmemt_libfabric_mem_handle_ep_t *remote_handle =
+        &reinterpret_cast<nvshmemt_libfabric_mem_handle_t *>(remote->handle)->hdls[domain_idx];
+    size_t op_size = bytesdesc.elembytes * bytesdesc.nelems;
+
+    struct iovec local_iov = {local->ptr, op_size};
+    struct fi_rma_iov remote_iov = {};
+    remote_iov.addr = (state->prov_infos[domain_idx]->domain_attr->mr_mode & FI_MR_VIRT_ADDR)
+                          ? reinterpret_cast<uintptr_t>(remote->ptr)
+                          : static_cast<uintptr_t>(remote->offset);
+    remote_iov.len = op_size;
+    remote_iov.key = remote_handle->key;
+
+    batch->local_iov.push_back(local_iov);
+    batch->local_desc.push_back(local_handle->local_desc);
+    batch->remote_iov.push_back(remote_iov);
+    if ((attrs->flags & NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS) == 0) {
+        region->op_count++;
+    }
+    *handled = true;
+    if (state->region_host_batch_max_ops != 0 &&
+        region->op_count >= state->region_host_batch_max_ops) {
+        return nvshmemt_libfabric_flush_batch_rma_region(tcurr, region);
+    }
+    return 0;
+}
+
+static int nvshmemt_libfabric_try_accumulate_batch_rma(struct nvshmem_transport *tcurr, int pe,
+                                                       rma_verb_t verb, rma_memdesc_t *remote,
+                                                       rma_memdesc_t *local,
+                                                       rma_bytesdesc_t bytesdesc, int qp_index,
+                                                       const nvshmem_transport_op_attrs_t *attrs,
+                                                       bool *handled) noexcept {
+    try {
+        return nvshmemt_libfabric_accumulate_batch_rma_impl(tcurr, pe, verb, remote, local,
+                                                            bytesdesc, qp_index, attrs, handled);
+    } catch (const std::bad_alloc &) {
+        nvshmem_transport_region_role_t role = nvshmemt_region_role_from_qp_index(qp_index);
+        int status =
+            nvshmemt_libfabric_region_flush(tcurr, role, attrs->issuer_id, attrs->region_id);
+        if (status) {
+            return status;
+        }
+        *handled = false;
+        return 0;
+    } catch (...) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+}
+
 static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, int pe,
                                              rma_verb_t verb, rma_memdesc_t *remote,
                                              rma_memdesc_t *local, rma_bytesdesc_t bytesdesc,
                                              int qp_index,
                                              const nvshmem_transport_op_attrs_t *attrs) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
+    if (attrs && (attrs->hints & NVSHMEMI_REGION_HINT_BATCH_RMA) != 0 && attrs->issuer_id &&
+        attrs->region_id) {
+        bool handled;
+        int status = nvshmemt_libfabric_try_accumulate_batch_rma(
+            tcurr, pe, verb, remote, local, bytesdesc, qp_index, attrs, &handled);
+        if (handled || status) {
+            return status;
+        }
+    }
+
     uint32_t imm_data_val = 0;
     uint32_t *imm_data = NULL;
     int status = 0;
@@ -1860,43 +2148,19 @@ static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, in
 
     // Generate sequence number for P and PUT operations when ordering is needed
     host_ep_submit_guard host_guard(libfabric_state, ep);
-    if (libfabric_state->use_staged_atomics &&
-        (verb.desc == NVSHMEMI_OP_P || verb.desc == NVSHMEMI_OP_PUT)) {
-        auto [signal_state, sig_lk] = get_signal_state_locked(libfabric_state, ep);
-        auto &seq_counter = signal_state->put_signal_seq_counter[pe];
-        uint32_t sequence_count;
-
-        status =
-            get_next_seq_num_with_retry(tcurr, seq_counter, &sequence_count, qp_index,
-                                        NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT);
-        if (status) {
-            return status;
-        }
-
-        seq_counter.put_count++;
-
-        nvshmemt_libfabric_imm_cq_data_hdr_t header;
-        uint8_t put_ack_count = 0;
-        if (seq_counter.put_count >= seq_counter.put_ack_freq) {
-            /* Make sure we didn't accidentally increment it anywhere else */
-            assert(seq_counter.put_count == seq_counter.put_ack_freq);
-            put_ack_count = seq_counter.put_count;
-            header = NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT_WITH_ACK_REQ;
-            seq_counter.put_count = 0;
-            ep.submitted_ops++;  // Account for incoming ack
-        } else {
-            header = NVSHMEMT_LIBFABRIC_IMM_STANDALONE_PUT;
-        }
-
-        imm_data_val = (static_cast<uint32_t>(header) << imm_header_bit_shift) |
-                       (static_cast<uint32_t>(put_ack_count)
-                        << nvshmemt_libfabric_endpoint_seq_counter_t::bit_shift) |
-                       (sequence_count & nvshmemt_libfabric_endpoint_seq_counter_t::bit_mask);
-        imm_data = &imm_data_val;
+    status = nvshmemt_libfabric_prepare_rma_imm(tcurr, libfabric_state, ep, pe, verb, qp_index,
+                                                &imm_data_val, &imm_data);
+    if (status) {
+        return status;
     }
 
-    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index, attrs,
-                                       imm_data, ep);
+    nvshmem_transport_op_attrs_t scalar_attrs = attrs ? *attrs : nvshmem_transport_op_attrs_t{};
+    if (libfabric_state->disable_implicit_batch_rma) {
+        scalar_attrs.flags &= ~NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
+    }
+
+    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                       attrs ? &scalar_attrs : nullptr, imm_data, ep);
 }
 
 static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
@@ -3337,7 +3601,15 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     NVSHMEMI_NULL_ERROR_JMP(transport, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate memory for libfabric transport.");
 
-    libfabric_state_owner = std::make_unique<nvshmemt_libfabric_state_t>();
+    try {
+        libfabric_state_owner = std::make_unique<nvshmemt_libfabric_state_t>();
+    } catch (const std::bad_alloc &) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                           "Unable to allocate libfabric state.");
+    } catch (...) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                           "Unable to construct libfabric state.");
+    }
     libfabric_state = libfabric_state_owner.get();
     libfabric_state->table = table;
     /* Transfer ownership to transport; finalize() reclaims it via unique_ptr. */
@@ -3348,9 +3620,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     transport->host_ops.get_mem_handle = nvshmemt_libfabric_get_mem_handle;
     transport->host_ops.release_mem_handle = nvshmemt_libfabric_release_mem_handle;
     transport->host_ops.rma = nvshmemt_libfabric_rma;
-    if (!options.LIBFABRIC_DISABLE_BATCH_RMA) {
-        transport->host_ops.rma_with_hints = nvshmemt_libfabric_rma_with_hints;
-    }
+    transport->host_ops.rma_with_hints = nvshmemt_libfabric_rma_with_hints;
+    transport->host_ops.region_flush = nvshmemt_libfabric_region_flush;
     transport->host_ops.fence = nvshmemt_libfabric_fence;
     transport->host_ops.quiet = nvshmemt_libfabric_quiet;
     transport->host_ops.finalize = nvshmemt_libfabric_finalize;
@@ -3368,6 +3639,28 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     status = nvshmemi_env_options_init(&options);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize env options.");
+
+    if (!nvshmemi_region_table_capacity_is_valid(options.REGION_MAX_SLOTS)) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM_REGION_MAX_SLOTS must be a positive power of two.\n");
+    }
+    if (options.REGION_HOST_BATCH_MAX_OPS < 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM_REGION_HOST_BATCH_MAX_OPS must be non-negative.\n");
+    }
+    libfabric_state->region_host_batch_max_ops =
+        static_cast<size_t>(options.REGION_HOST_BATCH_MAX_OPS);
+    try {
+        libfabric_state->batch_rma_regions =
+            std::make_unique<nvshmemi_region_lifecycle<nvshmemt_libfabric_batch_rma_region,
+                                                       NVSHMEM_TRANSPORT_REGION_ROLE_COUNT>>(
+                nvshmemt_region_table_capacities(options.REGION_MAX_SLOTS),
+                nvshmemt_region_table_probe_limit);
+    } catch (...) {
+        libfabric_state->batch_rma_regions.reset();
+        NVSHMEMI_WARN_PRINT("Unable to allocate libfabric batched RMA tables; using scalar RMA.\n");
+    }
+    libfabric_state->disable_implicit_batch_rma = options.LIBFABRIC_DISABLE_BATCH_RMA;
 
     libfabric_state->log_level = nvshmemt_common_get_log_level(&options);
     libfabric_state->max_nic_per_pe = options.LIBFABRIC_MAX_NIC_PER_PE;
