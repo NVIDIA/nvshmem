@@ -69,8 +69,10 @@ NVSHMEMI_ENV_DEF(IB_ROCE_VERSION_NUM, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
 NVSHMEMI_ENV_DEF(IB_SL, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT, "Service level to use over IB/ROCE")
 NVSHMEMI_ENV_DEF(IB_FORCE_GRH, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Force GRH routing on all IB connections, overriding automatic detection")
-NVSHMEMI_ENV_DEF(FORCE_ADDRESS_STABLE_AMO, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
-                 "Force address-stable multi-NIC AMO routing")
+NVSHMEMI_ENV_DEF(IB_ATOMIC_POLICY, string, "AUTO", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Controls default-QP multi-NIC AMO routing. Allowed values: AUTO, SINGLE, MULTI. "
+                 "SINGLE selects one responder NIC per target word; AUTO uses capability-aware "
+                 "selection; MULTI forces cross-NIC round-robin even when atomic scope is unknown.")
 NVSHMEMI_ENV_DEF(IB_PKEY_INDEX, int, 0, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Partition key (pkey) index to use for InfiniBand transport queue pairs. "
                  "Default is 0 (the default partition).")

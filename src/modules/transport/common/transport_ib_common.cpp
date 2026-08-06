@@ -13,6 +13,7 @@
 #include <infiniband/verbs.h>  // for IBV_ACCESS_LOCAL_WRITE
 #include <stdint.h>            // for uintptr_t, uint64_t
 #include <string.h>            // for strerror
+#include <strings.h>           // for strcasecmp
 #include <unistd.h>            // for access, close, sysconf
 #include <vector>              // for vector
 #include "device_host_transport/nvshmem_constants.h"
@@ -940,6 +941,44 @@ out:
     return status;
 }
 
+enum class nvshmemt_ib_atomic_policy : uint8_t {
+    AUTO,
+    SINGLE,
+    MULTI,
+};
+
+static int nvshmemt_ib_common_get_atomic_policy(const char *value,
+                                                nvshmemt_ib_atomic_policy *policy) {
+    if (value == nullptr || value[0] == '\0' || strcasecmp(value, "AUTO") == 0) {
+        *policy = nvshmemt_ib_atomic_policy::AUTO;
+    } else if (strcasecmp(value, "SINGLE") == 0) {
+        *policy = nvshmemt_ib_atomic_policy::SINGLE;
+    } else if (strcasecmp(value, "MULTI") == 0) {
+        *policy = nvshmemt_ib_atomic_policy::MULTI;
+    } else {
+        NVSHMEMI_ERROR_PRINT(
+            "Invalid NVSHMEM_IB_ATOMIC_POLICY value '%s'. Valid values are AUTO, SINGLE, and "
+            "MULTI.",
+            value);
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+static const char *nvshmemt_ib_common_atomic_policy_name(nvshmemt_ib_atomic_policy policy) {
+    switch (policy) {
+        case nvshmemt_ib_atomic_policy::AUTO:
+            return "AUTO";
+        case nvshmemt_ib_atomic_policy::SINGLE:
+            return "SINGLE";
+        case nvshmemt_ib_atomic_policy::MULTI:
+            return "MULTI";
+    }
+
+    return "UNKNOWN";
+}
+
 int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
                                                       nvshmemt_ib_common_state_t state,
                                                       const int *selected_physical_dev_ids,
@@ -949,11 +988,40 @@ int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
     bool seen_device[MAX_NUM_HCAS] = {};
     uint8_t local_cross_hca_atomic = 1;
     int selected_physical_devices = 0;
+    nvshmemt_ib_atomic_policy policy = nvshmemt_ib_atomic_policy::AUTO;
+
+    int policy_status =
+        nvshmemt_ib_common_get_atomic_policy(state->options->IB_ATOMIC_POLICY, &policy);
+
+    /* Every PE must use the same override or sources could disagree about AMO routing. */
+    if (t->n_pes > 1) {
+        uint8_t local_policy = policy_status == NVSHMEMX_SUCCESS ? static_cast<uint8_t>(policy)
+                                                                 : static_cast<uint8_t>(-1);
+        std::vector<uint8_t> peer_policies(t->n_pes);
+        status = t->boot_handle->allgather(&local_policy, peer_policies.data(),
+                                           sizeof(local_policy), t->boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Allgather of multi-NIC AMO policies failed.\n");
+
+        NVSHMEMI_NZ_ERROR_JMP(policy_status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                              "Unable to parse NVSHMEM_IB_ATOMIC_POLICY.\n");
+
+        for (uint8_t peer_policy : peer_policies) {
+            if (peer_policy != local_policy) {
+                NVSHMEMI_ERROR_JMP(
+                    status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                    "NVSHMEM_IB_ATOMIC_POLICY must have the same value on every PE.\n");
+            }
+        }
+    }
+
+    NVSHMEMI_NZ_ERROR_JMP(policy_status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                          "Unable to parse NVSHMEM_IB_ATOMIC_POLICY.\n");
 
     state->use_address_stable_amo = false;
 
     if (n_selected_dev_ids > 1) {
-        if (!selected_physical_dev_ids || !state->devices || device_struct_size == 0) {
+        if (!selected_physical_dev_ids) {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                                "Invalid multi-NIC AMO routing configuration.\n");
         }
@@ -968,22 +1036,39 @@ int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
 
             seen_device[dev_id] = true;
             selected_physical_devices++;
-            struct nvshmemt_ib_common_device *device =
-                (struct nvshmemt_ib_common_device *)((char *)state->devices +
-                                                     dev_id * device_struct_size);
-            if (device->device_attr.atomic_cap != IBV_ATOMIC_GLOB) {
-                local_cross_hca_atomic = 0;
+            if (policy == nvshmemt_ib_atomic_policy::AUTO) {
+                if (!state->devices || device_struct_size == 0) {
+                    NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                                       "Invalid multi-NIC AMO capability configuration.\n");
+                }
+                struct nvshmemt_ib_common_device *device =
+                    (struct nvshmemt_ib_common_device *)((char *)state->devices +
+                                                         dev_id * device_struct_size);
+                if (device->device_attr.atomic_cap != IBV_ATOMIC_GLOB) {
+                    local_cross_hca_atomic = 0;
+                }
             }
         }
 
         /* Different ports on one HCA do not need cross-HCA atomic scope. */
-        if (selected_physical_devices <= 1) local_cross_hca_atomic = 1;
+        if (policy == nvshmemt_ib_atomic_policy::AUTO && selected_physical_devices <= 1) {
+            local_cross_hca_atomic = 1;
+        }
     }
 
-    if (state->options->FORCE_ADDRESS_STABLE_AMO) local_cross_hca_atomic = 0;
+    if (policy == nvshmemt_ib_atomic_policy::SINGLE) {
+        local_cross_hca_atomic = 0;
+    } else if (policy == nvshmemt_ib_atomic_policy::MULTI) {
+        local_cross_hca_atomic = 1;
+        if (n_selected_dev_ids > 1) {
+            NVSHMEMI_WARN_PRINT(
+                "NVSHMEM_IB_ATOMIC_POLICY=MULTI bypasses cross-HCA atomic capability checks; "
+                "use it only when cross-NIC atomic scope is known to be safe.");
+        }
+    }
 
     /* All PEs participate even if this PE selected only one NIC. */
-    if (t->n_pes > 1) {
+    if (policy == nvshmemt_ib_atomic_policy::AUTO && t->n_pes > 1) {
         std::vector<uint8_t> peer_cross_hca_atomic(t->n_pes);
         status = t->boot_handle->allgather(&local_cross_hca_atomic, peer_cross_hca_atomic.data(),
                                            sizeof(local_cross_hca_atomic), t->boot_handle);
@@ -999,11 +1084,11 @@ int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
     }
 
     state->use_address_stable_amo = !local_cross_hca_atomic;
-    INFO(state->log_level, "Multi-NIC AMO routing: %s (selected NIC slots: %d, physical HCAs: %d)",
-         state->use_address_stable_amo
-             ? "address-stable fallback (global cross-HCA atomic capability unavailable or forced)"
-             : "cross-device round-robin",
-         n_selected_dev_ids, selected_physical_devices);
+    INFO(state->log_level,
+         "Multi-NIC AMO routing: %s (policy: %s, selected NIC slots: %d, physical HCAs: %d)",
+         state->use_address_stable_amo ? "address-stable selection" : "cross-device round-robin",
+         nvshmemt_ib_common_atomic_policy_name(policy), n_selected_dev_ids,
+         selected_physical_devices);
 
 out:
     return status;
