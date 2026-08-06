@@ -257,8 +257,8 @@ int nvshmemt_ib_common_fence(nvshmem_transport_t tcurr, int pe, int qp_index, in
 int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_dev_ids,
                                          int num_candidate_devs, int *out_qp_indices, int num_qps);
 
-/* Configure address-stable AMO routing when selected HCAs lack global atomic scope. The
- * selected device IDs are physical indices into state->devices. */
+/* Configure default-QP multi-NIC AMO routing. The selected device IDs are physical indices into
+ * state->devices. */
 int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
                                                       nvshmemt_ib_common_state_t state,
                                                       const int *selected_physical_dev_ids,
