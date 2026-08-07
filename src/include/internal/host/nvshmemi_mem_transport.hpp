@@ -21,6 +21,7 @@
 class nvshmemi_transport_view;
 
 enum class nvshmemi_clique_discovery_mode : uint8_t { LEGACY_NVML, CUDA_CLIQUE_API };
+inline constexpr size_t nvshmemi_num_cuda_clique_types = 4;
 
 static_assert(sizeof(nvshmem_mem_handle_t) % sizeof(uint64_t) == 0,
               "nvshmem_mem_handle_t size is not a multiple of 8B");
@@ -57,44 +58,43 @@ class nvshmemi_mem_p2p_transport final {
     bool has_cuda_clique_info(void) const {
         return clique_discovery_mode_ == nvshmemi_clique_discovery_mode::CUDA_CLIQUE_API;
     }
-    bool is_cuda_clique_connected_pe(CUcliqueType type, int pe) const {
-        const auto type_idx = static_cast<size_t>(type);
-        return type_idx < cuda_clique_connected_pes_.size() &&
-               cuda_clique_connected_pes_[type_idx].at(pe) != 0;
-    }
-    const std::vector<uint8_t> &get_unicast_pointer_connected_pes(void) const {
+    const std::vector<uint8_t> &get_uc_ptr_connected_pes(void) const {
         return cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER));
     }
     int create_proc_map(int npes, const nvshmemi_transport_view &transports);
     std::map<pid_t, int> get_proc_map(void) const { return proc_map_; }
-    int get_num_p2p_connected_pes(int npes_node);
-    bool is_nvl_connected_pe(int pe) {
-        /* Check if the peer GPU is connected via the MNNVL fabric */
-        return nvshmemi_nvl_connected_pes_.at(pe) != 0;
+    int get_num_uc_ptr_connected_pes(int npes_node);
+    bool is_uc_ptr_connected_pe(int pe) const {
+        /* Check if the peer GPU is reachable through a unicast pointer. */
+        return cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER))
+                   .at(pe) != 0;
     }
-    bool is_nvls_connected_pe(int pe) const noexcept {
-        /* Check if the peer GPU is connected via the MNNVL fabric
-         * and within same multicast domain
-         */
-        return nvshmemi_nvls_connected_pes_.at(pe) != 0;
+    bool is_mc_ptr_connected_pe(int pe) const noexcept {
+        /* Check if the peer GPU is in the multicast-pointer domain. */
+        return cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_POINTER))
+                   .at(pe) != 0;
+    }
+    bool is_uc_le_connected_pe(int pe) const {
+        /* Check if the peer GPU is reachable through a unicast logical endpoint. */
+        return cuda_clique_connected_pes_
+                   .at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT))
+                   .at(pe) != 0;
     }
     bool is_mc_le_connected_pe(int pe) const noexcept {
-        return nvshmemi_mc_le_connected_pes_.at(pe) != 0;
-    }
-    bool is_handle_accessible_pe(int pe) {
-        /* Check if the peer GPU is accessible with handles */
-        return nvshmemi_handle_accessible_pes_.at(pe) != 0;
+        return cuda_clique_connected_pes_
+                   .at(static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT))
+                   .at(pe) != 0;
     }
 
     // This function allows to modify the P2P-connected PE list if not all P2P PEs could be mapped
     // to VA
-    void update_nvl_connected_pes(const std::vector<uint8_t> &updated_connected_pes) {
-        nvshmemi_nvl_connected_pes_.clear();
-        nvshmemi_nvl_connected_pes_ = updated_connected_pes;
+    void update_uc_ptr_connected_pes(const std::vector<uint8_t> &updated_connected_pes) {
+        cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER)) =
+            updated_connected_pes;
     }
 
-    const std::vector<uint8_t> &get_nvls_connected_pes(void) const {
-        return nvshmemi_nvls_connected_pes_;
+    const std::vector<uint8_t> &get_mc_ptr_connected_pes(void) const {
+        return cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_POINTER));
     }
 
    private:
@@ -110,17 +110,8 @@ class nvshmemi_mem_p2p_transport final {
     bool nvshmemi_has_mnnvl_fabric_ = false;
     nvshmemi_clique_discovery_mode clique_discovery_mode_ =
         nvshmemi_clique_discovery_mode::LEGACY_NVML;
-    std::array<std::vector<uint8_t>, 4> cuda_clique_connected_pes_;
-    std::vector<uint8_t> nvshmemi_nvl_connected_pes_;
-
-    // list of PEs that can be accessed with handles
-    std::vector<uint8_t> nvshmemi_handle_accessible_pes_;
-
-    // this is a bitmap to track the PEs that are within the same multicast domain
-    std::vector<uint8_t> nvshmemi_nvls_connected_pes_;
-
-    // this is a bitmap to track the PEs reachable through a multicast logical endpoint
-    std::vector<uint8_t> nvshmemi_mc_le_connected_pes_;
+    // Connectivity bitmaps indexed by CUcliqueType.
+    std::array<std::vector<uint8_t>, nvshmemi_num_cuda_clique_types> cuda_clique_connected_pes_;
     bool errored_on_initialization_ = true;
     CUmemAllocationHandleType nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 };

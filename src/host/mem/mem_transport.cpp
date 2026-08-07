@@ -33,7 +33,6 @@
 
 namespace {
 
-constexpr size_t nvshmemi_num_cuda_clique_types = 4;
 static_assert(nvshmemi_num_cuda_clique_types <= 8,
               "valid_types must have one bit for each CUDA clique type");
 
@@ -213,11 +212,15 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     errored_on_initialization_ =
         true; /* By default, p2p is not initialized, so some features may be disabled */
 
-    nvshmemi_nvls_connected_pes_.resize(npes, 0);  // this is a bitmap
-    nvshmemi_mc_le_connected_pes_.resize(npes, 0);
-    nvshmemi_nvl_connected_pes_.resize(npes, 0);
-    nvshmemi_handle_accessible_pes_.resize(npes, 0);
     for (auto &connected_pes : cuda_clique_connected_pes_) connected_pes.resize(npes, 0);
+    auto &uc_ptr_connected_pes =
+        cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER));
+    auto &mc_ptr_connected_pes =
+        cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_POINTER));
+    auto &uc_le_connected_pes =
+        cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT));
+    auto &mc_le_connected_pes = cuda_clique_connected_pes_.at(
+        static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT));
     cudaDeviceProp prop;
     int flag = false;
     nvmlDevice_t local_device;
@@ -369,46 +372,37 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                 ? static_cast<CUmemAllocationHandleType>(CU_MEM_HANDLE_TYPE_FABRIC)
                 : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
-        /* if OVERRIDE_CLIQUE_ID is enabled, then only PEs with same rackID will be considered
-         * as nvls_connected_pes, others will not be considered.
+        /* If OVERRIDE_CLIQUE_ID is enabled, only PEs with the same rack ID are considered
+         * multicast-pointer connected.
          */
-        for (int i = 0; i < npes && nvshmemi_has_mnnvl_fabric_; i++) {
-            fabricInfo2 = pe_fabricInfo[i];
-            if ((fabricInfo2.state == NVML_GPU_FABRIC_STATE_COMPLETED) &&
-                (memcmp(fabricInfo1.clusterUuid, fabricInfo2.clusterUuid,
-                        NVML_GPU_FABRIC_UUID_LEN) == 0) &&
-                (fabricInfo1.cliqueId == fabricInfo2.cliqueId)) {
-                // setup nvl_connected_pes initially to include all PEs
-                // that are connected via NVL. If there are VA mapping restrictions,
-                // then this will updated.
-                nvshmemi_nvl_connected_pes_[i] = 1;
+        if (!has_cuda_clique_info()) {
+            for (int i = 0; i < npes && nvshmemi_has_mnnvl_fabric_; i++) {
+                fabricInfo2 = pe_fabricInfo[i];
+                if ((fabricInfo2.state == NVML_GPU_FABRIC_STATE_COMPLETED) &&
+                    (memcmp(fabricInfo1.clusterUuid, fabricInfo2.clusterUuid,
+                            NVML_GPU_FABRIC_UUID_LEN) == 0) &&
+                    (fabricInfo1.cliqueId == fabricInfo2.cliqueId)) {
+                    // Initially mark every NVL-connected PE as unicast-pointer connected.
+                    // VA mapping restrictions may narrow this set later.
+                    uc_ptr_connected_pes[i] = 1;
 
-                nvshmemi_handle_accessible_pes_[i] = 1;
-                if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
-                    // group PEs with same rackID in multicast domain (a subset of
-                    // nvl_connected_pes)
-                    platformInfo2 = pe_platformInfo[i];
-                    if (memcmp(platformInfo1.chassisSerialNumber, platformInfo2.chassisSerialNumber,
-                               sizeof(platformInfo1.chassisSerialNumber)) == 0) {
-                        nvshmemi_nvls_connected_pes_[i] = 1;
+                    uc_le_connected_pes[i] = 1;
+                    if (nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID) {
+                        // group PEs with same rackID in multicast domain (a subset of
+                        // uc_ptr_connected_pes)
+                        platformInfo2 = pe_platformInfo[i];
+                        if (memcmp(platformInfo1.chassisSerialNumber,
+                                   platformInfo2.chassisSerialNumber,
+                                   sizeof(platformInfo1.chassisSerialNumber)) == 0) {
+                            mc_ptr_connected_pes[i] = 1;
+                        }
+                    } else {
+                        // Track every unicast-pointer-connected PE.
+                        mc_ptr_connected_pes[i] = 1;
                     }
-                } else {
-                    // track nvl_connected_pes
-                    nvshmemi_nvls_connected_pes_[i] = 1;
+                    mc_le_connected_pes[i] = 1;
                 }
-                nvshmemi_mc_le_connected_pes_[i] = 1;
             }
-        }
-
-        if (nvshmemi_has_mnnvl_fabric_ && has_cuda_clique_info()) {
-            nvshmemi_nvl_connected_pes_ = cuda_clique_connected_pes_.at(
-                static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER));
-            nvshmemi_nvls_connected_pes_ = cuda_clique_connected_pes_.at(
-                static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_POINTER));
-            nvshmemi_handle_accessible_pes_ = cuda_clique_connected_pes_.at(
-                static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_LOGICAL_ENDPOINT));
-            nvshmemi_mc_le_connected_pes_ = cuda_clique_connected_pes_.at(
-                static_cast<size_t>(CU_CLIQUE_TYPE_MULTICAST_LOGICAL_ENDPOINT));
         }
 
         if (nvshmemi_has_mnnvl_fabric_) {
@@ -471,10 +465,11 @@ out:
     NVSHMEMU_HOST_PTR_FREE(peer_error_status);
 }
 
-int nvshmemi_mem_p2p_transport::get_num_p2p_connected_pes(int npes_node) {
+int nvshmemi_mem_p2p_transport::get_num_uc_ptr_connected_pes(int npes_node) {
+    const auto &uc_ptr_connected_pes = get_uc_ptr_connected_pes();
     return std::max(npes_node,
-                    static_cast<int>(std::count(nvshmemi_nvl_connected_pes_.begin(),
-                                                nvshmemi_nvl_connected_pes_.end(), uint8_t{1})));
+                    static_cast<int>(std::count(uc_ptr_connected_pes.begin(),
+                                                uc_ptr_connected_pes.end(), uint8_t{1})));
 }
 
 nvshmemi_mem_p2p_transport::~nvshmemi_mem_p2p_transport() {

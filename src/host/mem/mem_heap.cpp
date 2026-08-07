@@ -894,7 +894,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
     int status;
     size_t alignbytes = 0, heapextra = 0;
     CUmemAllocationProp prop = {};
-    int p2p_npes = get_p2pref()->get_num_p2p_connected_pes(cfg_.npes_node);
+    int p2p_npes = get_p2pref()->get_num_uc_ptr_connected_pes(cfg_.npes_node);
 
     set_cuda_mem_prop((void *)&prop, get_mem_handle_type());
 
@@ -915,9 +915,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
     if ((nvshmemi_options.LIMIT_PTR_P2P_ACCESS) ||
         ((p2p_npes * heap_size_) > NVSHMEMI_MAX_VA_SIZE)) {
         const bool has_cuda_clique_info = get_p2pref()->has_cuda_clique_info();
-        const auto &unicast_pointer_pes = get_p2pref()->get_unicast_pointer_connected_pes();
+        const auto &unicast_pointer_pes = get_p2pref()->get_uc_ptr_connected_pes();
         const auto &restricted_pointer_pes =
-            has_cuda_clique_info ? unicast_pointer_pes : get_p2pref()->get_nvls_connected_pes();
+            has_cuda_clique_info ? unicast_pointer_pes : get_p2pref()->get_mc_ptr_connected_pes();
         const size_t restricted_pointer_pe_count =
             std::count(restricted_pointer_pes.begin(), restricted_pointer_pes.end(), uint8_t{1});
         // Limit number of PEs mapped to VA
@@ -947,10 +947,10 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
             "Mapping the restricted PE domain (count: %zu) will exceed maximum VA space: %lld \n",
             restricted_pointer_pe_count, NVSHMEMI_MAX_VA_SIZE);
 
-        get_p2pref()->update_nvl_connected_pes(restricted_pointer_pes);
+        get_p2pref()->update_uc_ptr_connected_pes(restricted_pointer_pes);
 
         // Update p2p_npes to reflect the restricted unicast-pointer domain.
-        p2p_npes = get_p2pref()->get_num_p2p_connected_pes(cfg_.npes_node);
+        p2p_npes = get_p2pref()->get_num_uc_ptr_connected_pes(cfg_.npes_node);
     }
 
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
