@@ -18,10 +18,12 @@
 extern "C" {
 #endif
 
-__global__ void ping_pong(int *data_d, uint64_t *flag_d, int len, int pe, int iter) {
+__global__ void ping_pong(int *data_d, uint64_t *flag_d, int len, int pe, int iter,
+                          size_t dynamic_smem_size) {
     int i, peer;
 
     peer = !pe;
+    NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);
 
     for (i = 0; i < iter; i++) {
         if (pe) {
@@ -43,18 +45,27 @@ __global__ void ping_pong(int *data_d, uint64_t *flag_d, int len, int pe, int it
         }
     }
     nvshmem_quiet();
+    NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);
 }
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 }
 #endif
 
-void test_ping_pong(void **arglist, CUfunction kernel, cudaStream_t stream) {
+void test_ping_pong(void **arglist, CUfunction kernel, cudaStream_t stream,
+                    size_t dynamic_smem_size) {
     int status;
     if (use_cubin) {
-        CU_CHECK(cuLaunchCooperativeKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream, arglist));
+        if (dynamic_smem_size > 48 * 1024) {
+            CU_CHECK(cuFuncSetAttribute(kernel, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                                        (int)dynamic_smem_size));
+        }
+        CU_CHECK(cuLaunchCooperativeKernel(kernel, 1, 1, 1, 1, 1, 1, dynamic_smem_size, stream,
+                                           arglist));
     } else {
-        status = nvshmemx_collective_launch((const void *)ping_pong, 1, 1, arglist, 0, stream);
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(ping_pong, dynamic_smem_size);
+        status = nvshmemx_collective_launch((const void *)ping_pong, 1, 1, arglist,
+                                            dynamic_smem_size, stream);
         if (status != NVSHMEMX_SUCCESS) {
             fprintf(stderr, "shmemx_collective_launch failed %d \n", status);
             exit(-1);
@@ -72,6 +83,7 @@ int main(int c, char *v[]) {
     int iter = iters;
     int skip = warmup_iters;
     size_t max_msg_size = max_size;
+    size_t dynamic_smem_size = 0;
 
     int array_size, i;
     void **h_tables;
@@ -84,6 +96,9 @@ int main(int c, char *v[]) {
     CUfunction test_cubin = NULL;
 
     init_wrapper(&c, &v);
+    if (use_smem && !use_cubin) {
+        dynamic_smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
@@ -139,8 +154,8 @@ int main(int c, char *v[]) {
         int nelems = 0;
         h_size_arr[i] = size;
         nelems = size / sizeof(int);
-        void *args_1[] = {&data_d, &flag_d, &nelems, &mype, &skip};
-        void *args_2[] = {&data_d, &flag_d, &nelems, &mype, &iter};
+        void *args_1[] = {&data_d, &flag_d, &nelems, &mype, &skip, &dynamic_smem_size};
+        void *args_2[] = {&data_d, &flag_d, &nelems, &mype, &iter, &dynamic_smem_size};
 
         if (use_egm) {
             memset(flag_d, 0, sizeof(uint64_t));
@@ -150,7 +165,7 @@ int main(int c, char *v[]) {
         CUDA_CHECK(cudaDeviceSynchronize());
         nvshmem_barrier_all();
 
-        test_ping_pong(args_1, test_cubin, stream);
+        test_ping_pong(args_1, test_cubin, stream, dynamic_smem_size);
         CUDA_CHECK(cudaDeviceSynchronize());
         for (size_t repetition = 0; repetition < repetitions; repetition++) {
             if (use_egm) {
@@ -162,7 +177,7 @@ int main(int c, char *v[]) {
             nvshmem_barrier_all();
 
             cudaEventRecord(start, stream);
-            test_ping_pong(args_2, test_cubin, stream);
+            test_ping_pong(args_2, test_cubin, stream, dynamic_smem_size);
             cudaEventRecord(stop, stream);
 
             CUDA_CHECK(cudaEventSynchronize(stop));

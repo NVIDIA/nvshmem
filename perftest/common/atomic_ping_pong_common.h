@@ -13,21 +13,30 @@
 #include <unistd.h>
 #include "utils.h"
 
-#define DEFINE_ATOMIC_LATENCY_PING_PONG_CALL_KERNEL(AMO, TYPE_NAME)                            \
-    void test_ping_pong_##TYPE_NAME##_##AMO##_cubin(cudaStream_t stream, void **arglist) {     \
-        CUfunction test_cubin;                                                                 \
-        init_test_case_kernel(&test_cubin,                                                     \
-                              NVSHMEMI_TEST_STRINGIFY(ping_pong_##TYPE_NAME##_##AMO));         \
-        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, 1, 1, 1, 1, 1, 1, 0, stream, arglist)); \
+#define DEFINE_ATOMIC_LATENCY_PING_PONG_CALL_KERNEL(AMO, TYPE_NAME)                         \
+    void test_ping_pong_##TYPE_NAME##_##AMO##_cubin(cudaStream_t stream, void **arglist,    \
+                                                    size_t dynamic_smem_size) {             \
+        CUfunction test_cubin;                                                              \
+        init_test_case_kernel(&test_cubin,                                                  \
+                              NVSHMEMI_TEST_STRINGIFY(ping_pong_##TYPE_NAME##_##AMO));      \
+        if (dynamic_smem_size > 48 * 1024) {                                                \
+            CU_CHECK(cuFuncSetAttribute(test_cubin,                                         \
+                                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,    \
+                                        (int)dynamic_smem_size));                           \
+        }                                                                                   \
+        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, 1, 1, 1, 1, 1, 1, dynamic_smem_size, \
+                                           stream, arglist));                               \
     }
 
 #define DEFINE_PING_PONG_TEST_FOR_AMO_NO_ARG(TYPE, TYPE_NAME, AMO, COMPARE_EXPR)               \
     DEFINE_ATOMIC_LATENCY_PING_PONG_CALL_KERNEL(AMO, TYPE_NAME)                                \
-    __global__ void ping_pong_##TYPE_NAME##_##AMO(TYPE *flag_d, int pe, int iter) {            \
+    __global__ void ping_pong_##TYPE_NAME##_##AMO(TYPE *flag_d, int pe, int iter,              \
+                                                  size_t dynamic_smem_size) {                  \
         int i, peer;                                                                           \
                                                                                                \
         assert(1 == blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z); \
         peer = !pe;                                                                            \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                             \
                                                                                                \
         for (i = 0; i < iter; i++) {                                                           \
             if (pe) {                                                                          \
@@ -39,16 +48,18 @@
             }                                                                                  \
         }                                                                                      \
         nvshmem_quiet();                                                                       \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                          \
     }
 
 #define DEFINE_PING_PONG_TEST_FOR_AMO_ONE_ARG(TYPE, TYPE_NAME, AMO, COMPARE_EXPR, SET_EXPR)    \
     DEFINE_ATOMIC_LATENCY_PING_PONG_CALL_KERNEL(AMO, TYPE_NAME)                                \
     __global__ void ping_pong_##TYPE_NAME##_##AMO(TYPE *flag_d, int pe, int iter, TYPE value,  \
-                                                  TYPE cmp) {                                  \
+                                                  TYPE cmp, size_t dynamic_smem_size) {        \
         int i, peer;                                                                           \
                                                                                                \
         assert(1 == blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z); \
         peer = !pe;                                                                            \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                             \
                                                                                                \
         for (i = 0; i < iter; i++) {                                                           \
             if (pe) {                                                                          \
@@ -60,16 +71,18 @@
             }                                                                                  \
         }                                                                                      \
         nvshmem_quiet();                                                                       \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                          \
     }
 
 #define DEFINE_PING_PONG_TEST_FOR_AMO_TWO_ARG(TYPE, TYPE_NAME, AMO, COMPARE_EXPR, SET_EXPR)    \
     DEFINE_ATOMIC_LATENCY_PING_PONG_CALL_KERNEL(AMO, TYPE_NAME)                                \
     __global__ void ping_pong_##TYPE_NAME##_##AMO(TYPE *flag_d, int pe, int iter, TYPE value,  \
-                                                  TYPE cmp) {                                  \
+                                                  TYPE cmp, size_t dynamic_smem_size) {        \
         int i, peer;                                                                           \
                                                                                                \
         assert(1 == blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z); \
         peer = !pe;                                                                            \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                             \
                                                                                                \
         for (i = 0; i < iter; i++) {                                                           \
             if (pe) {                                                                          \
@@ -81,6 +94,7 @@
             }                                                                                  \
         }                                                                                      \
         nvshmem_quiet();                                                                       \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                          \
     }
 
 #define MAIN_SETUP(c, v, mype, npes, flag_d, stream, h_size_arr, h_tables, h_lat, atomic_op) \
@@ -124,10 +138,11 @@
 
 #define LAUNCH_KERNEL(TYPE_NAME, AMO, ARGLIST, STREAM)                                         \
     if (use_cubin) {                                                                           \
-        test_ping_pong_##TYPE_NAME##_##AMO##_cubin(STREAM, ARGLIST);                           \
+        test_ping_pong_##TYPE_NAME##_##AMO##_cubin(STREAM, ARGLIST, dynamic_smem_size);        \
     } else {                                                                                   \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(ping_pong_##TYPE_NAME##_##AMO, dynamic_smem_size);   \
         status = nvshmemx_collective_launch((const void *)ping_pong_##TYPE_NAME##_##AMO, 1, 1, \
-                                            ARGLIST, 0, STREAM);                               \
+                                            ARGLIST, dynamic_smem_size, STREAM);               \
         if (status != NVSHMEMX_SUCCESS) {                                                      \
             fprintf(stderr, "shmemx_collective_launch failed %d  \n", status);                 \
             exit(-1);                                                                          \
@@ -141,8 +156,8 @@
                                                                                                   \
         int status = 0;                                                                           \
         h_size_arr[0] = size;                                                                     \
-        void *args_1[] = {&flag_d, &mype, &skip};                                                 \
-        void *args_2[] = {&flag_d, &mype, &iter};                                                 \
+        void *args_1[] = {&flag_d, &mype, &skip, &dynamic_smem_size};                             \
+        void *args_2[] = {&flag_d, &mype, &iter, &dynamic_smem_size};                             \
                                                                                                   \
         float milliseconds;                                                                       \
         cudaEvent_t start, stop;                                                                  \
@@ -193,8 +208,8 @@
                                                                                                   \
         int status = 0;                                                                           \
         h_size_arr[0] = size;                                                                     \
-        void *args_1[] = {&flag_d, &mype, &skip, &value, &compare};                               \
-        void *args_2[] = {&flag_d, &mype, &iter, &value, &compare};                               \
+        void *args_1[] = {&flag_d, &mype, &skip, &value, &compare, &dynamic_smem_size};           \
+        void *args_2[] = {&flag_d, &mype, &iter, &value, &compare, &dynamic_smem_size};           \
                                                                                                   \
         float milliseconds;                                                                       \
         cudaEvent_t start, stop;                                                                  \

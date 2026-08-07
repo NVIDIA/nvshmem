@@ -190,12 +190,16 @@ int main(int argc, char *argv[]) {
     void **h_tables;
 
     read_args(argc, argv);
+    size_t dynamic_smem_size = 0;
 
     int iter = iters;
     int skip = warmup_iters;
     int mype, npes;
 
     MAIN_SETUP(argc, argv, mype, npes, flag_d, stream, h_size_arr, h_tables, h_lat);
+    if (use_smem && !use_cubin) {
+        dynamic_smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+    }
 
     switch (test_amo.type) {
         case AMO_INC: {
