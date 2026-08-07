@@ -149,6 +149,17 @@ inline __device__ void fence_async_proxy() {
     asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
 }
 
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_can_use_handle_atomic(T *target, int pe);
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_fetch(T *target, T value,
+                                                                        T compare, int pe);
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_atomic_nonfetch(T *target, T value,
+                                                                              int pe);
+
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 // forward declaration
 
@@ -559,6 +570,13 @@ __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(
     constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (num_buffers == 0 || registration.size <= kReserve) return 0;
     return nvshmemi_tma_align_down_16((registration.size - kReserve) / num_buffers);
+}
+
+__device__ __forceinline__ uint8_t *nvshmemi_handle_thread_smem_slot(uintptr_t smem_base,
+                                                                     uint32_t thread_idx) {
+    return reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base) +
+                                       static_cast<size_t>(thread_idx) *
+                                           NVSHMEMI_HANDLE_THREAD_SMEM_STRIDE);
 }
 
 __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers) {
@@ -1382,6 +1400,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     const bool can_use_handle = nvshmemi_is_le_implemented(pe);
 #endif
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    const bool can_use_atomic_handle = nvshmemi_is_le_atomic_implemented(pe, sig_addr);
+#else
+    const bool can_use_atomic_handle = false;
+#endif
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr) &&
         !nvshmemi_is_le_supported_and_prioritized(pe)) {
         volatile uint64_t *dest_actual =
@@ -1392,12 +1415,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
         nvshmemi_handle_p((void *)sig_addr, signal, pe);
 #endif
-    } else if (nvshmemi_use_ldst_path() && nvshmemi_peer_reachable(peer_base_addr)) {
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && nvshmemi_use_ldst_path() &&
+               nvshmemi_peer_reachable(peer_base_addr) &&
+               (!can_use_atomic_handle || !nvshmemi_is_le_supported_and_prioritized(pe))) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
         /* sig_op == NVSHMEM_SIGNAL_ADD */
         atomicAdd_system((unsigned long long *)dest_actual, signal);
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && can_use_atomic_handle) {
+        nvshmemi_handle_atomic_nonfetch<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, signal, pe);
+#endif
     } else {
         nvshmemi_transfer_amo_nonfetch<uint64_t>((void *)sig_addr, signal, pe,
                                                  (nvshmemi_amo_t)sig_op, qp_index);
@@ -2460,8 +2489,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
 template <typename T, int SMEM_CHUNK_SIZE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *__restrict__ dst,
                                                                          const T src, int pe) {
-    // This scalar p() path stages one payload in a single 16B shared-memory slot.
-    // Larger payloads should use the regular handle put path.
+    // This scalar p() path stages one payload in the first 16B of the common
+    // per-thread handle slot. Larger payloads should use the regular handle put path.
     static_assert(sizeof(T) <= CFT_HANDLE_TX_SIZE, "CFT handle p supports payloads up to 16B");
 
     unsigned mask = __activemask();
@@ -2473,8 +2502,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
     int leader_lane = __ffs(mask) - 1;
     uintptr_t smem_base = nvshmemi_tma_smem_base();
     int warp_idx_in_block = thrd_idx_in_blk / warpSize;
-
-    uint8_t *smem_ptr = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
 
     /*
      * Keep scalar PUTs in the same per-warp slot layout as staged copy paths:
@@ -2537,7 +2564,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
     }
     __syncwarp(mask);
 
-    uint8_t *smem_slot = smem_ptr + thrd_idx_in_blk * CFT_HANDLE_TX_SIZE;
+    uint8_t *smem_slot = nvshmemi_handle_thread_smem_slot(smem_base, thrd_idx_in_blk);
     const uint8_t *src_bytes = reinterpret_cast<const uint8_t *>(&src);
     // Place source bytes at the same byte positions selected by cp_mask.  If
     // the payload crosses a 16B boundary, the bytes for the second lane wrap to
@@ -2917,6 +2944,178 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p(void *__restrict
     nvshmemi_handle_p_emulated<T, NVSHMEMI_SMEM_BUF_SIZE>(dst, src, pe);
 }
 
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET
+template <le_fabric_atomic_op Op, typename T>
+struct nvshmemi_fabric_atomic_type {
+    static_assert(Op != le_fabric_atomic_op::Add, "fabric ADD requires its type specialization");
+    static_assert(sizeof(T) == sizeof(uint32_t) || sizeof(T) == sizeof(uint64_t),
+                  "unsupported fabric atomic type");
+    static constexpr le_fabric_atomic_type value =
+        sizeof(T) == sizeof(uint32_t) ? le_fabric_atomic_type::B32 : le_fabric_atomic_type::B64;
+};
+
+template <typename T>
+struct nvshmemi_fabric_atomic_type<le_fabric_atomic_op::Add, T> {
+    static_assert(std::is_same_v<T, float> || std::is_same_v<T, double> ||
+                      sizeof(T) == sizeof(uint32_t) || sizeof(T) == sizeof(uint64_t),
+                  "unsupported fabric ADD type");
+    static constexpr le_fabric_atomic_type value =
+        std::is_same_v<T, float>        ? le_fabric_atomic_type::F32
+        : std::is_same_v<T, double>     ? le_fabric_atomic_type::F64
+        : sizeof(T) == sizeof(uint32_t) ? le_fabric_atomic_type::U32
+                                        : le_fabric_atomic_type::U64;
+};
+
+template <le_fabric_atomic_op Op, typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_once(T *__restrict__ dst, T value,
+                                                                       T compare, int pe) {
+    const unsigned active_mask = __activemask();
+    const uint32_t active_threads = __popc(active_mask);
+    const uint32_t thread_idx =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    const uint32_t lane_idx = thread_idx % warpSize;
+    const uint32_t leader_lane = __ffs(active_mask) - 1;
+    const uint32_t warp_idx_in_block = thread_idx / warpSize;
+
+    const uintptr_t smem_base = nvshmemi_tma_smem_base();
+    /* fabric.try_atom always operates on a 16B destination block. Its regular
+     * source occupies 16B, while CAS requires a 32B-aligned 32B source whose
+     * lower and upper halves contain the compare and swap blocks respectively.
+     * Each thread's region is at least 16B-aligned, so rounding its source up
+     * to 32B consumes at most the first 16B of that same region.
+     *
+     * Give every thread a fixed 64B region. If its base is 32B-aligned, the
+     * source/result occupy [0, 48). If it is only 16B-aligned, they occupy
+     * [16, 64). Scalar PUT always uses [0, 16).
+     *
+     * Although source plus result need only 48B, the 64B stride contains the
+     * possible alignment adjustment and isolates this thread from both
+     * scalar PUT and atomic staging owned by every other thread. */
+    const uintptr_t thread_smem =
+        reinterpret_cast<uintptr_t>(nvshmemi_handle_thread_smem_slot(smem_base, thread_idx));
+    uint8_t *src_smem =
+        reinterpret_cast<uint8_t *>((thread_smem + NVSHMEMI_HANDLE_ATOMIC_SMEM_ALIGNMENT - 1) &
+                                    ~(NVSHMEMI_HANDLE_ATOMIC_SMEM_ALIGNMENT - 1));
+    void *return_value_smem = src_smem + 2 * CFT_HANDLE_TX_SIZE;
+
+    /* Reuse stage 0 of this physical warp's two-slot CFT barrier allocation. */
+    handle_barrier_t *handle_bar =
+        nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+
+    if (lane_idx == leader_lane) {
+        /* prepare_handle() preserves pending batches owned by this same warp.
+         * Drain explicitly before overwriting staging memory that such a batch
+         * may still be reading. The atomic itself is blocking, so retaining the
+         * earlier batch provides no benefit here. */
+        handle_bar->drain_pending_handle(true);
+        handle_bar->prepare_handle(warp_idx_in_block);
+        handle_bar->ensure_handle_tx_capacity(active_threads * CFT_HANDLE_TX_SIZE);
+    }
+    __syncwarp(active_mask);
+
+    /* Every instruction operates on a 16B destination block. Initialize the
+     * unused lanes with the operation's identity so only the requested scalar
+     * changes. CAS uses compare=swap=0 for unused lanes, which is also an
+     * identity whether the old lane is zero or nonzero. */
+    constexpr size_t source_bytes =
+        Op == le_fabric_atomic_op::Cas ? 2 * CFT_HANDLE_TX_SIZE : CFT_HANDLE_TX_SIZE;
+    constexpr uint8_t identity = Op == le_fabric_atomic_op::And ? 0xff : 0;
+    for (size_t i = 0; i < source_bytes; i++) src_smem[i] = identity;
+    if constexpr (Op == le_fabric_atomic_op::Cas) {
+        *reinterpret_cast<T *>(src_smem) = compare;
+        *reinterpret_cast<T *>(src_smem + CFT_HANDLE_TX_SIZE) = value;
+    } else {
+        *reinterpret_cast<T *>(src_smem) = value;
+    }
+    fence_async_proxy();
+
+    const auto dst_handle = nvshmemi_fabric_handle_for_pe(pe, dst);
+    fabric_try_atom_async<Op, nvshmemi_fabric_atomic_type<Op, T>::value>(
+        dst_handle.id(), dst_handle.offset(), return_value_smem, src_smem, handle_bar);
+    fabric_submit();
+    __syncwarp(active_mask);
+
+    if (lane_idx == leader_lane) {
+        handle_bar->record_pending_handle(active_threads * CFT_HANDLE_TX_SIZE);
+        handle_bar->drain_pending_handle(true);
+    }
+    __syncwarp(active_mask);
+
+    return *reinterpret_cast<T *>(return_value_smem);
+}
+
+template <typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_atomic_bits_equal(T lhs, T rhs) {
+    const uint8_t *lhs_bytes = reinterpret_cast<const uint8_t *>(&lhs);
+    const uint8_t *rhs_bytes = reinterpret_cast<const uint8_t *>(&rhs);
+    for (size_t i = 0; i < sizeof(T); i++) {
+        if (lhs_bytes[i] != rhs_bytes[i]) return false;
+    }
+    return true;
+}
+
+template <typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_swap_impl(T *__restrict__ dst,
+                                                                            T value, int pe) {
+    T compare{};
+    while (true) {
+        T old = nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(dst, value, compare, pe);
+        if (nvshmemi_atomic_bits_equal(old, compare)) return old;
+        compare = old;
+    }
+}
+
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE __half
+nvshmemi_handle_half_atomic_add_impl(__half *__restrict__ dst, __half value, int pe) {
+    /* Handle atomics require dst to be 16B-aligned, so the scalar half is the
+     * low lane of this word. Use bitwise word operations to keep the adjacent
+     * half unchanged, including negative zero and NaN payloads. */
+    uint32_t *word = reinterpret_cast<uint32_t *>(dst);
+    uint32_t expected =
+        nvshmemi_handle_atomic_once<le_fabric_atomic_op::Or>(word, uint32_t{0}, uint32_t{0}, pe);
+    const __half_raw value_raw = static_cast<__half_raw>(value);
+
+    while (true) {
+        const __half_raw old_raw = {static_cast<uint16_t>(expected)};
+        const __half new_value = __hadd(__half(old_raw), __half(value_raw));
+        const uint32_t desired =
+            (expected & 0xffff0000U) | static_cast<uint32_t>(static_cast<__half_raw>(new_value).x);
+        const uint32_t observed =
+            nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(word, desired, expected, pe);
+        if (observed == expected) return __half(old_raw);
+        expected = observed;
+    }
+}
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_fetch_impl(T *__restrict__ dst,
+                                                                             T value, T compare,
+                                                                             int pe) {
+    if constexpr (Amo == NVSHMEMI_AMO_ADD || Amo == NVSHMEMI_AMO_FETCH_ADD ||
+                  Amo == NVSHMEMI_AMO_INC || Amo == NVSHMEMI_AMO_FETCH_INC ||
+                  Amo == NVSHMEMI_AMO_SIGNAL_ADD) {
+        if constexpr (std::is_same_v<T, __half>) {
+            return nvshmemi_handle_half_atomic_add_impl(dst, value, pe);
+        } else {
+            return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Add>(dst, value, T{}, pe);
+        }
+    } else if constexpr (Amo == NVSHMEMI_AMO_AND || Amo == NVSHMEMI_AMO_FETCH_AND) {
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::And>(dst, value, T{}, pe);
+    } else if constexpr (Amo == NVSHMEMI_AMO_OR || Amo == NVSHMEMI_AMO_FETCH_OR ||
+                         Amo == NVSHMEMI_AMO_FETCH) {
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Or>(dst, value, T{}, pe);
+    } else if constexpr (Amo == NVSHMEMI_AMO_XOR || Amo == NVSHMEMI_AMO_FETCH_XOR) {
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Xor>(dst, value, T{}, pe);
+    } else if constexpr (Amo == NVSHMEMI_AMO_COMPARE_SWAP) {
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(dst, value, compare, pe);
+    } else {
+        static_assert(Amo == NVSHMEMI_AMO_SWAP || Amo == NVSHMEMI_AMO_SET,
+                      "unsupported fabric atomic operation");
+        return nvshmemi_handle_atomic_swap_impl(dst, value, pe);
+    }
+}
+#endif
+
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *src, void *dst,
                                                                   size_t len, int pe,
@@ -2995,6 +3194,65 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
 }
 
 #endif  // LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE constexpr bool nvshmemi_handle_atomic_is_supported() {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if constexpr (Amo == NVSHMEMI_AMO_ADD || Amo == NVSHMEMI_AMO_FETCH_ADD ||
+                  Amo == NVSHMEMI_AMO_INC || Amo == NVSHMEMI_AMO_FETCH_INC ||
+                  Amo == NVSHMEMI_AMO_SIGNAL_ADD) {
+        return std::is_same_v<T, __half> || sizeof(T) == sizeof(uint32_t) ||
+               sizeof(T) == sizeof(uint64_t);
+    } else {
+        return sizeof(T) == sizeof(uint32_t) || sizeof(T) == sizeof(uint64_t);
+    }
+#else
+    return false;
+#endif
+}
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_can_use_handle_atomic(T *target, int pe) {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if constexpr (!nvshmemi_handle_atomic_is_supported<T, Amo>()) {
+        return false;
+    } else {
+        return nvshmemi_is_le_atomic_implemented(pe, target);
+    }
+#else
+    return false;
+#endif
+}
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_fetch(T *target, T value,
+                                                                        T compare, int pe) {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    assert((nvshmemi_handle_atomic_is_supported<T, Amo>()));
+    return nvshmemi_handle_atomic_fetch_impl<T, Amo>(target, value, compare, pe);
+#else
+    /* Compile-only stub. nvshmemi_can_use_handle_atomic() returns false under
+     * the same feature gate, so normal dispatch cannot execute this path. */
+    (void)target;
+    (void)value;
+    (void)compare;
+    (void)pe;
+    return T{};
+#endif
+}
+
+template <typename T, nvshmemi_amo_t Amo>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_atomic_nonfetch(T *target, T value,
+                                                                              int pe) {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    (void)nvshmemi_handle_atomic_fetch_impl<T, Amo>(target, value, T{}, pe);
+#else
+    /* Compile-only stub; see nvshmemi_handle_atomic_fetch() above. */
+    (void)target;
+    (void)value;
+    (void)pe;
+#endif
+}
 
 #endif /* __CUDA__ARCH__ */
 #endif /* _NVSHMEM_COMMON_DEVICE_CUH_ */

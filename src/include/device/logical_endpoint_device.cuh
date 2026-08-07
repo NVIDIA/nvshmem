@@ -59,6 +59,12 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int) { 
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 inline constexpr int NVSHMEMI_SMEM_BUF_SIZE = 512;  // 16*32 - 16B per thread, 1 buf per warp
+/* Thread-scope handle operations share this per-thread staging layout. Atomics
+ * align their source within the owning thread's region; scalar PUTs use its
+ * first 16B. The common stride prevents the two paths from aliasing when
+ * different threads execute them concurrently. */
+inline constexpr size_t NVSHMEMI_HANDLE_ATOMIC_SMEM_ALIGNMENT = 2 * CFT_HANDLE_TX_SIZE;
+inline constexpr size_t NVSHMEMI_HANDLE_THREAD_SMEM_STRIDE = 4 * CFT_HANDLE_TX_SIZE;
 
 __device__ __forceinline__ bool nvshmemi_ld_and_check_valid_le_id(int pe) {
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
@@ -179,9 +185,12 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, 
 
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    const size_t thread_idx =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
     const size_t required_smem_size =
-        static_cast<size_t>(CFT_HANDLE_TX_SIZE) * blockDim.x * blockDim.y * blockDim.z;
-    return (nvshmemi_tma_smem_registered() &&
+        NVSHMEMI_HANDLE_THREAD_SMEM_STRIDE * thread_idx + CFT_HANDLE_TX_SIZE;
+    return (nvshmemi_tma_smem_registered() && handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
             nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
             nvshmemi_ld_and_check_valid_le_id(pe));
 #else
@@ -189,20 +198,15 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe) {
 #endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int pe,
-                                                                   const void *le_addr) {
-#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
-    const size_t threads_per_cta = blockDim.x * blockDim.y * blockDim.z;
+__device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int pe, const void* le_addr) {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     const size_t thread_idx =
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
-    /* Each thread needs a 32B-aligned CAS source block and a separate 16B
-     * result block. Reserve a 64B stride plus alignment slop so every atomic
-     * operation can share one staging layout. */
-    const size_t required_smem_size = 4 * CFT_HANDLE_TX_SIZE * threads_per_cta +
-                                      CFT_HANDLE_TX_SIZE;
-    return (nvshmemi_is_le_implemented(pe) &&
-            handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
+    /* In the worst-aligned case, the 32B CAS source starts 16B into this
+     * thread's region and its 16B result occupies the final 16B. */
+    const size_t required_smem_size = NVSHMEMI_HANDLE_THREAD_SMEM_STRIDE * (thread_idx + 1);
+    return (nvshmemi_is_le_implemented(pe) && handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
             nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
             nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE));
 #else
@@ -633,43 +637,41 @@ template <le_fabric_atomic_op Op, le_fabric_atomic_type Type>
 inline constexpr bool dependent_false_atomic_v = false;
 
 template <le_fabric_atomic_op Op, le_fabric_atomic_type Type>
-__device__ inline void fabric_try_atom_async(CUlogicalEndpointId dst_le_id,
-                                             uint64_t dst_data_off,
-                                             void *result_in_shared_memory,
-                                             const void *src_in_shared_memory,
-                                             handle_barrier_t *hbar) {
+__device__ inline void fabric_try_atom_async(CUlogicalEndpointId dst_le_id, uint64_t dst_data_off,
+                                             void* result_in_shared_memory,
+                                             const void* src_in_shared_memory,
+                                             handle_barrier_t* hbar) {
     static_assert(dependent_false_atomic_v<Op, Type>, "Unsupported fabric atomic operation/type");
 }
 
-#define NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(OP, TYPE, PTX_OP, PTX_TYPE)                         \
-    template <>                                                                             \
-    __device__ inline void fabric_try_atom_async<le_fabric_atomic_op::OP,                   \
-                                                  le_fabric_atomic_type::TYPE>(              \
-        CUlogicalEndpointId dst_le_id, uint64_t dst_data_off, void *result_in_shared_memory, \
-        const void *src_in_shared_memory, handle_barrier_t *hbar) {                         \
-        assert((dst_data_off & (CFT_HANDLE_TX_SIZE - 1)) == 0);                             \
-        assert((reinterpret_cast<uintptr_t>(result_in_shared_memory) &                     \
-                (CFT_HANDLE_TX_SIZE - 1)) == 0);                                            \
-        assert((reinterpret_cast<uintptr_t>(src_in_shared_memory) &                        \
-                ((le_fabric_atomic_op::OP == le_fabric_atomic_op::Cas ? 2 : 1) *            \
-                     CFT_HANDLE_TX_SIZE -                                                   \
-                 1)) == 0);                                                                 \
-                                                                                             \
-        const unsigned long long result_smem = static_cast<unsigned long long>(             \
-            __cvta_generic_to_shared(result_in_shared_memory));                             \
-        const unsigned long long src_smem = static_cast<unsigned long long>(                \
-            __cvta_generic_to_shared(src_in_shared_memory));                                \
-        const unsigned long long bar_smem = static_cast<unsigned long long>(                \
-            __cvta_generic_to_shared(reinterpret_cast<void *>(&(hbar->bar))));              \
-                                                                                             \
-        asm volatile(                                                                        \
-            "fabric.try_atom.async.shared::cta."                                            \
-            "mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys." #PTX_OP "." \
-                #PTX_TYPE " [%0, %1], [%2], [%3], [%4];\n"                                  \
-            :                                                                                \
-            : "r"(dst_le_id), "l"(dst_data_off), "l"(result_smem), "l"(src_smem),         \
-              "l"(bar_smem)                                                                 \
-            : "memory");                                                                    \
+#define NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(OP, TYPE, PTX_OP, PTX_TYPE)                                \
+    template <>                                                                                    \
+    __device__ inline void                                                                         \
+    fabric_try_atom_async<le_fabric_atomic_op::OP, le_fabric_atomic_type::TYPE>(                   \
+        CUlogicalEndpointId dst_le_id, uint64_t dst_data_off, void *result_in_shared_memory,       \
+        const void *src_in_shared_memory, handle_barrier_t *hbar) {                                \
+        assert((dst_data_off & (CFT_HANDLE_TX_SIZE - 1)) == 0);                                    \
+        assert((reinterpret_cast<uintptr_t>(result_in_shared_memory) &                             \
+                (CFT_HANDLE_TX_SIZE - 1)) == 0);                                                   \
+        assert(                                                                                    \
+            (reinterpret_cast<uintptr_t>(src_in_shared_memory) &                                   \
+             ((le_fabric_atomic_op::OP == le_fabric_atomic_op::Cas ? 2 : 1) * CFT_HANDLE_TX_SIZE - \
+              1)) == 0);                                                                           \
+                                                                                                   \
+        const unsigned long long result_smem =                                                     \
+            static_cast<unsigned long long>(__cvta_generic_to_shared(result_in_shared_memory));    \
+        const unsigned long long src_smem =                                                        \
+            static_cast<unsigned long long>(__cvta_generic_to_shared(src_in_shared_memory));       \
+        const unsigned long long bar_smem = static_cast<unsigned long long>(                       \
+            __cvta_generic_to_shared(reinterpret_cast<void *>(&(hbar->bar))));                     \
+                                                                                                   \
+        asm volatile(                                                                              \
+            "fabric.try_atom.async.shared::cta."                                                   \
+            "mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys." #PTX_OP             \
+            "." #PTX_TYPE " [%0, %1], [%2], [%3], [%4];\n"                                         \
+            :                                                                                      \
+            : "r"(dst_le_id), "l"(dst_data_off), "l"(result_smem), "l"(src_smem), "l"(bar_smem)    \
+            : "memory");                                                                           \
     }
 
 NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Add, U32, add, u32)
