@@ -17,6 +17,7 @@
 typedef unsigned int CUlogicalEndpointId;
 
 #define LE_HW_SW_REQUIREMENTS_MET 0
+#define LE_ATOMIC_HW_SW_REQUIREMENTS_MET 0
 inline constexpr int CFT_HANDLE_TX_SIZE = 16;
 
 __device__ __forceinline__ bool nvshmemi_ld_and_check_valid_le_id(int) { return false; }
@@ -36,6 +37,10 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int, size_t, threadgr
 }
 
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int) { return false; }
+
+__device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int, const void *) {
+    return false;
+}
 
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return false; }
 
@@ -179,6 +184,27 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe) {
     return (nvshmemi_tma_smem_registered() &&
             nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
             nvshmemi_ld_and_check_valid_le_id(pe));
+#else
+    return false;
+#endif
+}
+
+__device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int pe,
+                                                                   const void *le_addr) {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(CFT_HANDLES_ENABLED)
+    const size_t threads_per_cta = blockDim.x * blockDim.y * blockDim.z;
+    const size_t thread_idx =
+        threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
+    /* Each thread needs a 32B-aligned CAS source block and a separate 16B
+     * result block. Reserve a 64B stride plus alignment slop so every atomic
+     * operation can share one staging layout. */
+    const size_t required_smem_size = 4 * CFT_HANDLE_TX_SIZE * threads_per_cta +
+                                      CFT_HANDLE_TX_SIZE;
+    return (nvshmemi_is_le_implemented(pe) &&
+            handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
+            nvshmemi_smem_data_buf_size(1) >= required_smem_size &&
+            nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE));
 #else
     return false;
 #endif
@@ -583,6 +609,85 @@ inline __device__ uint16_t byte_range_to_bytemask_low_first(unsigned byte_offset
 /* try put */
 template <le_fabric_handle_kind K>
 inline constexpr bool dependent_false_v = false;
+
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET
+enum class le_fabric_atomic_op {
+    Add,
+    And,
+    Or,
+    Xor,
+    Cas,
+};
+
+enum class le_fabric_atomic_type {
+    B32,
+    B64,
+    U32,
+    U64,
+    F16x2,
+    F32,
+    F64,
+};
+
+template <le_fabric_atomic_op Op, le_fabric_atomic_type Type>
+inline constexpr bool dependent_false_atomic_v = false;
+
+template <le_fabric_atomic_op Op, le_fabric_atomic_type Type>
+__device__ inline void fabric_try_atom_async(CUlogicalEndpointId dst_le_id,
+                                             uint64_t dst_data_off,
+                                             void *result_in_shared_memory,
+                                             const void *src_in_shared_memory,
+                                             handle_barrier_t *hbar) {
+    static_assert(dependent_false_atomic_v<Op, Type>, "Unsupported fabric atomic operation/type");
+}
+
+#define NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(OP, TYPE, PTX_OP, PTX_TYPE)                         \
+    template <>                                                                             \
+    __device__ inline void fabric_try_atom_async<le_fabric_atomic_op::OP,                   \
+                                                  le_fabric_atomic_type::TYPE>(              \
+        CUlogicalEndpointId dst_le_id, uint64_t dst_data_off, void *result_in_shared_memory, \
+        const void *src_in_shared_memory, handle_barrier_t *hbar) {                         \
+        assert((dst_data_off & (CFT_HANDLE_TX_SIZE - 1)) == 0);                             \
+        assert((reinterpret_cast<uintptr_t>(result_in_shared_memory) &                     \
+                (CFT_HANDLE_TX_SIZE - 1)) == 0);                                            \
+        assert((reinterpret_cast<uintptr_t>(src_in_shared_memory) &                        \
+                ((le_fabric_atomic_op::OP == le_fabric_atomic_op::Cas ? 2 : 1) *            \
+                     CFT_HANDLE_TX_SIZE -                                                   \
+                 1)) == 0);                                                                 \
+                                                                                             \
+        const unsigned long long result_smem = static_cast<unsigned long long>(             \
+            __cvta_generic_to_shared(result_in_shared_memory));                             \
+        const unsigned long long src_smem = static_cast<unsigned long long>(                \
+            __cvta_generic_to_shared(src_in_shared_memory));                                \
+        const unsigned long long bar_smem = static_cast<unsigned long long>(                \
+            __cvta_generic_to_shared(reinterpret_cast<void *>(&(hbar->bar))));              \
+                                                                                             \
+        asm volatile(                                                                        \
+            "fabric.try_atom.async.shared::cta."                                            \
+            "mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys." #PTX_OP "." \
+                #PTX_TYPE " [%0, %1], [%2], [%3], [%4];\n"                                  \
+            :                                                                                \
+            : "r"(dst_le_id), "l"(dst_data_off), "l"(result_smem), "l"(src_smem),         \
+              "l"(bar_smem)                                                                 \
+            : "memory");                                                                    \
+    }
+
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Add, U32, add, u32)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Add, U64, add, u64)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Add, F16x2, add, f16x2)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Add, F32, add, f32)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Add, F64, add, f64)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(And, B32, and, b32)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(And, B64, and, b64)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Or, B32, or, b32)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Or, B64, or, b64)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Xor, B32, xor, b32)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Xor, B64, xor, b64)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Cas, B32, cas, b32)
+NVSHMEMI_DEFINE_FABRIC_TRY_ATOM(Cas, B64, cas, b64)
+
+#undef NVSHMEMI_DEFINE_FABRIC_TRY_ATOM
+#endif
 
 template <le_fabric_handle_kind K>
 __device__ inline void fabric_try_put_async(CUlogicalEndpointId dst_le_id, uint64_t dst_data_off,
