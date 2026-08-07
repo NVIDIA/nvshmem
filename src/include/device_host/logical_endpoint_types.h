@@ -16,6 +16,7 @@ typedef uint32_t CUlogicalEndpointId;
 
 // Update this to check CUDA, driver, version and architecture requirements for CFT handles
 #define LE_HW_SW_REQUIREMENTS_MET ((__CUDA_ARCH__ >= 1000) && (CUDART_VERSION >= 13030))
+#define LE_ATOMIC_HW_SW_REQUIREMENTS_MET ((__CUDA_ARCH__ >= 1000) && (CUDART_VERSION >= 13040))
 
 inline constexpr int CFT_HANDLE_TX_SIZE = 16;
 inline constexpr int TMA_COPY_NUM_STAGES = 2;
