@@ -17,11 +17,11 @@ DEFINE_ATOMIC_BW_FN_NO_ARG(fetch_inc);
 DEFINE_ATOMIC_BW_FN_ONE_ARG(add, 1);
 DEFINE_ATOMIC_BW_FN_ONE_ARG(fetch_add, 1);
 
-DEFINE_ATOMIC_BW_FN_ONE_ARG(and, (*(data_d + idx) << (i + 1)));
-DEFINE_ATOMIC_BW_FN_ONE_ARG(fetch_and, (*(data_d + idx) << (i + 1)));
+DEFINE_ATOMIC_BW_FN_ONE_ARG(and, (*target << (i + 1)));
+DEFINE_ATOMIC_BW_FN_ONE_ARG(fetch_and, (*target << (i + 1)));
 
-DEFINE_ATOMIC_BW_FN_ONE_ARG(or, (*(data_d + idx) << i));
-DEFINE_ATOMIC_BW_FN_ONE_ARG(fetch_or, (*(data_d + idx) << i));
+DEFINE_ATOMIC_BW_FN_ONE_ARG(or, (*target << i));
+DEFINE_ATOMIC_BW_FN_ONE_ARG(fetch_or, (*target << i));
 
 DEFINE_ATOMIC_BW_FN_ONE_ARG(xor, 1);
 DEFINE_ATOMIC_BW_FN_ONE_ARG(fetch_xor, 1);
@@ -81,6 +81,17 @@ int main(int argc, char *argv[]) {
     mype = nvshmem_my_pe();
     npes = nvshmem_n_pes();
 
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if (use_smem && max_threads > MAX_CFT_ATOMIC_THREADS) {
+        if (mype == 0) {
+            fprintf(stderr,
+                    "Capping atomic bandwidth test at %d threads per block for CFT atomics\n",
+                    MAX_CFT_ATOMIC_THREADS);
+        }
+        max_threads = MAX_CFT_ATOMIC_THREADS;
+    }
+#endif
+
     if (npes != 2) {
         fprintf(stderr, "This test requires exactly two processes   \n");
         goto finalize;
@@ -96,12 +107,13 @@ int main(int argc, char *argv[]) {
     if (!h_bw_stats || !h_msgrate_stats) goto finalize;
 
     if (use_mmap) {
-        data_d = (uint64_t *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
+        data_d = (uint64_t *)allocate_mmap_buffer(max_size * ATOMIC_BW_TARGET_STRIDE,
+                                                  mem_handle_type, use_egm, true);
         DEBUG_PRINT("Allocated mmap buffer\n");
     } else {
-        data_d = (uint64_t *)nvshmem_malloc(max_size);
+        data_d = (uint64_t *)nvshmem_malloc(max_size * ATOMIC_BW_TARGET_STRIDE);
         DEBUG_PRINT("Allocated nvshmem malloc buffer\n");
-        CUDA_CHECK(cudaMemset(data_d, 0, max_size));
+        CUDA_CHECK(cudaMemset(data_d, 0, max_size * ATOMIC_BW_TARGET_STRIDE));
     }
 
     CUDA_CHECK(cudaMalloc((void **)&counter_d, sizeof(unsigned int) * 2));
@@ -138,9 +150,9 @@ int main(int argc, char *argv[]) {
                 }
                 case AMO_AND: {
                     if (use_egm) {
-                        memset(data_d, 0xFF, size);
+                        memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                     } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                     }
                     CALL_ATOMIC_BW_KERNEL(and, blocks, threads, data_d, counter_d, nelems, mype,
                                           skip, args_skip)
@@ -148,9 +160,9 @@ int main(int argc, char *argv[]) {
                 }
                 case AMO_OR: {
                     if (use_egm) {
-                        memset(data_d, 0xFF, size);
+                        memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                     } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                     }
                     CALL_ATOMIC_BW_KERNEL(or, blocks, threads, data_d, counter_d, nelems, mype,
                                           skip, args_skip)
@@ -159,8 +171,8 @@ int main(int argc, char *argv[]) {
                 case AMO_XOR: {
                     set_value = 1;
                     for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
-                        cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
-                                   cudaMemcpyHostToDevice);
+                        cudaMemcpy((data_d + j * ATOMIC_BW_TARGET_STRIDE), &set_value,
+                                   sizeof(uint64_t), cudaMemcpyHostToDevice);
                     }
                     CALL_ATOMIC_BW_KERNEL(xor, blocks, threads, data_d, counter_d, nelems, mype,
                                           skip, args_skip)
@@ -178,9 +190,9 @@ int main(int argc, char *argv[]) {
                 }
                 case AMO_FETCH_AND: {
                     if (use_egm) {
-                        memset(data_d, 0xFF, size);
+                        memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                     } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                     }
                     CALL_ATOMIC_BW_KERNEL(fetch_and, blocks, threads, data_d, counter_d, nelems,
                                           mype, skip, args_skip)
@@ -188,9 +200,9 @@ int main(int argc, char *argv[]) {
                 }
                 case AMO_FETCH_OR: {
                     if (use_egm) {
-                        memset(data_d, 0xFF, size);
+                        memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                     } else {
-                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                        CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                     }
                     CALL_ATOMIC_BW_KERNEL(fetch_or, blocks, threads, data_d, counter_d, nelems,
                                           mype, skip, args_skip)
@@ -198,8 +210,8 @@ int main(int argc, char *argv[]) {
                 }
                 case AMO_FETCH_XOR: {
                     for (size_t j = 0; j < nelems; j++) {
-                        cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
-                                   cudaMemcpyHostToDevice);
+                        cudaMemcpy((data_d + j * ATOMIC_BW_TARGET_STRIDE), &set_value,
+                                   sizeof(uint64_t), cudaMemcpyHostToDevice);
                     }
                     CALL_ATOMIC_BW_KERNEL(fetch_xor, blocks, threads, data_d, counter_d, nelems,
                                           mype, skip, args_skip)
@@ -231,48 +243,48 @@ int main(int argc, char *argv[]) {
                 switch (test_amo.type) {
                     case AMO_AND: {
                         if (use_egm) {
-                            memset(data_d, 0xFF, size);
+                            memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                         } else {
-                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                         }
                         break;
                     }
                     case AMO_OR: {
                         if (use_egm) {
-                            memset(data_d, 0xFF, size);
+                            memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                         } else {
-                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                         }
                         break;
                     }
                     case AMO_XOR: {
                         set_value = 1;
                         for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
-                            cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
-                                       cudaMemcpyHostToDevice);
+                            cudaMemcpy((data_d + j * ATOMIC_BW_TARGET_STRIDE), &set_value,
+                                       sizeof(uint64_t), cudaMemcpyHostToDevice);
                         }
                         break;
                     }
                     case AMO_FETCH_AND: {
                         if (use_egm) {
-                            memset(data_d, 0xFF, size);
+                            memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                         } else {
-                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                         }
                         break;
                     }
                     case AMO_FETCH_OR: {
                         if (use_egm) {
-                            memset(data_d, 0xFF, size);
+                            memset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE);
                         } else {
-                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size));
+                            CUDA_CHECK(cudaMemset(data_d, 0xFF, size * ATOMIC_BW_TARGET_STRIDE));
                         }
                         break;
                     }
                     case AMO_FETCH_XOR: {
                         for (size_t j = 0; j < size / sizeof(uint64_t); j++) {
-                            cudaMemcpy((data_d + j), &set_value, sizeof(uint64_t),
-                                       cudaMemcpyHostToDevice);
+                            cudaMemcpy((data_d + j * ATOMIC_BW_TARGET_STRIDE), &set_value,
+                                       sizeof(uint64_t), cudaMemcpyHostToDevice);
                         }
                         break;
                     }
