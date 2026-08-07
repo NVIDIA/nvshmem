@@ -43,6 +43,7 @@ int main(int argc, char *argv[]) {
     uint64_t set_value = 1;
     unsigned int *counter_d;
     read_args(argc, argv);
+    size_t dynamic_smem_size = 0;
 
     int max_blocks = num_blocks, max_threads = threads_per_block;
     int array_size, i;
@@ -60,12 +61,15 @@ int main(int argc, char *argv[]) {
     float milliseconds;
     cudaEvent_t start, stop;
 
-    void *args_skip[] = {(void *)&data_d, (void *)&counter_d, (void *)&(nelems), (void *)&mype,
-                         (void *)&skip};
-    void *args_iter[] = {(void *)&data_d, (void *)&counter_d, (void *)&(nelems), (void *)&mype,
-                         (void *)&iter};
+    void *args_skip[] = {(void *)&data_d, (void *)&counter_d, (void *)&(nelems),
+                         (void *)&mype,   (void *)&skip,      (void *)&dynamic_smem_size};
+    void *args_iter[] = {(void *)&data_d, (void *)&counter_d, (void *)&(nelems),
+                         (void *)&mype,   (void *)&iter,      (void *)&dynamic_smem_size};
 
     init_wrapper(&argc, &argv);
+    if (use_smem && !use_cubin) {
+        dynamic_smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);

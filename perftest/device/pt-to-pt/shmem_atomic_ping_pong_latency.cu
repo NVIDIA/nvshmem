@@ -188,12 +188,16 @@ int main(int argc, char *argv[]) {
     void *flag_d = NULL;
     cudaStream_t stream;
     read_args(argc, argv);
+    size_t dynamic_smem_size = 0;
 
     void **h_tables;
     uint64_t *h_size_arr;
     double *h_lat;
 
     MAIN_SETUP(argc, argv, mype, npes, flag_d, stream, h_size_arr, h_tables, h_lat, &op);
+    if (use_smem && !use_cubin) {
+        dynamic_smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
+    }
 
     switch (test_amo.type) {
         case AMO_INC: {
