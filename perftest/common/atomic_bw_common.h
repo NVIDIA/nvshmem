@@ -18,18 +18,26 @@
 #define THREADS 1024
 #define BLOCKS 4
 #define MAX_MSG_SIZE 64 * 1024
+#define ATOMIC_BW_TARGET_STRIDE 2
+/* CFT assigns two handle-barrier slots to each warp. Keep every benchmark warp
+ * within the fixed handle-barrier region so the measurement does not mix CFT
+ * atomics with fallback atomics.
+ */
+#define CFT_ATOMIC_HANDLE_SLOTS_PER_WARP 2
+#define MAX_CFT_ATOMIC_THREADS \
+    ((NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / CFT_ATOMIC_HANDLE_SLOTS_PER_WARP) * NVSHMEMI_WARP_SIZE)
 
-#define DEFINE_ATOMIC_BW_CALL_KERNEL(AMO)                                               \
-    void test_atomic_##AMO##_bw_cubin(int num_blocks, int num_tpb, void **arglist,      \
-                                      size_t dynamic_smem_size) {                       \
-        CUfunction test_cubin;                                                          \
-        init_test_case_kernel(&test_cubin, NVSHMEMI_TEST_STRINGIFY(atomic_##AMO##_bw)); \
-        if (dynamic_smem_size > 48 * 1024) {                                            \
-            CU_CHECK(cuFuncSetAttribute(test_cubin,                                     \
-                                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,\
-                                        (int)dynamic_smem_size));                       \
-        }                                                                               \
-        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, num_blocks, 1, 1, num_tpb, 1, 1, \
+#define DEFINE_ATOMIC_BW_CALL_KERNEL(AMO)                                                \
+    void test_atomic_##AMO##_bw_cubin(int num_blocks, int num_tpb, void **arglist,       \
+                                      size_t dynamic_smem_size) {                        \
+        CUfunction test_cubin;                                                           \
+        init_test_case_kernel(&test_cubin, NVSHMEMI_TEST_STRINGIFY(atomic_##AMO##_bw));  \
+        if (dynamic_smem_size > 48 * 1024) {                                             \
+            CU_CHECK(cuFuncSetAttribute(test_cubin,                                      \
+                                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, \
+                                        (int)dynamic_smem_size));                        \
+        }                                                                                \
+        CU_CHECK(cuLaunchCooperativeKernel(test_cubin, num_blocks, 1, 1, num_tpb, 1, 1,  \
                                            dynamic_smem_size, 0, arglist));              \
     }
 
@@ -49,12 +57,16 @@
         for (i = 0; i < iter; i++) {                                                               \
             for (j = 0; j < len - slice; j += slice) {                                             \
                 int idx = j + tid;                                                                 \
-                nvshmem_uint64_atomic_##AMO(data_d + idx, peer);                                   \
+                uint64_t *target = data_d + idx * ATOMIC_BW_TARGET_STRIDE;                         \
+                nvshmem_uint64_atomic_##AMO(target, peer);                                         \
                 __syncthreads();                                                                   \
             }                                                                                      \
                                                                                                    \
             int idx = j + tid;                                                                     \
-            if (idx < len) nvshmem_uint64_atomic_##AMO(data_d + idx, peer);                        \
+            if (idx < len) {                                                                       \
+                uint64_t *target = data_d + idx * ATOMIC_BW_TARGET_STRIDE;                         \
+                nvshmem_uint64_atomic_##AMO(target, peer);                                         \
+            }                                                                                      \
                                                                                                    \
             /* synchronizing across blocks */                                                      \
             __syncthreads();                                                                       \
@@ -102,12 +114,16 @@
         for (i = 0; i < iter; i++) {                                                               \
             for (j = 0; j < len - slice; j += slice) {                                             \
                 int idx = j + tid;                                                                 \
-                nvshmem_uint64_atomic_##AMO(data_d + idx, SET_EXPR, peer);                         \
+                uint64_t *target = data_d + idx * ATOMIC_BW_TARGET_STRIDE;                         \
+                nvshmem_uint64_atomic_##AMO(target, SET_EXPR, peer);                               \
                 __syncthreads();                                                                   \
             }                                                                                      \
                                                                                                    \
             int idx = j + tid;                                                                     \
-            if (idx < len) nvshmem_uint64_atomic_##AMO(data_d + idx, SET_EXPR, peer);              \
+            if (idx < len) {                                                                       \
+                uint64_t *target = data_d + idx * ATOMIC_BW_TARGET_STRIDE;                         \
+                nvshmem_uint64_atomic_##AMO(target, SET_EXPR, peer);                               \
+            }                                                                                      \
                                                                                                    \
             /* synchronizing across blocks */                                                      \
             __syncthreads();                                                                       \
@@ -157,13 +173,15 @@
         for (i = 0; i < iter; i++) {                                                               \
             for (j = 0; j < len - slice; j += slice) {                                             \
                 int idx = j + tid;                                                                 \
-                nvshmem_uint64_atomic_##AMO(data_d + idx, COMPARE_EXPR, SET_EXPR, peer);           \
+                uint64_t *target = data_d + idx * ATOMIC_BW_TARGET_STRIDE;                         \
+                nvshmem_uint64_atomic_##AMO(target, COMPARE_EXPR, SET_EXPR, peer);                 \
                 __syncthreads();                                                                   \
             }                                                                                      \
                                                                                                    \
             int idx = j + tid;                                                                     \
             if (idx < len) {                                                                       \
-                nvshmem_uint64_atomic_##AMO(data_d + idx, COMPARE_EXPR, SET_EXPR, peer);           \
+                uint64_t *target = data_d + idx * ATOMIC_BW_TARGET_STRIDE;                         \
+                nvshmem_uint64_atomic_##AMO(target, COMPARE_EXPR, SET_EXPR, peer);                 \
             }                                                                                      \
                                                                                                    \
             /* synchronizing across blocks */                                                      \
@@ -196,13 +214,13 @@
         NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                              \
     }
 
-#define CALL_ATOMIC_BW_KERNEL(AMO, BLOCKS, THREADS, DATA, COUNTER, SIZE, PE, ITER, ARGS)     \
-    if (use_cubin) {                                                                         \
-        test_atomic_##AMO##_bw_cubin(BLOCKS, THREADS, ARGS, dynamic_smem_size);              \
-    } else {                                                                                 \
-        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(atomic_##AMO##_bw, dynamic_smem_size);              \
-        atomic_##AMO##_bw<<<BLOCKS, THREADS, dynamic_smem_size>>>(                            \
-            DATA, COUNTER, SIZE, PE, ITER, dynamic_smem_size);                                \
+#define CALL_ATOMIC_BW_KERNEL(AMO, BLOCKS, THREADS, DATA, COUNTER, SIZE, PE, ITER, ARGS)         \
+    if (use_cubin) {                                                                             \
+        test_atomic_##AMO##_bw_cubin(BLOCKS, THREADS, ARGS, dynamic_smem_size);                  \
+    } else {                                                                                     \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(atomic_##AMO##_bw, dynamic_smem_size);                 \
+        atomic_##AMO##_bw<<<BLOCKS, THREADS, dynamic_smem_size>>>(DATA, COUNTER, SIZE, PE, ITER, \
+                                                                  dynamic_smem_size);            \
     }
 
 #endif /* _ATOMIC_BW_COMMON_H_ */

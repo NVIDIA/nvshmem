@@ -15,6 +15,7 @@ __device__ int error_d;
 
 enum op { ATOMIC_FETCH = 0 };
 #define NUM_FETCHES (1 << 14)
+#define ATOMIC_TARGET_ALIGNMENT 16
 
 #define REPT_MACRO_FOR_TYPES(MACRO_NAME, OP)       \
     MACRO_NAME(OP, int, int);                      \
@@ -28,49 +29,50 @@ enum op { ATOMIC_FETCH = 0 };
     MACRO_NAME(OP, size_t, size);
 
 #define TEST_NVSHMEM_ATOMIC_FETCH_CUBIN(TYPENAME, TYPE, OP)                                  \
-    void *args_##TYPENAME##_fetch_##OP[] = {(void *)&remote, (void *)&fetched_values,         \
-                                            (void *)&_dynamic_smem_size};                     \
+    void *args_##TYPENAME##_fetch_##OP[] = {(void *)&remote, (void *)&fetched_values,        \
+                                            (void *)&_dynamic_smem_size};                    \
     CUfunction test_##TYPENAME##_fetch_##OP##_cubin;                                         \
     init_test_case_kernel(&test_##TYPENAME##_fetch_##OP##_cubin,                             \
                           NVSHMEMI_TEST_STRINGIFY(test_nvshmem_##TYPENAME##_##OP##_kernel)); \
-    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_fetch_##OP##_cubin, 1, 1, 1, 1, 1, 1,           \
-                            _dynamic_smem_size, 0,                                             \
-                            args_##TYPENAME##_fetch_##OP, NULL));
+    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_fetch_##OP##_cubin, 1, 1, 1, 1, 1, 1,          \
+                            _dynamic_smem_size, 0, args_##TYPENAME##_fetch_##OP, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
-#define TEST_NVSHMEM_ATOMIC_FETCH_KERNEL(OP, TYPE, TYPENAME)                                      \
-    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(                                     \
-        TYPE *remote, TYPE *fetched_values, size_t dynamic_smem_size) {                           \
-        const int mype = nvshmem_my_pe();                                                         \
-        const int npes = nvshmem_n_pes();                                                         \
-        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                \
-        for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) remote[i] = (TYPE)(mype + i); \
-        nvshmemx_barrier_all_block();                                                             \
-        for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) {                             \
-            switch (OP) {                                                                         \
-                case ATOMIC_FETCH:                                                                \
-                    fetched_values[i] =                                                           \
-                        nvshmem_##TYPENAME##_atomic_fetch(&remote[i], (mype + i + 1) % npes);     \
-                    break;                                                                        \
-                default:                                                                          \
-                    printf("Invalid operation (%d)\n", OP);                                       \
-                    assert(0);                                                                    \
-            }                                                                                     \
-        }                                                                                         \
-        __syncthreads();                                                                          \
-        for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) {                             \
-            if (fetched_values[i] != (TYPE)(((mype + i + 1) % npes) + i)) {                       \
-                printf(                                                                           \
-                    "pe %d received incorrect value at idx %d with "                              \
-                    "test_nvshmem_atomic_fetch(%s, %s)\n",                                        \
-                    mype, i, #OP, #TYPE);                                                         \
-                error_d = 1;                                                                      \
-            }                                                                                     \
-        }                                                                                         \
-        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                             \
+#define TEST_NVSHMEM_ATOMIC_FETCH_KERNEL(OP, TYPE, TYPENAME)                                    \
+    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(TYPE *remote, TYPE *fetched_values, \
+                                                            size_t dynamic_smem_size) {         \
+        const int mype = nvshmem_my_pe();                                                       \
+        const int npes = nvshmem_n_pes();                                                       \
+        constexpr size_t target_stride = ATOMIC_TARGET_ALIGNMENT / sizeof(TYPE);                \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                              \
+        for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x)                             \
+            remote[i * target_stride] = (TYPE)(mype + i);                                       \
+        nvshmemx_barrier_all_block();                                                           \
+        for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) {                           \
+            switch (OP) {                                                                       \
+                case ATOMIC_FETCH:                                                              \
+                    fetched_values[i] = nvshmem_##TYPENAME##_atomic_fetch(                      \
+                        &remote[i * target_stride], (mype + i + 1) % npes);                     \
+                    break;                                                                      \
+                default:                                                                        \
+                    printf("Invalid operation (%d)\n", OP);                                     \
+                    assert(0);                                                                  \
+            }                                                                                   \
+        }                                                                                       \
+        __syncthreads();                                                                        \
+        for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) {                           \
+            if (fetched_values[i] != (TYPE)(((mype + i + 1) % npes) + i)) {                     \
+                printf(                                                                         \
+                    "pe %d received incorrect value at idx %d with "                            \
+                    "test_nvshmem_atomic_fetch(%s, %s)\n",                                      \
+                    mype, i, #OP, #TYPE);                                                       \
+                error_d = 1;                                                                    \
+            }                                                                                   \
+        }                                                                                       \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                           \
     }
 REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_FETCH_KERNEL, ATOMIC_FETCH)
 
@@ -78,34 +80,34 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_FETCH_KERNEL, ATOMIC_FETCH)
 }
 #endif
 
-#define TEST_NVSHMEM_ATOMIC_FETCH(OP, TYPE, TYPENAME)                                           \
-    do {                                                                                        \
-        TYPE *remote;                                                                           \
-        if (use_mmap) {                                                                         \
-            remote = (TYPE *)allocate_mmap_buffer(sizeof(TYPE) * NUM_FETCHES, _mem_handle_type, \
-                                                  use_egm);                                     \
-            DEBUG_PRINT("Allocating mmaped buffer\n");                                          \
-        } else {                                                                                \
-            remote = (TYPE *)nvshmem_malloc(sizeof(TYPE) * NUM_FETCHES);                        \
-        }                                                                                       \
-        TYPE *fetched_values;                                                                   \
-        cudaMalloc(&fetched_values, sizeof(TYPE) * NUM_FETCHES);                                \
-        nvshmem_barrier_all();                                                                  \
-        if (use_cubin) {                                                                        \
-            TEST_NVSHMEM_ATOMIC_FETCH_CUBIN(TYPENAME, TYPE, OP);                                \
-        } else {                                                                                \
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,          \
-                                              _dynamic_smem_size);                              \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(              \
-                remote, fetched_values, _dynamic_smem_size);                                    \
-        }                                                                                       \
-        cudaDeviceSynchronize();                                                                \
-        cudaFree(fetched_values);                                                               \
-        if (use_mmap) {                                                                         \
-            free_mmap_buffer(remote);                                                           \
-        } else {                                                                                \
-            nvshmem_free(remote);                                                               \
-        }                                                                                       \
+#define TEST_NVSHMEM_ATOMIC_FETCH(OP, TYPE, TYPENAME)                                    \
+    do {                                                                                 \
+        TYPE *remote;                                                                    \
+        if (use_mmap) {                                                                  \
+            remote = (TYPE *)allocate_mmap_buffer(ATOMIC_TARGET_ALIGNMENT * NUM_FETCHES, \
+                                                  _mem_handle_type, use_egm);            \
+            DEBUG_PRINT("Allocating mmaped buffer\n");                                   \
+        } else {                                                                         \
+            remote = (TYPE *)nvshmem_malloc(ATOMIC_TARGET_ALIGNMENT * NUM_FETCHES);      \
+        }                                                                                \
+        TYPE *fetched_values;                                                            \
+        cudaMalloc(&fetched_values, sizeof(TYPE) * NUM_FETCHES);                         \
+        nvshmem_barrier_all();                                                           \
+        if (use_cubin) {                                                                 \
+            TEST_NVSHMEM_ATOMIC_FETCH_CUBIN(TYPENAME, TYPE, OP);                         \
+        } else {                                                                         \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,   \
+                                              _dynamic_smem_size);                       \
+            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(       \
+                remote, fetched_values, _dynamic_smem_size);                             \
+        }                                                                                \
+        cudaDeviceSynchronize();                                                         \
+        cudaFree(fetched_values);                                                        \
+        if (use_mmap) {                                                                  \
+            free_mmap_buffer(remote);                                                    \
+        } else {                                                                         \
+            nvshmem_free(remote);                                                        \
+        }                                                                                \
     } while (0)
 
 int main(int argc, char *argv[]) {
