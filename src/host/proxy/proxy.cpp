@@ -51,6 +51,12 @@ static base_request_t **channel_req;
 void *nvshmemi_proxy_progress(void *in);
 void *nvshmemi_proxy_progress_minimal(void *in);
 
+static void nvshmemi_proxy_atexit_finalize() {
+    if (nvshmemi_state && nvshmemi_state->proxy) {
+        (void)nvshmemi_proxy_finalize(nvshmemi_state);
+    }
+}
+
 int nvshmemi_proxy_prep_minimal_state(proxy_state_t *state) {
     int *temp_global_exit_request_state;
     int *temp_global_exit_code;
@@ -425,6 +431,12 @@ post_cst_api_check:
     state->proxy = (void *)proxy_state;
 
 out:
+    // Register every proxy generation after the transport exit handlers it uses.
+    if (!status && state->proxy && atexit(nvshmemi_proxy_atexit_finalize) != 0) {
+        NVSHMEMI_ERROR_PRINT("Failed to register proxy finalization at exit.\n");
+        status = nvshmemi_proxy_finalize(state);
+        if (!status) status = NVSHMEMX_ERROR_INTERNAL;
+    }
     if (status != 0) {
         exit(-1);
     }
@@ -1563,8 +1575,11 @@ void *nvshmemi_proxy_progress_minimal(void *in) {
 }
 
 int nvshmemi_proxy_finalize(nvshmemi_state_t *state) {
+    if (!state || !state->proxy) return 0;
+
     INFO(NVSHMEM_INIT, "In nvshmemi_proxy_finalize");
     proxy_state_t *proxy_state = (proxy_state_t *)state->proxy;
+    state->proxy = nullptr;
 
     proxy_state->progress_params.stop = 1;
 
