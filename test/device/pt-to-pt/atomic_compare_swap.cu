@@ -30,23 +30,25 @@ enum op { ATOMIC_COMPARE_SWAP = 0 };
 
 #define TEST_NVSHMEM_ATOMIC_COMP_CUBIN(TYPENAME, TYPE, OP)                                   \
     void *args_##TYPENAME##_comp_##OP[] = {(void *)&remote, (void *)&old_value,              \
-                                           (void *)&new_value, (void *)&match};              \
+                                           (void *)&new_value, (void *)&match,               \
+                                           (void *)&_dynamic_smem_size};                     \
     CUfunction test_##TYPENAME##_comp_##OP##_cubin;                                          \
     init_test_case_kernel(&test_##TYPENAME##_comp_##OP##_cubin,                              \
                           NVSHMEMI_TEST_STRINGIFY(test_nvshmem_##TYPENAME##_##OP##_kernel)); \
-    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_comp_##OP##_cubin, 1, 1, 1, 1, 1, 1, 0, 0,     \
-                            args_##TYPENAME##_comp_##OP, NULL));
+    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_comp_##OP##_cubin, 1, 1, 1, 1, 1, 1,           \
+                            _dynamic_smem_size, 0, args_##TYPENAME##_comp_##OP, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
 #define TEST_NVSHMEM_ATOMIC_COMPARE_SWAP_KERNEL(OP, TYPE, TYPENAME)                                \
-    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(TYPE *remote, TYPE old_value,          \
-                                                            TYPE new_value, bool match) {          \
+    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(                                       \
+        TYPE *remote, TYPE old_value, TYPE new_value, bool match, size_t dynamic_smem_size) {      \
         TYPE old;                                                                                  \
         const int mype = nvshmem_my_pe();                                                          \
         const int npes = nvshmem_n_pes();                                                          \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                 \
         nvshmem_barrier_all();                                                                     \
         switch (OP) {                                                                              \
             case ATOMIC_COMPARE_SWAP:                                                              \
@@ -67,6 +69,7 @@ extern "C" {
                    #TYPE);                                                                         \
             error_d = 1;                                                                           \
         }                                                                                          \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                              \
         if (match && old != old_value) {                                                           \
             printf("PE %i error inconsistent value of old (%s, %s)\n", mype, #OP, #TYPE);          \
             error_d = 1;                                                                           \
@@ -103,8 +106,10 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_COMPARE_SWAP_KERNEL, ATOMIC_COMPARE_SWA
         if (use_cubin) {                                                                    \
             TEST_NVSHMEM_ATOMIC_COMP_CUBIN(TYPENAME, TYPE, OP);                             \
         } else {                                                                            \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, old_value, new_value, \
-                                                              match);                       \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,      \
+                                              _dynamic_smem_size);                          \
+            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(          \
+                remote, old_value, new_value, match, _dynamic_smem_size);                   \
         }                                                                                   \
         cudaDeviceSynchronize();                                                            \
         old_value = (TYPE)0x23456789ABCDEF0Full;                                            \
@@ -114,8 +119,10 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_COMPARE_SWAP_KERNEL, ATOMIC_COMPARE_SWA
         if (use_cubin) {                                                                    \
             TEST_NVSHMEM_ATOMIC_COMP_CUBIN(TYPENAME, TYPE, OP);                             \
         } else {                                                                            \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, old_value, new_value, \
-                                                              match);                       \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,      \
+                                              _dynamic_smem_size);                          \
+            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(          \
+                remote, old_value, new_value, match, _dynamic_smem_size);                   \
         }                                                                                   \
         cudaDeviceSynchronize();                                                            \
     } while (0)

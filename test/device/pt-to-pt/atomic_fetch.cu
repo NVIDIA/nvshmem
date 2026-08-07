@@ -28,11 +28,13 @@ enum op { ATOMIC_FETCH = 0 };
     MACRO_NAME(OP, size_t, size);
 
 #define TEST_NVSHMEM_ATOMIC_FETCH_CUBIN(TYPENAME, TYPE, OP)                                  \
-    void *args_##TYPENAME##_fetch_##OP[] = {(void *)&remote, (void *)&fetched_values};       \
+    void *args_##TYPENAME##_fetch_##OP[] = {(void *)&remote, (void *)&fetched_values,         \
+                                            (void *)&_dynamic_smem_size};                     \
     CUfunction test_##TYPENAME##_fetch_##OP##_cubin;                                         \
     init_test_case_kernel(&test_##TYPENAME##_fetch_##OP##_cubin,                             \
                           NVSHMEMI_TEST_STRINGIFY(test_nvshmem_##TYPENAME##_##OP##_kernel)); \
-    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_fetch_##OP##_cubin, 1, 1, 1, 1, 1, 1, 0, 0,    \
+    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_fetch_##OP##_cubin, 1, 1, 1, 1, 1, 1,           \
+                            _dynamic_smem_size, 0,                                             \
                             args_##TYPENAME##_fetch_##OP, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
@@ -40,9 +42,11 @@ extern "C" {
 #endif
 
 #define TEST_NVSHMEM_ATOMIC_FETCH_KERNEL(OP, TYPE, TYPENAME)                                      \
-    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(TYPE *remote, TYPE *fetched_values) { \
+    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(                                     \
+        TYPE *remote, TYPE *fetched_values, size_t dynamic_smem_size) {                           \
         const int mype = nvshmem_my_pe();                                                         \
         const int npes = nvshmem_n_pes();                                                         \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                \
         for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) remote[i] = (TYPE)(mype + i); \
         nvshmemx_barrier_all_block();                                                             \
         for (int i = threadIdx.x; i < NUM_FETCHES; i += blockDim.x) {                             \
@@ -66,6 +70,7 @@ extern "C" {
                 error_d = 1;                                                                      \
             }                                                                                     \
         }                                                                                         \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                             \
     }
 REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_FETCH_KERNEL, ATOMIC_FETCH)
 
@@ -89,7 +94,10 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_FETCH_KERNEL, ATOMIC_FETCH)
         if (use_cubin) {                                                                        \
             TEST_NVSHMEM_ATOMIC_FETCH_CUBIN(TYPENAME, TYPE, OP);                                \
         } else {                                                                                \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, fetched_values);          \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,          \
+                                              _dynamic_smem_size);                              \
+            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(              \
+                remote, fetched_values, _dynamic_smem_size);                                    \
         }                                                                                       \
         cudaDeviceSynchronize();                                                                \
         cudaFree(fetched_values);                                                               \

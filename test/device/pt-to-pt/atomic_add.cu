@@ -35,13 +35,14 @@ enum op {
     MACRO_NAME(OP, long, long);                     \
     MACRO_NAME(OP, int32_t, int32);
 
-#define TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP)                                      \
-    void *args_##TYPENAME##_add_##OP[] = {(void *)&remote, (void *)&value, (void *)&expected}; \
-    CUfunction test_##TYPENAME##_add_##OP##_cubin;                                             \
-    init_test_case_kernel(&test_##TYPENAME##_add_##OP##_cubin,                                 \
-                          NVSHMEMI_TEST_STRINGIFY(test_nvshmem_##TYPENAME##_##OP##_kernel));   \
-    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_add_##OP##_cubin, 1, 1, 1, 1, 1, 1, 0, 0,        \
-                            args_##TYPENAME##_add_##OP, NULL));
+#define TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP)                                     \
+    void *args_##TYPENAME##_add_##OP[] = {(void *)&remote, (void *)&value, (void *)&expected, \
+                                          (void *)&_dynamic_smem_size};                       \
+    CUfunction test_##TYPENAME##_add_##OP##_cubin;                                            \
+    init_test_case_kernel(&test_##TYPENAME##_add_##OP##_cubin,                                \
+                          NVSHMEMI_TEST_STRINGIFY(test_nvshmem_##TYPENAME##_##OP##_kernel));  \
+    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_add_##OP##_cubin, 1, 1, 1, 1, 1, 1,             \
+                            _dynamic_smem_size, 0, args_##TYPENAME##_add_##OP, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
@@ -50,11 +51,12 @@ extern "C" {
    Each PE. We have to use a range since we don't know in which order the PEs will be executed.
    At the end, we confirm that remote contains (expected * npes). */
 #define TEST_NVSHMEM_ATOMIC_ADD_KERNEL(OP, TYPE, TYPENAME)                                         \
-    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(TYPE *remote, TYPE value,              \
-                                                            TYPE expected) {                       \
+    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(                                       \
+        TYPE *remote, TYPE value, TYPE expected, size_t dynamic_smem_size) {                       \
         TYPE old;                                                                                  \
         const int mype = nvshmem_my_pe();                                                          \
         const int npes = nvshmem_n_pes();                                                          \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                 \
         for (int i = 0; i < npes; i++) {                                                           \
             if (OP == ATOMIC_ADD_UNSIGNED || OP == ATOMIC_ADD_SIGNED) {                            \
                 nvshmem_##TYPENAME##_atomic_add(remote, value, i);                                 \
@@ -84,6 +86,7 @@ extern "C" {
                    expected);                                                                      \
             error_d = 1;                                                                           \
         }                                                                                          \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                              \
     }
 REPT_MACRO_FOR_UNSIGNED_TYPES(TEST_NVSHMEM_ATOMIC_ADD_KERNEL, ATOMIC_ADD_UNSIGNED)
 REPT_MACRO_FOR_SIGNED_TYPES(TEST_NVSHMEM_ATOMIC_ADD_KERNEL, ATOMIC_ADD_SIGNED)
@@ -94,77 +97,83 @@ REPT_MACRO_FOR_SIGNED_TYPES(TEST_NVSHMEM_ATOMIC_ADD_KERNEL, ATOMIC_FETCH_ADD_SIG
 }
 #endif
 
-#define TEST_NVSHMEM_ATOMIC_ADD_UNSIGNED(OP, TYPE, TYPENAME)                            \
-    do {                                                                                \
-        TYPE value = 5128;                                                              \
-        TYPE expected = 5128;                                                           \
-        TYPE *remote = (TYPE *)nvshmem_calloc(1, sizeof(TYPE));                         \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
-        value = 128;                                                                    \
-        expected = 5256;                                                                \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
+#define TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP)                                               \
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,                     \
+                                      _dynamic_smem_size);                                         \
+    test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(remote, value, expected, \
+                                                                          _dynamic_smem_size)
+
+#define TEST_NVSHMEM_ATOMIC_ADD_UNSIGNED(OP, TYPE, TYPENAME)    \
+    do {                                                        \
+        TYPE value = 5128;                                      \
+        TYPE expected = 5128;                                   \
+        TYPE *remote = (TYPE *)nvshmem_calloc(1, sizeof(TYPE)); \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
+        value = 128;                                            \
+        expected = 5256;                                        \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
     } while (0)
 
-#define TEST_NVSHMEM_ATOMIC_ADD_SIGNED(OP, TYPE, TYPENAME)                              \
-    do {                                                                                \
-        TYPE value = 5128;                                                              \
-        TYPE expected = 5128;                                                           \
-        TYPE *remote = (TYPE *)nvshmem_calloc(1, sizeof(TYPE));                         \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
-        value = -10256;                                                                 \
-        expected = -5128;                                                               \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
-        value = 5128;                                                                   \
-        expected = 0;                                                                   \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
-        value = -512;                                                                   \
-        expected = -512;                                                                \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
-        value = -1024;                                                                  \
-        expected = -1536;                                                               \
-        nvshmem_barrier_all();                                                          \
-        if (use_cubin) {                                                                \
-            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);                          \
-        } else {                                                                        \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote, value, expected); \
-        }                                                                               \
-        cudaDeviceSynchronize();                                                        \
+#define TEST_NVSHMEM_ATOMIC_ADD_SIGNED(OP, TYPE, TYPENAME)      \
+    do {                                                        \
+        TYPE value = 5128;                                      \
+        TYPE expected = 5128;                                   \
+        TYPE *remote = (TYPE *)nvshmem_calloc(1, sizeof(TYPE)); \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
+        value = -10256;                                         \
+        expected = -5128;                                       \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
+        value = 5128;                                           \
+        expected = 0;                                           \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
+        value = -512;                                           \
+        expected = -512;                                        \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
+        value = -1024;                                          \
+        expected = -1536;                                       \
+        nvshmem_barrier_all();                                  \
+        if (use_cubin) {                                        \
+            TEST_NVSHMEM_ATOMIC_ADD_CUBIN(TYPENAME, TYPE, OP);  \
+        } else {                                                \
+            TEST_NVSHMEM_ATOMIC_ADD_LAUNCH(TYPENAME, OP);       \
+        }                                                       \
+        cudaDeviceSynchronize();                                \
     } while (0)
 
 int main(int argc, char *argv[]) {

@@ -20,7 +20,9 @@ __device__ int error_d;
 extern "C" {
 #endif
 
-__global__ void test_nvshmem_half_atomic_no_conversions_kernel(__half *remote) {
+__global__ void test_nvshmem_half_atomic_no_conversions_kernel(__half *remote,
+                                                                size_t dynamic_smem_size) {
+    NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);
     const int mype = nvshmem_my_pe();
     __half value = __float2half_rn(1.0f);
     __half old = nvshmemx_half_atomic_fetch_add(remote, value, mype);
@@ -41,6 +43,7 @@ __global__ void test_nvshmem_half_atomic_no_conversions_kernel(__half *remote) {
                mype);
         error_d = 1;
     }
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
@@ -58,7 +61,10 @@ int main(int argc, char *argv[]) {
     __half *remote = (__half *)nvshmem_calloc(1, sizeof(__half));
     nvshmem_barrier_all();
 
-    test_nvshmem_half_atomic_no_conversions_kernel<<<1, 1>>>(remote);
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_half_atomic_no_conversions_kernel,
+                                      _dynamic_smem_size);
+    test_nvshmem_half_atomic_no_conversions_kernel<<<1, 1, _dynamic_smem_size>>>(
+        remote, _dynamic_smem_size);
     cudaDeviceSynchronize();
 
     cudaMemcpyFromSymbol(&ret_val, error_d, sizeof(int), 0);
