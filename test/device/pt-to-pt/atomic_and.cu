@@ -25,23 +25,25 @@ enum op { ATOMIC_AND = 0, ATOMIC_FETCH_AND };
     MACRO_NAME(OP, uint64_t, uint64);
 
 #define TEST_NVSHMEM_ATOMIC_AND_CUBIN(TYPENAME, TYPE, OP)                                    \
-    void *args_##TYPENAME##_add_##OP[] = {(void *)&remote};                                  \
+    void *args_##TYPENAME##_add_##OP[] = {(void *)&remote, (void *)&_dynamic_smem_size};     \
     CUfunction test_##TYPENAME##_and_##OP##_cubin;                                           \
     init_test_case_kernel(&test_##TYPENAME##_and_##OP##_cubin,                               \
                           NVSHMEMI_TEST_STRINGIFY(test_nvshmem_##TYPENAME##_##OP##_kernel)); \
-    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_and_##OP##_cubin, 1, 1, 1, 1, 1, 1, 0, 0,      \
-                            args_##TYPENAME##_add_##OP, NULL));
+    CU_CHECK(cuLaunchKernel(test_##TYPENAME##_and_##OP##_cubin, 1, 1, 1, 1, 1, 1,            \
+                            _dynamic_smem_size, 0, args_##TYPENAME##_add_##OP, NULL));
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
 #define TEST_NVSHMEM_ATOMIC_AND_KERNEL(OP, TYPE, TYPENAME)                                         \
-    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(TYPE *remote) {                        \
+    __global__ void test_nvshmem_##TYPENAME##_##OP##_kernel(TYPE *remote,                          \
+                                                            size_t dynamic_smem_size) {            \
         const int mype = nvshmem_my_pe();                                                          \
         const int npes = nvshmem_n_pes();                                                          \
         TYPE old = (TYPE)0;                                                                        \
         if ((size_t)npes - 1 > sizeof(TYPE)) return; /* Avoid overflow */                          \
+        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                                 \
         for (int i = 0; i < npes; i++) {                                                           \
             switch (OP) {                                                                          \
                 case ATOMIC_AND:                                                                   \
@@ -65,6 +67,7 @@ extern "C" {
             printf("PE %i observed error with TEST_NVSHMEM_AND(%s, %s)\n", mype, #OP, #TYPE);      \
             error_d = 1;                                                                           \
         }                                                                                          \
+        NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                              \
     }
 REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_AND_KERNEL, ATOMIC_AND)
 REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_AND_KERNEL, ATOMIC_FETCH_AND)
@@ -88,7 +91,10 @@ REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_AND_KERNEL, ATOMIC_FETCH_AND)
         if (use_cubin) {                                                                    \
             TEST_NVSHMEM_ATOMIC_AND_CUBIN(TYPENAME, TYPE, OP);                              \
         } else {                                                                            \
-            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1>>>(remote);                      \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_nvshmem_##TYPENAME##_##OP##_kernel,      \
+                                              _dynamic_smem_size);                          \
+            test_nvshmem_##TYPENAME##_##OP##_kernel<<<1, 1, _dynamic_smem_size>>>(          \
+                remote, _dynamic_smem_size);                                                \
         }                                                                                   \
         cudaDeviceSynchronize();                                                            \
     } while (0)
