@@ -18,6 +18,8 @@ if(NVSHMEM_MPI_SUPPORT)
   nvshmem_add_test(mpi_init.cpp)
   nvshmem_add_test(uid_init.cpp)
   nvshmem_add_test(uid_reinit.cpp)
+  # Implementation-only process-exit regressions are not part of normal builds or installs.
+  add_subdirectory(internal EXCLUDE_FROM_ALL)
   nvshmem_add_test(nvshmemx_init_with_device.cpp)
   nvshmem_add_test_no_device(nvshmemx_hostlib_init_attr.cpp)
 endif()

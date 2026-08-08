@@ -71,11 +71,8 @@ int main(int argc, char *argv[]) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    nvshmem_finalize();
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
+    // INTERNAL ONLY: leave the final UID initialization live to exercise process-exit
+    // proxy cleanup. This is not a public NVSHMEM lifecycle example.
     MPI_Finalize();
-
     return 0;
 }
