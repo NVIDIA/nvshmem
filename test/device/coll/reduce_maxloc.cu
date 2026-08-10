@@ -101,6 +101,8 @@ int main(int argc, char **argv) {
     char size_string[100];
     unsigned long long int errs;
     read_args(argc, argv);
+    // Maxloc reduction does not support the CFT path yet.
+    _dynamic_smem_size = SMEM_SIZE_DISABLE;
     if (use_mmap) {
         alloc_size = pad_up(alloc_size);
     }
