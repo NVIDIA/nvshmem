@@ -1881,11 +1881,12 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_q
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 ibgda_mix_amo_target(uint64_t value) {
-    value ^= value >> 30;
-    value *= 0xbf58476d1ce4e5b9ULL;
-    value ^= value >> 27;
-    value *= 0x94d049bb133111ebULL;
-    return value ^ (value >> 31);
+    /* Stateless SplitMix64 finalizer for the target PE and symmetric-heap offset. */
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_1;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_1;
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_2;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_2;
+    return value ^ (value >> NVSHMEMI_SPLITMIX64_SHIFT_3);
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool ibgda_use_address_stable_amo(

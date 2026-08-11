@@ -987,6 +987,7 @@ int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
     int status = 0;
     bool seen_device[MAX_NUM_HCAS] = {};
     uint8_t local_cross_hca_atomic = 1;
+    bool local_hca_atomic = true;
     int selected_physical_devices = 0;
     nvshmemt_ib_atomic_policy policy = nvshmemt_ib_atomic_policy::AUTO;
 
@@ -1044,15 +1045,27 @@ int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
                 struct nvshmemt_ib_common_device *device =
                     (struct nvshmemt_ib_common_device *)((char *)state->devices +
                                                          dev_id * device_struct_size);
+                if (device->device_attr.atomic_cap == IBV_ATOMIC_NONE) {
+                    local_hca_atomic = false;
+                }
                 if (device->device_attr.atomic_cap != IBV_ATOMIC_GLOB) {
                     local_cross_hca_atomic = 0;
                 }
             }
         }
 
-        /* Different ports on one HCA do not need cross-HCA atomic scope. */
-        if (policy == nvshmemt_ib_atomic_policy::AUTO && selected_physical_devices <= 1) {
-            local_cross_hca_atomic = 1;
+        /*
+         * `atomic_cap` is queried per verbs device and defines IBV_ATOMIC_HCA
+         * as atomic guarantees within that device. The physical-device IDs
+         * above collapse selected ports of one HCA to one device, so they need
+         * HCA scope, not IBV_ATOMIC_GLOB. See `ibv_query_device` in the NVIDIA
+         * RDMA Aware Networks Programming User Manual:
+         * https://docs.nvidia.com/rdma-aware-networks-programming-user-manual-1-7.pdf
+         *
+         * Do not override IBV_ATOMIC_NONE, which offers no atomic guarantees.
+         */
+        if (policy == nvshmemt_ib_atomic_policy::AUTO && selected_physical_devices == 1) {
+            local_cross_hca_atomic = local_hca_atomic;
         }
     }
 
@@ -1136,11 +1149,12 @@ nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_ep_from_qp_index(nvshmem_tran
 }
 
 static uint64_t nvshmemt_ib_common_mix_amo_target(uint64_t value) {
-    value ^= value >> 30;
-    value *= UINT64_C(0xbf58476d1ce4e5b9);
-    value ^= value >> 27;
-    value *= UINT64_C(0x94d049bb133111eb);
-    return value ^ (value >> 31);
+    /* Stateless SplitMix64 finalizer for the target PE and symmetric-heap offset. */
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_1;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_1;
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_2;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_2;
+    return value ^ (value >> NVSHMEMI_SPLITMIX64_SHIFT_3);
 }
 
 nvshmemt_ib_common_ep_ptr_t nvshmemt_ib_common_get_amo_ep_from_qp_index(nvshmem_transport_t t,
