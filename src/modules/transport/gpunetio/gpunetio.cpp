@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <cctype>
@@ -1333,6 +1332,9 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     dev_list = ftable.get_device_list(&num_devices);
     NVSHMEMI_NULL_ERROR_RET(dev_list, status, NVSHMEMX_ERROR_INTERNAL, "get_device_list failed \n");
     INFO(log_level, "Found %d devices\n", num_devices);
+    if (num_devices <= 0) {
+        NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL, "no IB devices found\n");
+    }
 
     struct nvshmemt_ib_hca_filter hca_filter = {};
     struct nvshmemt_ib_common_state temp_state = {};
@@ -1342,10 +1344,11 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE, "HCA filter parsing failed.\n");
     transport->device_assignment_mode = nvshmemt_ib_common_device_assignment_mode(hca_filter);
 
-    struct nvshmemt_ib_common_device common_devs[MAX_NUM_HCAS] = {};
+    std::vector<nvshmemt_ib_common_device> common_devs(num_devices);
     int temp_dev_ids[MAX_NUM_PES_PER_NODE];
     int temp_port_ids[MAX_NUM_PES_PER_NODE];
-    temp_state.devices = common_devs;
+    temp_state.devices = common_devs.data();
+    temp_state.device_capacity = num_devices;
     temp_state.dev_ids = temp_dev_ids;
     temp_state.port_ids = temp_port_ids;
 
@@ -1354,7 +1357,7 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     if (status) return status;
 
     {
-        bool device_checked[MAX_NUM_HCAS] = {};
+        std::vector<bool> device_checked(num_devices, false);
         int write_idx = 0;
         for (int i = 0; i < temp_state.n_dev_ids; i++) {
             int dev_idx = temp_state.dev_ids[i];
@@ -1412,8 +1415,7 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     if (status) return status;
 
     // We need to copy the detected devices into the vector-based structures of gpunetio_state.
-    std::array<int, MAX_NUM_HCAS> dev_remap;
-    dev_remap.fill(-1);
+    std::vector<int> dev_remap(num_devices, -1);
     for (int i = 0; i < temp_state.n_dev_ids; i++) {
         int dev_id = temp_state.dev_ids[i];
         if (dev_remap[dev_id] == -1) {

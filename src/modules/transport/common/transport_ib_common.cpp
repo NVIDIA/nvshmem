@@ -1428,6 +1428,15 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
     int status = 0;
     int offset = 0;
 
+    if (num_devices < 0 || state.device_capacity < num_devices ||
+        (num_devices > 0 && (!devices || !dev_list))) {
+        NVSHMEMI_ERROR_PRINT(
+            "invalid IB device storage: capacity=%d, device count=%d, devices=%p, dev_list=%p",
+            state.device_capacity, num_devices, devices, static_cast<void *>(dev_list));
+        state.n_dev_ids = 0;
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
     INFO(log_level,
          "Begin - Enumerating IB devices in the system ([<dev_id, device_name, num_ports>]) - ");
     for (int i = 0; i < num_devices; i++) {
