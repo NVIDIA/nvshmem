@@ -99,16 +99,14 @@ enum class completion_kind {
 
 /* Internal global variables */
 #ifdef NVSHMEM_USE_GDRCOPY
-struct gdrcopy_function_table gdrcopy_ftable;
-void *gdrcopy_handle = NULL;
-gdr_t gdr_desc;
-bool use_gdrcopy = false;
+nvshmemt_gpu_cpu_mapping_state gpu_cpu_mapping_state;
+bool use_gpu_cpu_mapping = false;
 
 /* Probe whether the current CUDA device is a memory-coherent platform
  * (e.g., Grace-Hopper / NVLink-C2C). Returns true iff the CUDA attribute
  * CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES is
  * supported and non-zero. Any probe failure is conservatively treated as
- * non-coherent so we do not erroneously require GDRCopy v2/FORCE_PCIE. */
+ * non-coherent so we do not erroneously require a forced-PCIe mapping. */
 bool libfabric_is_coherent_platform(struct nvshmemi_cuda_fn_table *table, int log_level) {
     CUdevice dev;
     constexpr auto coherent_platform_attribute = static_cast<CUdevice_attribute>(
@@ -144,20 +142,13 @@ bool libfabric_is_coherent_platform(struct nvshmemi_cuda_fn_table *table, int lo
     return attr != 0;
 }
 
-/* Configure use_gdrcopy_v2 based on platform coherency and GDRCopy v2/FORCE_PCIE
- * availability. On memory-coherent systems (e.g., Grace-Hopper / NVLink-C2C)
- * GDRCopy's default pin path can bypass the BAR1/PCIe window that the libfabric
- * staged-atomics protocol requires. GDRCopy 2.5+ exposes gdr_pin_buffer_v2 with
- * GDR_PIN_FLAG_FORCE_PCIE to force a BAR1 mapping; when that capability is
- * present we route pin/map through v2. When the platform is coherent but staged
- * atomics are enabled and the required capability is missing, returns a
- * non-zero status with an actionable diagnostic. Safe to call whether or not
- * use_gdrcopy is set; returns 0 immediately if GDRCopy is disabled or the
- * platform is non-coherent. */
-int libfabric_configure_gdrcopy_v2(nvshmemt_libfabric_state_t *libfabric_state) {
+/* Configure forced-PCIe GPU CPU mappings for libfabric staged atomics on coherent
+ * platforms. The selected backend may be the GDRCopy library or NVSHMEM's internal
+ * CUDA DMA-BUF implementation. */
+int libfabric_configure_gpu_cpu_mapping(nvshmemt_libfabric_state_t *libfabric_state) {
     int status = 0;
 
-    if (!use_gdrcopy) {
+    if (!use_gpu_cpu_mapping) {
         return 0;
     }
 
@@ -167,129 +158,57 @@ int libfabric_configure_gdrcopy_v2(nvshmemt_libfabric_state_t *libfabric_state) 
         return 0;
     }
 
-    bool v2_available =
-        (gdrcopy_ftable.pin_buffer_v2 && gdrcopy_ftable.map_v2 && gdrcopy_ftable.get_attribute);
-    bool force_pcie_supported = false;
-    if (v2_available) {
-        int supported = 0;
-        int rc = gdrcopy_ftable.get_attribute(
-            gdr_desc, NVSHMEMT_GDR_ATTR_SUPPORT_PIN_FLAG_FORCE_PCIE, &supported);
-        force_pcie_supported = (rc == 0 && supported != 0);
-    }
+    bool force_pcie_supported = nvshmemt_gpu_cpu_mapping_has_capability(
+        &gpu_cpu_mapping_state, NVSHMEMT_GPU_CPU_MAPPING_CAP_FORCE_PCIE);
 
-    if (v2_available && force_pcie_supported) {
-        libfabric_state->use_gdrcopy_v2 = true;
+    if (force_pcie_supported) {
+        libfabric_state->use_force_pcie_mapping = true;
         INFO(libfabric_state->log_level,
-             "Coherent platform detected; using GDRCopy v2 pin/map with "
-             "GDR_PIN_FLAG_FORCE_PCIE.");
+             "Coherent platform detected; using a forced PCIe GPU CPU mapping.");
     } else if (libfabric_state->use_staged_atomics) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                           "Coherent platform with libfabric staged atomics requires GDRCopy "
-                           ">= 2.5 with GDR_PIN_FLAG_FORCE_PCIE support "
-                           "(v2_available=%d, force_pcie_supported=%d). "
-                           "Please use libgdrapi/gdrdrv >= 2.5 and a GPU driver with "
-                           "GDR_PIN_FLAG_FORCE_PCIE support.\n",
-                           static_cast<int>(v2_available), static_cast<int>(force_pcie_supported));
+                           "Coherent platform with libfabric staged atomics requires a GPU CPU "
+                           "mapping backend with forced PCIe support.\n");
     } else {
         INFO(libfabric_state->log_level,
-             "Coherent platform detected but GDRCopy v2/FORCE_PCIE unavailable; "
-             "continuing with v1 pin/map path because use_staged_atomics is false.");
+             "Coherent platform detected but forced PCIe mapping is unavailable; continuing "
+             "with the default mapping because use_staged_atomics is false.");
     }
 
 out:
     return status;
 }
 
-void libfabric_gdr_cleanup_mapping(nvshmemt_libfabric_state_t *libfabric_state,
-                                   nvshmemt_libfabric_memhandle_info_t *handle_info, bool mapped,
-                                   size_t mapping_size, bool pinned, int primary_status) {
+void libfabric_gpu_cpu_mapping_cleanup(nvshmemt_libfabric_state_t *libfabric_state,
+                                       nvshmemt_libfabric_memhandle_info_t *handle_info,
+                                       int primary_status) {
     if (handle_info == nullptr) {
         return;
     }
-
-    if (mapped) {
-        int rc = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
-                                      mapping_size);
-        if (rc != 0) {
-            INFO(libfabric_state->log_level,
-                 "gdrcopy unmap failed during cleanup (rc=%d); primary status=%d", rc,
-                 primary_status);
-        }
+    int rc = nvshmemt_gpu_cpu_unmap(&gpu_cpu_mapping_state, &handle_info->cpu_mapping);
+    if (rc != 0) {
+        INFO(libfabric_state->log_level,
+             "GPU CPU unmap failed during cleanup (rc=%d); primary status=%d", rc, primary_status);
     }
-
-    if (pinned) {
-        int rc = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
-        if (rc != 0) {
-            INFO(libfabric_state->log_level,
-                 "gdrcopy unpin_buffer failed during cleanup (rc=%d); primary status=%d", rc,
-                 primary_status);
-        }
-    }
-
-    if (mapped || pinned) {
-        handle_info->gdr_mapping_size = 0;
-    }
+    handle_info->cpu_ptr = nullptr;
 }
 
-void *libfabric_gdr_cpu_ptr_from_mapping(void *cpu_ptr_base, void *buf, const gdr_info_t &info) {
-    const uintptr_t mapping_offset =
-        reinterpret_cast<uintptr_t>(buf) - static_cast<uintptr_t>(info.va);
-    return static_cast<void *>(static_cast<char *>(cpu_ptr_base) + mapping_offset);
-}
-
-/* Register a device-memory buffer with GDRCopy: pin, map, compute the
- * user-visible CPU pointer (accounting for 64KB page alignment), and record
- * the mapping info on handle_info. Uses the v2 pin/map path (with
- * GDR_PIN_FLAG_FORCE_PCIE) when libfabric_state->use_gdrcopy_v2 is set, else
- * the v1 path. Returns 0 on success, non-zero on failure (with the GDRCopy
- * return code surfaced via an INFO/ERROR log). On failure the caller is
- * responsible for freeing handle_info. */
-int libfabric_gdr_register_memhandle(nvshmemt_libfabric_state_t *libfabric_state,
-                                     nvshmemt_libfabric_memhandle_info_t *handle_info, void *buf,
-                                     size_t length) {
-    int status = 0;
-    gdr_info_t info;
-    const auto gdr_addr = static_cast<unsigned long>(reinterpret_cast<uintptr_t>(buf));
-    bool pinned = false;
-    bool mapped = false;
-
-    if (libfabric_state->use_gdrcopy_v2) {
-        /* Coherent platform path: force a BAR1/PCIe mapping so the
-         * staged-atomics protocol's ordering assumptions hold. */
-        status = gdrcopy_ftable.pin_buffer_v2(gdr_desc, gdr_addr, length,
-                                              NVSHMEMT_GDR_PIN_FLAG_FORCE_PCIE, &handle_info->mh);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "gdrcopy pin_buffer_v2 failed \n");
-        pinned = true;
-
-        status = gdrcopy_ftable.map_v2(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base,
-                                       length, NVSHMEMT_GDR_MAP_FLAG_DEFAULT);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map_v2 failed \n");
-        mapped = true;
-    } else {
-        status = gdrcopy_ftable.pin_buffer(gdr_desc, gdr_addr, length, 0, 0, &handle_info->mh);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy pin_buffer failed \n");
-        pinned = true;
-
-        status = gdrcopy_ftable.map(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base, length);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map failed \n");
-        mapped = true;
-    }
-
-    status = gdrcopy_ftable.get_info(gdr_desc, handle_info->mh, &info);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy get_info failed \n");
-
-    /* Mappings start on a 64KB boundary, so calculate the offset from the
-     * head of the mapping to the beginning of the buffer. */
-    handle_info->cpu_ptr = libfabric_gdr_cpu_ptr_from_mapping(handle_info->cpu_ptr_base, buf, info);
-    handle_info->gdr_mapping_size = length;
+int libfabric_gpu_cpu_mapping_register(nvshmemt_libfabric_state_t *libfabric_state,
+                                       nvshmemt_libfabric_memhandle_info_t *handle_info, void *buf,
+                                       size_t length) {
+    uint32_t flags = libfabric_state->use_force_pcie_mapping
+                         ? NVSHMEMT_GPU_CPU_MAPPING_FLAG_FORCE_PCIE
+                         : NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE;
+    int status =
+        nvshmemt_gpu_cpu_map(&gpu_cpu_mapping_state, buf, length, flags, &handle_info->cpu_mapping);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "GPU CPU mapping failed\n");
+    handle_info->cpu_ptr = handle_info->cpu_mapping.cpu_ptr;
+    handle_info->cache_region_size = length;
     handle_info->ptr = buf;
     return 0;
 
 out:
-    /* Best-effort cleanup of partially-established GDRCopy state so the pin
-     * does not leak. Cleanup errors are logged but do not overwrite status. */
-    libfabric_gdr_cleanup_mapping(libfabric_state, handle_info, mapped, length, pinned, status);
+    libfabric_gpu_cpu_mapping_cleanup(libfabric_state, handle_info, status);
     return status;
 }
 #endif
@@ -611,7 +530,7 @@ int perform_gdrcopy_amo(nvshmem_transport_t transport, nvshmemt_libfabric_gdr_op
     NVSHMEMI_NULL_ERROR_JMP(handle_info, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "Unable to get mem handle for atomic.\n");
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         ptr = (volatile T *)((char *)handle_info->cpu_ptr +
                              ((char *)received_op->target_addr - (char *)handle_info->ptr));
     } else
@@ -2379,7 +2298,7 @@ static int nvshmemt_libfabric_enforce_cst(struct nvshmem_transport *tcurr) {
     int status;
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         if (libfabric_state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_SLINGSHOT) {
             int temp;
             nvshmemt_libfabric_memhandle_info_t *mem_handle_info;
@@ -2390,8 +2309,10 @@ static int nvshmemt_libfabric_enforce_cst(struct nvshmem_transport *tcurr) {
             if (!mem_handle_info) {
                 goto skip;
             }
-            gdrcopy_ftable.copy_from_mapping(mem_handle_info->mh, &temp, mem_handle_info->cpu_ptr,
-                                             sizeof(int));
+            if (mem_handle_info->cpu_mapping.mapped) {
+                nvshmemt_gpu_cpu_copy_from(&gpu_cpu_mapping_state, &mem_handle_info->cpu_mapping,
+                                           &temp, mem_handle_info->cpu_ptr, sizeof(int));
+            }
         }
     }
 
@@ -2452,6 +2373,39 @@ skip:
     return status;
 }
 
+static int nvshmemt_libfabric_close_mem_handle_mrs(nvshmemt_libfabric_state_t *libfabric_state,
+                                                   nvshmemt_libfabric_mem_handle_t *fabric_handle,
+                                                   size_t count) {
+    int first_status = 0;
+    count = std::min(count, libfabric_state->domains.size());
+
+    for (size_t i = 0; i < count; i++) {
+        struct fid_mr *mr = fabric_handle->hdls[i].mr;
+        if (mr == nullptr) {
+            continue;
+        }
+
+        int status = fi_close(&mr->fid);
+        if (status != 0) {
+            NVSHMEMI_WARN_PRINT("Error releasing mem handle idx %zu (%d): %s\n", i, status,
+                                fi_strerror(-status));
+            if (first_status == 0) {
+                first_status = status;
+            }
+            continue;
+        }
+
+        if (i < libfabric_state->local_mrs.size() && libfabric_state->local_mrs[i] == mr) {
+            libfabric_state->local_mrs[i] = nullptr;
+            libfabric_state->local_mr_keys[i] = 0;
+            libfabric_state->local_mr_descs[i] = nullptr;
+        }
+        fabric_handle->hdls[i] = {};
+    }
+
+    return first_status;
+}
+
 static int nvshmemt_libfabric_release_mem_handle(nvshmem_mem_handle_t *mem_handle,
                                                  nvshmem_transport_t t) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
@@ -2462,46 +2416,35 @@ static int nvshmemt_libfabric_release_mem_handle(nvshmem_mem_handle_t *mem_handl
     assert(mem_handle != NULL);
     fabric_handle = (nvshmemt_libfabric_mem_handle_t *)mem_handle;
 
-    if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+    if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA &&
+        libfabric_state->cache != nullptr) {
         nvshmemt_libfabric_memhandle_info_t *handle_info;
         handle_info = (nvshmemt_libfabric_memhandle_info_t *)nvshmemt_mem_handle_cache_get(
             t, libfabric_state->cache, fabric_handle->buf);
         if (handle_info != NULL) {
 #ifdef NVSHMEM_USE_GDRCOPY
-            if ((use_gdrcopy == true) && (handle_info->gdr_mapping_size > 0)) {
-                status = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
-                                              handle_info->gdr_mapping_size);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unmap failed\n");
-
-                status = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
-                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unpin failed\n");
+            if (use_gpu_cpu_mapping &&
+                (handle_info->cpu_mapping.mapped || handle_info->cpu_mapping.pinned)) {
+                status = nvshmemt_gpu_cpu_unmap(&gpu_cpu_mapping_state, &handle_info->cpu_mapping);
+                NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                      "GPU CPU unmap failed\n");
             }
 #endif
-            if (libfabric_state->cache != NULL) {
-                curr_ptr = handle_info->ptr;
-                do {
-                    nvshmemt_mem_handle_cache_remove(t, libfabric_state->cache, curr_ptr);
-                    curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
-                } while (curr_ptr < (char *)handle_info->ptr + handle_info->gdr_mapping_size);
-            }
+            curr_ptr = handle_info->ptr;
+            do {
+                nvshmemt_mem_handle_cache_remove(t, libfabric_state->cache, curr_ptr);
+                curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
+            } while (curr_ptr < (char *)handle_info->ptr + handle_info->cache_region_size);
         }
     }
 
-    for (size_t i = 0; i < libfabric_state->domains.size(); i++) {
-        if (libfabric_state->local_mrs[i] == fabric_handle->hdls[i].mr) {
-            libfabric_state->local_mrs[i] = NULL;
-        }
-
-        int status = fi_close(&fabric_handle->hdls[i].mr->fid);
-        if (status) {
-            NVSHMEMI_WARN_PRINT("Error releasing mem handle idx %zu (%d): %s\n", i, status,
-                                fi_strerror(status * -1));
-        }
+    status = nvshmemt_libfabric_close_mem_handle_mrs(libfabric_state, fabric_handle,
+                                                     libfabric_state->domains.size());
+    if (status == 0) {
+        libfabric_state->local_mrs.clear();
+        libfabric_state->local_mr_keys.clear();
+        libfabric_state->local_mr_descs.clear();
     }
-
-    libfabric_state->local_mrs.clear();
-    libfabric_state->local_mr_keys.clear();
-    libfabric_state->local_mr_descs.clear();
 
 out:
     return status;
@@ -2510,7 +2453,7 @@ out:
 static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf,
                                              size_t length, nvshmem_transport_t t,
                                              bool local_only) {
-    nvshmemt_libfabric_mem_handle_t *fabric_handle;
+    nvshmemt_libfabric_mem_handle_t *fabric_handle = nullptr;
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
     cudaPointerAttributes attr = {};
     struct fi_mr_attr mr_attr;
@@ -2521,6 +2464,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     char *cached_ptr_end = static_cast<char *>(buf);
     CUdevice gpu_device_id;
     nvshmemt_libfabric_memhandle_info_t *handle_info = NULL;
+    size_t registered_domains = 0;
 
     // for now, error out if mmap is used with libfabric
     // TODO : Add workaround for mmap with libfabric
@@ -2577,6 +2521,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
                 fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &fabric_handle->hdls[i].mr);
             NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                             "Error registering memory region.\n");
+            registered_domains = i + 1;
 
             status =
                 fi_mr_bind(fabric_handle->hdls[i].mr, &libfabric_state->eps[i]->endpoint->fid, 0);
@@ -2597,6 +2542,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
                                             "Error registering memory region.\n");
 
             fabric_handle->hdls[i].mr = mr;
+            registered_domains = i + 1;
             fabric_handle->hdls[i].key = fi_mr_key(mr);
             fabric_handle->hdls[i].local_desc = fi_mr_desc(mr);
         }
@@ -2615,9 +2561,9 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
 
         if (!is_host) {
 #ifdef NVSHMEM_USE_GDRCOPY
-            if (use_gdrcopy) {
+            if (use_gpu_cpu_mapping) {
                 status =
-                    libfabric_gdr_register_memhandle(libfabric_state, handle_info, buf, length);
+                    libfabric_gpu_cpu_mapping_register(libfabric_state, handle_info, buf, length);
                 if (status != 0) {
                     goto out;
                 }
@@ -2625,14 +2571,15 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
 #endif
             {
                 NVSHMEMI_ERROR_PRINT(
-                    "GDRCopy support not enabled. Unable to register gpu memory handle info.");
+                    "GPU CPU mapping support is unavailable. Unable to register GPU memory "
+                    "handle info.");
                 status = NVSHMEMX_ERROR_INVALID_VALUE;
                 goto out;
             }
         } else {
             handle_info->ptr = buf;
             handle_info->cpu_ptr = buf;
-            handle_info->gdr_mapping_size = 0;
+            handle_info->cache_region_size = length;
         }
         curr_ptr = buf;
         do {
@@ -2667,14 +2614,18 @@ out:
                 }
             }
 #ifdef NVSHMEM_USE_GDRCOPY
-            if (!is_host && use_gdrcopy) {
-                bool gdr_mapping_created = handle_info->gdr_mapping_size > 0;
-                libfabric_gdr_cleanup_mapping(libfabric_state, handle_info, gdr_mapping_created,
-                                              handle_info->gdr_mapping_size, gdr_mapping_created,
-                                              status);
+            if (!is_host && use_gpu_cpu_mapping) {
+                libfabric_gpu_cpu_mapping_cleanup(libfabric_state, handle_info, status);
             }
 #endif
             free(handle_info);
+        }
+        if (fabric_handle != nullptr) {
+            int cleanup_status = nvshmemt_libfabric_close_mem_handle_mrs(
+                libfabric_state, fabric_handle, registered_domains);
+            if (cleanup_status == 0) {
+                *fabric_handle = {};
+            }
         }
     }
     return status;
@@ -3154,8 +3105,8 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
 
         nvshmemt_mem_handle_cache_fini(libfabric_state->cache);
 #ifdef NVSHMEM_USE_GDRCOPY
-        if (use_gdrcopy) {
-            nvshmemt_gdrcopy_ftable_fini(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle);
+        if (use_gpu_cpu_mapping) {
+            nvshmemt_gpu_cpu_mapping_fini(&gpu_cpu_mapping_state);
         }
 #endif
     }
@@ -3444,24 +3395,24 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (options.DISABLE_GDRCOPY) {
-        use_gdrcopy = false;
+        use_gpu_cpu_mapping = false;
     } else if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
-        use_gdrcopy = nvshmemt_gdrcopy_ftable_init(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle,
-                                                   libfabric_state->log_level);
-        if (!use_gdrcopy) {
+        use_gpu_cpu_mapping =
+            nvshmemt_gpu_cpu_mapping_init(&gpu_cpu_mapping_state, table, libfabric_state->log_level,
+                                          options.GDRCOPY_USE_INTERNAL_DMABUF);
+        if (!use_gpu_cpu_mapping) {
             INFO(libfabric_state->log_level,
-                 "GDRCopy Initialization failed."
-                 " Device memory will not be supported.\n");
+                 "GPU CPU mapping initialization failed. Device memory will not be supported.\n");
         }
     } else {
         INFO(libfabric_state->log_level,
-             "GDRCopy requested, but unused by transport. Disabling.\n");
-        use_gdrcopy = false;
+             "GPU CPU mapping requested, but unused by transport. Disabling.\n");
+        use_gpu_cpu_mapping = false;
     }
 #else
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                           "EFA Provider requires GDRCopy, but it was disabled"
+                           "EFA Provider requires GPU CPU mapping support, but it was disabled"
                            " at compile time.\n");
     }
 #endif
@@ -3474,7 +3425,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    status = libfabric_configure_gdrcopy_v2(libfabric_state);
+    status = libfabric_configure_gpu_cpu_mapping(libfabric_state);
     if (status != 0) {
         goto out;
     }

@@ -45,7 +45,7 @@
 #endif
 
 #ifdef NVSHMEM_USE_GDRCOPY
-#include "transport_gdr_abi.h"
+#include "transport_gdr_common.h"
 #endif
 
 #define NVSHMEMT_LIBFABRIC_MAJ_VER 1
@@ -844,10 +844,9 @@ struct nvshmemt_libfabric_state_t {
     /* Misc state management */
     bool use_staged_atomics = false;
     bool use_auto_progress = false;
-    /* True when the GDRCopy 2.5+ v2 pin/map path (with GDR_PIN_FLAG_FORCE_PCIE)
-     * is used. Only set on memory-coherent platforms when the required GDRCopy
-     * symbols and GPU/driver capability are present. See libfabric.cpp init. */
-    bool use_gdrcopy_v2 = false;
+    /* True when the selected GPU CPU mapping backend must force a PCIe mapping.
+     * Set for libfabric staged atomics on memory-coherent platforms. */
+    bool use_force_pcie_mapping = false;
 
     /* Deferred work queue (PR#19): holds signal ops and standalone acks that
      * would otherwise cause recursion during completion processing. */
@@ -861,12 +860,11 @@ typedef struct {
 } nvshmemt_libfabric_mem_handle_ep_t;
 
 typedef struct {
-    size_t gdr_mapping_size;
+    size_t cache_region_size;
     void *ptr;
     void *cpu_ptr;
 #ifdef NVSHMEM_USE_GDRCOPY
-    gdr_mh_t mh;
-    void *cpu_ptr_base;
+    nvshmemt_gpu_cpu_mapping cpu_mapping;
 #endif
 } nvshmemt_libfabric_memhandle_info_t;
 
