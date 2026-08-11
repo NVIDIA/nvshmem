@@ -45,7 +45,7 @@
 #endif
 
 #ifdef NVSHMEM_USE_GDRCOPY
-#include "gdrapi.h"
+#include "transport_gdr_abi.h"
 #endif
 
 #define NVSHMEMT_LIBFABRIC_MAJ_VER 1
