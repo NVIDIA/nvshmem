@@ -6,6 +6,9 @@
 #include "coll_test.h"
 #define LARGEST_DT double2
 
+constexpr int REDMAXLOC_NUM_ELEMS = 1;
+constexpr int REDMAXLOC_MAX_ELEMS_EXCLUSIVE = REDMAXLOC_NUM_ELEMS + 1;
+
 #define CALL_RDXN(TG_PRE, TG, TYPENAME, TYPE, OP, THREAD_COMP, ELEM_COMP)                          \
     __global__ void test_##TYPENAME##_##OP##_reduce_kern##TG(nvshmem_team_t team, TYPE *dest,      \
                                                              const TYPE *source, int nelems,       \
@@ -22,7 +25,7 @@
     }
 
 #define CALL_RDXN_OPS_ALL_TG(TYPENAME, TYPE) \
-    CALL_RDXN(x, _block, TYPENAME, TYPE, maxloc, INT_MAX, 2)
+    CALL_RDXN(x, _block, TYPENAME, TYPE, maxloc, INT_MAX, REDMAXLOC_MAX_ELEMS_EXCLUSIVE)
 
 CALL_RDXN_OPS_ALL_TG(double2, double2)
 
@@ -79,14 +82,13 @@ CALL_RDXN_OPS_ALL_TG(double2, double2)
     RUN_ITERS_OP(TYPENAME, TYPE, GROUP, maxloc, ELEM_COMP);
 
 int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int mype,
-                        size_t max_elems_arg, cudaStream_t stream, run_opt_t run_options,
-                        void **h_tables) {
+                        cudaStream_t stream, run_opt_t run_options, void **h_tables) {
     int status = 0;
     int nvshm_test_num_tpb = threads_per_block;
     int num_blocks = 1;
-    size_t num_elems = 1;
-    size_t min_elems = 1;
-    size_t max_elems = max_elems_arg;
+    int num_elems = REDMAXLOC_NUM_ELEMS;
+    int min_elems = REDMAXLOC_NUM_ELEMS;
+    int max_elems = REDMAXLOC_MAX_ELEMS_EXCLUSIVE;
     int iter = iters;
     int skip = warmup_iters;
     size_t dynamic_smem_size = NVSHMEM_PERF_COLL_DYNAMIC_SMEM_SIZE();
@@ -111,12 +113,9 @@ int main(int argc, char **argv) {
     int mype, array_size;
     size_t size = 0;
     size_t alloc_size;
-    int num_elems;
-    char *value = NULL;
-    int max_elems = 2;  //(MAX_ELEMS / 2);
-    int *h_buffer = NULL;
-    int *d_source, *d_dest;
-    int *h_source, *h_dest;
+    LARGEST_DT *h_buffer = NULL;
+    LARGEST_DT *d_source, *d_dest;
+    LARGEST_DT *h_source, *h_dest;
     char size_string[100];
     cudaStream_t cstrm;
     run_opt_t run_options;
@@ -124,8 +123,8 @@ int main(int argc, char **argv) {
 
     PROCESS_OPTS(run_options);
 
-    size = page_size_roundoff((MAX_ELEMS) * sizeof(LARGEST_DT));   // send buf
-    size += page_size_roundoff((MAX_ELEMS) * sizeof(LARGEST_DT));  // recv buf
+    size = page_size_roundoff(REDMAXLOC_NUM_ELEMS * sizeof(LARGEST_DT));   // send buf
+    size += page_size_roundoff(REDMAXLOC_NUM_ELEMS * sizeof(LARGEST_DT));  // recv buf
 
     DEBUG_PRINT("symmetric size requested %lu\n", size);
     sprintf(size_string, "%lu", size);
@@ -137,17 +136,7 @@ int main(int argc, char **argv) {
         goto out;
     }
 
-    value = getenv("NVSHMEM_PERF_COLL_MAX_ELEMS");
-
-    if (NULL != value) {
-        max_elems = atoi(value);
-        if (0 == max_elems) {
-            fprintf(stderr, "Warning: min max elem size = 1\n");
-            max_elems = 1;
-        }
-    }
-
-    array_size = floor(std::log2((float)max_elems)) + 1;
+    array_size = floor(std::log2((float)REDMAXLOC_MAX_ELEMS_EXCLUSIVE)) + 1;
 
     init_wrapper(&argc, &argv);
     alloc_tables(&h_tables, 8, array_size);
@@ -156,29 +145,27 @@ int main(int argc, char **argv) {
 
     CUDA_CHECK(cudaStreamCreateWithFlags(&cstrm, cudaStreamNonBlocking));
 
-    num_elems = 1;  // MAX_ELEMS / 2;
-    alloc_size = (num_elems * 2) * sizeof(LARGEST_DT);
+    alloc_size = (REDMAXLOC_NUM_ELEMS * 2) * sizeof(LARGEST_DT);
 
     CUDA_CHECK(cudaHostAlloc(&h_buffer, alloc_size, cudaHostAllocDefault));
-    h_source = (int32_t *)h_buffer;
-    h_dest = (int32_t *)&h_source[num_elems];
+    h_source = h_buffer;
+    h_dest = &h_source[REDMAXLOC_NUM_ELEMS];
 
-    d_source = (int32_t *)nvshmem_align(getpagesize(), num_elems * sizeof(LARGEST_DT));
-    d_dest = (int32_t *)nvshmem_align(getpagesize(), num_elems * sizeof(LARGEST_DT));
+    d_source = (LARGEST_DT *)nvshmem_align(getpagesize(), REDMAXLOC_NUM_ELEMS * sizeof(LARGEST_DT));
+    d_dest = (LARGEST_DT *)nvshmem_align(getpagesize(), REDMAXLOC_NUM_ELEMS * sizeof(LARGEST_DT));
 
-    CUDA_CHECK(cudaMemcpyAsync(d_source, h_source, (sizeof(LARGEST_DT) * num_elems),
+    CUDA_CHECK(cudaMemcpyAsync(d_source, h_source, (sizeof(LARGEST_DT) * REDMAXLOC_NUM_ELEMS),
                                cudaMemcpyHostToDevice, cstrm));
-    CUDA_CHECK(cudaMemcpyAsync(d_dest, h_dest, (sizeof(LARGEST_DT) * num_elems),
+    CUDA_CHECK(cudaMemcpyAsync(d_dest, h_dest, (sizeof(LARGEST_DT) * REDMAXLOC_NUM_ELEMS),
                                cudaMemcpyHostToDevice, cstrm));
 
-    rdxn_calling_kernel(NVSHMEM_TEAM_WORLD, d_dest, d_source, mype, max_elems, cstrm, run_options,
-                        h_tables);
+    rdxn_calling_kernel(NVSHMEM_TEAM_WORLD, d_dest, d_source, mype, cstrm, run_options, h_tables);
 
     DEBUG_PRINT("last error = %s\n", cudaGetErrorString(cudaGetLastError()));
 
-    CUDA_CHECK(cudaMemcpyAsync(h_source, d_source, (sizeof(LARGEST_DT) * num_elems),
+    CUDA_CHECK(cudaMemcpyAsync(h_source, d_source, (sizeof(LARGEST_DT) * REDMAXLOC_NUM_ELEMS),
                                cudaMemcpyDeviceToHost, cstrm));
-    CUDA_CHECK(cudaMemcpyAsync(h_dest, d_dest, (sizeof(LARGEST_DT) * num_elems),
+    CUDA_CHECK(cudaMemcpyAsync(h_dest, d_dest, (sizeof(LARGEST_DT) * REDMAXLOC_NUM_ELEMS),
                                cudaMemcpyDeviceToHost, cstrm));
 
     nvshmem_barrier_all();
