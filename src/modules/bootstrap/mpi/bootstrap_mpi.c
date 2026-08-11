@@ -135,7 +135,9 @@ static int bootstrap_mpi_finalize(bootstrap_handle_t *handle) {
                                "Freeing bootstrap communicator failed\n");
     }
 
-    if (nvshmem_initialized_mpi) MPI_Finalize();
+    if (nvshmem_initialized_mpi) {
+        MPI_Finalize();
+    }
 
 out:
     return status;
@@ -153,10 +155,11 @@ int nvshmemi_bootstrap_plugin_init(void *mpi_comm, bootstrap_handle_t *handle,
         exit(-1);
     }
 
-    if (NULL == mpi_comm)
+    if (NULL == mpi_comm) {
         src_comm = MPI_COMM_WORLD;
-    else
+    } else {
         src_comm = *((MPI_Comm *)mpi_comm);
+    }
 
     status = MPI_Initialized(&initialized);
     BOOTSTRAP_NE_ERROR_JMP(status, MPI_SUCCESS, NVSHMEMX_ERROR_INTERNAL, error,

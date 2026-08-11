@@ -45,13 +45,17 @@ __device__ void putmem_nbi_scope(void *dest, const void *source, size_t bytes, i
 template <>
 __device__ void putmem_nbi_scope<FLUSH_TEST_SCOPE_THREAD>(void *dest, const void *source,
                                                           size_t bytes, int pe) {
-    if (flat_thread_id() == 0) nvshmem_putmem_nbi(dest, source, bytes, pe);
+    if (flat_thread_id() == 0) {
+        nvshmem_putmem_nbi(dest, source, bytes, pe);
+    }
 }
 
 template <>
 __device__ void putmem_nbi_scope<FLUSH_TEST_SCOPE_WARP>(void *dest, const void *source,
                                                         size_t bytes, int pe) {
-    if (flat_thread_id() < warpSize) nvshmemx_putmem_nbi_warp(dest, source, bytes, pe);
+    if (flat_thread_id() < warpSize) {
+        nvshmemx_putmem_nbi_warp(dest, source, bytes, pe);
+    }
 }
 
 template <>
@@ -65,12 +69,16 @@ __device__ void flush_scope();
 
 template <>
 __device__ void flush_scope<FLUSH_TEST_SCOPE_THREAD>() {
-    if (flat_thread_id() == 0) nvshmemx_flush();
+    if (flat_thread_id() == 0) {
+        nvshmemx_flush();
+    }
 }
 
 template <>
 __device__ void flush_scope<FLUSH_TEST_SCOPE_WARP>() {
-    if (flat_thread_id() < warpSize) nvshmemx_flush_warp();
+    if (flat_thread_id() < warpSize) {
+        nvshmemx_flush_warp();
+    }
 }
 
 template <>
@@ -84,7 +92,9 @@ __device__ void poison_source(int *source, int nelems);
 template <>
 __device__ void poison_source<FLUSH_TEST_SCOPE_THREAD>(int *source, int nelems) {
     if (flat_thread_id() == 0) {
-        for (int i = 0; i < nelems; i++) source[i] = POISON_VALUE;
+        for (int i = 0; i < nelems; i++) {
+            source[i] = POISON_VALUE;
+        }
     }
 }
 
@@ -92,14 +102,18 @@ template <>
 __device__ void poison_source<FLUSH_TEST_SCOPE_WARP>(int *source, int nelems) {
     int tid = flat_thread_id();
     if (tid < warpSize) {
-        for (int i = tid; i < nelems; i += warpSize) source[i] = POISON_VALUE;
+        for (int i = tid; i < nelems; i += warpSize) {
+            source[i] = POISON_VALUE;
+        }
     }
 }
 
 template <>
 __device__ void poison_source<FLUSH_TEST_SCOPE_BLOCK>(int *source, int nelems) {
     int tid = flat_thread_id();
-    for (int i = tid; i < nelems; i += flat_block_size()) source[i] = POISON_VALUE;
+    for (int i = tid; i < nelems; i += flat_block_size()) {
+        source[i] = POISON_VALUE;
+    }
 }
 
 template <flush_test_scope_t SCOPE>
@@ -115,8 +129,9 @@ __global__ void test_flush_reuses_smem_source(int *recv_data, int elems_per_bloc
     nvshmemx_give_smem(nvshmem_smem, smem_offset);
     __syncthreads();
 
-    for (int i = tid; i < elems_per_block; i += flat_block_size())
+    for (int i = tid; i < elems_per_block; i += flat_block_size()) {
         payload[i] = mype * PATTERN_SCALE + offset + i;
+    }
     __syncthreads();
 
 #if __CUDA_ARCH__ >= 900
@@ -141,8 +156,9 @@ __global__ void test_flush_reuses_gmem_source_without_tma(int *source_data, int 
     int offset = blockIdx.x * elems_per_block;
     int peer = (mype + 1) % npes;
 
-    for (int i = tid; i < elems_per_block; i += flat_block_size())
+    for (int i = tid; i < elems_per_block; i += flat_block_size()) {
         source_data[offset + i] = mype * PATTERN_SCALE + offset + i;
+    }
     __syncthreads();
 
     putmem_nbi_scope<SCOPE>(recv_data + offset, source_data + offset,
@@ -163,8 +179,9 @@ __global__ void test_flush_reuses_gmem_source_block_put_thread_flush(int *source
     int offset = blockIdx.x * elems_per_block;
     int peer = (mype + 1) % npes;
 
-    for (int i = tid; i < elems_per_block; i += flat_block_size())
+    for (int i = tid; i < elems_per_block; i += flat_block_size()) {
         source_data[offset + i] = mype * PATTERN_SCALE + offset + i;
+    }
     __syncthreads();
 
     nvshmemx_putmem_nbi_block(recv_data + offset, source_data + offset,
@@ -172,8 +189,9 @@ __global__ void test_flush_reuses_gmem_source_block_put_thread_flush(int *source
     nvshmemx_flush();
     __syncthreads();
 
-    for (int i = tid; i < elems_per_block; i += flat_block_size())
+    for (int i = tid; i < elems_per_block; i += flat_block_size()) {
         source_data[offset + i] = POISON_VALUE;
+    }
     __syncthreads();
 
     nvshmem_quiet();

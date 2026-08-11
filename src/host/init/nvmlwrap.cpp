@@ -28,10 +28,11 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
     int status = NVSHMEMX_SUCCESS;
     char path[1024];
 
-    if (!nvshmemi_options.CUDA_PATH_provided)
+    if (!nvshmemi_options.CUDA_PATH_provided) {
         snprintf(path, 1024, "%s", "libnvidia-ml.so.1");
-    else
+    } else {
         snprintf(path, 1024, "%s/%s", nvshmemi_options.CUDA_PATH, "libnvidia-ml.so.1");
+    }
 
     *nvml_handle = dlopen(path, RTLD_NOW);
     if (!(*nvml_handle)) {

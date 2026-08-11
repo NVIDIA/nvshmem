@@ -63,8 +63,12 @@
     } while (0)
 
 static inline int nvshmemt_errno_from_status(int status) {
-    if (status < 0) return -status;
-    if (status > 0) return status;
+    if (status < 0) {
+        return -status;
+    }
+    if (status > 0) {
+        return status;
+    }
     return 0;
 }
 

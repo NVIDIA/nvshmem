@@ -37,7 +37,9 @@ __host__ __device__ inline size_t nvshmemi_bit_1st_nonzero(const unsigned char *
     for (size_t i = 0; i < size; i++) {
         unsigned char bit_val = ptr[i];
         for (size_t j = 0; bit_val && j < CHAR_BIT; j++) {
-            if (bit_val & 1) return i * CHAR_BIT + j;
+            if (bit_val & 1) {
+                return i * CHAR_BIT + j;
+            }
             bit_val >>= 1;
         }
     }

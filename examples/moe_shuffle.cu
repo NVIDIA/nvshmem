@@ -119,7 +119,9 @@ int setup_test_parameters(int argc, char **argv, int *num_blocks, int *threads_p
     while (1) {
         int c;
         c = getopt(argc, argv, "b:t:chloprvw");
-        if (c == -1) break;
+        if (c == -1) {
+            break;
+        }
 
         switch (c) {
             case 'b':

@@ -139,7 +139,9 @@ static uint64_t nvshmemiu_getHostHash() {
     int status = 0;
 
     status = gethostname(hostname, 1024);
-    if (status) ERROR_EXIT("gethostname failed \n");
+    if (status) {
+        ERROR_EXIT("gethostname failed \n");
+    }
 
     for (int c = 0; c < 1024 && hostname[c] != '\0'; c++) {
         result = ((result << 5) + result) + hostname[c];
@@ -173,8 +175,12 @@ void select_device_shmem() {
 
     shmem_fn_table.fn_shmem_fcollect64(hosts + 1, hosts, 1, 0, 0, n_pes, pSync);
     for (int i = 0; i < n_pes; i++) {
-        if (i == mype) break;
-        if (hosts[i + 1] == host) mype_node++;
+        if (i == mype) {
+            break;
+        }
+        if (hosts[i + 1] == host) {
+            mype_node++;
+        }
     }
 
     CUDA_CHECK(cudaGetDeviceCount(&dev_count));
@@ -304,7 +310,9 @@ static void check_for_cumodule_tests() {
 }
 
 static void print_read_args_summary() {
-    if (nvshmem_my_pe() != 0) return;
+    if (nvshmem_my_pe() != 0) {
+        return;
+    }
     printf("[PE 0] Runtime options after parsing command line arguments \n");
     printf(
         "min_size: %zu, max_size: %zu, step_factor: %zu, iterations: %zu, warmup iterations: %zu, "
@@ -327,7 +335,9 @@ static void print_read_args_summary() {
         use_nucs
 #endif
     );
-    if (repetitions_requested) printf("repetitions: %zu\n", repetitions);
+    if (repetitions_requested) {
+        printf("repetitions: %zu\n", repetitions);
+    }
     printf(
         "Note: Above is full list of options, any given test will use only a subset of these "
         "variables.\n");
@@ -338,16 +348,22 @@ void init_wrapper(int *c, char ***v) {
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     {
         char *value = getenv("NVSHMEMTEST_USE_MPI_LAUNCHER");
-        if (value) use_mpi = atoi(value);
+        if (value) {
+            use_mpi = atoi(value);
+        }
         char *uid_value = getenv("NVSHMEMTEST_USE_UID_BOOTSTRAP");
-        if (uid_value) use_uid = atoi(uid_value);
+        if (uid_value) {
+            use_uid = atoi(uid_value);
+        }
     }
 #endif
 
 #ifdef NVSHMEMTEST_SHMEM_SUPPORT
     {
         char *value = getenv("NVSHMEMTEST_USE_SHMEM_LAUNCHER");
-        if (value) use_shmem = atoi(value);
+        if (value) {
+            use_shmem = atoi(value);
+        }
     }
 #endif
 
@@ -357,7 +373,9 @@ void init_wrapper(int *c, char ***v) {
 
     if (use_mpi || use_uid) {
         status = nvshmemi_load_mpi();
-        if (status) exit(-1);
+        if (status) {
+            exit(-1);
+        }
 
         mpi_fn_table.fn_MPI_Init(c, v);
 
@@ -380,7 +398,9 @@ void init_wrapper(int *c, char ***v) {
         mpi_fn_table.fn_MPI_Comm_rank(node_comm, &local_rank);
         mpi_fn_table.fn_MPI_Comm_free(&node_comm);
         CUDA_CHECK(cudaGetDeviceCount(&dev_count));
-        if (dev_count <= 0) ERROR_EXIT("No CUDA devices available\n");
+        if (dev_count <= 0) {
+            ERROR_EXIT("No CUDA devices available\n");
+        }
         CUDA_CHECK(cudaSetDevice(local_rank % dev_count));
     }
     if (use_mpi) {
@@ -412,7 +432,9 @@ void init_wrapper(int *c, char ***v) {
 #ifdef NVSHMEMTEST_SHMEM_SUPPORT
     if (use_shmem) {
         status = nvshmemi_load_shmem();
-        if (status) exit(-1);
+        if (status) {
+            exit(-1);
+        }
 
         shmem_fn_table.fn_shmem_init();
         mype = shmem_fn_table.fn_shmem_my_pe();
@@ -420,10 +442,14 @@ void init_wrapper(int *c, char ***v) {
         DEBUG_PRINT("SHMEM: [%d of %d] hello SHMEM world! \n", mype, npes);
 
         latency = (double *)shmem_fn_table.fn_shmem_malloc(sizeof(double));
-        if (!latency) ERROR_EXIT("(shmem_malloc) failed \n");
+        if (!latency) {
+            ERROR_EXIT("(shmem_malloc) failed \n");
+        }
 
         avg_time = (double *)shmem_fn_table.fn_shmem_malloc(sizeof(double));
-        if (!avg_time) ERROR_EXIT("(shmem_malloc) failed \n");
+        if (!avg_time) {
+            ERROR_EXIT("(shmem_malloc) failed \n");
+        }
 
         select_device_shmem();
 
@@ -445,10 +471,14 @@ void init_wrapper(int *c, char ***v) {
     nvshmem_barrier_all();
     print_read_args_summary();
     d_latency = (double *)nvshmem_malloc(sizeof(double));
-    if (!d_latency) ERROR_EXIT("nvshmem_malloc failed \n");
+    if (!d_latency) {
+        ERROR_EXIT("nvshmem_malloc failed \n");
+    }
 
     d_avg_time = (double *)nvshmem_malloc(sizeof(double));
-    if (!d_avg_time) ERROR_EXIT("nvshmem_malloc failed \n");
+    if (!d_avg_time) {
+        ERROR_EXIT("nvshmem_malloc failed \n");
+    }
 
     DEBUG_PRINT("end of init \n");
     return;
@@ -652,8 +682,9 @@ static inline int atol_scaled(const char *str, size_t *out) {
         }
     } else if (p < 0) {
         return 1;
-    } else
+    } else {
         scale = 0;
+    }
 
     *out = (size_t)ceil(p * (1lu << scale));
     return 0;
@@ -802,7 +833,9 @@ double perf_stats_stddev(const perf_stats_t *stats) {
 template <typename T>
 static void append_column(std::ostringstream &builder, const T &value, int width) {
     builder << std::left;
-    if constexpr (std::is_same_v<T, double>) builder << std::fixed << std::setprecision(6);
+    if constexpr (std::is_same_v<T, double>) {
+        builder << std::fixed << std::setprecision(6);
+    }
     builder << std::setw(width) << value << "  ";
 }
 
@@ -848,15 +881,18 @@ static bool print_machine_table(std::string_view job_name, std::string_view subj
                                 char plus_minus, const uint64_t *sizes, const double *values,
                                 const perf_stats_t *stats, int num_entries) {
     const char *machine_readable_output = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-    if (machine_readable_output == nullptr || std::atoi(machine_readable_output) == 0) return false;
+    if (machine_readable_output == nullptr || std::atoi(machine_readable_output) == 0) {
+        return false;
+    }
 
     std::ostringstream builder;
     builder << job_name << '\n';
     for (int i = 0; i < num_entries; ++i) {
         const perf_stats_t *entry_stats = stats != nullptr ? &stats[i] : nullptr;
         const double value = values != nullptr ? values[i] : 0.0;
-        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0))
+        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0)) {
             continue;
+        }
         const double mean = entry_stats != nullptr ? entry_stats->mean : value;
         append_perf_result(builder, job_name, subjob_name, sizes[i], output_var, units, plus_minus,
                            mean, entry_stats);
@@ -870,8 +906,9 @@ static void print_basic_table_impl(const char *job_name, const char *subjob_name
                                    uint64_t *sizes, const double *values, const perf_stats_t *stats,
                                    int num_entries) {
     if (print_machine_table(job_name, subjob_name, output_var, units, plus_minus, sizes, values,
-                            stats, num_entries))
+                            stats, num_entries)) {
         return;
+    }
 
     const bool show_stats = stats != nullptr;
     const std::string mean_header = std::string{output_var} + " (" + units + ')';
@@ -892,8 +929,9 @@ static void print_basic_table_impl(const char *job_name, const char *subjob_name
     for (int i = 0; i < num_entries; ++i) {
         const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
         const double value = values != nullptr ? values[i] : 0.0;
-        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0))
+        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0)) {
             continue;
+        }
         append_column(builder, sizes[i], 10);
         append_column(builder, subjob_name, 8);
         const double mean = entry_stats != nullptr ? entry_stats->mean : value;
@@ -917,8 +955,9 @@ static void print_device_collective_table_impl(const char *job_name, const char 
                                                const double *values, const perf_stats_t *stats,
                                                int num_entries) {
     if (print_machine_table(job_name, subjob_name, output_var, units, plus_minus, sizes, values,
-                            stats, num_entries))
+                            stats, num_entries)) {
         return;
+    }
 
     const bool show_stats = stats != nullptr;
     const std::string_view job{job_name};
@@ -950,7 +989,9 @@ static void print_device_collective_table_impl(const char *job_name, const char 
     append_column(builder, "size(B)", 10);
     append_column(builder, "count", 8);
     append_column(builder, "type", 8);
-    if (reduction) append_column(builder, "redop", 8);
+    if (reduction) {
+        append_column(builder, "redop", 8);
+    }
     append_column(builder, "scope", 8);
     append_column(builder, "latency(us)", 16);
     if (show_stats) {
@@ -965,8 +1006,9 @@ static void print_device_collective_table_impl(const char *job_name, const char 
     for (int i = 0; i < num_entries; ++i) {
         const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
         const double value = values != nullptr ? values[i] : 0.0;
-        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0))
+        if (sizes[i] == 0 || (entry_stats != nullptr ? entry_stats->count == 0 : value == 0.0)) {
             continue;
+        }
         const double mean = entry_stats != nullptr ? entry_stats->mean : value;
         double algbw = 0.0;
         double busbw = 0.0;
@@ -974,7 +1016,9 @@ static void print_device_collective_table_impl(const char *job_name, const char 
         append_column(builder, sizes[i], 10);
         append_column(builder, sizes[i] / datatype_size, 8);
         append_column(builder, type, 8);
-        if (reduction) append_column(builder, operation, 8);
+        if (reduction) {
+            append_column(builder, operation, 8);
+        }
         append_column(builder, scope, 8);
         append_column(builder, mean, 16);
         if (show_stats) {
@@ -1006,8 +1050,9 @@ static void print_host_collective_table_impl(const char *job_name, const char *s
         builder << job << '\n';
         for (int i = 0; i < num_entries; ++i) {
             const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
-            if (sizes[i] == 0 || (show_stats ? entry_stats->count == 0 : values[i][0] == 0.0))
+            if (sizes[i] == 0 || (show_stats ? entry_stats->count == 0 : values[i][0] == 0.0)) {
                 continue;
+            }
             double mean = entry_stats != nullptr ? entry_stats->mean : 0.0;
             if (!show_stats) {
                 double min = 0.0;
@@ -1036,18 +1081,26 @@ static void print_host_collective_table_impl(const char *job_name, const char *s
     append_column(builder, "size(B)", 10);
     append_column(builder, "count", 8);
     append_column(builder, "type", 8);
-    if (reduction) append_column(builder, "redop", 8);
+    if (reduction) {
+        append_column(builder, "redop", 8);
+    }
     append_column(builder, "latency(us)", 16);
-    if (show_stats) append_column(builder, "stddev(us)", 16);
+    if (show_stats) {
+        append_column(builder, "stddev(us)", 16);
+    }
     append_column(builder, "min_lat(us)", 16);
     append_column(builder, "max_lat(us)", 16);
-    if (show_stats) append_column(builder, "repetitions", 12);
+    if (show_stats) {
+        append_column(builder, "repetitions", 12);
+    }
     append_column(builder, "algbw(GB/s)", 12);
     builder << std::left << std::setw(12) << "busbw(GB/s)" << '\n';
 
     for (int i = 0; i < num_entries; ++i) {
         const perf_stats_t *entry_stats = show_stats ? &stats[i] : nullptr;
-        if (sizes[i] == 0 || (show_stats ? entry_stats->count == 0 : values[i][0] == 0.0)) continue;
+        if (sizes[i] == 0 || (show_stats ? entry_stats->count == 0 : values[i][0] == 0.0)) {
+            continue;
+        }
         double mean = 0.0;
         double min = 0.0;
         double max = 0.0;
@@ -1064,12 +1117,18 @@ static void print_host_collective_table_impl(const char *job_name, const char *s
         append_column(builder, sizes[i], 10);
         append_column(builder, sizes[i] / parsed.size, 8);
         append_column(builder, parsed.name, 8);
-        if (reduction) append_column(builder, operation, 8);
+        if (reduction) {
+            append_column(builder, operation, 8);
+        }
         append_column(builder, mean, 16);
-        if (show_stats) append_stddev_column(builder, *entry_stats, 16);
+        if (show_stats) {
+            append_stddev_column(builder, *entry_stats, 16);
+        }
         builder << std::left << std::fixed << std::setprecision(3) << std::setw(16) << min << "  ";
         builder << std::left << std::fixed << std::setprecision(3) << std::setw(16) << max << "  ";
-        if (show_stats) append_column(builder, entry_stats->count, 12);
+        if (show_stats) {
+            append_column(builder, entry_stats->count, 12);
+        }
         builder << std::left << std::fixed << std::setprecision(3) << std::setw(12) << algbw
                 << "  ";
         builder << std::left << std::fixed << std::setprecision(3) << std::setw(12) << busbw
@@ -1324,12 +1383,13 @@ void read_args(int argc, char **argv) {
                 atomic_op_parse(optarg, &test_amo);
                 break;
             case '?':
-                if (optopt == 'c')
+                if (optopt == 'c') {
                     fprintf(stderr, "Option -%c requires an argument.\n", optopt);
-                else if (isprint(optopt))
+                } else if (isprint(optopt)) {
                     fprintf(stderr, "Unknown option `-%c'.\n", optopt);
-                else
+                } else {
                     fprintf(stderr, "Unknown option character `\\x%x'.\n", optopt);
+                }
                 return;
             default:
                 abort();
@@ -1360,10 +1420,11 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
     int status = 0;
     char path[1024];
     env_value = (const char *)getenv("NVSHMEM_CUDA_PATH");
-    if (!env_value)
+    if (!env_value) {
         snprintf(path, 1024, "%s", "libnvidia-ml.so.1");
-    else
+    } else {
         snprintf(path, 1024, "%s/%s", env_value, "libnvidia-ml.so.1");
+    }
 
     *nvml_handle = dlopen(path, RTLD_NOW);
     if (!(*nvml_handle)) {
@@ -1490,7 +1551,9 @@ bool is_mnnvl_supported(int dev_id) {
 
 void *allocate_mmap_buffer(size_t size, int mem_fabric_handle_type, bool use_egm, bool reset_zero) {
     mype = nvshmem_my_pe();
-    if (!mype) DEBUG_PRINT("allocating mmap buffer\n");
+    if (!mype) {
+        DEBUG_PRINT("allocating mmap buffer\n");
+    }
     CUmemAllocationProp prop = {};
     int dev_id, numa_id;
     size_t granularity = MEM_GRANULARITY;
@@ -1505,7 +1568,9 @@ void *allocate_mmap_buffer(size_t size, int mem_fabric_handle_type, bool use_egm
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     if (use_egm) {
-        if (!mype) DEBUG_PRINT("using EGM memory\n");
+        if (!mype) {
+            DEBUG_PRINT("using EGM memory\n");
+        }
         prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
         CU_CHECK(cuDeviceGetAttribute(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, my_dev));
         prop.location.id = numa_id;
@@ -1529,7 +1594,9 @@ void *allocate_mmap_buffer(size_t size, int mem_fabric_handle_type, bool use_egm
     // pad size to be multiple of granularity
     size = ((size + granularity - 1) / granularity) * granularity;
     // printf("Allocating mmap buffer: %d, %d size:%lu\n",mem_handle_type, use_egm, size);
-    if (!mype) DEBUG_PRINT("padding buffer size to %lu\n", size);
+    if (!mype) {
+        DEBUG_PRINT("padding buffer size to %lu\n", size);
+    }
     void *bufAddr, *mmapedAddr;
 
     CUmemAccessDesc accessDescriptor[2];

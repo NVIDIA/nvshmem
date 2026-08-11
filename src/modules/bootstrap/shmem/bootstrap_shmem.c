@@ -156,10 +156,18 @@ static int bootstrap_shmem_allgather_legacy(const void *sendbuf, void *recvbuf, 
     }
 
 out:
-    if (!status && (sendbuf_i || recvbuf_i)) shmem_barrier_all();
-    if (sendbuf_i) shmem_free(sendbuf_i);
-    if (recvbuf_i) shmem_free(recvbuf_i);
-    if (!status && (sendbuf_i || recvbuf_i)) shmem_barrier_all();
+    if (!status && (sendbuf_i || recvbuf_i)) {
+        shmem_barrier_all();
+    }
+    if (sendbuf_i) {
+        shmem_free(sendbuf_i);
+    }
+    if (recvbuf_i) {
+        shmem_free(recvbuf_i);
+    }
+    if (!status && (sendbuf_i || recvbuf_i)) {
+        shmem_barrier_all();
+    }
     return status;
 }
 
@@ -194,10 +202,18 @@ static int bootstrap_shmem_alltoall_legacy(const void *sendbuf, void *recvbuf, i
     }
 
 out:
-    if (!status && (sendbuf_i || recvbuf_i)) shmem_barrier_all();
-    if (sendbuf_i) shmem_free(sendbuf_i);
-    if (recvbuf_i) shmem_free(recvbuf_i);
-    if (!status && (sendbuf_i || recvbuf_i)) shmem_barrier_all();
+    if (!status && (sendbuf_i || recvbuf_i)) {
+        shmem_barrier_all();
+    }
+    if (sendbuf_i) {
+        shmem_free(sendbuf_i);
+    }
+    if (recvbuf_i) {
+        shmem_free(recvbuf_i);
+    }
+    if (!status && (sendbuf_i || recvbuf_i)) {
+        shmem_barrier_all();
+    }
     return status;
 }
 
@@ -279,23 +295,37 @@ static int bootstrap_shmem_allgather(const void *sendbuf, void *recvbuf, int len
     memcpy(sendbuf_i, sendbuf, length);
 
     rc = shmem_team_sync(SHMEM_TEAM_WORLD);
-    if (rc != 0) goto fallback;
+    if (rc != 0) {
+        goto fallback;
+    }
     rc = shmem_uint8_fcollect(SHMEM_TEAM_WORLD, recvbuf_i, sendbuf_i, length);
-    if (rc != 0) goto fallback;
+    if (rc != 0) {
+        goto fallback;
+    }
     rc = shmem_team_sync(SHMEM_TEAM_WORLD);
-    if (rc != 0) goto fallback;
+    if (rc != 0) {
+        goto fallback;
+    }
 
     memcpy(recvbuf, recvbuf_i, (size_t)length * handle->pg_size);
     goto out;
 
 fallback:
-    if (sendbuf_i) shmem_free(sendbuf_i);
-    if (recvbuf_i) shmem_free(recvbuf_i);
+    if (sendbuf_i) {
+        shmem_free(sendbuf_i);
+    }
+    if (recvbuf_i) {
+        shmem_free(recvbuf_i);
+    }
     TEAMS_FALLBACK(handle, bootstrap_shmem_allgather_legacy, sendbuf, recvbuf, length, handle);
 
 out:
-    if (sendbuf_i) shmem_free(sendbuf_i);
-    if (recvbuf_i) shmem_free(recvbuf_i);
+    if (sendbuf_i) {
+        shmem_free(sendbuf_i);
+    }
+    if (recvbuf_i) {
+        shmem_free(recvbuf_i);
+    }
     return status;
 }
 
@@ -315,23 +345,37 @@ static int bootstrap_shmem_alltoall(const void *sendbuf, void *recvbuf, int leng
     memcpy(sendbuf_i, sendbuf, (size_t)length * handle->pg_size);
 
     rc = shmem_team_sync(SHMEM_TEAM_WORLD);
-    if (rc != 0) goto fallback;
+    if (rc != 0) {
+        goto fallback;
+    }
     rc = shmem_uint8_alltoall(SHMEM_TEAM_WORLD, recvbuf_i, sendbuf_i, length);
-    if (rc != 0) goto fallback;
+    if (rc != 0) {
+        goto fallback;
+    }
     rc = shmem_team_sync(SHMEM_TEAM_WORLD);
-    if (rc != 0) goto fallback;
+    if (rc != 0) {
+        goto fallback;
+    }
 
     memcpy(recvbuf, recvbuf_i, (size_t)length * handle->pg_size);
     goto out;
 
 fallback:
-    if (sendbuf_i) shmem_free(sendbuf_i);
-    if (recvbuf_i) shmem_free(recvbuf_i);
+    if (sendbuf_i) {
+        shmem_free(sendbuf_i);
+    }
+    if (recvbuf_i) {
+        shmem_free(recvbuf_i);
+    }
     TEAMS_FALLBACK(handle, bootstrap_shmem_alltoall_legacy, sendbuf, recvbuf, length, handle);
 
 out:
-    if (sendbuf_i) shmem_free(sendbuf_i);
-    if (recvbuf_i) shmem_free(recvbuf_i);
+    if (sendbuf_i) {
+        shmem_free(sendbuf_i);
+    }
+    if (recvbuf_i) {
+        shmem_free(recvbuf_i);
+    }
     return status;
 }
 
@@ -340,7 +384,9 @@ out:
 static int bootstrap_shmem_finalize(bootstrap_handle_t *handle) {
     if (nvshmem_initialized_shmem) {
 #ifdef NVSHMEM_SHMEM_HAS_ACTIVE_SET
-        if (scratch) shmem_free(scratch);
+        if (scratch) {
+            shmem_free(scratch);
+        }
 #endif
         shmem_finalize();
     }

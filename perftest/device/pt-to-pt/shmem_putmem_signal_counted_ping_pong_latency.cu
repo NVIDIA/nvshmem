@@ -25,7 +25,9 @@ extern "C" {
 
 __global__ void probe_counted_backend(int *data_d, uint64_t *flag_d, int pe, int *status) {
     int rc = nvshmemx_putmem_signal_counted_nbi_block(data_d, data_d, 0, flag_d, pe);
-    if (threadIdx.x == 0) *status = rc;
+    if (threadIdx.x == 0) {
+        *status = rc;
+    }
 }
 
 __global__ void ping_pong(int *data_d, uint64_t *flag_d, uint64_t *ack_d, int len, int pe, int iter,
@@ -46,14 +48,16 @@ __global__ void ping_pong(int *data_d, uint64_t *flag_d, uint64_t *ack_d, int le
                 }
                 return;
             }
-            if (threadIdx.x == 0)
+            if (threadIdx.x == 0) {
                 nvshmem_uint64_wait_until(ack_d, NVSHMEM_CMP_EQ, static_cast<uint64_t>(i + 1));
+            }
             __syncthreads();
         } else {
             nvshmemx_signal_counted_wait_until(flag_d, expected);
             __syncthreads();
-            if (threadIdx.x == 0)
+            if (threadIdx.x == 0) {
                 nvshmemx_signal_op(ack_d, static_cast<uint64_t>(i + 1), NVSHMEM_SIGNAL_SET, peer);
+            }
             __syncthreads();
         }
     }
@@ -94,11 +98,14 @@ static int validate_counted_case(int *data, uint64_t *flag, uint64_t *ack, int *
     int local_errors = 0;
     if (mype == 1) {
         std::vector<unsigned char> received(bytes);
-        if (use_egm)
+        if (use_egm) {
             memcpy(received.data(), data, bytes);
-        else
+        } else {
             CUDA_CHECK(cudaMemcpy(received.data(), data, bytes, cudaMemcpyDeviceToHost));
-        for (unsigned char value : received) local_errors += value != kPayloadByte;
+        }
+        for (unsigned char value : received) {
+            local_errors += value != kPayloadByte;
+        }
         uint64_t observed = 0;
         CUDA_CHECK(cudaMemcpy(&observed, flag, sizeof(observed), cudaMemcpyDeviceToHost));
         local_errors += observed != static_cast<uint64_t>(iterations) * bytes;
@@ -110,13 +117,16 @@ static int validate_counted_case(int *data, uint64_t *flag, uint64_t *ack, int *
 
     CUDA_CHECK(cudaMemcpy(&status[0], &local_errors, sizeof(local_errors), cudaMemcpyHostToDevice));
     int rc = nvshmem_int_max_reduce(NVSHMEM_TEAM_WORLD, &status[1], &status[0], 1);
-    if (rc != NVSHMEMX_SUCCESS) return rc;
+    if (rc != NVSHMEMX_SUCCESS) {
+        return rc;
+    }
     int global_errors = 0;
     CUDA_CHECK(
         cudaMemcpy(&global_errors, &status[1], sizeof(global_errors), cudaMemcpyDeviceToHost));
-    if (mype == 0 && global_errors != 0)
+    if (mype == 0 && global_errors != 0) {
         fprintf(stderr, "counted payload validation failed for %zu bytes (%d errors)\n", bytes,
                 global_errors);
+    }
     return global_errors;
 }
 
@@ -207,7 +217,9 @@ int main(int argc, char *argv[]) {
     probe_status = NVSHMEMX_SUCCESS;
     CUDA_CHECK(cudaMemcpy(&probe_status, status_d, sizeof(probe_status), cudaMemcpyDeviceToHost));
     if (probe_status != NVSHMEMX_SUCCESS) {
-        if (mype == 0) printf("counted backend unavailable: status=%d\n", probe_status);
+        if (mype == 0) {
+            printf("counted backend unavailable: status=%d\n", probe_status);
+        }
         exit_code = probe_status == NVSHMEMX_ERROR_NOT_SUPPORTED ? 0 : 1;
         goto finalize;
     }
@@ -220,7 +232,9 @@ int main(int argc, char *argv[]) {
 
     i = 0;
     for (size_t size = min_size; size <= max_size; size *= step_factor) {
-        if (size == 0 || (size & 15) != 0) continue;
+        if (size == 0 || (size & 15) != 0) {
+            continue;
+        }
         int nelems = 0;
         nelems = size / sizeof(int);
         h_size_arr[i] = size;
@@ -249,7 +263,9 @@ int main(int argc, char *argv[]) {
                 goto finalize;
             }
             h_lat[i] = (milliseconds * 1000) / iter;
-            if (mype == 0) perf_stats_add(h_lat_stats[i], h_lat[i]);
+            if (mype == 0) {
+                perf_stats_add(h_lat_stats[i], h_lat[i]);
+            }
             nvshmem_barrier_all();
         }
         i++;
@@ -263,8 +279,12 @@ int main(int argc, char *argv[]) {
     }
 finalize:
 
-    if (status_d) nvshmem_free(status_d);
-    if (ack_d) nvshmem_free(ack_d);
+    if (status_d) {
+        nvshmem_free(status_d);
+    }
+    if (ack_d) {
+        nvshmem_free(ack_d);
+    }
     if (data_d) {
         if (use_mmap) {
             free_mmap_buffer(data_d);
@@ -280,7 +300,9 @@ finalize:
         }
     }
     free(h_lat_stats);
-    if (h_tables) free_tables(h_tables, 2);
+    if (h_tables) {
+        free_tables(h_tables, 2);
+    }
     finalize_wrapper();
 
     return exit_code;

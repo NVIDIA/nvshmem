@@ -21,7 +21,9 @@ extern __global__ void nvshmemi_reduce_kernel(int start, int stride, int size, T
 
 template <typename T>
 __global__ void nvshmemi_init_array_kernel(T *array, int len, T val) {
-    for (int i = 0; i < len; i++) array[i] = val;
+    for (int i = 0; i < len; i++) {
+        array[i] = val;
+    }
 }
 
 template <typename T>
@@ -86,8 +88,9 @@ __device__ void nvshmemi_team_creation_state_barrier(
         }
     } while (num_peers_complete < myteam->size);
 
-    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY)
+    if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY) {
         nvshmemi_transfer_enforce_consistency_at_target(false);
+    }
 }
 #endif
 template <threadgroup_t SCOPE>

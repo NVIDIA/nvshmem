@@ -63,7 +63,9 @@ int main(int argc, char **argv) {
 
     for (int r = 0; r < repeat; r++) {
         uint32_t lsize = r;
-        if (!mype) DEBUG_PRINT("[iter %d of %d]  begin\n", r, repeat);
+        if (!mype) {
+            DEBUG_PRINT("[iter %d of %d]  begin\n", r, repeat);
+        }
         for (int b = MIN_SIZE; b <= MAX_SIZE; b = b << 1) {
             int iter = min_iter * (MAX_SIZE / b);
             iter = (iter > max_iter) ? max_iter : iter;
@@ -75,10 +77,14 @@ int main(int argc, char **argv) {
                 goto out;
             }
 
-            if (!mype) DEBUG_PRINT("[binsize %d] ", b);
+            if (!mype) {
+                DEBUG_PRINT("[binsize %d] ", b);
+            }
             std::vector<std::string> combo_list;
             for (int align = MIN_ALIGNMENT; align <= MAX_ALIGNMENT; align *= 2) {
-                if (!mype) DEBUG_PRINT("[align %d] allocating %d buffers . . .", align, iter);
+                if (!mype) {
+                    DEBUG_PRINT("[align %d] allocating %d buffers . . .", align, iter);
+                }
 
                 for (int i = 0; i < iter; i++) {
                     lsize = rand_r(&lsize) % (b - (b >> 1)) + (b >> 1);
@@ -100,26 +106,34 @@ int main(int argc, char **argv) {
                     cudaMemset(buffer[i], 0, lsize);
                 }
 
-                if (!mype) DEBUG_PRINT("freeing buffers . . . ");
+                if (!mype) {
+                    DEBUG_PRINT("freeing buffers . . . ");
+                }
 
                 for (int i = 0; i < iter; i++) {
                     nvshmem_free(buffer[i]);
                 }
 
-                if (!mype) DEBUG_PRINT("done \n");
+                if (!mype) {
+                    DEBUG_PRINT("done \n");
+                }
             }
 
             free(buffer);
 
             if (!combo_list.empty()) {
                 ERROR_PRINT("caught error: align-size \n");
-                for (auto i : combo_list) ERROR_PRINT("%s\n", i.c_str());
+                for (auto i : combo_list) {
+                    ERROR_PRINT("%s\n", i.c_str());
+                }
                 ERROR_PRINT("verify_nvshmem_align failed \n");
                 status = -1;
                 goto out;
             }
         }
-        if (!mype) DEBUG_PRINT("[iter %d of %d] end \n \n", r, repeat);
+        if (!mype) {
+            DEBUG_PRINT("[iter %d of %d] end \n \n", r, repeat);
+        }
     }
 
 out:

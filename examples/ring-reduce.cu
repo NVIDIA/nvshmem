@@ -61,8 +61,9 @@ static inline int atol_scaled(const char *str, size_t *out) {
         }
     } else if (p < 0) {
         return 1;
-    } else
+    } else {
         scale = 0;
+    }
 
     *out = (size_t)ceil(p * (1lu << scale));
     return 0;
@@ -92,7 +93,9 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
 
     // Change src, dst, nreduce, signal to what this block is going to process
     // Each CTA will work independently
-    if (elems_per_block * (blockIdx.x + 1) > nreduce) return;
+    if (elems_per_block * (blockIdx.x + 1) > nreduce) {
+        return;
+    }
     src = src + block_idx * elems_per_block;
     dst = dst + block_idx * elems_per_block;
     nreduce = elems_per_block;
@@ -107,8 +110,9 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
     // reduce phase
     for (size_t chunk = 0; chunk < num_chunks; chunk++) {
         if (mype != 0) {
-            if (thread_id == 0)
+            if (thread_id == 0) {
                 nvshmem_signal_wait_until(&reduce_signals[chunk], NVSHMEM_CMP_EQ, phase);
+            }
 
             __syncthreads();
             for (size_t i = thread_id; i < chunk_elems; i += num_threads) {
@@ -116,9 +120,10 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
             }
             __syncthreads();
         }
-        if (thread_id == 0)
+        if (thread_id == 0) {
             nvshmem_int_put_signal_nbi(dst, (mype == 0) ? src : dst, chunk_elems,
                                        &reduce_signals[chunk], phase, NVSHMEM_SIGNAL_SET, peer);
+        }
         src = src + chunk_elems;
         dst = dst + chunk_elems;
     }
@@ -129,11 +134,13 @@ __global__ void ring_reduce(int *dst, const int *src, size_t nreduce, uint64_t *
     if (thread_id == 0) {
         for (size_t chunk = 0; chunk < num_chunks; chunk++) {
             // PEs 1..N-2 need to receive the broadcast; PE 0 and PE N-1 already have it.
-            if (mype >= 1 && mype < npes - 1)
+            if (mype >= 1 && mype < npes - 1) {
                 nvshmem_signal_wait_until(&bcast_signals[chunk], NVSHMEM_CMP_EQ, phase);
-            if (mype < npes - 2)
+            }
+            if (mype < npes - 2) {
                 nvshmem_int_put_signal_nbi(dst, dst, chunk_elems, &bcast_signals[chunk], phase,
                                            NVSHMEM_SIGNAL_SET, peer);
+            }
             dst = dst + chunk_elems;
         }
     }
@@ -168,12 +175,13 @@ int main(int argc, char **argv) {
                 atol_scaled(optarg, &chunk_size);
                 break;
             case '?':
-                if (optopt == 'c')
+                if (optopt == 'c') {
                     fprintf(stderr, "Option -%c requires an argument.\n", optopt);
-                else if (isprint(optopt))
+                } else if (isprint(optopt)) {
                     fprintf(stderr, "Unknown option `-%c'.\n", optopt);
-                else
+                } else {
                     fprintf(stderr, "Unknown option character `\\x%x'.\n", optopt);
+                }
                 return 1;
             default:
                 abort();
@@ -204,7 +212,9 @@ int main(int argc, char **argv) {
     uint64_t *signal = (uint64_t *)nvshmem_calloc(num_blocks * signals_per_block, sizeof(uint64_t));
     dim3 gridDim(num_blocks), blockDim(threads_per_block);
 
-    for (size_t i = 0; i < max_ints; i++) data_h[i] = i;
+    for (size_t i = 0; i < max_ints; i++) {
+        data_h[i] = i;
+    }
 
     CUDA_CHECK(cudaMemcpyAsync(src, data_h, max_size, cudaMemcpyHostToDevice, stream));
     nvshmemx_barrier_all_on_stream(stream);
@@ -243,9 +253,10 @@ int main(int argc, char **argv) {
         // validate output
         CUDA_CHECK(cudaMemcpy(data_h, dst, size, cudaMemcpyDeviceToHost));
         for (size_t i = 0; i < num_ints; i++) {
-            if (data_h[i] != (int)i * npes)
+            if (data_h[i] != (int)i * npes) {
                 printf("PE %d error, data[%zu] = %d expected data[%zu] = %d\n", mype, i, data_h[i],
                        i, (int)i * npes);
+            }
         }
     }
 

@@ -198,12 +198,16 @@ int test(launch_alltoall_ptr_t launch_alltoall, launch_ring_ptr_t launch_ring) {
             status = -1;
             goto out;
         }
-        if (!mype) DEBUG_PRINT("%zu \t\t ring passed \t\t ", size);
+        if (!mype) {
+            DEBUG_PRINT("%zu \t\t ring passed \t\t ", size);
+        }
 #endif
 #ifdef _ALL_TO_ALL_
         nvshmem_barrier_all();
 
-        if (!mype) DEBUG_PRINT("%zu \t\t passed \t\t ", size);
+        if (!mype) {
+            DEBUG_PRINT("%zu \t\t passed \t\t ", size);
+        }
 
         // check alltoall
         status = init_data_alltoall<T>((T *)src_d, size, disp, iter, mype, npes, 0, strm);
@@ -239,7 +243,9 @@ int test(launch_alltoall_ptr_t launch_alltoall, launch_ring_ptr_t launch_ring) {
 
         nvshmem_barrier_all();
 #endif
-        if (!mype) fprintf(stderr, "passed %ld bytes\n", size);
+        if (!mype) {
+            fprintf(stderr, "passed %ld bytes\n", size);
+        }
     }
 
 out:

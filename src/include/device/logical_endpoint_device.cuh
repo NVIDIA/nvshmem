@@ -113,10 +113,14 @@ __device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(size_t smem_chunk_
 
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP) {
         const size_t threads_per_cta = blockDim.x * blockDim.y * blockDim.z;
-        if ((threads_per_cta % (4 * NVSHMEMI_WARP_SIZE)) != 0) return false;
+        if ((threads_per_cta % (4 * NVSHMEMI_WARP_SIZE)) != 0) {
+            return false;
+        }
     }
 
-    if (smem_chunk_size == 0 || barrier_slots_per_group == 0) return false;
+    if (smem_chunk_size == 0 || barrier_slots_per_group == 0) {
+        return false;
+    }
 
     size_t stage_bytes = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
     size_t max_thrdgrps_by_smem = stage_bytes / smem_chunk_size;
@@ -157,8 +161,12 @@ __device__ __forceinline__ bool is_thrdgrp_smem_rsc_available(threadgroup_t scop
 #endif
 
 __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void* addr, size_t size) {
-    if (addr == nullptr) return false;
-    if (size == 0) return true;
+    if (addr == nullptr) {
+        return false;
+    }
+    if (size == 0) {
+        return true;
+    }
     return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
@@ -168,7 +176,9 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, 
                                                            const void* tma_addr) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if constexpr (REQUIRE_TX_SIZE_MULTIPLE) {
-        if (size == 0 || (size % CFT_HANDLE_TX_SIZE) != 0) return false;
+        if (size == 0 || (size % CFT_HANDLE_TX_SIZE) != 0) {
+            return false;
+        }
     }
 
     /* The handle path stages global local buffers through shared memory; shared
@@ -425,7 +435,9 @@ struct alignas(16) handle_barrier_t {
     /* Complete the current handle operation batch. Keeping the barrier valid advances it
      * to the next phase so more handle operations can be accumulated in the same slot. */
     inline __device__ void drain_pending_handle(bool invalidate = true) {
-        if (!has_pending_handle()) return;
+        if (!has_pending_handle()) {
+            return;
+        }
 
         if (pending_handle_bytes != 0) {
             uint64_t state = arrive_relaxed(pending_handle_bytes);
@@ -443,7 +455,9 @@ struct alignas(16) handle_barrier_t {
      * operation. A different owner implies a slot collision with another handle
      * path, which is resolved by completing the old batch first. */
     inline __device__ void prepare_handle(uint32_t owner) {
-        if (has_pending_handle() && pending_handle_owner != owner) drain_pending_handle(true);
+        if (has_pending_handle() && pending_handle_owner != owner) {
+            drain_pending_handle(true);
+        }
 
         if (!has_pending_handle()) {
             init_raw(1);
@@ -552,7 +566,9 @@ struct alignas(16) handle_barrier_t {
     inline __device__ bool wait_primary_report(uint64_t state) {
         while (true) {
             mbarrier_primary_wait_raw_result result = try_wait_primary_raw_result(state);
-            if (result.wait_complete) return result.report;
+            if (result.wait_complete) {
+                return result.report;
+            }
         }
     }
 
@@ -560,7 +576,9 @@ struct alignas(16) handle_barrier_t {
         while (true) {
             mbarrier_primary_wait_raw_result result =
                 try_wait_primary_by_parity_raw_result(phase_parity);
-            if (result.wait_complete) return result.report;
+            if (result.wait_complete) {
+                return result.report;
+            }
         }
     }
 
@@ -584,7 +602,9 @@ struct alignas(16) handle_barrier_t {
         reset_pending_handle_state();
     }
     inline __device__ void inval(int myIdx) {
-        if (myIdx % warpSize == 0) inval();
+        if (myIdx % warpSize == 0) {
+            inval();
+        }
     }
 };
 
@@ -598,7 +618,9 @@ static_assert(alignof(handle_barrier_t) == 16,
  */
 
 inline __device__ uint16_t size_to_bytemask_low_first(unsigned size_bytes) {
-    if (size_bytes >= 16) return 0xFFFFu;
+    if (size_bytes >= 16) {
+        return 0xFFFFu;
+    }
     return static_cast<uint16_t>((1u << size_bytes) - 1u);
 }
 
@@ -709,7 +731,9 @@ template <>
 __device__ inline void fabric_try_put_async<le_fabric_handle_kind::Unicast>(
     CUlogicalEndpointId dst_le_id, uint64_t dst_data_off, const void* src_in_shared_memory,
     uint16_t bytemask, handle_barrier_t* hbar) {
-    if (!bytemask) return;
+    if (!bytemask) {
+        return;
+    }
     assert((dst_data_off & (CFT_HANDLE_TX_SIZE - 1)) == 0);
 
     // .shared::cta operands need SMEM offsets from __cvta_generic_to_shared (generic ptr is wrong).

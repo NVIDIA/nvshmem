@@ -300,7 +300,9 @@ int ib_roce_get_version_num(const char *deviceName, int portNum, int gidIndex, i
         // In containerized environments, read could return EINVAL if the GID index is not mapped to
         // the container sysfs. In this case return NVSHMEMX_SUCCESS and let the caller move to next
         // GID index.
-        if (errno == EINVAL) return NVSHMEMX_SUCCESS;
+        if (errno == EINVAL) {
+            return NVSHMEMX_SUCCESS;
+        }
         NVSHMEMI_WARN_PRINT("IB: read failed in ib_roce_get_version_num: %s", strerror(errno));
         return NVSHMEMX_ERROR_INTERNAL;
     }
@@ -533,7 +535,9 @@ int nvshmemt_ib_common_release_mem_handle(struct nvshmemt_ibv_function_table *ft
     INFO(log_level, "ibv_dereg_mr handle %p handle->mr %p", handle, handle->mr);
     if (handle->mr) {
         status = ftable->dereg_mr((struct ibv_mr *)handle->mr);
-        if (handle->fd) close(handle->fd);
+        if (handle->fd) {
+            close(handle->fd);
+        }
     }
     NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dereg_mr failed \n");
 
@@ -547,11 +551,17 @@ int nvshmemt_ib_common_release_mem_handles(struct nvshmemt_ibv_function_table *f
     int status = 0;
 
     for (int i = 0; i < count; ++i) {
-        if (!handles[i].mr) continue;
+        if (!handles[i].mr) {
+            continue;
+        }
         int current = nvshmemt_ib_common_release_mem_handle(
             ftable, reinterpret_cast<nvshmem_mem_handle_t *>(&handles[i]), log_level);
-        if (!current) handles[i].mr = nullptr;
-        if (!status && current) status = current;
+        if (!current) {
+            handles[i].mr = nullptr;
+        }
+        if (!status && current) {
+            status = current;
+        }
     }
 
     return status;
@@ -581,7 +591,9 @@ bool nvshmemt_mlx5dv_dmabuf_capable(ibv_context *context,
 
     status = ftable->dealloc_pd(pd);
     NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed \n");
-    if (dev_fail) goto out;
+    if (dev_fail) {
+        goto out;
+    }
     return true;
 out:
     return false;
@@ -635,7 +647,9 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
         NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                            "IB endpoint connection requires at least one selected NIC.\n");
     }
-    if (max_selected > MAX_NUM_HCAS) max_selected = MAX_NUM_HCAS;
+    if (max_selected > MAX_NUM_HCAS) {
+        max_selected = MAX_NUM_HCAS;
+    }
 
     state->n_selected_dev_ids = 0;
     for (int i = 0; i < num_candidate_devs; ++i) {
@@ -657,7 +671,9 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
                 break;
             }
         }
-        if (seen) continue;
+        if (seen) {
+            continue;
+        }
         if (state->n_selected_dev_ids == max_selected) {
             capped = true;
             continue;
@@ -1033,7 +1049,9 @@ int nvshmemt_ib_common_configure_multinic_amo_routing(nvshmem_transport_t t,
                 NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                                    "Invalid selected HCA index %d.\n", dev_id);
             }
-            if (seen_device[dev_id]) continue;
+            if (seen_device[dev_id]) {
+                continue;
+            }
 
             seen_device[dev_id] = true;
             selected_physical_devices++;
@@ -1395,7 +1413,9 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
         filter.exclude_list = (options->HCA_LIST[0] == '^');
         status =
             nvshmemt_parse_hca_list(options->HCA_LIST, filter.hca_list, MAX_NUM_HCAS, log_level);
-        if (status < 0) return NVSHMEMX_ERROR_INVALID_VALUE;
+        if (status < 0) {
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+        }
         filter.hca_list_count = status;
     }
 
@@ -1409,7 +1429,9 @@ int nvshmemt_ib_common_parse_hca_filter(struct nvshmemt_ib_hca_filter &filter,
             filter.user_selection = 1;
             status = nvshmemt_parse_hca_list(options->HCA_PE_MAPPING, filter.pe_hca_mapping,
                                              MAX_NUM_PES_PER_NODE, log_level);
-            if (status < 0) return NVSHMEMX_ERROR_INVALID_VALUE;
+            if (status < 0) {
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
             filter.pe_hca_map_count = status;
         }
     }

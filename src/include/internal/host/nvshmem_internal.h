@@ -148,7 +148,9 @@ static inline void nvshmemi_get_local_mem_handle(nvshmem_mem_handle_t **handle, 
         *handle = nvshmemi_get_registered_buffer_handle(transport, addr, len);
     }
 
-    if (len) *len = *len < max_len ? *len : max_len;
+    if (len) {
+        *len = *len < max_len ? *len : max_len;
+    }
     assert(*handle != NULL &&
            "Could not retrieve remote transport handle for the local buffer. \
            Hint: Make sure local buffer is registered with NVSHMEM. NVSHMEM only supports local buffer that is \
@@ -164,7 +166,9 @@ static inline void nvshmemi_get_remote_mem_handle(rma_memdesc_t *handle, size_t 
     handle->handle = nvshmemi_state->handle_table->get_mem_handle(addr, len, pe, transport_idx);
     assert(handle->handle != NULL);
     handle->offset = nvshmemi_state->handle_table->get_addr_offset(addr);
-    if (len) *len = *len < max_len ? *len : max_len;
+    if (len) {
+        *len = *len < max_len ? *len : max_len;
+    }
 }
 /* rptr is symmetric address on the local pe
    lptr is local address - either symmetric or not */

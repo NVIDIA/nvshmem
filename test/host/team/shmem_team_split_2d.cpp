@@ -73,8 +73,12 @@ static int check_2d(nvshmem_team_t parent_team, int xdim) {
         printf("%d: 2d split failed, xdim: %d\n", nvshmem_my_pe(), xdim);
     }
 
-    if (xteam != NVSHMEM_TEAM_INVALID) nvshmem_team_destroy(xteam);
-    if (yteam != NVSHMEM_TEAM_INVALID) nvshmem_team_destroy(yteam);
+    if (xteam != NVSHMEM_TEAM_INVALID) {
+        nvshmem_team_destroy(xteam);
+    }
+    if (yteam != NVSHMEM_TEAM_INVALID) {
+        nvshmem_team_destroy(yteam);
+    }
 
     return errors != 0;
 }
@@ -113,7 +117,9 @@ int main(int argc, char **argv) {
     me = nvshmem_my_pe();
     npes = nvshmem_n_pes();
 
-    if (me == 0) printf("Performing 2d split test on NVSHMEM_TEAM_WORLD\n");
+    if (me == 0) {
+        printf("Performing 2d split test on NVSHMEM_TEAM_WORLD\n");
+    }
 
     errors += check_2d(NVSHMEM_TEAM_WORLD, 1);
     errors += check_2d(NVSHMEM_TEAM_WORLD, 2);
@@ -123,14 +129,18 @@ int main(int argc, char **argv) {
                                      &even_team);
 
     if (ret == 0) {
-        if (me == 0) printf("Performing 2d split test on even team\n");
+        if (me == 0) {
+            printf("Performing 2d split test on even team\n");
+        }
 
         errors += check_2d(even_team, 1);
         errors += check_2d(even_team, 2);
         errors += check_2d(even_team, 3);
         nvshmem_team_destroy(even_team);
     } else {
-        if (me == 0) printf("Unable to create even team\n");
+        if (me == 0) {
+            printf("Unable to create even team\n");
+        }
     }
 
     errors += check_2d_destroy_reuse(NVSHMEM_TEAM_WORLD, 2, 40);

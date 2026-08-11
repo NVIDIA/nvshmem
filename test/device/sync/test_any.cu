@@ -29,7 +29,9 @@ __global__ void test_kernel(uint64_t *flags, int *status, int *found, int mype, 
     }
     /* Check the flags array */
     for (int i = 0; i < npes; i++) {
-        if (flags[i] != 1) error_d = 1;
+        if (flags[i] != 1) {
+            error_d = 1;
+        }
     }
     /* Sanity check of shmem_test_any's fairness */
     ncompleted = 0;
@@ -51,7 +53,9 @@ __global__ void test_kernel(uint64_t *flags, int *status, int *found, int mype, 
     /* Sanity check case with NULL status array */
     completed_idx = nvshmem_uint64_test_any(flags, npes, NULL, NVSHMEM_CMP_EQ, 1);
 
-    if (completed_idx >= (size_t)npes) error_d = 3;
+    if (completed_idx >= (size_t)npes) {
+        error_d = 3;
+    }
 }
 
 int main(int argc, char **argv) {

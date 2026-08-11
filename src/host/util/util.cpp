@@ -43,7 +43,9 @@ uint64_t nvshmemu_getHostHash() {
     int status = 0;
 
     status = gethostname(hostname, 1024);
-    if (status) NVSHMEMI_ERROR_EXIT("gethostname failed \n");
+    if (status) {
+        NVSHMEMI_ERROR_EXIT("gethostname failed \n");
+    }
 
     for (int c = 0; c < 1024 && hostname[c] != '\0'; c++) {
         result = ((result << 5) + result) + hostname[c];
@@ -73,7 +75,9 @@ char *nvshmemu_hexdump(void *ptr, size_t len) {
     const char *hex = "0123456789abcdef";
 
     char *str = (char *)malloc(len * 2 + 1);
-    if (str == NULL) return NULL;
+    if (str == NULL) {
+        return NULL;
+    }
 
     char *ptr_c = (char *)ptr;
 
@@ -98,8 +102,11 @@ char *nvshmemu_wrap(const char *str, const size_t wraplen, const char *indent,
     char *str_s = NULL;
 
     /* Count characters and newlines */
-    for (const char *s = str; *s != '\0'; s++, str_len++)
-        if (*s == '\n') ++line_breaks;
+    for (const char *s = str; *s != '\0'; s++, str_len++) {
+        if (*s == '\n') {
+            ++line_breaks;
+        }
+    }
 
     /* Worst case is wrapping at 1/2 wraplen plus explicit line breaks. Each
      * wrap adds an indent string. The newline is either already in the source
@@ -186,7 +193,9 @@ void nvshmemu_debug_log_cpuset(int category, const char *thread_name) {
         int core_count = 0;
 
         for (int i = 0; i < CPU_SETSIZE; i++) {
-            if (CPU_ISSET(i, &my_set)) core_count++;
+            if (CPU_ISSET(i, &my_set)) {
+                core_count++;
+            }
         }
 
         size_t off = 0;
@@ -194,7 +203,9 @@ void nvshmemu_debug_log_cpuset(int category, const char *thread_name) {
         for (int i = 0; i < CPU_SETSIZE; i++) {
             if (CPU_ISSET(i, &my_set)) {
                 off += snprintf(cores_str + off, sizeof(cores_str) - off, "%2d ", i);
-                if (off >= sizeof(cores_str)) break;
+                if (off >= sizeof(cores_str)) {
+                    break;
+                }
             }
         }
 
@@ -212,7 +223,9 @@ nvshmemResult_t nvshmemu_gethostname(char *hostname, int maxlen) {
         return NVSHMEMI_SYSTEM_ERROR;
     }
     int i = 0;
-    while ((hostname[i] != '.') && (hostname[i] != '\0') && (i < maxlen - 1)) i++;
+    while ((hostname[i] != '.') && (hostname[i] != '\0') && (i < maxlen - 1)) {
+        i++;
+    }
     hostname[i] = '\0';
     return NVSHMEMI_SUCCESS;
 }

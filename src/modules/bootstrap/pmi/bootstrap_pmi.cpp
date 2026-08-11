@@ -75,10 +75,11 @@ static inline int WRAP_PMI_KVS_Get(const char kvsname[], const char key[], char 
 
     status = PMI2_KVS_Get(NULL, PMI2_ID_NULL, key, value, PMI2_MAX_VALLEN, &vallen);
 
-    if (vallen < 0)
+    if (vallen < 0) {
         return -1;
-    else
+    } else {
         return status;
+    }
 }
 
 #define WRAP_PMI_Abort PMI2_Abort
@@ -152,7 +153,9 @@ static int mod_table[] = {0, 2, 1};
 static void base64_build_decoding_table() {
     decoding_table = (char *)malloc(256);
 
-    for (int i = 0; i < 64; i++) decoding_table[(unsigned char)encoding_table[i]] = i;
+    for (int i = 0; i < 64; i++) {
+        decoding_table[(unsigned char)encoding_table[i]] = i;
+    }
 }
 
 static void base64_cleanup() { free(decoding_table); }
@@ -177,7 +180,9 @@ static size_t base64_encode(char *out, const unsigned char *in, size_t in_len) {
         out[j++] = encoding_table[(fused >> 0 * 6) & 0x3F];
     }
 
-    for (int i = 0; i < mod_table[in_len % 3]; i++) out[len - 1 - i] = '=';
+    for (int i = 0; i < mod_table[in_len % 3]; i++) {
+        out[len - 1 - i] = '=';
+    }
 
     return len;
 }
@@ -185,8 +190,12 @@ static size_t base64_encode(char *out, const unsigned char *in, size_t in_len) {
 static size_t base64_decode(char *out, const char *in, size_t in_len) {
     size_t len = base64_decode_length(in_len);
 
-    if (in[in_len - 1] == '=') (len)--;
-    if (in[in_len - 2] == '=') (len)--;
+    if (in[in_len - 1] == '=') {
+        (len)--;
+    }
+    if (in[in_len - 2] == '=') {
+        (len)--;
+    }
 
     for (size_t i = 0, j = 0; i < in_len;) {
         uint32_t a = in[i] == '=' ? 0 & i++ : decoding_table[(int)(in[i++])];
@@ -196,9 +205,15 @@ static size_t base64_decode(char *out, const char *in, size_t in_len) {
 
         uint32_t fused = (a << 3 * 6) + (b << 2 * 6) + (c << 1 * 6) + (d << 0 * 6);
 
-        if (j < len) out[j++] = (fused >> 2 * 8) & 0xFF;
-        if (j < len) out[j++] = (fused >> 1 * 8) & 0xFF;
-        if (j < len) out[j++] = (fused >> 0 * 8) & 0xFF;
+        if (j < len) {
+            out[j++] = (fused >> 2 * 8) & 0xFF;
+        }
+        if (j < len) {
+            out[j++] = (fused >> 1 * 8) & 0xFF;
+        }
+        if (j < len) {
+            out[j++] = (fused >> 0 * 8) & 0xFF;
+        }
     }
 
     return len;
@@ -413,7 +428,9 @@ static int bootstrap_pmi_finalize(bootstrap_handle_t *handle) {
 
     base64_cleanup();
 
-    if (pmi_info.kvs_name) free(pmi_info.kvs_name);
+    if (pmi_info.kvs_name) {
+        free(pmi_info.kvs_name);
+    }
 
 error:
     return status;
@@ -521,9 +538,15 @@ int nvshmemi_bootstrap_plugin_init(void *attr, bootstrap_handle_t *handle, const
 
 error:
     if (status) {
-        if (pmi_info.kvs_name) free(pmi_info.kvs_name);
-        if (pmi_info.kvs_key) free(pmi_info.kvs_key);
-        if (pmi_info.kvs_value) free(pmi_info.kvs_value);
+        if (pmi_info.kvs_name) {
+            free(pmi_info.kvs_name);
+        }
+        if (pmi_info.kvs_key) {
+            free(pmi_info.kvs_key);
+        }
+        if (pmi_info.kvs_value) {
+            free(pmi_info.kvs_value);
+        }
     }
 out:
     return status;

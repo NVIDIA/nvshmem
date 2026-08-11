@@ -73,16 +73,26 @@ void write_numa_node(const fs::path &path, int numa_node) {
 
 nvshmem_debug_log_level debug_level_from_env() {
     const char *debug = getenv("NVSHMEM_DEBUG");
-    if (!debug) return NVSHMEM_LOG_NONE;
-    if (strcmp_case_insensitive(debug, "WARN") == 0) return NVSHMEM_LOG_WARN;
-    if (strcmp_case_insensitive(debug, "INFO") == 0) return NVSHMEM_LOG_INFO;
-    if (strcmp_case_insensitive(debug, "TRACE") == 0) return NVSHMEM_LOG_TRACE;
+    if (!debug) {
+        return NVSHMEM_LOG_NONE;
+    }
+    if (strcmp_case_insensitive(debug, "WARN") == 0) {
+        return NVSHMEM_LOG_WARN;
+    }
+    if (strcmp_case_insensitive(debug, "INFO") == 0) {
+        return NVSHMEM_LOG_INFO;
+    }
+    if (strcmp_case_insensitive(debug, "TRACE") == 0) {
+        return NVSHMEM_LOG_TRACE;
+    }
     return NVSHMEM_LOG_INFO;
 }
 
 bool debug_subsys_enabled(unsigned long flags) {
     const char *debug_subsys = getenv("NVSHMEM_DEBUG_SUBSYS");
-    if (!debug_subsys || debug_subsys[0] == '\0') return (flags & NVSHMEM_INIT) != 0;
+    if (!debug_subsys || debug_subsys[0] == '\0') {
+        return (flags & NVSHMEM_INIT) != 0;
+    }
 
     std::string subsys_list(debug_subsys);
     size_t start = 0;
@@ -91,13 +101,19 @@ bool debug_subsys_enabled(unsigned long flags) {
         std::string subsys =
             subsys_list.substr(start, end == std::string::npos ? std::string::npos : end - start);
 
-        if (strcmp_case_insensitive(subsys.c_str(), "ALL") == 0) return true;
-        if ((flags & NVSHMEM_INIT) && strcmp_case_insensitive(subsys.c_str(), "INIT") == 0)
+        if (strcmp_case_insensitive(subsys.c_str(), "ALL") == 0) {
             return true;
-        if ((flags & NVSHMEM_TOPO) && strcmp_case_insensitive(subsys.c_str(), "TOPO") == 0)
+        }
+        if ((flags & NVSHMEM_INIT) && strcmp_case_insensitive(subsys.c_str(), "INIT") == 0) {
             return true;
+        }
+        if ((flags & NVSHMEM_TOPO) && strcmp_case_insensitive(subsys.c_str(), "TOPO") == 0) {
+            return true;
+        }
 
-        if (end == std::string::npos) break;
+        if (end == std::string::npos) {
+            break;
+        }
         start = end + 1;
     }
 
@@ -228,7 +244,9 @@ FILE *nvshmem_debug_file = nullptr;
 
 void nvshmem_debug_log(nvshmem_debug_log_level level, unsigned long flags, const char *filefunc,
                        int line, const char *fmt, ...) {
-    if (level > debug_level_from_env() || !debug_subsys_enabled(flags)) return;
+    if (level > debug_level_from_env() || !debug_subsys_enabled(flags)) {
+        return;
+    }
 
     FILE *out = nvshmem_debug_file ? nvshmem_debug_file : stderr;
     fprintf(out, "%s:%d: ", filefunc, line);

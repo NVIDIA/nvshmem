@@ -92,7 +92,9 @@ void nvshmemx_quiet_on_stream(cudaStream_t cstrm) {
     int in_cuda_graph = 0;
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(cstrm, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     nvshmemi_quiesce_internal_streams(cstrm);
 

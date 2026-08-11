@@ -59,7 +59,9 @@ __global__ void ping_pong(int *data_d, uint64_t *flag_d, int len, int pe, int it
         }
     }
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
 }
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
@@ -125,7 +127,9 @@ int main(int argc, char *argv[]) {
     h_size_arr = (uint64_t *)h_tables[0];
     h_lat = (double *)h_tables[1];
     h_lat_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_lat_stats) goto finalize;
+    if (!h_lat_stats) {
+        goto finalize;
+    }
     if (use_mmap) {
         data_d = (int *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
         flag_d = (uint64_t *)allocate_mmap_buffer(sizeof(uint64_t), mem_handle_type, use_egm);
@@ -180,7 +184,9 @@ int main(int argc, char *argv[]) {
             CUDA_CHECK(cudaEventSynchronize(stop));
             cudaEventElapsedTime(&milliseconds, start, stop);
             h_lat[i] = (milliseconds * 1000) / iter;
-            if (!mype) perf_stats_add(h_lat_stats[i], h_lat[i]);
+            if (!mype) {
+                perf_stats_add(h_lat_stats[i], h_lat[i]);
+            }
         }
         nvshmem_barrier_all();
         i++;

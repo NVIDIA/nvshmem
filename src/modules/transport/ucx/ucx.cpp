@@ -708,7 +708,9 @@ int nvshmemt_ucx_handle_amo(struct nvshmem_transport *transport, ucp_ep_h ep, nv
     bool send_full_header = false;
 
     status = nvshmemt_ucx_check_unsupported_float_amo(op, is_float);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     old_value = *((volatile T *)ptr);
     switch (op) {
@@ -853,7 +855,9 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /
                            amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                            int is_proxy) {
     int status = nvshmemt_ucx_check_unsupported_float_amo(verb.desc, verb.is_float);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
@@ -919,7 +923,9 @@ int nvshmemt_ucx_remote_amo(struct nvshmem_transport *transport, int pe, void * 
                             amo_verb_t verb, amo_memdesc_t *remote, amo_bytesdesc_t bytesdesc,
                             int is_proxy) {
     int status = nvshmemt_ucx_check_unsupported_float_amo(verb.desc, verb.is_float);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     transport_ucx_state_t *ucx_state = (transport_ucx_state_t *)transport->state;
     ucp_ep_h ep;
@@ -1271,7 +1277,9 @@ int nvshmemt_ucx_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
     mem_handle_info =
         (nvshmemt_ucx_mem_handle_info_t *)nvshmemt_mem_handle_cache_get_by_idx(ucx_state->cache, 0);
 
-    if (!mem_handle_info) return 0;
+    if (!mem_handle_info) {
+        return 0;
+    }
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gdrcopy) {
         int temp;

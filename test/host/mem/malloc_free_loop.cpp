@@ -53,7 +53,9 @@ int main(int argc, char **argv) {
             goto out;
         }
 
-        if (!mype) DEBUG_PRINT("[binsize %d] allocating %d buffers ", b, iter);
+        if (!mype) {
+            DEBUG_PRINT("[binsize %d] allocating %d buffers ", b, iter);
+        }
         for (int i = 0; i < iter; i++) {
             lsize = rand_r(&lsize) % (b - (b >> 1)) + (b >> 1);
 
@@ -69,15 +71,17 @@ int main(int argc, char **argv) {
             // free half of the buffers
             free_start_idx = (iter / 2) * (repeat & 1);
             free_end_idx = free_start_idx + iter / 2 - 1;
-            if (!mype)
+            if (!mype) {
                 DEBUG_PRINT("freeing buffers with index %d to %d \n", free_start_idx, free_end_idx);
+            }
             for (int i = free_start_idx; i <= free_end_idx; i++) {
                 nvshmem_free(buffer[i]);
             }
 
-            if (!mype)
+            if (!mype) {
                 DEBUG_PRINT("re-allocating buffers with index %d to %d \n", free_start_idx,
                             free_end_idx);
+            }
             for (int i = free_start_idx; i <= free_end_idx; i++) {
                 lsize = rand_r(&lsize) % (b - (b >> 1)) + (b >> 1);
                 buffer[i] = (char *)nvshmem_malloc(lsize);
@@ -88,7 +92,9 @@ int main(int argc, char **argv) {
                 cudaMemset(buffer[i], 0, lsize);
             }
 
-            if (!mype) DEBUG_PRINT("done repetition %d \n", r);
+            if (!mype) {
+                DEBUG_PRINT("done repetition %d \n", r);
+            }
         }
         // free all buffers
         for (int i = 0; i < iter; i++) {
@@ -96,7 +102,9 @@ int main(int argc, char **argv) {
         }
 
         free(buffer);
-        if (!mype) DEBUG_PRINT("[binsize %d] done testing \n", b);
+        if (!mype) {
+            DEBUG_PRINT("[binsize %d] done testing \n", b);
+        }
     }
 
     finalize_wrapper();

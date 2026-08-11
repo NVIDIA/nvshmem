@@ -30,12 +30,18 @@ __global__ void ping_pong(int *data_d, uint64_t *flag_d, uint64_t *ack_d, int le
         if (!pe) {
             nvshmemx_putmem_signal_nbi_block(data_d, data_d, bytes, flag_d, expected,
                                              NVSHMEM_SIGNAL_SET, peer);
-            if (threadIdx.x == 0) nvshmem_uint64_wait_until(ack_d, NVSHMEM_CMP_EQ, expected);
+            if (threadIdx.x == 0) {
+                nvshmem_uint64_wait_until(ack_d, NVSHMEM_CMP_EQ, expected);
+            }
             __syncthreads();
         } else {
-            if (threadIdx.x == 0) nvshmem_uint64_wait_until(flag_d, NVSHMEM_CMP_EQ, expected);
+            if (threadIdx.x == 0) {
+                nvshmem_uint64_wait_until(flag_d, NVSHMEM_CMP_EQ, expected);
+            }
             __syncthreads();
-            if (threadIdx.x == 0) nvshmemx_signal_op(ack_d, expected, NVSHMEM_SIGNAL_SET, peer);
+            if (threadIdx.x == 0) {
+                nvshmemx_signal_op(ack_d, expected, NVSHMEM_SIGNAL_SET, peer);
+            }
             __syncthreads();
         }
     }
@@ -75,11 +81,14 @@ static int validate_case(int *data, uint64_t *flag, uint64_t *ack, int *status, 
     int local_errors = 0;
     if (mype == 1) {
         std::vector<unsigned char> received(bytes);
-        if (use_egm)
+        if (use_egm) {
             memcpy(received.data(), data, bytes);
-        else
+        } else {
             CUDA_CHECK(cudaMemcpy(received.data(), data, bytes, cudaMemcpyDeviceToHost));
-        for (unsigned char value : received) local_errors += value != kPayloadByte;
+        }
+        for (unsigned char value : received) {
+            local_errors += value != kPayloadByte;
+        }
         uint64_t observed = 0;
         CUDA_CHECK(cudaMemcpy(&observed, flag, sizeof(observed), cudaMemcpyDeviceToHost));
         local_errors += observed != static_cast<uint64_t>(iterations);
@@ -91,13 +100,16 @@ static int validate_case(int *data, uint64_t *flag, uint64_t *ack, int *status, 
 
     CUDA_CHECK(cudaMemcpy(&status[0], &local_errors, sizeof(local_errors), cudaMemcpyHostToDevice));
     int rc = nvshmem_int_max_reduce(NVSHMEM_TEAM_WORLD, &status[1], &status[0], 1);
-    if (rc != NVSHMEMX_SUCCESS) return rc;
+    if (rc != NVSHMEMX_SUCCESS) {
+        return rc;
+    }
     int global_errors = 0;
     CUDA_CHECK(
         cudaMemcpy(&global_errors, &status[1], sizeof(global_errors), cudaMemcpyDeviceToHost));
-    if (mype == 0 && global_errors != 0)
+    if (mype == 0 && global_errors != 0) {
         fprintf(stderr, "putmem-signal payload validation failed for %zu bytes (%d errors)\n",
                 bytes, global_errors);
+    }
     return global_errors;
 }
 
@@ -184,7 +196,9 @@ int main(int argc, char *argv[]) {
 
     i = 0;
     for (size_t size = min_size; size <= max_size; size *= step_factor) {
-        if (size == 0 || (size & 15) != 0) continue;
+        if (size == 0 || (size & 15) != 0) {
+            continue;
+        }
         int nelems = size / sizeof(int);
         h_size_arr[i] = size;
         void *args_1[] = {&data_d, &flag_d, &ack_d, &nelems, &mype, &skip};
@@ -210,7 +224,9 @@ int main(int argc, char *argv[]) {
                 goto finalize;
             }
             h_lat[i] = (milliseconds * 1000) / iter;
-            if (mype == 0) perf_stats_add(h_lat_stats[i], h_lat[i]);
+            if (mype == 0) {
+                perf_stats_add(h_lat_stats[i], h_lat[i]);
+            }
             nvshmem_barrier_all();
         }
         i++;
@@ -224,8 +240,12 @@ int main(int argc, char *argv[]) {
     }
 finalize:
 
-    if (status_d) nvshmem_free(status_d);
-    if (ack_d) nvshmem_free(ack_d);
+    if (status_d) {
+        nvshmem_free(status_d);
+    }
+    if (ack_d) {
+        nvshmem_free(ack_d);
+    }
     if (data_d) {
         if (use_mmap) {
             free_mmap_buffer(data_d);

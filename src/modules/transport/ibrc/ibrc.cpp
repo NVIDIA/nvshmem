@@ -239,7 +239,9 @@ static struct ibrc_ep *ibrc_get_ep(int devid, uint32_t qpn) {
 }
 
 static int ibrc_destroy_ep(struct ibrc_ep *ep) {
-    if (!ep) return 0;
+    if (!ep) {
+        return 0;
+    }
     qp_map.erase(ibrc_qp_map_key(ep->devid, ep->qp->qp_num));
     int status = ftable.destroy_qp(ep->qp);
     free(ep->req);
@@ -259,7 +261,9 @@ static int nvshmemi_ib_malloc_debug(void **ptr, size_t size, int log_level, cons
     void *p;
     int size_aligned = ROUNDUP(size, page_size);
     int ret = posix_memalign(&p, page_size, size_aligned);
-    if (ret != 0) return -1;
+    if (ret != 0) {
+        return -1;
+    }
     memset(p, 0, size);
     *ptr = p;
     INFO(log_level, "%s:%d Ib Alloc Size %ld pointer %p", filefunc, line, size, *ptr);
@@ -338,7 +342,9 @@ out:
 }
 
 static int allocate_bpool(nvshmemt_ib_common_state_t state) {
-    if (bpool) return 0;
+    if (bpool) {
+        return 0;
+    }
 
     int device_count = 0;
     for (int i = 0; i < state->n_selected_dev_ids; ++i) {
@@ -350,14 +356,20 @@ static int allocate_bpool(nvshmemt_ib_common_state_t state) {
                 break;
             }
         }
-        if (!seen) device_count++;
+        if (!seen) {
+            device_count++;
+        }
     }
 
     bpool_size = state->srq_depth * device_count;
     int status =
         nvshmemi_ib_malloc((void **)&bpool, bpool_size * sizeof(ibrc_buf_t), state->log_level);
-    if (status) return NVSHMEMX_ERROR_OUT_OF_MEMORY;
-    for (int i = 0; i < bpool_size; ++i) bpool_free.push_back((void *)(bpool + i));
+    if (status) {
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
+    for (int i = 0; i < bpool_size; ++i) {
+        bpool_free.push_back((void *)(bpool + i));
+    }
     return 0;
 }
 
@@ -825,7 +837,9 @@ out:
     if (status) {
         if (dummy_created) {
             for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
-                if (dummy_local_mem->mrs[i]) (void)ftable.dereg_mr(dummy_local_mem->mrs[i]);
+                if (dummy_local_mem->mrs[i]) {
+                    (void)ftable.dereg_mr(dummy_local_mem->mrs[i]);
+                }
             }
             free(dummy_local_mem->ptr);
             dummy_local_mem.reset();
@@ -959,7 +973,9 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
         previous_handle_info = handle_info;
     }
 
-    if (state->cache) nvshmemt_mem_handle_cache_fini(state->cache);
+    if (state->cache) {
+        nvshmemt_mem_handle_cache_fini(state->cache);
+    }
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gdrcopy) {
@@ -972,7 +988,9 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
 
     if (dummy_local_mem) {
         for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
-            if (!dummy_local_mem->mrs[i]) continue;
+            if (!dummy_local_mem->mrs[i]) {
+                continue;
+            }
             status = ftable.dereg_mr(dummy_local_mem->mrs[i]);
             NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "ibv_dereg_mr failed \n");
@@ -982,7 +1000,9 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     }
 
     if (bpool != NULL) {
-        while (!bpool_free.empty()) bpool_free.pop_back();
+        while (!bpool_free.empty()) {
+            bpool_free.pop_back();
+        }
 
         free(bpool);
         bpool = nullptr;
@@ -1009,7 +1029,9 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
         std::vector<bool> device_finalized(state->n_raw_devices, false);
         for (int i = 0; i < state->n_dev_ids; i++) {
             int dev_id = state->dev_ids[i];
-            if (dev_id < 0 || dev_id >= state->n_raw_devices || device_finalized[dev_id]) continue;
+            if (dev_id < 0 || dev_id >= state->n_raw_devices || device_finalized[dev_id]) {
+                continue;
+            }
             device_finalized[dev_id] = true;
 
             if (((struct ibrc_device *)state->devices)[dev_id].bpool_mr) {
@@ -1227,7 +1249,9 @@ int poll_recv(nvshmemt_ib_common_state_t ibrc_state) {
         int devid = ibrc_state->dev_ids[ibrc_state->selected_dev_ids[i]];
         struct ibrc_device *device = ((struct ibrc_device *)ibrc_state->devices + devid);
 
-        if (!device->recv_cq) continue;
+        if (!device->recv_cq) {
+            continue;
+        }
 
         int ne = ibv_poll_cq(device->recv_cq, 1, &wc);
         if (ne < 0) {
@@ -1348,7 +1372,9 @@ int progress_send(nvshmemt_ib_common_state_t ibrc_state) {
         int devid = ibrc_state->dev_ids[ibrc_state->selected_dev_ids[i]];
         struct ibrc_device *device = ((struct ibrc_device *)ibrc_state->devices + devid);
 
-        if (!device->send_cq) continue;
+        if (!device->send_cq) {
+            continue;
+        }
 
         int ne = ibv_poll_cq(device->send_cq, 1, &wc);
         if (ne < 0) {

@@ -35,7 +35,9 @@ uint64_t validation_pattern(int sender_pe, int locality_domain, size_t message_s
 __global__ void fill_validation_pattern(uint64_t *data, size_t nelems, uint64_t pattern) {
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = gridDim.x * blockDim.x;
-    for (size_t index = tid; index < nelems; index += stride) data[index] = pattern;
+    for (size_t index = tid; index < nelems; index += stride) {
+        data[index] = pattern;
+    }
 }
 
 __global__ void validate_pattern(const uint64_t *data, size_t nelems, uint64_t expected,
@@ -43,7 +45,9 @@ __global__ void validate_pattern(const uint64_t *data, size_t nelems, uint64_t e
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = gridDim.x * blockDim.x;
     for (size_t index = tid; index < nelems; index += stride) {
-        if (data[index] != expected) atomicAdd(error_count, 1ULL);
+        if (data[index] != expected) {
+            atomicAdd(error_count, 1ULL);
+        }
     }
 }
 
@@ -60,11 +64,15 @@ __device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter
         __threadfence();
         counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
         if (counter == (gridDim.x * barrier_epoch - 1)) {
-            if constexpr (CALL_QUIET) nvshmem_quiet();
+            if constexpr (CALL_QUIET) {
+                nvshmem_quiet();
+            }
             *(counter_d + 1) += 1;
         }
         while (*(counter_d + 1) != barrier_epoch);
-        if constexpr (CALL_QUIET) nvshmem_quiet();
+        if constexpr (CALL_QUIET) {
+            nvshmem_quiet();
+        }
     }
     __syncthreads();
 }
@@ -178,7 +186,9 @@ __global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, s
     if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    if constexpr (!USE_FINAL_BARRIER) __syncthreads();
+    if constexpr (!USE_FINAL_BARRIER) {
+        __syncthreads();
+    }
     nvshmemx_release_smem();
 }
 
@@ -218,11 +228,15 @@ static bool configure_bw_variant(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
 
 static bool configure_bw_mode(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
     if (use_iteration_barrier) {
-        if (use_final_barrier) return configure_bw_variant<true, true>(bw_fn, bw_tma_fn);
+        if (use_final_barrier) {
+            return configure_bw_variant<true, true>(bw_fn, bw_tma_fn);
+        }
         return configure_bw_variant<true, false>(bw_fn, bw_tma_fn);
     }
 
-    if (use_final_barrier) return configure_bw_variant<false, true>(bw_fn, bw_tma_fn);
+    if (use_final_barrier) {
+        return configure_bw_variant<false, true>(bw_fn, bw_tma_fn);
+    }
     return configure_bw_variant<false, false>(bw_fn, bw_tma_fn);
 }
 
@@ -279,7 +293,9 @@ int main(int argc, char *argv[]) {
 
     /* Reset all per-node inter-block counters to zero. */
     auto reset_counters = [&]() {
-        for (auto *ptr : counter_d_arr) CUDA_CHECK(cudaMemset(ptr, 0, sizeof(unsigned int) * 2));
+        for (auto *ptr : counter_d_arr) {
+            CUDA_CHECK(cudaMemset(ptr, 0, sizeof(unsigned int) * 2));
+        }
     };
 
     init_wrapper(&argc, &argv);
@@ -366,8 +382,12 @@ int main(int argc, char *argv[]) {
            is later clamped to (occupancy * smallest-SMs-in-partition). */
         for (int n = 0; n < num_locality_domains; n++) {
             int sms = (int)nodeSmResources[n].sm.smCount;
-            if (n == 0 || sms < min_partition_sms) min_partition_sms = sms;
-            if (n == 0 || sms > max_partition_sms) max_partition_sms = sms;
+            if (n == 0 || sms < min_partition_sms) {
+                min_partition_sms = sms;
+            }
+            if (n == 0 || sms > max_partition_sms) {
+                max_partition_sms = sms;
+            }
         }
         if (mype == 0) {
             std::fprintf(stdout,
@@ -446,7 +466,9 @@ int main(int argc, char *argv[]) {
     {
         /* C/n CTAs per domain (n * blocks_per_domain == C). */
         blocks_per_domain = num_blocks / num_locality_domains;
-        if (blocks_per_domain < 1) blocks_per_domain = 1;
+        if (blocks_per_domain < 1) {
+            blocks_per_domain = 1;
+        }
 
         if (use_iteration_barrier || use_final_barrier) {
             int occupancy = 0;
@@ -459,7 +481,9 @@ int main(int argc, char *argv[]) {
             }
 
             int max_coresident = occupancy * min_partition_sms;
-            if (max_coresident < 1) max_coresident = 1;
+            if (max_coresident < 1) {
+                max_coresident = 1;
+            }
 
             if (blocks_per_domain > max_coresident) {
                 if (mype == 0) {
@@ -566,15 +590,18 @@ int main(int argc, char *argv[]) {
 
     if (mype == 0) {
         const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-        if (env) machine_readable = (std::atoi(env) != 0);
+        if (env) {
+            machine_readable = (std::atoi(env) != 0);
+        }
         bw_per_pair_per_size.assign(array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
     }
 
     if (mype == 0 && !machine_readable) {
         std::fprintf(stdout, "\nshmem_put_bw_locality_domains%s (GB/s)\n", use_tma ? " [TMA]" : "");
         std::fprintf(stdout, "%14s", "size (B)");
-        for (int s = 0; s < npes / 2; s++)
+        for (int s = 0; s < npes / 2; s++) {
             std::fprintf(stdout, "  PE %d -> PE %d", s, s ^ (npes / 2));
+        }
         std::fprintf(stdout, "\n");
         std::fflush(stdout);
     }
@@ -737,7 +764,9 @@ int main(int argc, char *argv[]) {
                 int global_validation_failed = 0;
                 CUDA_CHECK(cudaMemcpy(&global_validation_failed, d_validation_status + 1,
                                       sizeof(int), cudaMemcpyDeviceToHost));
-                if (global_validation_failed) return_code = 1;
+                if (global_validation_failed) {
+                    return_code = 1;
+                }
 
                 /* Gather all BW values to PE 0 */
                 CUDA_CHECK(
@@ -776,7 +805,9 @@ int main(int argc, char *argv[]) {
         std::vector<double> bw_avg(i, 0.0);
         for (int j = 0; j < i; j++) {
             double sum = 0.0;
-            for (int s = 0; s < num_pairs; s++) sum += bw_per_pair_per_size[j][s];
+            for (int s = 0; s < num_pairs; s++) {
+                sum += bw_per_pair_per_size[j][s];
+            }
             bw_avg[j] = sum / num_pairs;
         }
         print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, bw_avg.data(), i);
@@ -784,7 +815,9 @@ int main(int argc, char *argv[]) {
         if (npes > 2) {
             std::vector<double> bw_pair(i, 0.0);
             for (int s = 0; s < num_pairs; s++) {
-                for (int j = 0; j < i; j++) bw_pair[j] = bw_per_pair_per_size[j][s];
+                for (int j = 0; j < i; j++) {
+                    bw_pair[j] = bw_per_pair_per_size[j][s];
+                }
                 char subjob[32];
                 std::snprintf(subjob, sizeof(subjob), "PE%d_to_PE%d", s, s ^ (npes / 2));
                 print_basic_table(test_name, subjob, "BW", "GB/sec", '+', h_size_arr,
@@ -797,32 +830,63 @@ finalize:
 
     /* Clean up localized buffers */
     for (size_t n = 0; n < data_d.size(); n++) {
-        if (data_d[n]) nvshmemx_buffer_unregister_symmetric(data_d[n], alloc_size);
+        if (data_d[n]) {
+            nvshmemx_buffer_unregister_symmetric(data_d[n], alloc_size);
+        }
         if (n < buf_addrs.size() && buf_addrs[n]) {
             cuMemUnmap((CUdeviceptr)buf_addrs[n], alloc_size);
             cuMemAddressFree((CUdeviceptr)buf_addrs[n], alloc_size);
         }
-        if (n < alloc_handles.size()) cuMemRelease(alloc_handles[n]);
+        if (n < alloc_handles.size()) {
+            cuMemRelease(alloc_handles[n]);
+        }
     }
 
-    for (auto *ptr : counter_d_arr)
-        if (ptr) cudaFree(ptr);
+    for (auto *ptr : counter_d_arr) {
+        if (ptr) {
+            cudaFree(ptr);
+        }
+    }
 
-    for (auto evt : gc_done_events) cuEventDestroy(evt);
-    for (auto evt : timing_stop_events) cuEventDestroy(evt);
-    if (timing_start) cuEventDestroy(timing_start);
+    for (auto evt : gc_done_events) {
+        cuEventDestroy(evt);
+    }
+    for (auto evt : timing_stop_events) {
+        cuEventDestroy(evt);
+    }
+    if (timing_start) {
+        cuEventDestroy(timing_start);
+    }
 
-    for (auto stream : timing_streams) cuStreamDestroy(stream);
-    for (auto stream : gc_streams) cuStreamDestroy(stream);
-    for (auto ctx : green_ctxs) cuGreenCtxDestroy(ctx);
-    if (timing_stream) cuStreamDestroy(timing_stream);
+    for (auto stream : timing_streams) {
+        cuStreamDestroy(stream);
+    }
+    for (auto stream : gc_streams) {
+        cuStreamDestroy(stream);
+    }
+    for (auto ctx : green_ctxs) {
+        cuGreenCtxDestroy(ctx);
+    }
+    if (timing_stream) {
+        cuStreamDestroy(timing_stream);
+    }
 
-    if (d_bw_local) nvshmem_free(d_bw_local);
-    if (d_bw_all) nvshmem_free(d_bw_all);
-    if (d_validation_status) nvshmem_free(d_validation_status);
-    if (d_validation_errors) cudaFree(d_validation_errors);
+    if (d_bw_local) {
+        nvshmem_free(d_bw_local);
+    }
+    if (d_bw_all) {
+        nvshmem_free(d_bw_all);
+    }
+    if (d_validation_status) {
+        nvshmem_free(d_validation_status);
+    }
+    if (d_validation_errors) {
+        cudaFree(d_validation_errors);
+    }
 
-    if (h_tables) free_tables(h_tables, 2);
+    if (h_tables) {
+        free_tables(h_tables, 2);
+    }
     finalize_wrapper();
 
     return return_code;

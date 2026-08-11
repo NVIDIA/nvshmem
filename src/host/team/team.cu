@@ -16,30 +16,34 @@ extern "C" {
 
 #ifndef __CUDA_ARCH__
 int nvshmem_team_my_pe(nvshmem_team_t team) {
-    if (team == NVSHMEM_TEAM_INVALID)
+    if (team == NVSHMEM_TEAM_INVALID) {
         return -1;
-    else if (team == NVSHMEM_TEAM_WORLD)
+    } else if (team == NVSHMEM_TEAM_WORLD) {
         return nvshmemi_boot_handle.pg_rank;
-    else if (team == NVSHMEMX_TEAM_NODE)
+    } else if (team == NVSHMEMX_TEAM_NODE) {
         return nvshmemi_boot_handle.mype_node;
-    else
+    } else {
         return nvshmemi_team_pool[team]->my_pe;
+    }
 }
 
 int nvshmem_team_n_pes(nvshmem_team_t team) {
-    if (team == NVSHMEM_TEAM_INVALID)
+    if (team == NVSHMEM_TEAM_INVALID) {
         return -1;
-    else if (team == NVSHMEM_TEAM_WORLD)
+    } else if (team == NVSHMEM_TEAM_WORLD) {
         return nvshmemi_boot_handle.pg_size;
-    else if (team == NVSHMEMX_TEAM_NODE)
+    } else if (team == NVSHMEMX_TEAM_NODE) {
         return nvshmemi_boot_handle.npes_node;
-    else
+    } else {
         return nvshmemi_team_pool[team]->size;
+    }
 }
 
 void nvshmem_team_get_config(nvshmem_team_t team, nvshmem_team_config_t *config) {
     NVSHMEMI_CHECK_INIT_STATUS();
-    if (team == NVSHMEM_TEAM_INVALID) return;
+    if (team == NVSHMEM_TEAM_INVALID) {
+        return;
+    }
 
     nvshmemi_team_t *myteam = nvshmemi_team_pool[team];
     *config = myteam->config;
@@ -47,7 +51,9 @@ void nvshmem_team_get_config(nvshmem_team_t team, nvshmem_team_config_t *config)
 }
 
 int nvshmem_team_translate_pe(nvshmem_team_t src_team, int src_pe, nvshmem_team_t dest_team) {
-    if (src_team == NVSHMEM_TEAM_INVALID || dest_team == NVSHMEM_TEAM_INVALID) return -1;
+    if (src_team == NVSHMEM_TEAM_INVALID || dest_team == NVSHMEM_TEAM_INVALID) {
+        return -1;
+    }
     nvshmemi_team_t *src_teami, *dest_teami;
     NVSHMEMI_CHECK_INIT_STATUS();
     src_teami = nvshmemi_team_pool[src_team];
@@ -105,7 +111,9 @@ void nvshmem_team_destroy(nvshmem_team_t team) {
         NVSHMEMI_ERROR_PRINT("Cannot destroy a pre-defined team");
         return;
     }
-    if (team == NVSHMEM_TEAM_INVALID) return;
+    if (team == NVSHMEM_TEAM_INVALID) {
+        return;
+    }
     if (team >= nvshmemi_max_teams) {
         NVSHMEMI_ERROR_PRINT("Cannot destroy a team with an invalid handle");
         return;

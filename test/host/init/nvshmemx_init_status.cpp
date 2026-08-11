@@ -30,7 +30,9 @@ int main(int c, char *v[]) {
     nvshmem_barrier_all();
     assert(nvshmemx_init_status() >= NVSHMEM_STATUS_IS_INITIALIZED);
 
-    if (npes_per_gpu > 1) assert(nvshmemx_init_status() >= NVSHMEM_STATUS_LIMITED_MPG);
+    if (npes_per_gpu > 1) {
+        assert(nvshmemx_init_status() >= NVSHMEM_STATUS_LIMITED_MPG);
+    }
 
     nvshmem_finalize();
     assert(nvshmemx_init_status() == NVSHMEM_STATUS_IS_BOOTSTRAPPED);

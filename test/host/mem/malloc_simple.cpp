@@ -46,13 +46,16 @@ int main(int argc, char **argv) {
 
         cudaMemset(buffer, 0, size);
 
-        if (!mype)
+        if (!mype) {
             DEBUG_PRINT("[%d of %d] allocated symmetric object: %p size: %zu bytes \n", mype, npes,
                         buffer, size);
+        }
 
         nvshmem_free(buffer);
 
-        if (!mype) DEBUG_PRINT("[%d of %d] free symmetric object: %p \n", mype, npes, buffer);
+        if (!mype) {
+            DEBUG_PRINT("[%d of %d] free symmetric object: %p \n", mype, npes, buffer);
+        }
     }
 
 out:

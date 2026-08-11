@@ -27,7 +27,9 @@ __global__ void set_and_shift_kernel(float *send_data, float *recv_data, int num
                                      int npes) {
     int thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
     /* set the corresponding element of send_data */
-    if (thread_idx < num_elems) send_data[thread_idx] = mype;
+    if (thread_idx < num_elems) {
+        send_data[thread_idx] = mype;
+    }
 
     int peer = (mype + 1) % npes;
     /* Every thread in block 0 calls nvshmemx_float_put_block. Alternatively,
@@ -53,14 +55,17 @@ int main(int c, char *v[]) {
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     bool use_mpi = false;
     char *value = getenv("NVSHMEMTEST_USE_MPI_LAUNCHER");
-    if (value) use_mpi = atoi(value);
+    if (value) {
+        use_mpi = atoi(value);
+    }
 #endif
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     if (use_mpi) {
         nvshmemi_init_mpi(&c, &v);
-    } else
+    } else {
         nvshmem_init();
+    }
 #else
     nvshmem_init();
 #endif
@@ -108,7 +113,9 @@ int main(int c, char *v[]) {
     nvshmem_finalize();
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
-    if (use_mpi) nvshmemi_finalize_mpi();
+    if (use_mpi) {
+        nvshmemi_finalize_mpi();
+    }
 #endif
     return 0;
 }

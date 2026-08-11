@@ -11,8 +11,9 @@
 
 int test_wait_until_all_on_stream(uint64_t *flags, int *status, int mype, int npes,
                                   cudaStream_t stream) {
-    for (int i = 0; i < npes; i++)
+    for (int i = 0; i < npes; i++) {
         nvshmemx_signal_op_on_stream(flags + mype, 1, NVSHMEM_SIGNAL_SET, i, stream);
+    }
     nvshmemx_quiet_on_stream(stream);
     nvshmemx_uint64_wait_until_all_on_stream(flags, npes, status, NVSHMEM_CMP_EQ, 1, stream);
     CUDA_CHECK(cudaStreamSynchronize(stream));

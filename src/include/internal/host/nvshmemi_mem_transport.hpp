@@ -122,7 +122,9 @@ class nvshmemi_mem_p2p_transport final {
 class nvshmemi_mem_remote_transport final {
    public:
     ~nvshmemi_mem_remote_transport() {
-        if (remote_objref_ != nullptr) remote_objref_ = nullptr;
+        if (remote_objref_ != nullptr) {
+            remote_objref_ = nullptr;
+        }
     }
     nvshmemi_mem_remote_transport(const nvshmemi_mem_remote_transport &obj) = delete;
     nvshmemi_mem_remote_transport(nvshmemi_mem_remote_transport &&obj) = delete;
@@ -152,7 +154,9 @@ class nvshmemi_mem_remote_transport final {
 
     int is_mem_handle_null(nvshmem_mem_handle_t *handle) {
         NVSHMEMU_FOR_EACH(i, (sizeof(nvshmem_mem_handle_t) / sizeof(uint64_t))) {
-            if (*((uint64_t *)handle + i) != (uint64_t)0) return 0;
+            if (*((uint64_t *)handle + i) != (uint64_t)0) {
+                return 0;
+            }
         }
 
         return 1;

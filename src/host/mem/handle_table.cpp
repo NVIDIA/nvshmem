@@ -68,7 +68,9 @@ nvshmem_mem_handle_t *nvshmemi_handle_table::get_mem_handle(void *addr, size_t *
         return nullptr;
     }
 
-    if (addr_value < heap_base_value || addr_value - heap_base_value >= heap_size_) return nullptr;
+    if (addr_value < heap_base_value || addr_value - heap_base_value >= heap_size_) {
+        return nullptr;
+    }
 
     const size_t offset = static_cast<size_t>(addr_value - heap_base_value);
     const size_t addr_idx = offset >> log2_granularity_;
@@ -78,17 +80,23 @@ nvshmem_mem_handle_t *nvshmemi_handle_table::get_mem_handle(void *addr, size_t *
 
     /* If the address is within the mmap range, use the mmap handles. */
     if (offset >= heap_size_ - mmap_allocated_range_) {
-        if (!mmap_.has_index(addr_idx)) return nullptr;
+        if (!mmap_.has_index(addr_idx)) {
+            return nullptr;
+        }
         entry = &mmap_.get_index(addr_idx);
         reg = &mmap_;
     } else {
-        if (!internal_.has_index(addr_idx)) return nullptr;
+        if (!internal_.has_index(addr_idx)) {
+            return nullptr;
+        }
         entry = &internal_.get_index(addr_idx);
         reg = &internal_;
     }
 
     const uintptr_t entry_start = reinterpret_cast<uintptr_t>(entry->start_addr);
-    if (entry_start > addr_value || addr_value - entry_start >= entry->size) return nullptr;
+    if (entry_start > addr_value || addr_value - entry_start >= entry->size) {
+        return nullptr;
+    }
     const size_t entry_offset = static_cast<size_t>(addr_value - entry_start);
 
     /* Return the remaining space within the registered chunk. */

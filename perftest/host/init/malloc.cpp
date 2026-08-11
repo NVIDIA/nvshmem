@@ -15,9 +15,15 @@
 namespace {
 bool has_max_size_arg(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
-        if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--max_size")) return true;
-        if (!strncmp(argv[i], "-e", 2) && argv[i][2] != '\0') return true;
-        if (!strncmp(argv[i], "--max_size=", strlen("--max_size="))) return true;
+        if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "--max_size")) {
+            return true;
+        }
+        if (!strncmp(argv[i], "-e", 2) && argv[i][2] != '\0') {
+            return true;
+        }
+        if (!strncmp(argv[i], "--max_size=", strlen("--max_size="))) {
+            return true;
+        }
     }
     return false;
 }
@@ -65,12 +71,16 @@ int main(int argc, char *argv[]) {
     total_alloc_size = 0;
     while (true) {
         total_alloc_size += malloc_size;
-        if (total_alloc_size > max_alloc_size) break;
+        if (total_alloc_size > max_alloc_size) {
+            break;
+        }
         malloc_size *= 2;
         loop_size++;
     }
 
-    if (loop_size == 0) goto finalize;
+    if (loop_size == 0) {
+        goto finalize;
+    }
 
     h_size_arr = (uint64_t *)malloc(sizeof(uint64_t) * loop_size);
     h_time = (double *)malloc(sizeof(double) * loop_size);

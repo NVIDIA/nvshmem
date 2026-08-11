@@ -16,14 +16,18 @@
 
 template <bool USE_ITERATION_BARRIER>
 __device__ __forceinline__ void latency_thread_iteration_sync() {
-    if constexpr (USE_ITERATION_BARRIER) nvshmem_quiet();
+    if constexpr (USE_ITERATION_BARRIER) {
+        nvshmem_quiet();
+    }
 }
 
 template <bool USE_ITERATION_BARRIER>
 __device__ __forceinline__ void latency_threadgroup_iteration_sync(int tid) {
     if constexpr (USE_ITERATION_BARRIER) {
         __syncthreads();
-        if (!tid) nvshmem_quiet();
+        if (!tid) {
+            nvshmem_quiet();
+        }
         __syncthreads();
     }
 }
@@ -171,7 +175,9 @@ int main(int argc, char *argv[]) {
     h_size_arr = (uint64_t *)h_tables[0];
     h_lat = (double *)h_tables[1];
     h_lat_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_lat_stats) goto finalize;
+    if (!h_lat_stats) {
+        goto finalize;
+    }
 
     nvshmem_barrier_all();
 

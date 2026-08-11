@@ -43,7 +43,9 @@ __global__ void lap(float const *f_in, int stride_y, int stride_z, int nx, int n
 
     int const pos = idx_x + idx_y * stride_y + idx_z * stride_z;
     auto at_in = [=](int idx) -> float const & {
-        if (idx < 0 || idx >= sz) printf("OOB Error %d\n", idx);
+        if (idx < 0 || idx >= sz) {
+            printf("OOB Error %d\n", idx);
+        }
         return f_in[idx];
     };
     nvshmem_fence();

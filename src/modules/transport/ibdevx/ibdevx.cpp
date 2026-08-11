@@ -1046,7 +1046,9 @@ out:
     if (status) {
         if (dummy_created) {
             for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
-                if (dummy_local_mem->mrs[i]) ftable.dereg_mr(dummy_local_mem->mrs[i]);
+                if (dummy_local_mem->mrs[i]) {
+                    ftable.dereg_mr(dummy_local_mem->mrs[i]);
+                }
             }
             dummy_local_mem.reset();
         }
@@ -1080,7 +1082,9 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
 
     if (dummy_local_mem) {
         for (int i = 0; i < dummy_local_mem->num_devs; ++i) {
-            if (!dummy_local_mem->mrs[i]) continue;
+            if (!dummy_local_mem->mrs[i]) {
+                continue;
+            }
             status = ftable.dereg_mr(dummy_local_mem->mrs[i]);
             NVSHMEMT_ERRNO_NZ_ERROR_JMP(status, status, out,
                                         "Unable to deregister dummy memory.\n");
@@ -1092,8 +1096,9 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
         std::vector<bool> device_finalized(ibdevx_state->n_raw_devices, false);
         for (int i = 0; i < ibdevx_state->n_dev_ids; i++) {
             int dev_id = ibdevx_state->dev_ids[i];
-            if (dev_id < 0 || dev_id >= ibdevx_state->n_raw_devices || device_finalized[dev_id])
+            if (dev_id < 0 || dev_id >= ibdevx_state->n_raw_devices || device_finalized[dev_id]) {
                 continue;
+            }
             device_finalized[dev_id] = true;
 
             struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices + dev_id);
@@ -1142,7 +1147,9 @@ int progress_send(nvshmemt_ib_common_state_t ibdevx_state) {
         struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices + devid);
         int comp_code;
 
-        if (!device->scq.cqn) continue;
+        if (!device->scq.cqn) {
+            continue;
+        }
         cqe = ((struct mlx5_cqe64 *)device->scq.buf + (device->scq.cur_idx % device->scq.num_cqe));
         cqe_vol = cqe;
         ownership = (device->scq.cur_idx / device->scq.num_cqe) % 2;
@@ -1804,7 +1811,9 @@ static int nvshmemt_ibdevx_setup_cst_endpoints(nvshmem_transport_t t) {
 out:
     if (status) {
         for (struct ibdevx_ep *cst_ep : cst_eps) {
-            if (cst_ep) (void)ep_destroy(cst_ep);
+            if (cst_ep) {
+                (void)ep_destroy(cst_ep);
+            }
         }
         cst_eps.clear();
     }
@@ -1987,7 +1996,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                     NVSHMEMI_WARN_PRINT(
                         "device %s is not enumerated as an mlx5 device. Skipping...", name);
                     ftable.close_device(dev->common_device.context);
-                    if (dev->common_device.pd) ftable.dealloc_pd(dev->common_device.pd);
+                    if (dev->common_device.pd) {
+                        ftable.dealloc_pd(dev->common_device.pd);
+                    }
                     dev->common_device.context = NULL;
                     dev->common_device.pd = NULL;
                     continue;
@@ -2005,7 +2016,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                         "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
                         name);
                     ftable.close_device(dev->common_device.context);
-                    if (dev->common_device.pd) ftable.dealloc_pd(dev->common_device.pd);
+                    if (dev->common_device.pd) {
+                        ftable.dealloc_pd(dev->common_device.pd);
+                    }
                     dev->common_device.context = NULL;
                     dev->common_device.pd = NULL;
                     continue;
@@ -2014,7 +2027,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                     nvshmemt_ibdevx_max_rd_atomic, dev->common_device.device_attr.max_qp_rd_atom);
             }
 
-            if (!dev->common_device.context) continue;
+            if (!dev->common_device.context) {
+                continue;
+            }
 
             ibdevx_state->dev_ids[write_idx] = ibdevx_state->dev_ids[i];
             ibdevx_state->port_ids[write_idx] = ibdevx_state->port_ids[i];

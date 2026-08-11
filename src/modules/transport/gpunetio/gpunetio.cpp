@@ -546,7 +546,9 @@ gpunetio_internal_buffer::make(nvshmemt_gpunetio_state_t *state, gpunetio_device
 }
 
 gpunetio_internal_buffer::~gpunetio_internal_buffer() {
-    if (!state_) return;
+    if (!state_) {
+        return;
+    }
     if (mem_handle.mr) {
         nvshmemt_ib_common_release_mem_handle(&state_->ftable,
                                               reinterpret_cast<nvshmem_mem_handle_t *>(&mem_handle),
@@ -620,16 +622,22 @@ int gpunetio_ep::connect(nvshmemt_gpunetio_state_t *gpunetio_state,
 
     doca_verbs_ah_attr_t *endpoint_ah = nullptr;
     int rc = device_->create_ah(portid, remote_exch_info->vgid, dlid, use_ib_grh, &endpoint_ah);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
     auto ah_guard = make_scope_guard([&]() { doca_verbs_ah_attr_destroy(endpoint_ah); });
 
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
     rc = device_->create_qp_attr(remote_exch_info->qpn, portid, endpoint_ah, &verbs_qp_attr);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
     auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
     rc = device_->transition_qp_to_rts(qp->qp, verbs_qp_attr);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
 
     return NVSHMEMX_SUCCESS;
 }
@@ -663,7 +671,9 @@ int gpunetio_ep::progress() {
 
         while (!((cqe->op_own & 0x01) ^ ownership)) {
             uint8_t opcode = cqe->op_own >> 4;
-            if (opcode == GPUNETIO_CQE_OPCODE_INVALID) break;
+            if (opcode == GPUNETIO_CQE_OPCODE_INVALID) {
+                break;
+            }
             if (opcode == GPUNETIO_CQE_OPCODE_REQ_ERR) {
                 auto *err = reinterpret_cast<volatile doca_gpunetio_ib_mlx5_err_cqe_ex *>(cqe);
                 TRACE(log_level,
@@ -745,7 +755,9 @@ bool gpunetio_device::cst_is_required() const {
         NVSHMEMI_WARN_PRINT("Cannot query dev attr. Assuming no GDR write ordering\n");
     } else {
         // GPU guarantees incoming PCIe write ordering. No need to do CST.
-        if (order >= CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER) rval = false;
+        if (order >= CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER) {
+            rval = false;
+        }
     }
     rval = rval || common_device.data_direct;
     return rval;
@@ -756,7 +768,9 @@ int gpunetio_device::create_ah(int portid, const doca_verbs_gid &remote_gid, uin
                                bool use_ib_grh, doca_verbs_ah_attr_t **out_ah) const {
     // DOCA_CHECK macro captures `gpunetio_state` from the enclosing scope.
     nvshmemt_gpunetio_state_t *gpunetio_state = state_;
-    if (out_ah == nullptr) return NVSHMEMX_ERROR_INVALID_VALUE;
+    if (out_ah == nullptr) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     *out_ah = nullptr;
 
     doca_verbs_ah_attr_t *local_ah = nullptr;
@@ -889,24 +903,32 @@ int gpunetio_device::connect_self_loop(int portid, doca_gpu_verbs_qp_hl *qp_loca
     doca_verbs_ah_attr_t *loopback_ah = nullptr;
     int rc = create_ah(portid, vgid, port_attr.lid,
                        port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND, &loopback_ah);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
     auto ah_guard = make_scope_guard([&]() { doca_verbs_ah_attr_destroy(loopback_ah); });
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_backup->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr = nullptr;
     rc = create_qp_attr(dest_qp_num, portid, loopback_ah, &verbs_qp_attr);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
     auto qp_attr_guard = make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr); });
 
     DOCA_CHECK(doca_verbs_qp_get_qpn(qp_local->qp, &dest_qp_num));
     doca_verbs_qp_attr_t *verbs_qp_attr_backup = nullptr;
     rc = create_qp_attr(dest_qp_num, portid, loopback_ah, &verbs_qp_attr_backup);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
     auto qp_attr_backup_guard =
         make_scope_guard([&]() { doca_verbs_qp_attr_destroy(verbs_qp_attr_backup); });
 
     rc = transition_qp_to_rts(qp_local->qp, verbs_qp_attr);
-    if (rc) return rc;
+    if (rc) {
+        return rc;
+    }
 
     rc = transition_qp_to_rts(qp_backup->qp, verbs_qp_attr_backup);
     return rc;
@@ -1002,14 +1024,18 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
     INFO(state_->log_level, "Creating %d %s-data-path RC QPs", num_rc_eps_per_pe, kind_str);
     for (int i = 0; i < num_rc_eps_per_pe; i++) {
         // Only the first device has a host QP, subsequent don't have one
-        if (skip_host_slot && i == 0) continue;
+        if (skip_host_slot && i == 0) {
+            continue;
+        }
         for (int j = 0; j < n_pes; j++) {
             int dst_pe = (i * n_pes + 1 + mype + j) % n_pes;
             int mapped_i = rc_first_index + i * n_pes + dst_pe;
             int local_mapped_i = i + num_rc_eps_per_pe * dst_pe;
 
             // Skip self-loop QP
-            if (dst_pe == mype) continue;
+            if (dst_pe == mype) {
+                continue;
+            }
 
             TRACE(state_->log_level, "[%s] dst_pe: %d, mapped_i: %d, local_mapped_i: %d", kind_str,
                   dst_pe, mapped_i, local_mapped_i);
@@ -1040,7 +1066,9 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
 
     for (int i = 0; i < num_rc_eps_per_pe; ++i) {
         // Mirror the make loop: empty host slot on non-host devices has no EPs to connect.
-        if (skip_host_slot && i == 0) continue;
+        if (skip_host_slot && i == 0) {
+            continue;
+        }
         for (int j = 0; j < n_pes; ++j) {
             int ep_index = rc_first_index + i * n_pes + j;
             int peer_handle_index = num_rc_eps_per_pe * j + i;
@@ -1137,7 +1165,9 @@ int gpunetio_device::progress(int n_pes) {
         std::lock_guard<std::mutex> lk(*rc_eps_mtx);
         int num_gpu_eps = num_gpu_eps_per_pe * n_pes;
         for (int j = 0; j < num_gpu_eps; j++) {
-            if (!rc_eps_gpu[j]) continue;
+            if (!rc_eps_gpu[j]) {
+                continue;
+            }
             rc_eps_gpu[j]->progress();
         }
     }
@@ -1165,8 +1195,12 @@ int gpunetio_device::progress(int n_pes) {
 int gpunetio_device::cpu_progress_locked() {
     std::lock_guard<std::mutex> lk(cpu_progress_mtx);
     for (auto &ep : rc_eps_cpu) {
-        if (!ep) continue;
-        if (ep->requires_cpu_proxy()) doca_gpu_verbs_cpu_proxy_progress(ep->qp->qp_gverbs, nullptr);
+        if (!ep) {
+            continue;
+        }
+        if (ep->requires_cpu_proxy()) {
+            doca_gpu_verbs_cpu_proxy_progress(ep->qp->qp_gverbs, nullptr);
+        }
         ep->progress();
     }
     return NVSHMEMX_SUCCESS;
@@ -1260,8 +1294,9 @@ int nvshmemt_gpunetio_state_t::init_populate_state(nvshmemi_options_s *options) 
     }
 
     num_fetch_slots_per_rc = options->GPUNETIO_NUM_FETCH_SLOTS_PER_RC;
-    if (num_fetch_slots_per_rc > 0)
+    if (num_fetch_slots_per_rc > 0) {
         num_fetch_slots_per_rc = gpunetio_round_up_pow2(num_fetch_slots_per_rc);
+    }
     if (num_fetch_slots_per_rc <= 0) {
         NVSHMEMI_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
                            "NVSHMEM_GPUNETIO_NUM_FETCH_SLOTS_PER_RC must be a positive number.\n");
@@ -1309,7 +1344,9 @@ int nvshmemt_gpunetio_state_t::init_gpu(nvshmemi_options_s *options) {
 
     status = nvshmemt_ib_common_check_dmabuf_support(dmabuf_support_for_data_buffers, cuda_syms,
                                                      options->IB_DISABLE_DMABUF);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     CUDA_RUNTIME_CHECK_RET(
         cudaDeviceGetStreamPriorityRange(&lowest_stream_priority, &highest_stream_priority),
@@ -1359,7 +1396,9 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
 
     status = nvshmemt_ib_common_enumerate_devices(
         &ftable, temp_state, sizeof(nvshmemt_ib_common_device), hca_filter, dev_list, num_devices);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     {
         std::vector<bool> device_checked(num_devices, false);
@@ -1376,7 +1415,9 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
                     NVSHMEMI_WARN_PRINT(
                         "device %s is not enumerated as an mlx5 device. Skipping...", name);
                     ftable.close_device(dev->context);
-                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    if (dev->pd) {
+                        ftable.dealloc_pd(dev->pd);
+                    }
                     dev->context = nullptr;
                     dev->pd = nullptr;
                     continue;
@@ -1389,14 +1430,18 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
                         "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
                         name);
                     ftable.close_device(dev->context);
-                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    if (dev->pd) {
+                        ftable.dealloc_pd(dev->pd);
+                    }
                     dev->context = nullptr;
                     dev->pd = nullptr;
                     continue;
                 }
             }
 
-            if (!dev->context) continue;
+            if (!dev->context) {
+                continue;
+            }
 
             temp_state.dev_ids[write_idx] = temp_state.dev_ids[i];
             temp_state.port_ids[write_idx] = temp_state.port_ids[i];
@@ -1417,7 +1462,9 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
 
     status = nvshmemt_ib_common_discover_pci_paths(
         transport, temp_state, sizeof(nvshmemt_ib_common_device), &ftable, &mlx5dv_ftable);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // We need to copy the detected devices into the vector-based structures of gpunetio_state.
     std::vector<int> dev_remap(num_devices, -1);
@@ -1481,7 +1528,9 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     // Open NIC in GPUNetIO
     for (auto &device : devices) {
         status = device->open_net_dev();
-        if (status) return status;
+        if (status) {
+            return status;
+        }
     }
 
     return NVSHMEMX_SUCCESS;
@@ -1541,7 +1590,9 @@ void nvshmemt_gpunetio_state_t::initialize_cache_state() {
 // Phase 1: One-time global setup
 int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *selected_dev_ids) {
     int status = get_cuda_device_id(&cached_gpu_device_id);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // Populate selected device IDs if not already done
     if (this->selected_dev_ids.empty()) {
@@ -1820,7 +1871,9 @@ int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_
 
     for (int i = 0; i < num_qps; i++) {
         out_qp_indices[i] = use_gdaki ? cur_gpu_qp_index : cur_cpu_qp_index;
-        if (!use_gdaki && first_user_cpu_qp < 0) first_user_cpu_qp = cur_cpu_qp_index;
+        if (!use_gdaki && first_user_cpu_qp < 0) {
+            first_user_cpu_qp = cur_cpu_qp_index;
+        }
 
         int n_devs_selected = static_cast<int>(selected_dev_ids.size());
         int selected_dev_idx = last_device_index % n_devs_selected;
@@ -1847,7 +1900,9 @@ int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_
             user_cpu_qps.push_back({dev_idx, device.num_cpu_eps_per_pe - 1});
         }
 
-        if (device.num_default_cpu_eps_per_pe > 1) has_multiple_cpu_qps = true;
+        if (device.num_default_cpu_eps_per_pe > 1) {
+            has_multiple_cpu_qps = true;
+        }
         last_device_index++;
     }
 
@@ -1888,13 +1943,17 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
         if (options->GPUNETIO_NUM_RC_PER_PE_GPU > 0) {
             status = device.add_endpoints(t, portid, options->GPUNETIO_NUM_RC_PER_PE_GPU,
                                           gpunetio_qp_kind::GPU);
-            if (status) return status;
+            if (status) {
+                return status;
+            }
         }
 
         // host EP + default-pool QPs
         status = device.add_endpoints(t, portid, options->GPUNETIO_NUM_RC_PER_PE_CPU + 1,
                                       gpunetio_qp_kind::CPU);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
         device.num_default_cpu_eps_per_pe = device.num_cpu_eps_per_pe - 1;
 
         init_dev_cnt++;
@@ -1909,7 +1968,9 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
 
     // Phase 4: GPU setup (only once)
     status = setup_gpu_state(t);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     if (init_dev_cnt < num_selected_devs) {
         NVSHMEMI_WARN_PRINT("Failed to initialize all selected devices. Perf may be limited.\n");
@@ -2228,8 +2289,9 @@ static int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, vo
         device_mhandle_cache.dev_ptr = device_mhandle_d;
 
         if (gpunetio_state->device_local_only_mhandles.empty()) {
-            if (gpunetio_device_state)
+            if (gpunetio_device_state) {
                 gpunetio_device_state->globalmem.local_only_mhandle_head = device_mhandle_d;
+            }
         } else {
             gpunetio_device_local_only_mhandle_cache *last_mhandle_cache =
                 &gpunetio_state->device_local_only_mhandles.back();
@@ -2347,12 +2409,14 @@ static int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle
              it != gpunetio_state->device_local_only_mhandles.end(); ++it) {
             if (it->mhandle.start == reinterpret_cast<uint64_t>(handle->buf)) {
                 curr_mhandle_cache = &gpunetio_state->device_local_only_mhandles.data()[position];
-                if (position > 0)
+                if (position > 0) {
                     prev_mhandle_cache =
                         &gpunetio_state->device_local_only_mhandles.data()[position - 1];
-                if (position < gpunetio_state->device_local_only_mhandles.size() - 1)
+                }
+                if (position < gpunetio_state->device_local_only_mhandles.size() - 1) {
                     next_mhandle_cache =
                         &gpunetio_state->device_local_only_mhandles.data()[position + 1];
+                }
                 break;
             }
             ++position;
@@ -2363,12 +2427,13 @@ static int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle
         }
         // Remove this element from the linked list on both host and GPU.
         if (prev_mhandle_cache) {
-            if (next_mhandle_cache)
+            if (next_mhandle_cache) {
                 prev_mhandle_cache->mhandle.next =
                     static_cast<nvshmemi_gpunetio_device_local_only_mhandle_t *>(
                         next_mhandle_cache->dev_ptr);
-            else
+            } else {
                 prev_mhandle_cache->mhandle.next = nullptr;
+            }
             mhandle_gpu_ptr = reinterpret_cast<void *>(
                 reinterpret_cast<uintptr_t>(prev_mhandle_cache->dev_ptr) +
                 offsetof(nvshmemi_gpunetio_device_local_only_mhandle_t, next));
@@ -2378,12 +2443,13 @@ static int nvshmemt_gpunetio_release_mem_handle(nvshmem_mem_handle_t *mem_handle
                                 gpunetio_state->my_stream),
                 NVSHMEMX_ERROR_INTERNAL);
         } else if (gpunetio_device_state) {
-            if (next_mhandle_cache)
+            if (next_mhandle_cache) {
                 gpunetio_device_state->globalmem.local_only_mhandle_head =
                     static_cast<nvshmemi_gpunetio_device_local_only_mhandle_t *>(
                         next_mhandle_cache->dev_ptr);
-            else
+            } else {
                 gpunetio_device_state->globalmem.local_only_mhandle_head = nullptr;
+            }
         }
         // Free the copy of this element on GPU.
         CUDA_RUNTIME_CHECK_RET(cudaFree(curr_mhandle_cache->dev_ptr), NVSHMEMX_ERROR_INTERNAL);
@@ -2450,7 +2516,9 @@ static int nvshmemt_gpunetio_host_quiet(struct nvshmem_transport *tcurr, int pe,
         // Finally drain the EP mapped to this index
         for (int pe_idx = pe_begin; pe_idx < pe_end; pe_idx++) {
             auto &ep = device->rc_eps_cpu[slot * n_pes + pe_idx];
-            if (!ep) continue;
+            if (!ep) {
+                continue;
+            }
             while (ep->head_op_id != ep->tail_op_id) {
                 device->cpu_progress_locked();
             }
@@ -2481,7 +2549,9 @@ static int nvshmemt_gpunetio_host_quiet(struct nvshmem_transport *tcurr, int pe,
         for (int pe_idx = pe_begin; pe_idx < pe_end; pe_idx++) {
             for (int k = slot_begin; k < slot_end; k++) {
                 auto &ep = device->rc_eps_cpu[k * n_pes + pe_idx];
-                if (!ep) continue;
+                if (!ep) {
+                    continue;
+                }
                 while (ep->head_op_id != ep->tail_op_id) {
                     device->cpu_progress_locked();
                 }
@@ -2489,7 +2559,9 @@ static int nvshmemt_gpunetio_host_quiet(struct nvshmem_transport *tcurr, int pe,
         }
 
         // Host QP only lives on selected_dev_ids[0], exit early
-        if (qp_index == NVSHMEMX_QP_HOST) break;
+        if (qp_index == NVSHMEMX_QP_HOST) {
+            break;
+        }
     }
 
     return NVSHMEMX_SUCCESS;
@@ -2530,13 +2602,17 @@ static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, r
     int status = 0;
 
     gpunetio_ep *ep = gpunetio_state->get_next_cpu_ep(pe, qp_index, tcurr->n_pes, tcurr->my_pe);
-    if (!ep) return NVSHMEMX_SUCCESS;
+    if (!ep) {
+        return NVSHMEMX_SUCCESS;
+    }
 
     auto *qp_cpu = ep->qp->qp_gverbs->qp_cpu;
     uint16_t wqe_bb_idx = static_cast<uint16_t>(ep->wqe_bb_idx);
 
     status = ep->check_poll_avail(false);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     auto *wqe = reinterpret_cast<gpunetio_rw_wqe *>(
         qp_cpu->sq_wqe_daddr +
@@ -2596,7 +2672,9 @@ static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, r
 
     if (!verb.is_nbi && verb.desc != NVSHMEMI_OP_P) {
         status = ep->check_poll_avail(true);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
     }
     return NVSHMEMX_SUCCESS;
 }
@@ -2610,7 +2688,9 @@ static int gpunetio_amo_32(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
     uint32_t compare = static_cast<uint32_t>(remote->cmp);
 
     int status = ep->check_poll_avail(false);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     const auto *remote_handle =
         gpunetio_get_dev_mem_handle(remote->remote_memdesc.handle, device->selected_dev_slot);
@@ -2744,7 +2824,9 @@ static int gpunetio_amo_64(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
     uint16_t wqe_bb_idx = static_cast<uint16_t>(ep->wqe_bb_idx);
 
     int status = ep->check_poll_avail(false, /*min_free_slots=*/2);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     const auto *remote_handle =
         gpunetio_get_dev_mem_handle(remote->remote_memdesc.handle, device->selected_dev_slot);
@@ -2923,7 +3005,9 @@ static int nvshmemt_gpunetio_host_amo(struct nvshmem_transport *tcurr, int pe, v
 
     gpunetio_ep *ep = gpunetio_state->get_next_cpu_amo_ep(pe, qp_index, tcurr->n_pes, tcurr->my_pe,
                                                           remote->remote_memdesc.offset);
-    if (!ep) return NVSHMEMX_SUCCESS;
+    if (!ep) {
+        return NVSHMEMX_SUCCESS;
+    }
 
     if (bytesdesc.elembytes == 4) {
         return gpunetio_amo_32(ep, verb, remote);
@@ -2969,7 +3053,9 @@ int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api
     // Global state for GPUNetIO transport
     auto [gpunetio_state, state_status] =
         nvshmemt_gpunetio_state_t::make(transport_owner.get(), options.get(), table);
-    if (state_status) return state_status;
+    if (state_status) {
+        return state_status;
+    }
     transport->state = gpunetio_state.get();
 
     transport->host_ops.can_reach_peer = nvshmemt_gpunetio_can_reach_peer;

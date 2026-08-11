@@ -99,7 +99,9 @@ int main(int argc, char **argv) {
     dev_id = mype_node % npes_node;
     CUDA_CHECK(cudaSetDevice(dev_id));
 
-    if (!mype) printf("creating and mmapping buffer of size: %lu\n", size);
+    if (!mype) {
+        printf("creating and mmapping buffer of size: %lu\n", size);
+    }
     // Allocation of user buffer is local
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;

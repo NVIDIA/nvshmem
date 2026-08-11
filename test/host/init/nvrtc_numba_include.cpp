@@ -21,7 +21,9 @@ extern "C" __global__ void nvshmem_numba_include_kernel() {}
 void print_compile_log(nvrtcProgram prog) {
     size_t compile_log_size = 0;
     nvrtcGetProgramLogSize(prog, &compile_log_size);
-    if (compile_log_size <= 1) return;
+    if (compile_log_size <= 1) {
+        return;
+    }
 
     std::vector<char> compile_log(compile_log_size);
     nvrtcGetProgramLog(prog, compile_log.data());

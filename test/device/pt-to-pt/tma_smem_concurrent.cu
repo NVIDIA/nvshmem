@@ -65,7 +65,9 @@ __global__ void concurrent_tma_put(const unsigned char *source, unsigned char *d
 
     nvshmemx_release_smem();
     __syncthreads();
-    if (threadIdx.x == 0) atomicSub(&gate->active, 1);
+    if (threadIdx.x == 0) {
+        atomicSub(&gate->active, 1);
+    }
 }
 
 unsigned char pattern_for(int pe, int flow) {
@@ -226,14 +228,24 @@ int main(int argc, char **argv) {
 
     cleanup:
         for (int flow = 0; flow < kFlows; flow++) {
-            if (streams[flow] != nullptr) CUDA_CHECK(cudaStreamDestroy(streams[flow]));
+            if (streams[flow] != nullptr) {
+                CUDA_CHECK(cudaStreamDestroy(streams[flow]));
+            }
         }
-        if (gate != nullptr) CUDA_CHECK(cudaFree(gate));
-        if (destination != nullptr) nvshmem_free(destination);
-        if (source != nullptr) nvshmem_free(source);
+        if (gate != nullptr) {
+            CUDA_CHECK(cudaFree(gate));
+        }
+        if (destination != nullptr) {
+            nvshmem_free(destination);
+        }
+        if (source != nullptr) {
+            nvshmem_free(source);
+        }
     }
 
-    if (skipped) goto out;
+    if (skipped) {
+        goto out;
+    }
 
     status = allreduce_status(status);
     if (mype == 0 && status == 0) {

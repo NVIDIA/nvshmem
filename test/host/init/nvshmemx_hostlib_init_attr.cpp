@@ -21,7 +21,9 @@ int main(int c, char *v[]) {
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     char *value = getenv("NVSHMEMTEST_USE_MPI_LAUNCHER");
-    if (value) use_mpi = atoi(value);
+    if (value) {
+        use_mpi = atoi(value);
+    }
 
     if (use_mpi) {
         int rank, nranks;
@@ -54,13 +56,17 @@ int main(int c, char *v[]) {
     nvshmem_barrier_all();
     assert(nvshmemx_init_status() >= NVSHMEM_STATUS_IS_INITIALIZED);
 
-    if (npes_per_gpu > 1) assert(nvshmemx_init_status() >= NVSHMEM_STATUS_LIMITED_MPG);
+    if (npes_per_gpu > 1) {
+        assert(nvshmemx_init_status() >= NVSHMEM_STATUS_LIMITED_MPG);
+    }
 
     nvshmemx_hostlib_finalize();
     assert(nvshmemx_init_status() == NVSHMEM_STATUS_IS_BOOTSTRAPPED);
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
-    if (use_mpi) MPI_Finalize();
+    if (use_mpi) {
+        MPI_Finalize();
+    }
 #endif
 
     return status;

@@ -71,8 +71,9 @@ __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, siz
         /* Producer: fill src_smem with iteration-dependent data so the
          * compiler cannot CSE or hoist the put.  Only threads with work
          * participate, but all threads syncthreads after. */
-        for (size_t j = tid; j < nelems; j += blockDim.x * blockDim.y * blockDim.z)
+        for (size_t j = tid; j < nelems; j += blockDim.x * blockDim.y * blockDim.z) {
             src_smem[j] = (double)(i * 31337 + (int)j);
+        }
         __syncthreads();
 
         /* put_nbi_block.  Dispatch differs per transport:
@@ -108,7 +109,9 @@ __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, siz
     }
     __syncthreads();
 
-    if constexpr (USE_SMEM) nvshmemx_release_smem();
+    if constexpr (USE_SMEM) {
+        nvshmemx_release_smem();
+    }
 }
 
 static double bw_gbs(size_t bytes_per_iter, size_t iters, float ms) {
@@ -144,10 +147,14 @@ int main(int argc, char *argv[]) {
     npes = nvshmem_n_pes();
     if (mype == 0) {
         const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-        if (env) machine_readable = (std::atoi(env) != 0);
+        if (env) {
+            machine_readable = (std::atoi(env) != 0);
+        }
     }
     if (npes != 2) {
-        if (mype == 0) fprintf(stderr, "This test requires exactly two processes\n");
+        if (mype == 0) {
+            fprintf(stderr, "This test requires exactly two processes\n");
+        }
         goto finalize;
     }
 
@@ -173,11 +180,12 @@ int main(int argc, char *argv[]) {
         smem_size = max_dyn_smem;
         size_t max_data_bytes = (size_t)smem_size - smem_data_offset;
         if (max_size > max_data_bytes) {
-            if (mype == 0)
+            if (mype == 0) {
                 fprintf(stderr,
                         "clamping max_size from %zu to %zu (device max dynamic smem %d, "
                         "barrier reserve %zu)\n",
                         max_size, max_data_bytes, max_dyn_smem, smem_data_offset);
+            }
             max_size = max_data_bytes & ~(size_t)15; /* keep 16 B aligned */
         }
     }
@@ -205,9 +213,13 @@ int main(int argc, char *argv[]) {
      * max_size so the sweep reaches device-smem capacity even when
      * max_size is not a clean power of the step factor. */
     for (size_t size = min_size;; size *= step_factor) {
-        if (size > max_size) size = max_size;
+        if (size > max_size) {
+            size = max_size;
+        }
         size_t nelems = size / sizeof(double);
-        if (nelems == 0) continue;
+        if (nelems == 0) {
+            continue;
+        }
 
         auto run = [&](auto kernel_ptr, size_t n) {
             kernel_ptr<<<1, max_threads, smem_size>>>(dst_d, nelems, peer, n);
@@ -303,7 +315,9 @@ int main(int argc, char *argv[]) {
                        stg_flush.mean, tma_quiet.mean, tma_flush.mean, speedup);
             }
         }
-        if (size == max_size) break;
+        if (size == max_size) {
+            break;
+        }
     }
 
     if (mype == 0 && machine_readable && !size_values.empty()) {
@@ -353,7 +367,9 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    if (dst_d) nvshmem_free(dst_d);
+    if (dst_d) {
+        nvshmem_free(dst_d);
+    }
     finalize_wrapper();
     return 0;
 }

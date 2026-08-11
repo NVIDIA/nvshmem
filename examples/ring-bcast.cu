@@ -14,11 +14,15 @@ __global__ void ring_bcast(int *data, size_t nelem, int root, uint64_t *psync) {
     int npes = nvshmem_n_pes();
     int peer = (mype + 1) % npes;
 
-    if (mype == root) *psync = 1;
+    if (mype == root) {
+        *psync = 1;
+    }
 
     nvshmem_signal_wait_until(psync, NVSHMEM_CMP_NE, 0);
 
-    if (mype == npes - 1) return;
+    if (mype == npes - 1) {
+        return;
+    }
 
     nvshmem_int_put(data, data, nelem, peer);
     nvshmem_fence();
@@ -43,7 +47,9 @@ int main(void) {
     int *data_h = (int *)malloc(sizeof(int) * data_len);
     uint64_t *psync = (uint64_t *)nvshmem_calloc(1, sizeof(uint64_t));
 
-    for (size_t i = 0; i < data_len; i++) data_h[i] = mype + i;
+    for (size_t i = 0; i < data_len; i++) {
+        data_h[i] = mype + i;
+    }
 
     cudaMemcpyAsync(data, data_h, sizeof(int) * data_len, cudaMemcpyHostToDevice, stream);
 
@@ -59,9 +65,10 @@ int main(void) {
     cudaStreamSynchronize(stream);
 
     for (size_t i = 0; i < data_len; i++) {
-        if (data_h[i] != (int)i)
+        if (data_h[i] != (int)i) {
             printf("PE %d error, data[%zu] = %d expected data[%zu] = %d\n", mype, i, data_h[i], i,
                    (int)i);
+        }
     }
 
     nvshmem_free(data);

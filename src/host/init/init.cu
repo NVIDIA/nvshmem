@@ -246,7 +246,9 @@ int nvshmemi_update_device_state() {
                 std::min(registered_state.state_size, sizeof(nvshmemi_device_host_state_t));
             nvshmemi_get_device_state((void **)&device_state);
             status = cudaMemcpy(it->first, (void *)device_state, copy_size, cudaMemcpyHostToDevice);
-            if (status) break;
+            if (status) {
+                break;
+            }
         }
         num_initialized_device_states = iter;
     }
@@ -259,7 +261,9 @@ int nvshmemi_update_device_state() {
              it != registered_transport_device_states.cend(); ++it) {
             status = cudaMemcpy((it->first), (void *)gpunetio_device_state,
                                 sizeof(nvshmemi_gpunetio_device_state_t), cudaMemcpyHostToDevice);
-            if (status) break;
+            if (status) {
+                break;
+            }
         }
     }
 #endif
@@ -272,7 +276,9 @@ int nvshmemi_update_device_state() {
              it != registered_transport_device_states.cend(); ++it) {
             status = cudaMemcpy((it->first), (void *)ibgda_device_state,
                                 sizeof(nvshmemi_ibgda_device_state_t), cudaMemcpyHostToDevice);
-            if (status) break;
+            if (status) {
+                break;
+            }
         }
     }
 #endif
@@ -465,7 +471,9 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
     memcpy(nvshmemi_host_hashes, hostHash, sizeof(uint64_t) * npes);
     for (int i = 0; i < npes; i++) {
         if (nvshmemi_host_hashes[i] == myHostHash) {
-            if (i == mype) mype_node = npes_node;
+            if (i == mype) {
+                mype_node = npes_node;
+            }
             npes_node++;
         }
     }
@@ -506,7 +514,9 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
     nvshmemi_pe_dist = NVSHMEMI_PE_DIST_MISC;
 
     if (npes_node != 0) {
-        if (npes % npes_node != 0) goto out;
+        if (npes % npes_node != 0) {
+            goto out;
+        }
         num_nodes = npes / npes_node;
     } else {
         NVSHMEMI_ERROR_JMP(
@@ -516,8 +526,9 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
 
     for (int i = 0; i < num_nodes; i++) {
         for (int j = 0; j < npes_node; j++) {
-            if (nvshmemi_host_hashes[i * npes_node] != nvshmemi_host_hashes[i * num_nodes + j])
+            if (nvshmemi_host_hashes[i * npes_node] != nvshmemi_host_hashes[i * num_nodes + j]) {
                 goto check_roundrobin_dist;
+            }
         }
     }
     nvshmemi_pe_dist = NVSHMEMI_PE_DIST_BLOCK;
@@ -527,8 +538,9 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
 check_roundrobin_dist:
     for (int i = 0; i < npes_node; i++) {
         for (int j = 0; j < num_nodes; j++) {
-            if (nvshmemi_host_hashes[j * npes_node] != nvshmemi_host_hashes[i * num_nodes + j])
+            if (nvshmemi_host_hashes[j * npes_node] != nvshmemi_host_hashes[i * num_nodes + j]) {
                 goto out;
+            }
         }
     }
     nvshmemi_pe_dist = NVSHMEMI_PE_DIST_ROUNDROBIN;
@@ -536,7 +548,9 @@ check_roundrobin_dist:
 
 out:
     nvshmemi_device_state.pe_dist = nvshmemi_pe_dist;
-    if (hostHash) free(hostHash);
+    if (hostHash) {
+        free(hostHash);
+    }
     return status;
 }
 
@@ -570,7 +584,9 @@ enum class nvshmemi_gpu_sharing_t {
  * via nvshmemi_detect_same_device — never on prop.name.
  */
 static nvshmemi_gpu_sharing_t nvshmemi_classify_gpu_sharing(const nvshmemi_state_t *state) {
-    if (state->pe_info == nullptr) return nvshmemi_gpu_sharing_t::NONE;
+    if (state->pe_info == nullptr) {
+        return nvshmemi_gpu_sharing_t::NONE;
+    }
 
     nvshmemi_gpu_sharing_t kind = nvshmemi_gpu_sharing_t::NONE;
     int i = -1;
@@ -580,10 +596,13 @@ static nvshmemi_gpu_sharing_t nvshmemi_classify_gpu_sharing(const nvshmemi_state
         for (j = 0; j < i; j++) {
             const auto &a = state->pe_info[i];
             const auto &b = state->pe_info[j];
-            if (a.hostHash != b.hostHash) continue;
-            if (a.pcie_id.dev_id != b.pcie_id.dev_id || a.pcie_id.bus_id != b.pcie_id.bus_id ||
-                a.pcie_id.domain_id != b.pcie_id.domain_id)
+            if (a.hostHash != b.hostHash) {
                 continue;
+            }
+            if (a.pcie_id.dev_id != b.pcie_id.dev_id || a.pcie_id.bus_id != b.pcie_id.bus_id ||
+                a.pcie_id.domain_id != b.pcie_id.domain_id) {
+                continue;
+            }
 
             const bool same_uuid =
                 std::equal(std::begin(a.gpu_uuid.bytes), std::end(a.gpu_uuid.bytes),
@@ -591,10 +610,14 @@ static nvshmemi_gpu_sharing_t nvshmemi_classify_gpu_sharing(const nvshmemi_state
             kind = same_uuid ? nvshmemi_gpu_sharing_t::MPG : nvshmemi_gpu_sharing_t::MPS_MLOPART;
             break;
         }
-        if (kind != nvshmemi_gpu_sharing_t::NONE) break;
+        if (kind != nvshmemi_gpu_sharing_t::NONE) {
+            break;
+        }
     }
 
-    if (kind == nvshmemi_gpu_sharing_t::NONE) return kind;
+    if (kind == nvshmemi_gpu_sharing_t::NONE) {
+        return kind;
+    }
 
     const char *reason = (kind == nvshmemi_gpu_sharing_t::MPS_MLOPART)
                              ? "MPS MLOPart partitions"
@@ -1004,7 +1027,9 @@ static int nvshmemi_determine_mpg_support_level() {
             exit(-1);
         }
         char *env = getenv("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE");
-        if (env) active_thread_percentage = atof(env);
+        if (env) {
+            active_thread_percentage = atof(env);
+        }
 
         float *active_percentages = (float *)malloc(sizeof(float) * nvshmemi_state->npes);
         status = nvshmemi_boot_handle.allgather((void *)&active_thread_percentage,
@@ -1081,7 +1106,9 @@ static int nvshmemi_setup_limited_mpg_support() {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "bootstrap barrier failed \n");
 
     for (int i = 0; i < nvshmemi_team_same_gpu->size; i++) {
-        if (i == nvshmemi_team_same_gpu->my_pe) continue;
+        if (i == nvshmemi_team_same_gpu->my_pe) {
+            continue;
+        }
         CUDA_RUNTIME_CHECK(
             cudaIpcOpenEventHandle(&event, *(cudaIpcEventHandle_t *)&shm->event_handle[i]));
         nvshmemi_state->same_gpu_other_pe_mps_events[counter++] = event;
@@ -1153,7 +1180,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     cpu_set_t my_set;
     CPU_ZERO(&my_set);
 
-    if (nvshmemi_device_state.nvshmemi_is_nvshmem_initialized) return 0;
+    if (nvshmemi_device_state.nvshmemi_is_nvshmem_initialized) {
+        return 0;
+    }
 
     if (!nvshmemi_cuda_syms) {
         nvshmemi_cuda_syms =
@@ -1326,7 +1355,9 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
         int core_count = 0;
 
         for (int i = 0; i < CPU_SETSIZE; i++) {
-            if (CPU_ISSET(i, &my_set)) core_count++;
+            if (CPU_ISSET(i, &my_set)) {
+                core_count++;
+            }
         }
 
         if (core_count == 1) {
@@ -1399,16 +1430,17 @@ int nvshmemi_check_state_and_init() {
 }
 
 int nvshmemid_init_status() {
-    if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped)
+    if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
         return NVSHMEM_STATUS_NOT_INITIALIZED;
-    else if (!nvshmemi_device_state.nvshmemi_is_nvshmem_initialized)
+    } else if (!nvshmemi_device_state.nvshmemi_is_nvshmem_initialized) {
         return NVSHMEM_STATUS_IS_BOOTSTRAPPED;
-    else if (!nvshmemi_is_mpg_run)
+    } else if (!nvshmemi_is_mpg_run) {
         return NVSHMEM_STATUS_IS_INITIALIZED;
-    else if (nvshmemi_is_limited_mpg_run)
+    } else if (nvshmemi_is_limited_mpg_run) {
         return NVSHMEM_STATUS_LIMITED_MPG;
-    else
+    } else {
         return NVSHMEM_STATUS_FULL_MPG;
+    }
 }
 
 int nvshmemx_init_status() { return nvshmemid_init_status(); }
@@ -1523,7 +1555,9 @@ void nvshmem_global_exit(int status) {
      */
     nvshmemi_proxy_finalize(nvshmemi_state);
     /** Bootstraps like UID are agnostic of execution environment, so this API is optional */
-    if (nvshmemi_boot_handle.global_exit) nvshmemi_boot_handle.global_exit(status);
+    if (nvshmemi_boot_handle.global_exit) {
+        nvshmemi_boot_handle.global_exit(status);
+    }
 }
 #endif
 
@@ -1543,7 +1577,9 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
     }
 
     nvshmemi_init_counter--;
-    if (nvshmemi_init_counter != 0) return;
+    if (nvshmemi_init_counter != 0) {
+        return;
+    }
 
     nvshmemi_get_device_state_ptrs(&dev_state_ptr, &transport_dev_state_ptr);
     NVSHMEMI_NULL_ERROR_JMP(dev_state_ptr, status, NVSHMEMX_ERROR_INVALID_VALUE, out,
@@ -1605,19 +1641,25 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
                               "nvshmem transport finalize failed \n");
 
         /* Device cleanup */
-        if (nvshmemi_device_state.peer_heap_base_p2p)
+        if (nvshmemi_device_state.peer_heap_base_p2p) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.peer_heap_base_p2p));
-        if (nvshmemi_device_state.peer_heap_base_remote)
+        }
+        if (nvshmemi_device_state.peer_heap_base_remote) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.peer_heap_base_remote));
-        if (nvshmemi_device_state.test_wait_any_start_idx_ptr)
+        }
+        if (nvshmemi_device_state.test_wait_any_start_idx_ptr) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.test_wait_any_start_idx_ptr));
-        if (nvshmemi_device_state.tma_smem_bases)
+        }
+        if (nvshmemi_device_state.tma_smem_bases) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
-        if (nvshmemi_device_state.tma_smem_size)
+        }
+        if (nvshmemi_device_state.tma_smem_size) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
+        }
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-        if (nvshmemi_device_state.unicast_le_ids_)
+        if (nvshmemi_device_state.unicast_le_ids_) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.unicast_le_ids_));
+        }
 #endif
 
         /* cleanup state */
@@ -1634,8 +1676,9 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         nvshmemi_state = NULL;
         nvshmemi_device_state.nvshmemi_is_nvshmem_initialized = 0;
         nvshmemi_is_device_state_ready = false;
-    } else
+    } else {
         nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+    }
 
 out:
     if (status) {
@@ -1706,10 +1749,11 @@ static void nvshmemi_init_debug() {
                 WARN("Unrecognized value in DEBUG_SUBSYS: %s%s", invert ? "^" : "", subsys);
             }
             if (mask) {
-                if (invert)
+                if (invert) {
                     nvshmem_debug_mask &= ~mask;
-                else
+                } else {
                     nvshmem_debug_mask |= mask;
+                }
             }
             subsys = strtok(NULL, ",");
         }
@@ -1767,7 +1811,9 @@ static void nvshmemi_init_debug() {
 
 static void nvshmemi_init_msg(void) {
     if (0 == nvshmemi_boot_handle.pg_rank) {
-        if (nvshmemi_options.VERSION) printf("%s\n", NVSHMEM_VENDOR_STRING);
+        if (nvshmemi_options.VERSION) {
+            printf("%s\n", NVSHMEM_VENDOR_STRING);
+        }
 
 #ifdef NVSHMEM_BUILD_P2P_ONLY
         WARN(
@@ -1785,11 +1831,15 @@ static void nvshmemi_init_msg(void) {
             printf("  %-28s %d\n", "CUDA API", CUDA_VERSION);
 
             err = cudaRuntimeGetVersion(&runtimeVersion);
-            if (err != cudaSuccess) runtimeVersion = -1;
+            if (err != cudaSuccess) {
+                runtimeVersion = -1;
+            }
             printf("  %-28s %d\n", "CUDA Runtime", runtimeVersion);
 
             err = cudaDriverGetVersion(&driverVersion);
-            if (err != cudaSuccess) driverVersion = -1;
+            if (err != cudaSuccess) {
+                driverVersion = -1;
+            }
             printf("  %-28s %d\n", "CUDA Driver", driverVersion);
 
             printf("  %-28s %s %s\n", "Build Timestamp", __DATE__, __TIME__);
@@ -1808,8 +1858,9 @@ static void nvshmemi_init_msg(void) {
         }
     }
 
-    if (nvshmemi_options.DEBUG_provided || nvshmemi_options.DEBUG_SUBSYS_provided)
+    if (nvshmemi_options.DEBUG_provided || nvshmemi_options.DEBUG_SUBSYS_provided) {
         nvshmemu_debug_log_cpuset(NVSHMEM_INIT, "process");
+    }
 }
 
 int nvshmemi_proxy_level(nvshmemi_state_t *state) {
@@ -1931,8 +1982,9 @@ int set_job_connectivity(nvshmemi_state_t *state) {
 
     // check if all proxy ops are ordered
     for (int i = 0; i < state->num_initialized_transports; i++) {
-        if (state->transports[i] && (state->transports[i]->host_ops.fence != NULL))
+        if (state->transports[i] && (state->transports[i]->host_ops.fence != NULL)) {
             proxy_ops_are_ordered = false;
+        }
     }
     nvshmemi_device_state.proxy_ops_are_ordered = proxy_ops_are_ordered;
 
@@ -2001,10 +2053,11 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     nvshmemi_device_state.proxy = nvshmemi_proxy_level(state);
 
-    if (nvshmemi_options.ASSERT_ATOMICS_SYNC)
+    if (nvshmemi_options.ASSERT_ATOMICS_SYNC) {
         nvshmemi_device_state.atomics_sync = 1;
-    else
+    } else {
         nvshmemi_device_state.atomics_sync = 0;
+    }
 
     nvshmemi_device_state.atomics_le_min_size = state->atomic_host_endian_min_size;
 
@@ -2144,16 +2197,26 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
 out:
     if (status) {
-        if (heap_base_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_array_dptr));
-        if (heap_base_actual_array_dptr) CUDA_RUNTIME_CHECK(cudaFree(heap_base_actual_array_dptr));
-        if (test_wait_any_start_idx_ptr) CUDA_RUNTIME_CHECK(cudaFree(test_wait_any_start_idx_ptr));
+        if (heap_base_array_dptr) {
+            CUDA_RUNTIME_CHECK(cudaFree(heap_base_array_dptr));
+        }
+        if (heap_base_actual_array_dptr) {
+            CUDA_RUNTIME_CHECK(cudaFree(heap_base_actual_array_dptr));
+        }
+        if (test_wait_any_start_idx_ptr) {
+            CUDA_RUNTIME_CHECK(cudaFree(test_wait_any_start_idx_ptr));
+        }
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-        if (unicast_le_ids_dptr) CUDA_RUNTIME_CHECK(cudaFree(unicast_le_ids_dptr));
+        if (unicast_le_ids_dptr) {
+            CUDA_RUNTIME_CHECK(cudaFree(unicast_le_ids_dptr));
+        }
 #endif
-        if (nvshmemi_device_state.tma_smem_bases)
+        if (nvshmemi_device_state.tma_smem_bases) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_bases));
-        if (nvshmemi_device_state.tma_smem_size)
+        }
+        if (nvshmemi_device_state.tma_smem_size) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.tma_smem_size));
+        }
     }
     return status;
 }

@@ -46,7 +46,9 @@ int main(int argc, char **argv) {
 
     for (int r = 0; r < repeat; r++) {
         uint32_t lsize = r;
-        if (!mype) DEBUG_PRINT("[iter %d of %d] allocations: ", r, repeat);
+        if (!mype) {
+            DEBUG_PRINT("[iter %d of %d] allocations: ", r, repeat);
+        }
         for (int i = 0; i < iter; i++) {
             lsize = rand_r(&lsize) % (MAX_SIZE - 1) + 1;
 
@@ -57,19 +59,31 @@ int main(int argc, char **argv) {
             }
 
             cudaMemset(buffer[i], 0, lsize);
-            if (!mype) DEBUG_PRINT("ptr: %p size: %zuB; ", (void *)buffer[i], lsize);
+            if (!mype) {
+                DEBUG_PRINT("ptr: %p size: %zuB; ", (void *)buffer[i], lsize);
+            }
         }
-        if (!mype) DEBUG_PRINT("\n \n");
+        if (!mype) {
+            DEBUG_PRINT("\n \n");
+        }
 
-        if (!mype) DEBUG_PRINT("[%d of %d] freeing all buffers: ", r, repeat);
+        if (!mype) {
+            DEBUG_PRINT("[%d of %d] freeing all buffers: ", r, repeat);
+        }
 
         for (int i = 0; i < iter; i++) {
-            if (!mype) DEBUG_PRINT("ptr: %p; ", (void *)buffer[i]);
+            if (!mype) {
+                DEBUG_PRINT("ptr: %p; ", (void *)buffer[i]);
+            }
             nvshmem_free(buffer[i]);
         }
-        if (!mype) DEBUG_PRINT("\n \n");
+        if (!mype) {
+            DEBUG_PRINT("\n \n");
+        }
 
-        if (!mype) DEBUG_PRINT("[iter %d of %d] end of iter \n \n", r, repeat);
+        if (!mype) {
+            DEBUG_PRINT("[iter %d of %d] end of iter \n \n", r, repeat);
+        }
     }
 
     free(buffer);

@@ -69,7 +69,9 @@ static void nvshmemi_options_print_heading(const char *h, int style) {
             break;
         case NVSHMEMI_OPTIONS_STYLE_RST:
             printf("%s\n", h);
-            for (const char *c = h; *c != '\0'; c++) putchar('~');
+            for (const char *c = h; *c != '\0'; c++) {
+                putchar('~');
+            }
             printf("\n\n");
             break;
         default:
@@ -164,7 +166,9 @@ void nvshmemi_options_print(int style) {
                                style)
 #include "env_defs.h"
 
-        if (style == NVSHMEMI_OPTIONS_STYLE_RST) printf(".. code-block:: none\n\n");
+        if (style == NVSHMEMI_OPTIONS_STYLE_RST) {
+            printf(".. code-block:: none\n\n");
+        }
 
         nvshmem_nvtx_print_options();
 #undef NVSHMEMI_ENV_DEF

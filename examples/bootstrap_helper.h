@@ -74,7 +74,9 @@ void nvshmemi_init_mpi(int *c, char ***v) {
     int rank, nranks;
 
     status = nvshmemi_load_mpi();
-    if (status) exit(-1);
+    if (status) {
+        exit(-1);
+    }
 
     mpi_fn_table.fn_MPI_Init(c, v);
 

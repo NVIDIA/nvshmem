@@ -30,8 +30,9 @@ __global__ void test_nvshmem_signal_add_kernel(uint64_t *remote, size_t dynamic_
     const int mype = nvshmem_my_pe();
     const int npes = nvshmem_n_pes();
 
-    for (int i = 0; i < npes; i++)
+    for (int i = 0; i < npes; i++) {
         nvshmemx_signal_op(remote, (uint64_t)(mype + 1), NVSHMEM_SIGNAL_ADD, i);
+    }
 
     nvshmem_barrier_all();
 

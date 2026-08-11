@@ -127,7 +127,9 @@ int nvshmemi_discover_cuda_cliques(
     int status =
         nvshmemi_boot_handle.allgather(&local_record, peer_records.data(),
                                        sizeof(nvshmemi_cuda_clique_record), &nvshmemi_boot_handle);
-    if (status != 0) return status;
+    if (status != 0) {
+        return status;
+    }
 
     if (!std::all_of(
             peer_records.begin(), peer_records.end(),
@@ -212,7 +214,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     errored_on_initialization_ =
         true; /* By default, p2p is not initialized, so some features may be disabled */
 
-    for (auto &connected_pes : cuda_clique_connected_pes_) connected_pes.resize(npes, 0);
+    for (auto &connected_pes : cuda_clique_connected_pes_) {
+        connected_pes.resize(npes, 0);
+    }
     auto &uc_ptr_connected_pes =
         cuda_clique_connected_pes_.at(static_cast<size_t>(CU_CLIQUE_TYPE_UNICAST_POINTER));
     auto &mc_ptr_connected_pes =
@@ -360,12 +364,15 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
                   &flag,
                   static_cast<CUdevice_attribute>(CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED),
                   device_id));
-        if (!flag) nvshmemi_has_mnnvl_fabric_ = 0;
+        if (!flag) {
+            nvshmemi_has_mnnvl_fabric_ = 0;
+        }
 
         fabricInfo1 = pe_fabricInfo[mype];
         if (fabricInfo1.state < NVML_GPU_FABRIC_STATE_COMPLETED ||
-            memcmp(fabricInfo1.clusterUuid, zero, NVML_GPU_FABRIC_UUID_LEN) == 0)
+            memcmp(fabricInfo1.clusterUuid, zero, NVML_GPU_FABRIC_UUID_LEN) == 0) {
             nvshmemi_has_mnnvl_fabric_ = 0;
+        }
 
         nvshmemi_mem_handle_type_ =
             (nvshmemi_has_mnnvl_fabric_ && flag)
@@ -411,14 +418,15 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     }
 
     if (nvshmemi_options.CUMEM_HANDLE_TYPE_provided) {
-        if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "FABRIC") == 0)
+        if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "FABRIC") == 0) {
             nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_FABRIC;
-        else if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "ANY") == 0)
+        } else if (strcmp_case_insensitive(nvshmemi_options.CUMEM_HANDLE_TYPE, "ANY") == 0) {
             nvshmemi_mem_handle_type_ =
                 (CUmemAllocationHandleType)(CU_MEM_HANDLE_TYPE_FABRIC |
                                             CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
-        else
+        } else {
             nvshmemi_mem_handle_type_ = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+        }
     }
 
     if (nvshmemi_mem_handle_type_ == CU_MEM_HANDLE_TYPE_FABRIC) {
@@ -432,7 +440,9 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
         INFO(NVSHMEM_MEM, "Symmetric Memory Heap Handle Type: POSIX File Descriptor\n");
     }
 out:
-    if (status == 0) errored_on_initialization_ = false;
+    if (status == 0) {
+        errored_on_initialization_ = false;
+    }
 
     NVSHMEMU_HOST_PTR_FREE(cudev);
     if ((status || nvml_status) && nvml_ftable_.nvmlShutdown != NULL) {
@@ -442,9 +452,10 @@ out:
                  nvml_status);
         }
         nvshmemi_nvml_ftable_fini(&nvml_ftable_, &nvml_handle_);
-        if (status)
+        if (status) {
             INFO(NVSHMEM_MEM,
                  "Unable to intialize mem p2p transport (likely non-fatal). status = %d\n", status);
+        }
     }
 
     NVSHMEMU_HOST_PTR_FREE(pe_fabricInfo);
@@ -474,7 +485,9 @@ int nvshmemi_mem_p2p_transport::get_num_uc_ptr_connected_pes(int npes_node) {
 
 nvshmemi_mem_p2p_transport::~nvshmemi_mem_p2p_transport() {
     proc_map_.clear();
-    if (p2p_objref_ != nullptr) p2p_objref_ = nullptr;
+    if (p2p_objref_ != nullptr) {
+        p2p_objref_ = nullptr;
+    }
 }
 
 /*
@@ -505,7 +518,9 @@ out:
 int nvshmemi_mem_remote_transport::register_mem_handle(nvshmem_mem_handle_t *local_handles,
                                                        int transport_idx, void *buf, size_t size,
                                                        const nvshmemi_transport_view &transports) {
-    if (!transports.supports_get_mem(transport_idx)) return 0;
+    if (!transports.supports_get_mem(transport_idx)) {
+        return 0;
+    }
     nvshmem_transport_t current = transports.transport(transport_idx);
     return current->host_ops.get_mem_handle((nvshmem_mem_handle_t *)(local_handles + transport_idx),
                                             buf, size, current, false);
@@ -522,7 +537,9 @@ int nvshmemi_mem_remote_transport::release_mem_handles(nvshmem_mem_handle_t *han
                                  if (status == NVSHMEMX_SUCCESS) {
                                      memset(&handles[i], 0, sizeof(handles[i]));
                                  } else {
-                                     if (first_status == NVSHMEMX_SUCCESS) first_status = status;
+                                     if (first_status == NVSHMEMX_SUCCESS) {
+                                         first_status = status;
+                                     }
                                      NVSHMEMI_ERROR_PRINT(
                                          "transport %llu failed to release memory handle "
                                          "(status=%d)",

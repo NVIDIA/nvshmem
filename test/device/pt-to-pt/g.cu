@@ -140,7 +140,9 @@ int main(int c, char *v[]) {
     int iters = 50;
 
     status = setup(1, 1, max_msg_size, iters, true);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
@@ -148,10 +150,14 @@ int main(int c, char *v[]) {
 
     DEBUG_PRINT("testing nvshmem_int_g\n");
     status = test<int>(launch_alltoall<int>, launch_ring<int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
     DEBUG_PRINT("testing nvshmem_double_g\n");
     status = test<double>(launch_alltoall<double>, launch_ring<double>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     cleanup();
 

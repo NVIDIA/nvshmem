@@ -65,7 +65,9 @@ nvshmemi_nvls_rsc::nvshmemi_nvls_rsc(nvshmemi_team_t *team, nvshmemi_state_t *st
     n_devices_ = team->size;
 
 out:
-    if (status) throw nvshmemi_nvls_exception("Unable to initialize NVLS resource\n");
+    if (status) {
+        throw nvshmemi_nvls_exception("Unable to initialize NVLS resource\n");
+    }
 }
 
 void nvshmemi_nvls_rsc::invalidate_rsc(void) {

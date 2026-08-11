@@ -12,10 +12,14 @@
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_counted_range_in_heap(const void *ptr,
                                                                              size_t bytes) {
-    if (ptr == nullptr || !__isGlobal(ptr)) return false;
+    if (ptr == nullptr || !__isGlobal(ptr)) {
+        return false;
+    }
     uintptr_t base = reinterpret_cast<uintptr_t>(nvshmemi_device_state_d.heap_base);
     uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-    if (addr < base) return false;
+    if (addr < base) {
+        return false;
+    }
     size_t offset = static_cast<size_t>(nvshmemi_heap_offset(ptr));
     return offset < nvshmemi_device_state_d.heap_size &&
            bytes <= nvshmemi_device_state_d.heap_size - offset;
@@ -23,23 +27,31 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_counted_range_in_heap(con
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_validate_counted_put(
     const void *dest, const void *source, size_t bytes, const uint64_t *signal_addr, int pe) {
-    if (pe < 0 || pe >= nvshmemi_device_state_d.npes) return NVSHMEMX_ERROR_INVALID_VALUE;
+    if (pe < 0 || pe >= nvshmemi_device_state_d.npes) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     if (!nvshmemi_counted_range_in_heap(dest, bytes) ||
-        !nvshmemi_counted_range_in_heap(signal_addr, sizeof(*signal_addr)))
+        !nvshmemi_counted_range_in_heap(signal_addr, sizeof(*signal_addr))) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
-    if (source == nullptr || (!__isShared(source) && !__isGlobal(source)))
+    }
+    if (source == nullptr || (!__isShared(source) && !__isGlobal(source))) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
-    if (nvshmemi_ptr_range_overflows(source, bytes)) return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    if (nvshmemi_ptr_range_overflows(source, bytes)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     constexpr size_t counted_counter_alignment = 256;
     const uintptr_t dest_addr = reinterpret_cast<uintptr_t>(dest);
     const uintptr_t signal_addr_value = reinterpret_cast<uintptr_t>(signal_addr);
     const uint64_t signal_offset = nvshmemi_heap_offset(signal_addr);
     if (signal_addr_value >= dest_addr &&
-        static_cast<size_t>(signal_addr_value - dest_addr) < bytes)
+        static_cast<size_t>(signal_addr_value - dest_addr) < bytes) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     if ((dest_addr & 15u) != 0u || (reinterpret_cast<uintptr_t>(source) & 15u) != 0u ||
-        (signal_offset & (counted_counter_alignment - 1)) != 0u || (bytes & 15u) != 0u)
+        (signal_offset & (counted_counter_alignment - 1)) != 0u || (bytes & 15u) != 0u) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
     return NVSHMEMX_SUCCESS;
 }
 
@@ -88,7 +100,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_shared_source_
             if (pending_bytes &&
                 pending_bytes + chunk >= static_cast<uint32_t>(TMA_PUT_MAX_BATCH_SIZE)) {
                 *cta_status = nvshmemi_counted_drain_batch(completion, pending_bytes);
-                if (*cta_status != NVSHMEMX_SUCCESS) break;
+                if (*cta_status != NVSHMEMX_SUCCESS) {
+                    break;
+                }
                 pending_bytes = 0;
             }
 
@@ -119,8 +133,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
         const char *src = reinterpret_cast<const char *>(source);
         cuda::std::array<char *, TMA_COPY_NUM_STAGES> staging{};
         char *staging_base = nvshmemi_tma_data_buffer(smem_base);
-        for (size_t stage = 0; stage < staging.size(); stage++)
+        for (size_t stage = 0; stage < staging.size(); stage++) {
             staging[stage] = staging_base + stage * staging_capacity;
+        }
         __mbarrier_t *staging_barrier = reinterpret_cast<__mbarrier_t *>(
             nvshmemi_counted_state_slot(smem_base, NVSHMEMI_COUNTED_TMA_BARRIER_SLOT));
         size_t transferred = 0;
@@ -139,12 +154,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
             if (pending_bytes &&
                 pending_bytes + chunk >= static_cast<uint32_t>(TMA_PUT_MAX_BATCH_SIZE)) {
                 *cta_status = nvshmemi_counted_drain_batch(completion, pending_bytes);
-                if (*cta_status != NVSHMEMX_SUCCESS) break;
+                if (*cta_status != NVSHMEMX_SUCCESS) {
+                    break;
+                }
                 pending_bytes = 0;
             }
 
             size_t slot = iteration % staging.size();
-            if (iteration >= staging.size()) completion->fabric_wait_sync_reads();
+            if (iteration >= staging.size()) {
+                completion->fabric_wait_sync_reads();
+            }
             nvshmemi_tma_g2s_copy_thread(0, staging[slot], staging_barrier, src + transferred,
                                          chunk);
 
@@ -213,8 +232,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
                 size_t slot = iteration % staging.size();
                 int phase = static_cast<int>((iteration / staging.size()) & 1);
 
-                if (iteration >= staging.size())
+                if (iteration >= staging.size()) {
                     nvshmemi_tma_mbarrier_try_wait(reusable[slot], phase ^ 1);
+                }
                 nvshmemi_tma_bulk_global_to_shared(staging[slot], src + batch_offset + transferred,
                                                    static_cast<uint32_t>(chunk), ready[slot]);
                 nvshmemi_tma_mbarrier_arrive_expect_tx(ready[slot], static_cast<uint32_t>(chunk));
@@ -249,7 +269,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
         }
 
         __syncthreads();
-        if (*cta_status != NVSHMEMX_SUCCESS) break;
+        if (*cta_status != NVSHMEMX_SUCCESS) {
+            break;
+        }
         batch_offset += batch_bytes;
         chunk_index += (batch_bytes + staging_capacity - 1) / staging_capacity;
     }
@@ -270,10 +292,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
     bool is_elected, uintptr_t smem_base, size_t staging_capacity, int *cta_status,
     handle_barrier_t *completion) {
     unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
-    if (block_threads < 2 * warpSize)
+    if (block_threads < 2 * warpSize) {
         return nvshmemi_counted_put_global_source_block_single(
             dest, source, bytes, signal_addr, pe, is_elected, smem_base, staging_capacity,
             cta_status, completion);
+    }
     return nvshmemi_counted_put_global_source_block_pipelined(
         dest, source, bytes, signal_addr, pe, tid, is_elected, smem_base, staging_capacity,
         cta_status, completion);
@@ -283,17 +306,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_global_source_
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_block(
     void *dest, const void *source, size_t bytes, uint64_t *signal_addr, int pe) {
     int status = nvshmemi_validate_counted_put(dest, source, bytes, signal_addr, pe);
-    if (status != NVSHMEMX_SUCCESS) return status;
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
+    }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT) && \
     !defined(__CUDACC_RTC__) && !defined(__clang_llvm_bitcode_lib__) &&  \
     !defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
     if (!nvshmemi_device_state_d.counted_operations_available ||
         nvshmemi_device_state_d.tma_policy != NVSHMEMX_TMA_ENABLE ||
-        !nvshmemi_ld_and_check_valid_le_id(pe))
+        !nvshmemi_ld_and_check_valid_le_id(pe)) {
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
-    if (bytes == 0) return NVSHMEMX_SUCCESS;
+    }
+    if (bytes == 0) {
+        return NVSHMEMX_SUCCESS;
+    }
     const auto registration = nvshmemi_tma_get_smem_registration();
-    if (!registration.is_valid()) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    if (!registration.is_valid()) {
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
 
     const unsigned int tid =
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
@@ -306,7 +336,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
     bool source_is_shared = __isShared(source);
     size_t staging_capacity =
         source_is_shared ? 0 : nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES);
-    if (!source_is_shared && staging_capacity == 0) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    if (!source_is_shared && staging_capacity == 0) {
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
 
     if (is_elected) {
         *cta_status = NVSHMEMX_SUCCESS;
@@ -316,9 +348,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
         completion->init_raw(1);
     }
     __syncthreads();
-    if (source_is_shared)
+    if (source_is_shared) {
         return nvshmemi_counted_put_shared_source_block(dest, source, bytes, signal_addr, pe,
                                                         is_elected, cta_status, completion);
+    }
     return nvshmemi_counted_put_global_source_block(dest, source, bytes, signal_addr, pe, tid,
                                                     is_elected, smem_base, staging_capacity,
                                                     cta_status, completion);

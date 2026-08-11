@@ -114,12 +114,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
      * match no warp and silently skip the quiet). */
     if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && PE_size < groupSize &&
         num_warps > first_unused_warp) {
-        if (my_warp_idx == first_unused_warp)
+        if (my_warp_idx == first_unused_warp) {
             nvshmemi_transfer_quiet<NVSHMEMI_THREADGROUP_WARP>(false);
-    } else
+        }
+    } else {
         nvshmemi_transfer_quiet<SCOPE>(false);
+    }
     nvshmemi_threadgroup_sync<SCOPE>();
-    if (myIdx == 0) teami->alltoall_count++;
+    if (myIdx == 0) {
+        teami->alltoall_count++;
+    }
 }
 
 template <typename T, threadgroup_t SCOPE>

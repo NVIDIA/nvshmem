@@ -225,7 +225,9 @@ struct nvshmemt_libfabric_endpoint_seq_counter_t {
          * fi_sends don't overwhelm its tx ring. See init-time comment. */
         if (ack_high_watermark < UINT32_MAX) {
             uint64_t total_pending = 0;
-            for (uint32_t c = 0; c < num_categories; c++) total_pending += pending_acks[c];
+            for (uint32_t c = 0; c < num_categories; c++) {
+                total_pending += pending_acks[c];
+            }
             if (total_pending >= ack_high_watermark) {
                 return -1;
             }
@@ -338,7 +340,9 @@ struct signal_seq_map {
 
     nvshmemt_libfabric_comp_entry_t *find(uint32_t seq) {
         slot &s = slots[seq % window];
-        if (s.occupied && s.seq == seq) return &s.entry;
+        if (s.occupied && s.seq == seq) {
+            return &s.entry;
+        }
         auto it = overflow.find(seq);
         return (it != overflow.end()) ? &it->second : nullptr;
     }
@@ -531,10 +535,14 @@ class threadSafeOpQueue {
        public:
         explicit conditional_mutex(bool locking_required) : should_lock(locking_required) {}
         void lock() {
-            if (should_lock) mtx.lock();
+            if (should_lock) {
+                mtx.lock();
+            }
         }
         void unlock() noexcept {
-            if (should_lock) mtx.unlock();
+            if (should_lock) {
+                mtx.unlock();
+            }
         }
     };
 
@@ -649,7 +657,9 @@ class threadSafeOpQueue {
 
 struct cuda_device_deleter {
     void operator()(void *p) const noexcept {
-        if (p) cudaFree(p);
+        if (p) {
+            cudaFree(p);
+        }
     }
 };
 using cuda_device_ptr = std::unique_ptr<void, cuda_device_deleter>;
@@ -698,13 +708,17 @@ class nvshmemt_libfabric_deferred_work_queue_t {
 
    public:
     void push(const nvshmemt_libfabric_deferred_work_t &item) {
-        while (lock.test_and_set(std::memory_order_acquire)) NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        while (lock.test_and_set(std::memory_order_acquire)) {
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        }
         queue.push_back(item);
         lock.clear(std::memory_order_release);
     }
 
     bool pop(nvshmemt_libfabric_deferred_work_t &item) {
-        while (lock.test_and_set(std::memory_order_acquire)) NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        while (lock.test_and_set(std::memory_order_acquire)) {
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        }
         if (queue.empty()) {
             lock.clear(std::memory_order_release);
             return false;
@@ -716,7 +730,9 @@ class nvshmemt_libfabric_deferred_work_queue_t {
     }
 
     void clear() {
-        while (lock.test_and_set(std::memory_order_acquire)) NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        while (lock.test_and_set(std::memory_order_acquire)) {
+            NVSHMEMT_LIBFABRIC_CPU_RELAX();
+        }
         queue.clear();
         lock.clear(std::memory_order_release);
     }
@@ -732,7 +748,9 @@ class SPSCRing {
     bool push(const T &entry) {
         size_t h = head.load(std::memory_order_relaxed);
         size_t next = (h + 1) % Capacity;
-        if (next == tail.load(std::memory_order_acquire)) return false;
+        if (next == tail.load(std::memory_order_acquire)) {
+            return false;
+        }
         ring[h] = entry;
         head.store(next, std::memory_order_release);
         return true;
@@ -740,7 +758,9 @@ class SPSCRing {
 
     bool pop(T &entry) {
         size_t t = tail.load(std::memory_order_relaxed);
-        if (t == head.load(std::memory_order_acquire)) return false;
+        if (t == head.load(std::memory_order_acquire)) {
+            return false;
+        }
         entry = ring[t];
         tail.store((t + 1) % Capacity, std::memory_order_release);
         return true;

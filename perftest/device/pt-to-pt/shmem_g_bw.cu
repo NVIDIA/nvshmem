@@ -60,7 +60,9 @@ __global__ void bw(T *data_d, volatile unsigned int *counter_d, int len, int pe,
 
         for (u = 0; u < UNROLL; ++u) {
             int idx = j + u * threads + tid * stride;
-            if (idx < len) *(data_d + idx) = call_nvshmem_g<T>(data_d + idx, peer);
+            if (idx < len) {
+                *(data_d + idx) = call_nvshmem_g<T>(data_d + idx, peer);
+            }
         }
 
         // synchronizing across blocks
@@ -248,17 +250,19 @@ int main(int argc, char *argv[]) {
         }
     } else {
         for (size = min_size; size <= max_size; size *= step_factor) {
-            for (size_t repetition = 0; repetition < repetitions; repetition++)
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 nvshmem_barrier_all();
+            }
         }
     }
 
     if (mype == 0) {
         print_basic_table("shmem_g_bw", "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
                           h_bw_stats);
-        if (report_msgrate)
+        if (report_msgrate) {
             print_basic_table("shmem_g_bw", "None", "msgrate", "MMPS", '+', h_size_arr, h_msgrate,
                               i, h_msgrate_stats);
+        }
     }
 
 finalize:
@@ -270,7 +274,9 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    if (h_tables) free_tables(h_tables, 3);
+    if (h_tables) {
+        free_tables(h_tables, 3);
+    }
     free(h_bw_stats);
     free(h_msgrate_stats);
     finalize_wrapper();

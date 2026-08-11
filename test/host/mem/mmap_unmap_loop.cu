@@ -54,17 +54,23 @@
 namespace {
 
 int check_cuda_driver(CUresult result, const char *call) {
-    if (result == CUDA_SUCCESS) return 0;
+    if (result == CUDA_SUCCESS) {
+        return 0;
+    }
 
     const char *str = nullptr;
     CUresult ret = cuGetErrorString(result, &str);
-    if (ret == CUDA_ERROR_INVALID_VALUE || str == nullptr) str = "Unknown error";
+    if (ret == CUDA_ERROR_INVALID_VALUE || str == nullptr) {
+        str = "Unknown error";
+    }
     ERROR_PRINT("%s failed with %s \n", call, str);
     return -1;
 }
 
 int check_cuda_runtime(cudaError_t result, const char *call) {
-    if (result == cudaSuccess) return 0;
+    if (result == cudaSuccess) {
+        return 0;
+    }
 
     ERROR_PRINT("%s failed with %s \n", call, cudaGetErrorString(result));
     return -1;
@@ -79,7 +85,9 @@ struct NvshmemGuard {
     }
 
     ~NvshmemGuard() {
-        if (initialized) finalize_wrapper();
+        if (initialized) {
+            finalize_wrapper();
+        }
     }
 
     NvshmemGuard(const NvshmemGuard &) = delete;
@@ -124,10 +132,14 @@ class SymmetricMapping {
 
     int register_symmetric(void *user_buf, size_t size) {
         int status = unregister();
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         void *mapping = nvshmemx_buffer_register_symmetric(user_buf, size, 0);
-        if (mapping == nullptr) return -1;
+        if (mapping == nullptr) {
+            return -1;
+        }
 
         mapping_ = mapping;
         size_ = size;
@@ -137,11 +149,15 @@ class SymmetricMapping {
 
     int register_at_preferred(void *user_buf, size_t size, void *preferred_addr) {
         int status = unregister();
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         void *mapping = nvshmemx_buffer_register_symmetric_at_preferred_address(user_buf, size,
                                                                                 preferred_addr, 0);
-        if (mapping == nullptr) return -1;
+        if (mapping == nullptr) {
+            return -1;
+        }
 
         mapping_ = mapping;
         size_ = size;
@@ -150,10 +166,14 @@ class SymmetricMapping {
     }
 
     int unregister() {
-        if (!registered_) return 0;
+        if (!registered_) {
+            return 0;
+        }
 
         int status = nvshmemx_buffer_unregister_symmetric(mapping_, size_);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         registered_ = false;
         return 0;
@@ -162,10 +182,14 @@ class SymmetricMapping {
     void *addr() const { return mapping_; }
 
     void reset() {
-        if (!registered_) return;
+        if (!registered_) {
+            return;
+        }
 
         int status = nvshmemx_buffer_unregister_symmetric(mapping_, size_);
-        if (status) ERROR_PRINT("nvshmemx_buffer_unregister_symmetric failed during cleanup \n");
+        if (status) {
+            ERROR_PRINT("nvshmemx_buffer_unregister_symmetric failed during cleanup \n");
+        }
         registered_ = false;
     }
 
@@ -268,7 +292,9 @@ int check_collective_errors(uint64_t *errs) {
     int status =
         check_cuda_runtime(cudaMemcpyFromSymbol(errs, errs_d, sizeof(unsigned long long int), 0),
                            "cudaMemcpyFromSymbol");
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     if (*errs) {
         printf("Validation errors found\n");
@@ -299,7 +325,9 @@ int test_allocation_at_preferred_address(void *user_buf, size_t size, void *mmap
     int unregister_status = mapping.unregister();
     if (unregister_status) {
         ERROR_PRINT("nvshmemx_buffer_unregister_symmetric failed \n");
-        if (!status) status = unregister_status;
+        if (!status) {
+            status = unregister_status;
+        }
     }
     return status;
 }
@@ -348,15 +376,23 @@ int main(int argc, char **argv) {
     mype_node = nvshmem_team_my_pe(NVSHMEMX_TEAM_NODE);
     npes_node = nvshmem_team_n_pes(NVSHMEMX_TEAM_NODE);
     status = check_cuda_runtime(cudaGetDeviceCount(&dev_count), "cudaGetDeviceCount");
-    if (status) return status;
+    if (status) {
+        return status;
+    }
     npes_per_gpu = (npes_node + dev_count - 1) / dev_count;
     dev_id = (mype_node / npes_per_gpu);
     status = check_cuda_runtime(cudaSetDevice(dev_id), "cudaSetDevice");
-    if (status) return status;
+    if (status) {
+        return status;
+    }
     status = check_cuda_driver(cuDeviceGet(&my_dev, dev_id), "cuDeviceGet");
-    if (status) return status;
+    if (status) {
+        return status;
+    }
     status = check_cuda_runtime(cudaDriverGetVersion(&cuda_drv_version), "cudaDriverGetVersion");
-    if (status) return status;
+    if (status) {
+        return status;
+    }
     prop.type = MEM_ALLOC_TYPE;
     prop.location.type = MEM_ALLOC_LOCATION_TYPE;
     prop.location.id = dev_id;
@@ -365,7 +401,9 @@ int main(int argc, char **argv) {
         status = check_cuda_driver(
             cuDeviceGetAttribute(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, my_dev),
             "cuDeviceGetAttribute");
-        if (status) return status;
+        if (status) {
+            return status;
+        }
         prop.location.id = numa_id;
     } else {
         prop.allocFlags.gpuDirectRDMACapable = 1;
@@ -386,7 +424,9 @@ int main(int argc, char **argv) {
 
     std::vector<UserBuffer> buffers(iter);
 
-    if (!mype) DEBUG_PRINT("creating and mmapping %d buffers ", iter);
+    if (!mype) {
+        DEBUG_PRINT("creating and mmapping %d buffers ", iter);
+    }
     for (unsigned int i = 0; i < iter; i++) {
         seed = i;
         lsize = rand_r(&seed) % (_max_size - _min_size + 1) + _min_size;
@@ -394,7 +434,9 @@ int main(int argc, char **argv) {
 
         UserBuffer &buffer = buffers[i];
         status = buffer.allocate(lsize, prop);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         status = buffer.register_symmetric();
         if (status) {
@@ -406,7 +448,9 @@ int main(int argc, char **argv) {
             memset(buffer.mapped_ptr(), 0, lsize);
         } else {
             status = check_cuda_runtime(cudaMemset(buffer.mapped_ptr(), 0, lsize), "cudaMemset");
-            if (status) return status;
+            if (status) {
+                return status;
+            }
         }
     }
 
@@ -428,7 +472,9 @@ int main(int argc, char **argv) {
         // test heap usage to verify mmap correctness
         CudaStreamGuard stream_guard;
         status = stream_guard.create();
-        if (status) return status;
+        if (status) {
+            return status;
+        }
         cudaStream_t stream = stream_guard.get();
 
         bufId = r % iter;
@@ -446,7 +492,9 @@ int main(int argc, char **argv) {
         DO_REDUCE_ON_STREAM_TEST(int, dtype_t, sum);
         DO_REDUCE_TEST(int, dtype_t, sum);
         status = check_collective_errors(&errs);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
         fflush(stdout);
         nvshmem_barrier_all();
 
@@ -479,8 +527,9 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        if (!mype)
+        if (!mype) {
             DEBUG_PRINT("freeing buffers with index %d to %d \n", free_start_idx, free_end_idx);
+        }
         for (int i = free_start_idx; i <= free_end_idx; i++) {
             status = buffers[i].unregister_symmetric();
             if (status) {
@@ -499,9 +548,10 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (!mype)
+        if (!mype) {
             DEBUG_PRINT("re-allocating buffers with index %d to %d \n", free_start_idx,
                         free_end_idx);
+        }
         if (r % 2) {
             for (int i = free_end_idx; i >= free_start_idx; i--) {
                 status = buffers[i].register_symmetric();
@@ -514,7 +564,9 @@ int main(int argc, char **argv) {
                 } else {
                     status = check_cuda_runtime(
                         cudaMemset(buffers[i].mapped_ptr(), 0, buffers[i].size()), "cudaMemset");
-                    if (status) return status;
+                    if (status) {
+                        return status;
+                    }
                 }
             }
         } else {
@@ -529,16 +581,22 @@ int main(int argc, char **argv) {
                 } else {
                     status = check_cuda_runtime(
                         cudaMemset(buffers[i].mapped_ptr(), 0, buffers[i].size()), "cudaMemset");
-                    if (status) return status;
+                    if (status) {
+                        return status;
+                    }
                 }
             }
         }
-        if (!mype) DEBUG_PRINT("done repetition %d \n", r);
+        if (!mype) {
+            DEBUG_PRINT("done repetition %d \n", r);
+        }
     }
 
     fflush(stdout);
 
-    if (!mype) DEBUG_PRINT("[binsize %d] done testing \n", b);
+    if (!mype) {
+        DEBUG_PRINT("[binsize %d] done testing \n", b);
+    }
 
     return status;
 }

@@ -18,7 +18,9 @@
 static std::string writeFile(const std::string &path, const std::string &contents) {
     FILE *fp = std::fopen(path.c_str(), "w");
     EXPECT_NE(fp, nullptr) << "Failed to open file: " << path << " errno=" << errno;
-    if (fp == nullptr) return path;
+    if (fp == nullptr) {
+        return path;
+    }
     std::fwrite(contents.data(), 1, contents.size(), fp);
     std::fclose(fp);
     return path;

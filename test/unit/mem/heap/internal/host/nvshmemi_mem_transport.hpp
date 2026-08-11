@@ -26,7 +26,9 @@ static_assert(sizeof(nvshmem_mem_handle_t) % sizeof(uint64_t) == 0,
 class nvshmemi_mem_p2p_transport {
    public:
     ~nvshmemi_mem_p2p_transport() {
-        if (p2p_objref_ != nullptr) p2p_objref_ = nullptr;
+        if (p2p_objref_ != nullptr) {
+            p2p_objref_ = nullptr;
+        }
     }
     nvshmemi_mem_p2p_transport(const nvshmemi_mem_p2p_transport &obj) = delete;
     static nvshmemi_mem_p2p_transport *get_instance(int mype, int npes) {
@@ -63,13 +65,17 @@ class nvshmemi_mem_p2p_transport {
     void set_heap_size_(nvshmemi_symmetric_heap &heap, size_t size) { heap.heap_size_ = size; }
     void set_heap_base_(nvshmemi_symmetric_heap &heap) {
         auto &storage = heap_base_storage_[&heap];
-        if (!storage) storage = std::make_unique<int>(1);
+        if (!storage) {
+            storage = std::make_unique<int>(1);
+        }
         heap.heap_base_ = storage.get();
     }
 
     void set_peer_heap_base_p2p_(nvshmemi_symmetric_heap &heap) {
         auto &storage = peer_heap_base_p2p_storage_[&heap];
-        if (!storage) storage = std::make_unique<int>(1);
+        if (!storage) {
+            storage = std::make_unique<int>(1);
+        }
         void *ptr = storage.get();
 
         if (heap.peer_heap_base_p2p_ == nullptr) {
@@ -93,7 +99,9 @@ class nvshmemi_mem_p2p_transport {
 class nvshmemi_mem_remote_transport {
    public:
     ~nvshmemi_mem_remote_transport() {
-        if (remote_objref_ != nullptr) remote_objref_ = nullptr;
+        if (remote_objref_ != nullptr) {
+            remote_objref_ = nullptr;
+        }
     }
     nvshmemi_mem_remote_transport(const nvshmemi_mem_remote_transport &obj) = delete;
     nvshmemi_mem_remote_transport(nvshmemi_mem_remote_transport &&obj) = delete;

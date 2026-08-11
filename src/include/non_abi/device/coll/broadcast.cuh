@@ -87,7 +87,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_intranode_tree_thre
         for (int i = 0; i < k; i++) {
             int child_in_team =
                 ((my_pe_in_team + (teami->size - PE_root)) % teami->size) * k + i + 1;
-            if (child_in_team >= teami->size) break;
+            if (child_in_team >= teami->size) {
+                break;
+            }
             child_in_team = (child_in_team + PE_root) % teami->size;
             int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
 
@@ -96,8 +98,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_intranode_tree_thre
                                                nelems * sizeof(T) / sizeof(uint32_t), child);
         }
     }
-    if (PE_root == my_pe_in_team && dest != source)
+    if (PE_root == my_pe_in_team && dest != source) {
         nvshmemi_memcpy_threadgroup<SCOPE>(dest, source, nelems * sizeof(T));
+    }
     if (!myIdx) { /* Only one thread should increment */
         teami->bcast_sync_offset += sizeof(T) * nelems * 2;
     }
@@ -133,7 +136,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_internode_tree_thre
     nvshmemi_threadgroup_sync<SCOPE>();
     for (int i = myIdx; i < k; i += groupSize) {
         int child_in_team = ((my_pe_in_team + (teami->size - PE_root)) % teami->size) * k + i + 1;
-        if (child_in_team >= teami->size) break;
+        if (child_in_team >= teami->size) {
+            break;
+        }
         child_in_team = (child_in_team + PE_root) % teami->size;
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
 
@@ -141,8 +146,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_internode_tree_thre
             (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
             nelems * sizeof(T) / sizeof(uint32_t), child);
     }
-    if (PE_root == my_pe_in_team && dest != source)
+    if (PE_root == my_pe_in_team && dest != source) {
         nvshmemi_memcpy_threadgroup<SCOPE>(dest, source, nelems * sizeof(T));
+    }
     if (!myIdx) { /* Only one thread should increment */
         teami->bcast_sync_offset += sizeof(T) * nelems * 2;
     }
@@ -179,32 +185,39 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
     /* Do remote transfers first */
     for (int i = myIdx; i < k; i += groupSize) {
         int child_in_team = ((my_pe_in_team + (teami->size - PE_root)) % teami->size) * k + i + 1;
-        if (child_in_team >= teami->size) break;
+        if (child_in_team >= teami->size) {
+            break;
+        }
         child_in_team = (child_in_team + PE_root) % teami->size;
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
-        if (is_remote)
+        if (is_remote) {
             nvshmemi_put_nbi<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
                 (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
                 nelems * sizeof(T) / sizeof(uint32_t), child);
+        }
     }
 
     /* Do P2P transfers */
     for (int i = 0; i < k; i++) {
         int child_in_team = ((my_pe_in_team + (teami->size - PE_root)) % teami->size) * k + i + 1;
-        if (child_in_team >= teami->size) break;
+        if (child_in_team >= teami->size) {
+            break;
+        }
         child_in_team = (child_in_team + PE_root) % teami->size;
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
 
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
-        if (!is_remote)
+        if (!is_remote) {
             nvshmemii_put_nbi<uint64_t, SCOPE>((uint64_t *)(pWrk + recv_offset),
                                                (uint64_t *)(pWrk + recv_offset),
                                                nelems * sizeof(T) / sizeof(uint32_t), child);
+        }
     }
 
-    if (PE_root == my_pe_in_team && dest != source)
+    if (PE_root == my_pe_in_team && dest != source) {
         nvshmemi_memcpy_threadgroup<SCOPE>(dest, source, nelems * sizeof(T));
+    }
     if (!myIdx) { /* Only one thread should increment */
         teami->bcast_sync_offset += sizeof(T) * nelems * 2;
     }
@@ -239,32 +252,39 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_nonLL_tree_threadgr
     /* Do remote transfers first */
     for (int i = myIdx; i < k; i += groupSize) {
         int child_in_team = ((my_pe_in_team + (teami->size - PE_root)) % teami->size) * k + i + 1;
-        if (child_in_team >= teami->size) break;
+        if (child_in_team >= teami->size) {
+            break;
+        }
         child_in_team = (child_in_team + PE_root) % teami->size;
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
-        if (is_remote)
+        if (is_remote) {
             nvshmemi_put_signal<T, NVSHMEMI_THREADGROUP_THREAD>(
                 dest, (PE_root == my_pe_in_team) ? source : dest, nelems,
                 (uint64_t *)(pWrk + recv_offset), ll_flag, NVSHMEMI_AMO_SIGNAL_SET, child, 1);
+        }
     }
 
     /* Do P2P transfers */
     for (int i = 0; i < k; i++) {
         int child_in_team = ((my_pe_in_team + (teami->size - PE_root)) % teami->size) * k + i + 1;
-        if (child_in_team >= teami->size) break;
+        if (child_in_team >= teami->size) {
+            break;
+        }
         child_in_team = (child_in_team + PE_root) % teami->size;
         int child = nvshmemi_team_translate_pe(team, child_in_team, NVSHMEM_TEAM_WORLD_INDEX);
 
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
-        if (!is_remote)
+        if (!is_remote) {
             nvshmemii_put_signal<T, SCOPE>(dest, (PE_root == my_pe_in_team) ? source : dest, nelems,
                                            (uint64_t *)(pWrk + recv_offset), ll_flag,
                                            NVSHMEMI_AMO_SIGNAL_SET, child, 1);
+        }
     }
 
-    if (PE_root == my_pe_in_team && dest != source)
+    if (PE_root == my_pe_in_team && dest != source) {
         nvshmemi_memcpy_threadgroup<SCOPE>(dest, source, nelems * sizeof(T));
+    }
     if (!myIdx) { /* Only one thread should increment */
         nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
         teami->bcast_sync_offset +=
@@ -349,10 +369,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
                     nvshmemi_device_state_d.pe_dist ==
                         NVSHMEMI_PE_DIST_BLOCK) { /* hierarchical topo-aware */
                     bcast_algo = 2;
-                } else
+                } else {
                     bcast_algo = 3;
-            } else /* non-LL algorithm */
+                }
+            } else { /* non-LL algorithm */
                 bcast_algo = 4;
+            }
             break;
         case 1: /* Brutefoce algorithm: send one to all followed by barrier */
             break;

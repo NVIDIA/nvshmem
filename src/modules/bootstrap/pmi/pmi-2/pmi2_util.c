@@ -86,7 +86,9 @@ int PMI2U_readline(int fd, char *buf, int maxlen) {
         ch = *nextChar++;
         *p++ = ch;
         curlen++;
-        if (ch == '\n') break;
+        if (ch == '\n') {
+            break;
+        }
     }
 
     /* We null terminate the string for convenience in printing */
@@ -101,9 +103,9 @@ int PMI2U_readline(int fd, char *buf, int maxlen) {
 int PMI2U_writeline(int fd, char *buf) {
     int size = strlen(buf), n;
 
-    if (buf[size - 1] != '\n') /* error:  no newline at end */
+    if (buf[size - 1] != '\n') { /* error:  no newline at end */
         PMI2U_printf("write_line: message string doesn't end in newline: :%s:", buf);
-    else {
+    } else {
         PMI2U_printf("PMI sending: %s", buf);
 
         do {
@@ -129,22 +131,30 @@ int PMI2U_parse_keyvals(char *st) {
     char *p, *keystart, *valstart;
     int offset;
 
-    if (!st) return (-1);
+    if (!st) {
+        return (-1);
+    }
 
     PMI2U_keyval_tab_idx = 0;
     p = st;
     while (1) {
-        while (*p == ' ') p++;
+        while (*p == ' ') {
+            p++;
+        }
         /* got non-blank */
         if (*p == '=') {
             PMI2U_printf("PMI2U_parse_keyvals:  unexpected = at character %ld in %s",
                          (long int)(p - st), st);
             return (-1);
         }
-        if (*p == '\n' || *p == '\0') return (0); /* normal exit */
+        if (*p == '\n' || *p == '\0') {
+            return (0); /* normal exit */
+        }
         /* got normal character */
         keystart = p; /* remember where key started */
-        while (*p != ' ' && *p != '=' && *p != '\n' && *p != '\0') p++;
+        while (*p != ' ' && *p != '=' && *p != '\n' && *p != '\0') {
+            p++;
+        }
         if (*p == ' ' || *p == '\n' || *p == '\0') {
             PMI2U_printf("PMI2U_parse_keyvals: unexpected key delimiter at character %ld in %s",
                          (long int)(p - st), st);
@@ -156,7 +166,9 @@ int PMI2U_parse_keyvals(char *st) {
         strncpy(PMI2U_keyval_tab[PMI2U_keyval_tab_idx].key, keystart, MAXKEYLEN);
         PMI2U_keyval_tab[PMI2U_keyval_tab_idx].key[MAXKEYLEN - 1] = '\0';
         valstart = ++p; /* start of value */
-        while (*p != ' ' && *p != '\n' && *p != '\0') p++;
+        while (*p != ' ' && *p != '\n' && *p != '\0') {
+            p++;
+        }
         /* store value */
         strncpy(PMI2U_keyval_tab[PMI2U_keyval_tab_idx].value, valstart, MAXVALLEN);
         offset = p - valstart;
@@ -165,15 +177,20 @@ int PMI2U_parse_keyvals(char *st) {
          intermediate offset */
         PMI2U_keyval_tab[PMI2U_keyval_tab_idx].value[offset] = '\0';
         PMI2U_keyval_tab_idx++;
-        if (*p == ' ') continue;
-        if (*p == '\n' || *p == '\0') return (0); /* value has been set to empty */
+        if (*p == ' ') {
+            continue;
+        }
+        if (*p == '\n' || *p == '\0') {
+            return (0); /* value has been set to empty */
+        }
     }
 }
 
 void PMI2U_dump_keyvals(void) {
     int i;
-    for (i = 0; i < PMI2U_keyval_tab_idx; i++)
+    for (i = 0; i < PMI2U_keyval_tab_idx; i++) {
         PMI2U_printf("  %s=%s", PMI2U_keyval_tab[i].key, PMI2U_keyval_tab[i].value);
+    }
 }
 
 char *PMI2U_getval(const char *keystr, char *valstr, int vallen) {
@@ -234,7 +251,9 @@ int MPIU_Strncpy(char *dest, const char *src, size_t n) {
     const char *s_ptr = src;
     register int i;
 
-    if (n == 0) return 0;
+    if (n == 0) {
+        return 0;
+    }
 
     i = (int)n;
     while (*s_ptr && i-- > 0) {

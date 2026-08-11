@@ -92,7 +92,9 @@ static int get_numa_id(char *path) {
 
     int numaId = -1;
     FILE *file = fopen(npath, "r");
-    if (file == NULL) return -1;
+    if (file == NULL) {
+        return -1;
+    }
     if (fscanf(file, "%d", &numaId) == EOF) {
         fclose(file);
         return -1;
@@ -108,7 +110,9 @@ static int get_device_path(char *bus_id, char **path) {
     char *cuda_rpath;
     char bus_path[] = "/sys/class/pci_bus/0000:00/device";
 
-    for (int i = 0; i < 16; i++) bus_id[i] = tolower(bus_id[i]);
+    for (int i = 0; i < 16; i++) {
+        bus_id[i] = tolower(bus_id[i]);
+    }
     memcpy(bus_path + sizeof("/sys/class/pci_bus/") - 1, bus_id, sizeof("0000:00") - 1);
 
     cuda_rpath = realpath(bus_path, NULL);
@@ -134,11 +138,15 @@ static int is_pci_addr(const char *name) {
 
 static int get_nvidia_gpu_count(void) {
     DIR *dir = opendir(NVIDIA_DRIVER_PATH);
-    if (!dir) return 0;
+    if (!dir) {
+        return 0;
+    }
     int count = 0;
     struct dirent *ent;
     while ((ent = readdir(dir)) != NULL) {
-        if (is_pci_addr(ent->d_name)) count++;
+        if (is_pci_addr(ent->d_name)) {
+            count++;
+        }
     }
     closedir(dir);
     return count;
@@ -173,12 +181,18 @@ static const char *get_netdevs_policy_name(enum netdevs_policy policy) {
 int nvshmemi_get_netdevs_policy_entity_count(nvshmemi_state_t *state) {
     if (get_netdevs_policy() == NETDEVS_POLICY_EXTERNAL_SHARING_PCIE_SWITCH_NIC_EXCLUSIVE) {
         int gpu_count = get_nvidia_gpu_count();
-        if (gpu_count > 0) return gpu_count;
-        if (state && state->npes_node > 0) return state->npes_node;
+        if (gpu_count > 0) {
+            return gpu_count;
+        }
+        if (state && state->npes_node > 0) {
+            return state->npes_node;
+        }
         return 1;
     }
 
-    if (!state || state->npes_node <= 0) return 1;
+    if (!state || state->npes_node <= 0) {
+        return 1;
+    }
     return state->npes_node;
 }
 
@@ -190,8 +204,12 @@ static int get_all_physical_gpu_paths_and_index(int cuda_device_id, char ***cuda
     std::vector<std::array<char, MAX_BUSID_SIZE>> gpu_bus_ids;
 
     status = get_cuda_bus_id(cuda_device_id, my_bus_id);
-    if (status != NVSHMEMX_SUCCESS) return status;
-    for (int k = 0; k < MAX_BUSID_SIZE; k++) my_bus_id[k] = tolower(my_bus_id[k]);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
+    }
+    for (int k = 0; k < MAX_BUSID_SIZE; k++) {
+        my_bus_id[k] = tolower(my_bus_id[k]);
+    }
 
     nvidia_dir = opendir(NVIDIA_DRIVER_PATH);
     if (!nvidia_dir) {
@@ -204,10 +222,14 @@ static int get_all_physical_gpu_paths_and_index(int cuda_device_id, char ***cuda
     *out_mygpu_index = -1;
     struct dirent *ent;
     while ((ent = readdir(nvidia_dir)) != NULL) {
-        if (!is_pci_addr(ent->d_name)) continue;
+        if (!is_pci_addr(ent->d_name)) {
+            continue;
+        }
         std::array<char, MAX_BUSID_SIZE> bus_id = {};
         strncpy(bus_id.data(), ent->d_name, MAX_BUSID_SIZE - 1);
-        for (int k = 0; k < MAX_BUSID_SIZE; k++) bus_id[k] = tolower(bus_id[k]);
+        for (int k = 0; k < MAX_BUSID_SIZE; k++) {
+            bus_id[k] = tolower(bus_id[k]);
+        }
         gpu_bus_ids.push_back(bus_id);
     }
     closedir(nvidia_dir);
@@ -235,8 +257,9 @@ static int get_all_physical_gpu_paths_and_index(int cuda_device_id, char ***cuda
             goto out;
         }
 
-        if (strncmp(my_bus_id, gpu_bus_ids[gpu_id].data(), MAX_BUSID_SIZE) == 0)
+        if (strncmp(my_bus_id, gpu_bus_ids[gpu_id].data(), MAX_BUSID_SIZE) == 0) {
             *out_mygpu_index = gpu_id;
+        }
     }
 
     if (*out_mygpu_index < 0) {
@@ -249,7 +272,9 @@ out:
     if (status) {
         if (*cuda_device_paths) {
             for (int i = 0; i < *out_ngpus; i++) {
-                if ((*cuda_device_paths)[i]) free((*cuda_device_paths)[i]);
+                if ((*cuda_device_paths)[i]) {
+                    free((*cuda_device_paths)[i]);
+                }
             }
             free(*cuda_device_paths);
             *cuda_device_paths = NULL;
@@ -265,10 +290,14 @@ static enum pci_distance get_pci_distance(char *cuda_path, char *mlx_path) {
     int same = 1;
     size_t i;
     for (i = 0; i < strlen(cuda_path); i++) {
-        if (cuda_path[i] != mlx_path[i]) same = 0;
+        if (cuda_path[i] != mlx_path[i]) {
+            same = 0;
+        }
         if (cuda_path[i] == '/') {
             depth++;
-            if (same == 1) score++;
+            if (same == 1) {
+                score++;
+            }
         }
     }
     if (score <= 3) {
@@ -277,8 +306,12 @@ static enum pci_distance get_pci_distance(char *cuda_path, char *mlx_path) {
         int numaId2 = get_numa_id(mlx_path);
         return ((numaId1 == numaId2) ? PATH_NODE : PATH_SYS);
     }
-    if (score == 4) return PATH_PHB;
-    if (score == depth - 1) return PATH_PIX;
+    if (score == 4) {
+        return PATH_PHB;
+    }
+    if (score == depth - 1) {
+        return PATH_PIX;
+    }
     return PATH_PXB;
 }
 
@@ -289,10 +322,14 @@ typedef struct nvshmemi_path_pair_info {
 } nvshmemi_path_pair_info_t;
 
 static void free_entity_paths(char **entity_paths, int n_entities) {
-    if (!entity_paths) return;
+    if (!entity_paths) {
+        return;
+    }
 
     for (int i = 0; i < n_entities; i++) {
-        if (entity_paths[i]) free(entity_paths[i]);
+        if (entity_paths[i]) {
+            free(entity_paths[i]);
+        }
     }
     free(entity_paths);
 }
@@ -358,7 +395,9 @@ static int collect_local_pe_paths(char ***entity_paths, int *n_entities, int *my
     status = NVSHMEMX_SUCCESS;
 
 out:
-    if (gpu_info_all) free(gpu_info_all);
+    if (gpu_info_all) {
+        free(gpu_info_all);
+    }
     if (status) {
         free_entity_paths(*entity_paths, *n_entities);
         *entity_paths = NULL;
@@ -476,12 +515,13 @@ static int select_devices_by_distance(int *device_arr, int max_dev_per_entity,
         bool need_more_assignments = 0;
         int entity_base_index = (*pairs_iter).entity_idx * max_dev_per_entity;
         /* skip pairs where the entity already has a partner in the first loop */
-        for (entity_pair_index = 0; entity_pair_index < max_dev_per_entity; entity_pair_index++)
+        for (entity_pair_index = 0; entity_pair_index < max_dev_per_entity; entity_pair_index++) {
             if (entity_selected_devices[entity_base_index + entity_pair_index] ==
                 PE_DEVICE_NOT_ASSIGNED) {
                 need_more_assignments = 1;
                 break;
             }
+        }
 
         if (!need_more_assignments) {
             continue;
@@ -715,9 +755,13 @@ int nvshmemi_build_transport_map(nvshmemi_state_t *state) {
                           "allgather of ipc handles failed \n");
 
 out:
-    if (local_map) free(local_map);
+    if (local_map) {
+        free(local_map);
+    }
     if (status) {
-        if (state->transport_map) free(state->transport_map);
+        if (state->transport_map) {
+            free(state->transport_map);
+        }
     }
     return status;
 }
@@ -765,7 +809,9 @@ int nvshmemi_detect_same_device(nvshmemi_state_t *state) {
 
     for (int i = 0; i < state->npes; i++) {
         (state->pe_info + i)->pe = i;
-        if (i == state->mype) continue;
+        if (i == state->mype) {
+            continue;
+        }
 
         const auto &uuid_i = (state->pe_info + i)->gpu_uuid;
         status = (((state->pe_info + i)->hostHash == my_info.hostHash) &&
@@ -784,7 +830,9 @@ int nvshmemi_detect_same_device(nvshmemi_state_t *state) {
 out:
     if (status) {
         state->cucontext = NULL;
-        if (state->pe_info) free(state->pe_info);
+        if (state->pe_info) {
+            free(state->pe_info);
+        }
     }
     return status;
 }
@@ -855,7 +903,9 @@ static int cpumap_to_cpuset(std::string_view map_str, cpu_set_t *set) {
         }
         masks[--m] = parsed_mask;
 
-        if (end == std::string_view::npos) break;
+        if (end == std::string_view::npos) {
+            break;
+        }
         start = end + 1;
     }
 
@@ -921,7 +971,9 @@ static int set_cpu_affinity(nvshmemi_state_t *state) {
     }
 
     /* Strip newline if present */
-    if (map_str.back() == '\n') map_str.pop_back();
+    if (map_str.back() == '\n') {
+        map_str.pop_back();
+    }
 
     status = cpumap_to_cpuset(map_str, &numa_set);
     if (status != NVSHMEMX_SUCCESS) {

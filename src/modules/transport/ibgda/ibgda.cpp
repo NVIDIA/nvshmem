@@ -107,7 +107,9 @@ static size_t ibgda_round_up(size_t v, size_t size) { return ((v + size - 1) / s
 static constexpr int ibgda_round_up_pow2(int n) {
     assert(n >= 1);
     int pow2 = 1;
-    while (pow2 < n) pow2 <<= 1;
+    while (pow2 < n) {
+        pow2 <<= 1;
+    }
     return pow2;
 }
 
@@ -598,7 +600,9 @@ out:
 int nvshmemt_ibgda_progress(nvshmem_transport_t t) {
     int status = 0;
     status = ibgda_dci_progress(t);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
     status = ibgda_rc_progress(t);
     return status;
 }
@@ -630,10 +634,12 @@ int nvshmemt_ibgda_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_
              it != ibgda_device_local_only_mhandles.end(); ++it) {
             if (it->mhandle.start == (uint64_t)handle->buf) {
                 curr_mhandle_cache = &ibgda_device_local_only_mhandles.data()[position];
-                if (position > 0)
+                if (position > 0) {
                     prev_mhandle_cache = &ibgda_device_local_only_mhandles.data()[position - 1];
-                if (position < ibgda_device_local_only_mhandles.size() - 1)
+                }
+                if (position < ibgda_device_local_only_mhandles.size() - 1) {
                     next_mhandle_cache = &ibgda_device_local_only_mhandles.data()[position + 1];
+                }
                 break;
             }
             ++position;
@@ -643,11 +649,12 @@ int nvshmemt_ibgda_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_
 
         // Remove this element from the linked list on both host and GPU.
         if (prev_mhandle_cache) {
-            if (next_mhandle_cache)
+            if (next_mhandle_cache) {
                 prev_mhandle_cache->mhandle.next =
                     (nvshmemi_ibgda_device_local_only_mhandle_t *)next_mhandle_cache->dev_ptr;
-            else
+            } else {
                 prev_mhandle_cache->mhandle.next = NULL;
+            }
             mhandle_gpu_ptr = (void *)((uintptr_t)prev_mhandle_cache->dev_ptr +
                                        offsetof(nvshmemi_ibgda_device_local_only_mhandle_t, next));
             status =
@@ -658,11 +665,12 @@ int nvshmemt_ibgda_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_
                                   "Setting local_only_mhandle in GPU memory failed.\n");
         } else {
             // The caller will trigger device state update.
-            if (next_mhandle_cache)
+            if (next_mhandle_cache) {
                 ibgda_device_state->globalmem.local_only_mhandle_head =
                     (nvshmemi_ibgda_device_local_only_mhandle_t *)next_mhandle_cache->dev_ptr;
-            else
+            } else {
                 ibgda_device_state->globalmem.local_only_mhandle_head = NULL;
+            }
         }
 
         // Free the copy of this element on GPU.
@@ -869,7 +877,9 @@ int nvshmemt_ibgda_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, s
 
 out:
     if (status) {
-        if (device_mhandle_d) cudaFree(device_mhandle_d);
+        if (device_mhandle_d) {
+            cudaFree(device_mhandle_d);
+        }
         if (did_emplace) {
             if (local_only) {
                 // Recoverable
@@ -976,7 +986,9 @@ out:
 static void ibgda_gpu_mem_free(struct ibgda_mem_object *mobject) {
     int status = 0;
 
-    if (!mobject) return;
+    if (!mobject) {
+        return;
+    }
 
     assert(mobject->mem_type == IBGDA_MEM_TYPE_GPU);
 
@@ -1022,7 +1034,9 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
     NVSHMEMI_NULL_ERROR_JMP(mobject, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "Unable to allocate a new mobject.\n");
 
-    if (alignment > 0) bufsize = size + alignment - 1;
+    if (alignment > 0) {
+        bufsize = size + alignment - 1;
+    }
 
     status = cudaMalloc(&ptr, bufsize);
     NVSHMEMI_NE_ERROR_JMP(status, cudaSuccess, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1100,7 +1114,9 @@ out:
             CUDA_RUNTIME_ERROR_STRING(_status);
         }
 
-        if (mobject) free(mobject);
+        if (mobject) {
+            free(mobject);
+        }
     }
     return status;
 }
@@ -1108,7 +1124,9 @@ out:
 static void ibgda_host_mem_free(struct ibgda_mem_object *mobject) {
     cudaError_t status;
 
-    if (!mobject) return;
+    if (!mobject) {
+        return;
+    }
 
     assert(mobject->mem_type == IBGDA_MEM_TYPE_HOST);
 
@@ -1172,8 +1190,12 @@ out:
             cudaError_t _status = cudaHostUnregister(ptr);
             CUDA_RUNTIME_ERROR_STRING(_status);
         }
-        if (ptr) free(ptr);
-        if (mobject) free(mobject);
+        if (ptr) {
+            free(ptr);
+        }
+        if (mobject) {
+            free(mobject);
+        }
     }
     return status;
 }
@@ -1182,25 +1204,29 @@ static inline int ibgda_nic_control_alloc(struct ibgda_mem_object **pmobject, si
                                           size_t alignment) {
     assert(ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU ||
            ibgda_nic_buf_location == IBGDA_MEM_TYPE_HOST);
-    if (ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU)
+    if (ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU) {
         return ibgda_gpu_mem_alloc(pmobject, size, alignment, false);
-    else
+    } else {
         return ibgda_host_mem_alloc(pmobject, size, alignment, true);
+    }
 }
 
 static inline void ibgda_nic_control_free(struct ibgda_mem_object *mobject) {
     assert(ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU ||
            ibgda_nic_buf_location == IBGDA_MEM_TYPE_HOST);
-    if (ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU)
+    if (ibgda_nic_buf_location == IBGDA_MEM_TYPE_GPU) {
         ibgda_gpu_mem_free(mobject);
-    else
+    } else {
         ibgda_host_mem_free(mobject);
+    }
 }
 
 static void ibgda_nic_mem_gpu_unmap(struct ibgda_mem_object *mobject) {
     cudaError_t status;
 
-    if (!mobject) return;
+    if (!mobject) {
+        return;
+    }
 
     assert(mobject->mem_type == IBGDA_MEM_TYPE_NIC);
 
@@ -1263,7 +1289,9 @@ out:
             cudaError_t _status = cudaHostUnregister(uar->reg_addr);
             CUDA_RUNTIME_ERROR_STRING(_status);
         }
-        if (mobject) free(mobject);
+        if (mobject) {
+            free(mobject);
+        }
     }
     return status;
 }
@@ -1305,16 +1333,21 @@ out:
 static void ibgda_unmap_and_free_qp_uar(struct ibgda_mem_object *mobject) {
     struct mlx5dv_devx_uar *uar = NULL;
 
-    if (!mobject) return;
+    if (!mobject) {
+        return;
+    }
 
     uar = mobject->uar;
 
-    if (mobject->has_gpu_mapping)
+    if (mobject->has_gpu_mapping) {
         ibgda_nic_mem_gpu_unmap(mobject);
-    else
+    } else {
         ibgda_nic_mem_cpu_unmap(mobject);
+    }
 
-    if (uar) mlx5dv_devx_free_uar(uar);
+    if (uar) {
+        mlx5dv_devx_free_uar(uar);
+    }
 }
 
 static int ibgda_alloc_and_map_qp_uar(struct ibv_context *context, ibgda_nic_handler_t handler,
@@ -1329,16 +1362,18 @@ static int ibgda_alloc_and_map_qp_uar(struct ibv_context *context, ibgda_nic_han
 
 #ifdef HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED
     uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
-    if (uar)
+    if (uar) {
         uar_reg_size = IBGDA_MLX5_NC_UAR_SIZE;
-    else
+    } else
 #endif
         /* We only use this in the case that we have CPU proxy. When extending support to SM-Side
          * code, we will need to add an explicit check for mmio support in the cuda driver.
          */
         if (use_nc_uar) {
             uar = mlx5dv_devx_alloc_uar(context, MLX5DV_UAR_ALLOC_TYPE_NC);
-            if (uar) uar_reg_size = IBGDA_MLX5_NC_UAR_SIZE;
+            if (uar) {
+                uar_reg_size = IBGDA_MLX5_NC_UAR_SIZE;
+            }
         }
 
     if (!uar) {
@@ -1405,12 +1440,16 @@ out:
 
 static void ibgda_destroy_cq_mobjects(struct ibgda_cq *gcq) {
     if (gcq->dbr_mobject) {
-        if (gcq->dbr_mobject->has_nic_mapping) ibgda_mobject_nic_unmap(gcq->dbr_mobject);
+        if (gcq->dbr_mobject->has_nic_mapping) {
+            ibgda_mobject_nic_unmap(gcq->dbr_mobject);
+        }
         ibgda_nic_control_free(gcq->dbr_mobject);
     }
 
     if (gcq->cq_mobject) {
-        if (gcq->cq_mobject->has_nic_mapping) ibgda_mobject_nic_unmap(gcq->cq_mobject);
+        if (gcq->cq_mobject->has_nic_mapping) {
+            ibgda_mobject_nic_unmap(gcq->cq_mobject);
+        }
         ibgda_nic_control_free(gcq->cq_mobject);
     }
 }
@@ -1543,14 +1582,20 @@ static int ibgda_create_cq(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_cq 
 
 out:
     if (status) {
-        if (uar) mlx5dv_devx_free_uar(uar);
-        if (gcq) free(gcq);
+        if (uar) {
+            mlx5dv_devx_free_uar(uar);
+        }
+        if (gcq) {
+            free(gcq);
+        }
     }
     return status;
 }
 
 static void ibgda_destroy_cq(struct ibgda_cq *gcq) {
-    if (!gcq) return;
+    if (!gcq) {
+        return;
+    }
 
     if (gcq->devx_cq) {
         mlx5dv_devx_obj_destroy(gcq->devx_cq);
@@ -2037,26 +2082,36 @@ out:
 
 static void ibgda_destroy_qp_mobjects(struct ibgda_qp_control_structures *qp_ctrl) {
     if (qp_ctrl->prod_idx_mobject) {
-        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY)
+        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
             ibgda_gpu_mem_free(qp_ctrl->prod_idx_mobject);
-        else
+        } else {
             ibgda_host_mem_free(qp_ctrl->prod_idx_mobject);
+        }
     }
 
-    if (qp_ctrl->prod_idx_cache) free(qp_ctrl->prod_idx_cache);
+    if (qp_ctrl->prod_idx_cache) {
+        free(qp_ctrl->prod_idx_cache);
+    }
 
-    if (qp_ctrl->prod_idx_snapshot) free(qp_ctrl->prod_idx_snapshot);
+    if (qp_ctrl->prod_idx_snapshot) {
+        free(qp_ctrl->prod_idx_snapshot);
+    }
 
     if (qp_ctrl->dbr_mobject) {
-        if (qp_ctrl->dbr_mobject->has_nic_mapping) ibgda_mobject_nic_unmap(qp_ctrl->dbr_mobject);
-        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_GPU)
+        if (qp_ctrl->dbr_mobject->has_nic_mapping) {
+            ibgda_mobject_nic_unmap(qp_ctrl->dbr_mobject);
+        }
+        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_GPU) {
             ibgda_nic_control_free(qp_ctrl->dbr_mobject);
-        else
+        } else {
             ibgda_host_mem_free(qp_ctrl->dbr_mobject);
+        }
     }
 
     if (qp_ctrl->wq_mobject) {
-        if (qp_ctrl->wq_mobject->has_nic_mapping) ibgda_mobject_nic_unmap(qp_ctrl->wq_mobject);
+        if (qp_ctrl->wq_mobject->has_nic_mapping) {
+            ibgda_mobject_nic_unmap(qp_ctrl->wq_mobject);
+        }
         ibgda_nic_control_free(qp_ctrl->wq_mobject);
     }
 }
@@ -2107,10 +2162,11 @@ static int ibgda_create_qp_mobjects(struct ibgda_qp_control_structures *qp_ctrl,
                                    ibgda_state->dmabuf_support_for_control_buffers);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cannot register wq buf.\n");
 
-    if (ibgda_nic_handler == IBGDA_NIC_HANDLER_GPU)
+    if (ibgda_nic_handler == IBGDA_NIC_HANDLER_GPU) {
         status = ibgda_nic_control_alloc(&dbr_mobject, dbr_buf_size, IBGDA_GPAGE_SIZE);
-    else
+    } else {
         status = ibgda_host_mem_alloc(&dbr_mobject, dbr_buf_size, IBGDA_GPAGE_SIZE, true);
+    }
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cannot allocate dbr buf.\n");
 
     status = ibgda_mobject_nic_map(dbr_mobject, context, IBV_ACCESS_LOCAL_WRITE,
@@ -2237,8 +2293,12 @@ static int ibgda_create_qp_shared_objects(struct ibgda_device *device) {
 
 out:
     if (status) {
-        if (recv_cq) ftable.destroy_cq(recv_cq);
-        if (srq) ftable.destroy_srq(srq);
+        if (recv_cq) {
+            ftable.destroy_cq(recv_cq);
+        }
+        if (srq) {
+            ftable.destroy_srq(srq);
+        }
     }
     return status;
 }
@@ -2422,9 +2482,15 @@ static int ibgda_create_qp(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep 
 
 out:
     if (status) {
-        if (uar_mobject) ibgda_unmap_and_free_qp_uar(uar_mobject);
-        if (send_cq) ibgda_destroy_cq(send_cq);
-        if (ep) free(ep);
+        if (uar_mobject) {
+            ibgda_unmap_and_free_qp_uar(uar_mobject);
+        }
+        if (send_cq) {
+            ibgda_destroy_cq(send_cq);
+        }
+        if (ep) {
+            free(ep);
+        }
     }
 
     return status;
@@ -2651,11 +2717,21 @@ static int ibgda_create_dct_shared_objects(nvshmemt_ibgda_state_t *ibgda_state,
     device->support_half_av_seg = support_half_av_seg;
 out:
     if (status) {
-        if (ah) ftable.destroy_ah(ah);
-        if (recv_cq) ftable.destroy_cq(recv_cq);
-        if (send_cq) ftable.destroy_cq(send_cq);
-        if (srq) ftable.destroy_srq(srq);
-        if (pd) ftable.dealloc_pd(pd);
+        if (ah) {
+            ftable.destroy_ah(ah);
+        }
+        if (recv_cq) {
+            ftable.destroy_cq(recv_cq);
+        }
+        if (send_cq) {
+            ftable.destroy_cq(send_cq);
+        }
+        if (srq) {
+            ftable.destroy_srq(srq);
+        }
+        if (pd) {
+            ftable.dealloc_pd(pd);
+        }
     }
     return status;
 }
@@ -2791,9 +2867,13 @@ out:
     if (status) {
         if (ib_qp) {
             int _status = ftable.destroy_qp(ib_qp);
-            if (_status) NVSHMEMI_ERROR_PRINT("ibv_destroy_qp for dct failed.\n");
+            if (_status) {
+                NVSHMEMI_ERROR_PRINT("ibv_destroy_qp for dct failed.\n");
+            }
         }
-        if (ep) free(ep);
+        if (ep) {
+            free(ep);
+        }
     }
     return status;
 }
@@ -3387,7 +3467,9 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
         for (int j = 0; j < n_pes; ++j) {
             // Do not create loopback to self
             int dst_pe = (i * n_pes + 1 + mype + j) % n_pes;
-            if (dst_pe == mype) continue;
+            if (dst_pe == mype) {
+                continue;
+            }
             int mapped_i = rc_first_index + i * n_pes + dst_pe;
             int local_mapped_i = i + num_eps_per_pe * dst_pe;
             /* mapped_i indexes this device's RC array; global_mapped_i indexes rc_h/rc_d. */
@@ -3772,12 +3854,16 @@ out:
 static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_state) {
     int status = 0;
 
-    if (!ep) return status;
+    if (!ep) {
+        return status;
+    }
 
     if (ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCT) {
         if (ep->ib_qp) {
             int status = ftable.destroy_qp(ep->ib_qp);
-            if (status) NVSHMEMI_ERROR_PRINT("ibv_destroy_qp failed.\n");
+            if (status) {
+                NVSHMEMI_ERROR_PRINT("ibv_destroy_qp failed.\n");
+            }
         }
     } else {
         if (ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC) {
@@ -4050,15 +4136,33 @@ static int ibgda_setup_gpu_state(nvshmem_transport_t t) {
 
 out:
     if (status) {
-        if (dci_h) free(dci_h);
-        if (dct_h) free(dct_h);
-        if (ibgda_state->device_state_cache->cq_h) free(ibgda_state->device_state_cache->cq_h);
-        if (ibgda_state->device_state_cache->rc_h) free(ibgda_state->device_state_cache->rc_h);
-        if (dci_d) cudaFree(dci_d);
-        if (dct_d) cudaFree(dct_d);
-        if (cq_d) cudaFree(cq_d);
-        if (rc_d) cudaFree(rc_d);
-        if (qp_group_switches_d) cudaFree(qp_group_switches_d);
+        if (dci_h) {
+            free(dci_h);
+        }
+        if (dct_h) {
+            free(dct_h);
+        }
+        if (ibgda_state->device_state_cache->cq_h) {
+            free(ibgda_state->device_state_cache->cq_h);
+        }
+        if (ibgda_state->device_state_cache->rc_h) {
+            free(ibgda_state->device_state_cache->rc_h);
+        }
+        if (dci_d) {
+            cudaFree(dci_d);
+        }
+        if (dct_d) {
+            cudaFree(dct_d);
+        }
+        if (cq_d) {
+            cudaFree(cq_d);
+        }
+        if (rc_d) {
+            cudaFree(rc_d);
+        }
+        if (qp_group_switches_d) {
+            cudaFree(qp_group_switches_d);
+        }
     }
     return status;
 }
@@ -4074,7 +4178,9 @@ static bool ibgda_cst_is_required(struct ibgda_device *device, CUdevice dev_id) 
         NVSHMEMI_WARN_PRINT("Cannot query dev attr. Assuming no GDR write ordering\n");
     } else {
         // GPU guarantees incoming PCIe write ordering. No need to do CST.
-        if (order >= CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER) rval = false;
+        if (order >= CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER) {
+            rval = false;
+        }
     }
     rval = rval || device->common_device.data_direct;
     return rval;
@@ -4091,7 +4197,9 @@ static int ibgda_connect_global_setup(nvshmemt_ibgda_state_t *ibgda_state, int n
     status = ibgda_get_cuda_device_attributes(&ibgda_state->cached_gpu_device_id,
                                               &ibgda_state->cached_warp_size,
                                               &ibgda_state->cached_mtpb, &ibgda_state->cached_mpc);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     if (num_selected_devs <= 0 || selected_dev_ids == NULL) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
@@ -4150,14 +4258,20 @@ static int ibgda_connect_device_calculations(nvshmemt_ibgda_state_t *ibgda_state
 
     // Calculate and validate endpoint counts for this device
     status = ibgda_validate_dct_endpoints(ibgda_state, device, ibgda_state->n_devs_selected);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_calculate_dci_endpoints(ibgda_state, device, n_pes,
                                            ibgda_state->cached_warp_size, ibgda_state->cached_mpc);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_calculate_rc_endpoints(ibgda_state, device, ibgda_state->cached_warp_size);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     return status;
 }
@@ -4172,22 +4286,34 @@ static int ibgda_connect_device_resources(nvshmemt_ibgda_state_t *ibgda_state,
 
     // Allocate device structs
     status = ibgda_allocate_dct_structures(device, n_pes);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_allocate_dci_structures(device);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_allocate_rc_structures(t, device, num_rc_eps_per_pe * n_pes);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_create_qp_shared_objects(device);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_create_dct_shared_objects(ibgda_state, device, portid);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_create_dci_shared_objects(ibgda_state, device);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     return status;
 }
@@ -4199,16 +4325,22 @@ static int ibgda_connect_device_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
     int status = 0;
     // Setup DCT endpoints
     status = ibgda_setup_dct_endpoints(ibgda_state, device, portid, t);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // Setup DCI endpoints
     status = ibgda_setup_dci_endpoints(ibgda_state, device, portid);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // Setup RC endpoints
     status = ibgda_setup_rc_endpoints(ibgda_state, device, portid, t,
                                       ibgda_state->common.options->IBGDA_NUM_RC_PER_PE);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // Calculate global flags
     int n_pes = t->n_pes;
@@ -4310,10 +4442,14 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
 
     // Phase 1: Global setup (only on first call)
     status = ibgda_connect_global_setup(ibgda_state, num_selected_devs, selected_dev_ids);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     status = ibgda_configure_multinic_amo_routing(t, ibgda_state);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // Phase 2-4: Per-device processing (cached per device)
     int init_dev_cnt = 0;
@@ -4331,13 +4467,19 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
         initialized_devices[dev_idx] = true;
 
         status = ibgda_connect_device_calculations(ibgda_state, device, n_pes);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         status = ibgda_connect_device_resources(ibgda_state, device, portid, t);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         status = ibgda_connect_device_endpoints(ibgda_state, device, portid, t);
-        if (status) return status;
+        if (status) {
+            return status;
+        }
 
         init_dev_cnt++;
     }
@@ -4357,7 +4499,9 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
 
     // Phase 5: GPU setup (only once)
     status = ibgda_setup_gpu_state(t);
-    if (status) return status;
+    if (status) {
+        return status;
+    }
 
     // Mark that first call is complete
     ibgda_state->connect_endpoints_first_call = false;
@@ -4397,12 +4541,21 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     ibgda_device_state_h = (nvshmemi_ibgda_device_state_t *)transport->type_specific_shared_state;
     if (ibgda_device_state_h) {
-        if (ibgda_device_state_h->globalmem.dcts) cudaFree(ibgda_device_state_h->globalmem.dcts);
-        if (ibgda_device_state_h->globalmem.dcis) cudaFree(ibgda_device_state_h->globalmem.dcis);
-        if (ibgda_device_state_h->globalmem.cqs) cudaFree(ibgda_device_state_h->globalmem.cqs);
-        if (ibgda_device_state_h->globalmem.rcs) cudaFree(ibgda_device_state_h->globalmem.rcs);
-        if (ibgda_device_state_h->globalmem.qp_group_switches)
+        if (ibgda_device_state_h->globalmem.dcts) {
+            cudaFree(ibgda_device_state_h->globalmem.dcts);
+        }
+        if (ibgda_device_state_h->globalmem.dcis) {
+            cudaFree(ibgda_device_state_h->globalmem.dcis);
+        }
+        if (ibgda_device_state_h->globalmem.cqs) {
+            cudaFree(ibgda_device_state_h->globalmem.cqs);
+        }
+        if (ibgda_device_state_h->globalmem.rcs) {
+            cudaFree(ibgda_device_state_h->globalmem.rcs);
+        }
+        if (ibgda_device_state_h->globalmem.qp_group_switches) {
             cudaFree(ibgda_device_state_h->globalmem.qp_group_switches);
+        }
     }
 
     for (int i = 0; i < ibgda_state->n_devs_selected; i++) {
@@ -4442,8 +4595,9 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     /* Free all devices, not just ones we used. */
     for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
         dev_id = ibgda_state->common.dev_ids[i];
-        if (dev_id < 0 || dev_id >= ibgda_state->common.n_raw_devices || device_finalized[dev_id])
+        if (dev_id < 0 || dev_id >= ibgda_state->common.n_raw_devices || device_finalized[dev_id]) {
             continue;
+        }
         device_finalized[dev_id] = true;
 
         device = (struct ibgda_device *)ibgda_state->common.devices + dev_id;
@@ -4612,7 +4766,9 @@ int nvshmemt_ibgda_add_device_remote_mem_handles(nvshmem_transport_t t, int tran
 out:
     if (status) {
         // Unrecoverable error
-        if (ibgda_device_rkeys_d) cudaFree(ibgda_device_rkeys_d);
+        if (ibgda_device_rkeys_d) {
+            cudaFree(ibgda_device_rkeys_d);
+        }
         ibgda_device_rkeys.clear();
     }
     return status;
@@ -4628,12 +4784,13 @@ static ibgda_nic_mapping_memtype_reqeust_t ibgda_parse_nic_mapping_memtype_reque
     // To lower case
     std::for_each(req.begin(), req.end(), [](decltype(*req.begin()) &c) { c = ::tolower(c); });
 
-    if (req == "gpumem")
+    if (req == "gpumem") {
         return IBGDA_NIC_MAPPING_MEMTYPE_REQUEST_GPUMEM;
-    else if (req == "hostmem")
+    } else if (req == "hostmem") {
         return IBGDA_NIC_MAPPING_MEMTYPE_REQUEST_HOSTMEM;
-    else
+    } else {
         return IBGDA_NIC_MAPPING_MEMTYPE_REQUEST_AUTO;
+    }
 }
 
 static int ibgda_check_nic_mapping_memtypes(nvshmemt_ibgda_state_t *ibgda_state,
@@ -4653,7 +4810,9 @@ static int ibgda_check_nic_mapping_memtypes(nvshmemt_ibgda_state_t *ibgda_state,
 
     if (try_gpumem) {
         status = ibgda_gpu_mem_alloc(&mobject, IBGDA_DBRSIZE, IBGDA_GPAGE_SIZE, false);
-        if (status) goto out_try_gpumem;
+        if (status) {
+            goto out_try_gpumem;
+        }
 
         if (!ibgda_state->common.options->IB_DISABLE_DMABUF && ibgda_state->cuda_support_dmabuf) {
             status = ibgda_mobject_nic_map(mobject, device->common_device.context,
@@ -4664,14 +4823,18 @@ static int ibgda_check_nic_mapping_memtypes(nvshmemt_ibgda_state_t *ibgda_state,
         if (!ibgda_state->dmabuf_support_for_control_buffers) {
             status = ibgda_mobject_nic_map(mobject, device->common_device.context,
                                            IBV_ACCESS_LOCAL_WRITE, false);
-            if (status) goto out_try_gpumem;
+            if (status) {
+                goto out_try_gpumem;
+            }
         }
 
         can_use_gpumem = true;
 
     out_try_gpumem:
         if (mobject) {
-            if (mobject->has_nic_mapping) ibgda_mobject_nic_unmap(mobject);
+            if (mobject->has_nic_mapping) {
+                ibgda_mobject_nic_unmap(mobject);
+            }
             ibgda_gpu_mem_free(mobject);
         }
         mobject = NULL;
@@ -4680,17 +4843,23 @@ static int ibgda_check_nic_mapping_memtypes(nvshmemt_ibgda_state_t *ibgda_state,
 
     if (try_hostmem) {
         status = ibgda_host_mem_alloc(&mobject, IBGDA_DBRSIZE, IBGDA_GPAGE_SIZE, true);
-        if (status) goto out_try_hostmem;
+        if (status) {
+            goto out_try_hostmem;
+        }
 
         status =
             ibgda_mobject_nic_map(mobject, device->common_device.context, IBV_ACCESS_LOCAL_WRITE);
-        if (status) goto out_try_hostmem;
+        if (status) {
+            goto out_try_hostmem;
+        }
 
         can_use_hostmem = true;
 
     out_try_hostmem:
         if (mobject) {
-            if (mobject->has_nic_mapping) ibgda_mobject_nic_unmap(mobject);
+            if (mobject->has_nic_mapping) {
+                ibgda_mobject_nic_unmap(mobject);
+            }
             ibgda_host_mem_free(mobject);
         }
         mobject = NULL;
@@ -4700,7 +4869,9 @@ static int ibgda_check_nic_mapping_memtypes(nvshmemt_ibgda_state_t *ibgda_state,
     device->support_nic_buf_on_gpumem = can_use_gpumem;
     device->support_nic_buf_on_hostmem = can_use_hostmem;
 
-    if (!can_use_gpumem && !can_use_hostmem) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    if (!can_use_gpumem && !can_use_hostmem) {
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
 
     return 0;
 }
@@ -4721,7 +4892,9 @@ static int ibgda_check_gpu_mapping_nic_uar(struct ibgda_device *device) {
     }
 
 out:
-    if (mobject) ibgda_unmap_and_free_qp_uar(mobject);
+    if (mobject) {
+        ibgda_unmap_and_free_qp_uar(mobject);
+    }
     return status;
 }
 
@@ -4959,7 +5132,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                     NVSHMEMI_WARN_PRINT(
                         "device %s is not enumerated as an mlx5 device. Skipping...\n", name);
                     ftable.close_device(dev->context);
-                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    if (dev->pd) {
+                        ftable.dealloc_pd(dev->pd);
+                    }
                     dev->context = NULL;
                     dev->pd = NULL;
                     continue;
@@ -4990,7 +5165,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                         "Skipping...\n",
                         name);
                     ftable.close_device(dev->context);
-                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    if (dev->pd) {
+                        ftable.dealloc_pd(dev->pd);
+                    }
                     dev->context = NULL;
                     dev->pd = NULL;
                     continue;
@@ -5011,7 +5188,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                         "to check the PCI_ATOMIC_MODE value in the NIC firmware. Skipping...\n",
                         name);
                     ftable.close_device(dev->context);
-                    if (dev->pd) ftable.dealloc_pd(dev->pd);
+                    if (dev->pd) {
+                        ftable.dealloc_pd(dev->pd);
+                    }
                     dev->context = NULL;
                     dev->pd = NULL;
                     continue;
@@ -5023,7 +5202,9 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                                       "query_endianness_conversion_size failed\n");
             }
 
-            if (!dev->context) continue;
+            if (!dev->context) {
+                continue;
+            }
 
             ibgda_state->common.dev_ids[write_idx] = ibgda_state->common.dev_ids[i];
             ibgda_state->common.port_ids[write_idx] = ibgda_state->common.port_ids[i];
@@ -5044,10 +5225,12 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
             (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
         nic_buf_on_gpumem &= device->support_nic_buf_on_gpumem;
         nic_buf_on_hostmem &= device->support_nic_buf_on_hostmem;
-        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY)
+        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
             nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
-        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY)
+        }
+        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
             nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
+        }
     }
 
     nvshmemt_ib_common_log_device_assignment(ibgda_state->common);

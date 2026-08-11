@@ -61,8 +61,9 @@ static int nvshmemi_p2p_rma_optimized(cudaStream_t custrm /* internal stream */,
                     cudaMemcpyAsync(dest->ptr, src->ptr, bytesdesc.nelems * bytesdesc.elembytes,
                                     cudaMemcpyDeviceToDevice, custrm),
                     status, out);
-                if (verb.desc == NVSHMEMI_OP_PUT_SIGNAL)
+                if (verb.desc == NVSHMEMI_OP_PUT_SIGNAL) {
                     nvshmemi_signal_op_on_stream(sig_addr, signal, sig_op, pe, custrm);
+                }
             }
         } else { /*!is_nbi*/
             if (is_contig) {
@@ -85,8 +86,9 @@ static int nvshmemi_p2p_rma_optimized(cudaStream_t custrm /* internal stream */,
                         cudaMemcpyAsync(dest->ptr, src->ptr, bytesdesc.nelems * bytesdesc.elembytes,
                                         cudaMemcpyDeviceToDevice, verb.cstrm),
                         status, out);
-                    if (verb.desc == NVSHMEMI_OP_PUT_SIGNAL)
+                    if (verb.desc == NVSHMEMI_OP_PUT_SIGNAL) {
                         nvshmemi_signal_op_on_stream(sig_addr, signal, sig_op, pe, verb.cstrm);
+                    }
                 }
             } else { /*!is_contig*/
                 CUDA_RUNTIME_CHECK_GOTO(

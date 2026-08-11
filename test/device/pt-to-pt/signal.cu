@@ -48,7 +48,9 @@ __global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes,
         __syncthreads();
     }
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
@@ -62,7 +64,9 @@ __global__ void ring(T *src, T *dest, int len, int nextpe, size_t dynamic_smem_s
     }
     __syncthreads();
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
@@ -140,14 +144,18 @@ int main(int c, char *v[]) {
     int iters = 50;
 
     status = setup(1, 1, max_msg_size, iters);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
     }
 
     status = test<uint64_t>(launch_alltoall<uint64_t>, launch_ring<uint64_t>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     cleanup();
 

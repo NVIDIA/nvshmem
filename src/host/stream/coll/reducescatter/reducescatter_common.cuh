@@ -65,7 +65,9 @@ void nvshmemi_call_reducescatter_on_stream_kernel(nvshmem_team_t team, TYPE *des
 
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(stream, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     nvshmemi_team_t *teami = nvshmemi_team_pool[team];
     int num_blocks = 1;

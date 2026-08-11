@@ -53,15 +53,21 @@ struct CUModuleGuard {
     }
 
     ~CUModuleGuard() {
-        if (initialized) nvshmemx_cumodule_finalize(mod);
-        if (mod) cuModuleUnload(mod);
+        if (initialized) {
+            nvshmemx_cumodule_finalize(mod);
+        }
+        if (mod) {
+            cuModuleUnload(mod);
+        }
     }
 };
 
 static std::string get_exe_dir() {
     char buf[1024];
     ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len < 0) return {};
+    if (len < 0) {
+        return {};
+    }
     std::string_view exe(buf, static_cast<size_t>(len));
     auto slash = exe.find_last_of('/');
     return slash == std::string_view::npos ? std::string(".") : std::string(exe.substr(0, slash));
@@ -69,11 +75,15 @@ static std::string get_exe_dir() {
 
 static std::vector<char> read_file(const std::string &path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f.is_open()) return {};
+    if (!f.is_open()) {
+        return {};
+    }
     auto size = f.tellg();
     f.seekg(0, std::ios::beg);
     std::vector<char> buf(size);
-    if (!f.read(buf.data(), size)) return {};
+    if (!f.read(buf.data(), size)) {
+        return {};
+    }
     return buf;
 }
 
