@@ -65,7 +65,9 @@ int main(int argc, char **argv) {
     nvshmem_barrier_all();
     ret_val =
         test_nvshmemx_uint64_wait_until_all_vector_on_stream(ivars, status, cmp_values, stream);
-    if (ret_val) goto out;
+    if (ret_val) {
+        goto out;
+    }
 
 out:
     CUDA_CHECK(cudaFree(status));

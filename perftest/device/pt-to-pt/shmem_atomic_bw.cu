@@ -104,7 +104,9 @@ int main(int argc, char *argv[]) {
     h_msgrate = (double *)h_tables[2];
     h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
     h_msgrate_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_bw_stats || !h_msgrate_stats) goto finalize;
+    if (!h_bw_stats || !h_msgrate_stats) {
+        goto finalize;
+    }
 
     if (use_mmap) {
         data_d = (uint64_t *)allocate_mmap_buffer(max_size * ATOMIC_BW_TARGET_STRIDE,
@@ -395,9 +397,10 @@ int main(int argc, char *argv[]) {
     if (mype == 0) {
         print_basic_table(perf_table_name, "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
                           h_bw_stats);
-        if (report_msgrate)
+        if (report_msgrate) {
             print_basic_table(perf_table_name, "None", "msgrate", "MMPS", '+', h_size_arr,
                               h_msgrate, i, h_msgrate_stats);
+        }
     }
 
 finalize:
@@ -409,7 +412,9 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    if (h_tables) free_tables(h_tables, 3);
+    if (h_tables) {
+        free_tables(h_tables, 3);
+    }
     free(h_bw_stats);
     free(h_msgrate_stats);
     finalize_wrapper();

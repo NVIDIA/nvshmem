@@ -112,7 +112,9 @@ int main(int argc, char *argv[]) {
     while (1) {
         int c;
         c = getopt_long(argc, argv, "s:S:n:i:d:b:t:c:r:h", long_options, NULL);
-        if (c == -1) break;
+        if (c == -1) {
+            break;
+        }
 
         switch (c) {
             case 's':
@@ -238,7 +240,9 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    if (strm) CUDA_CHECK(cudaStreamDestroy(strm));
+    if (strm) {
+        CUDA_CHECK(cudaStreamDestroy(strm));
+    }
 
     if (data_d) {
         if (use_mmap) {
@@ -247,11 +251,21 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    if (size_array) free(size_array);
-    if (ons_latency_array) free(ons_latency_array);
-    if (offs_latency_array) free(offs_latency_array);
-    if (ons_latency_stats) free(ons_latency_stats);
-    if (offs_latency_stats) free(offs_latency_stats);
+    if (size_array) {
+        free(size_array);
+    }
+    if (ons_latency_array) {
+        free(ons_latency_array);
+    }
+    if (offs_latency_array) {
+        free(offs_latency_array);
+    }
+    if (ons_latency_stats) {
+        free(ons_latency_stats);
+    }
+    if (offs_latency_stats) {
+        free(offs_latency_stats);
+    }
 
     if (data_d_local) {
         if (use_mmap) {

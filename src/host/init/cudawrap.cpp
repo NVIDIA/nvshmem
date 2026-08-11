@@ -107,17 +107,22 @@ static int cudaPfnFuncLoader(struct nvshmemi_cuda_fn_table *table) {
 int nvshmemi_cuda_library_init(struct nvshmemi_cuda_fn_table *table) {
     cudaError_t cuda_err;
 
-    if (cudaState == cudaInitialized) return NVSHMEMI_SUCCESS;
-    if (cudaState == cudaError) return NVSHMEMI_SYSTEM_ERROR;
+    if (cudaState == cudaInitialized) {
+        return NVSHMEMI_SUCCESS;
+    }
+    if (cudaState == cudaError) {
+        return NVSHMEMI_SYSTEM_ERROR;
+    }
 
     /*
      * Load CUDA driver library
      */
     char path[1024];
-    if (!nvshmemi_options.CUDA_PATH_provided)
+    if (!nvshmemi_options.CUDA_PATH_provided) {
         snprintf(path, 1024, "%s", "libcuda.so.1");
-    else
+    } else {
         snprintf(path, 1024, "%s/%s", nvshmemi_options.CUDA_PATH, "libcuda.so.1");
+    }
 
     cudaLib = dlopen(path, RTLD_LAZY);
     if (cudaLib == NULL) {

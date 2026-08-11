@@ -59,7 +59,9 @@ int main(int argc, char **argv) {
             }
 
             /* No more teams to free */
-            if (i == j) break;
+            if (i == j) {
+                break;
+            }
 
             nvshmem_team_destroy(new_team[j]);
             j++;

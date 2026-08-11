@@ -15,9 +15,10 @@ template <typename T>
 __global__ void broadcast_on_stream_kernel(nvshmem_team_t team, T *dest, const T *source,
                                            size_t nelems, int PE_root, int in_cuda_graph) {
 #ifdef __CUDA_ARCH__
-    if (!blockIdx.x)
+    if (!blockIdx.x) {
         nvshmemi_broadcast_threadgroup<T, NVSHMEMI_THREADGROUP_BLOCK>(team, dest, source, nelems,
                                                                       PE_root);
+    }
 #endif
 }
 
@@ -40,7 +41,9 @@ void nvshmemi_call_broadcast_on_stream_kernel(nvshmem_team_t team, T *dest, cons
     int num_blocks = 1;
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(stream, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     broadcast_on_stream_kernel<T><<<num_blocks, num_threads_per_block, 0, stream>>>(
         team, dest, source, nelems, PE_root, in_cuda_graph);

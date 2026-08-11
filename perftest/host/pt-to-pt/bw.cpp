@@ -156,22 +156,29 @@ int main(int argc, char *argv[]) {
                    dir, strm, sev, eev, &ms, &us);
                 if (putget_issue.type == ON_STREAM) {
                     bandwidth_array[i] = ((float)iter * (float)size) / ((ms / 1000) * B_TO_GB);
-                    if (report_msgrate) msgrate_array[i] = calculate_msgrate(1, iter, ms);
+                    if (report_msgrate) {
+                        msgrate_array[i] = calculate_msgrate(1, iter, ms);
+                    }
                 } else {
                     bandwidth_array[i] = ((float)iter * (float)size) / ((us / 1000000) * B_TO_GB);
-                    if (report_msgrate) msgrate_array[i] = calculate_msgrate(1, iter, us / MS_TO_S);
+                    if (report_msgrate) {
+                        msgrate_array[i] = calculate_msgrate(1, iter, us / MS_TO_S);
+                    }
                 }
                 perf_stats_add(bandwidth_stats[i], bandwidth_array[i]);
-                if (report_msgrate) perf_stats_add(msgrate_stats[i], msgrate_array[i]);
+                if (report_msgrate) {
+                    perf_stats_add(msgrate_stats[i], msgrate_array[i]);
+                }
             }
             i++;
         }
 
         print_basic_table("Bandwidth", "None", "Bandwidth", "GB", '+', size_array, bandwidth_array,
                           i, bandwidth_stats);
-        if (report_msgrate)
+        if (report_msgrate) {
             print_basic_table("Bandwidth", "None", "msgrate", "MMPS", '+', size_array,
                               msgrate_array, i, msgrate_stats);
+        }
         CUDA_CHECK(cudaEventDestroy(sev));
         CUDA_CHECK(cudaEventDestroy(eev));
 
@@ -181,7 +188,9 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    if (strm) CUDA_CHECK(cudaStreamDestroy(strm));
+    if (strm) {
+        CUDA_CHECK(cudaStreamDestroy(strm));
+    }
 
     if (data_d) {
         if (use_mmap) {
@@ -190,11 +199,21 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    if (size_array) free(size_array);
-    if (bandwidth_array) free(bandwidth_array);
-    if (bandwidth_stats) free(bandwidth_stats);
-    if (msgrate_array) free(msgrate_array);
-    if (msgrate_stats) free(msgrate_stats);
+    if (size_array) {
+        free(size_array);
+    }
+    if (bandwidth_array) {
+        free(bandwidth_array);
+    }
+    if (bandwidth_stats) {
+        free(bandwidth_stats);
+    }
+    if (msgrate_array) {
+        free(msgrate_array);
+    }
+    if (msgrate_stats) {
+        free(msgrate_stats);
+    }
 
     if (data_d_local) {
         if (use_mmap) {

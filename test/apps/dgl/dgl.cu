@@ -75,7 +75,9 @@ int main(int argc, char *argv[]) {
     while (1) {
         int c;
         c = getopt(argc, argv, "c:t:h");
-        if (c == -1) break;
+        if (c == -1) {
+            break;
+        }
 
         switch (c) {
             case 'c':
@@ -165,7 +167,9 @@ int main(int argc, char *argv[]) {
 
 finalize:
 
-    if (data_d) nvshmem_free(data_d);
+    if (data_d) {
+        nvshmem_free(data_d);
+    }
     free_tables(h_tables, 2);
     finalize_wrapper();
 

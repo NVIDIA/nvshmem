@@ -42,8 +42,11 @@ int main(int argc, char **argv) {
     dev_buf = (long *)nvshmem_calloc(NELEM, sizeof(long));
     cudaMemcpy(host_buf, dev_buf, NELEM * sizeof(long), cudaMemcpyDeviceToHost);
 
-    for (i = 0; i < NELEM; i++)
-        if (host_buf[i]) ++err;
+    for (i = 0; i < NELEM; i++) {
+        if (host_buf[i]) {
+            ++err;
+        }
+    }
 
     free(host_buf);
     nvshmem_free(dev_buf);

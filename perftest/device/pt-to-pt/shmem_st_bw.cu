@@ -32,7 +32,9 @@ __global__ void bw(double *data_d, double *remote_d, volatile unsigned int *coun
 
         for (u = 0; u < UNROLL; ++u) {
             int idx = j + u * threads + tid;
-            if (idx < len) *(remote_d + idx) = *(data_d + idx);
+            if (idx < len) {
+                *(remote_d + idx) = *(data_d + idx);
+            }
         }
 
         // synchronizing across blocks
@@ -106,7 +108,9 @@ int main(int argc, char *argv[]) {
     h_store_rate = (double *)h_tables[2];
     h_bw_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
     h_store_rate_stats = (perf_stats_t *)calloc(array_size, sizeof(perf_stats_t));
-    if (!h_bw_stats || !h_store_rate_stats) goto finalize;
+    if (!h_bw_stats || !h_store_rate_stats) {
+        goto finalize;
+    }
 
     if (use_mmap) {
         data_d = (double *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -165,17 +169,19 @@ int main(int argc, char *argv[]) {
         }
     } else {
         for (size = min_size; size <= max_size; size *= step_factor) {
-            for (size_t repetition = 0; repetition < repetitions; repetition++)
+            for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 nvshmem_barrier_all();
+            }
         }
     }
 
     if (mype == 0) {
         print_basic_table("shmem_st_bw", "None", "BW", "GB/sec", '+', h_size_arr, h_bw, i,
                           h_bw_stats);
-        if (report_msgrate)
+        if (report_msgrate) {
             print_basic_table("shmem_st_bw", "None", "store_rate", "MOPS", '+', h_size_arr,
                               h_store_rate, i, h_store_rate_stats);
+        }
     }
 
 finalize:
@@ -187,7 +193,9 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    if (h_tables) free_tables(h_tables, 3);
+    if (h_tables) {
+        free_tables(h_tables, 3);
+    }
     free(h_bw_stats);
     free(h_store_rate_stats);
     finalize_wrapper();

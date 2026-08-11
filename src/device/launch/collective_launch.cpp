@@ -247,7 +247,9 @@ out:
 int nvshmemi_teardown_collective_launch() {
     int status = 0;
 
-    if (!nvshmemi_device_only_state.is_initialized) goto out;
+    if (!nvshmemi_device_only_state.is_initialized) {
+        goto out;
+    }
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(nvshmemi_device_only_state.claunch_params.stream),
                             status, out);

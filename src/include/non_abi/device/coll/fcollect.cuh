@@ -359,8 +359,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     int nthreads = nvshmemi_threadgroup_size<SCOPE>();
-    if (!myIdx) /* Only one thread should increment fcollect_count */
+    if (!myIdx) { /* Only one thread should increment fcollect_count */
         nvshmemi_device_state_d.team_pool[team]->fcollect_count += 1;
+    }
     nvshmemi_threadgroup_sync<SCOPE>();
     constexpr bool is_half_prec =
         is_half<T>::value || is_bfloat<T>::value || is_uint16<T>::value || is_int16<T>::value;
@@ -459,12 +460,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             nvshmemi_threadgroup_sync<SCOPE>();
             break;
         case FCOLLECT_ONESHOT:
-            if (p2p_direct)
+            if (p2p_direct) {
                 nvshmemi_fcollect_p2p_allpush_threadgroup<T, SCOPE>(team, dest, source, dest_offset,
                                                                     nelems);
-            else
+            } else {
                 nvshmemi_fcollect_allpush_threadgroup<T, SCOPE>(team, dest, source, dest_offset,
                                                                 nelems);
+            }
             break;
         case FCOLLECT_NVLS:
             nvshmemi_fcollect_nvls_allpush_threadgroup<T, SCOPE>(team, dest, source, dest_offset,

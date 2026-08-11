@@ -17,13 +17,19 @@ __global__ void test_kernel(int *my_data, int *all_data, int *status, uint64_t *
                             size_t *indices, int mype, int npes) {
     int total_sum = 0;
 
-    for (int i = 0; i < N; i++) my_data[i] = mype * N + i;
+    for (int i = 0; i < N; i++) {
+        my_data[i] = mype * N + i;
+    }
 
-    for (int i = 0; i < npes; i++) nvshmem_int_put_nbi(&all_data[mype * N], my_data, N, i);
+    for (int i = 0; i < npes; i++) {
+        nvshmem_int_put_nbi(&all_data[mype * N], my_data, N, i);
+    }
 
     nvshmem_fence();
 
-    for (int i = 0; i < npes; i++) nvshmemx_signal_op(&flags[mype], 1, NVSHMEM_SIGNAL_SET, i);
+    for (int i = 0; i < npes; i++) {
+        nvshmemx_signal_op(&flags[mype], 1, NVSHMEM_SIGNAL_SET, i);
+    }
 
     size_t ncompleted;
     while ((ncompleted =

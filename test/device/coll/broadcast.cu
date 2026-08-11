@@ -130,8 +130,9 @@ int main(int argc, char **argv) {
             DEBUG_PRINT("%d: broadcast block passed\n", mype);
             COLL_CHECK_ERRS_D();
             nvshmem_barrier_all();
-        } else
+        } else {
             nvshmem_barrier_all();
+        }
     }
 
     finalize_test_teams();

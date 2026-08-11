@@ -99,7 +99,9 @@ static int mod_table[] = {0, 2, 1};
 static void base64_build_decoding_table() {
     decoding_table = (char *)malloc(256);
 
-    for (int i = 0; i < 64; i++) decoding_table[(unsigned char)encoding_table[i]] = i;
+    for (int i = 0; i < 64; i++) {
+        decoding_table[(unsigned char)encoding_table[i]] = i;
+    }
 }
 
 static void base64_cleanup() { free(decoding_table); }
@@ -124,7 +126,9 @@ static size_t base64_encode(char *out, const unsigned char *in, size_t in_len) {
         out[j++] = encoding_table[(fused >> 0 * 6) & 0x3F];
     }
 
-    for (int i = 0; i < mod_table[in_len % 3]; i++) out[len - 1 - i] = '=';
+    for (int i = 0; i < mod_table[in_len % 3]; i++) {
+        out[len - 1 - i] = '=';
+    }
 
     return len;
 }
@@ -132,8 +136,12 @@ static size_t base64_encode(char *out, const unsigned char *in, size_t in_len) {
 static size_t base64_decode(char *out, const char *in, size_t in_len) {
     size_t len = base64_decode_length(in_len);
 
-    if (in[in_len - 1] == '=') (len)--;
-    if (in[in_len - 2] == '=') (len)--;
+    if (in[in_len - 1] == '=') {
+        (len)--;
+    }
+    if (in[in_len - 2] == '=') {
+        (len)--;
+    }
 
     for (size_t i = 0, j = 0; i < in_len;) {
         uint32_t a = in[i] == '=' ? 0 & i++ : decoding_table[(int)(in[i++])];
@@ -143,9 +151,15 @@ static size_t base64_decode(char *out, const char *in, size_t in_len) {
 
         uint32_t fused = (a << 3 * 6) + (b << 2 * 6) + (c << 1 * 6) + (d << 0 * 6);
 
-        if (j < len) out[j++] = (fused >> 2 * 8) & 0xFF;
-        if (j < len) out[j++] = (fused >> 1 * 8) & 0xFF;
-        if (j < len) out[j++] = (fused >> 0 * 8) & 0xFF;
+        if (j < len) {
+            out[j++] = (fused >> 2 * 8) & 0xFF;
+        }
+        if (j < len) {
+            out[j++] = (fused >> 1 * 8) & 0xFF;
+        }
+        if (j < len) {
+            out[j++] = (fused >> 0 * 8) & 0xFF;
+        }
     }
 
     return len;
@@ -185,7 +199,9 @@ int SPMI_Init(int *spawned) {
     /* Get the value of PMI_DEBUG from the environment if possible, since
        we may have set it to help debug the setup process */
     p = getenv("PMI_DEBUG");
-    if (p) PMI_debug = atoi(p);
+    if (p) {
+        PMI_debug = atoi(p);
+    }
 
     /* Get the fd for PMI commands; if none, we're a singleton */
     rc = getPMIFD(&notset);
@@ -214,23 +230,26 @@ int SPMI_Init(int *spawned) {
     /* If size, rank, and debug are not set from a communication port,
        use the environment */
     if (notset) {
-        if ((p = getenv("PMI_SIZE")))
+        if ((p = getenv("PMI_SIZE"))) {
             PMI_size = atoi(p);
-        else
+        } else {
             PMI_size = 1;
+        }
 
         if ((p = getenv("PMI_RANK"))) {
             PMI_rank = atoi(p);
             /* Let the util routine know the rank of this process for
                any messages (usually debugging or error) */
             SPMIU_Set_rank(PMI_rank);
-        } else
+        } else {
             PMI_rank = 0;
+        }
 
-        if ((p = getenv("PMI_DEBUG")))
+        if ((p = getenv("PMI_DEBUG"))) {
             PMI_debug = atoi(p);
-        else
+        } else {
             PMI_debug = 0;
+        }
 
         /* Leave unchanged otherwise, which indicates that no value
            was set */
@@ -240,7 +259,9 @@ int SPMI_Init(int *spawned) {
 
     PMII_getmaxes(&PMI_kvsname_max, &PMI_keylen_max, &PMI_vallen_max);
 
-    if (!PMI_initialized) PMI_initialized = NORMAL_INIT_WITH_PM;
+    if (!PMI_initialized) {
+        PMI_initialized = NORMAL_INIT_WITH_PM;
+    }
 
     *spawned = 1;
     __SPMI_KVS_Init();
@@ -257,18 +278,20 @@ int SPMI_Initialized(int *initialized) {
 }
 
 int SPMI_Get_size(int *size) {
-    if (PMI_initialized)
+    if (PMI_initialized) {
         *size = PMI_size;
-    else
+    } else {
         *size = 1;
+    }
     return (0);
 }
 
 int SPMI_Get_rank(int *rank) {
-    if (PMI_initialized)
+    if (PMI_initialized) {
         *rank = PMI_rank;
-    else
+    } else {
         *rank = 0;
+    }
     return (0);
 }
 
@@ -332,19 +355,25 @@ int SPMI_KVS_Get_my_name(char kvsname[], int length) {
 }
 
 int SPMI_KVS_Get_name_length_max(int *maxlen) {
-    if (maxlen == NULL) return SPMI_ERR_INVALID_ARG;
+    if (maxlen == NULL) {
+        return SPMI_ERR_INVALID_ARG;
+    }
     *maxlen = PMI_kvsname_max;
     return SPMI_SUCCESS;
 }
 
 int SPMI_KVS_Get_key_length_max(int *maxlen) {
-    if (maxlen == NULL) return SPMI_ERR_INVALID_ARG;
+    if (maxlen == NULL) {
+        return SPMI_ERR_INVALID_ARG;
+    }
     *maxlen = PMI_keylen_max;
     return SPMI_SUCCESS;
 }
 
 int SPMI_KVS_Get_value_length_max(int *maxlen) {
-    if (maxlen == NULL) return SPMI_ERR_INVALID_ARG;
+    if (maxlen == NULL) {
+        return SPMI_ERR_INVALID_ARG;
+    }
     *maxlen = PMI_vallen_max;
     return SPMI_SUCCESS;
 }
@@ -358,16 +387,22 @@ int SPMI_KVS_Put(const char kvsname[], const char key[], const char value[]) {
     /* This is a special hack to support singleton initialization */
     if (PMI_initialized == SINGLETON_INIT_BUT_NO_PM) {
         rc = strncpy(cached_singinit_key, key, PMI_keylen_max);
-        if (rc == NULL) return SPMI_FAIL;
+        if (rc == NULL) {
+            return SPMI_FAIL;
+        }
 
         rc = strncpy(cached_singinit_val, value, PMI_vallen_max);
-        if (rc == NULL) return SPMI_FAIL;
+        if (rc == NULL) {
+            return SPMI_FAIL;
+        }
 
         return 0;
     }
 
     r = snprintf(buf, SPMIU_MAXLINE, "cmd=put kvsname=%s key=%s value=%s\n", kvsname, key, value);
-    if (r < 0) return SPMI_FAIL;
+    if (r < 0) {
+        return SPMI_FAIL;
+    }
     err = GetResponse(buf, "put_result", 1);
     return err;
 }
@@ -385,7 +420,9 @@ int SPMI_KVS_Get(const char kvsname[], const char key[], char value[], int lengt
     int rc;
 
     rc = snprintf(buf, SPMIU_MAXLINE, "cmd=get kvsname=%s key=%s\n", kvsname, key);
-    if (rc < 0) return SPMI_FAIL;
+    if (rc < 0) {
+        return SPMI_FAIL;
+    }
 
     err = GetResponse(buf, "get_result", 0);
     if (err == SPMI_SUCCESS) {

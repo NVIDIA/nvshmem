@@ -137,7 +137,9 @@ NVSHMEMI_HOSTDEVICE_PREFIX constexpr int nvshmemi_tile_valid_dim_size(int dim_si
         return dim_size;
     } else {
         int remaining = get_tuple_val<dim>(boundary) - get_tuple_val<dim>(start_coord);
-        if (remaining <= 0) return 0;
+        if (remaining <= 0) {
+            return 0;
+        }
         return remaining < dim_size ? remaining : dim_size;
     }
 }

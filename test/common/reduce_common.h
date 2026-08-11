@@ -81,14 +81,17 @@ __device__ unsigned long long int errs_d;
 
 __host__ __device__ bool nvshmtest_are_strings_same(const char *str1, const char *str2) {
     while (*str1 != '\0') {
-        if ((*str2 == '\0') || (*str1 != *str2)) return 0;
+        if ((*str2 == '\0') || (*str1 != *str2)) {
+            return 0;
+        }
         str1++;
         str2++;
     }
-    if (*str2 == '\0')
+    if (*str2 == '\0') {
         return 1;
-    else
+    } else {
         return 0;
+    }
 }
 
 #define DECL_INIT_REDUCE_DATA(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)              \

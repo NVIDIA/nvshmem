@@ -69,7 +69,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
 
     /* Pre-fill smem (amortized; simulates prior compute filling smem) */
     size_t chunk = (size_t)smem_size;
-    for (int j = tid; j < (int)(chunk / sizeof(*smem)); j += blockDim.x) smem[j] = tid;
+    for (int j = tid; j < (int)(chunk / sizeof(*smem)); j += blockDim.x) {
+        smem[j] = tid;
+    }
     __syncthreads();
 
     size_t n_chunks = (bytes_per_block + chunk - 1) / chunk;
@@ -119,7 +121,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
  * translate a request into hardware-dependent memory transactions; this
  * benchmark has no visibility into that on-wire transaction count. */
 static size_t tma_messages_per_iteration(size_t bytes, int num_blocks, int smem_size) {
-    if (num_blocks <= 0 || smem_size <= 0) return 0;
+    if (num_blocks <= 0 || smem_size <= 0) {
+        return 0;
+    }
 
     const size_t block_count = (size_t)num_blocks;
     const size_t chunk_size = (size_t)smem_size;
@@ -215,12 +219,14 @@ int main(int argc, char *argv[]) {
 
             print_basic_table("shmem_put_tma_smem_bw", "None", "BW", "GB/sec", '+', h_size_arr,
                               h_bw, i);
-            if (report_msgrate)
+            if (report_msgrate) {
                 print_basic_table("shmem_put_tma_smem_bw", "None", "msgrate", "MMPS", '+',
                                   h_size_arr, h_msgrate, i);
+            }
         } else {
-            for (size_t size = min_size; size <= max_size; size *= step_factor)
+            for (size_t size = min_size; size <= max_size; size *= step_factor) {
                 nvshmem_barrier_all();
+            }
         }
 
         /* Optional correctness check: set NVSHMEM_PERFTEST_VERIFY=1 to enable.
@@ -237,7 +243,9 @@ int main(int argc, char *argv[]) {
                            max_size);
                 }
             } else {
-                if (mype == 1) CUDA_CHECK(cudaMemset(dst, 0xFF, verify_size));
+                if (mype == 1) {
+                    CUDA_CHECK(cudaMemset(dst, 0xFF, verify_size));
+                }
                 CUDA_CHECK(cudaDeviceSynchronize());
                 nvshmem_barrier_all();
 
@@ -262,17 +270,18 @@ int main(int argc, char *argv[]) {
                         for (int j = 0; j < n_ints; j++) {
                             int expected = j % max_threads;
                             if (h_buf[j] != expected) {
-                                if (errors < 5)
+                                if (errors < 5) {
                                     fprintf(stderr,
                                             "[verify] FAIL at int[%d]: got %d, expected %d\n", j,
                                             h_buf[j], expected);
+                                }
                                 errors++;
                             }
                         }
-                        if (errors == 0)
+                        if (errors == 0) {
                             printf("[verify] PASS (%zu bytes, pattern j%%threads_per_block)\n",
                                    verify_size);
-                        else {
+                        } else {
                             printf("[verify] FAIL: %d / %d ints wrong\n", errors, n_ints);
                             exit_code = 1;
                         }
@@ -286,8 +295,12 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    if (dst) nvshmem_free(dst);
-    if (h_tables) free_tables(h_tables, 3);
+    if (dst) {
+        nvshmem_free(dst);
+    }
+    if (h_tables) {
+        free_tables(h_tables, 3);
+    }
     finalize_wrapper();
 
     return exit_code;

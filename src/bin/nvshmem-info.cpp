@@ -80,7 +80,9 @@ int main(int argc, char **argv) {
         printf("  %-28s %d\n", "CUDA API", CUDA_VERSION);
 
         err = cudaDriverGetVersion(&driverVersion);
-        if (err != cudaSuccess) driverVersion = -1;
+        if (err != cudaSuccess) {
+            driverVersion = -1;
+        }
 
         printf("  %-28s %d\n", "CUDA Driver", driverVersion);
 
@@ -113,10 +115,11 @@ int main(int argc, char **argv) {
             goto out;
         }
 
-        if (opt_env_rst)
+        if (opt_env_rst) {
             nvshmemi_options_print(NVSHMEMI_OPTIONS_STYLE_RST);
-        else
+        } else {
             nvshmemi_options_print(NVSHMEMI_OPTIONS_STYLE_INFO);
+        }
     }
 
 out:

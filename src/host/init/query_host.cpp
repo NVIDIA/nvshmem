@@ -20,7 +20,9 @@ void nvshmem_info_get_name(char *name) {
     const char *str = NVSHMEM_VENDOR_STRING;
 
     /* Copy up to NVSHMEM_MAX_NAME_LEN-1 chars, then add NULL terminator */
-    for (i = 0; i < NVSHMEM_MAX_NAME_LEN - 1 && str[i] != '\0'; i++) name[i] = str[i];
+    for (i = 0; i < NVSHMEM_MAX_NAME_LEN - 1 && str[i] != '\0'; i++) {
+        name[i] = str[i];
+    }
 
     name[i] = '\0';
 }

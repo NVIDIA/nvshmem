@@ -22,13 +22,17 @@ int lat(void *data_d, void *data_d_local, int sizeBytes, int pe, int iter, int s
     if (iss.type == ON_STREAM) {
         if (dir.type == WRITE) {
             for (int i = 0; i < (iter + skip); i++) {
-                if (i == skip) CUDA_CHECK(cudaEventRecord(sev, strm));
+                if (i == skip) {
+                    CUDA_CHECK(cudaEventRecord(sev, strm));
+                }
                 nvshmemx_putmem_on_stream((void *)data_d, (void *)data_d_local, sizeBytes, peer,
                                           strm);
             }
         } else {
             for (int i = 0; i < (iter + skip); i++) {
-                if (i == skip) CUDA_CHECK(cudaEventRecord(sev, strm));
+                if (i == skip) {
+                    CUDA_CHECK(cudaEventRecord(sev, strm));
+                }
                 nvshmemx_getmem_on_stream((void *)data_d_local, (void *)data_d, sizeBytes, peer,
                                           strm);
             }
@@ -39,12 +43,16 @@ int lat(void *data_d, void *data_d_local, int sizeBytes, int pe, int iter, int s
     } else {
         if (dir.type == WRITE) {
             for (int i = 0; i < (iter + skip); i++) {
-                if (i == skip) gettimeofday(&start, NULL);
+                if (i == skip) {
+                    gettimeofday(&start, NULL);
+                }
                 nvshmem_putmem((void *)data_d, (void *)data_d_local, sizeBytes, peer);
             }
         } else {
             for (int i = 0; i < (iter + skip); i++) {
-                if (i == skip) gettimeofday(&start, NULL);
+                if (i == skip) {
+                    gettimeofday(&start, NULL);
+                }
                 nvshmem_getmem((void *)data_d_local, (void *)data_d, sizeBytes, peer);
             }
         }
@@ -169,7 +177,9 @@ int main(int argc, char *argv[]) {
     }
 
 finalize:
-    if (strm) CUDA_CHECK(cudaStreamDestroy(strm));
+    if (strm) {
+        CUDA_CHECK(cudaStreamDestroy(strm));
+    }
 
     if (data_d) {
         if (use_mmap) {
@@ -178,12 +188,20 @@ finalize:
             nvshmem_free(data_d);
         }
     }
-    if (size_array) free(size_array);
-    if (latency_array) free(latency_array);
-    if (latency_stats) free(latency_stats);
+    if (size_array) {
+        free(size_array);
+    }
+    if (latency_array) {
+        free(latency_array);
+    }
+    if (latency_stats) {
+        free(latency_stats);
+    }
 
 #ifdef _NVSHMEM_REGISTRATION_CACHE_ENABLED
-    if (data_d_local) cudaFree(data_d_local);
+    if (data_d_local) {
+        cudaFree(data_d_local);
+    }
 #else
     if (data_d_local) {
         if (use_mmap) {

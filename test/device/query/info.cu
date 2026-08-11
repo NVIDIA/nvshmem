@@ -19,14 +19,20 @@
 
 __device__ size_t dev_strlen(const char *str) {
     size_t i = 0;
-    while (str[i] != '\0') ++i;
+    while (str[i] != '\0') {
+        ++i;
+    }
     return i;
 }
 
 __device__ int dev_strncmp(const char *s1, const char *s2, size_t max) {
     for (size_t i = 0; i < max; i++) {
-        if (s1[i] != s2[i]) return 1;
-        if (s1[i] == '\0') break;
+        if (s1[i] != s2[i]) {
+            return 1;
+        }
+        if (s1[i] == '\0') {
+            break;
+        }
     }
 
     return 0;

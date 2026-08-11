@@ -85,14 +85,20 @@ __host__ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_ask_smem(
  */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, size_t size) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
-    if (smem == NULL || size == 0) return;
+    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) {
+        return;
+    }
+    if (smem == NULL || size == 0) {
+        return;
+    }
 
     /* Size must be at least NVSHMEMI_SMEM_DATA_REGION_OFFSET — we reserve the
      * initial bytes for mbarriers/TMA descriptors.  A smaller allocation
      * can't hold our barriers, so don't register this CTA; it falls back to
      * P2P stores for all puts. */
-    if (size < (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET) return;
+    if (size < (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET) {
+        return;
+    }
 
     /* Use nvshmemi_tma_block_is_elected() — elect.sync with a shfl_sync
      * warp_id broadcast — so the compiler sees a warp-uniform predicate and
@@ -129,7 +135,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
  */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
-    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return;
+    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) {
+        return;
+    }
     int registration_slot = nvshmemi_tma_find_smem_registration();
     if (registration_slot >= 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)

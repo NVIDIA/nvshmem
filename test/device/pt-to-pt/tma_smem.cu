@@ -62,7 +62,9 @@ __global__ void test_put_from_smem(int *recv_data, int elems_per_block, int mype
 
 __global__ void init_source_data(int *source_data, int nelems, int mype) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < nelems) source_data[idx] = mype * PATTERN_SCALE + idx;
+    if (idx < nelems) {
+        source_data[idx] = mype * PATTERN_SCALE + idx;
+    }
 }
 
 __global__ void test_get_to_gmem(int *source_data, int *recv_data, int nelems, int mype, int npes) {

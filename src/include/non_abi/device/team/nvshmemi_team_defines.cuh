@@ -20,25 +20,27 @@
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_team_my_pe(
     nvshmem_team_t team) {
-    if (team == NVSHMEM_TEAM_INVALID)
+    if (team == NVSHMEM_TEAM_INVALID) {
         return -1;
-    else if (team == NVSHMEM_TEAM_WORLD)
+    } else if (team == NVSHMEM_TEAM_WORLD) {
         return nvshmemi_device_state_d.mype;
-    else if (team == NVSHMEMX_TEAM_NODE)
+    } else if (team == NVSHMEMX_TEAM_NODE) {
         return nvshmemi_device_state_d.node_mype;
-    else
+    } else {
         return nvshmemi_device_state_d.team_pool[team]->my_pe;
+    }
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_team_n_pes(nvshmem_team_t team) {
-    if (team == NVSHMEM_TEAM_INVALID)
+    if (team == NVSHMEM_TEAM_INVALID) {
         return -1;
-    else if (team == NVSHMEM_TEAM_WORLD)
+    } else if (team == NVSHMEM_TEAM_WORLD) {
         return nvshmemi_device_state_d.npes;
-    else if (team == NVSHMEMX_TEAM_NODE)
+    } else if (team == NVSHMEMX_TEAM_NODE) {
         return nvshmemi_device_state_d.node_npes;
-    else
+    } else {
         return nvshmemi_device_state_d.team_pool[team]->size;
+    }
 }
 
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ size_t get_fcollect_psync_len_per_team() {
@@ -119,14 +121,18 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_team_is_i
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_team_translate_pe(nvshmem_team_t src_team,
                                                                         int src_pe,
                                                                         nvshmem_team_t dest_team) {
-    if (src_team == NVSHMEM_TEAM_INVALID || dest_team == NVSHMEM_TEAM_INVALID) return -1;
+    if (src_team == NVSHMEM_TEAM_INVALID || dest_team == NVSHMEM_TEAM_INVALID) {
+        return -1;
+    }
     nvshmemi_team_t *src_teami, *dest_teami;
 
     src_teami = nvshmemi_device_state_d.team_pool[src_team];
     dest_teami = nvshmemi_device_state_d.team_pool[dest_team];
     int src_pe_world, dest_pe = -1;
 
-    if (src_pe > src_teami->size) return -1;
+    if (src_pe > src_teami->size) {
+        return -1;
+    }
 
     src_pe_world = src_teami->pe_mapping[src_pe];
     assert(src_pe_world >= src_teami->start && src_pe_world < nvshmemi_device_state_d.npes);

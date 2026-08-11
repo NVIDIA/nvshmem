@@ -20,11 +20,15 @@ struct transport_mem_handle_info_cache {
 
 int nvshmemt_parse_hca_list(const char *string, struct nvshmemt_hca_info *hca_list, int max_count,
                             int log_level) {
-    if (!string) return 0;
+    if (!string) {
+        return 0;
+    }
 
     const char *ptr = string;
     // Ignore "^" name, will be detected outside of this function
-    if (ptr[0] == '^') ptr++;
+    if (ptr[0] == '^') {
+        ptr++;
+    }
 
     int if_num = 0;
     int if_counter = 0;
@@ -245,8 +249,12 @@ int nvshmemt_put_signal(struct nvshmem_transport *tcurr, int pe, rma_verb_t writ
                                      write_bytesdesc[i], is_proxy);
     }
 
-    if (tcurr->host_ops.fence) status = tcurr->host_ops.fence(tcurr, pe, NVSHMEMX_QP_DEFAULT, 0);
-    if (unlikely(status)) goto out;
+    if (tcurr->host_ops.fence) {
+        status = tcurr->host_ops.fence(tcurr, pe, NVSHMEMX_QP_DEFAULT, 0);
+    }
+    if (unlikely(status)) {
+        goto out;
+    }
 
     status = tcurr->host_ops.amo(tcurr, pe, NULL, sig_verb, sig_target, sig_bytesdesc, is_proxy);
 

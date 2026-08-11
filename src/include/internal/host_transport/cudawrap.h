@@ -221,8 +221,12 @@ struct nvshmemi_cuda_fn_table {
 static inline void nvshmemi_cu_get_error_info(struct nvshmemi_cuda_fn_table *table, int err_code,
                                               const char **err_name, const char **err_desc) {
     CUresult err = static_cast<CUresult>(err_code);
-    if (err_name) *err_name = "UNKNOWN";
-    if (err_desc) *err_desc = "Unknown";
+    if (err_name) {
+        *err_name = "UNKNOWN";
+    }
+    if (err_desc) {
+        *err_desc = "Unknown";
+    }
     if (table) {
         if (table->pfn_cuGetErrorName && err_name) {
             (void)table->pfn_cuGetErrorName(err, err_name);

@@ -41,7 +41,9 @@ void nvshmemi_call_alltoall_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
     int num_blocks = 1;
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(stream, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     alltoall_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, 0, stream>>>(
         team, dest, source, nelems, in_cuda_graph);

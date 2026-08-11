@@ -89,8 +89,9 @@ static inline int nvshmemi_atol_scaled(const char *str, nvshmemi_env_size *out) 
         }
     } else if (p < 0) {
         return 1;
-    } else
+    } else {
         scale = 0;
+    }
 
     *out = (nvshmemi_env_size)ceil(p * (1lu << scale));
     return 0;
@@ -132,20 +133,30 @@ static size_t nvshmemi_conf_cap = 0;
 static int nvshmemi_conf_inited = 0;
 
 static inline char *nvshmemi_conf_strdup(const char *s) {
-    if (s == NULL) return NULL;
+    if (s == NULL) {
+        return NULL;
+    }
     size_t n = strlen(s) + 1;
     char *out = (char *)malloc(n);
-    if (out == NULL) return NULL;
+    if (out == NULL) {
+        return NULL;
+    }
     memcpy(out, s, n);
     return out;
 }
 
 /* Trim leading+trailing whitespace in-place, returning new start pointer. */
 static inline char *nvshmemi_conf_trim(char *s) {
-    if (s == NULL) return NULL;
-    while (*s != '\0' && isspace((unsigned char)*s)) s++;
+    if (s == NULL) {
+        return NULL;
+    }
+    while (*s != '\0' && isspace((unsigned char)*s)) {
+        s++;
+    }
     size_t n = strlen(s);
-    while (n > 0 && isspace((unsigned char)s[n - 1])) s[--n] = '\0';
+    while (n > 0 && isspace((unsigned char)s[n - 1])) {
+        s[--n] = '\0';
+    }
     return s;
 }
 
@@ -176,28 +187,42 @@ static inline void nvshmemi_conf_set(nvshmemi_conf_kv_t **kvs, size_t *n, size_t
 
 static inline void nvshmemi_conf_parse_file(nvshmemi_conf_kv_t **kvs, size_t *n, size_t *cap,
                                             const char *path) {
-    if (path == NULL || path[0] == '\0') return;
+    if (path == NULL || path[0] == '\0') {
+        return;
+    }
     FILE *fp = fopen(path, "r");
-    if (fp == NULL) return; /* Missing file is not an error. */
+    if (fp == NULL) {
+        return; /* Missing file is not an error. */
+    }
 
     char line[4096];
     while (fgets(line, (int)sizeof(line), fp) != NULL) {
         /* Strip newline */
         size_t l = strlen(line);
-        while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = '\0';
+        while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r')) {
+            line[--l] = '\0';
+        }
 
         char *p = nvshmemi_conf_trim(line);
-        if (*p == '\0') continue;
-        if (*p == '#') continue;
+        if (*p == '\0') {
+            continue;
+        }
+        if (*p == '#') {
+            continue;
+        }
 
         char *eq = strchr(p, '=');
-        if (eq == NULL) continue;
+        if (eq == NULL) {
+            continue;
+        }
         *eq = '\0';
 
         char *k = nvshmemi_conf_trim(p);
         char *v = nvshmemi_conf_trim(eq + 1);
 
-        if (k == NULL || *k == '\0') continue;
+        if (k == NULL || *k == '\0') {
+            continue;
+        }
 
         /* Inline comment: cut at '#' when preceded by whitespace. */
         for (char *c = v; c != NULL && *c != '\0'; c++) {
@@ -250,7 +275,9 @@ static inline const char *nvshmemi_conf_get(const char *key) {
     }
 
     for (size_t i = 0; i < nvshmemi_conf_n; i++) {
-        if (strcmp(nvshmemi_conf_kvs[i].key, key) == 0) return nvshmemi_conf_kvs[i].val;
+        if (strcmp(nvshmemi_conf_kvs[i].key, key) == 0) {
+            return nvshmemi_conf_kvs[i].val;
+        }
     }
     return NULL;
 }
@@ -264,11 +291,13 @@ static inline const char *nvshmemi_getenv_helper(const char *prefix, const char 
     len = strlen(prefix) + 1 /* '_' */ + strlen(name) + 1 /* '\0' */;
     env_name = (char *)alloca(len);
     ret = snprintf(env_name, len, "%s_%s", prefix, name);
-    if (ret < 0)
+    if (ret < 0) {
         fprintf(stderr, "WARNING: Error in sprintf: %s_%s\n", prefix, name);
-    else {
+    } else {
         env_value = nvshmemi_conf_get(env_name);
-        if (env_value == NULL) env_value = (const char *)getenv(env_name);
+        if (env_value == NULL) {
+            env_value = (const char *)getenv(env_name);
+        }
     }
 
     return env_value;
@@ -278,7 +307,9 @@ static inline const char *nvshmemi_getenv(const char *name) {
     const char *env_value;
 
     env_value = nvshmemi_getenv_helper("NVSHMEM", name);
-    if (env_value != NULL) return env_value;
+    if (env_value != NULL) {
+        return env_value;
+    }
 
     return NULL;
 }
@@ -317,8 +348,9 @@ static inline int nvshmemi_getenv_size(const char *name, nvshmemi_env_size defau
             fprintf(stderr, "Invalid size in environment variable '%s' (%s)\n", name, env);
             return ret;
         }
-    } else
+    } else {
         *out = default_val;
+    }
     return 0;
 }
 

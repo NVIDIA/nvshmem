@@ -34,13 +34,14 @@ void nvshmem_debug_log(nvshmem_debug_log_level level, unsigned long flags, const
     char buffer[1024];
     size_t len = 0;
     pthread_mutex_lock(&nvshmem_debug_output_lock);
-    if (level == NVSHMEM_LOG_WARN && nvshmem_debug_level >= NVSHMEM_LOG_WARN)
+    if (level == NVSHMEM_LOG_WARN && nvshmem_debug_level >= NVSHMEM_LOG_WARN) {
         len = snprintf(buffer, sizeof(buffer), "\n%s:%d:%d [%d] %s:%d NVSHMEM WARN ", hostname,
                        getpid(), nvshmemi_gettid(), cudaDev, filefunc, line);
-    else if (level == NVSHMEM_LOG_INFO && nvshmem_debug_level >= NVSHMEM_LOG_INFO &&
-             (flags & nvshmem_debug_mask))
+    } else if (level == NVSHMEM_LOG_INFO && nvshmem_debug_level >= NVSHMEM_LOG_INFO &&
+               (flags & nvshmem_debug_mask)) {
         len = snprintf(buffer, sizeof(buffer), "%s:%d:%d [%d] NVSHMEM INFO ", hostname, getpid(),
                        nvshmemi_gettid(), cudaDev);
+    }
 #ifdef NVSHMEM_TRACE
     else if (level == NVSHMEM_LOG_TRACE && nvshmem_debug_level >= NVSHMEM_LOG_TRACE &&
              (flags & nvshmem_debug_mask)) {

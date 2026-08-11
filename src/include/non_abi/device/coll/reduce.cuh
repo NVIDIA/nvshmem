@@ -833,29 +833,34 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadg
         const int4 *__restrict__ src_p = (const int4 *)src;
 
         if constexpr (is_unsigned || is_signed || is_float_v) {
-            if (len >= 192 && len % 192 == 0)
+            if (len >= 192 && len % 192 == 0) {
                 nvshmemi_f32_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 12>(dst_p, src_p,
                                                                                 nelems);
-            else
+            } else {
                 nvshmemi_f32_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 1>(dst_p, src_p,
                                                                                nelems);
+            }
         } else if constexpr (is_half_v) {
-            if (len >= 192 && len % 192 == 0)
+            if (len >= 192 && len % 192 == 0) {
                 nvshmemi_f16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 12>(dst_p, src_p,
                                                                                   nelems);
-            else
+            } else {
                 nvshmemi_f16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 1>(dst_p, src_p,
                                                                                  nelems);
+            }
         } else if constexpr (is_bfloat_v) {
-            if (len >= 192 && len % 192 == 0)
+            if (len >= 192 && len % 192 == 0) {
                 nvshmemi_bf16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 12>(dst_p, src_p,
                                                                                    nelems);
-            else
+            } else {
                 nvshmemi_bf16x2_add_local_reduce_mcast16_v4_threadgroup<SCOPE, 1>(dst_p, src_p,
                                                                                   nelems);
+            }
         }
         len -= nelems * sizeof(int4);
-        if (0 == len) return 0;
+        if (0 == len) {
+            return 0;
+        }
         dest = (TYPE *)(dst_p + nelems);
         src = (TYPE *)(src_p + nelems);
     }
@@ -867,37 +872,40 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadg
         const uint64_t *__restrict__ src_p = (const uint64_t *)src;
         switch (OP) {
             case RDXN_OPS_SUM:
-                if (is_unsigned || is_signed)
+                if (is_unsigned || is_signed) {
                     nvshmemi_u64_add_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_float_v)
+                } else if (is_float_v) {
                     nvshmemi_f32_add_local_reduce_mcast8_v2_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                      nelems);
-                else if (is_double_v)
+                } else if (is_double_v) {
                     nvshmemi_f64_add_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_half_v)
+                } else if (is_half_v) {
                     nvshmemi_f16x2_add_local_reduce_mcast8_v2_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                        nelems);
-                else if (is_bfloat_v)
+                } else if (is_bfloat_v) {
                     nvshmemi_bf16x2_add_local_reduce_mcast8_v2_threadgroup<TYPE, SCOPE>(
                         dst_p, src_p, nelems);
+                }
                 break;
             case RDXN_OPS_MIN:
-                if (is_unsigned)
+                if (is_unsigned) {
                     nvshmemi_u64_min_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_signed)
+                } else if (is_signed) {
                     nvshmemi_s64_min_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
+                }
                 break;
             case RDXN_OPS_MAX:
-                if (is_unsigned)
+                if (is_unsigned) {
                     nvshmemi_u64_max_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_signed)
+                } else if (is_signed) {
                     nvshmemi_s64_max_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
+                }
                 break;
             case RDXN_OPS_AND:
                 nvshmemi_b64_and_local_reduce_mcast8_threadgroup<TYPE, SCOPE>(dst_p, src_p, nelems);
@@ -913,7 +921,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadg
         }
 
         len -= nelems * sizeof(uint64_t);
-        if (0 == len) return 0;
+        if (0 == len) {
+            return 0;
+        }
         dest = (TYPE *)(dst_p + nelems);
         src = (TYPE *)(src_p + nelems);
     }
@@ -925,37 +935,40 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadg
         const uint32_t *__restrict__ src_p = (const uint32_t *)src;
         switch (OP) {
             case RDXN_OPS_SUM:
-                if (is_unsigned)
+                if (is_unsigned) {
                     nvshmemi_u32_add_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_signed)
+                } else if (is_signed) {
                     nvshmemi_s32_add_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_float_v)
+                } else if (is_float_v) {
                     nvshmemi_f32_add_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_half_v)
+                } else if (is_half_v) {
                     nvshmemi_f16x2_add_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                     nelems);
-                else if (is_bfloat_v)
+                } else if (is_bfloat_v) {
                     nvshmemi_bf16x2_add_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                      nelems);
+                }
                 break;
             case RDXN_OPS_MIN:
-                if (is_unsigned)
+                if (is_unsigned) {
                     nvshmemi_u32_min_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_signed)
+                } else if (is_signed) {
                     nvshmemi_s32_min_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
+                }
                 break;
             case RDXN_OPS_MAX:
-                if (is_unsigned)
+                if (is_unsigned) {
                     nvshmemi_u32_max_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
-                else if (is_signed)
+                } else if (is_signed) {
                     nvshmemi_s32_max_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p,
                                                                                   nelems);
+                }
                 break;
             case RDXN_OPS_XOR:
                 nvshmemi_b32_xor_local_reduce_mcast4_threadgroup<TYPE, SCOPE>(dst_p, src_p, nelems);
@@ -971,7 +984,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_local_reduce_mcast_threadg
         }
 
         len -= nelems * sizeof(uint32_t);
-        if (0 == len) return 0;
+        if (0 == len) {
+            return 0;
+        }
     }
 
     /* Return the remainder length, incase the caller wants to retry with unicast */
@@ -1101,7 +1116,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
                 nvshmemi_put_nbi<TYPE, SCOPE>(pWrk + offset, pWrk + send_offset + phase * nreduce,
                                               nreduce, step2_nbrs[phase][i]);
             }
-            if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
+            if (!myIdx) {
+                nvshmemi_fence<nvshmemi_threadgroup_thread>();
+            }
             nvshmemi_threadgroup_sync<SCOPE>();
             for (int i = myIdx; i < k - 1; i += groupSize) {
                 nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(pSync, rank), sync_counter[0],
@@ -1113,10 +1130,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
                     reinterpret_cast<uint64_t *>(get_pe_sync_addr(pSync, step2_nbrs[phase][i])),
                     NVSHMEM_CMP_GE, sync_counter[0]);
                 int offset = recv_offset + k * phase * nreduce;
-                if (step2_nbrs[phase][i] < rank)
+                if (step2_nbrs[phase][i] < rank) {
                     offset += i * nreduce;
-                else
+                } else {
                     offset += (i + 1) * nreduce;
+                }
                 gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(dst, (pWrk + offset), dst, nreduce);
             }
             /*nvshmem_quiet(); */ /*wait for my puts to complete */
@@ -1128,20 +1146,25 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
         for (int i = 0; i < step1_nrecvs; i++) {
             nvshmemi_put_nbi<TYPE, SCOPE>(dst, dst, nreduce, step1_recvfrom[i]);
         }
-        if (!myIdx) nvshmemi_fence<nvshmemi_threadgroup_thread>();
+        if (!myIdx) {
+            nvshmemi_fence<nvshmemi_threadgroup_thread>();
+        }
         nvshmemi_threadgroup_sync<SCOPE>();
         for (int i = myIdx; i < step1_nrecvs; i += groupSize) {
             nvshmemi_signal_for_barrier<long>(get_pe_sync_addr(pSync, rank), sync_counter[0],
                                               step1_recvfrom[i]);
         }
     } else if (step1_sendto != -1) {
-        if (!myIdx)
+        if (!myIdx) {
             nvshmemi_wait_until<uint64_t>(
                 reinterpret_cast<uint64_t *>(get_pe_sync_addr(pSync, step1_sendto)), NVSHMEM_CMP_GE,
                 sync_counter[0]);
+        }
     }
     nvshmemi_threadgroup_sync<SCOPE>();
-    if (!myIdx) sync_counter[0] = sync_counter[0] + 1;
+    if (!myIdx) {
+        sync_counter[0] = sync_counter[0] + 1;
+    }
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -1276,12 +1299,13 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
     nvshmemi_threadgroup_sync<SCOPE>();
 
     TYPE *pWrk = (TYPE *)nvshmemi_team_get_psync(teami_node, REDUCE);
-    if (teami_node->size >= 2)
+    if (teami_node->size >= 2) {
         nvshmemi_fcollect_threadgroup<TYPE, SCOPE>(
             NVSHMEMX_TEAM_NODE, pWrk, source, nvshmemi_team_my_pe(NVSHMEMX_TEAM_NODE) * nreduce,
             nreduce);
-    else
+    } else {
         nvshmemi_memcpy_threadgroup<SCOPE>(dest, source, nreduce * sizeof(TYPE));
+    }
 
     if (teami_node->size >= 2) {
         for (int j = myIdx; j < nreduce; j += groupSize) {
@@ -1304,7 +1328,9 @@ nvshmemi_gpu_rdxn_hierarchical_fcollect_threadgroup(nvshmem_team_t team, TYPE *d
 #if CUDART_VERSION >= 12050 || defined(__NVCC__) || defined(__CUDACC_RTC__)
         if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK && OP == RDXN_OPS_SUM &&
                       sizeof(TYPE) >= 4 && sizeof(TYPE) <= 8) {
-            for (int i = myIdx; i < nreduce; i += groupSize) *(dest + i) = 0;
+            for (int i = myIdx; i < nreduce; i += groupSize) {
+                *(dest + i) = 0;
+            }
             nvshmemi_threadgroup_sync<SCOPE>();
             auto block = cg::this_thread_block();
             auto tile = cg::tiled_partition<NVSHMEMI_WARP_SIZE>(block);
@@ -1384,10 +1410,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
     int nreduce) {
     TYPE *src = (TYPE *)nvshmemi_mc_ptr(teami, src_ptr);
     TYPE *dest;
-    if (ONESHOT)
+    if (ONESHOT) {
         dest = dst_ptr;
-    else
+    } else {
         dest = (TYPE *)nvshmemi_mc_ptr(teami, dst_ptr);
+    }
     nvshmemi_threadgroup_sync<SCOPE>();
     size_t len = nreduce * sizeof(TYPE);
     constexpr bool is_half_v = is_half<TYPE>::value;
@@ -1399,29 +1426,34 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
         int4 *__restrict__ dst_p = (int4 *)dest;
         const int4 *__restrict__ src_p = (const int4 *)src;
         if constexpr (is_half_v) {
-            if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0)
+            if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0) {
                 NVSHMEMI_HALF_ADD_REDUCE_MCAST16_THREADGROUP_UNROLLED(SCOPE, ONESHOT, dst_p, src_p,
                                                                       nelems);
-            else
+            } else {
                 nvshmemi_f16x2_add_reduce_mcast16_v4_threadgroup<SCOPE, 1, ONESHOT>(dst_p, src_p,
                                                                                     nelems);
+            }
         } else if constexpr (is_bfloat_v) {
-            if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0)
+            if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0) {
                 NVSHMEMI_BFLOAT_ADD_REDUCE_MCAST16_THREADGROUP_UNROLLED(SCOPE, ONESHOT, dst_p,
                                                                         src_p, nelems);
-            else
+            } else {
                 nvshmemi_bf16x2_add_reduce_mcast16_v4_threadgroup<SCOPE, 1, ONESHOT>(dst_p, src_p,
                                                                                      nelems);
+            }
         } else {
-            if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0)
+            if (len >= ALIGNED_UNROLLED_LEN && len % ALIGNED_UNROLLED_LEN == 0) {
                 NVSHMEMI_FLOAT_ADD_REDUCE_MCAST16_THREADGROUP_UNROLLED(SCOPE, ONESHOT, dst_p, src_p,
                                                                        nelems);
-            else
+            } else {
                 nvshmemi_f32_add_reduce_mcast16_v4_threadgroup<SCOPE, 1, ONESHOT>(dst_p, src_p,
                                                                                   nelems);
+            }
         }
         len -= nelems * sizeof(int4);
-        if (0 == len) return;
+        if (0 == len) {
+            return;
+        }
         dest = (TYPE *)(dst_p + nelems);
         src = (TYPE *)(src_p + nelems);
     }
@@ -1439,7 +1471,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
             nvshmemi_f32_add_reduce_mcast8_v2_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
         }
         len -= nelems * sizeof(uint64_t);
-        if (0 == len) return;
+        if (0 == len) {
+            return;
+        }
         dest = (TYPE *)(dst_p + nelems);
         src = (TYPE *)(src_p + nelems);
     }
@@ -1457,7 +1491,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_mcast_threadro
             nvshmemi_f32_add_reduce_mcast4_threadgroup<SCOPE, ONESHOT>(dst_p, src_p, nelems);
         }
         len -= nelems * sizeof(uint32_t);
-        if (0 == len) return;
+        if (0 == len) {
+            return;
+        }
     }
 
     return;
@@ -1804,8 +1840,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reduce_threadgroup(nvshme
                                                                           const TYPE *source,
                                                                           size_t nreduce) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-    if (!myIdx) /* Only one thread should increment rdxn_count */
+    if (!myIdx) { /* Only one thread should increment rdxn_count */
         nvshmemi_device_state_d.team_pool[team]->rdxn_count += 1;
+    }
     nvshmemi_threadgroup_sync<SCOPE>();
 
     constexpr bool is_rdxn_sum = (OP == RDXN_OPS_SUM);
@@ -1838,11 +1875,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reduce_threadgroup(nvshme
         case 1:
         case 2:
             if (nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_nvls_threshold >= nreduce &&
-                is_one_shot_supported)
+                is_one_shot_supported) {
                 reduce_algo = 4;
-            else if (is_two_shot_supported)
+            } else if (is_two_shot_supported) {
                 reduce_algo = 3;
-            else {
+            } else {
                 reduce_algo = 0;
             }
             break;

@@ -112,7 +112,9 @@ __global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes) {
         __syncthreads();
     }
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
 }
 
 template <typename T>
@@ -124,7 +126,9 @@ __global__ void ring(T *src, T *dest, int len, int nextpe) {
     }
     __syncthreads();
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
 }
 
 template <typename T>
@@ -155,24 +159,34 @@ int main(int c, char *v[]) {
     int iters = 50;
 
     status = setup(1, 1, max_msg_size, iters);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
     }
 
     status = test<int>(launch_alltoall<int>, launch_ring<int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<unsigned int>(launch_alltoall<unsigned int>, launch_ring<unsigned int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<long long int>(launch_alltoall<long long int>, launch_ring<long long int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<unsigned long long int>(launch_alltoall<unsigned long long int>,
                                           launch_ring<unsigned long long int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     cleanup();
 

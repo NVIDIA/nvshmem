@@ -80,10 +80,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
             }
         } else {
             op1 = dest;
-            if (pe == nvshmemi_team_my_pe(team))
+            if (pe == nvshmemi_team_my_pe(team)) {
                 op2 = (TYPE *)source + pe * nreduce;
-            else
+            } else {
                 op2 = (TYPE *)((char *)pWrk + pe * nreduce * sizeof(TYPE));
+            }
         }
         gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(op1, op2, op3, nreduce);
     }
@@ -136,8 +137,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_threadgroup
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     int groupSize = nvshmemi_threadgroup_size<SCOPE>();
 
-    if (!myIdx) /* Only one thread should increment rdxn_count */
+    if (!myIdx) { /* Only one thread should increment rdxn_count */
         nvshmemi_device_state_d.team_pool[team]->rdxn_count += 1;
+    }
     nvshmemi_threadgroup_sync<SCOPE>();
 
     constexpr bool is_float_v = is_float<TYPE>::value;

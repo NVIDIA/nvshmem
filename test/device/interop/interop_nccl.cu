@@ -391,9 +391,15 @@ out:
         log_status(mype, npes, "destroying NCCL communicator");
         NCCL_CALL(ncclCommDestroy(nccl_comm));
     }
-    if (host_buffer != nullptr) free(host_buffer);
-    if (buffer != nullptr) nvshmem_free(buffer);
-    if (scratch != nullptr) nvshmem_free(scratch);
+    if (host_buffer != nullptr) {
+        free(host_buffer);
+    }
+    if (buffer != nullptr) {
+        nvshmem_free(buffer);
+    }
+    if (scratch != nullptr) {
+        nvshmem_free(scratch);
+    }
     if (status == 0 && ran_test && mype == 0) {
         log_status(mype, npes, "Interop test passed");
     }

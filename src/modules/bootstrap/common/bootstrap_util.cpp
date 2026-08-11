@@ -22,8 +22,11 @@ char *bootstrap_util_wrap_string(const char *str, const size_t wraplen, const ch
     char *str_s = NULL;
 
     /* Count characters and newlines */
-    for (const char *s = str; *s != '\0'; s++, str_len++)
-        if (*s == '\n') ++line_breaks;
+    for (const char *s = str; *s != '\0'; s++, str_len++) {
+        if (*s == '\n') {
+            ++line_breaks;
+        }
+    }
 
     /* Worst case is wrapping at 1/2 wraplen plus explicit line breaks. Each
      * wrap adds an indent string. The newline is either already in the source
@@ -100,7 +103,9 @@ void bootstrap_util_print_header(int style, const char *h) {
             break;
         case BOOTSTRAP_OPTIONS_STYLE_RST:
             printf("%s\n", h);
-            for (const char *c = h; *c != '\0'; c++) putchar('~');
+            for (const char *c = h; *c != '\0'; c++) {
+                putchar('~');
+            }
             printf("\n\n");
             break;
         default:

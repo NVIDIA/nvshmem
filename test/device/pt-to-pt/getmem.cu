@@ -134,20 +134,28 @@ int main(int c, char *v[]) {
 
     read_args(c, v);
     status = setup(0, 1, MAX_MSG_SIZE, ITER, true);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
     }
 
     status = test<int>(launch_alltoall, launch_ring);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<int>(launch_alltoall_warp, launch_ring_warp);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<int>(launch_alltoall_block, launch_ring_block);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     cleanup();
 

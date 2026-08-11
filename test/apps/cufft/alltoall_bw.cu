@@ -272,10 +272,11 @@ int main(int argc, char *argv[]) {
     CUDA_CHECK(cudaStreamCreate(&stream));
 
     // Iterate over sizes
-    if (mype == 0)
+    if (mype == 0) {
         printf(
             "         array_dim,         errors,        checked, "
             "         num_B,  av_time_ms, av_bw_GB_s_pe,       num_B_ib, av_bw_ib_GB_s_pe\n");
+    }
     for (size_t array_dim = array_dim_min; array_dim <= array_dim_max; array_dim *= 2) {
         // This models a cuFFTMp all-to-all
         // See
@@ -389,10 +390,11 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if (mype == 0)
+        if (mype == 0) {
             printf("    %14zu, %14zu, %14zu, %14zu,   %5.3e,     %5.3e, %14zu,        %5.3e\n",
                    array_dim, errors, checked, num_B, average_time_ms, average_bw_GB_s, num_B_ib,
                    average_bw_ib_GB_s);
+        }
 
         if (errors != 0) {
             fprintf(stderr, "ERROR in the alltoall\n");

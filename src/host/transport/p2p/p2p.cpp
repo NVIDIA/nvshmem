@@ -66,7 +66,9 @@ int nvshmemt_p2p_can_reach_peer(int *access, struct nvshmem_transport_pe_info *p
         has_fabric_access = true;
     }
 
-    if (has_fabric_access) goto out;
+    if (has_fabric_access) {
+        goto out;
+    }
 
     if (peer_info->hostHash != p2p_state->hostHash) {
         *access = 0;
@@ -231,7 +233,9 @@ out:
 }
 
 int nvshmemt_p2p_finalize(nvshmem_transport_t transport) {
-    if (!transport) return 0;
+    if (!transport) {
+        return 0;
+    }
 
     if (transport->state) {
         transport_p2p_state_t *p2p_state = (transport_p2p_state_t *)transport->state;

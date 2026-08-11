@@ -59,18 +59,24 @@ __global__ void counted_put(unsigned char *destination, const unsigned char *sou
                             uint64_t *counter, int pe, int *statuses, Source source_kind,
                             size_t donation) {
     extern __shared__ __align__(16) unsigned char smem[];
-    if (donation) nvshmemx_give_smem(smem, donation);
+    if (donation) {
+        nvshmemx_give_smem(smem, donation);
+    }
     const void *put_source = source;
     if (source_kind == Source::Shared) {
         unsigned char *payload = smem + nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
-        for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) payload[i] = source[i];
+        for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
+            payload[i] = source[i];
+        }
         put_source = payload;
     }
     __syncthreads();
     statuses[threadIdx.x] =
         nvshmemx_putmem_signal_counted_nbi_block(destination, put_source, bytes, counter, pe);
     __syncthreads();
-    if (donation) nvshmemx_release_smem();
+    if (donation) {
+        nvshmemx_release_smem();
+    }
 }
 
 __global__ void wait_and_validate(const unsigned char *destination, size_t bytes,
@@ -78,7 +84,9 @@ __global__ void wait_and_validate(const unsigned char *destination, size_t bytes
                                   int producer_pe, size_t source_offset, int *errors) {
     nvshmemx_signal_counted_wait_until(counter, expected_counter_value);
     for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
-        if (destination[i] != payload_byte(producer_pe, source_offset + i)) atomicAdd(errors, 1);
+        if (destination[i] != payload_byte(producer_pe, source_offset + i)) {
+            atomicAdd(errors, 1);
+        }
     }
 }
 
@@ -89,7 +97,9 @@ __global__ void wait_and_validate_producers(const unsigned char *destination, si
     for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) {
         int producer_pe = static_cast<int>(i / 16 + 1);
         size_t source_offset = i % 16;
-        if (destination[i] != payload_byte(producer_pe, source_offset)) atomicAdd(errors, 1);
+        if (destination[i] != payload_byte(producer_pe, source_offset)) {
+            atomicAdd(errors, 1);
+        }
     }
 }
 
@@ -123,16 +133,30 @@ __global__ void invalid_counted_put(unsigned char *destination, const unsigned c
     alignas(16) uint4 local_source = {};
     const void *put_source = source;
     int pe = 0;
-    if (which == INVALID_PE) pe = npes;
-    if (which == INVALID_DESTINATION) dst = statuses;
-    if (which == INVALID_DEST_ALIGNMENT) dst = destination + 1;
-    if (which == INVALID_COUNTER_8B_ALIGNMENT)
+    if (which == INVALID_PE) {
+        pe = npes;
+    }
+    if (which == INVALID_DESTINATION) {
+        dst = statuses;
+    }
+    if (which == INVALID_DEST_ALIGNMENT) {
+        dst = destination + 1;
+    }
+    if (which == INVALID_COUNTER_8B_ALIGNMENT) {
         count = reinterpret_cast<uint64_t *>(reinterpret_cast<unsigned char *>(counter) + 4);
-    if (which == INVALID_COUNTER_CFT_ALIGNMENT)
+    }
+    if (which == INVALID_COUNTER_CFT_ALIGNMENT) {
         count = reinterpret_cast<uint64_t *>(reinterpret_cast<unsigned char *>(counter) + 8);
-    if (which == INVALID_SIZE) count_bytes = bytes - 1;
-    if (which == INVALID_SOURCE_SPACE) put_source = &local_source;
-    if (which == MISSING_DONATION) put_source = smem;
+    }
+    if (which == INVALID_SIZE) {
+        count_bytes = bytes - 1;
+    }
+    if (which == INVALID_SOURCE_SPACE) {
+        put_source = &local_source;
+    }
+    if (which == MISSING_DONATION) {
+        put_source = smem;
+    }
     statuses[threadIdx.x] =
         nvshmemx_putmem_signal_counted_nbi_block(dst, put_source, count_bytes, count, pe);
 }
@@ -202,18 +226,20 @@ static int report_case(const counted_test_context &test, const char *name, int l
     int status = nvshmem_int_sum_reduce(NVSHMEM_TEAM_WORLD, &test.case_failures[1],
                                         &test.case_failures[0], 1);
     if (status != 0) {
-        if (test.mype == 0)
+        if (test.mype == 0) {
             fprintf(stderr, "putmem_signal_counted: result reduction failed: %d\n", status);
+        }
         exit(1);
     }
     int global_failures = 0;
     CUDA_CHECK(cudaMemcpy(&global_failures, &test.case_failures[1], sizeof(global_failures),
                           cudaMemcpyDeviceToHost));
     if (test.mype == 0) {
-        if (global_failures == 0)
+        if (global_failures == 0) {
             printf("putmem_signal_counted: %s: SUCCESS\n", name);
-        else
+        } else {
             printf("putmem_signal_counted: %s: FAILURE (%d errors)\n", name, global_failures);
+        }
         fflush(stdout);
     }
     return global_failures;
@@ -233,7 +259,9 @@ static int run_counter_reset_load_case(const counted_test_context &test, uint64_
                           cudaMemcpyDeviceToHost));
 
     int failed = 0;
-    for (uint64_t value : observed_host) failed += value != 0;
+    for (uint64_t value : observed_host) {
+        failed += value != 0;
+    }
     return failed;
 }
 
@@ -367,7 +395,9 @@ static int run_ring_cases(const counted_test_context &test) {
 }
 
 static int run_fan_in_case(const counted_test_context &test) {
-    if (!test.counted_available) return 0;
+    if (!test.counted_available) {
+        return 0;
+    }
 
     // All producers write disjoint payloads and contribute to one receiver-local counter.
     int failed = 0;
@@ -436,7 +466,9 @@ static int run_batch_boundary_cases(const counted_test_context &test) {
 }
 
 static int run_invalid_argument_cases(const counted_test_context &test) {
-    if (!test.counted_available) return 0;
+    if (!test.counted_available) {
+        return 0;
+    }
 
     int failed = 0;
     int case_failures = 0;
@@ -476,7 +508,9 @@ static int run_invalid_argument_cases(const counted_test_context &test) {
     std::vector<unsigned char> unchanged_destination(64);
     CUDA_CHECK(cudaMemcpy(unchanged_destination.data(), test.destination,
                           unchanged_destination.size(), cudaMemcpyDeviceToHost));
-    for (unsigned char value : unchanged_destination) case_failures += value != 0;
+    for (unsigned char value : unchanged_destination) {
+        case_failures += value != 0;
+    }
     nvshmem_barrier_all();
     failed += report_case(test, "rejected operations preserve state", case_failures);
     return failed;
@@ -535,8 +569,9 @@ int main(int argc, char **argv) {
     failed += report_case(test, "backend capability probe",
                           probe_counted_backend(&test, expect_not_supported));
     if (npes < 2) {
-        if (mype == 0)
+        if (mype == 0) {
             printf("putmem_signal_counted: remote cases: SKIPPED (requires at least 2 PEs)\n");
+        }
     } else {
         failed += run_ring_cases(test);
         failed += run_fan_in_case(test);

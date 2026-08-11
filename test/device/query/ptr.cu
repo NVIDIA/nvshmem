@@ -23,7 +23,9 @@ __global__ void check_ptr(int *v_h, int *v_d, int32_t *errors) {
             ++(*errors);
         }
 
-        if (ptr != NULL) atomicAdd_system(ptr, 1);
+        if (ptr != NULL) {
+            atomicAdd_system(ptr, 1);
+        }
     }
 
     int *ptr = (int *)nvshmem_ptr(v_h, me);
@@ -71,7 +73,9 @@ int main(int argc, char **argv) {
             ++errors;
         }
 
-        if (ptr != NULL) npeers++;
+        if (ptr != NULL) {
+            npeers++;
+        }
     }
 
     int *ptr = (int *)nvshmem_ptr(v_h, me);

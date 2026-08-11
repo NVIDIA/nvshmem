@@ -21,7 +21,9 @@ int main(int argc, char **argv) {
     while (1) {
         int c;
         c = getopt(argc, argv, "n:h");
-        if (c == -1) break;
+        if (c == -1) {
+            break;
+        }
 
         switch (c) {
             case 'n':

@@ -68,8 +68,9 @@ static inline int atol_scaled(const char *str, size_t *out) {
         }
     } else if (p < 0) {
         return 1;
-    } else
+    } else {
         scale = 0;
+    }
 
     *out = (size_t)ceil(p * (1lu << scale));
     return 0;
@@ -170,7 +171,9 @@ static void select_device_pre_init(int rank) {
     MPI_Comm_rank(node_comm, &local_rank);
     MPI_Comm_free(&node_comm);
     CUDA_CHECK(cudaGetDeviceCount(&dev_count));
-    if (dev_count <= 0) ERROR_EXIT("No CUDA devices available\n");
+    if (dev_count <= 0) {
+        ERROR_EXIT("No CUDA devices available\n");
+    }
     CUDA_CHECK(cudaSetDevice(local_rank % dev_count));
 }
 #endif
@@ -180,10 +183,11 @@ static int parse_mode_by_env(const char *envname) {
     if (bootstrap_mode) {
         int mode = atoi(bootstrap_mode);
         if (mode < NVSHMEMTEST_USE_BOOTSTRAP_DEFAULT &&
-            mode >= NVSHMEMTEST_USE_BOOTSTRAP_UNSUPPORTED)
+            mode >= NVSHMEMTEST_USE_BOOTSTRAP_UNSUPPORTED) {
             return NVSHMEMTEST_USE_BOOTSTRAP_UNSUPPORTED;
-        else
+        } else {
             return mode;
+        }
     } else {
         return NVSHMEMTEST_USE_BOOTSTRAP_DEFAULT;
     }
@@ -195,7 +199,9 @@ nvshmemBootstrapMPI::nvshmemBootstrapMPI(int *c, char ***v)
     if (usage_mode() == NVSHMEMTEST_USE_BOOTSTRAP_WITH_MPI) {
 #ifdef NVSHMEMTEST_MPI_SUPPORT
         MPI_Initialized(&flag);
-        if (!flag) MPI_Init(c, v);
+        if (!flag) {
+            MPI_Init(c, v);
+        }
         int rank, nranks;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &nranks);
@@ -226,7 +232,9 @@ nvshmemBootstrapUID::nvshmemBootstrapUID(int *c, char ***v)
 #ifdef NVSHMEMTEST_MPI_SUPPORT
         /* mpirun launcher */
         MPI_Initialized(&flag);
-        if (!flag) MPI_Init(c, v);
+        if (!flag) {
+            MPI_Init(c, v);
+        }
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &nranks);
         nvshmemx_uniqueid_t id = NVSHMEMX_UNIQUEID_INITIALIZER;
@@ -274,7 +282,9 @@ static void finalize_common(T &obj) {
     int flag = 0;
     if (obj.usage_mode() == NVSHMEMTEST_USE_BOOTSTRAP_WITH_MPI) {
         MPI_Finalized(&flag);
-        if (!flag) MPI_Finalize();
+        if (!flag) {
+            MPI_Finalize();
+        }
     }
 #endif
 }
@@ -315,7 +325,9 @@ static void check_for_cumodule_tests() {
 }
 
 static void print_read_args_summary() {
-    if (nvshmem_my_pe() != 0) return;
+    if (nvshmem_my_pe() != 0) {
+        return;
+    }
     printf("[PE 0] Runtime options after parsing command line arguments\n");
     printf(
         "min_size: %zu, max_size: %zu, step_factor: %zu, min_iters: %zu, max_iters: %zu, repeat: "
@@ -461,10 +473,11 @@ void read_args(int argc, char **argv) {
                 }
                 break;
             case '?':
-                if (isprint(optopt))
+                if (isprint(optopt)) {
                     fprintf(stderr, "Unknown option `-%c'.\n", optopt);
-                else
+                } else {
                     fprintf(stderr, "Unknown option character `\\x%x'.\n", optopt);
+                }
                 return;
             default:
                 abort();
@@ -490,10 +503,11 @@ int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nv
     int status = 0;
     char path[1024];
     env_value = (const char *)getenv("NVSHMEM_CUDA_PATH");
-    if (!env_value)
+    if (!env_value) {
         snprintf(path, 1024, "%s", "libnvidia-ml.so.1");
-    else
+    } else {
         snprintf(path, 1024, "%s/%s", env_value, "libnvidia-ml.so.1");
+    }
 
     *nvml_handle = dlopen(path, RTLD_NOW);
     if (!(*nvml_handle)) {
@@ -620,7 +634,9 @@ bool is_mnnvl_supported(int dev_id) {
 
 void *allocate_mmap_buffer(size_t size, int mem_handle_type, bool use_egm, bool reset_zero) {
     mype = nvshmem_my_pe();
-    if (!mype) DEBUG_PRINT("allocating mmap buffer\n");
+    if (!mype) {
+        DEBUG_PRINT("allocating mmap buffer\n");
+    }
     CUmemAllocationProp prop = {};
     int dev_id, numa_id;
     size_t granularity = MEM_GRANULARITY;
@@ -635,7 +651,9 @@ void *allocate_mmap_buffer(size_t size, int mem_handle_type, bool use_egm, bool 
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     if (use_egm) {
-        if (!mype) DEBUG_PRINT("using EGM memory\n");
+        if (!mype) {
+            DEBUG_PRINT("using EGM memory\n");
+        }
         prop.location.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
         CU_CHECK(cuDeviceGetAttribute(&numa_id, CU_DEVICE_ATTRIBUTE_HOST_NUMA_ID, my_dev));
         prop.location.id = numa_id;
@@ -658,7 +676,9 @@ void *allocate_mmap_buffer(size_t size, int mem_handle_type, bool use_egm, bool 
 
     // pad size to be multiple of granularity
     size = ((size + granularity - 1) / granularity) * granularity;
-    if (!mype) DEBUG_PRINT("padding buffer size to %lu\n", size);
+    if (!mype) {
+        DEBUG_PRINT("padding buffer size to %lu\n", size);
+    }
     void *bufAddr, *mmapedAddr;
 
     CUmemAccessDesc accessDescriptor[2];

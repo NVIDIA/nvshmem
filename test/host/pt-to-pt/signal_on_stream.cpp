@@ -32,8 +32,9 @@ int test_nvshmem_signal_add_on_stream(uint64_t *remote, cudaStream_t stream) {
     const int mype = nvshmem_my_pe();
     const int npes = nvshmem_n_pes();
 
-    for (int i = 0; i < npes; i++)
+    for (int i = 0; i < npes; i++) {
         nvshmemx_signal_op_on_stream(remote, (uint64_t)(mype + 1), NVSHMEM_SIGNAL_ADD, i, stream);
+    }
     cudaStreamSynchronize(stream);
     nvshmem_barrier_all();
 
@@ -61,7 +62,9 @@ int main(int argc, char *argv[]) {
     nvshmem_barrier_all();
 
     ret_val = test_nvshmem_signal_set_on_stream(remote, stream);
-    if (ret_val) goto out;
+    if (ret_val) {
+        goto out;
+    }
 
     if (use_egm) {
         memset((void *)remote, 0, sizeof(uint64_t));

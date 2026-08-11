@@ -51,7 +51,9 @@ int nvshmemi_alltoall_on_stream(nvshmem_team_t team, TYPE *dest, const TYPE *sou
             for (int i = 1; i <= teami->size; i++) {
                 int dst_pe = (teami->my_pe + i) % teami->size;
                 if (nvshmemi_disable_self_write_ce_coll) {
-                    if (dst_pe == teami->my_pe) continue;
+                    if (dst_pe == teami->my_pe) {
+                        continue;
+                    }
                 }
                 CUDA_RUNTIME_CHECK(cudaMemcpyAsync(
                     nvshmemi_ptr(dest + teami->my_pe * nelems,

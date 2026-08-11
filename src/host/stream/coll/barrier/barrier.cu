@@ -22,15 +22,18 @@ __global__ void barrier_on_stream_kernel_threadgroup(nvshmem_team_t team, int in
     }
     if (in_cuda_graph) {
         nvshmemi_threadgroup_sync<SCOPE>();
-        if (!myidx) __threadfence_system();
+        if (!myidx) {
+            __threadfence_system();
+        }
         nvshmemi_threadgroup_sync<SCOPE>();
     }
 
     nvshmemi_sync_algo_threadgroup<SCOPE>(team);
 
     if (!myidx) {
-        if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY)
+        if (nvshmemi_device_state_d.job_connectivity > NVSHMEMI_JOB_GPU_PROXY) {
             nvshmemi_transfer_enforce_consistency_at_target(false);
+        }
     }
     nvshmemx_release_smem();
 #endif
@@ -60,7 +63,9 @@ int nvshmemi_call_barrier_on_stream_kernel(nvshmem_team_t team, cudaStream_t str
 
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(stream, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
     if (num_threads_per_block <= 32) {
@@ -87,7 +92,9 @@ int nvshmemi_call_sync_on_stream_kernel(nvshmem_team_t team, cudaStream_t stream
 
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(stream, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
     if (num_threads_per_block <= 32) {

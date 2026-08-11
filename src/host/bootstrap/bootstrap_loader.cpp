@@ -37,8 +37,9 @@ void _bootstrap_loader_fini_helper() {
 int bootstrap_loader_finalize(bootstrap_handle_t *handle) {
     int status = handle->finalize(handle);
 
-    if (status != 0)
+    if (status != 0) {
         NVSHMEMI_ERROR_PRINT("Bootstrap plugin finalize failed for '%s'\n", plugin_name);
+    }
 
     dlclose(plugin_hdl);
     plugin_hdl = nullptr;

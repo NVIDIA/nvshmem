@@ -89,7 +89,9 @@ int main(int argc, char **argv) {
         status = -1;
         goto out;
     }
-    if (status) ERROR_PRINT("[%d] barrier failed \n", mype);
+    if (status) {
+        ERROR_PRINT("[%d] barrier failed \n", mype);
+    }
 
     cudaMallocHost((void **)&buf_h, alloc_size);
 

@@ -24,7 +24,9 @@
 
 __global__ void accumulate(int *input, int *partial_sum) {
     int index = threadIdx.x;
-    if (0 == index) *partial_sum = 0;
+    if (0 == index) {
+        *partial_sum = 0;
+    }
     __syncthreads();
     atomicAdd(partial_sum, input[index]);
 }
@@ -34,7 +36,9 @@ __global__ void correct_accumulate(int *input, int *partial_sum, int *full_sum) 
     if (*full_sum > THRESHOLD) {
         input[index] = input[index] - CORRECTION;
     }
-    if (0 == index) *partial_sum = 0;
+    if (0 == index) {
+        *partial_sum = 0;
+    }
     __syncthreads();
     atomicAdd(partial_sum, input[index]);
 }
@@ -51,14 +55,17 @@ int main(int c, char *v[]) {
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     bool use_mpi = false;
     char *value = getenv("NVSHMEMTEST_USE_MPI_LAUNCHER");
-    if (value) use_mpi = atoi(value);
+    if (value) {
+        use_mpi = atoi(value);
+    }
 #endif
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     if (use_mpi) {
         nvshmemi_init_mpi(&c, &v);
-    } else
+    } else {
         nvshmem_init();
+    }
 #else
     nvshmem_init();
 #endif
@@ -90,7 +97,9 @@ int main(int c, char *v[]) {
     nvshmem_finalize();
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
-    if (use_mpi) nvshmemi_finalize_mpi();
+    if (use_mpi) {
+        nvshmemi_finalize_mpi();
+    }
 #endif
     return 0;
 }

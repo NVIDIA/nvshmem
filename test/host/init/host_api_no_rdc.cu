@@ -52,7 +52,9 @@ struct NvshmemHostGuard {
             int rank = 0, nranks = 1;
             MPI_Comm_rank(MPI_COMM_WORLD, &rank);
             MPI_Comm_size(MPI_COMM_WORLD, &nranks);
-            if (rank == 0) nvshmemx_get_uniqueid(&id);
+            if (rank == 0) {
+                nvshmemx_get_uniqueid(&id);
+            }
             MPI_Bcast(&id, sizeof(id), MPI_UINT8_T, 0, MPI_COMM_WORLD);
             nvshmemx_set_attr_uniqueid_args(rank, nranks, &id, &attr);
             flags = NVSHMEMX_INIT_WITH_UNIQUEID;
@@ -64,9 +66,13 @@ struct NvshmemHostGuard {
         status = nvshmemx_hostlib_init_attr(flags, &attr);
     }
     ~NvshmemHostGuard() {
-        if (status == NVSHMEMX_SUCCESS) nvshmemx_hostlib_finalize();
+        if (status == NVSHMEMX_SUCCESS) {
+            nvshmemx_hostlib_finalize();
+        }
 #ifdef NVSHMEMTEST_MPI_SUPPORT
-        if (use_mpi) MPI_Finalize();
+        if (use_mpi) {
+            MPI_Finalize();
+        }
 #endif
     }
 };

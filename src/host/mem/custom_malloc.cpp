@@ -135,7 +135,9 @@ int mspace::track_large_chunks(int /*enable*/) { return 0; }
 
 void *mspace::allocate(size_t bytes) {
     INFO(NVSHMEM_MEM, "mspace_malloc called with %zu bytes", bytes);
-    if (bytes == 0) return NULL;
+    if (bytes == 0) {
+        return NULL;
+    }
     bytes = align_request(bytes);
     for (std::map<void *, size_t>::iterator it = free_chunks_start.begin();
          it != free_chunks_start.end(); it++) {
@@ -161,7 +163,9 @@ void *mspace::allocate(size_t bytes) {
 
 void *mspace::allocate_at_preferred_addr(void *ptr, size_t size) {
     INFO(NVSHMEM_MEM, "mspace_allocate_preferred called with %p, %zu bytes", ptr, size);
-    if (size == 0) return NULL;
+    if (size == 0) {
+        return NULL;
+    }
     size = align_request(size);
     for (auto it = free_chunks_start.begin(); it != free_chunks_start.end(); it++) {
         // check if there is free chunk large to cover ptr <---> ptr+size
@@ -221,7 +225,9 @@ void *mspace::allocate_zeroed(size_t n_elements, size_t elem_size) {
          elem_size);
     size_t bytes = n_elements * elem_size;
     void *ptr = allocate(bytes);
-    if (ptr) CUDA_RUNTIME_CHECK(cudaMemset(ptr, 0, bytes));
+    if (ptr) {
+        CUDA_RUNTIME_CHECK(cudaMemset(ptr, 0, bytes));
+    }
     ASSERT_CORRECTNESS
     return ptr;
 }
@@ -232,7 +238,9 @@ void *mspace::allocate_aligned(size_t alignment, size_t bytes) {
     /* Request bytes + alignment for simplicity */
     bytes += alignment;
     char *ptr = (char *)allocate(bytes);
-    if (!ptr) return NULL;
+    if (!ptr) {
+        return NULL;
+    }
     char *ret_ptr = (char *)(alignment * (((uint64_t)ptr + (alignment - 1)) / alignment));
     if (ret_ptr - ptr) {
         inuse_chunks[ret_ptr] = inuse_chunks[ptr] - (ret_ptr - ptr);
@@ -259,14 +267,17 @@ void *mspace::reallocate(void *ptr, size_t size) {
                 inuse_chunks[ptr] = size;
                 free_chunks_start.erase((char *)ptr + current_size);
                 free_chunks_end.erase((char *)ptr + current_size + chunk_size);
-                if (current_size + chunk_size > size)
+                if (current_size + chunk_size > size) {
                     add_free_chunk((char *)ptr + size, size - current_size);
+                }
                 ASSERT_CORRECTNESS
                 return ptr;
             }
         }
         void *new_ptr = allocate(size);
-        if (new_ptr == NULL) return NULL;
+        if (new_ptr == NULL) {
+            return NULL;
+        }
         CUDA_RUNTIME_CHECK(cudaMemcpy(new_ptr, ptr, size, cudaMemcpyDeviceToDevice));
         inuse_chunks.erase(ptr);
         add_free_chunk((char *)ptr, current_size);

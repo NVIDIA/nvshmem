@@ -28,15 +28,17 @@ static void mps_cpu_barrier(volatile std::atomic<int>& barrier, volatile std::at
 
     // Check-in
     count = barrier.fetch_add(1, std::memory_order_release) +
-            1;       // equivalent to ++barrier with release memory ordering
-    if (count == n)  // Last one in
+            1;         // equivalent to ++barrier with release memory ordering
+    if (count == n) {  // Last one in
         sense = 1;
+    }
     while (!sense);
 
     // Check-out
     count = --barrier;
-    if (count == 0)  // Last one out
+    if (count == 0) {  // Last one out
         sense = 0;
+    }
     while (sense.load(std::memory_order_acquire));
 }
 
@@ -45,9 +47,10 @@ void nvshmemi_mps_sync_gpu_on_stream(cudaStream_t stream) {
 
     CUDA_RUNTIME_CHECK(cudaEventRecord(nvshmemi_state->mps_event, stream));
     mps_cpu_barrier(shm->barrier, shm->sense, (int)shm->nprocesses);
-    for (int i = 0; i < nvshmemi_team_same_gpu->size - 1; i++)
+    for (int i = 0; i < nvshmemi_team_same_gpu->size - 1; i++) {
         CUDA_RUNTIME_CHECK(
             cudaStreamWaitEvent(stream, nvshmemi_state->same_gpu_other_pe_mps_events[i], 0));
+    }
     mps_cpu_barrier(
         shm->barrier, shm->sense,
         (int)shm->nprocesses); /* wait for completion (so tthat next barrier works correctly) */

@@ -279,13 +279,16 @@ int nvshmemi_proxy_setup_connections(proxy_state_t *proxy_state) {
         for (int i = 0; i < state->num_initialized_transports; i++) {
             int transport_bit = (1 << i);
             // assumes symmetry of transport list at all PEs
-            if (!((state->transport_bitmap) & transport_bit)) continue;
+            if (!((state->transport_bitmap) & transport_bit)) {
+                continue;
+            }
             struct nvshmem_transport *tcurr = state->transports[i];
 
             // finding the first transport with CPU WRITE capability
             if (!(tcurr->cap[j] &
-                  (NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ)))
+                  (NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ))) {
                 continue;
+            }
 
             // assuming the transport is connected - IB RC
             assert(tcurr->attr & NVSHMEM_TRANSPORT_ATTR_CONNECTED);
@@ -303,7 +306,9 @@ int nvshmemi_proxy_setup_connections(proxy_state_t *proxy_state) {
 
 out:
     if (status) {
-        if (transport) free(transport);
+        if (transport) {
+            free(transport);
+        }
     }
     return status;
 }
@@ -411,8 +416,9 @@ int nvshmemi_proxy_init(nvshmemi_state_t *state, int proxy_level) {
         cudaGetLastError();
         goto post_cst_api_check;
     }
-    if (write_options & (CUdevice_attribute)CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_HOST)
+    if (write_options & (CUdevice_attribute)CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_HOST) {
         proxy_state->is_consistency_api_supported = true;
+    }
     status = CUPFN(nvshmemi_cuda_syms, cuDeviceGetAttribute)(
         &proxy_state->gdr_device_native_ordering,
         (CUdevice_attribute)CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WRITES_ORDERING, device);
@@ -435,7 +441,9 @@ out:
     if (!status && state->proxy && atexit(nvshmemi_proxy_atexit_finalize) != 0) {
         NVSHMEMI_ERROR_PRINT("Failed to register proxy finalization at exit.\n");
         status = nvshmemi_proxy_finalize(state);
-        if (!status) status = NVSHMEMX_ERROR_INTERNAL;
+        if (!status) {
+            status = NVSHMEMX_ERROR_INTERNAL;
+        }
     }
     if (status != 0) {
         exit(-1);
@@ -754,7 +762,9 @@ void enforce_cst(proxy_state_t *proxy_state) {
 
     int status = 0;
 
-    if (nvshmemi_options.BYPASS_FLUSH) return;
+    if (nvshmemi_options.BYPASS_FLUSH) {
+        return;
+    }
 
     if (proxy_state->is_consistency_api_supported) {
         if (CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER > proxy_state->gdr_device_native_ordering &&
@@ -779,9 +789,13 @@ void enforce_cst(proxy_state_t *proxy_state) {
     }
 #elif defined(NVSHMEM_X86_64)
     for (int i = 0; i < state->num_initialized_transports; i++) {
-        if (!((state->transport_bitmap) & (1 << i))) continue;
+        if (!((state->transport_bitmap) & (1 << i))) {
+            continue;
+        }
         struct nvshmem_transport *tcurr = state->transports[i];
-        if (!tcurr->host_ops.enforce_cst) continue;
+        if (!tcurr->host_ops.enforce_cst) {
+            continue;
+        }
 
         // assuming the transport is connected - IB RC
         if (tcurr->attr & NVSHMEM_TRANSPORT_ATTR_CONNECTED) {
@@ -875,7 +889,9 @@ inline void progress_quiet(proxy_state_t *proxy_state) {
             int status = 0;
 
             tcurr = proxy_state->transport[i];
-            if (tcurr == NULL) continue;
+            if (tcurr == NULL) {
+                continue;
+            }
             status = tcurr->host_ops.quiet(tcurr, i, NVSHMEMX_QP_ALL);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in progress_quiet \n");
@@ -949,11 +965,15 @@ inline int process_channel_fence(proxy_state_t *proxy_state, proxy_channel_t *ch
     for (int i = 0; i < state->npes; i++) {
         struct nvshmem_transport *tcurr;
 
-        if (i == state->mype) continue;
+        if (i == state->mype) {
+            continue;
+        }
 
         tcurr = proxy_state->transport[i];
 
-        if (tcurr->host_ops.fence) status = tcurr->host_ops.fence(tcurr, i, NVSHMEMX_QP_DEFAULT, 0);
+        if (tcurr->host_ops.fence) {
+            status = tcurr->host_ops.fence(tcurr, i, NVSHMEMX_QP_DEFAULT, 0);
+        }
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_fence \n");
             exit(-1);
@@ -1020,8 +1040,9 @@ inline int process_channel_qp_fence(proxy_state_t *proxy_state, proxy_channel_t 
             int pe = base_pe + j;
             NVSHMEMU_PE_TRANSLATE(pe);
             struct nvshmem_transport *tcurr = proxy_state->transport[pe];
-            if (tcurr->host_ops.fence)
+            if (tcurr->host_ops.fence) {
                 status = tcurr->host_ops.fence(tcurr, pe, qp_index, is_multi);
+            }
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_qp_fence\n");
                 exit(-1);
@@ -1078,8 +1099,9 @@ inline int process_channel_qp_quiet(proxy_state_t *proxy_state, proxy_channel_t 
             int pe = j % state->npes;
             NVSHMEMU_PE_TRANSLATE(pe);
             struct nvshmem_transport *tcurr = proxy_state->transport[pe];
-            if (tcurr->host_ops.quiet)
+            if (tcurr->host_ops.quiet) {
                 status = tcurr->host_ops.quiet(tcurr, pe, qp_sync_req_0->qp_index);
+            }
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_qp_quiet\n");
                 exit(-1);
@@ -1360,7 +1382,9 @@ inline void progress_channels(proxy_state_t *proxy_state) {
                         is_processed = 0;
                         status = process_channel_dma(proxy_state, ch, &is_processed,
                                                      proxy_request_batch_idx);
-                        if (likely(is_processed)) proxy_state->issued_get = 1;
+                        if (likely(is_processed)) {
+                            proxy_state->issued_get = 1;
+                        }
                         NVSHMEMI_NZ_EXIT(status, "error in process_channel_dma<GET>\n");
                         break;
                     case NVSHMEMI_OP_P:
@@ -1494,10 +1518,13 @@ void progress_transports(proxy_state_t *proxy_state) {
 
         if (!((proxy_state->transport_bitmap) & (1 << i)) &&
             (tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_IBGDA &&
-             tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO))
+             tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO)) {
             continue;
+        }
 
-        if (tcurr->host_ops.progress == NULL) continue;
+        if (tcurr->host_ops.progress == NULL) {
+            continue;
+        }
 
         status = tcurr->host_ops.progress(tcurr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -1575,7 +1602,9 @@ void *nvshmemi_proxy_progress_minimal(void *in) {
 }
 
 int nvshmemi_proxy_finalize(nvshmemi_state_t *state) {
-    if (!state || !state->proxy) return 0;
+    if (!state || !state->proxy) {
+        return 0;
+    }
 
     INFO(NVSHMEM_INIT, "In nvshmemi_proxy_finalize");
     proxy_state_t *proxy_state = (proxy_state_t *)state->proxy;
@@ -1585,11 +1614,15 @@ int nvshmemi_proxy_finalize(nvshmemi_state_t *state) {
 
     pthread_join(proxy_state->progress_thread, NULL);
     /* Late proxy init state */
-    if (proxy_state->stream) CUDA_RUNTIME_CHECK(cudaStreamDestroy(proxy_state->stream));
-    if (proxy_state->queue_stream_in)
+    if (proxy_state->stream) {
+        CUDA_RUNTIME_CHECK(cudaStreamDestroy(proxy_state->stream));
+    }
+    if (proxy_state->queue_stream_in) {
         CUDA_RUNTIME_CHECK(cudaStreamDestroy(proxy_state->queue_stream_in));
-    if (proxy_state->queue_stream_out)
+    }
+    if (proxy_state->queue_stream_out) {
         CUDA_RUNTIME_CHECK(cudaStreamDestroy(proxy_state->queue_stream_out));
+    }
 
     /* setup connections state */
     free(proxy_state->transport_id);
@@ -1600,18 +1633,25 @@ int nvshmemi_proxy_finalize(nvshmemi_state_t *state) {
      * on the program being terminated successfully to release remaining resources.
      */
     if (proxy_state->global_exit_request_state &&
-        *proxy_state->global_exit_request_state > PROXY_GLOBAL_EXIT_NOT_REQUESTED)
+        *proxy_state->global_exit_request_state > PROXY_GLOBAL_EXIT_NOT_REQUESTED) {
         return 0;
+    }
     /* setup device channels state */
-    if (nvshmemi_device_state.proxy_channel_g_coalescing_buf)
+    if (nvshmemi_device_state.proxy_channel_g_coalescing_buf) {
         nvshmemi_free(nvshmemi_device_state.proxy_channel_g_coalescing_buf);
-    if (nvshmemi_device_state.proxy_channel_g_buf)
+    }
+    if (nvshmemi_device_state.proxy_channel_g_buf) {
         nvshmemi_free(nvshmemi_device_state.proxy_channel_g_buf);
-    if (nvshmemi_device_state.proxy_channels_complete_local_ptr)
+    }
+    if (nvshmemi_device_state.proxy_channels_complete_local_ptr) {
         CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.proxy_channels_complete_local_ptr));
-    if (nvshmemi_device_state.proxy_channel_g_buf_head_ptr)
+    }
+    if (nvshmemi_device_state.proxy_channel_g_buf_head_ptr) {
         CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.proxy_channel_g_buf_head_ptr));
-    if (proxy_state->channels_device) CUDA_RUNTIME_CHECK(cudaFree(proxy_state->channels_device));
+    }
+    if (proxy_state->channels_device) {
+        CUDA_RUNTIME_CHECK(cudaFree(proxy_state->channels_device));
+    }
 
     /* create channels state */
     for (int i = 0; i < proxy_state->channel_count; i++) {
@@ -1627,12 +1667,15 @@ int nvshmemi_proxy_finalize(nvshmemi_state_t *state) {
     free(proxy_state->channels);
 
     /* Early proxy init state */
-    if (proxy_state->global_exit_request_state)
+    if (proxy_state->global_exit_request_state) {
         CUDA_RUNTIME_CHECK(cudaFreeHost(proxy_state->global_exit_request_state));
-    if (proxy_state->global_exit_code)
+    }
+    if (proxy_state->global_exit_code) {
         CUDA_RUNTIME_CHECK(cudaFreeHost(proxy_state->global_exit_code));
-    if (proxy_state->nvshmemi_timeout)
+    }
+    if (proxy_state->nvshmemi_timeout) {
         CUDA_RUNTIME_CHECK(cudaFreeHost(proxy_state->nvshmemi_timeout));
+    }
 
     return 0;
 }

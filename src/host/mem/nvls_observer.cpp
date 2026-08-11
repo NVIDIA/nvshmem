@@ -36,9 +36,12 @@ bool should_process_nvls_team_pool_entry(int team_idx) {
     const int mc_shared_idx = NVSHMEM_TEAM_MC_SHARED_INDEX;
     const int shared_idx = NVSHMEM_TEAM_SHARED_INDEX;
 
-    if (nvshmemi_team_pool == NULL || nvshmemi_max_teams <= 0) return false;
-    if (team_idx < 0 || team_idx >= nvshmemi_max_teams || nvshmemi_team_pool[team_idx] == NULL)
+    if (nvshmemi_team_pool == NULL || nvshmemi_max_teams <= 0) {
         return false;
+    }
+    if (team_idx < 0 || team_idx >= nvshmemi_max_teams || nvshmemi_team_pool[team_idx] == NULL) {
+        return false;
+    }
 
     const bool is_mc_shared_alias =
         team_idx == mc_shared_idx && nvshmemi_max_teams > mc_shared_idx &&
@@ -61,11 +64,15 @@ int nvshmemi_nvls_observer::on_chunk_mapped(nvshmem_mem_handle_t *handle, off_t 
 }
 
 int nvshmemi_nvls_observer::on_chunk_unmapped(off_t mc_offset, size_t size) {
-    if (!is_platform_nvls_) return 0;
+    if (!is_platform_nvls_) {
+        return 0;
+    }
     INFO(NVSHMEM_MEM, "unbinding and releasing nvls memory mc_offset: %ld size: %zu\n", mc_offset,
          size);
     int status = nvls_unbind_heap_memory_by_size(mc_offset, size);
-    if (status != 0) return status;
+    if (status != 0) {
+        return status;
+    }
 
     auto removed = std::remove_if(
         mapped_chunks_.begin(), mapped_chunks_.end(), [mc_offset, size](const mapped_chunk &chunk) {
@@ -249,7 +256,9 @@ int nvshmemi_nvls_observer::nvls_create_heap_memory_by_size(nvshmemi_team_t *tea
     CUmemGenericAllocationHandle peer_handle;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
     // Prune for duplicate teams that inherit the rsc, but own the resource
-    if (!nvls_obj->is_owner(team)) return 0;
+    if (!nvls_obj->is_owner(team)) {
+        return 0;
+    }
 
     /* team PE0 will export MC group */
     if (team->my_pe == 0) {
@@ -295,10 +304,14 @@ cleanup:
 int nvshmemi_nvls_observer::nvls_create_heap_memory(uint64_t mem_size) {
     nvshmemi_team_t *team = NULL;
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
-    if (!is_platform_nvls_) return status;
+    if (!is_platform_nvls_) {
+        return status;
+    }
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) {
+            continue;
+        }
         team = nvshmemi_team_pool[i];
         status = nvls_create_heap_memory_by_size(team, mem_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
@@ -318,7 +331,9 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory_by_size(nvshmemi_team_t *team,
     CUmemGenericAllocationHandle *mc_handle = NULL;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
     // Prune for duplicate teams that inherit the rsc, but own the resource
-    if (!nvls_obj->is_owner(team)) return 0;
+    if (!nvls_obj->is_owner(team)) {
+        return 0;
+    }
 
     /* Get the most recently allocated mc_handle */
     mc_handle = nvls_obj->get_mc_handle_ptr(nvls_obj->get_mc_handle_size() - 1);
@@ -345,10 +360,14 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory(nvshmem_mem_handle_t *mem_hand
                                                   off_t mmap_offset, size_t mmap_size) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
     std::vector<nvshmemi_team_t *> bound_teams;
-    if (!is_platform_nvls_) return status;
+    if (!is_platform_nvls_) {
+        return status;
+    }
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) {
+            continue;
+        }
         nvshmemi_team_t *team = nvshmemi_team_pool[i];
         status = nvls_bind_heap_memory_by_size(team, mem_handle, mc_offset, mmap_offset, mmap_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -388,7 +407,9 @@ int nvshmemi_nvls_observer::nvls_map_heap_memory_by_size(nvshmemi_team_t *team, 
 
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
     // Prune for duplicate teams that inherit the rsc, but own the resource
-    if (!nvls_obj->is_owner(team)) return 0;
+    if (!nvls_obj->is_owner(team)) {
+        return 0;
+    }
 
     /* Get the most recently allocated mc_handle */
     mc_handle = nvls_obj->get_mc_handle_ptr(nvls_obj->get_mc_handle_size() - 1);
@@ -412,10 +433,14 @@ out:
 int nvshmemi_nvls_observer::nvls_map_heap_memory(uint64_t size, off_t mmap_offset,
                                                  off_t mc_offset) {
     int status = 0; /* Passthrough for the case where no teams have NVLS resource */
-    if (!is_platform_nvls_) return status;
+    if (!is_platform_nvls_) {
+        return status;
+    }
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) {
+            continue;
+        }
         status = nvls_map_heap_memory_by_size(nvshmemi_team_pool[i], size, mmap_offset, mc_offset);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Mapping MC handle for team ID: %d failed\n",
@@ -471,7 +496,9 @@ int nvshmemi_nvls_observer::nvls_unmap_heap_memory_by_size(nvshmemi_team_t *team
                                                            uint64_t mem_size) {
     int status = 0;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
-    if (nvls_obj == nullptr || !nvls_obj->is_owner(team)) return status;
+    if (nvls_obj == nullptr || !nvls_obj->is_owner(team)) {
+        return status;
+    }
     status = nvls_obj->unmap_group_mem(mc_offset, mem_size);
     return status;
 }
@@ -482,10 +509,14 @@ void nvshmemi_nvls_observer::nvls_unmap_heap_memory_by_team(nvshmemi_team_t *tea
 
 int nvshmemi_nvls_observer::nvls_unmap_heap_memory(off_t mc_offset, uint64_t size) {
     int status = 0;
-    if (!is_platform_nvls_) return status;
+    if (!is_platform_nvls_) {
+        return status;
+    }
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) {
+            continue;
+        }
         status = nvls_unmap_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unmapping MC handle for team ID: %d failed\n",
@@ -498,7 +529,9 @@ out:
 void nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_team(nvshmemi_team_t *team) {
     int status = 0;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
-    if (nvls_obj == nullptr || !nvls_obj->is_owner(team)) return;
+    if (nvls_obj == nullptr || !nvls_obj->is_owner(team)) {
+        return;
+    }
 
     /* Here we unbind for only the size that has been bound by real UC handles i.e physical heap
      * size to optimize for performance of unbind
@@ -541,7 +574,9 @@ int nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_size(nvshmemi_team_t *tea
                                                             size_t size) {
     int status = 0;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
-    if (nvls_obj == nullptr || !nvls_obj->is_owner(team)) return status;
+    if (nvls_obj == nullptr || !nvls_obj->is_owner(team)) {
+        return status;
+    }
 
     if (nvls_obj->get_mc_handle_size() == 0) {
         NVSHMEMI_ERROR_PRINT("No active MC group for team ID: %d\n", team->team_idx);
@@ -572,7 +607,9 @@ int nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_size(off_t mc_offset, siz
 
     // for all teams unbind mc_handle
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) continue;
+        if (!should_process_nvls_team_pool_entry(i)) {
+            continue;
+        }
         status = nvls_unbind_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Unbinding NVLS memory for team ID: %d failed. Status: %d\n",

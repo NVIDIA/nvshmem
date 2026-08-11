@@ -166,7 +166,9 @@ __global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes,
         __syncthreads();
     }
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
@@ -180,7 +182,9 @@ __global__ void ring(T *src, T *dest, int len, int nextpe, size_t dynamic_smem_s
     }
     __syncthreads();
 
-    if (!tid) nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
@@ -216,36 +220,54 @@ int main(int c, char *v[]) {
     int iters = 50;
 
     status = setup(1, 1, max_msg_size, iters);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
     }
 
     status = test<char>(launch_alltoall<char>, launch_ring<char>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<unsigned char>(launch_alltoall<unsigned char>, launch_ring<unsigned char>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<short>(launch_alltoall<short>, launch_ring<short>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<unsigned short>(launch_alltoall<unsigned short>, launch_ring<unsigned short>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<int>(launch_alltoall<int>, launch_ring<int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<unsigned int>(launch_alltoall<unsigned int>, launch_ring<unsigned int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<long long int>(launch_alltoall<long long int>, launch_ring<long long int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     status = test<unsigned long long int>(launch_alltoall<unsigned long long int>,
                                           launch_ring<unsigned long long int>);
-    if (status) goto out;
+    if (status) {
+        goto out;
+    }
 
     cleanup();
 

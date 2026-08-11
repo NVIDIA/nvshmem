@@ -55,9 +55,10 @@ static int nvshmemi_coll_common_cpu_read_env() {
     nvshmemi_device_state.gpu_coll_env_params_var.reduce_nvls_threshold =
         nvshmemi_options.REDUCE_NVLS_THRESHOLD;
 
-    if (nvshmemi_device_state.gpu_coll_env_params_var.reduce_recexch_kval > nvshmemi_state->npes)
+    if (nvshmemi_device_state.gpu_coll_env_params_var.reduce_recexch_kval > nvshmemi_state->npes) {
         nvshmemi_device_state.gpu_coll_env_params_var.reduce_recexch_kval =
             std::max(MIN_REDUCE_RECEXCH_VALUE, nvshmemi_state->npes);
+    }
 
     nvshmemi_device_state.gpu_coll_env_params_var.bcast_tree_kval =
         nvshmemi_options.BCAST_TREE_KVAL;
@@ -128,7 +129,9 @@ int nvshmemi_coll_common_cpu_init() {
 #endif
 
     status = nvshmemi_coll_common_cpu_read_env();
-    if (status) NVSHMEMI_COLL_CPU_ERR_POP();
+    if (status) {
+        NVSHMEMI_COLL_CPU_ERR_POP();
+    }
 
 #ifdef NVSHMEM_USE_NCCL
     nvshmemi_use_nccl = 1;

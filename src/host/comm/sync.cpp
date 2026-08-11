@@ -65,12 +65,12 @@ void nvshmemx_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp, uint64_t 
         nvshmemi_can_use_cuda_64_bit_stream_memops &&
         (nvshmemi_can_flush_remote_writes || nvshmemi_options.BYPASS_FLUSH) &&
         CUPFN(nvshmemi_cuda_syms, cuStreamWaitValue64)) {
-        if (cmp == NVSHMEM_CMP_GE)
+        if (cmp == NVSHMEM_CMP_GE) {
             status =
                 CUPFN(nvshmemi_cuda_syms,
                       cuStreamWaitValue64(cstream, (CUdeviceptr)sig_addr, cmp_value,
                                           CU_STREAM_WAIT_VALUE_GEQ | CU_STREAM_WAIT_VALUE_FLUSH));
-        else {  // cmp == NVSHMEM_CMP_EQ
+        } else {  // cmp == NVSHMEM_CMP_EQ
             status =
                 CUPFN(nvshmemi_cuda_syms,
                       cuStreamWaitValue64(cstream, (CUdeviceptr)sig_addr, cmp_value,

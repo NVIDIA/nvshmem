@@ -24,10 +24,11 @@ __global__ void fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const
         my_nelems = nelems_per_block + nelems_remain;
     }
 
-    if (my_nelems > 0)
+    if (my_nelems > 0) {
         nvshmemi_fcollect_threadgroup<TYPE, NVSHMEMI_THREADGROUP_BLOCK>(
             myteam, dest, source + nelems_per_block * blockIdx.x,
             nelems_per_block * blockIdx.x + nvshmemi_team_my_pe(myteam) * nelems, my_nelems);
+    }
 #endif
 }
 
@@ -50,7 +51,9 @@ void nvshmemi_call_fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
 
     cudaStreamCaptureStatus status;
     CUDA_RUNTIME_CHECK(cudaStreamIsCapturing(stream, &status));
-    if (status == cudaStreamCaptureStatusActive) in_cuda_graph = 1;
+    if (status == cudaStreamCaptureStatusActive) {
+        in_cuda_graph = 1;
+    }
 
     /* By default select min(occupancy, nelems) */
     int num_threads_per_block = nvshmemi_fcollect_maxblocksize[type_str];

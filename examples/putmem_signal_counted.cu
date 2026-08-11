@@ -23,12 +23,16 @@ __global__ void counted_ring(void *destination, uint64_t *counter, int pe) {
     unsigned char *payload = smem + reserve;
     nvshmemx_give_smem(smem, reserve);
 
-    for (size_t i = threadIdx.x; i < kBytes; i += blockDim.x) payload[i] = (unsigned char)pe;
+    for (size_t i = threadIdx.x; i < kBytes; i += blockDim.x) {
+        payload[i] = (unsigned char)pe;
+    }
     __syncthreads();
 
     int status =
         nvshmemx_putmem_signal_counted_nbi_block(destination, payload, kBytes, counter, pe);
-    if (status == NVSHMEMX_SUCCESS) nvshmemx_signal_counted_wait_until(counter, kBytes);
+    if (status == NVSHMEMX_SUCCESS) {
+        nvshmemx_signal_counted_wait_until(counter, kBytes);
+    }
     nvshmemx_release_smem();
 }
 
@@ -74,8 +78,9 @@ int main(int argc, char **argv) {
     size_t reserve = (size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
     counted_ring<<<1, 128, reserve + kBytes>>>(destination, counter, (mype + 1) % npes);
     cudaError_t error = cudaDeviceSynchronize();
-    if (error != cudaSuccess)
+    if (error != cudaSuccess) {
         std::fprintf(stderr, "counted ring failed: %s\n", cudaGetErrorString(error));
+    }
     nvshmem_free(counter);
     nvshmem_free(destination);
     nvshmem_finalize();

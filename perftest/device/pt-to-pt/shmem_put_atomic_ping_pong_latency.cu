@@ -183,7 +183,9 @@ int main(int c, char *v[]) {
             CUDA_CHECK(cudaEventSynchronize(stop));
             cudaEventElapsedTime(&milliseconds, start, stop);
             h_lat[i] = (milliseconds * 1000) / iter;
-            if (mype == 0) perf_stats_add(h_lat_stats[i], h_lat[i]);
+            if (mype == 0) {
+                perf_stats_add(h_lat_stats[i], h_lat[i]);
+            }
             nvshmem_barrier_all();
         }
         i++;

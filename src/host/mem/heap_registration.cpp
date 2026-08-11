@@ -45,7 +45,9 @@ void store_posix_fd(nvshmem_mem_handle_t *handle, int fd) noexcept {
 
 int consume_cuda_runtime_error_for_failed_ipc(cudaError_t api_status, const char *api_name) {
     const cudaError_t status = cudaGetLastError();
-    if (status == cudaSuccess) return NVSHMEMX_SUCCESS;
+    if (status == cudaSuccess) {
+        return NVSHMEMX_SUCCESS;
+    }
     if (status != api_status) {
         NVSHMEMI_ERROR_PRINT("%s returned %d (%s), but cudaGetLastError returned %d (%s)\n",
                              api_name, api_status, cudaGetErrorString(api_status), status,
@@ -91,12 +93,16 @@ int nvshmemi_heap_registration::setup() {
 
 /* Close imported POSIX FDs retained in P2P handle sets. */
 nvshmemi_heap_registration::~nvshmemi_heap_registration() {
-    if (effective_handle_type_ != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) return;
+    if (effective_handle_type_ != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+        return;
+    }
 
     for (int i = 0; i < npes_; i++) {
         for (int j = 0; j < transports_.num_transports(); j++) {
             bool is_p2p_transport = transports_.active_has_cap(j, i, NVSHMEM_TRANSPORT_CAP_MAP);
-            if (!is_p2p_transport) continue;
+            if (!is_p2p_transport) {
+                continue;
+            }
 
             for (size_t k = 0; k < table_->num_p2p_handle_sets(); k++) {
                 close(load_posix_fd(table_->get_p2p_mem_handle(k, i, j)));
@@ -111,11 +117,15 @@ int nvshmemi_heap_registration::teardown() {
     int first_status = NVSHMEMX_SUCCESS;
 
     for (size_t j = 0; j < internal_reg.num_handle_sets(); j++) {
-        if (j > 0 && nvshmemi_device_state.enable_rail_opt) continue;
+        if (j > 0 && nvshmemi_device_state.enable_rail_opt) {
+            continue;
+        }
         nvshmem_mem_handle_t *handles = internal_reg.get_mem_handle(j, mype_, 0);
         int status = remote_tran.release_mem_handles(handles, transports_);
         if (status) {
-            if (first_status == NVSHMEMX_SUCCESS) first_status = status;
+            if (first_status == NVSHMEMX_SUCCESS) {
+                first_status = status;
+            }
             INFO(NVSHMEM_MEM, "release_mem_handles failed during heap teardown (j=%zu)\n", j);
         }
     }
@@ -140,11 +150,15 @@ bool nvshmemi_heap_registration::is_node_local_pe(int pe_id) const {
 
 int nvshmemi_heap_registration::node_local_index(int pe_id) const {
     assert(is_node_local_pe(pe_id));
-    if (nvshmemi_host_hashes == nullptr) return pe_id % npes_node_;
+    if (nvshmemi_host_hashes == nullptr) {
+        return pe_id % npes_node_;
+    }
 
     int local_index = 0;
     for (int i = 0; i < pe_id; i++) {
-        if (nvshmemi_host_hashes[i] == nvshmemi_host_hashes[pe_id]) local_index++;
+        if (nvshmemi_host_hashes[i] == nvshmemi_host_hashes[pe_id]) {
+            local_index++;
+        }
     }
     return local_index;
 }
@@ -157,9 +171,13 @@ int nvshmemi_heap_registration::map_p2p_chunk(nvshmem_mem_handle_t *handle, void
 
     /* Iterate over P2P transports. */
     for (int i = 0; i < transports_.num_transports(); i++) {
-        if (!transports_.active_has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) continue;
+        if (!transports_.active_has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) {
+            continue;
+        }
         status = export_p2p_memory(&local_handles[i], buf, size, handle);
-        if (status != NVSHMEMX_SUCCESS) break;
+        if (status != NVSHMEMX_SUCCESS) {
+            break;
+        }
     }
     status = nvshmemi_bootstrap_aggregate_status(status, npes_);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -197,15 +215,19 @@ int nvshmemi_heap_registration::map_p2p_range(void *buf, size_t size,
     int i = (mype_ + 1) % npes_;
     while (i != mype_) {
         for (int j = 0; j < transports_.num_transports(); j++) {
-            if (!transports_.active_between_has_cap(mype_, i, npes_, j, NVSHMEM_TRANSPORT_CAP_MAP))
+            if (!transports_.active_between_has_cap(mype_, i, npes_, j,
+                                                    NVSHMEM_TRANSPORT_CAP_MAP)) {
                 continue;
+            }
             INFO(NVSHMEM_MEM, "Mapping Buf: %p Size: %zu PE ID: %d, P2P Transport Idx: %d\n", buf,
                  size, i, j);
             nvshmem_mem_handle_t *in_handle =
                 &gathered_handles[i * transports_.num_transports() + j];
             status = map_p2p_memory(i, in_handle, buf, size);
             if (status) {
-                if (status != NVSHMEMX_ERROR_INVALID_VALUE) return status;
+                if (status != NVSHMEMX_ERROR_INVALID_VALUE) {
+                    return status;
+                }
                 /* Map failed: remove all map-related capabilities. */
                 transports_.clear_cap(j, i,
                                       NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST |
@@ -306,13 +328,17 @@ int nvshmemi_heap_registration::map_p2p_memory(int pe_id, nvshmem_mem_handle_t *
                                      cuda_status, cudaGetErrorString(cuda_status));
                 int status =
                     consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcOpenMemHandle");
-                if (status != NVSHMEMX_SUCCESS) return status;
+                if (status != NVSHMEMX_SUCCESS) {
+                    return status;
+                }
                 return NVSHMEMX_ERROR_INVALID_VALUE;
             }
             return NVSHMEMX_SUCCESS;
         }
         case nvshmemi_heap_registration_policy::STATIC_SYSMEM_FULL_HEAP:
-            if (!is_node_local_pe(pe_id)) return NVSHMEMX_ERROR_INVALID_VALUE;
+            if (!is_node_local_pe(pe_id)) {
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
             peer_heap_base_p2p_[mype_] = geometry_.heap_base;
             peer_heap_base_p2p_[pe_id] = static_cast<char *>(geometry_.global_heap_base) +
                                          node_local_index(pe_id) * geometry_.logical_heap_size;
@@ -351,7 +377,9 @@ int nvshmemi_heap_registration::exchange_p2p_memory_handle(nvshmem_mem_handle_t 
     /* Open all sockets. */
     for (const auto &entry : p2p_processes) {
         pid_t sending_process = entry.first;
-        if (pid == sending_process) continue;
+        if (pid == sending_process) {
+            continue;
+        }
 
         ipcHandle *recvIpcHandle = nullptr;
         NVSHMEMI_IPC_CHECK(ipcOpenSocket(recvIpcHandle, sending_process, pid));
@@ -366,7 +394,9 @@ int nvshmemi_heap_registration::exchange_p2p_memory_handle(nvshmem_mem_handle_t 
     /* Send all FDs. */
     for (const auto &entry : p2p_processes) {
         pid_t receiving_process = entry.first;
-        if (pid == receiving_process) continue;
+        if (pid == receiving_process) {
+            continue;
+        }
 
         NVSHMEMI_IPC_CHECK(
             ipcSendFd(myIpcHandle, load_posix_fd(*local_handle), pid, receiving_process));
@@ -374,7 +404,9 @@ int nvshmemi_heap_registration::exchange_p2p_memory_handle(nvshmem_mem_handle_t 
 
     /* Receive all FDs. */
     for (const auto &[sending_process, pe] : p2p_processes) {
-        if (pid == sending_process) continue;
+        if (pid == sending_process) {
+            continue;
+        }
 
         int received_fd;
         NVSHMEMI_IPC_CHECK(ipcRecvFd(recvIpcHandles[sending_process], &received_fd));
@@ -423,7 +455,9 @@ int nvshmemi_heap_registration::export_p2p_memory(nvshmem_mem_handle_t *out, voi
                                      cudaGetErrorString(cuda_status));
                 int status =
                     consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcGetMemHandle");
-                if (status != NVSHMEMX_SUCCESS) return status;
+                if (status != NVSHMEMX_SUCCESS) {
+                    return status;
+                }
                 return NVSHMEMX_ERROR_INVALID_VALUE;
             }
             return NVSHMEMX_SUCCESS;
@@ -456,8 +490,9 @@ int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* 
 
     /* Register local handles for the requested buffer range. */
     for (int i = 0; i < transports_.num_transports(); i++) {
-        if (!transports_.is_active(i) || transports_.has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP))
+        if (!transports_.is_active(i) || transports_.has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) {
             continue;
+        }
         status = remotetran.register_mem_handle(local_handles.data(), i, remote_buf, remote_size,
                                                 transports_);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_mem_handle failed\n");
@@ -503,7 +538,9 @@ out:
             remotetran.release_mem_handles(local_handles.data(), transports_);
         if (cleanup_status != NVSHMEMX_SUCCESS) {
             NVSHMEMI_WARN_PRINT("release mem handles failed after registration failure\n");
-            if (status == NVSHMEMX_SUCCESS) status = cleanup_status;
+            if (status == NVSHMEMX_SUCCESS) {
+                status = cleanup_status;
+            }
         }
     }
     return status;
@@ -537,7 +574,9 @@ void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
                                   (char *)buf, size);
     }
 
-    if (table_->empty_handle_cache()) table_->inc_handle_cache();
+    if (table_->empty_handle_cache()) {
+        table_->inc_handle_cache();
+    }
 }
 
 int nvshmemi_heap_registration::register_vmm_chunk(nvshmem_mem_handle_t *handle, off_t mc_offset,
@@ -600,7 +639,9 @@ int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t siz
             addr_idx += idx;
 
             /* A failed registration may not have published this chunk's sparse index. */
-            if (!mmap_reg.has_index(addr_idx)) continue;
+            if (!mmap_reg.has_index(addr_idx)) {
+                continue;
+            }
 
             const auto &entry = mmap_reg.get_index(addr_idx);
             status = ((entry.start_addr != curr_ptr) || (entry.size != register_size));
@@ -634,8 +675,10 @@ int nvshmemi_heap_registration::plan_vmm_peer_bases() {
 
     for (int i = ((mype_ + 1) % npes_); i != mype_; i = ((i + 1) % npes_)) {
         for (int j = 0; j < transports_.num_transports(); j++) {
-            if (!transports_.active_between_has_cap(mype_, i, npes_, j, NVSHMEM_TRANSPORT_CAP_MAP))
+            if (!transports_.active_between_has_cap(mype_, i, npes_, j,
+                                                    NVSHMEM_TRANSPORT_CAP_MAP)) {
                 continue;
+            }
             void *peer_base = (void *)((uintptr_t)geometry_.global_heap_base +
                                        geometry_.logical_heap_size * p2p_counter++);
             peer_heap_base_p2p_[i] = peer_base;

@@ -17,11 +17,15 @@ int main(int argc, char **argv) {
     me = nvshmem_my_pe();
     npes = nvshmem_n_pes();
 
-    if (me == 0) printf("Reuse teams test\n");
+    if (me == 0) {
+        printf("Reuse teams test\n");
+    }
 
     nvshmem_team_t old_team, new_team;
     ret = nvshmem_team_split_strided(NVSHMEM_TEAM_WORLD, 0, 1, npes, NULL, 0, &old_team);
-    if (ret) ++errors;
+    if (ret) {
+        ++errors;
+    }
 
     /* A total of npes-1 iterations are performed, where the active set in iteration i
      * includes PEs i..npes-1.  The size of the team decreases by 1 each iteration.  */
@@ -34,7 +38,9 @@ int main(int argc, char **argv) {
 
         ret = nvshmem_team_split_strided(old_team, 1, 1, nvshmem_team_n_pes(old_team) - 1, NULL, 0,
                                          &new_team);
-        if (old_team != NVSHMEM_TEAM_INVALID && ret) ++errors;
+        if (old_team != NVSHMEM_TEAM_INVALID && ret) {
+            ++errors;
+        }
 
         nvshmem_team_destroy(old_team);
         old_team = new_team;

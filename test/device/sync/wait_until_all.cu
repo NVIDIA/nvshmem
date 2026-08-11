@@ -12,7 +12,9 @@ __device__ int error_d;
 #define N 100
 
 __global__ void test_kernel(uint64_t *flags, int *status, int mype, int npes) {
-    for (int i = 0; i < npes; i++) nvshmemx_signal_op(&flags[mype], 1, NVSHMEM_SIGNAL_SET, i);
+    for (int i = 0; i < npes; i++) {
+        nvshmemx_signal_op(&flags[mype], 1, NVSHMEM_SIGNAL_SET, i);
+    }
     nvshmem_quiet();
     nvshmem_uint64_wait_until_all(flags, npes, status, NVSHMEM_CMP_EQ, 1);
 

@@ -36,7 +36,9 @@ __global__ void ping_pong(int *data_d, uint64_t *pack_buffer_d, int len, int pe,
     tid = threadIdx.x;
 
     for (i = 0; i < (iter + skip); i++) {
-        if (i == skip) start = clock64();
+        if (i == skip) {
+            start = clock64();
+        }
 
         /*if (pe) {
             nvshmemi_recvLL<int, NVSHMEMI_THREADGROUP_WARP>(data_d, pack_buffer_d, len, 2 * i + 1);

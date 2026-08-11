@@ -137,7 +137,9 @@ static void detect_module_or_library_support(struct test_args_s *args) {
     }
 
     use_module = getenv("NVSHMEMTEST_USE_CUMODULE");
-    if (use_module) (*args).use_culibrary = false;
+    if (use_module) {
+        (*args).use_culibrary = false;
+    }
 
 out:
     return;
@@ -184,10 +186,11 @@ int main(int argc, char **argv) {
 
     /** Load Result **/
     nvshmemx_barrier_all_on_stream(0);
-    if (!test_args.use_culibrary)
+    if (!test_args.use_culibrary) {
         t = new TestCUModule(fatbin_buffer, kernel_name);
-    else
+    } else {
         t = new TestCULibrary(fatbin_buffer, kernel_name);
+    }
     t->initialize(&function);
 
     /** Run **/
@@ -205,8 +208,12 @@ int main(int argc, char **argv) {
 
 cleanup:
     /** Cleanup **/
-    if (t != nullptr) t->finalize();
-    if (t != nullptr) delete t;
+    if (t != nullptr) {
+        t->finalize();
+    }
+    if (t != nullptr) {
+        delete t;
+    }
 
     finalize_wrapper();
 

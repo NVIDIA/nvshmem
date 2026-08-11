@@ -50,7 +50,9 @@ void print_table_v1(const char *job_name, const char *subjob_name, const char *v
                     uint64_t *size, double *value, int num_entries) {
     bool machine_readable = false;
     char *env_value = getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-    if (env_value) machine_readable = atoi(env_value);
+    if (env_value) {
+        machine_readable = atoi(env_value);
+    }
     int i;
 
     /* Used for automated test output. It outputs the data in a non human-friendly format. */

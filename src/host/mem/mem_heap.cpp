@@ -349,7 +349,9 @@ template <typename T>
 int nvshmemi_symmetric_heap::is_symmetric(T value) {
     int status = 0;
     /* TODO: need to handle multi-threaded scenarios */
-    if (!nvshmemi_options.ENABLE_ERROR_CHECKS) return 0;
+    if (!nvshmemi_options.ENABLE_ERROR_CHECKS) {
+        return 0;
+    }
 
     std::vector<T> scratch(cfg_.npes);
     status =
@@ -786,9 +788,10 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
                                          le_id);
                     int release_status =
                         CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdRelease(le_id, 1));
-                    if (release_status != CUDA_SUCCESS)
+                    if (release_status != CUDA_SUCCESS) {
                         NVSHMEMI_ERROR_PRINT("cuLogicalEndpointIdRelease failed for id %u\n",
                                              le_id);
+                    }
                     local_status = NVSHMEMX_ERROR_INTERNAL;
                     break;
                 }
@@ -832,7 +835,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
         }
     }
     status = converge_unicast_endpoint_status(local_status);
-    if (status != NVSHMEMX_SUCCESS) destroy_unicast_endpoints();
+    if (status != NVSHMEMX_SUCCESS) {
+        destroy_unicast_endpoints();
+    }
     return status;
 }
 
@@ -840,11 +845,17 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::converge_unicast_endpoint_status
     std::vector<int> statuses(cfg_.npes, NVSHMEMX_SUCCESS);
     int status = nvshmemi_boot_handle.allgather(&local_status, statuses.data(),
                                                 sizeof(local_status), &nvshmemi_boot_handle);
-    if (status != NVSHMEMX_SUCCESS) return NVSHMEMX_ERROR_INTERNAL;
+    if (status != NVSHMEMX_SUCCESS) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
     int converged_status = NVSHMEMX_SUCCESS;
     for (int peer_status : statuses) {
-        if (peer_status == NVSHMEMX_SUCCESS) continue;
-        if (peer_status != NVSHMEMX_ERROR_NOT_SUPPORTED) return peer_status;
+        if (peer_status == NVSHMEMX_SUCCESS) {
+            continue;
+        }
+        if (peer_status != NVSHMEMX_ERROR_NOT_SUPPORTED) {
+            return peer_status;
+        }
         converged_status = NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
     return converged_status;
@@ -852,7 +863,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::converge_unicast_endpoint_status
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::bind_unicast_endpoint_memory(
     CUmemGenericAllocationHandle mem_handle, off_t heap_offset, off_t mem_offset, size_t size) {
-    if (!le_unicast_enabled_) return NVSHMEMX_SUCCESS;
+    if (!le_unicast_enabled_) {
+        return NVSHMEMX_SUCCESS;
+    }
     int status =
         CUPFN(nvshmemi_cuda_syms,
               cuLogicalEndpointBindMem(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[cfg_.mype]),
@@ -863,7 +876,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::bind_unicast_endpoint_memory(
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unbind_unicast_endpoint_memory(off_t heap_offset,
                                                                                size_t size) {
-    if (!le_unicast_enabled_) return NVSHMEMX_SUCCESS;
+    if (!le_unicast_enabled_) {
+        return NVSHMEMX_SUCCESS;
+    }
     int status =
         CUPFN(nvshmemi_cuda_syms,
               cuLogicalEndpointUnbind(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[cfg_.mype]),
@@ -874,16 +889,20 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unbind_unicast_endpoint_memory(o
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::destroy_unicast_endpoints() {
     int first_error = NVSHMEMX_SUCCESS;
     for (size_t i = 0; i < unicast_endpoint_ids_with_flag_.size(); i++) {
-        if (!IS_VALID_LE_ID(unicast_endpoint_ids_with_flag_[i])) continue;
+        if (!IS_VALID_LE_ID(unicast_endpoint_ids_with_flag_[i])) {
+            continue;
+        }
         int status =
             CUPFN(nvshmemi_cuda_syms,
                   cuLogicalEndpointDestroy(PARSE_LE_ID(unicast_endpoint_ids_with_flag_[i])));
-        if (status != CUDA_SUCCESS && first_error == NVSHMEMX_SUCCESS)
+        if (status != CUDA_SUCCESS && first_error == NVSHMEMX_SUCCESS) {
             first_error = NVSHMEMX_ERROR_INTERNAL;
+        }
         status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdRelease(
                                                PARSE_LE_ID(unicast_endpoint_ids_with_flag_[i]), 1));
-        if (status != CUDA_SUCCESS && first_error == NVSHMEMX_SUCCESS)
+        if (status != CUDA_SUCCESS && first_error == NVSHMEMX_SUCCESS) {
             first_error = NVSHMEMX_ERROR_INTERNAL;
+        }
     }
     INFO(NVSHMEM_MEM, "[%d] Released unicast logical endpoints", cfg_.mype);
     unicast_endpoint_ids_with_flag_.clear();
@@ -982,9 +1001,10 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_heap() {
         int local_status =
             le_counted_operations_supported_ ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
         status = converge_unicast_endpoint_status(local_status);
-        if (status != NVSHMEMX_SUCCESS && status != NVSHMEMX_ERROR_NOT_SUPPORTED)
+        if (status != NVSHMEMX_SUCCESS && status != NVSHMEMX_ERROR_NOT_SUPPORTED) {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                "converge counted-operation capability failed\n");
+        }
 
         const bool counted_operations = status == NVSHMEMX_SUCCESS;
         local_status = reserve_unicast_endpoint(heap_size_, counted_operations);
@@ -1027,14 +1047,20 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
 teardown_hooks:
     for (auto &obs : observers_) {
         int obs_status = obs->on_heap_teardown();
-        if (teardown_status == 0 && obs_status != 0) teardown_status = obs_status;
+        if (teardown_status == 0 && obs_status != 0) {
+            teardown_status = obs_status;
+        }
     }
     /* Registration may be absent during partial initialization. */
     if (heap_registration_) {
         int reg_status = heap_registration_->teardown();
-        if (teardown_status == 0 && reg_status != 0) teardown_status = reg_status;
+        if (teardown_status == 0 && reg_status != 0) {
+            teardown_status = reg_status;
+        }
     }
-    if (status != 0) goto out;
+    if (status != 0) {
+        goto out;
+    }
 
     if (heap_base_ != NULL) {
         status = CUPFN(nvshmemi_cuda_syms,
@@ -1087,7 +1113,9 @@ teardown_hooks:
     INFO(NVSHMEM_MEM, "[%d] Leaving %s::cleanup_symmetric_heap\n", cfg_.mype,
          typeid(decltype(this)).name());
 out:
-    if (status == 0 && teardown_status != 0) status = teardown_status;
+    if (status == 0 && teardown_status != 0) {
+        status = teardown_status;
+    }
     return status;
 }
 
@@ -1100,12 +1128,16 @@ int nvshmemi_symmetric_heap_static::cleanup_symmetric_heap() {
     /* Run teardown hooks before releasing memory. */
     for (auto &obs : observers_) {
         int obs_status = obs->on_heap_teardown();
-        if (teardown_status == 0 && obs_status != 0) teardown_status = obs_status;
+        if (teardown_status == 0 && obs_status != 0) {
+            teardown_status = obs_status;
+        }
     }
     /* Registration may be absent during partial initialization. */
     if (heap_registration_) {
         int reg_status = heap_registration_->teardown();
-        if (teardown_status == 0 && reg_status != 0) teardown_status = reg_status;
+        if (teardown_status == 0 && reg_status != 0) {
+            teardown_status = reg_status;
+        }
     }
 
     if (!peer_heap_base_p2p_.empty()) {
@@ -1129,7 +1161,9 @@ int nvshmemi_symmetric_heap_static::cleanup_symmetric_heap() {
     nvshmemi_mem_remote_transport::destroy_instance();
 
 out:
-    if (status == 0 && teardown_status != 0) status = teardown_status;
+    if (status == 0 && teardown_status != 0) {
+        status = teardown_status;
+    }
     return status;
 }
 
@@ -1160,7 +1194,9 @@ int nvshmemi_symmetric_heap_static::setup_symmetric_heap(void) {
 out:
     if (status) {
         cleanup_symmetric_heap();
-        if (heap_size_) free_heap_memory(heap_base_);
+        if (heap_size_) {
+            free_heap_memory(heap_base_);
+        }
     }
 
     return status;
@@ -1959,7 +1995,9 @@ int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr)
     int status = 0;
     int buf_loc_id, loc_id;
     CUdevice gpu_dev;
-    if (!nvshmemi_options.ENABLE_ERROR_CHECKS) return 0;
+    if (!nvshmemi_options.ENABLE_ERROR_CHECKS) {
+        return 0;
+    }
 
     std::vector<int> scratch(cfg_.npes);
 
@@ -2090,7 +2128,9 @@ static nvshmemx_status check_vmm_buffer_device(
         CUPFN(cuda_syms, cuPointerGetAttribute(static_cast<void *>(&device_ordinal),
                                                CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
                                                reinterpret_cast<CUdeviceptr>(ptr)));
-    if (cu_status != CUDA_SUCCESS) return NVSHMEMX_ERROR_INTERNAL;
+    if (cu_status != CUDA_SUCCESS) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
     return (static_cast<int>(device_ordinal) != expected_device_id) ? NVSHMEMX_ERROR_INVALID_VALUE
                                                                     : NVSHMEMX_SUCCESS;
 }
@@ -2244,7 +2284,9 @@ void *nvshmemi_symmetric_heap_static::allocate_symmetric_memory(size_t size, siz
 extern "C" {
 
 void nvshmemi_free(void *ptr) {
-    if (ptr == NULL) return;
+    if (ptr == NULL) {
+        return;
+    }
 
     nvshmemi_state->heap_obj->heap_deallocate(ptr);
 }
@@ -2361,7 +2403,9 @@ void *nvshmemi_ptr(const void *ptr, int pe) {
 
         if (offset < nvshmemi_device_state.heap_size) {
             void *peer_addr = nvshmemi_state->heap_obj->get_local_pe_bases()[pe];
-            if (peer_addr != NULL) peer_addr = (void *)((char *)peer_addr + offset);
+            if (peer_addr != NULL) {
+                peer_addr = (void *)((char *)peer_addr + offset);
+            }
             return peer_addr;
         }
     }
@@ -2379,9 +2423,13 @@ void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr) {
     if (ptr >= nvshmemi_device_state.heap_base && offset < nvshmemi_device_state.heap_size) {
         nvls::nvshmemi_nvls_rsc *nvls =
             reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(nvshmemi_team_pool[team]->nvls_rsc);
-        if (nvls == NULL) return NULL;
+        if (nvls == NULL) {
+            return NULL;
+        }
         void *mc_addr = nvls->get_mc_base();
-        if (mc_addr != NULL) mc_addr = (void *)((char *)mc_addr + offset);
+        if (mc_addr != NULL) {
+            mc_addr = (void *)((char *)mc_addr + offset);
+        }
         return mc_addr;
     } else {
         return NULL;

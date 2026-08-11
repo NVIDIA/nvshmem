@@ -65,7 +65,9 @@ static const char *nvshmemi_device_assignment_mode_name(
 
 static int nvshmemi_get_device_block(int device_count, int entity_count, int entity_index,
                                      int *start, int *count) {
-    if (!start || !count) return NVSHMEMX_ERROR_INVALID_VALUE;
+    if (!start || !count) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
 
     *start = -1;
     *count = 0;
@@ -130,9 +132,10 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
     INFO(NVSHMEM_INIT, "NVSHMEM_ENABLE_MULTI_PORT = %d (source: %s)",
          nvshmemi_options.ENABLE_MULTI_PORT, multi_port_source);
 
-    if (!state->transports)
+    if (!state->transports) {
         state->transports =
             (nvshmem_transport_t *)calloc(NVSHMEM_TRANSPORT_COUNT, sizeof(nvshmem_transport_t));
+    }
 
     transports = (nvshmem_transport_t *)state->transports;
 
@@ -152,7 +155,9 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
             // No need for alias VA map for P2P transport
             transports[index]->alias_va_map = nullptr;
             transports[index]->egm_map = nullptr;
-            if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
+            if (transports[index]->max_op_len == 0) {
+                transports[index]->max_op_len = SIZE_MAX;
+            }
             index++;
         } else {
             nvshmemi_local_mem_cache_fini(tmp_cache_ptr);
@@ -166,28 +171,33 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
 
 #ifdef NVSHMEM_IBRC_SUPPORT
     if (!transport_name &&
-        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ibrc", TRANSPORT_STRING_MAX_LENGTH) == 0)
+        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ibrc", TRANSPORT_STRING_MAX_LENGTH) == 0) {
         transport_name = "ibrc";
+    }
 #endif
 #ifdef NVSHMEM_UCX_SUPPORT
     if (!transport_name &&
-        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ucx", TRANSPORT_STRING_MAX_LENGTH) == 0)
+        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ucx", TRANSPORT_STRING_MAX_LENGTH) == 0) {
         transport_name = "ucx";
+    }
 #endif
 #ifdef NVSHMEM_IBDEVX_SUPPORT
-    if (!transport_name &&
-        strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ibdevx", TRANSPORT_STRING_MAX_LENGTH) == 0)
+    if (!transport_name && strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "ibdevx",
+                                       TRANSPORT_STRING_MAX_LENGTH) == 0) {
         transport_name = "ibdevx";
+    }
 #endif
 #ifdef NVSHMEM_LIBFABRIC_SUPPORT
     if (!transport_name && strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "libfabric",
-                                       TRANSPORT_STRING_MAX_LENGTH) == 0)
+                                       TRANSPORT_STRING_MAX_LENGTH) == 0) {
         transport_name = "libfabric";
+    }
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
     if (!transport_name && strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "gpunetio",
-                                       TRANSPORT_STRING_MAX_LENGTH) == 0)
+                                       TRANSPORT_STRING_MAX_LENGTH) == 0) {
         transport_name = "gpunetio";
+    }
 #endif
 
     if (transport_name) {
@@ -237,7 +247,9 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
             transports[index]->alias_va_map =
                 state->vmm_heap ? state->vmm_heap->get_alias_va_map() : nullptr;
             transports[index]->egm_map = state->vmm_heap ? state->vmm_heap->get_egm_map() : nullptr;
-            if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
+            if (transports[index]->max_op_len == 0) {
+                transports[index]->max_op_len = SIZE_MAX;
+            }
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
             if (strncasecmp(transport_name, "gpunetio", TRANSPORT_STRING_MAX_LENGTH) == 0 &&
@@ -328,7 +340,9 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
                 state->vmm_heap ? state->vmm_heap->get_alias_va_map() : nullptr;
             transports[index]->egm_map = state->vmm_heap ? state->vmm_heap->get_egm_map() : nullptr;
             nvshmemi_ibgda_get_device_state(&transports[index]->type_specific_shared_state);
-            if (transports[index]->max_op_len == 0) transports[index]->max_op_len = SIZE_MAX;
+            if (transports[index]->max_op_len == 0) {
+                transports[index]->max_op_len = SIZE_MAX;
+            }
             state->atomic_host_endian_min_size = transports[index]->atomic_host_endian_min_size;
             nvshmemi_device_state.ibgda_is_initialized = true;
             nvshmemi_device_state.selected_device_transport = NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA;
@@ -402,7 +416,9 @@ int nvshmemi_transport_finalize(nvshmemi_state_t *state) {
     INFO(NVSHMEM_INIT, "In nvshmemi_transport_finalize");
     int status = 0;
 
-    if (!state->transports) return 0;
+    if (!state->transports) {
+        return 0;
+    }
 
     for (int i = 0; i < state->num_initialized_transports; i++) {
         nvshmemi_transport_finalize_one(state, i);
@@ -421,7 +437,9 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
 
     for (int i = 0; i < state->num_initialized_transports; i++) {
         int current_status = 0;
-        if (!((state->transport_bitmap) & (1 << i))) continue;
+        if (!((state->transport_bitmap) & (1 << i))) {
+            continue;
+        }
         tcurr = transports[i];
 
         if (!(tcurr->attr & NVSHMEM_TRANSPORT_ATTR_CONNECTED)) {
@@ -439,7 +457,9 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state) {
                 (tcurr->n_devices + assignment_entity_count - 1) / assignment_entity_count;
         }
 
-        if (max_devices_per_pe == 0) max_devices_per_pe = 1;
+        if (max_devices_per_pe == 0) {
+            max_devices_per_pe = 1;
+        }
 
         std::vector<int> selected_devices(max_devices_per_pe, -1);
         int found_devices = 0;

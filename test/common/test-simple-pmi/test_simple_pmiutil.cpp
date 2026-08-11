@@ -70,8 +70,9 @@ void SPMIU_printf(int print_flag, const char *fmt, ...) {
             } else {
                 logfile = fopen("testserver.out", "w");
             }
-        } else
+        } else {
             logfile = stderr;
+        }
     }
 
     if (print_flag) {
@@ -138,7 +139,9 @@ int SPMIU_readline(int fd, char *buf, int maxlen) {
         ch = *nextChar++;
         *p++ = ch;
         curlen++;
-        if (ch == '\n') break;
+        if (ch == '\n') {
+            break;
+        }
     }
 
     /* We null terminate the string for convenience in printing */
@@ -155,9 +158,9 @@ int SPMIU_writeline(int fd, char *buf) {
     if (size > SPMIU_MAXLINE) {
         buf[SPMIU_MAXLINE - 1] = '\0';
         SPMIU_printf(1, "write_line: message string too big: :%s:\n", buf);
-    } else if (buf[strlen(buf) - 1] != '\n') /* error:  no newline at end */
+    } else if (buf[strlen(buf) - 1] != '\n') { /* error:  no newline at end */
         SPMIU_printf(1, "write_line: message string doesn't end in newline: :%s:\n", buf);
-    else {
+    } else {
         do {
             n = write(fd, buf, size);
         } while (n == -1 && errno == EINTR);
@@ -167,7 +170,9 @@ int SPMIU_writeline(int fd, char *buf) {
             perror("system msg for write_line failure ");
             return (-1);
         }
-        if (n < size) SPMIU_printf(1, "write_line failed to write entire message\n");
+        if (n < size) {
+            SPMIU_printf(1, "write_line failed to write entire message\n");
+        }
     }
     return 0;
 }
@@ -180,19 +185,25 @@ int SPMIU_parse_keyvals(char *st) {
     char *p, *keystart, *valstart;
     int offset;
 
-    if (!st) return (-1);
+    if (!st) {
+        return (-1);
+    }
 
     SPMIU_keyval_tab_idx = 0;
     p = st;
     while (1) {
-        while (*p == ' ') p++;
+        while (*p == ' ') {
+            p++;
+        }
         /* got non-blank */
         if (*p == '=') {
             SPMIU_printf(1, "SPMIU_parse_keyvals:  unexpected = at character %d in %s\n", p - st,
                          st);
             return (-1);
         }
-        if (*p == '\n' || *p == '\0') return (0); /* normal exit */
+        if (*p == '\n' || *p == '\0') {
+            return (0); /* normal exit */
+        }
         /* got normal character */
         keystart = p; /* remember where key started */
         int length = 0;
@@ -215,7 +226,9 @@ int SPMIU_parse_keyvals(char *st) {
         strncpy(SPMIU_keyval_tab[SPMIU_keyval_tab_idx].key, keystart, MAXKEYLEN);
 
         valstart = ++p; /* start of value */
-        while (*p != ' ' && *p != '\n' && *p != '\0') p++;
+        while (*p != ' ' && *p != '\n' && *p != '\0') {
+            p++;
+        }
         /* store value */
         strncpy(SPMIU_keyval_tab[SPMIU_keyval_tab_idx].value, valstart, MAXVALLEN);
         offset = (int)(p - valstart);
@@ -224,15 +237,20 @@ int SPMIU_parse_keyvals(char *st) {
            intermediate offset */
         SPMIU_keyval_tab[SPMIU_keyval_tab_idx].value[offset] = '\0';
         SPMIU_keyval_tab_idx++;
-        if (*p == ' ') continue;
-        if (*p == '\n' || *p == '\0') return (0); /* value has been set to empty */
+        if (*p == ' ') {
+            continue;
+        }
+        if (*p == '\n' || *p == '\0') {
+            return (0); /* value has been set to empty */
+        }
     }
 }
 
 void SPMIU_dump_keyvals(void) {
     int i;
-    for (i = 0; i < SPMIU_keyval_tab_idx; i++)
+    for (i = 0; i < SPMIU_keyval_tab_idx; i++) {
         SPMIU_printf(1, "  %s=%s\n", SPMIU_keyval_tab[i].key, SPMIU_keyval_tab[i].value);
+    }
 }
 
 char *SPMIU_getval(const char *keystr, char *valstr, int vallen) {

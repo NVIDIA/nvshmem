@@ -28,12 +28,16 @@ __device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter
         __threadfence();
         counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
         if (counter == (gridDim.x * barrier_epoch - 1)) {
-            if constexpr (CALL_QUIET) nvshmem_quiet();
+            if constexpr (CALL_QUIET) {
+                nvshmem_quiet();
+            }
             *(counter_d + 1) += 1;
         }
         while (*(counter_d + 1) != barrier_epoch);
     }
-    if constexpr (SYNC_AFTER) __syncthreads();
+    if constexpr (SYNC_AFTER) {
+        __syncthreads();
+    }
 }
 
 template <SMEMToggle SMEM_MODE>
@@ -390,9 +394,13 @@ int main(int argc, char *argv[]) {
                 {
                     void *args[] = {&data_d, &counter_d,  &len,      &mype,
                                     &npes,   &iter_timed, &smem_size};
-                    if (is_sender) cudaEventRecord(start);
+                    if (is_sender) {
+                        cudaEventRecord(start);
+                    }
                     status = nvshmemx_collective_launch_attr(&cl_attr, (const void *)bw_fn, args);
-                    if (is_sender) cudaEventRecord(stop);
+                    if (is_sender) {
+                        cudaEventRecord(stop);
+                    }
                     if (status != 0) {
                         fprintf(stderr, "nvshmemx_collective_launch_attr (timed) failed: %d\n",
                                 status);
@@ -406,15 +414,18 @@ int main(int argc, char *argv[]) {
                     CUDA_CHECK(cudaGetLastError());
                     cudaEventElapsedTime(&milliseconds, start, stop);
                     h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
-                    if (report_msgrate)
+                    if (report_msgrate) {
                         h_msgrate[i] =
                             calculate_msgrate(get_messages_per_iteration(max_blocks, max_threads),
                                               iter, milliseconds);
+                    }
                 } else {
                     CUDA_CHECK(cudaDeviceSynchronize());
                     CUDA_CHECK(cudaGetLastError());
                     h_bw[i] = 0.0;
-                    if (report_msgrate) h_msgrate[i] = 0.0;
+                    if (report_msgrate) {
+                        h_msgrate[i] = 0.0;
+                    }
                 }
 
                 /* Gather all values to PE 0. */
@@ -431,9 +442,10 @@ int main(int argc, char *argv[]) {
                 if (mype == 0) {
                     CUDA_CHECK(cudaMemcpy(h_bw_all.data(), d_bw_all, npes * sizeof(double),
                                           cudaMemcpyDeviceToHost));
-                    if (report_msgrate)
+                    if (report_msgrate) {
                         CUDA_CHECK(cudaMemcpy(h_msgrate_all.data(), d_msgrate_all,
                                               npes * sizeof(double), cudaMemcpyDeviceToHost));
+                    }
                     double bw_sum = 0.0;
                     double msgrate_sum = 0.0;
                     for (int s = 0; s < npes / 2; s++) {
@@ -450,8 +462,9 @@ int main(int argc, char *argv[]) {
                         }
                     }
                     perf_stats_add(bw_avg_stats_per_size[i], bw_sum / (npes / 2));
-                    if (report_msgrate)
+                    if (report_msgrate) {
                         perf_stats_add(msgrate_avg_stats_per_size[i], msgrate_sum / (npes / 2));
+                    }
                 }
             }
 
@@ -469,11 +482,15 @@ int main(int argc, char *argv[]) {
                                 std::vector<std::vector<perf_stats_t>> &pair_stats,
                                 std::vector<perf_stats_t> &avg_stats) {
             std::vector<double> avg(i, 0.0);
-            for (int j = 0; j < i; j++) avg[j] = avg_stats[j].mean;
+            for (int j = 0; j < i; j++) {
+                avg[j] = avg_stats[j].mean;
+            }
             print_basic_table(test_name, "None", output_var, units, '+', h_size_arr, avg.data(), i,
                               avg_stats.data());
 
-            if (npes <= 2) return;
+            if (npes <= 2) {
+                return;
+            }
             std::vector<double> pair(i, 0.0);
             std::vector<perf_stats_t> stats(i);
             for (int s = 0; s < num_pairs; s++) {
@@ -489,9 +506,10 @@ int main(int argc, char *argv[]) {
         };
 
         print_metric("BW", "GB/sec", bw_stats_per_pair_per_size, bw_avg_stats_per_size);
-        if (report_msgrate)
+        if (report_msgrate) {
             print_metric("msgrate", "MMPS", msgrate_stats_per_pair_per_size,
                          msgrate_avg_stats_per_size);
+        }
     }
 
 finalize:
@@ -504,12 +522,22 @@ finalize:
         }
     }
 
-    if (d_bw_local) nvshmem_free(d_bw_local);
-    if (d_bw_all) nvshmem_free(d_bw_all);
-    if (d_msgrate_local) nvshmem_free(d_msgrate_local);
-    if (d_msgrate_all) nvshmem_free(d_msgrate_all);
+    if (d_bw_local) {
+        nvshmem_free(d_bw_local);
+    }
+    if (d_bw_all) {
+        nvshmem_free(d_bw_all);
+    }
+    if (d_msgrate_local) {
+        nvshmem_free(d_msgrate_local);
+    }
+    if (d_msgrate_all) {
+        nvshmem_free(d_msgrate_all);
+    }
 
-    if (h_tables) free_tables(h_tables, 3);
+    if (h_tables) {
+        free_tables(h_tables, 3);
+    }
     finalize_wrapper();
 
     return exit_status;

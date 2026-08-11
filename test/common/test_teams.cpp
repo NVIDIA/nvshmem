@@ -269,7 +269,8 @@ void finalize_test_teams() {
         if (map_team_to_string[teams[i]] != "NVSHMEM_TEAM_WORLD" &&
             map_team_to_string[teams[i]] != "NVSHMEM_TEAM_SHARED" &&
             map_team_to_string[teams[i]] != "NVSHMEM_TEAM_MC_SHARED" &&
-            map_team_to_string[teams[i]] != "NVSHMEMX_TEAM_NODE")
+            map_team_to_string[teams[i]] != "NVSHMEMX_TEAM_NODE") {
             nvshmem_team_destroy(teams[i]);
+        }
     }
 }

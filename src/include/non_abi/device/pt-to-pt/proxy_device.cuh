@@ -299,7 +299,9 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_rma
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
-    if (!bytes) return;
+    if (!bytes) {
+        return;
+    }
     transfer_dma(rptr, lptr, bytes, pe, op, qp_index);
 }
 
@@ -809,8 +811,9 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_fen
     int pe = NVSHMEMX_PE_ALL, nvshmemx_qp_handle_t *qp_handle = NULL, int num_qps = 1) {
     if (likely(pe == NVSHMEMX_PE_ALL || qp_handle == NULL)) {
         proxy_fence();
-    } else
+    } else {
         proxy_fence_qp(pe, qp_handle, num_qps);
+    }
 }
 
 #endif /* __CUDA_ARCH__ */
