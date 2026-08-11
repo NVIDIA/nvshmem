@@ -25,7 +25,7 @@
 #include "internal/host_transport/transport.h"                             // for nvsh...
 #include "transport_common.h"                                              // for nvsh...
 #ifdef NVSHMEM_USE_GDRCOPY
-#include "transport_gdr_common.h"  // for gdrc...
+#include "transport_gdr_common.h"  // for nvsh...
 #endif
 
 static void *ibv_handle;
@@ -38,9 +38,7 @@ static uint64_t nvshmemt_ucx_submitted_proxy_atomics = 0;
 static uint64_t nvshmemt_ucx_submitted_host_atomics = 0;
 static uint64_t nvshmemt_ucx_completed_proxy_atomics = 0;
 static uint64_t nvshmemt_ucx_completed_host_atomics = 0;
-static struct gdrcopy_function_table gdrcopy_ftable;
-static void *gdrcopy_handle = NULL;
-static gdr_t gdr_desc;
+static nvshmemt_gpu_cpu_mapping_state gpu_cpu_mapping_state;
 static bool is_egm;
 #endif
 
@@ -49,7 +47,7 @@ static uint64_t nvshmemt_ucx_bounce_buffers_in_use = 0;
 
 static uint64_t nvshmemt_g_bogus_bounce_buffer = 0;
 
-static bool use_gdrcopy = 0;
+static bool use_gpu_cpu_mapping = 0;
 static bool use_local_atomics = 0;
 
 int nvshmemt_ucx_progress(nvshmem_transport_t transport);
@@ -135,7 +133,7 @@ static void nvshmemt_ucx_atomic_request_cb(void *request, ucs_status_t status, v
         NVSHMEMT_UCX_ERROR_PRINT(status, "UCX AMO request completed with error.\n");
     }
 
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         if (buffer) {
             if (buffer->amo_has_retval) {
                 nvshmem_transport_t transport = (nvshmem_transport_t)buffer->transport;
@@ -146,7 +144,7 @@ static void nvshmemt_ucx_atomic_request_cb(void *request, ucs_status_t status, v
                 void *valid_cpu_ptr;
 
                 valid_cpu_ptr =
-                    (void *)((char *)mem_handle_info->cpu_ptr +
+                    (void *)((char *)mem_handle_info->cpu_mapping.cpu_ptr +
                              ((char *)buffer->amo_device_retptr - (char *)mem_handle_info->ptr));
                 elem = (g_elem_t *)valid_cpu_ptr;
                 elem->data = buffer->retvalue;
@@ -254,7 +252,7 @@ ucs_status_t ucx_recv_resp_am_data_cb(void *arg, const void *header, size_t head
             get_mem_handle_info(transport, ucx_state, header_info->header.resp_h.retptr);
 
         valid_cpu_ptr =
-            (void *)((char *)mem_handle_info->cpu_ptr +
+            (void *)((char *)mem_handle_info->cpu_mapping.cpu_ptr +
                      ((char *)header_info->header.resp_h.retptr - (char *)mem_handle_info->ptr));
         recv_elem_ptr = (volatile g_elem_t *)valid_cpu_ptr;
         recv_elem_ptr->data = header_info->header.resp_h.retval;
@@ -294,15 +292,11 @@ int nvshmemt_ucx_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_tr
     if (handle_info) {
 #ifdef NVSHMEM_USE_GDRCOPY
 
-        /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
+        /* GPU CPU mapping is not used for EGM memory. */
         is_egm = check_egm(handle->ptr, t->egm_map);
-        if (use_gdrcopy && !is_egm) {
-            status = gdrcopy_ftable.unmap(gdr_desc, handle_info->mh, handle_info->cpu_ptr_base,
-                                          handle_info->size);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unmap failed\n");
-
-            status = gdrcopy_ftable.unpin_buffer(gdr_desc, handle_info->mh);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdr_unpin failed\n");
+        if (use_gpu_cpu_mapping && !is_egm) {
+            status = nvshmemt_gpu_cpu_unmap(&gpu_cpu_mapping_state, &handle_info->cpu_mapping);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "GPU CPU unmap failed\n");
         }
 #endif
         buff_size = handle_info->size;
@@ -398,10 +392,10 @@ int nvshmemt_ucx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, siz
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
+    /* GPU CPU mapping is not used for EGM memory. */
     is_egm = check_egm(buf, t->egm_map);
 
-    if (use_gdrcopy && !local_only && !is_egm) {
+    if (use_gpu_cpu_mapping && !local_only && !is_egm) {
         void *gdr_buf = buf;
 
         // if applicable, alias_va_ptr (VA1) is only used for pin_buffer() and
@@ -410,23 +404,10 @@ int nvshmemt_ucx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, siz
         if (alias_va_ptr != NULL) {
             gdr_buf = alias_va_ptr;
         }
-        status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)gdr_buf, length, 0, 0,
-                                           &handle_info->mh);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error,
-                              "gdrcopy pin_buffer failed \n");
-
-        status = gdrcopy_ftable.map(gdr_desc, handle_info->mh, &handle_info->cpu_ptr_base, length);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, "gdrcopy map failed \n");
-
-        gdr_info_t info;
-        status = gdrcopy_ftable.get_info(gdr_desc, handle_info->mh, &info);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, "gdrcopy get_info failed \n");
-
-        // remember that mappings start on a 64KB boundary, so let's
-        // calculate the offset from the head of the mapping to the
-        // beginning of the buffer
-        handle_info->cpu_ptr =
-            (void *)((char *)handle_info->cpu_ptr_base + ((char *)gdr_buf - (char *)info.va));
+        status =
+            nvshmemt_gpu_cpu_map(&gpu_cpu_mapping_state, gdr_buf, length,
+                                 NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE, &handle_info->cpu_mapping);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, "GPU CPU mapping failed\n");
     }
 #endif
     if (!local_only) {
@@ -461,6 +442,17 @@ error:
         if (ucx_state->cache) {
             nvshmemt_mem_handle_cache_remove(t, ucx_state->cache, buf);
         }
+#ifdef NVSHMEM_USE_GDRCOPY
+        if (handle_info->cpu_mapping.pinned || handle_info->cpu_mapping.mapped) {
+            int cleanup_status =
+                nvshmemt_gpu_cpu_unmap(&gpu_cpu_mapping_state, &handle_info->cpu_mapping);
+            if (cleanup_status != 0) {
+                INFO(ucx_state->log_level,
+                     "GPU CPU mapping cleanup failed after registration error (rc=%d)",
+                     cleanup_status);
+            }
+        }
+#endif
         free(handle_info);
     }
 
@@ -809,7 +801,7 @@ int nvshmemt_ucx_process_amos(struct nvshmem_transport *transport) {
         send_header = &header->header.send_h;
         nvshmemt_ucx_mem_handle_info_t *mem_handle_info =
             get_mem_handle_info(transport, ucx_state, send_header->addr);
-        ptr = (void *)((char *)mem_handle_info->cpu_ptr +
+        ptr = (void *)((char *)mem_handle_info->cpu_mapping.cpu_ptr +
                        ((char *)send_header->addr - (char *)mem_handle_info->ptr));
         status = 0;
         int is_float = (send_header->op & NVSHMEMI_AMO_FLOAT_BIT) != 0;
@@ -866,7 +858,7 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /
     nvshmemt_ucx_am_header_t *header;
     ucp_ep_h ep;
 
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         if (is_proxy) {
             ep = ucx_state->endpoints[(ucx_state->ep_count * pe + ucx_state->proxy_ep_idx)];
         } else {
@@ -914,8 +906,9 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /
         return 0;
     }
 #endif
-    NVSHMEMI_ERROR_PRINT("AMO %d not supported with the current configuration (GDRCopy Disabled)\n",
-                         verb.desc);
+    NVSHMEMI_ERROR_PRINT(
+        "AMO %d not supported with the current configuration (GPU CPU mapping disabled)\n",
+        verb.desc);
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
@@ -1002,7 +995,7 @@ int nvshmemt_ucx_remote_amo(struct nvshmem_transport *transport, int pe, void * 
 fetch_atomic:
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         void *buffer_value = NULL;
         if (verb.desc > NVSHMEMI_AMO_END_OF_NONFETCH) {
             buffer = nvshmemt_ucx_get_bounce_buffer(ucx_state);
@@ -1091,8 +1084,9 @@ fetch_atomic:
         return 0;
     }
 #endif
-    NVSHMEMI_ERROR_PRINT("AMO %d not supported with the current configuration (GDRCopy Disabled)\n",
-                         verb.desc);
+    NVSHMEMI_ERROR_PRINT(
+        "AMO %d not supported with the current configuration (GPU CPU mapping disabled)\n",
+        verb.desc);
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
@@ -1120,7 +1114,7 @@ int nvshmemt_ucx_quiet(struct nvshmem_transport *tcurr, int /*pe*/, int qp_index
 
     /* Since atomics are managed by a two-part request, we need to track them separately. */
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         if (qp_index != NVSHMEMX_QP_HOST) {
             while (nvshmemt_ucx_submitted_proxy_atomics > nvshmemt_ucx_completed_proxy_atomics) {
                 nvshmemt_ucx_progress(tcurr);
@@ -1161,7 +1155,7 @@ int nvshmemt_ucx_progress(nvshmem_transport_t transport) {
 
     ucp_worker_progress(ucx_state->worker_context);
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_local_atomics && use_gdrcopy) {
+    if (use_local_atomics && use_gpu_cpu_mapping) {
         nvshmemt_ucx_process_amos(transport);
     }
 #endif
@@ -1241,8 +1235,8 @@ int nvshmemt_ucx_finalize(nvshmem_transport_t transport) {
         }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-        if (use_gdrcopy) {
-            nvshmemt_gdrcopy_ftable_fini(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle);
+        if (use_gpu_cpu_mapping) {
+            nvshmemt_gpu_cpu_mapping_fini(&gpu_cpu_mapping_state);
         }
 #endif
 
@@ -1281,10 +1275,10 @@ int nvshmemt_ucx_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
         return 0;
     }
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         int temp;
-        gdrcopy_ftable.copy_from_mapping(mem_handle_info->mh, &temp, mem_handle_info->cpu_ptr,
-                                         sizeof(int));
+        nvshmemt_gpu_cpu_copy_from(&gpu_cpu_mapping_state, &mem_handle_info->cpu_mapping, &temp,
+                                   mem_handle_info->cpu_mapping.cpu_ptr, sizeof(int));
         return 0;
     }
 #endif
@@ -1340,8 +1334,7 @@ int nvshmemt_ucx_show_info(struct nvshmem_transport * /*transport*/, int /*style
     return 0;
 }
 
-int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*table*/,
-                  int api_version) {
+int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, int api_version) {
     ucs_status_t ucs_rc;
     ucp_params_t params;
 
@@ -1382,10 +1375,10 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table * /*tabl
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (options.DISABLE_GDRCOPY) {
-        use_gdrcopy = false;
+        use_gpu_cpu_mapping = false;
     } else {
-        use_gdrcopy =
-            nvshmemt_gdrcopy_ftable_init(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle, log_level);
+        use_gpu_cpu_mapping = nvshmemt_gpu_cpu_mapping_init(
+            &gpu_cpu_mapping_state, table, log_level, options.GDRCOPY_USE_INTERNAL_DMABUF);
     }
 #endif
 
