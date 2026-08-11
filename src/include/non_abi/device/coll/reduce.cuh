@@ -115,7 +115,7 @@ perform_gpu_rdxn<double2, RDXN_OPS_MAXLOC>(double2 op1, double2 op2) {
 
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_linear_reduce_threadgroup(
-    TYPE *x, TYPE *y, TYPE *z, size_t nelems) {
+    const TYPE *x, const TYPE *y, TYPE *z, size_t nelems) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     int groupSize = nvshmemi_threadgroup_size<SCOPE>();
     int i;
@@ -1154,7 +1154,7 @@ nvshmemi_gpu_rdxn_threadgroup_zcopy_get_bar_direct(nvshmem_team_t team, TYPE *de
     int next_offset = -1;
     char *base = NULL;
     char *peer_base = NULL;
-    char *peer_source = NULL;
+    const TYPE *peer_source = NULL;
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     int groupSize = nvshmemi_threadgroup_size<SCOPE>();
@@ -1171,15 +1171,15 @@ nvshmemi_gpu_rdxn_threadgroup_zcopy_get_bar_direct(nvshmem_team_t team, TYPE *de
     next_offset = src_offset;
     peer_base = (char *)((void *)__ldg(
         (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + next_rank));
-    peer_source = peer_base + next_offset;
-    gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>((void *)source, peer_source, dest, nreduce);
+    peer_source = reinterpret_cast<const TYPE *>(peer_base + next_offset);
+    gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(source, peer_source, dest, nreduce);
 
     for (i = 2; i < teami->size; i++) {
         next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, my_active_set_pe + i);
         next_offset = src_offset;
         peer_base = (char *)((void *)__ldg(
             (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + next_rank));
-        peer_source = peer_base + next_offset;
+        peer_source = reinterpret_cast<const TYPE *>(peer_base + next_offset);
         gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(dest, peer_source, dest, nreduce);
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
