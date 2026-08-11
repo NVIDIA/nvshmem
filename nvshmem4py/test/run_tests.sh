@@ -257,9 +257,9 @@ TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
 pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
 pip install "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
 pip install pytest pytest-mpi
-CUTLASS_DSL_SPEC="nvidia-cutlass-dsl>=4.5.2,<5.0"
+CUTLASS_DSL_SPEC="nvidia-cutlass-dsl>=4.8.0,<5.0"
 if [ "$CUDA_MAJOR" = "13" ]; then
-    CUTLASS_DSL_SPEC="nvidia-cutlass-dsl[cu13]>=4.5.2,<5.0"
+    CUTLASS_DSL_SPEC="nvidia-cutlass-dsl[cu13]>=4.8.0,<5.0"
 fi
 pip install "$CUTLASS_DSL_SPEC"
 pip install yapf
@@ -466,6 +466,12 @@ echo "================================================"
 python3 "$TEST_DIR/wheel_sanity_test.py"
 if [ $? -ne 0 ]; then
     echo "Test failed: wheel sanity test"
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+python3 -m pytest "$TEST_DIR/test_cute_library_lifetime.py" -v
+if [ $? -ne 0 ]; then
+    echo "Test failed: CuTe library lifetime unit test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 

@@ -15,8 +15,6 @@ from nvshmem.core.interop.cute import cute_compile_helper
 import nvshmem.core.device.cute as nvshmem_cute
 import nvshmem.bindings.device.cute as nvshmem_cute_bindings
 
-_KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
-
 rma_dtypes = [
     "bfloat16", "float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"
 ]
@@ -65,14 +63,8 @@ def _nvshmem_stream():
 
 
 def _compile_kernel(kernel, *example_args):
-    compiled, nvshmem_kernel = cute_compile_helper(kernel, *example_args)
-    _KERNEL_OBJECTS.append(nvshmem_kernel)
+    compiled, _ = cute_compile_helper(kernel, *example_args)
     return compiled
-
-
-def _finalize_kernels():
-    while _KERNEL_OBJECTS:
-        nvshmem.core.library_finalize(_KERNEL_OBJECTS.pop())
 
 
 @pytest.mark.mpi

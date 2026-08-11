@@ -12,6 +12,11 @@ Used to avoid re-creating NvshmemResources every time someone calls nvshmem.core
 """
 _mr_references = {}
 """
+Strong references to CUDA objects and owners registered by NVSHMEM4Py helpers.
+"""
+_helper_library_references = {}
+_helper_module_references = {}
+"""
 class for Internal Init Status
 """
 

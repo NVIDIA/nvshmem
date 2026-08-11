@@ -13,7 +13,7 @@ from enum import IntEnum
 import nvshmem.core
 from nvshmem.core.memory import buffer
 from nvshmem.core.utils import get_size
-from nvshmem.core._internal_tracking import _mr_references
+from nvshmem.core._internal_tracking import (_mr_references, _helper_library_references, _helper_module_references)
 from nvshmem.core.nvshmem_types import *
 from nvshmem import bindings
 
@@ -25,7 +25,8 @@ from typing import Any, Tuple, Union
 
 __all__ = [
     "bytetensor", "tensor", "free_tensor", "tensor_get_buffer", "get_peer_tensor", "get_multicast_tensor",
-    "register_external_tensor", "unregister_external_tensor", "cleanup_cute", "cute_compile_helper"
+    "register_external_tensor", "unregister_external_tensor", "cleanup_cute", "register_cute_library",
+    "register_cute_module", "cute_compile_helper"
 ]
 
 try:
@@ -447,6 +448,28 @@ def free_tensor(tensor: Tensor) -> None:
     nvshmem.core.free(buf)
 
 
+def register_cute_library(compiled_executor: Any) -> NvshmemKernelObject:
+    """Register a CuTe-compiled CUDA library with NVSHMEM.
+
+    NVSHMEM keeps ``compiled_executor`` alive until :func:`nvshmem.core.finalize`.
+    Call :func:`nvshmem.core.library_finalize` for earlier release. Do not
+    explicitly unload the CuTe module while it is registered.
+    """
+    cuda_library = compiled_executor.jit_module.cuda_library
+    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
+    nvshmem.core.library_init(nvshmem_kernel)
+    _helper_library_references[nvshmem_kernel] = compiled_executor
+    return nvshmem_kernel
+
+
+def register_cute_module(compiled_executor: Any, cuda_module: Any) -> NvshmemKernelObject:
+    """Register a CuTe-owned CUmodule and keep its executor alive."""
+    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_module))
+    nvshmem.core.module_init(nvshmem_kernel)
+    _helper_module_references[nvshmem_kernel] = compiled_executor
+    return nvshmem_kernel
+
+
 def cute_compile_helper(kernel_fn, *args, **kwargs):
     """
     Helper function to compile a CuTe DSL kernel function.
@@ -465,8 +488,8 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
     Returns:
         A tuple containing:
         - The compiled kernel function. (a callable object)
-        - The nvshmem kernel object. (a NvshmemKernelObject) - the user should run ``nvshmem.core.library_finalize`` 
-                  on this object after the kernel is executed.
+        - The NVSHMEM kernel object. Call ``nvshmem.core.library_finalize``
+          for early release; otherwise ``nvshmem.core.finalize`` releases it.
 
     NOTE: This function assumes that the device being used as the NVSHMEM PE is already set current.
     """
@@ -509,8 +532,5 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
     # NOTE! assumes that device is already set current.
     dev = Device()
     compiled_func = compiled_func.to(dev.device_id)
-    cuda_library = compiled_func.jit_module.cuda_library
-    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
-    nvshmem_kernel._keepalive = compiled_func
-    nvshmem.core.library_init(nvshmem_kernel)
+    nvshmem_kernel = register_cute_library(compiled_func)
     return compiled_func, nvshmem_kernel

@@ -83,7 +83,7 @@ mlir = [
     "numba-cuda-mlir[<NUMBA_CUDA_MLIR_VERSION_PLACEHOLDER>]>=0.4.2",
 ]
 cute = [
-    "nvidia-cutlass-dsl<CUTLASS_DSL_EXTRA_PLACEHOLDER>>=4.5.2,<5.0",
+    "nvidia-cutlass-dsl<CUTLASS_DSL_EXTRA_PLACEHOLDER>>=4.8.0,<5.0",
 ]
 
 [tool.black]
