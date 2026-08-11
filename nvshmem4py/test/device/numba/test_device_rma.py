@@ -283,5 +283,5 @@ def test_tma_shared_memory_management(nvshmem_init_fini):
         minimum_smem,
         nvshmem.core.ask_smem(nvshmem.core.SmemAmount.SMEM_BARRIERS_ONLY),
     ]
-    assert (results == expected).all(), "Numba TMA shared-memory wrapper results are incorrect"
+    assert results.get().tolist() == expected, "Numba TMA shared-memory wrapper results are incorrect"
     nvshmem.core.free_array(results)

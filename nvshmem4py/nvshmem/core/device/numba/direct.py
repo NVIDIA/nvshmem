@@ -6,7 +6,7 @@ import nvshmem.bindings as host_bindings
 from nvshmem.core import Teams
 
 import cffi
-from numba.core import cgutils, types
+from numba.core import types
 from numba.core.extending import overload
 from numba.types import int8, int16, int64, uint8, uint16, uint32, uint64, float32, float64, float16, Array
 from numba import cuda
@@ -50,7 +50,9 @@ def _array_data_voidptr(typingctx, arrty):
 
     def codegen(cgctx, builder, sig, args):
         ary = arrayobj.make_array(arrty)(cgctx, builder, args[0])
-        return builder.bitcast(ary.data, cgutils.voidptr_t)
+        # Numbast types a C ``void *`` parameter as CPointer(none), which Numba
+        # represents as ``i8**`` even though the value is a plain data address.
+        return builder.bitcast(ary.data, cgctx.get_value_type(sig.return_type))
 
     return sig, codegen
 
