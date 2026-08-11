@@ -715,6 +715,7 @@ if(NVSHMEM_UCX_SUPPORT)
     target_include_directories(nvshmem_transport_ucx PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_ucx PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
+                   modules/transport/common/transport_gdr_dmabuf.cpp
     )
   endif()
   set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_ucx)
@@ -740,6 +741,7 @@ if(NVSHMEM_IBRC_SUPPORT)
     target_include_directories(nvshmem_transport_ibrc PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_ibrc PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
+                   modules/transport/common/transport_gdr_dmabuf.cpp
     )
   endif()
   if(HAVE_IBV_ACCESS_RELAXED_ORDERING)
@@ -807,6 +809,7 @@ if(NVSHMEM_IBGDA_SUPPORT)
     target_include_directories(nvshmem_transport_ibgda PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_ibgda PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
+                   modules/transport/common/transport_gdr_dmabuf.cpp
     )
   endif()
   if(HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED)
@@ -890,6 +893,7 @@ if(NVSHMEM_LIBFABRIC_SUPPORT)
     target_include_directories(nvshmem_transport_libfabric PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_libfabric PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
+                   modules/transport/common/transport_gdr_dmabuf.cpp
     )
   endif()
   set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_libfabric)
@@ -1123,6 +1127,8 @@ set(TRANSPORT_EXPORTS
     common/transport_gdr_abi.h
     common/transport_gdr_common.cpp
     common/transport_gdr_common.h
+    common/transport_gdr_dmabuf.cpp
+    common/transport_gdr_internal.h
     common/transport_ib_common.cpp
     common/transport_ib_common.h
     common/transport_mlx5_common.cpp

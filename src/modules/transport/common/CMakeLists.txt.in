@@ -24,7 +24,10 @@ endmacro()
 add_helper_library(nvshmem_transport_common OFF transport_common.cpp)
 
 if(NVSHMEM_USE_GDRCOPY)
-  add_helper_library(nvshmem_transport_gdr_common OFF transport_gdr_common.cpp)
+  set(GDR_COMMON_SOURCES
+      transport_gdr_common.cpp
+      transport_gdr_dmabuf.cpp)
+  add_helper_library(nvshmem_transport_gdr_common OFF "${GDR_COMMON_SOURCES}")
   target_include_directories(nvshmem_transport_gdr_common PUBLIC ${GDRCOPY_INCLUDE})
 endif()
 

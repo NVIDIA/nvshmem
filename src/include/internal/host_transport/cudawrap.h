@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -159,6 +159,7 @@ typedef CUresult(CUDAAPI *PFN_cuDeviceGetCliqueInfo_v13040)(CUcliqueInfo *clique
 struct nvshmemi_cuda_fn_table {
     DEFINE_SYM(cuCtxGetDevice, 2000)
     DEFINE_SYM(cuCtxSynchronize, 2000)
+    DEFINE_SYM(cuDriverGetVersion, 2020)
     DEFINE_SYM(cuDeviceGet, 2000)
     DEFINE_SYM(cuDeviceGetAttribute, 2000)
     DEFINE_SYM(cuPointerGetAttribute, 4000)
@@ -168,6 +169,7 @@ struct nvshmemi_cuda_fn_table {
     DEFINE_SYM(cuGetErrorName, 6000)
     DEFINE_SYM(cuCtxSetCurrent, 4000)
     DEFINE_SYM(cuDevicePrimaryCtxRetain, 7000)
+    DEFINE_SYM(cuDevicePrimaryCtxRelease, 11000)
     DEFINE_SYM(cuCtxGetCurrent, 4000)
     DEFINE_SYM(cuCtxGetFlags, 7000)
     DEFINE_SYM(cuCtxSetFlags, 12010)
