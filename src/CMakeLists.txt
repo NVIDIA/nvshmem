@@ -1120,6 +1120,7 @@ set(TRANSPORT_EXPORTS
     common/mlx5_prm.h
     common/transport_common.cpp
     common/transport_common.h
+    common/transport_gdr_abi.h
     common/transport_gdr_common.cpp
     common/transport_gdr_common.h
     common/transport_ib_common.cpp

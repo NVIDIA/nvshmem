@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -15,7 +15,7 @@
 #include "device_host_transport/nvshmem_common_transport.h"
 
 #ifdef NVSHMEM_USE_GDRCOPY
-#include "gdrapi.h"
+#include "transport_gdr_abi.h"
 #endif
 
 /* This value is arbitrary. UCX doesn't give a max length for packed rkeys. */

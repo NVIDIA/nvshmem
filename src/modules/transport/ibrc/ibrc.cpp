@@ -28,7 +28,7 @@
 #include "internal/host_transport/cudawrap.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
 #ifdef NVSHMEM_USE_GDRCOPY
-#include "gdrapi.h"
+#include "transport_gdr_abi.h"
 #endif
 #include "infiniband/verbs.h"
 #include "non_abi/nvshmem_build_options.h"
