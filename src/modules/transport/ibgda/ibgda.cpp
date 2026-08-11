@@ -148,7 +148,7 @@ typedef enum {
 typedef enum {
     IBGDA_NIC_HANDLER_AUTO = 0,
     IBGDA_NIC_HANDLER_GPU,
-    IBGDA_NIC_HANDLER_CPU_GDRCOPY,
+    IBGDA_NIC_HANDLER_CPU_MAPPING,
     IBGDA_NIC_HANDLER_CPU_HOST_MEMORY,
 } ibgda_nic_handler_t;
 
@@ -172,7 +172,7 @@ struct ibgda_mem_object {
     bool has_gpu_mapping : 1;
     bool has_nic_mapping : 1;
 #ifdef NVSHMEM_USE_GDRCOPY
-    gdr_mh_t mh;
+    nvshmemt_gpu_cpu_mapping cpu_mapping;
 #endif
 };
 
@@ -358,11 +358,9 @@ static void *mlx5dv_handle;
 static struct nvshmemi_cuda_fn_table *ibgda_cuda_syms;
 
 #ifdef NVSHMEM_USE_GDRCOPY
-static gdr_t gdr_desc;
-static struct gdrcopy_function_table gdrcopy_ftable;
-static void *gdrcopy_handle = NULL;
+static nvshmemt_gpu_cpu_mapping_state gpu_cpu_mapping_state;
 #endif
-static bool use_gdrcopy = false;
+static bool use_gpu_cpu_mapping = false;
 
 static ibgda_mem_type_t ibgda_nic_buf_location;
 static ibgda_nic_handler_t ibgda_nic_handler;
@@ -429,18 +427,18 @@ static int ibgda_parse_nic_handler_request(ibgda_nic_handler_t *out_loc, const c
     } else if (req == "gpu") {
         loc = IBGDA_NIC_HANDLER_GPU;
     } else if (req == "cpu") {
-        loc = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
+        loc = IBGDA_NIC_HANDLER_CPU_MAPPING;
     } else if (req == "cpu_host_memory") {
         loc = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
     } else {
         status = NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
-    if (loc == IBGDA_NIC_HANDLER_CPU_GDRCOPY && !use_gdrcopy) {
+    if (loc == IBGDA_NIC_HANDLER_CPU_MAPPING && !use_gpu_cpu_mapping) {
         status = NVSHMEMX_ERROR_NOT_SUPPORTED;
         NVSHMEMI_ERROR_JMP(
             status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
-            "NVSHMEM_IBGDA_NIC_HANDLER=cpu requires GDRCopy.\n"
+            "NVSHMEM_IBGDA_NIC_HANDLER=cpu requires a GPU CPU mapping backend.\n"
             "please use one of NVSHMEM_IBGDA_NIC_HANDLER=auto/gpu/cpu_host_memory instead.\n");
     }
 
@@ -491,10 +489,11 @@ int ibgda_dci_progress(nvshmem_transport_t t) {
         prod_idx_array = (uint64_t *)device->dci.dci_ctrl.prod_idx_mobject->aligned.cpu_ptr;
 
 #ifdef NVSHMEM_USE_GDRCOPY
-        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
-            gdrcopy_ftable.copy_from_mapping(device->dci.dci_ctrl.prod_idx_mobject->mh,
-                                             prod_idx_snapshot, prod_idx_array,
-                                             sizeof(uint64_t) * num_prod_idx_slots);
+        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING) {
+            auto *mobject = device->dci.dci_ctrl.prod_idx_mobject;
+            nvshmemt_gpu_cpu_copy_from(&gpu_cpu_mapping_state, &mobject->cpu_mapping,
+                                       prod_idx_snapshot, prod_idx_array,
+                                       sizeof(uint64_t) * num_prod_idx_slots);
         } else
 #endif
             if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
@@ -565,10 +564,10 @@ int ibgda_rc_progress(nvshmem_transport_t t) {
             __be64 *bf;
 
 #ifdef NVSHMEM_USE_GDRCOPY
-            if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
-                gdrcopy_ftable.copy_from_mapping(ep->qp_ctrl.prod_idx_mobject->mh,
-                                                 prod_idx_snapshot, prod_idx_buffer,
-                                                 sizeof(uint64_t));
+            if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING) {
+                auto *mobject = ep->qp_ctrl.prod_idx_mobject;
+                nvshmemt_gpu_cpu_copy_from(&gpu_cpu_mapping_state, &mobject->cpu_mapping,
+                                           prod_idx_snapshot, prod_idx_buffer, sizeof(uint64_t));
             } else
 #endif
                 if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
@@ -994,17 +993,10 @@ static void ibgda_gpu_mem_free(struct ibgda_mem_object *mobject) {
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (mobject->has_cpu_mapping) {
-        assert(use_gdrcopy);
-
-        status = gdrcopy_ftable.unmap(gdr_desc, mobject->mh, mobject->base.cpu_ptr,
-                                      mobject->aligned.size);
+        assert(use_gpu_cpu_mapping);
+        status = nvshmemt_gpu_cpu_unmap(&gpu_cpu_mapping_state, &mobject->cpu_mapping);
         if (status) {
-            NVSHMEMI_WARN_PRINT("gdr_unmap failed ... Continue\n");
-        }
-
-        status = gdrcopy_ftable.unpin_buffer(gdr_desc, mobject->mh);
-        if (status) {
-            NVSHMEMI_WARN_PRINT("gdr_unpin failed ... Continue\n");
+            NVSHMEMI_WARN_PRINT("GPU CPU unmap failed ... Continue\n");
         }
     }
 #endif
@@ -1024,11 +1016,6 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
     void *ptr = 0;
     void *aligned_ptr;
     size_t bufsize = size;
-#ifdef NVSHMEM_USE_GDRCOPY
-    void *cpu_ptr_base = NULL;
-    void *cpu_ptr = NULL;
-#endif
-
     struct ibgda_mem_object *mobject =
         (struct ibgda_mem_object *)calloc(1, sizeof(struct ibgda_mem_object));
     NVSHMEMI_NULL_ERROR_JMP(mobject, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -1061,35 +1048,18 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
 
     if (host_mapping) {
 #ifdef NVSHMEM_USE_GDRCOPY
-        if (use_gdrcopy) {
-            status = gdrcopy_ftable.pin_buffer(gdr_desc, (unsigned long)aligned_ptr,
-                                               ibgda_round_up(size, IBGDA_GPAGE_SIZE), 0, 0,
-                                               &mobject->mh);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "gdrcopy pin_buffer failed \n");
-
-            status = gdrcopy_ftable.map(gdr_desc, mobject->mh, &cpu_ptr_base, size);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map failed \n");
-
-            gdr_info_t info;
-            status = gdrcopy_ftable.get_info(gdr_desc, mobject->mh, &info);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "gdrcopy get_info failed \n");
-
-            // remember that mappings start on a 64KB boundary, so let's
-            // calculate the offset from the head of the mapping to the
-            // beginning of the buffer
-            uintptr_t off;
-            off = (uintptr_t)aligned_ptr - info.va;
-            cpu_ptr = (void *)((uintptr_t)cpu_ptr_base + off);
-
-            mobject->base.cpu_ptr = cpu_ptr_base;
-            mobject->aligned.cpu_ptr = cpu_ptr;
+        if (use_gpu_cpu_mapping) {
+            status = nvshmemt_gpu_cpu_map(&gpu_cpu_mapping_state, aligned_ptr, size,
+                                          NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE, &mobject->cpu_mapping,
+                                          ibgda_round_up(size, IBGDA_GPAGE_SIZE));
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "GPU CPU mapping failed\n");
+            mobject->base.cpu_ptr = mobject->cpu_mapping.cpu_ptr_base;
+            mobject->aligned.cpu_ptr = mobject->cpu_mapping.cpu_ptr;
         } else
 #endif
         {
             NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
-                               "host_mapping is not supported as GDRCopy is disable \n");
+                               "host_mapping requires a GPU CPU mapping backend\n");
         }
     }
 
@@ -2082,7 +2052,7 @@ out:
 
 static void ibgda_destroy_qp_mobjects(struct ibgda_qp_control_structures *qp_ctrl) {
     if (qp_ctrl->prod_idx_mobject) {
-        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
+        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING) {
             ibgda_gpu_mem_free(qp_ctrl->prod_idx_mobject);
         } else {
             ibgda_host_mem_free(qp_ctrl->prod_idx_mobject);
@@ -2132,9 +2102,9 @@ static int ibgda_create_qp_mobjects(struct ibgda_qp_control_structures *qp_ctrl,
     uint64_t *prod_idx_cache = NULL;
     uint64_t *prod_idx_snapshot = NULL;
 
-    if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY ||
+    if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING ||
         ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
-        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
+        if (ibgda_nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING) {
             status = ibgda_gpu_mem_alloc(&prod_idx_mobject, sizeof(uint64_t) * num_eps,
                                          IBGDA_GPAGE_SIZE, true);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -4630,8 +4600,8 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
-        nvshmemt_gdrcopy_ftable_fini(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle);
+    if (use_gpu_cpu_mapping) {
+        nvshmemt_gpu_cpu_mapping_fini(&gpu_cpu_mapping_state);
     }
 #endif
 
@@ -5029,10 +4999,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (options->DISABLE_GDRCOPY) {
-        use_gdrcopy = false;
+        use_gpu_cpu_mapping = false;
     } else {
-        use_gdrcopy = nvshmemt_gdrcopy_ftable_init(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle,
-                                                   ibgda_state->common.log_level);
+        use_gpu_cpu_mapping = nvshmemt_gpu_cpu_mapping_init(&gpu_cpu_mapping_state, ibgda_cuda_syms,
+                                                            ibgda_state->common.log_level,
+                                                            options->GDRCOPY_USE_INTERNAL_DMABUF);
     }
 #endif
 
@@ -5140,15 +5111,15 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                     continue;
                 }
 
-                if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
-                    ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
+                if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_MAPPING) {
+                    ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_MAPPING;
                 } else if (nic_handler_request == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
                     ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
                 } else {
                     status = ibgda_check_gpu_mapping_nic_uar(ibgda_dev);
                     if (status) {
-                        if (use_gdrcopy) {
-                            ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
+                        if (use_gpu_cpu_mapping) {
+                            ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_MAPPING;
                         } else {
                             ibgda_dev->nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
                         }
@@ -5225,8 +5196,8 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
             (struct ibgda_device *)ibgda_state->common.devices + ibgda_state->common.dev_ids[i];
         nic_buf_on_gpumem &= device->support_nic_buf_on_gpumem;
         nic_buf_on_hostmem &= device->support_nic_buf_on_hostmem;
-        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
-            nic_handler = IBGDA_NIC_HANDLER_CPU_GDRCOPY;
+        if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING) {
+            nic_handler = IBGDA_NIC_HANDLER_CPU_MAPPING;
         }
         if (device->nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
             nic_handler = IBGDA_NIC_HANDLER_CPU_HOST_MEMORY;
@@ -5259,11 +5230,12 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
         INFO(ibgda_state->common.log_level, "NIC buffer will be on host memory.\n");
     }
 
-    assert(nic_handler == IBGDA_NIC_HANDLER_GPU || nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY ||
+    assert(nic_handler == IBGDA_NIC_HANDLER_GPU || nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING ||
            nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY);
-    if (nic_handler == IBGDA_NIC_HANDLER_CPU_GDRCOPY) {
-        assert(use_gdrcopy);
-        INFO(ibgda_state->common.log_level, "NIC handler will be CPU with gdrcopy backend.\n");
+    if (nic_handler == IBGDA_NIC_HANDLER_CPU_MAPPING) {
+        assert(use_gpu_cpu_mapping);
+        INFO(ibgda_state->common.log_level,
+             "NIC handler will be CPU with the selected GPU CPU mapping backend.\n");
     } else if (nic_handler == IBGDA_NIC_HANDLER_CPU_HOST_MEMORY) {
         INFO(ibgda_state->common.log_level, "NIC handler will be CPU with host memory backend.\n");
     } else {
