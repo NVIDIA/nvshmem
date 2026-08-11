@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -50,6 +50,7 @@ static int cudaPfnFuncLoader(struct nvshmemi_cuda_fn_table *table) {
 
     LOAD_SYM(table, cuCtxGetDevice, 2000, , 0);
     LOAD_SYM(table, cuCtxSynchronize, 2000, , 0);
+    LOAD_SYM(table, cuDriverGetVersion, 2020, , 0);
     LOAD_SYM(table, cuDeviceGet, 2000, , 0);
     LOAD_SYM(table, cuDeviceGetAttribute, 2000, , 0);
     LOAD_SYM(table, cuPointerSetAttribute, 6000, , 0);
@@ -59,6 +60,7 @@ static int cudaPfnFuncLoader(struct nvshmemi_cuda_fn_table *table) {
     LOAD_SYM(table, cuGetErrorName, 6000, , 0);
     LOAD_SYM(table, cuCtxSetCurrent, 4000, , 0);
     LOAD_SYM(table, cuDevicePrimaryCtxRetain, 7000, , 0);
+    LOAD_SYM(table, cuDevicePrimaryCtxRelease, 11000, , 1);
     LOAD_SYM(table, cuCtxGetCurrent, 4000, , 0);
     LOAD_SYM(table, cuCtxGetFlags, 7000, , 0);
     LOAD_SYM(table, cuCtxSetFlags, 12010, , 1);

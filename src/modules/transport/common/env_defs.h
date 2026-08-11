@@ -43,7 +43,9 @@ NVSHMEMI_ENV_DEF(DEBUG_SUBSYS, string, "", NVSHMEMI_ENV_CAT_HIDDEN,
 NVSHMEMI_ENV_DEF(DISABLE_IB_NATIVE_ATOMICS, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable use of InfiniBand native atomics")
 NVSHMEMI_ENV_DEF(DISABLE_GDRCOPY, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
-                 "Disable use of GDRCopy in IB RC Transport")
+                 "Disable GDRCopy and CUDA DMA-BUF GPU CPU mappings in supported transports")
+NVSHMEMI_ENV_DEF(GDRCOPY_USE_INTERNAL_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Use the internal CUDA DMA-BUF CPU-mapping backend instead of libgdrapi")
 NVSHMEMI_ENV_DEF(DISABLE_DATA_DIRECT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable use of directNIC in IB Transport")
 NVSHMEMI_ENV_DEF(IB_DISABLE_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
