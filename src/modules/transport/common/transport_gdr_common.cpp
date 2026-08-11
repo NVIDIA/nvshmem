@@ -16,6 +16,25 @@
 
 namespace {
 
+struct gdrcopy_function_table {
+    gdr_t (*open)();
+    int (*close)(gdr_t g);
+    int (*pin_buffer)(gdr_t g, unsigned long addr, size_t size, uint64_t p2p_token,
+                      uint32_t va_space, gdr_mh_t *handle);
+    int (*unpin_buffer)(gdr_t g, gdr_mh_t handle);
+    int (*get_info)(gdr_t g, gdr_mh_t handle, gdr_info_t *info);
+    int (*map)(gdr_t g, gdr_mh_t handle, void **va, size_t size);
+    int (*unmap)(gdr_t g, gdr_mh_t handle, void *va, size_t size);
+    int (*copy_from_mapping)(gdr_mh_t handle, void *h_ptr, const void *map_d_ptr, size_t size);
+    int (*copy_to_mapping)(gdr_mh_t handle, void *map_d_ptr, const void *h_ptr, size_t size);
+    void (*runtime_get_version)(int *major, int *minor);
+    int (*driver_get_version)(gdr_t g, int *major, int *minor);
+    int (*pin_buffer_v2)(gdr_t g, unsigned long addr, size_t size, uint32_t flags,
+                         gdr_mh_t *handle);
+    int (*map_v2)(gdr_t g, gdr_mh_t handle, void **va, size_t size, int flags);
+    int (*get_attribute)(gdr_t g, int attr, int *value);
+};
+
 struct nvshmemt_gdrcopy_backend_context {
     gdrcopy_function_table ftable;
     gdr_t descriptor;
@@ -57,7 +76,9 @@ static nvshmemt_gpu_cpu_mapping_type nvshmemt_gdrcopy_mapping_type(const gdr_inf
 
 static int nvshmemt_gdrcopy_close(void *opaque_context) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context) return EINVAL;
+    if (!context) {
+        return EINVAL;
+    }
     int status = 0;
     if (context->descriptor && context->ftable.close) {
         status = context->ftable.close(context->descriptor);
@@ -69,12 +90,16 @@ static int nvshmemt_gdrcopy_close(void *opaque_context) {
 static int nvshmemt_gdrcopy_pin(void *opaque_context, uintptr_t gpu_va, size_t size, uint32_t flags,
                                 uintptr_t *handle) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context || !handle || flags & ~NVSHMEMT_GPU_CPU_MAPPING_FLAG_FORCE_PCIE) return EINVAL;
+    if (!context || !handle || flags & ~NVSHMEMT_GPU_CPU_MAPPING_FLAG_FORCE_PCIE) {
+        return EINVAL;
+    }
 
     gdr_mh_t gdr_handle{};
     int status;
     if (flags & NVSHMEMT_GPU_CPU_MAPPING_FLAG_FORCE_PCIE) {
-        if (!context->ftable.pin_buffer_v2) return ENOTSUP;
+        if (!context->ftable.pin_buffer_v2) {
+            return ENOTSUP;
+        }
         status =
             context->ftable.pin_buffer_v2(context->descriptor, static_cast<unsigned long>(gpu_va),
                                           size, NVSHMEMT_GDR_PIN_FLAG_FORCE_PCIE, &gdr_handle);
@@ -82,25 +107,33 @@ static int nvshmemt_gdrcopy_pin(void *opaque_context, uintptr_t gpu_va, size_t s
         status = context->ftable.pin_buffer(context->descriptor, static_cast<unsigned long>(gpu_va),
                                             size, 0, 0, &gdr_handle);
     }
-    if (status == 0) *handle = static_cast<uintptr_t>(gdr_handle.h);
+    if (status == 0) {
+        *handle = static_cast<uintptr_t>(gdr_handle.h);
+    }
     return status;
 }
 
 static int nvshmemt_gdrcopy_unpin(void *opaque_context, uintptr_t handle) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context) return EINVAL;
+    if (!context) {
+        return EINVAL;
+    }
     return context->ftable.unpin_buffer(context->descriptor, nvshmemt_gdrcopy_handle(handle));
 }
 
 static int nvshmemt_gdrcopy_get_info(void *opaque_context, uintptr_t handle,
                                      nvshmemt_gpu_cpu_backend_info *backend_info) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context || !backend_info) return EINVAL;
+    if (!context || !backend_info) {
+        return EINVAL;
+    }
 
     gdr_info_t info{};
     int status =
         context->ftable.get_info(context->descriptor, nvshmemt_gdrcopy_handle(handle), &info);
-    if (status != 0) return status;
+    if (status != 0) {
+        return status;
+    }
 
     backend_info->gpu_va = static_cast<uintptr_t>(info.va);
     backend_info->mapped_size = static_cast<size_t>(info.mapped_size);
@@ -115,7 +148,9 @@ static int nvshmemt_gdrcopy_map(void *opaque_context, uintptr_t handle, void **c
         return EINVAL;
     }
     if (flags & NVSHMEMT_GPU_CPU_MAPPING_FLAG_FORCE_PCIE) {
-        if (!context->ftable.map_v2) return ENOTSUP;
+        if (!context->ftable.map_v2) {
+            return ENOTSUP;
+        }
         return context->ftable.map_v2(context->descriptor, nvshmemt_gdrcopy_handle(handle),
                                       cpu_ptr_base, size, NVSHMEMT_GDR_MAP_FLAG_DEFAULT);
     }
@@ -126,7 +161,9 @@ static int nvshmemt_gdrcopy_map(void *opaque_context, uintptr_t handle, void **c
 static int nvshmemt_gdrcopy_unmap(void *opaque_context, uintptr_t handle, void *cpu_ptr_base,
                                   size_t size) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context) return EINVAL;
+    if (!context) {
+        return EINVAL;
+    }
     return context->ftable.unmap(context->descriptor, nvshmemt_gdrcopy_handle(handle), cpu_ptr_base,
                                  size);
 }
@@ -134,14 +171,18 @@ static int nvshmemt_gdrcopy_unmap(void *opaque_context, uintptr_t handle, void *
 static int nvshmemt_gdrcopy_copy_to(void *opaque_context, uintptr_t handle, void *map_d_ptr,
                                     const void *h_ptr, size_t size) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context) return EINVAL;
+    if (!context) {
+        return EINVAL;
+    }
     return context->ftable.copy_to_mapping(nvshmemt_gdrcopy_handle(handle), map_d_ptr, h_ptr, size);
 }
 
 static int nvshmemt_gdrcopy_copy_from(void *opaque_context, uintptr_t handle, void *h_ptr,
                                       const void *map_d_ptr, size_t size) {
     auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(opaque_context);
-    if (!context) return EINVAL;
+    if (!context) {
+        return EINVAL;
+    }
     return context->ftable.copy_from_mapping(nvshmemt_gdrcopy_handle(handle), h_ptr, map_d_ptr,
                                              size);
 }
@@ -176,20 +217,30 @@ static void nvshmemt_gdrcopy_library_cleanup(nvshmemt_gdrcopy_backend_context *c
         }
         delete context;
     }
-    if (library_handle) dlclose(library_handle);
+    if (library_handle) {
+        dlclose(library_handle);
+    }
 }
 
 }  // namespace
 
 void nvshmemt_gpu_cpu_backend_reset(nvshmemt_gpu_cpu_backend *backend) {
-    if (!backend) return;
-    if (backend->context && backend->ops.close) (void)backend->ops.close(backend->context);
-    if (backend->library_handle) dlclose(backend->library_handle);
+    if (!backend) {
+        return;
+    }
+    if (backend->context && backend->ops.close) {
+        (void)backend->ops.close(backend->context);
+    }
+    if (backend->library_handle) {
+        dlclose(backend->library_handle);
+    }
     *backend = {};
 }
 
 bool nvshmemt_gdrcopy_backend_init(nvshmemt_gpu_cpu_backend *backend, int log_level) {
-    if (!backend) return false;
+    if (!backend) {
+        return false;
+    }
     *backend = {};
 
     void *library_handle = dlopen("libgdrapi.so.2", RTLD_LAZY);
@@ -301,47 +352,18 @@ bool nvshmemt_gdrcopy_backend_init(nvshmemt_gpu_cpu_backend *backend, int log_le
     return true;
 }
 
-bool nvshmemt_gdrcopy_ftable_init(struct gdrcopy_function_table *gdrcopy_ftable, gdr_t *gdr_desc,
-                                  void **gdrcopy_handle, int log_level) {
-    if (!gdrcopy_ftable || !gdr_desc || !gdrcopy_handle) return false;
-
-    *gdrcopy_ftable = {};
-    *gdr_desc = nullptr;
-    *gdrcopy_handle = nullptr;
-
-    nvshmemt_gpu_cpu_backend backend{};
-    if (!nvshmemt_gdrcopy_backend_init(&backend, log_level)) return false;
-
-    auto *context = static_cast<nvshmemt_gdrcopy_backend_context *>(backend.context);
-    *gdrcopy_ftable = context->ftable;
-    *gdr_desc = context->descriptor;
-    *gdrcopy_handle = backend.library_handle;
-
-    context->descriptor = nullptr;
-    backend.library_handle = nullptr;
-    delete context;
-    return true;
-}
-
-void nvshmemt_gdrcopy_ftable_fini(struct gdrcopy_function_table *gdrcopy_ftable, gdr_t *gdr_desc,
-                                  void **gdrcopy_handle) {
-    if (gdrcopy_ftable && gdr_desc && *gdr_desc && gdrcopy_ftable->close) {
-        (void)gdrcopy_ftable->close(*gdr_desc);
-    }
-    if (gdr_desc) *gdr_desc = nullptr;
-    if (gdrcopy_handle && *gdrcopy_handle) dlclose(*gdrcopy_handle);
-    if (gdrcopy_handle) *gdrcopy_handle = nullptr;
-    if (gdrcopy_ftable) *gdrcopy_ftable = {};
-}
-
 bool nvshmemt_gpu_cpu_mapping_init(nvshmemt_gpu_cpu_mapping_state *state,
                                    struct nvshmemi_cuda_fn_table *cuda_syms, int log_level,
                                    bool force_internal_dmabuf) {
-    if (!state) return false;
+    if (!state) {
+        return false;
+    }
     nvshmemt_gpu_cpu_mapping_fini(state);
 
     auto *impl = new (std::nothrow) nvshmemt_gpu_cpu_mapping_impl{};
-    if (!impl) return false;
+    if (!impl) {
+        return false;
+    }
     impl->log_level = log_level;
 
     if (force_internal_dmabuf) {
@@ -364,7 +386,9 @@ bool nvshmemt_gpu_cpu_mapping_init(nvshmemt_gpu_cpu_mapping_state *state,
 
 void nvshmemt_gpu_cpu_mapping_fini(nvshmemt_gpu_cpu_mapping_state *state) {
     auto *impl = nvshmemt_gpu_cpu_impl(state);
-    if (!impl) return;
+    if (!impl) {
+        return;
+    }
     nvshmemt_gpu_cpu_backend_reset(&impl->backend);
     delete impl;
     state->impl = nullptr;
@@ -405,21 +429,31 @@ int nvshmemt_gpu_cpu_map(nvshmemt_gpu_cpu_mapping_state *state, void *gpu_ptr, s
     uintptr_t offset = 0;
     result.gpu_ptr = gpu_ptr;
     result.size = size;
-    if (pin_size == 0) pin_size = size;
-    if (pin_size < size) return EINVAL;
+    if (pin_size == 0) {
+        pin_size = size;
+    }
+    if (pin_size < size) {
+        return EINVAL;
+    }
 
     int status = backend.ops.pin(backend.context, reinterpret_cast<uintptr_t>(gpu_ptr), pin_size,
                                  flags, &result.backend_handle);
-    if (status != 0) return status;
+    if (status != 0) {
+        return status;
+    }
     result.pinned = true;
 
     status =
         backend.ops.map(backend.context, result.backend_handle, &result.cpu_ptr_base, size, flags);
-    if (status != 0) goto out;
+    if (status != 0) {
+        goto out;
+    }
     result.mapped = true;
 
     status = backend.ops.get_info(backend.context, result.backend_handle, &info);
-    if (status != 0) goto out;
+    if (status != 0) {
+        goto out;
+    }
 
     if (requested_va < info.gpu_va) {
         status = EINVAL;
@@ -442,26 +476,49 @@ out:
     if (result.mapped) {
         (void)backend.ops.unmap(backend.context, result.backend_handle, result.cpu_ptr_base, size);
     }
-    if (result.pinned) (void)backend.ops.unpin(backend.context, result.backend_handle);
+    if (result.pinned) {
+        (void)backend.ops.unpin(backend.context, result.backend_handle);
+    }
     return status;
 }
 
 int nvshmemt_gpu_cpu_unmap(nvshmemt_gpu_cpu_mapping_state *state,
                            nvshmemt_gpu_cpu_mapping *mapping) {
     auto *impl = nvshmemt_gpu_cpu_impl(state);
-    if (!impl || !mapping) return EINVAL;
+    if (!impl || !mapping) {
+        return EINVAL;
+    }
 
     int first_error = 0;
     if (mapping->mapped) {
         int status = impl->backend.ops.unmap(impl->backend.context, mapping->backend_handle,
                                              mapping->cpu_ptr_base, mapping->size);
-        if (status != 0) first_error = status;
+        if (status == 0) {
+            mapping->mapped = false;
+            mapping->cpu_ptr_base = nullptr;
+            mapping->cpu_ptr = nullptr;
+        } else {
+            first_error = status;
+        }
     }
     if (mapping->pinned) {
+        /* Preserve a live handle when unpin fails so a later cleanup can retry it. */
         int status = impl->backend.ops.unpin(impl->backend.context, mapping->backend_handle);
-        if (status != 0 && first_error == 0) first_error = status;
+        if (status == 0) {
+            mapping->pinned = false;
+            mapping->backend_handle = 0;
+            if (first_error != 0) {
+                mapping->mapped = false;
+                mapping->cpu_ptr_base = nullptr;
+                mapping->cpu_ptr = nullptr;
+            }
+        } else if (first_error == 0) {
+            first_error = status;
+        }
     }
-    *mapping = {};
+    if (!mapping->mapped && !mapping->pinned) {
+        *mapping = {};
+    }
     return first_error;
 }
 
@@ -469,7 +526,9 @@ int nvshmemt_gpu_cpu_copy_to(nvshmemt_gpu_cpu_mapping_state *state,
                              const nvshmemt_gpu_cpu_mapping *mapping, void *map_d_ptr,
                              const void *h_ptr, size_t size) {
     auto *impl = nvshmemt_gpu_cpu_impl(state);
-    if (!impl || !mapping || !mapping->mapped) return EINVAL;
+    if (!impl || !mapping || !mapping->mapped) {
+        return EINVAL;
+    }
     return impl->backend.ops.copy_to(impl->backend.context, mapping->backend_handle, map_d_ptr,
                                      h_ptr, size);
 }
@@ -478,7 +537,9 @@ int nvshmemt_gpu_cpu_copy_from(nvshmemt_gpu_cpu_mapping_state *state,
                                const nvshmemt_gpu_cpu_mapping *mapping, void *h_ptr,
                                const void *map_d_ptr, size_t size) {
     auto *impl = nvshmemt_gpu_cpu_impl(state);
-    if (!impl || !mapping || !mapping->mapped) return EINVAL;
+    if (!impl || !mapping || !mapping->mapped) {
+        return EINVAL;
+    }
     return impl->backend.ops.copy_from(impl->backend.context, mapping->backend_handle, h_ptr,
                                        map_d_ptr, size);
 }
