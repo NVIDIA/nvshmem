@@ -53,7 +53,10 @@ __global__ void test_put_from_smem(int *recv_data, int elems_per_block, int mype
 
     nvshmemx_putmem_nbi_block(recv_data + offset, payload, (size_t)elems_per_block * sizeof(int),
                               peer);
-    nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
+    __syncthreads();
     nvshmemx_release_smem();
 }
 
