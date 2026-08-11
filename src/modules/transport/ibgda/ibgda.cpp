@@ -56,7 +56,6 @@
 #define NVSHMEMI_IBGDA_CQE_SIZE 64
 #define NVSHMEMI_IBGDA_MAX_INLINE_SIZE (8 * 32)
 
-#define MAX_NUM_HCAS 48
 #define MAX_NUM_PORTS 4
 #define MAX_NUM_PES_PER_NODE 32
 
@@ -4123,7 +4122,7 @@ static int ibgda_connect_global_setup(nvshmemt_ibgda_state_t *ibgda_state, int n
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
         int dev_id = ibgda_state->common.dev_ids[selected_dev_ids[i]];
-        if (dev_id < 0 || dev_id >= MAX_NUM_HCAS) {
+        if (dev_id < 0 || dev_id >= ibgda_state->common.device_capacity) {
             NVSHMEMI_ERROR_PRINT("Invalid raw device ID %d.\n", dev_id);
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
@@ -4308,7 +4307,7 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     // Phase 2-4: Per-device processing (cached per device)
     int init_dev_cnt = 0;
     int n_pes = t->n_pes;
-    bool initialized_devices[MAX_NUM_HCAS] = {};
+    std::vector<bool> initialized_devices(ibgda_state->common.device_capacity, false);
     for (int i = 0; i < ibgda_state->n_devs_selected; i++) {
         int dev_idx = ibgda_state->selected_dev_ids[i];
         struct ibgda_device *device = (struct ibgda_device *)ibgda_state->common.devices + dev_idx;
@@ -4365,11 +4364,13 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     int n_pes = transport->n_pes;
     int mype = transport->my_pe;
     int num_rc_eps;
-    bool device_finalized[MAX_NUM_HCAS] = {};
+    std::vector<bool> device_finalized;
 
     if (!ibgda_state) {
         goto out;
     }
+
+    device_finalized.resize(ibgda_state->common.device_capacity, false);
 
     ibgda_device_lkeys.clear();
     ibgda_device_rkeys.clear();
@@ -4430,7 +4431,8 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     /* Free all devices, not just ones we used. */
     for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
         dev_id = ibgda_state->common.dev_ids[i];
-        if (dev_id < 0 || dev_id >= MAX_NUM_HCAS || device_finalized[dev_id]) continue;
+        if (dev_id < 0 || dev_id >= ibgda_state->common.device_capacity || device_finalized[dev_id])
+            continue;
         device_finalized[dev_id] = true;
 
         device = (struct ibgda_device *)ibgda_state->common.devices + dev_id;
@@ -4884,10 +4886,15 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     dev_list = ftable.get_device_list(&num_devices);
     NVSHMEMI_NULL_ERROR_JMP(dev_list, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "get_device_list failed \n");
+    if (num_devices <= 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "no IB devices found\n");
+    }
 
-    ibgda_state->common.devices = calloc(MAX_NUM_HCAS, sizeof(struct ibgda_device));
+    ibgda_state->common.devices =
+        calloc(static_cast<size_t>(num_devices), sizeof(struct ibgda_device));
     NVSHMEMI_NULL_ERROR_JMP(ibgda_state->common.devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "get_device_list failed \n");
+    ibgda_state->common.device_capacity = num_devices;
 
     ibgda_state->common.dev_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibgda_state->common.dev_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -4925,7 +4932,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Device enumeration failed.\n");
 
     {
-        bool device_checked[MAX_NUM_HCAS] = {};
+        std::vector<bool> device_checked(num_devices, false);
         int write_idx = 0;
         for (int i = 0; i < ibgda_state->common.n_dev_ids; i++) {
             int dev_idx = ibgda_state->common.dev_ids[i];

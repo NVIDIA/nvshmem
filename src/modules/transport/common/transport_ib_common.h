@@ -147,6 +147,10 @@ struct nvshmemt_ib_common_state {
     int selected_dev_ids[MAX_NUM_HCAS];
     int n_selected_dev_ids;
     int max_selected_dev_ids;
+
+    /* Number of raw device slots allocated in devices. This must cover the complete list returned
+     * by ibv_get_device_list(), not just the devices selected by an HCA filter. */
+    int device_capacity;
 };
 
 typedef struct nvshmemt_ib_common_state *nvshmemt_ib_common_state_t;

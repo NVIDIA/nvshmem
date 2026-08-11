@@ -67,7 +67,6 @@ static inline int get_ibdevx_srq_depth(nvshmemt_ib_common_state_t state) {
 #error Unknown cache line size
 #endif
 
-#define MAX_NUM_HCAS 48
 #define MAX_NUM_PORTS 4
 #define MAX_NUM_PES_PER_NODE 32
 #define BAR_READ_BUFSIZE (sizeof(uint64_t))
@@ -1090,10 +1089,11 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
     }
 
     if (ibdevx_state->devices) {
-        bool device_finalized[MAX_NUM_HCAS] = {};
+        std::vector<bool> device_finalized(ibdevx_state->device_capacity, false);
         for (int i = 0; i < ibdevx_state->n_dev_ids; i++) {
             int dev_id = ibdevx_state->dev_ids[i];
-            if (dev_id < 0 || dev_id >= MAX_NUM_HCAS || device_finalized[dev_id]) continue;
+            if (dev_id < 0 || dev_id >= ibdevx_state->device_capacity || device_finalized[dev_id])
+                continue;
             device_finalized[dev_id] = true;
 
             struct ibdevx_device *device = ((struct ibdevx_device *)ibdevx_state->devices + dev_id);
@@ -1926,10 +1926,14 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     dev_list = ftable.get_device_list(&num_devices);
     NVSHMEMI_NULL_ERROR_JMP(dev_list, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "get_device_list failed \n");
+    if (num_devices <= 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "no IB devices found\n");
+    }
 
-    ibdevx_state->devices = calloc(MAX_NUM_HCAS, sizeof(struct ibdevx_device));
+    ibdevx_state->devices = calloc(static_cast<size_t>(num_devices), sizeof(struct ibdevx_device));
     NVSHMEMI_NULL_ERROR_JMP(ibdevx_state->devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "get_device_list failed \n");
+    ibdevx_state->device_capacity = num_devices;
 
     ibdevx_state->dev_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibdevx_state->dev_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
@@ -1952,7 +1956,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Device enumeration failed.\n");
 
     {
-        bool device_checked[MAX_NUM_HCAS] = {};
+        std::vector<bool> device_checked(num_devices, false);
         int write_idx = 0;
         for (int i = 0; i < ibdevx_state->n_dev_ids; i++) {
             int dev_idx = ibdevx_state->dev_ids[i];

@@ -71,7 +71,6 @@ static inline int get_ibrc_srq_depth(nvshmemt_ib_common_state_t state) { return 
 #error Unknown cache line size
 #endif
 
-#define MAX_NUM_HCAS 48
 #define MAX_NUM_PORTS 4
 #define MAX_NUM_PES_PER_NODE 32
 #ifdef NVSHMEM_USE_GDRCOPY
@@ -1007,10 +1006,11 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     connected_qp_count = 0;
 
     if (state->devices) {
-        bool device_finalized[MAX_NUM_HCAS] = {};
+        std::vector<bool> device_finalized(state->device_capacity, false);
         for (int i = 0; i < state->n_dev_ids; i++) {
             int dev_id = state->dev_ids[i];
-            if (dev_id < 0 || dev_id >= MAX_NUM_HCAS || device_finalized[dev_id]) continue;
+            if (dev_id < 0 || dev_id >= state->device_capacity || device_finalized[dev_id])
+                continue;
             device_finalized[dev_id] = true;
 
             if (((struct ibrc_device *)state->devices)[dev_id].bpool_mr) {
@@ -1809,10 +1809,14 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     dev_list = ftable.get_device_list(&num_devices);
     NVSHMEMI_NULL_ERROR_JMP(dev_list, status, NVSHMEMX_ERROR_INTERNAL, out,
                             "get_device_list failed \n");
+    if (num_devices <= 0) {
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "no IB devices found\n");
+    }
 
-    ibrc_state->devices = calloc(MAX_NUM_HCAS, sizeof(struct ibrc_device));
+    ibrc_state->devices = calloc(static_cast<size_t>(num_devices), sizeof(struct ibrc_device));
     NVSHMEMI_NULL_ERROR_JMP(ibrc_state->devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "get_device_list failed \n");
+    ibrc_state->device_capacity = num_devices;
 
     ibrc_state->dev_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibrc_state->dev_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
