@@ -27,9 +27,6 @@
 
 #include "internal/host_transport/cudawrap.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
-#ifdef NVSHMEM_USE_GDRCOPY
-#include "transport_gdr_abi.h"
-#endif
 #include "infiniband/verbs.h"
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host_transport/nvshmem_constants.h"
@@ -81,15 +78,6 @@ static inline int get_ibrc_srq_depth(nvshmemt_ib_common_state_t state) { return 
 #define IBRC_GRH_HOP_LIMIT 255
 
 // Enum values are now defined in transport_ib_common.h
-
-#ifdef NVSHMEM_USE_GDRCOPY
-struct ibrc_gdrcopy_mapping {
-    void *cpu_ptr_base = nullptr;
-    gdr_mh_t mh{};
-    bool pinned = false;
-    bool mapped = false;
-};
-#endif
 
 struct ibrc_request {
     struct ibv_send_wr sr;
@@ -153,9 +141,9 @@ typedef struct ibrc_mem_handle_info {
     struct ibrc_mem_handle mem_handle;
     void *ptr;
     size_t size;
-    void *cpu_ptr;  // CPU-accessible pointer: set via GDRCopy map or directly for SYSMEM
+    void *cpu_ptr;  // CPU-accessible pointer: mapped GPU memory or directly accessible SYSMEM
 #ifdef NVSHMEM_USE_GDRCOPY
-    ibrc_gdrcopy_mapping gdrcopy;
+    nvshmemt_gpu_cpu_mapping cpu_mapping;
 #endif
 } ibrc_mem_handle_info_t;
 
@@ -176,9 +164,9 @@ static uint64_t connected_qp_count;
 static int use_ib_native_atomics = 1;
 /* Maximum number of RDMA Read & Atomic operations that can be outstanding per QP */
 static int nvshmemt_ibrc_max_rd_atomic = INT_MAX;
-static bool use_gdrcopy = 0;
+static bool use_gpu_cpu_mapping = 0;
 static std::atomic<bool> use_cpu_atomics{
-    false};  // true when send-based atomics are possible (GDRCopy or SYSMEM)
+    false};  // true when send-based atomics have a CPU-accessible mapping
 static volatile uint64_t atomics_received = 0;
 static volatile uint64_t atomics_processed = 0;
 static volatile uint64_t atomics_issued = 0;
@@ -186,40 +174,10 @@ static volatile uint64_t atomics_completed = 0;
 static volatile uint64_t atomics_acked = 0;
 static bool is_egm = false;
 #ifdef NVSHMEM_USE_GDRCOPY
-static gdr_t gdr_desc;
-static struct gdrcopy_function_table gdrcopy_ftable;
-static void *gdrcopy_handle = NULL;
+static nvshmemt_gpu_cpu_mapping_state gpu_cpu_mapping_state;
 
-static int nvshmemt_ibrc_release_gdrcopy_mapping(ibrc_mem_handle_info_t &handle_info) {
-    int status = 0;
-    int first_error = 0;
-    auto &mapping = handle_info.gdrcopy;
-
-    if (mapping.mapped) {
-        status = gdrcopy_ftable.unmap(gdr_desc, mapping.mh, mapping.cpu_ptr_base, handle_info.size);
-        if (status == 0) {
-            mapping.mapped = false;
-            mapping.cpu_ptr_base = nullptr;
-        } else if (!first_error) {
-            first_error = status;
-        }
-    }
-
-    if (mapping.pinned) {
-        status = gdrcopy_ftable.unpin_buffer(gdr_desc, mapping.mh);
-        if (status == 0) {
-            mapping.pinned = false;
-            mapping.mh = {};
-            if (first_error) {
-                mapping.mapped = false;
-                mapping.cpu_ptr_base = nullptr;
-            }
-        } else if (!first_error) {
-            first_error = status;
-        }
-    }
-
-    return first_error;
+static int nvshmemt_ibrc_release_gpu_cpu_mapping(ibrc_mem_handle_info_t &handle_info) {
+    return nvshmemt_gpu_cpu_unmap(&gpu_cpu_mapping_state, &handle_info.cpu_mapping);
 }
 #endif
 
@@ -682,7 +640,9 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
     nvshmemt_ib_common_state_t ibrc_state = (nvshmemt_ib_common_state_t)transport->state;
     std::unique_ptr<ibrc_mem_handle_info_t> handle_info;
     struct ibrc_mem_handle *handle = (struct ibrc_mem_handle *)mem_handle;
+#ifdef NVSHMEM_USE_GDRCOPY
     bool is_sysmem = false;
+#endif
     bool dummy_created = false;
     int registered_count = 0;
     const auto cache_granularity = 1ULL << t->log2_cumem_granularity;
@@ -732,8 +692,8 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
         handle_info->size = length;
     }
 
-    /* For SYSMEM heap, the buffer is directly CPU-accessible without GDRCopy.
-     * Set cpu_ptr so the send-based atomic path can use it, and skip GDRCopy
+    /* For SYSMEM heap, the buffer is directly CPU-accessible without a GPU mapping.
+     * Set cpu_ptr so the send-based atomic path can use it, and skip mapping
      * pin (which would fail on system memory). */
     if (!local_only && handle_info) {
         cudaPointerAttributes attrs;
@@ -744,14 +704,16 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
                 use_cpu_atomics = true;
                 ibrc_state->ib_transport_ftable->progress_recv = progress_recv_wrapper;
             }
+#ifdef NVSHMEM_USE_GDRCOPY
             is_sysmem = true;
+#endif
         }
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
+    /* CPU mapping is not used for EGM memory. */
     is_egm = check_egm(buf, transport->egm_map);
-    if (use_gdrcopy && !local_only && !is_egm && !is_sysmem) {
+    if (use_gpu_cpu_mapping && !local_only && !is_egm && !is_sysmem) {
         void *gdr_buf = buf;
 
         // if applicable, alias_va_ptr (VA1) is only used for pin_buffer() and
@@ -761,31 +723,16 @@ int nvshmemt_ibrc_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, si
             gdr_buf = alias_va_ptr;
         }
 
-        auto &mapping = handle_info->gdrcopy;
-        status = gdrcopy_ftable.pin_buffer(gdr_desc, reinterpret_cast<unsigned long>(gdr_buf),
-                                           length, 0, 0, &mapping.mh);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy pin_buffer failed \n");
-        mapping.pinned = true;
-
-        status = gdrcopy_ftable.map(gdr_desc, mapping.mh, &mapping.cpu_ptr_base, length);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy map failed \n");
-        mapping.mapped = true;
-
-        gdr_info_t info;
-        status = gdrcopy_ftable.get_info(gdr_desc, mapping.mh, &info);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy get_info failed \n");
-
-        // remember that mappings start on a 64KB boundary, so let's
-        // calculate the offset from the head of the mapping to the
-        // beginning of the buffer
-        const auto off = reinterpret_cast<uintptr_t>(gdr_buf) - info.va;
-        handle_info->cpu_ptr =
-            reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(mapping.cpu_ptr_base) + off);
+        auto &mapping = handle_info->cpu_mapping;
+        status = nvshmemt_gpu_cpu_map(&gpu_cpu_mapping_state, gdr_buf, length,
+                                      NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE, &mapping);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "GPU CPU mapping failed\n");
+        handle_info->cpu_ptr = mapping.cpu_ptr;
     }
 #endif
 
-    /* The memory handle cache is only used with GDRCopy.
-     * Local memory is never used with GDRCopy so it doesn't need
+    /* The memory handle cache is only used with GPU CPU mappings.
+     * Local memory is never used with these mappings so it doesn't need
      * to go into the cache.
      * This optimization allows us to greatly simplify the lookup of
      * mem handle info when using the dynamic heap.
@@ -846,7 +793,7 @@ out:
         }
 #ifdef NVSHMEM_USE_GDRCOPY
         if (handle_info) {
-            (void)nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
+            (void)nvshmemt_ibrc_release_gpu_cpu_mapping(*handle_info);
         }
 #endif
         if (handle_info) {
@@ -893,12 +840,13 @@ int nvshmemt_ibrc_release_mem_handle(nvshmem_mem_handle_t *mem_handle, nvshmem_t
 
     if (handle_info) {
 #ifdef NVSHMEM_USE_GDRCOPY
-        /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
+        /* GPU CPU mapping is not used for EGM memory. */
         is_egm = check_egm(addr, t->egm_map);
 
-        if (use_gdrcopy && !is_egm) {
-            status = nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gdrcopy cleanup failed\n");
+        if (use_gpu_cpu_mapping && !is_egm) {
+            status = nvshmemt_ibrc_release_gpu_cpu_mapping(*handle_info);
+            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                  "GPU CPU mapping cleanup failed\n");
         }
 #endif
 
@@ -956,12 +904,12 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
             (struct ibrc_mem_handle_info *)nvshmemt_mem_handle_cache_get_by_idx(state->cache, i);
         if (handle_info && handle_info != previous_handle_info) {
 #ifdef NVSHMEM_USE_GDRCOPY
-            /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
+            /* GPU CPU mapping is not used for EGM memory. */
             is_egm = check_egm(handle_info->ptr, transport->egm_map);
-            if (use_gdrcopy && !is_egm) {
-                status = nvshmemt_ibrc_release_gdrcopy_mapping(*handle_info);
+            if (use_gpu_cpu_mapping && !is_egm) {
+                status = nvshmemt_ibrc_release_gpu_cpu_mapping(*handle_info);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "gdrcopy cleanup failed\n");
+                                      "GPU CPU mapping cleanup failed\n");
             }
 #endif
             status = nvshmemt_ib_common_release_mem_handles(
@@ -978,8 +926,8 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
-        nvshmemt_gdrcopy_ftable_fini(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle);
+    if (use_gpu_cpu_mapping) {
+        nvshmemt_gpu_cpu_mapping_fini(&gpu_cpu_mapping_state);
     }
 #endif
 
@@ -1416,7 +1364,7 @@ int nvshmemt_ibrc_progress(nvshmem_transport_t t) {
     status = progress_send(ibrc_state);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "progress_send failed, \n");
 
-    if (use_gdrcopy || use_cpu_atomics) {
+    if (use_gpu_cpu_mapping || use_cpu_atomics) {
         status = progress_recv(t, ibrc_state, NVSHMEMT_IB_COMMON_WAIT_NONE);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "progress_recv failed, \n");
     }
@@ -1564,15 +1512,16 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
     /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
     is_egm = check_egm(remote->remote_memdesc.ptr, tcurr->egm_map);
     if (is_egm) {
-        INFO(ibrc_state->log_level, "IBRC: buf: %p is egm, not using gdrcopy for atomics\n",
+        INFO(ibrc_state->log_level,
+             "IBRC: buf: %p is EGM, not using a GPU CPU mapping for atomics\n",
              remote->remote_memdesc.ptr);
     }
-    // if gdrcopy or cpu-accessible memory is available, use send-based atomics
+    // If a GPU CPU mapping or directly CPU-accessible memory is available, use send-based atomics
     // to guarantee atomicity across different ops
-    if ((use_gdrcopy || use_cpu_atomics) && !is_egm) {
+    if ((use_gpu_cpu_mapping || use_cpu_atomics) && !is_egm) {
         ibrc_mem_handle_info_t *mem_handle_info;
 
-        // assuming GDRCopy availability is uniform on all nodes
+        // Assume GPU CPU mapping availability is uniform on all nodes.
         op.op = (nvshmemi_amo_t)(verb.desc | (verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0));
         op.addr = remote->remote_memdesc.ptr;
         op.retaddr = remote->retptr;
@@ -1656,16 +1605,17 @@ int nvshmemt_ibrc_enforce_cst_at_target(struct nvshmem_transport *tcurr) {
     assert(mem_handle_info != NULL);
 
 #ifdef NVSHMEM_USE_GDRCOPY
-    /* we track if the memory handle is EGM based so that GDRCOPY can be disabled*/
+    /* CPU mapping is not used for EGM memory. */
     is_egm = check_egm(mem_handle_info->ptr, tcurr->egm_map);
-    if (use_gdrcopy && !is_egm && mem_handle_info->gdrcopy.mapped) {
+    if (use_gpu_cpu_mapping && !is_egm && mem_handle_info->cpu_mapping.mapped) {
         int temp;
-        status = gdrcopy_ftable.copy_from_mapping(mem_handle_info->gdrcopy.mh, &temp,
-                                                  mem_handle_info->cpu_ptr, sizeof(int));
+        status = nvshmemt_gpu_cpu_copy_from(&gpu_cpu_mapping_state, &mem_handle_info->cpu_mapping,
+                                            &temp, mem_handle_info->cpu_ptr, sizeof(int));
         if (status == 0) {
             return NVSHMEMX_SUCCESS;
         }
-        INFO(state->log_level, "GDRCopy CST read failed (%d), falling back to RDMA read", status);
+        INFO(state->log_level, "GPU CPU mapping CST read failed (%d), falling back to RDMA read",
+             status);
         status = 0;
     }
 #endif
@@ -1874,12 +1824,13 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
 #ifdef NVSHMEM_USE_GDRCOPY
     if (ibrc_state->options->DISABLE_GDRCOPY) {
-        use_gdrcopy = false;
+        use_gpu_cpu_mapping = false;
     } else {
-        use_gdrcopy = nvshmemt_gdrcopy_ftable_init(&gdrcopy_ftable, &gdr_desc, &gdrcopy_handle,
-                                                   ibrc_state->log_level);
+        use_gpu_cpu_mapping =
+            nvshmemt_gpu_cpu_mapping_init(&gpu_cpu_mapping_state, table, ibrc_state->log_level,
+                                          ibrc_state->options->GDRCOPY_USE_INTERNAL_DMABUF);
     }
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         use_cpu_atomics = true;
     }
 #else
@@ -1896,10 +1847,10 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibrc_state->ib_transport_ftable->ep_connect = ep_connect;
     ibrc_state->ib_transport_ftable->progress = nvshmemt_ibrc_progress;
     // progress_recv is registered when send-based atomics are available
-    // (GDRCopy or SYSMEM). For SYSMEM, this is set later in get_mem_handle.
+    // (GPU CPU mapping or SYSMEM). For SYSMEM, this is set later in get_mem_handle.
     ibrc_state->ib_transport_ftable->progress_recv = NULL;
 #ifdef NVSHMEM_USE_GDRCOPY
-    if (use_gdrcopy) {
+    if (use_gpu_cpu_mapping) {
         ibrc_state->ib_transport_ftable->progress_recv = progress_recv_wrapper;
     }
 #endif
@@ -1960,7 +1911,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
 
     transport->host_ops.enforce_cst = nvshmemt_ibrc_enforce_cst_at_target;
 #if !defined(NVSHMEM_PPC64LE) && !defined(NVSHMEM_AARCH64)
-    if (!use_gdrcopy)
+    if (!use_gpu_cpu_mapping)
 #endif
         transport->host_ops.enforce_cst_at_target = nvshmemt_ibrc_enforce_cst_at_target;
 
