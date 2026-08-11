@@ -38,6 +38,17 @@
 
 #define NVSHMEM_MAX_NAME_LEN 256
 
+/*
+ * SplitMix64 finalizer parameters used to hash AMO targets. Keep these shared
+ * between host and device routing so a target selects the same endpoint.
+ * Reference: https://prng.di.unimi.it/splitmix64.c
+ */
+#define NVSHMEMI_SPLITMIX64_SHIFT_1 30U
+#define NVSHMEMI_SPLITMIX64_MULTIPLIER_1 0xbf58476d1ce4e5b9ULL
+#define NVSHMEMI_SPLITMIX64_SHIFT_2 27U
+#define NVSHMEMI_SPLITMIX64_MULTIPLIER_2 0x94d049bb133111ebULL
+#define NVSHMEMI_SPLITMIX64_SHIFT_3 31U
+
 typedef enum nvshmemi_cmp_type {
     NVSHMEM_CMP_EQ = 0,
     NVSHMEM_CMP_NE,
