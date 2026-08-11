@@ -294,6 +294,7 @@ struct gpunetio_device {
     int num_gpu_eps_per_pe = 0;
     int num_cpu_eps_per_pe = 0;
     int num_default_cpu_eps_per_pe = 0;
+    int selected_dev_slot = 0;
     // Common device information
     nvshmemt_ib_common_device common_device = {};
     // GPUNetIO-specific device information
@@ -336,6 +337,8 @@ struct nvshmemt_gpunetio_state_t {
     int connect_endpoints(nvshmem_transport_t t, int *selected_dev_ids, int num_selected_devs,
                           int *out_qp_indices, int num_qps);
     gpunetio_ep *get_next_cpu_ep(int pe, int qp_index, int n_pes, int mype);
+    gpunetio_ep *get_next_cpu_amo_ep(int pe, int qp_index, int n_pes, int mype,
+                                     uint64_t remote_offset);
 
     // Per-instance transport state
     std::vector<std::unique_ptr<gpunetio_device>> devices;
@@ -360,6 +363,7 @@ struct nvshmemt_gpunetio_state_t {
     int log_level = 0;
     bool skip_cst = false;
     bool dmabuf_support_for_data_buffers = false;
+    bool use_address_stable_amo = false;
     bool connect_endpoints_first_call = false;
     int last_device_index = 0;
     bool has_multiple_cpu_qps = false;
@@ -392,6 +396,7 @@ struct nvshmemt_gpunetio_state_t {
     void initialize_cache_state();
     int get_cuda_device_id(CUdevice *out);
     int connect_global_setup(int num_selected_devs, int *selected_dev_ids);
+    int configure_multinic_amo_routing(nvshmem_transport_t t);
     int setup_gpu_state(nvshmem_transport_t t);
     int connect_qps_only(nvshmem_transport_t t, int *out_qp_indices, int num_qps);
 };
@@ -1555,6 +1560,27 @@ int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *
     return NVSHMEMX_SUCCESS;
 }
 
+int nvshmemt_gpunetio_state_t::configure_multinic_amo_routing(nvshmem_transport_t t) {
+    std::vector<nvshmemt_ib_common_device> common_devices;
+    common_devices.reserve(devices.size());
+    for (const auto &device : devices) {
+        common_devices.push_back(device->common_device);
+    }
+
+    nvshmemt_ib_common_state common_state = {};
+    common_state.devices = common_devices.data();
+    common_state.options = options.get();
+    common_state.log_level = log_level;
+
+    int status = nvshmemt_ib_common_configure_multinic_amo_routing(
+        t, &common_state, selected_dev_ids.data(), static_cast<int>(selected_dev_ids.size()),
+        sizeof(nvshmemt_ib_common_device));
+    if (status == NVSHMEMX_SUCCESS) {
+        use_address_stable_amo = common_state.use_address_stable_amo;
+    }
+    return status;
+}
+
 gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_ep(int pe, int qp_index, int n_pes, int mype) {
     if (qp_index == NVSHMEMX_QP_HOST) {
         // A single host EP per PE lives on selected_dev_ids[0]; skip the device round-robin
@@ -1574,6 +1600,38 @@ gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_ep(int pe, int qp_index, in
     int dev_idx = selected_dev_ids[cpu_dev_rr % n_devs];
     cpu_dev_rr++;
     return devices[dev_idx]->get_cpu_ep_from_qp_index(pe, qp_index, n_pes, mype);
+}
+
+static uint64_t gpunetio_mix_amo_target(uint64_t value) {
+    // Stateless SplitMix64 finalizer for the target PE and symmetric-heap offset.
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_1;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_1;
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_2;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_2;
+    return value ^ (value >> NVSHMEMI_SPLITMIX64_SHIFT_3);
+}
+
+gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_amo_ep(int pe, int qp_index, int n_pes,
+                                                            int mype, uint64_t remote_offset) {
+    if (!use_address_stable_amo || qp_index != NVSHMEMX_QP_DEFAULT ||
+        selected_dev_ids.size() <= 1 || pe == mype) {
+        return get_next_cpu_ep(pe, qp_index, n_pes, mype);
+    }
+
+    // Preserve the default-QP round-robin sequence used by later RMA operations.
+    (void)get_next_cpu_ep(pe, qp_index, n_pes, mype);
+
+    uint64_t target = (static_cast<uint64_t>(static_cast<uint32_t>(pe)) << 32) ^ remote_offset;
+    uint64_t hash = gpunetio_mix_amo_target(target);
+    size_t num_selected_slots = selected_dev_ids.size();
+    int num_default_qps_per_slot = options->GPUNETIO_NUM_RC_PER_PE_CPU;
+    assert(num_default_qps_per_slot > 0);
+    // Match IBRC's selected-device-SPREAD default-QP ordering.
+    uint64_t selected_qp = hash % (num_selected_slots * num_default_qps_per_slot);
+    size_t selected_dev_slot = selected_qp % num_selected_slots;
+    gpunetio_device &device = *devices[selected_dev_ids[selected_dev_slot]];
+    int selected_qp_slot = 1 + static_cast<int>(selected_qp / num_selected_slots);
+    return device.get_cpu_ep_from_qp_index(pe, selected_qp_slot, n_pes, mype);
 }
 
 // Populate and copy over state to GPU
@@ -1715,6 +1773,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
 
     gpunetio_device_state_h->globalmem.qps = qp_d;
     gpunetio_device_state_h->may_skip_cst = skip_cst;
+    gpunetio_device_state_h->use_address_stable_amo = use_address_stable_amo;
     gpunetio_device_state_h->num_devices_initialized = n_devs_selected;
     gpunetio_device_state_h->num_rc_per_pe = num_rc_handles / n_devs_selected / t->n_pes;
     gpunetio_device_state_h->num_default_rc_per_pe = options->GPUNETIO_NUM_RC_PER_PE_GPU;
@@ -1814,10 +1873,17 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
+    status = configure_multinic_amo_routing(t);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("configure_multinic_amo_routing failed.\n");
+        return status;
+    }
+
     // Phase 2-3: Per-device processing (cached per device)
     for (int i = 0; i < num_selected_devs; i++) {
         int dev_idx = dev_ids[selected_dev_ids[i]];
         gpunetio_device &device = *devices[dev_idx];
+        device.selected_dev_slot = i;
         int portid = port_ids[selected_dev_ids[i]];
 
         if (options->GPUNETIO_NUM_RC_PER_PE_GPU > 0) {
@@ -2450,6 +2516,14 @@ static int nvshmemt_gpunetio_host_fence(struct nvshmem_transport *tcurr, int pe,
     return NVSHMEMX_SUCCESS;
 }
 
+static const nvshmemt_ib_common_mem_handle *gpunetio_get_dev_mem_handle(
+    const nvshmem_mem_handle_t *mem_handle, int selected_dev_slot) {
+    auto *gpunetio_mem_handle = reinterpret_cast<const struct gpunetio_mem_handle *>(mem_handle);
+    assert(gpunetio_mem_handle != nullptr);
+    assert(selected_dev_slot >= 0 && selected_dev_slot < gpunetio_mem_handle->num_devs);
+    return &gpunetio_mem_handle->dev_mem_handles[selected_dev_slot];
+}
+
 static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                       rma_memdesc_t *remote, rma_memdesc_t *local,
                                       rma_bytesdesc_t bytesdesc, int qp_index) {
@@ -2539,8 +2613,8 @@ static int gpunetio_amo_32(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
     int status = ep->check_poll_avail(false);
     if (status) return status;
 
-    auto *remote_handle =
-        reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->remote_memdesc.handle);
+    const auto *remote_handle =
+        gpunetio_get_dev_mem_handle(remote->remote_memdesc.handle, device->selected_dev_slot);
 
     auto *wqe = reinterpret_cast<gpunetio_atomic_32_wqe *>(
         qp_cpu->sq_wqe_daddr +
@@ -2559,7 +2633,8 @@ static int gpunetio_amo_32(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
         wqe->data.lkey = htobe32(device->dummy_mr_lkey);
         wqe->data.addr = htobe64(reinterpret_cast<uintptr_t>(device->dummy_mr_buf));
     } else {
-        auto *ret_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->ret_handle);
+        const auto *ret_handle =
+            gpunetio_get_dev_mem_handle(remote->ret_handle, device->selected_dev_slot);
         assert(ret_handle != nullptr);
         wqe->data.lkey = htobe32(ret_handle->lkey);
         wqe->data.addr = htobe64(reinterpret_cast<uintptr_t>(remote->retptr));
@@ -2672,8 +2747,8 @@ static int gpunetio_amo_64(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
     int status = ep->check_poll_avail(false, /*min_free_slots=*/2);
     if (status) return status;
 
-    auto *remote_handle =
-        reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->remote_memdesc.handle);
+    const auto *remote_handle =
+        gpunetio_get_dev_mem_handle(remote->remote_memdesc.handle, device->selected_dev_slot);
 
     doca_gpunetio_ib_mlx5_wqe_ctrl_seg *ctrl = nullptr;
     doca_gpunetio_ib_mlx5_wqe_raddr_seg *raddr = nullptr;
@@ -2819,7 +2894,8 @@ static int gpunetio_amo_64(gpunetio_ep *ep, amo_verb_t verb, amo_memdesc_t *remo
         data->lkey = htobe32(device->dummy_mr_lkey);
         data->addr = htobe64(reinterpret_cast<uintptr_t>(device->dummy_mr_buf));
     } else {
-        auto *ret_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->ret_handle);
+        const auto *ret_handle =
+            gpunetio_get_dev_mem_handle(remote->ret_handle, device->selected_dev_slot);
         assert(ret_handle != nullptr);
         data->lkey = htobe32(ret_handle->lkey);
         data->addr = htobe64(reinterpret_cast<uintptr_t>(remote->retptr));
@@ -2846,7 +2922,8 @@ static int nvshmemt_gpunetio_host_amo(struct nvshmem_transport *tcurr, int pe, v
                                       amo_bytesdesc_t bytesdesc, int qp_index) {
     auto *gpunetio_state = static_cast<nvshmemt_gpunetio_state_t *>(tcurr->state);
 
-    gpunetio_ep *ep = gpunetio_state->get_next_cpu_ep(pe, qp_index, tcurr->n_pes, tcurr->my_pe);
+    gpunetio_ep *ep = gpunetio_state->get_next_cpu_amo_ep(pe, qp_index, tcurr->n_pes, tcurr->my_pe,
+                                                          remote->remote_memdesc.offset);
     if (!ep) return NVSHMEMX_SUCCESS;
 
     if (bytesdesc.elembytes == 4) {
