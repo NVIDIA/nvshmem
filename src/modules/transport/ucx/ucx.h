@@ -15,7 +15,7 @@
 #include "device_host_transport/nvshmem_common_transport.h"
 
 #ifdef NVSHMEM_USE_GDRCOPY
-#include "transport_gdr_abi.h"
+#include "transport_gdr_common.h"
 #endif
 
 /* This value is arbitrary. UCX doesn't give a max length for packed rkeys. */
@@ -84,9 +84,7 @@ typedef struct {
     size_t size;
     nvshmemt_ucx_mem_handle_t *mem_handle;
 #ifdef NVSHMEM_USE_GDRCOPY
-    gdr_mh_t mh;
-    void *cpu_ptr;
-    void *cpu_ptr_base;
+    nvshmemt_gpu_cpu_mapping cpu_mapping;
 #endif
 } nvshmemt_ucx_mem_handle_info_t;
 
