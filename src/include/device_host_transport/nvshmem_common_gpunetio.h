@@ -78,6 +78,7 @@
         state.num_default_rc_per_pe = NVSHMEMI_GPUNETIO_SCALAR_INVALID;       \
         state.nic_buf_on_gpumem = false;                                      \
         state.may_skip_cst = false;                                           \
+        state.use_address_stable_amo = false;                                 \
         state.globalmem.qp_group_switches = NULL;                             \
         state.globalmem.local_only_mhandle_head = NULL;                       \
         state.globalmem.qps = NULL;                                           \
@@ -182,6 +183,7 @@ struct nvshmemi_gpunetio_device_state_v1 {
     int num_default_rc_per_pe;
     bool nic_buf_on_gpumem;
     bool may_skip_cst;
+    bool use_address_stable_amo;
 
     struct {
         // lkeys[idx] gives the lkey of chunk idx.

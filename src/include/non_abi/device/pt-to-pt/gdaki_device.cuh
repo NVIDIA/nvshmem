@@ -293,6 +293,45 @@ gdaki_get_qp(int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     }
 }
 
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
+gdaki_mix_amo_target(uint64_t value) {
+    // Stateless SplitMix64 finalizer for the target PE and symmetric-heap offset.
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_1;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_1;
+    value ^= value >> NVSHMEMI_SPLITMIX64_SHIFT_2;
+    value *= NVSHMEMI_SPLITMIX64_MULTIPLIER_2;
+    return value ^ (value >> NVSHMEMI_SPLITMIX64_SHIFT_3);
+}
+
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool gdaki_use_address_stable_amo(
+    int pe, nvshmemx_qp_handle_t qp_index) {
+    CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
+    return state->use_address_stable_amo && qp_index == NVSHMEMX_QP_DEFAULT &&
+           state->num_devices_initialized > 1 && pe != nvshmemi_device_state_d.mype;
+}
+
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_gpunetio_device_qp_t *
+gdaki_get_amo_qp(int pe, uint64_t remote_addr,
+                 nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    if (!gdaki_use_address_stable_amo(pe, qp_index)) {
+        return gdaki_get_qp(pe, qp_index);
+    }
+
+    CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
+    uint64_t remote_offset = remote_addr - (uint64_t)nvshmemi_device_state_d.heap_base;
+    uint64_t target = (static_cast<uint64_t>(static_cast<uint32_t>(pe)) << 32) ^ remote_offset;
+    uint64_t hash = gdaki_mix_amo_target(target);
+    uint32_t num_selected_slots = state->num_devices_initialized;
+    uint32_t num_default_qps_per_slot = state->num_default_rc_per_pe;
+    assert(num_default_qps_per_slot > 0);
+    uint32_t selected_dev_slot = hash % num_selected_slots;
+    uint32_t default_qp_slot = (hash / num_selected_slots) % num_default_qps_per_slot;
+    uint32_t qp_idx = (selected_dev_slot * num_default_qps_per_slot + default_qp_slot) *
+                          nvshmemi_device_state_d.npes +
+                      pe;
+    return &state->globalmem.qps[qp_idx];
+}
+
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_get_lkey(
     uint64_t addr, __be32 *lkey, size_t *chunk_size, bool *is_sysmem_scope, uint32_t dev_idx) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
@@ -655,10 +694,11 @@ gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
 template <nvshmemi_op_t channel_op, bool nbi>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
+    nvshmemi_gpunetio_device_qp_t *selected_qp = nullptr) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     unsigned int amask = __activemask();
-    bool can_coalesce_warp = gdaki_can_coalesce_warp_pe(amask, proxy_pe);
+    bool can_coalesce_warp = selected_qp == nullptr && gdaki_can_coalesce_warp_pe(amask, proxy_pe);
     int my_tid;
     int tg_size;
 
@@ -667,7 +707,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
 
     nvshmemi_gpunetio_device_qp_t *qp;
 
-    if (can_coalesce_warp) {
+    if (selected_qp != nullptr) {
+        qp = selected_qp;
+        my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
+        tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
+    } else if (can_coalesce_warp) {
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
         if (my_tid == 0) {
@@ -705,7 +749,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
 
         size_t transfer_size = gdaki_cal_transfer_size(remaining_size, lchunk_size, rchunk_size);
 
-        can_coalesce_warp = gdaki_can_coalesce_warp(amask, qp);
+        can_coalesce_warp = selected_qp == nullptr && gdaki_can_coalesce_warp(amask, qp);
         if (can_coalesce_warp) {
             my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
             tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
@@ -1327,7 +1371,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_amo_nonfetch_impl(
     size_t rchunk_size;
 
 #ifndef __clang_llvm_bitcode_lib__
-    bool can_coalesce_warp = gdaki_can_coalesce_warp_pe(amask, pe);
+    bool can_coalesce_warp =
+        !gdaki_use_address_stable_amo(pe, qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -1336,13 +1381,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_amo_nonfetch_impl(
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
         if (my_tid == 0) {
-            qp = gdaki_get_qp(pe, qp_index);
+            qp = gdaki_get_amo_qp(pe, (uint64_t)rptr, qp_index);
         }
         qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
     } else {
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
-        qp = gdaki_get_qp(pe, qp_index);
+        qp = gdaki_get_amo_qp(pe, (uint64_t)rptr, qp_index);
     }
 
     gdaki_get_raddr_rkey((uint64_t)rptr, pe, pe, &raddr, &rkey, &rchunk_size, qp->dev_idx);
@@ -1444,7 +1489,8 @@ nvshmemi_gdaki_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
     size_t rchunk_size;
 
 #ifndef __clang_llvm_bitcode_lib__
-    bool can_coalesce_warp = gdaki_can_coalesce_warp_pe(amask, pe);
+    bool can_coalesce_warp =
+        !gdaki_use_address_stable_amo(pe, qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -1453,13 +1499,13 @@ nvshmemi_gdaki_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
         if (my_tid == 0) {
-            qp = gdaki_get_qp(pe, qp_index);
+            qp = gdaki_get_amo_qp(pe, (uint64_t)rptr, qp_index);
         }
         qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
     } else {
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
-        qp = gdaki_get_qp(pe, qp_index);
+        qp = gdaki_get_amo_qp(pe, (uint64_t)rptr, qp_index);
     }
     gdaki_get_raddr_rkey((uint64_t)rptr, pe, pe, &raddr, &rkey, &rchunk_size, qp->dev_idx);
 
@@ -1587,7 +1633,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
     __be32 sig_rkey;
 
 #ifndef __clang_llvm_bitcode_lib__
-    bool can_coalesce_warp = gdaki_can_coalesce_warp_pe(amask, pe);
+    bool can_coalesce_warp =
+        !gdaki_use_address_stable_amo(pe, qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -1597,13 +1644,13 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
         if (my_tid == 0) {
-            qp = gdaki_get_qp(pe, qp_index);
+            qp = gdaki_get_amo_qp(pe, (uint64_t)sig_rptr, qp_index);
         }
         qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
     } else {
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
-        qp = gdaki_get_qp(pe, qp_index);
+        qp = gdaki_get_amo_qp(pe, (uint64_t)sig_rptr, qp_index);
     }
     gdaki_get_lkey((uint64_t)lptr, &lkey, &lchunk_size, &is_data_buf_in_sysmem, qp->dev_idx);
     gdaki_get_raddr_rkey((uint64_t)rptr, pe, pe, &raddr, &rkey, &rchunk_size, qp->dev_idx);
@@ -1681,7 +1728,13 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
             }
         }
     } else {
-        gdaki_rma_thread<NVSHMEMI_OP_PUT, true>((uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe);
+        if (gdaki_use_address_stable_amo(pe, qp_index)) {
+            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>((uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe,
+                                                    qp_index, qp);
+        } else {
+            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>((uintptr_t)rptr, (uintptr_t)lptr, bytes, pe,
+                                                    pe);
+        }
 
         num_wqes = num_atomic_wqes_per_cmd + (need_additional_wqe ? 1 : 0);
 
@@ -1774,10 +1827,20 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
         goto out;
     }
 
+    // The collective fast path chooses one QP for the warp. In address-stable mode, use the
+    // single-thread path so the data write and signal atomic share the target-selected QP.
+    if (gdaki_use_address_stable_amo(pe, qp_index)) {
+        if (my_tid == 0) {
+            nvshmemi_gdaki_put_signal_thread_impl<is_nbi>(req_rptr, req_lptr, bytes, sig_rptr,
+                                                          signal, sig_op, pe, qp_index);
+        }
+        goto out;
+    }
+
     my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == 0) {
-        qp = gdaki_get_qp(pe, qp_index);
+        qp = gdaki_get_amo_qp(pe, (uint64_t)sig_rptr, qp_index);
     }
 
     qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
@@ -1813,7 +1876,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
     if (unlikely(chunk_idx > tg_size - 1)) {
         if (my_tid == 0) {
             nvshmemi_gdaki_put_signal_thread_impl<is_nbi>(req_rptr, req_lptr, bytes, sig_rptr,
-                                                          signal, sig_op, pe);
+                                                          signal, sig_op, pe, qp_index);
         }
         goto out;
     }
