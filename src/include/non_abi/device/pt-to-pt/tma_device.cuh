@@ -313,7 +313,7 @@ __device__ __forceinline__ void nvshmemi_tma_bulk_global_to_shared(void *smem_ds
  *     __syncthreads().  This waits only for the smem READ phase to finish,
  *     leaving the remote write in flight.
  *   - For full completion (smem read + remote write both done): call
- *     nvshmem_quiet() from every thread then __syncthreads().
+ *     nvshmem_quiet() from a thread then __syncthreads().
  *
  * Returns 0 on success.
  */
