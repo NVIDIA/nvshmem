@@ -113,15 +113,6 @@ if(NVSHMEM_USE_NCCL)
   )
 endif()
 
-if(NVSHMEM_USE_GDRCOPY)
-  find_path(
-    GDRCOPY_INCLUDE gdrapi.h
-    PATHS /usr/local/gdrcopy /usr/local/gdrdrv ${CMAKE_SOURCE_DIR}
-    HINTS ${CMAKE_SOURCE_DIR} /usr/local/gdrcopy /usr/local/gdrdrv ${GDRCOPY_HOME}
-    PATH_SUFFIXES include_gdrcopy include
-  )
-endif()
-
 if(NVSHMEM_SHMEM_SUPPORT)
   find_library(
     SHMEM_LIB

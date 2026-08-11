@@ -40,7 +40,7 @@ else()
   set(NVSHMEM_CFT_HANDLES_SUPPORT_DEFAULT OFF)
 endif()
 
-option(NVSHMEM_USE_GDRCOPY "Enable compilation of GDRCopy offload paths for atomics in remote transports" ${NVSHMEM_USE_GDRCOPY_DEFAULT})
+option(NVSHMEM_USE_GDRCOPY "Enable CPU-mappable GPU-memory paths for remote-transport atomics" ${NVSHMEM_USE_GDRCOPY_DEFAULT})
 option(NVSHMEM_USE_MLX5DV "Enable directNIC support" ${NVSHMEM_USE_MLX5DV_DEFAULT})
 option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable CFT handles (logical endpoint) support" ${NVSHMEM_CFT_HANDLES_SUPPORT_DEFAULT})
 option(NVSHMEM_BUILD_IBDEVX_TRANSPORT "Enable compilation of the ibdevx transport" OFF)
@@ -51,7 +51,6 @@ option(NVSHMEM_BUILD_LIBFABRIC_TRANSPORT "Enable compilation of the libfabric tr
 option(NVSHMEM_BUILD_UCX_TRANSPORT "Enable compilation of the UCX transport" OFF)
 
 set(CUDA_HOME ${CUDA_HOME_DEFAULT} CACHE PATH "path to CUDA installation")
-set(GDRCOPY_HOME ${GDRCOPY_HOME_DEFAULT} CACHE PATH "path to GDRCOPY installation")
 set(LIBFABRIC_HOME ${LIBFABRIC_HOME_DEFAULT} CACHE PATH "path to libfabric installation")
 set(UCX_HOME ${UCX_HOME_DEFAULT} CACHE PATH "path to UCX installation")
 
@@ -79,15 +78,6 @@ if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BU
   find_library(MLX5_lib NAMES mlx5)
 endif()
 
-if(NVSHMEM_USE_GDRCOPY)
-  find_path(
-    GDRCOPY_INCLUDE gdrapi.h
-    PATHS /usr/local/gdrcopy /usr/local/gdrdrv ${CMAKE_SOURCE_DIR}
-    HINTS ${CMAKE_SOURCE_DIR} /usr/local/gdrcopy /usr/local/gdrdrv ${GDRCOPY_HOME}
-    PATH_SUFFIXES include_gdrcopy include
-  )
-endif()
-
 add_subdirectory(common)
 
 macro(nvshmem_transport_set_base_config LIBNAME)
@@ -101,7 +91,6 @@ macro(nvshmem_transport_set_base_config LIBNAME)
 endmacro()
 
 macro(nvshmem_transport_set_gdr_config TRANSPORT_NAME)
-  target_include_directories(nvshmem_transport_gdr_common PUBLIC ${GDRCOPY_INCLUDE})
   target_link_libraries(${TRANSPORT_NAME} PRIVATE nvshmem_transport_gdr_common)
 endmacro()
 
@@ -110,8 +99,7 @@ macro(nvshmem_transport_set_ib_config TRANSPORT_NAME)
 endmacro()
 
 macro(nvshmem_transport_set_mlx5_config TRANSPORT_NAME)
-  target_include_directories(nvshmem_transport_gdr_common PUBLIC ${GDRCOPY_INCLUDE})
-    target_link_libraries(${TRANSPORT_NAME} PRIVATE ${MLX5_lib})
+  target_link_libraries(${TRANSPORT_NAME} PRIVATE ${MLX5_lib})
 endmacro()
 
 macro(nvshmem_add_transport TRANSPORT_NAME SOURCE_LIST CUDA_FLAG GDR_FLAG IB_FLAG MLX5_FLAG)

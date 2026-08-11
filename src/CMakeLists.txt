@@ -712,7 +712,6 @@ if(NVSHMEM_UCX_SUPPORT)
   )
   target_link_libraries(nvshmem_transport_ucx PRIVATE ucx::ucs ucx::ucp CUDA::cudart_static)
   if(NVSHMEM_USE_GDRCOPY)
-    target_include_directories(nvshmem_transport_ucx PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_ucx PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
                    modules/transport/common/transport_gdr_dmabuf.cpp
@@ -738,7 +737,6 @@ if(NVSHMEM_IBRC_SUPPORT)
   )
   target_link_libraries(nvshmem_transport_ibrc PRIVATE CUDA::cudart_static)
   if(NVSHMEM_USE_GDRCOPY)
-    target_include_directories(nvshmem_transport_ibrc PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_ibrc PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
                    modules/transport/common/transport_gdr_dmabuf.cpp
@@ -806,7 +804,6 @@ if(NVSHMEM_IBGDA_SUPPORT)
   )
   target_link_libraries(nvshmem_transport_ibgda PRIVATE ${MLX5_lib} CUDA::cudart_static)
   if(NVSHMEM_USE_GDRCOPY)
-    target_include_directories(nvshmem_transport_ibgda PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_ibgda PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
                    modules/transport/common/transport_gdr_dmabuf.cpp
@@ -854,12 +851,6 @@ if(NVSHMEM_GPUNETIO_SUPPORT)
   target_link_libraries(nvshmem_transport_gpunetio PRIVATE ${MLX5_lib} CUDA::cudart_static)
   target_link_libraries(nvshmem_transport_gpunetio PRIVATE doca_gpunetio)
   target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GPUNETIO_INCLUDE})
-  if(NVSHMEM_USE_GDRCOPY)
-    target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GDRCOPY_INCLUDE})
-    target_sources(nvshmem_transport_gpunetio PRIVATE
-                   modules/transport/common/transport_gdr_common.cpp
-    )
-  endif()
   if(HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED)
     target_compile_definitions(nvshmem_transport_gpunetio PRIVATE HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED=${HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED})
   endif()
@@ -890,7 +881,6 @@ if(NVSHMEM_LIBFABRIC_SUPPORT)
   )
   target_link_libraries(nvshmem_transport_libfabric PRIVATE ${FABRIC_lib} CUDA::cudart_static)
   if(NVSHMEM_USE_GDRCOPY)
-    target_include_directories(nvshmem_transport_libfabric PRIVATE ${GDRCOPY_INCLUDE})
     target_sources(nvshmem_transport_libfabric PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
                    modules/transport/common/transport_gdr_dmabuf.cpp

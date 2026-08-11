@@ -60,7 +60,7 @@ message( "\n__TRANSPORT__\n")
 nvshmem_add_default_on_option(NVSHMEM_IBRC_SUPPORT "Enable compilation of the IBRC remote transport")
 
 message( "\n__FUNCTIONALITY__\n")
-nvshmem_add_default_on_option(NVSHMEM_USE_GDRCOPY "Enable compilation of GDRCopy offload paths for atomics in remote transports")
+nvshmem_add_default_on_option(NVSHMEM_USE_GDRCOPY "Enable CPU-mappable GPU-memory paths for remote-transport atomics")
 nvshmem_add_default_on_option(NVSHMEM_USE_MLX5DV "Enable directNIC feature")
 nvshmem_add_default_on_option(NVSHMEM_NVTX "Enable NVSHMEM NVTX support")
 
@@ -113,7 +113,6 @@ message( "______________________________________________________________________
 message( "Paths of dependencies")
 message( "___________________________________________________________________________________________________")
 nvshmem_add_default_environment_path(CUDA_HOME "/usr/local/cuda" "path to CUDA installation")
-nvshmem_add_default_environment_path(GDRCOPY_HOME "/usr/local/gdrdrv" "path to GDRCOPY installation")
 nvshmem_add_default_environment_path(LIBFABRIC_HOME "/usr/local/libfabric" "path to libfabric installation")
 nvshmem_add_default_environment_path(NVSHMEM_CLANG_DIR "" "path to force cmake to look for clang when compiling the bitcode library.")
 nvshmem_add_default_environment_path(MPI_HOME "/usr/local/ompi" "path to MPI installation")
@@ -229,7 +228,6 @@ NVSHMEM_CFT_HANDLES_SUPPORT=${NVSHMEM_CFT_HANDLES_SUPPORT} \
 NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT=${NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT} \
 NVSHMEM_VERBOSE=${NVSHMEM_VERBOSE} \
 CUDA_HOME=${CUDA_HOME} \
-GDRCOPY_HOME=${GDRCOPY_HOME} \
 LIBFABRIC_HOME=${LIBFABRIC_HOME} \
 MPI_HOME=${MPI_HOME} \
 NCCL_HOME=${NCCL_HOME} \

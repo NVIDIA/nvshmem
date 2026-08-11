@@ -28,7 +28,6 @@ if(NVSHMEM_USE_GDRCOPY)
       transport_gdr_common.cpp
       transport_gdr_dmabuf.cpp)
   add_helper_library(nvshmem_transport_gdr_common OFF "${GDR_COMMON_SOURCES}")
-  target_include_directories(nvshmem_transport_gdr_common PUBLIC ${GDRCOPY_INCLUDE})
 endif()
 
 if(NVSHMEM_BUILD_IBDEVX_TRANSPORT OR NVSHMEM_BUILD_IBGDA_TRANSPORT OR NVSHMEM_BUILD_IBRC_TRANSPORT OR NVSHMEM_BUILD_GPUNETIO_TRANSPORT)
