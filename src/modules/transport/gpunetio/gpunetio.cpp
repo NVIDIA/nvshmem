@@ -1348,7 +1348,7 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
     int temp_dev_ids[MAX_NUM_PES_PER_NODE];
     int temp_port_ids[MAX_NUM_PES_PER_NODE];
     temp_state.devices = common_devs.data();
-    temp_state.device_capacity = num_devices;
+    temp_state.n_raw_devices = num_devices;
     temp_state.dev_ids = temp_dev_ids;
     temp_state.port_ids = temp_port_ids;
 

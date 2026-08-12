@@ -1006,11 +1006,10 @@ int nvshmemt_ibrc_finalize(nvshmem_transport_t transport) {
     connected_qp_count = 0;
 
     if (state->devices) {
-        std::vector<bool> device_finalized(state->device_capacity, false);
+        std::vector<bool> device_finalized(state->n_raw_devices, false);
         for (int i = 0; i < state->n_dev_ids; i++) {
             int dev_id = state->dev_ids[i];
-            if (dev_id < 0 || dev_id >= state->device_capacity || device_finalized[dev_id])
-                continue;
+            if (dev_id < 0 || dev_id >= state->n_raw_devices || device_finalized[dev_id]) continue;
             device_finalized[dev_id] = true;
 
             if (((struct ibrc_device *)state->devices)[dev_id].bpool_mr) {
@@ -1816,7 +1815,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibrc_state->devices = calloc(static_cast<size_t>(num_devices), sizeof(struct ibrc_device));
     NVSHMEMI_NULL_ERROR_JMP(ibrc_state->devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "get_device_list failed \n");
-    ibrc_state->device_capacity = num_devices;
+    ibrc_state->n_raw_devices = num_devices;
 
     ibrc_state->dev_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibrc_state->dev_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,

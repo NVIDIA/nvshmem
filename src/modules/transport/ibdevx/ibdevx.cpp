@@ -1089,10 +1089,10 @@ int nvshmemt_ibdevx_finalize(nvshmem_transport_t transport) {
     }
 
     if (ibdevx_state->devices) {
-        std::vector<bool> device_finalized(ibdevx_state->device_capacity, false);
+        std::vector<bool> device_finalized(ibdevx_state->n_raw_devices, false);
         for (int i = 0; i < ibdevx_state->n_dev_ids; i++) {
             int dev_id = ibdevx_state->dev_ids[i];
-            if (dev_id < 0 || dev_id >= ibdevx_state->device_capacity || device_finalized[dev_id])
+            if (dev_id < 0 || dev_id >= ibdevx_state->n_raw_devices || device_finalized[dev_id])
                 continue;
             device_finalized[dev_id] = true;
 
@@ -1933,7 +1933,7 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     ibdevx_state->devices = calloc(static_cast<size_t>(num_devices), sizeof(struct ibdevx_device));
     NVSHMEMI_NULL_ERROR_JMP(ibdevx_state->devices, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "get_device_list failed \n");
-    ibdevx_state->device_capacity = num_devices;
+    ibdevx_state->n_raw_devices = num_devices;
 
     ibdevx_state->dev_ids = (int *)malloc(MAX_NUM_PES_PER_NODE * sizeof(int));
     NVSHMEMI_NULL_ERROR_JMP(ibdevx_state->dev_ids, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
