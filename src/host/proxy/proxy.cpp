@@ -1136,13 +1136,14 @@ inline void copy_from_channel(proxy_state_t *state, proxy_channel_t *ch, void *d
         channel_ptr_uint64 = (volatile uint64_t *)channel_ptr;
         while ((channel_ptr_char[0] & 1) != flag);
         bounce.whole_buffer = *channel_ptr_uint64;
-        memcpy(dest_ptr, &bounce.bytes[1], 7);
+        memcpy(dest_ptr, &bounce.bytes[PROXY_CHANNEL_ENTRY_CONTROL_BYTES],
+               PROXY_CHANNEL_ENTRY_DATA_BYTES);
 
-        dest_ptr += 7;
+        dest_ptr += PROXY_CHANNEL_ENTRY_DATA_BYTES;
 
         /* each channel buffer is 8 bytes. */
-        num_bytes += 8;
-        counter += 8;
+        num_bytes += CHANNEL_ENTRY_BYTES;
+        counter += CHANNEL_ENTRY_BYTES;
         /* Note, the second to last bit being set denotes a continuation of the same request from
          * the other side. */
     } while ((channel_ptr_char[0] & 0x10) == 0x10);
