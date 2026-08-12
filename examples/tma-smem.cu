@@ -43,7 +43,8 @@
  */
 __global__ void tma_smem_put_kernel(int *recv_data, int num_elems, int mype, int npes) {
     extern __shared__ char nvshmem_smem[];
-    int *payload = (int *)nvshmem_smem;
+    int smem_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+    int *payload = reinterpret_cast<int *>(nvshmem_smem + smem_offset);
     int tid = threadIdx.x;
 
     /* Step 1: Give shared memory to NVSHMEM for TMA-based transfers */
@@ -63,8 +64,11 @@ __global__ void tma_smem_put_kernel(int *recv_data, int num_elems, int mype, int
 
     /* Step 4: Put from shared memory to remote PE's global memory */
     int peer = (mype + 1) % npes;
-    nvshmemx_putmem_nbi_block(recv_data, nvshmem_smem, (size_t)num_elems * sizeof(int), peer);
-    nvshmem_quiet();
+    nvshmemx_putmem_nbi_block(recv_data, payload, (size_t)num_elems * sizeof(int), peer);
+    if (!tid) {
+        nvshmem_quiet();
+    }
+    __syncthreads();
 
     /* Step 5: Release smem registration so subsequent kernels start clean */
     nvshmemx_release_smem();
