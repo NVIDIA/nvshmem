@@ -182,9 +182,9 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void copy_to_channel(vo
 
     /* idx is an every increasing counter. Since it is 64 bit integer, practically
     it will not overflow */
-    size_with_flags = (size * 8) / 7;
-    if (size_with_flags % 8) {
-        size_with_flags += (8 - (size_with_flags % 8));
+    size_with_flags = (size * CHANNEL_ENTRY_BYTES) / PROXY_CHANNEL_ENTRY_DATA_BYTES;
+    if (size_with_flags % CHANNEL_ENTRY_BYTES) {
+        size_with_flags += CHANNEL_ENTRY_BYTES - (size_with_flags % CHANNEL_ENTRY_BYTES);
     }
     idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue,
                     size_with_flags);
@@ -193,21 +193,23 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void copy_to_channel(vo
     // flow-control
     check_channel_availability(tail_idx);
 
-    for (size_remaining = size; size_remaining > 7; idx += sizeof(uint64_t), size_remaining -= 7) {
+    for (size_remaining = size; size_remaining > PROXY_CHANNEL_ENTRY_DATA_BYTES;
+         idx += CHANNEL_ENTRY_BYTES, size_remaining -= PROXY_CHANNEL_ENTRY_DATA_BYTES) {
         channel_ptr = (volatile uint64_t *)((uint64_t)nvshmemi_device_state_d.proxy_channels_buf +
                                             (idx & (CHANNEL_BUF_SIZE - 1)));
-        memcpy(&bounce.bytes[1], src_ptr, 7);
+        memcpy(&bounce.bytes[PROXY_CHANNEL_ENTRY_CONTROL_BYTES], src_ptr,
+               PROXY_CHANNEL_ENTRY_DATA_BYTES);
         /* Note, the second to last bit being set denotes a continuation of the same request to the
          * other side. */
         bounce.bytes[0] =
             (char)(!((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1) | 0x10);
         *channel_ptr = bounce.whole_buffer;
-        src_ptr += 7;
+        src_ptr += PROXY_CHANNEL_ENTRY_DATA_BYTES;
     }
 
     channel_ptr = (volatile uint64_t *)((uint64_t)nvshmemi_device_state_d.proxy_channels_buf +
                                         (idx & (CHANNEL_BUF_SIZE - 1)));
-    memcpy(&bounce.bytes[1], src_ptr, size_remaining);
+    memcpy(&bounce.bytes[PROXY_CHANNEL_ENTRY_CONTROL_BYTES], src_ptr, size_remaining);
     bounce.bytes[0] = (char)!((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
     *channel_ptr = bounce.whole_buffer;
 }
@@ -311,7 +313,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     uint64_t idx, tail_idx, *req;
     int size = PROXY_PUT_WITH_SIG_REQ_BYTES;
-    int group_size = 1;
+    int group_size = PROXY_GROUP_SIZE_SINGLE;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
     const uint64_t mask_lowest_byte = 0xFFFFFFFFFFFFFF00u;
@@ -518,7 +520,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_inl
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     uint64_t idx, tail_idx, *req;
     int size = PROXY_INLINE_REQ_BYTES + (qp_index != NVSHMEMX_QP_DEFAULT ? CHANNEL_ENTRY_BYTES : 0);
-    int group_size = 1;
+    int group_size = PROXY_GROUP_SIZE_SINGLE;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
 
@@ -593,7 +595,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     int pe, nvshmemi_amo_t amo_op, nvshmemx_qp_handle_t qp_index) {
     uint64_t idx, tail_idx, *req;
     int size = PROXY_AMO_REQ_BYTES + (qp_index != NVSHMEMX_QP_DEFAULT ? CHANNEL_ENTRY_BYTES : 0);
-    int group_size = 1;
+    int group_size = PROXY_GROUP_SIZE_SINGLE;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
 
