@@ -65,10 +65,6 @@ typedef enum { _LL_PSYNC_NON_VOLATILE = 0, _LL_PSYNC_VOLATILE } nvshmemi_psync_v
 
 #ifdef __CUDA_ARCH__
 
-__device__ __forceinline__ uint32_t nvshmemi_get_flat_blk_idx() {
-    return blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
-}
-
 __device__ __forceinline__ void *nvshmemi_ptr_add(void *ptr, size_t byte_offset) {
     return static_cast<void *>(static_cast<char *>(ptr) + byte_offset);
 }
@@ -444,14 +440,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
 /* Qualify each CTA's block index with its grid ID so concurrent grids use
  * distinct registration slots. Owner keys follow the base-pointer table. */
 
-__device__ __forceinline__ uint64_t nvshmemi_tma_grid_id() {
-    uint64_t grid_id;
-    asm volatile("mov.u64 %0, %%gridid;" : "=l"(grid_id));
-    return grid_id;
-}
-
 __device__ __forceinline__ uint64_t nvshmemi_tma_registration_key() {
-    uint64_t grid_id = nvshmemi_tma_grid_id();
+    uint64_t grid_id = nvshmemi_get_grid_id();
     return grid_id == UINT64_MAX ? 0 : grid_id + 1;
 }
 
@@ -472,12 +462,12 @@ __device__ __forceinline__ int nvshmemi_tma_smem_registration_slot() {
     }
 
     size_t blocks_per_grid = len / grid_namespaces;
-    uint32_t block_id = blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+    uint32_t block_id = nvshmemi_get_flat_blk_idx();
     if (block_id >= blocks_per_grid) {
         return -1;
     }
 
-    size_t grid_slot = nvshmemi_tma_grid_id() % grid_namespaces;
+    size_t grid_slot = nvshmemi_get_grid_id() % grid_namespaces;
     return static_cast<int>(grid_slot * blocks_per_grid + block_id);
 }
 

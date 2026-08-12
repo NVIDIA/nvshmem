@@ -57,6 +57,16 @@ typedef enum {
 
 #ifdef __CUDA_ARCH__
 
+__device__ __forceinline__ uint64_t nvshmemi_get_grid_id() {
+    uint64_t grid_id;
+    asm volatile("mov.u64 %0, %%gridid;" : "=l"(grid_id));
+    return grid_id;
+}
+
+__device__ __forceinline__ uint32_t nvshmemi_get_flat_blk_idx() {
+    return blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y;
+}
+
 template <threadgroup_t scope>
 __device__ __forceinline__ int nvshmemi_thread_id_in_threadgroup() {
     switch (scope) {
