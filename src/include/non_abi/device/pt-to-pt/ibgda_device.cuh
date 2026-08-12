@@ -3356,16 +3356,6 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
         goto out;
     }
 
-    // The collective fast path chooses one QP for the warp. In address-stable mode, use the
-    // single-thread path so the data write and signal atomic share the target-selected QP.
-    if (ibgda_use_address_stable_amo(pe, qp_index)) {
-        if (my_tid == 0) {
-            nvshmemi_ibgda_put_signal_thread_impl<is_nbi, support_half_av_seg>(
-                req_rptr, req_lptr, bytes, sig_rptr, signal, sig_op, pe, qp_index);
-        }
-        goto out;
-    }
-
     my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
 
     if (my_tid == 0) {

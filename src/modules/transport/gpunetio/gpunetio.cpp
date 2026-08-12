@@ -1626,7 +1626,6 @@ gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_amo_ep(int pe, int qp_index
     size_t num_selected_slots = selected_dev_ids.size();
     int num_default_qps_per_slot = options->GPUNETIO_NUM_RC_PER_PE_CPU;
     assert(num_default_qps_per_slot > 0);
-    // Match IBRC's selected-device-SPREAD default-QP ordering.
     uint64_t selected_qp = hash % (num_selected_slots * num_default_qps_per_slot);
     size_t selected_dev_slot = selected_qp % num_selected_slots;
     gpunetio_device &device = *devices[selected_dev_ids[selected_dev_slot]];
