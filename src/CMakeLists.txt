@@ -13,20 +13,25 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-Wno-vla-cxx-extension)
 endif()
 
-# Only forward CMAKE_CUDA_ARCHITECTURES when the user explicitly set it. Otherwise the
-# device sub-project picks its own default based on NVSHMEM_DEVICELIB_CUDA_HOME's CTK
-# version — which can legitimately differ from the host-side toolkit (same major, older
-# minor) for ABI stability across a major release series.
-if(NOT CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
+# NVSHMEM's automatic value has this cache help string. CMake command-line
+# overrides use a different one, so forward only those user-supplied values.
+get_property(NVSHMEM_CUDA_ARCHITECTURES_HELP
+             CACHE CMAKE_CUDA_ARCHITECTURES PROPERTY HELPSTRING)
+if(DEFINED CUDA_ARCHITECTURES OR
+   NOT NVSHMEM_CUDA_ARCHITECTURES_HELP STREQUAL "CUDA ARCHITECTURES")
     list(APPEND my_cmake_cache_args
         -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
     )
+else()
+    # Clear an architecture cached by an earlier device sub-project configure.
+    list(APPEND my_cmake_args -U CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 ExternalProject_Add(nvshmem_device_project
                     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/device
                     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/device
-                    CMAKE_ARGS  -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                    CMAKE_ARGS  ${my_cmake_args}
+                                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                                 -DNVSHMEM_PREFIX=${NVSHMEM_PREFIX}
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
                                 -DNVSHMEM_VERBOSE=${NVSHMEM_VERBOSE}
