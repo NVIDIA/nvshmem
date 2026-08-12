@@ -46,11 +46,33 @@ __global__ void validate_pattern(const uint64_t *data, size_t nelems, uint64_t e
     }
 }
 
+/* counter_d[0] counts CTA arrivals across all enabled barriers, while
+ * counter_d[1] records the most recently released barrier epoch. */
+template <bool CALL_QUIET>
+__device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter_d,
+                                                  unsigned int barrier_epoch) {
+    unsigned int counter;
+    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * barrier_epoch - 1)) {
+            if constexpr (CALL_QUIET) nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != barrier_epoch);
+        if constexpr (CALL_QUIET) nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                          int iter) {
     int i;
-    unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    unsigned int barrier_epoch = 0;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
@@ -58,38 +80,21 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
         nvshmemx_double_put_nbi_block(data_d + (bid * (len / nblocks)),
                                       data_d + (bid * (len / nblocks)), len / nblocks, peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshme_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                         int iter) {
     int i;
-    unsigned int counter;
+    unsigned int barrier_epoch = 0;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -104,38 +109,21 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t
             data_d + (bid * put_size_per_block + warpid * put_size_per_warp), put_size_per_warp,
             peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshme_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                           int iter) {
     int i;
-    unsigned int counter;
+    unsigned int barrier_epoch = 0;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -148,32 +136,14 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
                                data_d + (bid * put_size_per_block + tid * put_size_per_thread),
                                put_size_per_thread, peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshme_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
 /*
@@ -183,12 +153,12 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
  * global source and performs its internal global->shared->remote-global TMA
  * staging. If TMA routing is unavailable, the put falls back to P2P stores.
  */
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                              int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     int i;
-    unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    unsigned int barrier_epoch = 0;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
@@ -199,35 +169,61 @@ __global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, s
         nvshmemx_double_put_nbi_block(data_d + (bid * (len / nblocks)),
                                       data_d + (bid * (len / nblocks)), len / nblocks, peer);
 
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
+    if constexpr (!USE_FINAL_BARRIER) __syncthreads();
     nvshmemx_release_smem();
 }
 
 typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                         int iter);
+typedef void (*bw_tma_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
+                            int iter, int smem_size);
+
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+static bool configure_bw_variant(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
+    *bw_tma_fn = bw_block_tma<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            *bw_fn = bw_thread<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using thread-scope put (iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
+            break;
+        case NVSHMEM_WARP:
+            *bw_fn = bw_warp<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using warp-scope put (iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
+            break;
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            *bw_fn = bw_block<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using block-scope put (iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
+            break;
+        default:
+            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
+            return false;
+    }
+
+    return true;
+}
+
+static bool configure_bw_mode(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
+    if (use_iteration_barrier) {
+        if (use_final_barrier) return configure_bw_variant<true, true>(bw_fn, bw_tma_fn);
+        return configure_bw_variant<true, false>(bw_fn, bw_tma_fn);
+    }
+
+    if (use_final_barrier) return configure_bw_variant<false, true>(bw_fn, bw_tma_fn);
+    return configure_bw_variant<false, false>(bw_fn, bw_tma_fn);
+}
 
 int main(int argc, char *argv[]) {
     int mype, npes;
@@ -265,7 +261,8 @@ int main(int argc, char *argv[]) {
     uint64_t *h_size_arr;
     double *h_bw = NULL;
 
-    bw_fn_t bw_fn = bw_block;
+    bw_fn_t bw_fn = NULL;
+    bw_tma_fn_t bw_tma_fn = NULL;
     bool use_tma = false;
     int smem_size = 0;
     int min_partition_sms = 0;
@@ -405,24 +402,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    switch (threadgroup_scope.type) {
-        case NVSHMEM_THREAD:
-            bw_fn = bw_thread;
-            DEBUG_PRINT("Using thread-scope put\n");
-            break;
-        case NVSHMEM_WARP:
-            bw_fn = bw_warp;
-            DEBUG_PRINT("Using warp-scope put\n");
-            break;
-        case NVSHMEM_BLOCK:
-        case NVSHMEM_ALL_SCOPES:
-            bw_fn = bw_block;
-            DEBUG_PRINT("Using block-scope put\n");
-            break;
-        default:
-            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
-            goto finalize;
-    }
+    if (!configure_bw_mode(&bw_fn, &bw_tma_fn)) goto finalize;
 
     /* Register scratch smem for NVSHMEM's block-scope global-to-global TMA path.
        Requires NVSHMEM_TMA_POLICY=ENABLE, sm_90+, and at least two full warps;
@@ -438,16 +418,16 @@ int main(int argc, char *argv[]) {
             goto finalize;
         }
         smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-        CUDA_CHECK(cudaFuncSetAttribute(bw_block_tma, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        CUDA_CHECK(cudaFuncSetAttribute(bw_tma_fn, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                         smem_size));
         DEBUG_PRINT("Using block-scope global-to-global TMA put (smem_size=%d)\n", smem_size);
     }
 
     /* ------------------------------------------------------------------ */
     /* Clamp the launch grid to the co-resident capacity of one SM         */
-    /* partition.  The kernels use a global-counter inter-block barrier     */
-    /* every iteration, which deadlocks if the grid has more CTAs than can  */
-    /* be simultaneously resident.  We cannot use a cooperative launch here */
+    /* partition.  An enabled global-counter inter-block barrier deadlocks  */
+    /* if the grid has more CTAs than can be simultaneously resident.  We   */
+    /* cannot use a cooperative launch here                                 */
     /* (nvshmemx_collective_launch ignores the user stream and so cannot    */
     /* target the per-domain green-context streams), so we guarantee co-     */
     /* residence ourselves: max CTAs = occupancy * SMs-in-partition.        */
@@ -457,31 +437,38 @@ int main(int argc, char *argv[]) {
         blocks_per_domain = num_blocks / num_locality_domains;
         if (blocks_per_domain < 1) blocks_per_domain = 1;
 
-        int occupancy = 0;
-        if (use_tma) {
-            CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-                &occupancy, bw_block_tma, max_threads, (size_t)smem_size));
-        } else {
-            CUDA_CHECK(
-                cudaOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, bw_fn, max_threads, 0));
-        }
-
-        int max_coresident = occupancy * min_partition_sms;
-        if (max_coresident < 1) max_coresident = 1;
-
-        if (blocks_per_domain > max_coresident) {
-            if (mype == 0) {
-                fprintf(stderr,
-                        "WARNING: %d CTAs/domain exceeds the co-resident capacity of an SM "
-                        "partition (%d blocks/SM * %d SMs = %d); clamping to %d to avoid an "
-                        "inter-block-barrier deadlock.\n",
-                        blocks_per_domain, occupancy, min_partition_sms, max_coresident,
-                        max_coresident);
+        if (use_iteration_barrier || use_final_barrier) {
+            int occupancy = 0;
+            if (use_tma) {
+                CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                    &occupancy, bw_tma_fn, max_threads, (size_t)smem_size));
+            } else {
+                CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, bw_fn,
+                                                                         max_threads, 0));
             }
-            blocks_per_domain = max_coresident;
+
+            int max_coresident = occupancy * min_partition_sms;
+            if (max_coresident < 1) max_coresident = 1;
+
+            if (blocks_per_domain > max_coresident) {
+                if (mype == 0) {
+                    fprintf(stderr,
+                            "WARNING: %d CTAs/domain exceeds the co-resident capacity of an SM "
+                            "partition (%d blocks/SM * %d SMs = %d); clamping to %d to avoid an "
+                            "inter-block-barrier deadlock.\n",
+                            blocks_per_domain, occupancy, min_partition_sms, max_coresident,
+                            max_coresident);
+                }
+                blocks_per_domain = max_coresident;
+            }
+            DEBUG_PRINT("Grid clamp: occupancy=%d, partition_sms=%d, blocks_per_domain=%d\n",
+                        occupancy, min_partition_sms, blocks_per_domain);
+        } else {
+            DEBUG_PRINT(
+                "Grid clamp disabled because both inter-CTA barriers are disabled "
+                "(blocks_per_domain=%d)\n",
+                blocks_per_domain);
         }
-        DEBUG_PRINT("Grid clamp: occupancy=%d, partition_sms=%d, blocks_per_domain=%d\n", occupancy,
-                    min_partition_sms, blocks_per_domain);
     }
 
     /* ------------------------------------------------------------------ */
@@ -596,9 +583,9 @@ int main(int argc, char *argv[]) {
            paths pass localized global memory as the put source and destination. */
         auto launch_kernel = [&](int n, size_t kern_len, int kern_peer, int kern_iter) {
             if (use_tma) {
-                bw_block_tma<<<blocks_per_domain, max_threads, smem_size,
-                               (cudaStream_t)gc_streams[n]>>>(data_d[n], counter_d_arr[n], kern_len,
-                                                              kern_peer, kern_iter, smem_size);
+                bw_tma_fn<<<blocks_per_domain, max_threads, smem_size,
+                            (cudaStream_t)gc_streams[n]>>>(data_d[n], counter_d_arr[n], kern_len,
+                                                           kern_peer, kern_iter, smem_size);
             } else {
                 bw_fn<<<blocks_per_domain, max_threads, 0, (cudaStream_t)gc_streams[n]>>>(
                     data_d[n], counter_d_arr[n], kern_len, kern_peer, kern_iter);

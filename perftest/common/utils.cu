@@ -311,7 +311,8 @@ static void print_read_args_summary() {
         "number of ctas: %zu, threads per cta: %zu "
         "stride: %zu, datatype: %s, reduce_op: %s, threadgroup_scope: %s, atomic_op: %s, dir: %s, "
         "report_msgrate: %d, bidirectional: %d, putget_issue :%s, use_graph: %d, use_mmap: %d, "
-        "mem_handle_type: %zu, use_egm: %d, use_smem: %d"
+        "mem_handle_type: %zu, use_egm: %d, use_smem: %d, iteration_barrier: %d, "
+        "final_barrier: %d"
 #if CUDART_VERSION >= 13000
         ", use_nucs: %d"
 #endif
@@ -319,7 +320,8 @@ static void print_read_args_summary() {
         min_size, max_size, step_factor, iters, warmup_iters, num_blocks, threads_per_block, stride,
         datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
         test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
-        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem
+        putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem,
+        use_iteration_barrier, use_final_barrier
 #if CUDART_VERSION >= 13000
         ,
         use_nucs
@@ -1118,6 +1120,8 @@ bool use_graph = false;
 bool use_mmap = false;
 bool use_egm = false;
 bool use_smem = true;
+bool use_iteration_barrier = true;
+bool use_final_barrier = true;
 #if CUDART_VERSION >= 13000
 bool use_nucs = false;
 #endif
@@ -1160,6 +1164,8 @@ void read_args(int argc, char **argv) {
                                            {"mmap", no_argument, 0, 0},
                                            {"egm", no_argument, 0, 0},
                                            {"use_smem", required_argument, 0, 0},
+                                           {"no-iteration-barrier", no_argument, 0, 0},
+                                           {"no-final-barrier", no_argument, 0, 0},
 #if CUDART_VERSION >= 13000
                                            {"nucs", no_argument, 0, 0},
 #endif
@@ -1213,6 +1219,10 @@ void read_args(int argc, char **argv) {
                     "--mmap (Use mmaped buffer) \n"
                     "--egm (Use EGM memory for mmaped buffer) \n"
                     "--use_smem <0|1> (Enable shared-memory registration in TMA-capable tests) \n"
+                    "--no-iteration-barrier (Disable per-iteration synchronization in applicable "
+                    "put/get bandwidth and latency tests) \n"
+                    "--no-final-barrier (Disable the final inter-CTA barrier and quiet in "
+                    "applicable put/get bandwidth tests) \n"
                     "-m, --mem_handle_type: <0:auto, 1:posix_fd, 2:fabric> (for mmaped buffer) \n"
                     "--cudagraph (Use CUDA graph to amortize launch overhead) \n"
                     "--nucs (Enable NVLink-utilization-centric CTA scheduling on cooperative "
@@ -1247,6 +1257,10 @@ void read_args(int argc, char **argv) {
                     use_egm = true;
                 } else if (strcmp(long_options[option_index].name, "use_smem") == 0) {
                     use_smem = parse_bool_arg("--use_smem", optarg, true);
+                } else if (strcmp(long_options[option_index].name, "no-iteration-barrier") == 0) {
+                    use_iteration_barrier = false;
+                } else if (strcmp(long_options[option_index].name, "no-final-barrier") == 0) {
+                    use_final_barrier = false;
                 }
 #if CUDART_VERSION >= 13000
                 else if (strcmp(long_options[option_index].name, "nucs") == 0) {

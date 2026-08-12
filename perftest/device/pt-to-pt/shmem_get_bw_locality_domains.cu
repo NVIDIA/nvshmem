@@ -46,11 +46,33 @@ __global__ void validate_pattern(const uint64_t *data, size_t nelems, uint64_t e
     }
 }
 
+/* counter_d[0] counts CTA arrivals across all enabled barriers, while
+ * counter_d[1] records the most recently released barrier epoch. */
+template <bool CALL_QUIET>
+__device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter_d,
+                                                  unsigned int barrier_epoch) {
+    unsigned int counter;
+    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * barrier_epoch - 1)) {
+            if constexpr (CALL_QUIET) nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != barrier_epoch);
+        if constexpr (CALL_QUIET) nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                          int iter) {
     int i;
-    unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    unsigned int barrier_epoch = 0;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
@@ -58,88 +80,21 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
         nvshmemx_double_get_nbi_block(data_d + (bid * (len / nblocks)),
                                       data_d + (bid * (len / nblocks)), len / nblocks, peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshmem_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
-/*
- * TMA-enabled block-scope global-to-global get. Shared memory is registered as
- * NVSHMEM scratch space only. The source and destination arguments remain in
- * the localized global allocation. NVSHMEM stages the remote-global source
- * through shared memory before writing the local-global destination. If TMA
- * routing is unavailable, the get falls back to P2P loads.
- */
-__global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
-                             int iter, int smem_size) {
-    extern __shared__ char nvshmem_smem[];
-    int i;
-    unsigned int counter;
-    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
-    int bid = blockIdx.x;
-    int nblocks = gridDim.x;
-
-    nvshmemx_give_smem(nvshmem_smem, smem_size);
-    __syncthreads();
-
-    for (i = 0; i < iter; i++) {
-        nvshmemx_double_get_nbi_block(data_d + (bid * (len / nblocks)),
-                                      data_d + (bid * (len / nblocks)), len / nblocks, peer);
-
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
-        }
-        __syncthreads();
-    }
-
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
-    }
-    __syncthreads();
-    nvshmemx_release_smem();
-}
-
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                         int iter) {
     int i;
-    unsigned int counter;
+    unsigned int barrier_epoch = 0;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -154,38 +109,21 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t
             data_d + (bid * get_size_per_block + warpid * get_size_per_warp), get_size_per_warp,
             peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshmem_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                           int iter) {
     int i;
-    unsigned int counter;
+    unsigned int barrier_epoch = 0;
     int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -198,36 +136,90 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
                                data_d + (bid * get_size_per_block + tid * get_size_per_thread),
                                get_size_per_thread, peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshmem_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
+}
+
+/* TMA-enabled block-scope global-to-global get. Shared memory is registered as
+ * NVSHMEM scratch space only; source and destination remain in localized global
+ * allocations. NVSHMEM falls back to its non-TMA path when routing is unavailable. */
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+__global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
+                             int iter, int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    int i;
+    unsigned int barrier_epoch = 0;
+    int bid = blockIdx.x;
+    int nblocks = gridDim.x;
+
+    nvshmemx_give_smem(nvshmem_smem, smem_size);
     __syncthreads();
+
+    for (i = 0; i < iter; i++) {
+        nvshmemx_double_get_nbi_block(data_d + (bid * (len / nblocks)),
+                                      data_d + (bid * (len / nblocks)), len / nblocks, peer);
+
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
+        }
+    }
+
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
+    }
+    if constexpr (!USE_FINAL_BARRIER) __syncthreads();
+    nvshmemx_release_smem();
 }
 
 typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                         int iter);
+typedef void (*bw_tma_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
+                            int iter, int smem_size);
+
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+static bool configure_bw_variant(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
+    *bw_tma_fn = bw_block_tma<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            *bw_fn = bw_thread<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using thread-scope get (iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
+            break;
+        case NVSHMEM_WARP:
+            *bw_fn = bw_warp<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using warp-scope get (iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
+            break;
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            *bw_fn = bw_block<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using block-scope get (iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
+            break;
+        default:
+            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
+            return false;
+    }
+
+    return true;
+}
+
+static bool configure_bw_mode(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
+    if (use_iteration_barrier) {
+        if (use_final_barrier) return configure_bw_variant<true, true>(bw_fn, bw_tma_fn);
+        return configure_bw_variant<true, false>(bw_fn, bw_tma_fn);
+    }
+
+    if (use_final_barrier) return configure_bw_variant<false, true>(bw_fn, bw_tma_fn);
+    return configure_bw_variant<false, false>(bw_fn, bw_tma_fn);
+}
 
 int main(int argc, char *argv[]) {
     int mype, npes;
@@ -258,21 +250,26 @@ int main(int argc, char *argv[]) {
     int return_code = 0;
 
     read_args(argc, argv);
-    int max_blocks = num_blocks, max_threads = threads_per_block;
+    int max_threads = threads_per_block;
 
     int array_size, i;
     void **h_tables = NULL;
     uint64_t *h_size_arr;
     double *h_bw = NULL;
 
-    bw_fn_t bw_fn = bw_block;
+    bw_fn_t bw_fn = NULL;
+    bw_tma_fn_t bw_tma_fn = NULL;
     bool use_tma = false;
     int smem_size = 0;
+    int min_partition_sms = 0;
+    int max_partition_sms = 0;
+    int blocks_per_domain = 0;
     int iter = iters;
     int skip = warmup_iters;
 
     float milliseconds;
 
+    /* Reset all per-node inter-block counters to zero. */
     auto reset_counters = [&]() {
         for (auto *ptr : counter_d_arr) CUDA_CHECK(cudaMemset(ptr, 0, sizeof(unsigned int) * 2));
     };
@@ -331,7 +328,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* ------------------------------------------------------------------ */
-    /* Create green contexts and streams                                   */
+    /* Create green contexts and streams (one per locality domain)         */
     /* ------------------------------------------------------------------ */
     {
         int dev;
@@ -352,6 +349,21 @@ int main(int argc, char *argv[]) {
         CUdevResource remainder;
         CU_CHECK(cuDevSmResourceSplit(nodeSmResources.data(), num_locality_domains, &smResource,
                                       &remainder, 0, params.data()));
+
+        /* Smallest/largest SM partition across locality domains.  The inter-block
+           barrier requires the whole grid to be co-resident, so the launch grid
+           is later clamped to (occupancy * smallest-SMs-in-partition). */
+        for (int n = 0; n < num_locality_domains; n++) {
+            int sms = (int)nodeSmResources[n].sm.smCount;
+            if (n == 0 || sms < min_partition_sms) min_partition_sms = sms;
+            if (n == 0 || sms > max_partition_sms) max_partition_sms = sms;
+        }
+        if (mype == 0) {
+            std::fprintf(stdout,
+                         "SM partitions per locality domain: min=%d, max=%d (of %d domains)\n",
+                         min_partition_sms, max_partition_sms, num_locality_domains);
+            std::fflush(stdout);
+        }
 
         green_ctxs.resize(num_locality_domains);
         gc_streams.resize(num_locality_domains);
@@ -386,28 +398,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    switch (threadgroup_scope.type) {
-        case NVSHMEM_THREAD:
-            bw_fn = bw_thread;
-            DEBUG_PRINT("Using thread-scope get\n");
-            break;
-        case NVSHMEM_WARP:
-            bw_fn = bw_warp;
-            DEBUG_PRINT("Using warp-scope get\n");
-            break;
-        case NVSHMEM_BLOCK:
-        case NVSHMEM_ALL_SCOPES:
-            bw_fn = bw_block;
-            DEBUG_PRINT("Using block-scope get\n");
-            break;
-        default:
-            fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
-            goto finalize;
-    }
+    if (!configure_bw_mode(&bw_fn, &bw_tma_fn)) goto finalize;
 
     /* Register scratch smem for NVSHMEM's block-scope global-to-global TMA path.
-       Requires NVSHMEM_TMA_POLICY=ENABLE, sm_90+, and at least two full warps.
-       Other routing failures fall back to P2P loads inside NVSHMEM. */
+       Requires NVSHMEM_TMA_POLICY=ENABLE, sm_90+, and at least two full warps;
+       other routing failures fall back to P2P loads inside NVSHMEM. */
     use_tma = use_smem && (threadgroup_scope.type == NVSHMEM_BLOCK ||
                            threadgroup_scope.type == NVSHMEM_ALL_SCOPES);
     if (use_tma) {
@@ -419,9 +414,57 @@ int main(int argc, char *argv[]) {
             goto finalize;
         }
         smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-        CUDA_CHECK(cudaFuncSetAttribute(bw_block_tma, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        CUDA_CHECK(cudaFuncSetAttribute(bw_tma_fn, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                         smem_size));
         DEBUG_PRINT("Using block-scope global-to-global TMA get (smem_size=%d)\n", smem_size);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Clamp the launch grid to the co-resident capacity of one SM         */
+    /* partition.  An enabled global-counter inter-block barrier deadlocks  */
+    /* if the grid has more CTAs than can be simultaneously resident.  We   */
+    /* cannot use a cooperative launch here                                 */
+    /* (nvshmemx_collective_launch ignores the user stream and so cannot    */
+    /* target the per-domain green-context streams), so we guarantee co-     */
+    /* residence ourselves: max CTAs = occupancy * SMs-in-partition.        */
+    /* ------------------------------------------------------------------ */
+    {
+        /* C/n CTAs per domain (n * blocks_per_domain == C). */
+        blocks_per_domain = num_blocks / num_locality_domains;
+        if (blocks_per_domain < 1) blocks_per_domain = 1;
+
+        if (use_iteration_barrier || use_final_barrier) {
+            int occupancy = 0;
+            if (use_tma) {
+                CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
+                    &occupancy, bw_tma_fn, max_threads, (size_t)smem_size));
+            } else {
+                CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, bw_fn,
+                                                                         max_threads, 0));
+            }
+
+            int max_coresident = occupancy * min_partition_sms;
+            if (max_coresident < 1) max_coresident = 1;
+
+            if (blocks_per_domain > max_coresident) {
+                if (mype == 0) {
+                    fprintf(stderr,
+                            "WARNING: %d CTAs/domain exceeds the co-resident capacity of an SM "
+                            "partition (%d blocks/SM * %d SMs = %d); clamping to %d to avoid an "
+                            "inter-block-barrier deadlock.\n",
+                            blocks_per_domain, occupancy, min_partition_sms, max_coresident,
+                            max_coresident);
+                }
+                blocks_per_domain = max_coresident;
+            }
+            DEBUG_PRINT("Grid clamp: occupancy=%d, partition_sms=%d, blocks_per_domain=%d\n",
+                        occupancy, min_partition_sms, blocks_per_domain);
+        } else {
+            DEBUG_PRINT(
+                "Grid clamp disabled because both inter-CTA barriers are disabled "
+                "(blocks_per_domain=%d)\n",
+                blocks_per_domain);
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -442,6 +485,7 @@ int main(int argc, char *argv[]) {
 
         alloc_size = ((max_size + granularity - 1) / granularity) * granularity;
         alloc_size = pad_up(alloc_size);
+        DEBUG_PRINT("Localized alloc granularity: %zu, alloc_size: %zu\n", granularity, alloc_size);
 
         data_d.resize(num_locality_domains, nullptr);
         buf_addrs.resize(num_locality_domains, nullptr);
@@ -475,6 +519,8 @@ int main(int argc, char *argv[]) {
                 goto finalize;
             }
             CUDA_CHECK(cudaMemset(data_d[n], 0, alloc_size));
+            DEBUG_PRINT("PE %d: node %d  buf_addr=%p  sym_ptr=%p\n", mype, n, buf_addrs[n],
+                        (void *)data_d[n]);
         }
     }
 
@@ -519,33 +565,32 @@ int main(int argc, char *argv[]) {
         std::vector<double> h_bw_all(npes, 0.0);
         std::vector<float> elapsed_ms(num_locality_domains, 0.0f);
         std::vector<unsigned long long> validation_errors(num_locality_domains, 0);
-        int blocks_per_domain = max_blocks / num_locality_domains;
-        if (blocks_per_domain < 1) blocks_per_domain = 1;
 
-        if (blocks_per_domain * num_locality_domains != max_blocks && mype == 0) {
+        if (blocks_per_domain * num_locality_domains != num_blocks && mype == 0) {
             fprintf(stderr,
                     "WARNING: -c %d not divisible by num_locality_domains %d. "
                     "Using %d blocks per domain (%d total)\n",
-                    max_blocks, num_locality_domains, blocks_per_domain,
+                    num_blocks, num_locality_domains, blocks_per_domain,
                     blocks_per_domain * num_locality_domains);
         }
 
-        /* The TMA kernel registers NVSHMEM scratch smem. Both paths pass localized
-           global memory as the get source and destination. */
+        /* The TMA kernel differs only by registering NVSHMEM scratch smem; both
+           paths pass localized global memory as the get source and destination. */
         auto launch_kernel = [&](int n, size_t kern_len, int kern_peer, int kern_iter) {
             if (use_tma) {
-                bw_block_tma<<<blocks_per_domain, max_threads, smem_size,
-                               (cudaStream_t)gc_streams[n]>>>(data_d[n], counter_d_arr[n], kern_len,
-                                                              kern_peer, kern_iter, smem_size);
+                bw_tma_fn<<<blocks_per_domain, max_threads, smem_size,
+                            (cudaStream_t)gc_streams[n]>>>(data_d[n], counter_d_arr[n], kern_len,
+                                                           kern_peer, kern_iter, smem_size);
             } else {
                 bw_fn<<<blocks_per_domain, max_threads, 0, (cudaStream_t)gc_streams[n]>>>(
                     data_d[n], counter_d_arr[n], kern_len, kern_peer, kern_iter);
             }
         };
 
-        i = 0;
         bool warned_split = false;
+        i = 0;
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
+            /* size/n bytes per domain (total == size). */
             size_t bytes_per_domain = size / num_locality_domains;
             size_t len = bytes_per_domain / sizeof(double);
             size_t bytes_per_block = (len / blocks_per_domain) * sizeof(double);
@@ -581,12 +626,10 @@ int main(int argc, char *argv[]) {
                 int validation_blocks = static_cast<int>(std::min<size_t>(
                     kValidationMaxBlocks, (len + kValidationThreads - 1) / kValidationThreads));
 
-                if (mype < npes / 2) {
-                    for (int n = 0; n < num_locality_domains; n++) {
-                        CUDA_CHECK(cudaMemsetAsync(data_d[n], 0, bytes_per_domain,
-                                                   (cudaStream_t)gc_streams[n]));
-                    }
-                } else {
+                /* A get reads from the upper-half peer into the lower-half PE's
+                   corresponding localized buffer.  Initialize the source with a
+                   domain-specific pattern and clear the destination. */
+                if (mype >= npes / 2) {
                     for (int n = 0; n < num_locality_domains; n++) {
                         fill_validation_pattern<<<validation_blocks, kValidationThreads, 0,
                                                   (cudaStream_t)gc_streams[n]>>>(
@@ -594,6 +637,11 @@ int main(int argc, char *argv[]) {
                             validation_pattern(mype, n, size, repetition));
                     }
                     CUDA_CHECK(cudaGetLastError());
+                } else {
+                    for (int n = 0; n < num_locality_domains; n++) {
+                        CUDA_CHECK(cudaMemsetAsync(data_d[n], 0, bytes_per_domain,
+                                                   (cudaStream_t)gc_streams[n]));
+                    }
                 }
                 for (int n = 0; n < num_locality_domains; n++) {
                     CU_CHECK(cuStreamSynchronize(gc_streams[n]));
@@ -622,13 +670,14 @@ int main(int argc, char *argv[]) {
                     }
 
                     milliseconds = *std::max_element(elapsed_ms.begin(), elapsed_ms.end());
+                    /* Aggregate BW uses the actual bytes moved and the slowest domain time. */
                     h_bw[i] = ((double)num_locality_domains * bytes_per_domain) /
                               (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
                 } else {
                     h_bw[i] = 0.0;
                 }
 
-                /* Validate only after every timed get stream has completed. */
+                /* Validate only after every timed requester stream has completed. */
                 nvshmem_barrier_all();
                 int local_validation_failed = 0;
                 std::fill(validation_errors.begin(), validation_errors.end(), 0);
@@ -654,7 +703,7 @@ int main(int argc, char *argv[]) {
                         CU_CHECK(cuStreamSynchronize(gc_streams[n]));
                         if (validation_errors[n] != 0) {
                             fprintf(stderr,
-                                    "PE %d: validation failed for source PE %d, domain %d, "
+                                    "PE %d: get validation failed for source PE %d, domain %d, "
                                     "size %zu, repetition %zu: %llu mismatched elements\n",
                                     mype, peer, n, size, repetition, validation_errors[n]);
                             local_validation_failed = 1;
@@ -671,6 +720,7 @@ int main(int argc, char *argv[]) {
                                       sizeof(int), cudaMemcpyDeviceToHost));
                 if (global_validation_failed) return_code = 1;
 
+                /* Gather all BW values to PE 0 */
                 CUDA_CHECK(
                     cudaMemcpy(d_bw_local, &h_bw[i], sizeof(double), cudaMemcpyHostToDevice));
                 nvshmem_double_put(d_bw_all + mype, d_bw_local, 1, 0);

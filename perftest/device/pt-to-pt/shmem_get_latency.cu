@@ -14,46 +14,62 @@
 
 #define THREADS_PER_WARP 32
 
+template <bool USE_ITERATION_BARRIER>
+__device__ __forceinline__ void latency_thread_iteration_sync() {
+    if constexpr (USE_ITERATION_BARRIER) nvshmem_quiet();
+}
+
+template <bool USE_ITERATION_BARRIER>
+__device__ __forceinline__ void latency_threadgroup_iteration_sync(int tid) {
+    if constexpr (USE_ITERATION_BARRIER) {
+        __syncthreads();
+        if (!tid) nvshmem_quiet();
+        __syncthreads();
+    }
+}
+
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 extern "C" {
 #endif
 
-__global__ void latency_kern(int *data_d, int len, int pe, int iter, size_t dynamic_smem_size) {
-    int i, peer;
-
-    peer = !pe;
-    NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);
-
-    for (i = 0; i < iter; i++) {
-        nvshmem_int_get_nbi(data_d, data_d, len, peer);
-        nvshmem_quiet();
+#define LATENCY_THREAD(NAME, USE_ITERATION_BARRIER)                                          \
+    __global__ void NAME(int *data_d, int len, int pe, int iter, size_t dynamic_smem_size) { \
+        int i, peer;                                                                         \
+                                                                                             \
+        peer = !pe;                                                                          \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                           \
+                                                                                             \
+        for (i = 0; i < iter; i++) {                                                         \
+            nvshmem_int_get_nbi(data_d, data_d, len, peer);                                  \
+            latency_thread_iteration_sync<USE_ITERATION_BARRIER>();                          \
+        }                                                                                    \
+                                                                                             \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                        \
     }
 
-    NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);
-}
+LATENCY_THREAD(latency_kern, true)
+LATENCY_THREAD(latency_kern_no_iteration_barrier, false)
 
-#define LATENCY_THREADGROUP(group)                                               \
-    __global__ void latency_kern_##group(int *data_d, int len, int pe, int iter, \
-                                         size_t dynamic_smem_size) {             \
-        int i, tid, peer;                                                        \
-                                                                                 \
-        peer = !pe;                                                              \
-        tid = threadIdx.x;                                                       \
-        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                               \
-                                                                                 \
-        for (i = 0; i < iter; i++) {                                             \
-            nvshmemx_int_get_nbi_##group(data_d, data_d, len, peer);             \
-                                                                                 \
-            __syncthreads();                                                     \
-            if (!tid) nvshmem_quiet();                                           \
-            __syncthreads();                                                     \
-        }                                                                        \
-                                                                                 \
-        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                            \
+#define LATENCY_THREADGROUP(group, NAME, USE_ITERATION_BARRIER)                              \
+    __global__ void NAME(int *data_d, int len, int pe, int iter, size_t dynamic_smem_size) { \
+        int i, tid, peer;                                                                    \
+                                                                                             \
+        peer = !pe;                                                                          \
+        tid = threadIdx.x;                                                                   \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                           \
+                                                                                             \
+        for (i = 0; i < iter; i++) {                                                         \
+            nvshmemx_int_get_nbi_##group(data_d, data_d, len, peer);                         \
+            latency_threadgroup_iteration_sync<USE_ITERATION_BARRIER>(tid);                  \
+        }                                                                                    \
+                                                                                             \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                        \
     }
 
-LATENCY_THREADGROUP(warp)
-LATENCY_THREADGROUP(block)
+LATENCY_THREADGROUP(warp, latency_kern_warp, true)
+LATENCY_THREADGROUP(warp, latency_kern_warp_no_iteration_barrier, false)
+LATENCY_THREADGROUP(block, latency_kern_block, true)
+LATENCY_THREADGROUP(block, latency_kern_block_no_iteration_barrier, false)
 
 #if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
 }
@@ -74,9 +90,16 @@ LATENCY_THREADGROUP(block)
             CU_CHECK(cuLaunchKernel(kernel, 1, 1, 1, threads, 1, 1,                               \
                                     (unsigned int)dynamic_smem_size, NULL, arglist, NULL));       \
         } else {                                                                                  \
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(latency_kern##TG, dynamic_smem_size);               \
-            latency_kern##TG<<<1, threads, dynamic_smem_size>>>(data_d, len, pe, iter,            \
-                                                                dynamic_smem_size);               \
+            if (use_iteration_barrier) {                                                          \
+                CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(latency_kern##TG, dynamic_smem_size);           \
+                latency_kern##TG<<<1, threads, dynamic_smem_size>>>(data_d, len, pe, iter,        \
+                                                                    dynamic_smem_size);           \
+            } else {                                                                              \
+                CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(latency_kern##TG##_no_iteration_barrier,        \
+                                                  dynamic_smem_size);                             \
+                latency_kern##TG##_no_iteration_barrier<<<1, threads, dynamic_smem_size>>>(       \
+                    data_d, len, pe, iter, dynamic_smem_size);                                    \
+            }                                                                                     \
         }                                                                                         \
     }
 
@@ -113,9 +136,15 @@ int main(int argc, char *argv[]) {
 
     if (use_cubin) {
         init_cumodule(CUMODULE_NAME);
-        init_test_case_kernel(&test_cubin, "latency_kern");
-        init_test_case_kernel(&test_cubin_warp, "latency_kern_warp");
-        init_test_case_kernel(&test_cubin_block, "latency_kern_block");
+        init_test_case_kernel(&test_cubin, use_iteration_barrier
+                                               ? "latency_kern"
+                                               : "latency_kern_no_iteration_barrier");
+        init_test_case_kernel(&test_cubin_warp, use_iteration_barrier
+                                                    ? "latency_kern_warp"
+                                                    : "latency_kern_warp_no_iteration_barrier");
+        init_test_case_kernel(&test_cubin_block, use_iteration_barrier
+                                                     ? "latency_kern_block"
+                                                     : "latency_kern_block_no_iteration_barrier");
     }
 
     cudaEventCreate(&start);
