@@ -150,11 +150,6 @@ if(NOT DEFINED NVSHMEM_BUILD_BITCODE_CUBIN_TESTS)
   set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS ON)
 endif()
 
-if (NOT SubBuild)
-  configure_file(${NVSHMEM_PERFTEST_TLD}/../src/include/non_abi/device/pt-to-pt/transfer_device.cuh.in
-  ${NVSHMEM_PERFTEST_TLD}/common/include/non_abi/device/pt-to-pt/transfer_device.cuh COPYONLY)
-endif()
-
 macro(nvshmem_add_perftest_prefix SOURCE PREFIX)
   get_filename_component(NAME_ ${SOURCE} NAME_WE)
   get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
