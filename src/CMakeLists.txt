@@ -13,18 +13,23 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-Wno-vla-cxx-extension)
 endif()
 
-# NVSHMEM's automatic value has this cache help string. CMake command-line
-# overrides use a different one, so forward only those user-supplied values.
-get_property(NVSHMEM_CUDA_ARCHITECTURES_HELP
-             CACHE CMAKE_CUDA_ARCHITECTURES PROPERTY HELPSTRING)
-if(DEFINED CUDA_ARCHITECTURES OR
-   NOT NVSHMEM_CUDA_ARCHITECTURES_HELP STREQUAL "CUDA ARCHITECTURES")
-    list(APPEND my_cmake_cache_args
-        -DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}
-    )
-else()
+# AUTO lets the device project select architectures from its own toolkit.
+# INHERIT forwards the host build's CMAKE_CUDA_ARCHITECTURES; any other value
+# is forwarded as an explicit device-library architecture list.
+if("${NVSHMEM_DEVICELIB_CUDA_ARCHITECTURES}" STREQUAL "")
+    message(FATAL_ERROR
+            "NVSHMEM_DEVICELIB_CUDA_ARCHITECTURES must be AUTO, INHERIT, or a CMake architecture list")
+elseif("${NVSHMEM_DEVICELIB_CUDA_ARCHITECTURES}" STREQUAL "AUTO")
     # Clear an architecture cached by an earlier device sub-project configure.
     list(APPEND my_cmake_args -U CMAKE_CUDA_ARCHITECTURES)
+elseif("${NVSHMEM_DEVICELIB_CUDA_ARCHITECTURES}" STREQUAL "INHERIT")
+    list(APPEND my_cmake_cache_args
+        "-DCMAKE_CUDA_ARCHITECTURES:STRING=${CMAKE_CUDA_ARCHITECTURES}"
+    )
+else()
+    list(APPEND my_cmake_cache_args
+        "-DCMAKE_CUDA_ARCHITECTURES:STRING=${NVSHMEM_DEVICELIB_CUDA_ARCHITECTURES}"
+    )
 endif()
 
 ExternalProject_Add(nvshmem_device_project
