@@ -14,6 +14,28 @@
 
 enum class SMEMToggle { DISABLE, ENABLE };
 
+/* counter_d[0] counts CTA arrivals across all enabled barriers, while
+ * counter_d[1] records the most recently released barrier epoch. */
+template <bool CALL_QUIET>
+__device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter_d,
+                                                  unsigned int barrier_epoch) {
+    unsigned int counter;
+    int tid = threadIdx.x;
+
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * barrier_epoch - 1)) {
+            if constexpr (CALL_QUIET) nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != barrier_epoch);
+        if constexpr (CALL_QUIET) nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
 template <SMEMToggle SMEM_MODE>
 class smem_registration_guard {
    public:
@@ -43,14 +65,13 @@ class smem_registration_guard {
  * give_smem registration.  Selected at runtime via --use_smem (default: 1). */
 /* These kernels are launched with 1D grids and blocks.  Keep generic index
  * flattening if that changes. */
-template <SMEMToggle SMEM_MODE>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int len, int pe,
                          int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
-    unsigned int counter;
-    int tid = threadIdx.x;
+    unsigned int barrier_epoch = 0;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
 
@@ -59,41 +80,23 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, int l
         nvshmemx_double_put_nbi_block(data_d + (bid * (len / nblocks)),
                                       data_d + (bid * (len / nblocks)), len / nblocks, peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshme_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
-template <SMEMToggle SMEM_MODE>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int len, int pe, int npes,
                         int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
-    unsigned int counter;
+    unsigned int barrier_epoch = 0;
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -109,41 +112,23 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, int le
             data_d + (bid * put_size_per_block + warpid * put_size_per_warp), put_size_per_warp,
             peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshme_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
-template <SMEMToggle SMEM_MODE>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int len, int pe,
                           int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
     smem_registration_guard<SMEM_MODE> smem_guard(nvshmem_smem, smem_size);
     int i, peer;
-    unsigned int counter;
+    unsigned int barrier_epoch = 0;
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -157,32 +142,14 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, int 
                                data_d + (bid * put_size_per_block + tid * put_size_per_thread),
                                put_size_per_thread, peer);
 
-        // synchronizing across blocks
-        __syncthreads();
-        if (!tid) {
-            __threadfence();
-            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-            if (counter == (gridDim.x * (i + 1) - 1)) {
-                *(counter_d + 1) += 1;
-            }
-            while (*(counter_d + 1) != i + 1);
+        if constexpr (USE_ITERATION_BARRIER) {
+            inter_cta_barrier<false>(counter_d, ++barrier_epoch);
         }
-        __syncthreads();
     }
 
-    // synchronize and call nvshme_quiet
-    __syncthreads();
-    if (!tid) {
-        __threadfence();
-        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
-        if (counter == (gridDim.x * (i + 1) - 1)) {
-            nvshmem_quiet();
-            *(counter_d + 1) += 1;
-        }
-        while (*(counter_d + 1) != i + 1);
-        nvshmem_quiet();
+    if constexpr (USE_FINAL_BARRIER) {
+        inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    __syncthreads();
 }
 
 typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, int len, int pe, int npes,
@@ -192,23 +159,29 @@ static SMEMToggle parse_smem_enabled() {
     return use_smem ? SMEMToggle::ENABLE : SMEMToggle::DISABLE;
 }
 
-template <SMEMToggle SMEM_MODE>
-static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+static bool configure_bw_variant(bw_fn_t *bw_fn, int *smem_size) {
     switch (threadgroup_scope.type) {
         case NVSHMEM_THREAD:
-            *bw_fn = bw_thread<SMEM_MODE>;
-            DEBUG_PRINT("Using thread-scope put (smem=%d)\n",
-                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            *bw_fn = bw_thread<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT(
+                "Using thread-scope put (smem=%d, iteration_barrier=%d, "
+                "final_barrier=%d)\n",
+                (int)(SMEM_MODE == SMEMToggle::ENABLE), (int)USE_ITERATION_BARRIER,
+                (int)USE_FINAL_BARRIER);
             break;
         case NVSHMEM_WARP:
-            *bw_fn = bw_warp<SMEM_MODE>;
-            DEBUG_PRINT("Using warp-scope put (smem=%d)\n", (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            *bw_fn = bw_warp<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using warp-scope put (smem=%d, iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE), (int)USE_ITERATION_BARRIER,
+                        (int)USE_FINAL_BARRIER);
             break;
         case NVSHMEM_BLOCK:
         case NVSHMEM_ALL_SCOPES:
-            *bw_fn = bw_block<SMEM_MODE>;
-            DEBUG_PRINT("Using block-scope put (smem=%d)\n",
-                        (int)(SMEM_MODE == SMEMToggle::ENABLE));
+            *bw_fn = bw_block<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            DEBUG_PRINT("Using block-scope put (smem=%d, iteration_barrier=%d, final_barrier=%d)\n",
+                        (int)(SMEM_MODE == SMEMToggle::ENABLE), (int)USE_ITERATION_BARRIER,
+                        (int)USE_FINAL_BARRIER);
             break;
         default:
             fprintf(stderr, "Invalid threadgroup scope: %s\n", threadgroup_scope.name.c_str());
@@ -217,17 +190,35 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
 
     if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
         *smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
-        CUDA_CHECK(cudaFuncSetAttribute(bw_block<SMEM_MODE>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
-        CUDA_CHECK(cudaFuncSetAttribute(bw_warp<SMEM_MODE>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
-        CUDA_CHECK(cudaFuncSetAttribute(bw_thread<SMEM_MODE>,
-                                        cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+        CUDA_CHECK(
+            cudaFuncSetAttribute(bw_block<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+        CUDA_CHECK(
+            cudaFuncSetAttribute(bw_warp<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+        CUDA_CHECK(
+            cudaFuncSetAttribute(bw_thread<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
     } else {
         *smem_size = 0;
     }
 
     return true;
+}
+
+template <SMEMToggle SMEM_MODE>
+static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
+    if (use_iteration_barrier) {
+        if (use_final_barrier) {
+            return configure_bw_variant<SMEM_MODE, true, true>(bw_fn, smem_size);
+        }
+        return configure_bw_variant<SMEM_MODE, true, false>(bw_fn, smem_size);
+    }
+
+    if (use_final_barrier) {
+        return configure_bw_variant<SMEM_MODE, false, true>(bw_fn, smem_size);
+    }
+    return configure_bw_variant<SMEM_MODE, false, false>(bw_fn, smem_size);
 }
 
 int main(int argc, char *argv[]) {

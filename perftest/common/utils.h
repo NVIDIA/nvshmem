@@ -334,6 +334,8 @@ extern bool use_graph;
 extern bool use_mmap;
 extern bool use_egm;
 extern bool use_smem;
+extern bool use_iteration_barrier;
+extern bool use_final_barrier;
 #if CUDART_VERSION >= 13000
 extern bool use_nucs;
 #endif
