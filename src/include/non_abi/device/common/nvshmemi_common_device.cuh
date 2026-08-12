@@ -1298,7 +1298,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_P
     }
 #endif
     if (!nvshmemi_use_ldst_path()) {
-        nvshmemi_transfer_fence<NVSHMEMI_THREADGROUP_THREAD>(pe, qp_handle, num_qps);
+        nvshmemi_transfer_fence<SCOPE>(pe, qp_handle, num_qps);
     }
     __threadfence_system(); /* Use __threadfence_system instead of __threadfence
                                for data visibility in case of intra-node GPU transfers */
