@@ -86,6 +86,56 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
     __syncthreads();
 }
 
+/*
+ * TMA-enabled block-scope global-to-global get. Shared memory is registered as
+ * NVSHMEM scratch space only. The source and destination arguments remain in
+ * the localized global allocation. NVSHMEM stages the remote-global source
+ * through shared memory before writing the local-global destination. If TMA
+ * routing is unavailable, the get falls back to P2P loads.
+ */
+__global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
+                             int iter, int smem_size) {
+    extern __shared__ char nvshmem_smem[];
+    int i;
+    unsigned int counter;
+    int tid = (threadIdx.x * blockDim.y * blockDim.z + threadIdx.y * blockDim.z + threadIdx.z);
+    int bid = blockIdx.x;
+    int nblocks = gridDim.x;
+
+    nvshmemx_give_smem(nvshmem_smem, smem_size);
+    __syncthreads();
+
+    for (i = 0; i < iter; i++) {
+        nvshmemx_double_get_nbi_block(data_d + (bid * (len / nblocks)),
+                                      data_d + (bid * (len / nblocks)), len / nblocks, peer);
+
+        __syncthreads();
+        if (!tid) {
+            __threadfence();
+            counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+            if (counter == (gridDim.x * (i + 1) - 1)) {
+                *(counter_d + 1) += 1;
+            }
+            while (*(counter_d + 1) != i + 1);
+        }
+        __syncthreads();
+    }
+
+    __syncthreads();
+    if (!tid) {
+        __threadfence();
+        counter = atomicInc((unsigned int *)counter_d, UINT_MAX);
+        if (counter == (gridDim.x * (i + 1) - 1)) {
+            nvshmem_quiet();
+            *(counter_d + 1) += 1;
+        }
+        while (*(counter_d + 1) != i + 1);
+        nvshmem_quiet();
+    }
+    __syncthreads();
+    nvshmemx_release_smem();
+}
+
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                         int iter) {
     int i;
@@ -216,6 +266,8 @@ int main(int argc, char *argv[]) {
     double *h_bw = NULL;
 
     bw_fn_t bw_fn = bw_block;
+    bool use_tma = false;
+    int smem_size = 0;
     int iter = iters;
     int skip = warmup_iters;
 
@@ -353,6 +405,25 @@ int main(int argc, char *argv[]) {
             goto finalize;
     }
 
+    /* Register scratch smem for NVSHMEM's block-scope global-to-global TMA path.
+       Requires NVSHMEM_TMA_POLICY=ENABLE, sm_90+, and at least two full warps.
+       Other routing failures fall back to P2P loads inside NVSHMEM. */
+    use_tma = use_smem && (threadgroup_scope.type == NVSHMEM_BLOCK ||
+                           threadgroup_scope.type == NVSHMEM_ALL_SCOPES);
+    if (use_tma) {
+        if (max_threads < 64) {
+            fprintf(stderr,
+                    "Localized global-to-global TMA requires at least 64 threads per CTA "
+                    "(requested %d)\n",
+                    max_threads);
+            goto finalize;
+        }
+        smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        CUDA_CHECK(cudaFuncSetAttribute(bw_block_tma, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                        smem_size));
+        DEBUG_PRINT("Using block-scope global-to-global TMA get (smem_size=%d)\n", smem_size);
+    }
+
     /* ------------------------------------------------------------------ */
     /* Allocate localized memory per locality domain and register with NVSHMEM */
     /* ------------------------------------------------------------------ */
@@ -432,7 +503,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (mype == 0) {
-        std::fprintf(stdout, "\nshmem_get_bw_locality_domains (GB/s)\n");
+        std::fprintf(stdout, "\nshmem_get_bw_locality_domains%s (GB/s)\n", use_tma ? " [TMA]" : "");
         std::fprintf(stdout, "%14s", "size (B)");
         for (int s = 0; s < npes / 2; s++)
             std::fprintf(stdout, "  PE %d <- PE %d", s, s ^ (npes / 2));
@@ -459,6 +530,19 @@ int main(int argc, char *argv[]) {
                     blocks_per_domain * num_locality_domains);
         }
 
+        /* The TMA kernel registers NVSHMEM scratch smem. Both paths pass localized
+           global memory as the get source and destination. */
+        auto launch_kernel = [&](int n, size_t kern_len, int kern_peer, int kern_iter) {
+            if (use_tma) {
+                bw_block_tma<<<blocks_per_domain, max_threads, smem_size,
+                               (cudaStream_t)gc_streams[n]>>>(data_d[n], counter_d_arr[n], kern_len,
+                                                              kern_peer, kern_iter, smem_size);
+            } else {
+                bw_fn<<<blocks_per_domain, max_threads, 0, (cudaStream_t)gc_streams[n]>>>(
+                    data_d[n], counter_d_arr[n], kern_len, kern_peer, kern_iter);
+            }
+        };
+
         i = 0;
         bool warned_split = false;
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
@@ -469,13 +553,17 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
 
             if (!warned_split && mype == 0 &&
-                (size % num_locality_domains != 0 || bytes_per_domain % sizeof(double) != 0)) {
+                (size % num_locality_domains != 0 || bytes_per_domain % sizeof(double) != 0 ||
+                 (use_tma && bytes_per_block % 16 != 0))) {
                 fprintf(stderr,
                         "WARNING: size %zu does not split cleanly across %d domains "
                         "(per-domain %zu B, per-CTA %zu B); reported BW reflects the %zu B "
-                        "actually moved.\n",
+                        "actually moved%s\n",
                         size, num_locality_domains, bytes_per_domain, bytes_per_block,
-                        (size_t)num_locality_domains * bytes_per_domain);
+                        (size_t)num_locality_domains * bytes_per_domain,
+                        (use_tma && bytes_per_block % 16 != 0)
+                            ? " and TMA falls back to P2P (per-CTA size must be a multiple of 16B)."
+                            : ".");
                 warned_split = true;
             }
 
@@ -483,8 +571,7 @@ int main(int argc, char *argv[]) {
                 /* warmup */
                 reset_counters();
                 for (int n = 0; n < num_locality_domains; n++) {
-                    bw_fn<<<blocks_per_domain, max_threads, 0, (cudaStream_t)gc_streams[n]>>>(
-                        data_d[n], counter_d_arr[n], len, peer, skip);
+                    launch_kernel(n, len, peer, skip);
                 }
                 CUDA_CHECK(cudaGetLastError());
                 CUDA_CHECK(cudaDeviceSynchronize());
@@ -521,8 +608,7 @@ int main(int argc, char *argv[]) {
                     CU_CHECK(cuEventRecord(timing_start, timing_stream));
                     for (int n = 0; n < num_locality_domains; n++) {
                         CU_CHECK(cuStreamWaitEvent(gc_streams[n], timing_start, 0));
-                        bw_fn<<<blocks_per_domain, max_threads, 0, (cudaStream_t)gc_streams[n]>>>(
-                            data_d[n], counter_d_arr[n], len, peer, iter);
+                        launch_kernel(n, len, peer, iter);
                         CU_CHECK(cuEventRecord(gc_done_events[n], gc_streams[n]));
                         CU_CHECK(cuStreamWaitEvent(timing_streams[n], gc_done_events[n], 0));
                         CU_CHECK(cuEventRecord(timing_stop_events[n], timing_streams[n]));
