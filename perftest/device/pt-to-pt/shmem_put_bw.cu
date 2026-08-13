@@ -252,15 +252,16 @@ int main(int argc, char *argv[]) {
     double *h_bw = NULL;
     double *h_msgrate = NULL;
     /* Per-PE BW gather: each PE stages its h_bw[i] in d_bw_local and writes
-     * it into d_bw_all[mype] on PE 0 every iteration. PE 0 then prints one
-     * row per size with N/2 columns (one per sender pair). */
+     * it into d_bw_all[mype] on PE 0 every repetition. PE 0 accumulates
+     * aggregate and per-pair statistics for the final result tables. */
     double *d_bw_local = NULL, *d_bw_all = NULL;
     double *d_msgrate_local = NULL, *d_msgrate_all = NULL;
     int exit_status = 1;
 
-    bool machine_readable = false;
-    std::vector<std::vector<double>> bw_per_pair_per_size;
-    std::vector<std::vector<double>> msgrate_per_pair_per_size;
+    std::vector<std::vector<perf_stats_t>> bw_stats_per_pair_per_size;
+    std::vector<perf_stats_t> bw_avg_stats_per_size;
+    std::vector<std::vector<perf_stats_t>> msgrate_stats_per_pair_per_size;
+    std::vector<perf_stats_t> msgrate_avg_stats_per_size;
 
     bw_fn_t bw_fn = NULL;
     /* Opt this benchmark into NVSHMEM's TMA path by registering smem at kernel
@@ -312,22 +313,14 @@ int main(int argc, char *argv[]) {
     }
 
     if (mype == 0) {
-        const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-        if (env) machine_readable = (std::atoi(env) != 0);
-        bw_per_pair_per_size.assign(array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
-        if (report_msgrate)
-            msgrate_per_pair_per_size.assign(
-                array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
-    }
-
-    if (mype == 0 && !machine_readable) {
-        const char *test_name = bidirectional ? "shmem_put_bw_bidi" : "shmem_put_bw_uni";
-        std::fprintf(stdout, "\n%s (GB/s)\n", test_name);
-        std::fprintf(stdout, "%14s", "size (B)");
-        for (int s = 0; s < npes / 2; s++)
-            std::fprintf(stdout, "  PE %d -> PE %d", s, s ^ (npes / 2));
-        std::fprintf(stdout, "\n");
-        std::fflush(stdout);
+        bw_stats_per_pair_per_size.assign(array_size,
+                                          std::vector<perf_stats_t>(std::max(1, npes / 2)));
+        bw_avg_stats_per_size.resize(array_size);
+        if (report_msgrate) {
+            msgrate_stats_per_pair_per_size.assign(
+                array_size, std::vector<perf_stats_t>(std::max(1, npes / 2)));
+            msgrate_avg_stats_per_size.resize(array_size);
+        }
     }
 
     if (use_mmap) {
@@ -412,9 +405,9 @@ int main(int argc, char *argv[]) {
                     cudaEventElapsedTime(&milliseconds, start, stop);
                     h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
                     if (report_msgrate)
-                        h_msgrate[i] = calculate_msgrate(
-                            put_messages_per_iteration(max_blocks, max_threads), iter,
-                            milliseconds);
+                        h_msgrate[i] =
+                            calculate_msgrate(put_messages_per_iteration(max_blocks, max_threads),
+                                              iter, milliseconds);
                 } else {
                     CUDA_CHECK(cudaDeviceSynchronize());
                     CUDA_CHECK(cudaGetLastError());
@@ -423,7 +416,7 @@ int main(int argc, char *argv[]) {
                 }
                 nvshmem_barrier_all();
 
-                /* Gather every PE's values onto PE 0 and emit the row.
+                /* Gather every PE's values onto PE 0 and accumulate the results.
                  * In bidirectional mode each pair contributes two flows
                  * (sender → peer and peer → sender), so the pair-column
                  * value is the sum of the two; otherwise only the
@@ -443,26 +436,24 @@ int main(int argc, char *argv[]) {
                     if (report_msgrate)
                         CUDA_CHECK(cudaMemcpy(h_msgrate_all.data(), d_msgrate_all,
                                               npes * sizeof(double), cudaMemcpyDeviceToHost));
-                    if (!machine_readable) {
-                        std::fprintf(stdout, "%14lu", (unsigned long)h_size_arr[i]);
-                    }
+                    double bw_sum = 0.0;
+                    double msgrate_sum = 0.0;
                     for (int s = 0; s < npes / 2; s++) {
-                        double bw =
+                        const double bw =
                             bidirectional ? (h_bw_all[s] + h_bw_all[s + npes / 2]) : h_bw_all[s];
-                        bw_per_pair_per_size[i][s] = bw;
-                        if (report_msgrate)
-                            msgrate_per_pair_per_size[i][s] =
-                                bidirectional
-                                    ? h_msgrate_all[s] + h_msgrate_all[s + npes / 2]
-                                    : h_msgrate_all[s];
-                        if (!machine_readable) {
-                            std::fprintf(stdout, "%14.2f", bw);
+                        perf_stats_add(bw_stats_per_pair_per_size[i][s], bw);
+                        bw_sum += bw;
+                        if (report_msgrate) {
+                            const double msgrate =
+                                bidirectional ? h_msgrate_all[s] + h_msgrate_all[s + npes / 2]
+                                              : h_msgrate_all[s];
+                            perf_stats_add(msgrate_stats_per_pair_per_size[i][s], msgrate);
+                            msgrate_sum += msgrate;
                         }
                     }
-                    if (!machine_readable) {
-                        std::fprintf(stdout, "\n");
-                        std::fflush(stdout);
-                    }
+                    perf_stats_add(bw_avg_stats_per_size[i], bw_sum / (npes / 2));
+                    if (report_msgrate)
+                        perf_stats_add(msgrate_avg_stats_per_size[i], msgrate_sum / (npes / 2));
                 }
             }
 
@@ -472,54 +463,37 @@ int main(int argc, char *argv[]) {
 
     exit_status = 0;
 
-    if (mype == 0 && machine_readable) {
+    if (mype == 0) {
         const char *test_name = bidirectional ? "shmem_put_bw_bidi" : "shmem_put_bw_uni";
         const int num_pairs = std::max(1, npes / 2);
 
-        std::vector<double> bw_avg(i, 0.0);
-        for (int j = 0; j < i; j++) {
-            double sum = 0.0;
-            for (int s = 0; s < num_pairs; s++) sum += bw_per_pair_per_size[j][s];
-            bw_avg[j] = sum / num_pairs;
-        }
-        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, bw_avg.data(), i);
+        auto print_metric = [&](const char *output_var, const char *units,
+                                std::vector<std::vector<perf_stats_t>> &pair_stats,
+                                std::vector<perf_stats_t> &avg_stats) {
+            std::vector<double> avg(i, 0.0);
+            for (int j = 0; j < i; j++) avg[j] = avg_stats[j].mean;
+            print_basic_table(test_name, "None", output_var, units, '+', h_size_arr, avg.data(), i,
+                              avg_stats.data());
 
-        if (npes > 2) {
-            std::vector<double> bw_pair(i, 0.0);
+            if (npes <= 2) return;
+            std::vector<double> pair(i, 0.0);
+            std::vector<perf_stats_t> stats(i);
             for (int s = 0; s < num_pairs; s++) {
-                for (int j = 0; j < i; j++) bw_pair[j] = bw_per_pair_per_size[j][s];
+                for (int j = 0; j < i; j++) {
+                    pair[j] = pair_stats[j][s].mean;
+                    stats[j] = pair_stats[j][s];
+                }
                 char subjob[32];
                 std::snprintf(subjob, sizeof(subjob), "PE%d_to_PE%d", s, s ^ (npes / 2));
-                print_basic_table(test_name, subjob, "BW", "GB/sec", '+', h_size_arr,
-                                  bw_pair.data(), i);
+                print_basic_table(test_name, subjob, output_var, units, '+', h_size_arr,
+                                  pair.data(), i, stats.data());
             }
-        }
-    }
+        };
 
-    if (mype == 0 && report_msgrate) {
-        const char *test_name = bidirectional ? "shmem_put_bw_bidi" : "shmem_put_bw_uni";
-        const int num_pairs = std::max(1, npes / 2);
-
-        std::vector<double> msgrate_avg(i, 0.0);
-        for (int j = 0; j < i; j++) {
-            double sum = 0.0;
-            for (int s = 0; s < num_pairs; s++) sum += msgrate_per_pair_per_size[j][s];
-            msgrate_avg[j] = sum / num_pairs;
-        }
-        print_basic_table(test_name, "None", "msgrate", "MMPS", '+', h_size_arr,
-                          msgrate_avg.data(), i);
-
-        if (npes > 2) {
-            std::vector<double> msgrate_pair(i, 0.0);
-            for (int s = 0; s < num_pairs; s++) {
-                for (int j = 0; j < i; j++)
-                    msgrate_pair[j] = msgrate_per_pair_per_size[j][s];
-                char subjob[32];
-                std::snprintf(subjob, sizeof(subjob), "PE%d_to_PE%d", s, s ^ (npes / 2));
-                print_basic_table(test_name, subjob, "msgrate", "MMPS", '+', h_size_arr,
-                                  msgrate_pair.data(), i);
-            }
-        }
+        print_metric("BW", "GB/sec", bw_stats_per_pair_per_size, bw_avg_stats_per_size);
+        if (report_msgrate)
+            print_metric("msgrate", "MMPS", msgrate_stats_per_pair_per_size,
+                         msgrate_avg_stats_per_size);
     }
 
 finalize:
