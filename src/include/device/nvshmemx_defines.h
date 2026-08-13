@@ -99,19 +99,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
      * avoids inserting a peeling loop (which if(tid==0) would cause). */
     if (nvshmemi_tma_block_is_elected()) {
         int registration_slot = nvshmemi_tma_claim_smem_registration();
-        if (registration_slot < 0) return;
+        if (registration_slot >= 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-        uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
-        for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
-            nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
-        }
-        /* Publish the registration only after its deferred-completion
-         * metadata has been initialized. */
-        __threadfence_block();
+            uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
+            for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
+                nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
+            }
+            /* Publish the registration only after its deferred-completion
+             * metadata has been initialized. */
+            __threadfence_block();
 #endif
-        nvshmemi_tma_publish_smem_registration(registration_slot, reinterpret_cast<uintptr_t>(smem),
-                                               size);
+            nvshmemi_tma_publish_smem_registration(registration_slot,
+                                                   reinterpret_cast<uintptr_t>(smem), size);
+        }
     }
+    __syncthreads();
 #endif /* __CUDA_ARCH__ >= 900 */
 }
 

@@ -234,6 +234,7 @@ int main(int argc, char *argv[]) {
         CUDA_CHECK(cudaDeviceSynchronize());
         for (size_t repetition = 0; repetition < repetitions; repetition++) {
             initialize_counted_case(data_d, flag_d, ack_d, status_d, size, mype);
+            CUDA_CHECK(cudaDeviceSynchronize());
             nvshmem_barrier_all();
 
             cudaEventRecord(start, stream);
