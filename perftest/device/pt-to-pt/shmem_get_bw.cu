@@ -254,9 +254,10 @@ int main(int argc, char *argv[]) {
     double *h_bw = NULL;
     double *h_msgrate = NULL;
 
-    bool machine_readable = false;
-    std::vector<std::vector<double>> bw_per_pair_per_size;
-    std::vector<std::vector<double>> msgrate_per_pair_per_size;
+    std::vector<std::vector<perf_stats_t>> bw_stats_per_pair_per_size;
+    std::vector<perf_stats_t> bw_avg_stats_per_size;
+    std::vector<std::vector<perf_stats_t>> msgrate_stats_per_pair_per_size;
+    std::vector<perf_stats_t> msgrate_avg_stats_per_size;
 
     bw_fn_t bw_fn = NULL;
     const SMEMToggle smem_mode = parse_smem_enabled();
@@ -319,21 +320,14 @@ int main(int argc, char *argv[]) {
     }
 
     if (mype == 0) {
-        const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-        if (env) machine_readable = (std::atoi(env) != 0);
-        bw_per_pair_per_size.assign(array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
-        if (report_msgrate)
-            msgrate_per_pair_per_size.assign(
-                array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
-    }
-
-    if (mype == 0 && !machine_readable) {
-        std::fprintf(stdout, "\nshmem_get_bw (GB/s)\n");
-        std::fprintf(stdout, "%14s", "size (B)");
-        for (int s = 0; s < npes / 2; s++)
-            std::fprintf(stdout, "  PE %d <- PE %d", s, s ^ (npes / 2));
-        std::fprintf(stdout, "\n");
-        std::fflush(stdout);
+        bw_stats_per_pair_per_size.assign(array_size,
+                                          std::vector<perf_stats_t>(std::max(1, npes / 2)));
+        bw_avg_stats_per_size.resize(array_size);
+        if (report_msgrate) {
+            msgrate_stats_per_pair_per_size.assign(
+                array_size, std::vector<perf_stats_t>(std::max(1, npes / 2)));
+            msgrate_avg_stats_per_size.resize(array_size);
+        }
     }
 
     {
@@ -404,9 +398,9 @@ int main(int argc, char *argv[]) {
                     cudaEventElapsedTime(&milliseconds, start, stop);
                     h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
                     if (report_msgrate)
-                        h_msgrate[i] = calculate_msgrate(
-                            get_messages_per_iteration(max_blocks, max_threads), iter,
-                            milliseconds);
+                        h_msgrate[i] =
+                            calculate_msgrate(get_messages_per_iteration(max_blocks, max_threads),
+                                              iter, milliseconds);
                 } else {
                     CUDA_CHECK(cudaDeviceSynchronize());
                     CUDA_CHECK(cudaGetLastError());
@@ -431,21 +425,21 @@ int main(int argc, char *argv[]) {
                     if (report_msgrate)
                         CUDA_CHECK(cudaMemcpy(h_msgrate_all.data(), d_msgrate_all,
                                               npes * sizeof(double), cudaMemcpyDeviceToHost));
-                    if (!machine_readable) {
-                        std::fprintf(stdout, "%14lu", (unsigned long)size);
-                    }
+                    double bw_sum = 0.0;
+                    double msgrate_sum = 0.0;
                     for (int s = 0; s < npes / 2; s++) {
-                        bw_per_pair_per_size[i][s] = h_bw_all[s];
-                        if (report_msgrate)
-                            msgrate_per_pair_per_size[i][s] = h_msgrate_all[s];
-                        if (!machine_readable) {
-                            std::fprintf(stdout, "%14.2f", h_bw_all[s]);
+                        const double bw = h_bw_all[s];
+                        perf_stats_add(bw_stats_per_pair_per_size[i][s], bw);
+                        bw_sum += bw;
+                        if (report_msgrate) {
+                            const double msgrate = h_msgrate_all[s];
+                            perf_stats_add(msgrate_stats_per_pair_per_size[i][s], msgrate);
+                            msgrate_sum += msgrate;
                         }
                     }
-                    if (!machine_readable) {
-                        std::fprintf(stdout, "\n");
-                        std::fflush(stdout);
-                    }
+                    perf_stats_add(bw_avg_stats_per_size[i], bw_sum / (npes / 2));
+                    if (report_msgrate)
+                        perf_stats_add(msgrate_avg_stats_per_size[i], msgrate_sum / (npes / 2));
                 }
             }
 
@@ -455,54 +449,37 @@ int main(int argc, char *argv[]) {
 
     exit_status = 0;
 
-    if (mype == 0 && machine_readable) {
+    if (mype == 0) {
         const char *test_name = "shmem_get_bw_uni";
         const int num_pairs = std::max(1, npes / 2);
 
-        std::vector<double> bw_avg(i, 0.0);
-        for (int j = 0; j < i; j++) {
-            double sum = 0.0;
-            for (int s = 0; s < num_pairs; s++) sum += bw_per_pair_per_size[j][s];
-            bw_avg[j] = sum / num_pairs;
-        }
-        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, bw_avg.data(), i);
+        auto print_metric = [&](const char *output_var, const char *units,
+                                std::vector<std::vector<perf_stats_t>> &pair_stats,
+                                std::vector<perf_stats_t> &avg_stats) {
+            std::vector<double> avg(i, 0.0);
+            for (int j = 0; j < i; j++) avg[j] = avg_stats[j].mean;
+            print_basic_table(test_name, "None", output_var, units, '+', h_size_arr, avg.data(), i,
+                              avg_stats.data());
 
-        if (npes > 2) {
-            std::vector<double> bw_pair(i, 0.0);
+            if (npes <= 2) return;
+            std::vector<double> pair(i, 0.0);
+            std::vector<perf_stats_t> stats(i);
             for (int s = 0; s < num_pairs; s++) {
-                for (int j = 0; j < i; j++) bw_pair[j] = bw_per_pair_per_size[j][s];
+                for (int j = 0; j < i; j++) {
+                    pair[j] = pair_stats[j][s].mean;
+                    stats[j] = pair_stats[j][s];
+                }
                 char subjob[32];
                 std::snprintf(subjob, sizeof(subjob), "PE%d_from_PE%d", s, s ^ (npes / 2));
-                print_basic_table(test_name, subjob, "BW", "GB/sec", '+', h_size_arr,
-                                  bw_pair.data(), i);
+                print_basic_table(test_name, subjob, output_var, units, '+', h_size_arr,
+                                  pair.data(), i, stats.data());
             }
-        }
-    }
+        };
 
-    if (mype == 0 && report_msgrate) {
-        const char *test_name = "shmem_get_bw_uni";
-        const int num_pairs = std::max(1, npes / 2);
-
-        std::vector<double> msgrate_avg(i, 0.0);
-        for (int j = 0; j < i; j++) {
-            double sum = 0.0;
-            for (int s = 0; s < num_pairs; s++) sum += msgrate_per_pair_per_size[j][s];
-            msgrate_avg[j] = sum / num_pairs;
-        }
-        print_basic_table(test_name, "None", "msgrate", "MMPS", '+', h_size_arr,
-                          msgrate_avg.data(), i);
-
-        if (npes > 2) {
-            std::vector<double> msgrate_pair(i, 0.0);
-            for (int s = 0; s < num_pairs; s++) {
-                for (int j = 0; j < i; j++)
-                    msgrate_pair[j] = msgrate_per_pair_per_size[j][s];
-                char subjob[32];
-                std::snprintf(subjob, sizeof(subjob), "PE%d_from_PE%d", s, s ^ (npes / 2));
-                print_basic_table(test_name, subjob, "msgrate", "MMPS", '+', h_size_arr,
-                                  msgrate_pair.data(), i);
-            }
-        }
+        print_metric("BW", "GB/sec", bw_stats_per_pair_per_size, bw_avg_stats_per_size);
+        if (report_msgrate)
+            print_metric("msgrate", "MMPS", msgrate_stats_per_pair_per_size,
+                         msgrate_avg_stats_per_size);
     }
 
 finalize:
