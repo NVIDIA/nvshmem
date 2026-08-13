@@ -295,19 +295,20 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
         !nvshmemi_ld_and_check_valid_le_id(pe))
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
     if (bytes == 0) return NVSHMEMX_SUCCESS;
-    if (!nvshmemi_tma_smem_registered()) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    const auto registration = nvshmemi_tma_get_smem_registration();
+    if (!registration.is_valid()) return NVSHMEMX_ERROR_NOT_SUPPORTED;
 
     const unsigned int tid =
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     const bool is_elected = nvshmemi_tma_block_is_elected();
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
     int *cta_status = reinterpret_cast<int *>(
         nvshmemi_counted_state_slot(smem_base, NVSHMEMI_COUNTED_STATUS_SLOT));
     handle_barrier_t *completion = reinterpret_cast<handle_barrier_t *>(
         nvshmemi_counted_state_slot(smem_base, NVSHMEMI_COUNTED_HANDLE_BARRIER_SLOT));
     bool source_is_shared = __isShared(source);
     size_t staging_capacity =
-        source_is_shared ? 0 : nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+        source_is_shared ? 0 : nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES);
     if (!source_is_shared && staging_capacity == 0) return NVSHMEMX_ERROR_NOT_SUPPORTED;
 
     if (is_elected) {
