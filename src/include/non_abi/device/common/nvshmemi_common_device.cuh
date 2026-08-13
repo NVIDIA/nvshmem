@@ -2059,7 +2059,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_wait_get_wrapper_thread(
     if ((myIdx % warpSize) == 0) {
         // wait till the get is completed
         uint64_t curr_state = handle_bar->arrive_relaxed(copy_bytes);
-        handle_bar->try_wait_token(curr_state);
+        handle_bar->wait_primary(curr_state);
     }
 }
 
@@ -2078,11 +2078,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_issue_get_arrive_wrapper_
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_wait_get_phase_wrapper_thread(
     int myIdx, handle_barrier_t *handle_bar, int phase) {
     if ((myIdx % warpSize) == 0) {
-        mbarrier_try_wait_rdy_cnd wait_result;
-        do {
-            wait_result = handle_bar->try_wait_parity_rdy_cnd(phase);
-        } while (!wait_result.rdy);
-        assert(!wait_result.cnd_inv);
+        handle_bar->wait_primary_by_parity(phase);
     }
 }
 
