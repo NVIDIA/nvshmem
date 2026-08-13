@@ -352,7 +352,7 @@ int main(int argc, char *argv[]) {
         cl_attr.cuda_config.attrs = (n_user_attrs > 0) ? user_attrs.data() : nullptr;
         cl_attr.cuda_config.numAttrs = n_user_attrs;
 
-        const int is_sender = (mype < npes / 2);
+        const int is_sender = (bidirectional || mype < npes / 2);
 
         i = 0;
         for (size_t size = min_size; size <= max_size; size *= step_factor) {
@@ -428,11 +428,14 @@ int main(int argc, char *argv[]) {
                     double bw_sum = 0.0;
                     double msgrate_sum = 0.0;
                     for (int s = 0; s < npes / 2; s++) {
-                        const double bw = h_bw_all[s];
+                        const double bw =
+                            bidirectional ? h_bw_all[s] + h_bw_all[s + npes / 2] : h_bw_all[s];
                         perf_stats_add(bw_stats_per_pair_per_size[i][s], bw);
                         bw_sum += bw;
                         if (report_msgrate) {
-                            const double msgrate = h_msgrate_all[s];
+                            const double msgrate =
+                                bidirectional ? h_msgrate_all[s] + h_msgrate_all[s + npes / 2]
+                                              : h_msgrate_all[s];
                             perf_stats_add(msgrate_stats_per_pair_per_size[i][s], msgrate);
                             msgrate_sum += msgrate;
                         }
@@ -450,7 +453,7 @@ int main(int argc, char *argv[]) {
     exit_status = 0;
 
     if (mype == 0) {
-        const char *test_name = "shmem_get_bw_uni";
+        const char *test_name = bidirectional ? "shmem_get_bw_bidi" : "shmem_get_bw_uni";
         const int num_pairs = std::max(1, npes / 2);
 
         auto print_metric = [&](const char *output_var, const char *units,
