@@ -437,6 +437,33 @@ __device__ __forceinline__ int nvshmemi_tma_find_smem_registration() {
     return reinterpret_cast<volatile unsigned long long *>(owners)[slot] == key ? slot : -1;
 }
 
+struct nvshmemi_tma_smem_registration_t {
+    uintptr_t base;
+    size_t size;
+    int slot;
+
+    __device__ __forceinline__ bool is_valid() const { return slot >= 0 && base != 0; }
+};
+
+__device__ __forceinline__ nvshmemi_tma_smem_registration_t nvshmemi_tma_get_smem_registration() {
+    nvshmemi_tma_smem_registration_t registration = {0, 0, -1};
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    if (nvshmemi_device_state_d.tma_policy == NVSHMEMX_TMA_DISABLE) return registration;
+
+    int slot = nvshmemi_tma_find_smem_registration();
+    if (slot < 0) return registration;
+
+    registration.base =
+        reinterpret_cast<volatile uintptr_t *>(nvshmemi_device_state_d.tma_smem_bases)[slot];
+    if (nvshmemi_device_state_d.tma_smem_size != NULL) {
+        registration.size =
+            reinterpret_cast<volatile size_t *>(nvshmemi_device_state_d.tma_smem_size)[slot];
+    }
+    registration.slot = slot;
+#endif
+    return registration;
+}
+
 __device__ __forceinline__ int nvshmemi_tma_claim_smem_registration() {
     unsigned long long *owners = nvshmemi_tma_smem_owner_keys();
     uint64_t key = nvshmemi_tma_registration_key();
@@ -525,6 +552,13 @@ __device__ __forceinline__ char *nvshmemi_tma_barrier_region(uintptr_t smem_base
 
 __device__ __forceinline__ char *nvshmemi_tma_data_buffer(uintptr_t smem_base) {
     return reinterpret_cast<char *>(smem_base + (uintptr_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET);
+}
+
+__device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(
+    const nvshmemi_tma_smem_registration_t &registration, size_t num_buffers) {
+    constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
+    if (num_buffers == 0 || registration.size <= kReserve) return 0;
+    return nvshmemi_tma_align_down_16((registration.size - kReserve) / num_buffers);
 }
 
 __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers) {
@@ -661,16 +695,17 @@ enum class Blocking { No, Yes };
  * loads when this helper returns -1.
  */
 template <threadgroup_t SCOPE>
-__device__ inline int nvshmemi_memcpy_tma_global_shared(void *smem_dst, const void *gmem_src,
-                                                        size_t bytes) {
+__device__ inline int nvshmemi_memcpy_tma_global_shared(
+    const nvshmemi_tma_smem_registration_t &registration, void *smem_dst, const void *gmem_src,
+    size_t bytes) {
     if (bytes == 0) return 0;
     if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)smem_dst)) return -1;
     if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
     if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
     if (bytes > (size_t)UINT32_MAX) return -1;
 
-    uintptr_t base = nvshmemi_tma_smem_base();
-    size_t smem_size = nvshmemi_tma_smem_size();
+    uintptr_t base = registration.base;
+    size_t smem_size = registration.size;
     constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     if (base == 0 || smem_size <= kReserve) return -1;
 
@@ -679,7 +714,7 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void *smem_dst, const vo
     uintptr_t reserve_end = base + kReserve;
     if (dst_start < reserve_end && dst_end > base) return -1;
 
-    uint64_t *mbar = nvshmemi_tma_barrier_slot(4);
+    uint64_t *mbar = nvshmemi_tma_barrier_slot(base, 4);
     bool is_leader = (SCOPE == NVSHMEMI_THREADGROUP_THREAD)
                          ? true
                          : ((SCOPE == NVSHMEMI_THREADGROUP_WARP) ? nvshmemi_tma_elect_warp()
@@ -718,8 +753,9 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void *smem_dst, const vo
  * Returns 0 on success; -1 if alignment, size, or smem registration fails.
  */
 template <threadgroup_t SCOPE, Blocking BLOCKING>
-__device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst, const void *gmem_src,
-                                                               size_t bytes) {
+__device__ inline int nvshmemi_memcpy_tma_global_global_single(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *gmem_src,
+    size_t bytes) {
     static_assert(SCOPE == NVSHMEMI_THREADGROUP_THREAD || SCOPE == NVSHMEMI_THREADGROUP_WARP,
                   "single impl is only for THREAD or WARP scope");
     if (bytes == 0) return 0;
@@ -727,8 +763,8 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst, c
     if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
     if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
 
-    uintptr_t base = nvshmemi_tma_smem_base();
-    size_t smem_size = nvshmemi_tma_smem_size();
+    uintptr_t base = registration.base;
+    size_t smem_size = registration.size;
     if (base == 0 || smem_size == 0) return -1;
 
     /* Barrier regions are reserved at the base by give_smem; data tile is the
@@ -815,8 +851,9 @@ __device__ inline int nvshmemi_memcpy_tma_global_global_single(void *gmem_dst, c
  * Returns 0 on success; -1 on alignment/size/registration failure.
  */
 template <Blocking BLOCKING>
-__device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst, const void *gmem_src,
-                                                       size_t bytes) {
+__device__ int nvshmemi_memcpy_tma_global_global_block(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *gmem_src,
+    size_t bytes) {
     if (bytes == 0) return 0;
     /* These are TMA routing constraints, not put API constraints.  The caller
      * falls back to regular P2P stores when this helper returns -1. */
@@ -824,8 +861,8 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst, const voi
     if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)gmem_src)) return -1;
     if (!nvshmemi_tma_is_16b_aligned(bytes)) return -1;
 
-    uintptr_t base = nvshmemi_tma_smem_base();
-    size_t smem_size = nvshmemi_tma_smem_size();
+    uintptr_t base = registration.base;
+    size_t smem_size = registration.size;
     if (base == 0 || smem_size == 0) return -1;
 
     /* Barrier region reserved at the base by give_smem.  This impl uses slots
@@ -936,47 +973,54 @@ __device__ int nvshmemi_memcpy_tma_global_global_block(void *gmem_dst, const voi
  * scope to the double-buffered impl.
  */
 template <threadgroup_t SCOPE, Blocking BLOCKING>
-__device__ inline int nvshmemi_memcpy_tma_global_global(void *gmem_dst, const void *gmem_src,
-                                                        size_t bytes) {
+__device__ inline int nvshmemi_memcpy_tma_global_global(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *gmem_src,
+    size_t bytes) {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        return nvshmemi_memcpy_tma_global_global_block<BLOCKING>(gmem_dst, gmem_src, bytes);
+        return nvshmemi_memcpy_tma_global_global_block<BLOCKING>(registration, gmem_dst, gmem_src,
+                                                                 bytes);
     } else {
-        return nvshmemi_memcpy_tma_global_global_single<SCOPE, BLOCKING>(gmem_dst, gmem_src, bytes);
+        return nvshmemi_memcpy_tma_global_global_single<SCOPE, BLOCKING>(registration, gmem_dst,
+                                                                         gmem_src, bytes);
     }
 }
 
 template <threadgroup_t SCOPE>
-__device__ inline int nvshmemi_memcpy_tma_global_global_nbi(void *gmem_dst, const void *gmem_src,
-                                                            size_t bytes) {
-    return nvshmemi_memcpy_tma_global_global<SCOPE, Blocking::No>(gmem_dst, gmem_src, bytes);
+__device__ inline int nvshmemi_memcpy_tma_global_global_nbi(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *gmem_src,
+    size_t bytes) {
+    return nvshmemi_memcpy_tma_global_global<SCOPE, Blocking::No>(registration, gmem_dst, gmem_src,
+                                                                  bytes);
 }
 
 template <threadgroup_t SCOPE>
-__device__ inline int nvshmemi_memcpy_tma_global_global(void *gmem_dst, const void *gmem_src,
-                                                        size_t bytes) {
-    return nvshmemi_memcpy_tma_global_global<SCOPE, Blocking::Yes>(gmem_dst, gmem_src, bytes);
+__device__ inline int nvshmemi_memcpy_tma_global_global(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *gmem_src,
+    size_t bytes) {
+    return nvshmemi_memcpy_tma_global_global<SCOPE, Blocking::Yes>(registration, gmem_dst, gmem_src,
+                                                                   bytes);
 }
 
 #else /* non-sm90: compile-time fallback returning -1 so call sites can instantiate. */
 
 template <threadgroup_t SCOPE>
-__device__ inline int nvshmemi_memcpy_tma_global_global_nbi(void * /*gmem_dst*/,
-                                                            const void * /*gmem_src*/,
-                                                            size_t /*bytes*/) {
+__device__ inline int nvshmemi_memcpy_tma_global_global_nbi(
+    const nvshmemi_tma_smem_registration_t & /*registration*/, void * /*gmem_dst*/,
+    const void * /*gmem_src*/, size_t /*bytes*/) {
     return -1;
 }
 
 template <threadgroup_t SCOPE>
-__device__ inline int nvshmemi_memcpy_tma_global_global(void * /*gmem_dst*/,
-                                                        const void * /*gmem_src*/,
-                                                        size_t /*bytes*/) {
+__device__ inline int nvshmemi_memcpy_tma_global_global(
+    const nvshmemi_tma_smem_registration_t & /*registration*/, void * /*gmem_dst*/,
+    const void * /*gmem_src*/, size_t /*bytes*/) {
     return -1;
 }
 
 template <threadgroup_t SCOPE>
-__device__ inline int nvshmemi_memcpy_tma_global_shared(void * /*smem_dst*/,
-                                                        const void * /*gmem_src*/,
-                                                        size_t /*bytes*/) {
+__device__ inline int nvshmemi_memcpy_tma_global_shared(
+    const nvshmemi_tma_smem_registration_t & /*registration*/, void * /*smem_dst*/,
+    const void * /*gmem_src*/, size_t /*bytes*/) {
     return -1;
 }
 
@@ -990,23 +1034,24 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(void * /*smem_dst*/,
  * mismatch or non-supported target).
  */
 template <threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma(void *gmem_dst, const void *source,
-                                                                 size_t nbytes) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *source,
+    size_t nbytes) {
     if (__isShared(source)) {
         return nvshmemi_memcpy_tma_shared_global<SCOPE>(gmem_dst, source, nbytes);
     } else {
-        return nvshmemi_memcpy_tma_global_global<SCOPE>(gmem_dst, source, nbytes);
+        return nvshmemi_memcpy_tma_global_global<SCOPE>(registration, gmem_dst, source, nbytes);
     }
 }
 
 template <threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma_nbi(void *gmem_dst,
-                                                                     const void *source,
-                                                                     size_t nbytes) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma_nbi(
+    const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *source,
+    size_t nbytes) {
     if (__isShared(source)) {
         return nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>(gmem_dst, source, nbytes);
     }
-    return nvshmemi_memcpy_tma_global_global_nbi<SCOPE>(gmem_dst, source, nbytes);
+    return nvshmemi_memcpy_tma_global_global_nbi<SCOPE>(registration, gmem_dst, source, nbytes);
 }
 
 /* qpair specific APIs */
@@ -1167,14 +1212,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        if (nvshmemi_tma_smem_registered()) {
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        if (registration.is_valid()) {
             if (__isShared(dest)) {
                 if (nvshmemi_memcpy_tma_global_shared<SCOPE>(
-                        (void *)dest, (const void *)source_actual, nbytes) == 0)
+                        registration, (void *)dest, (const void *)source_actual, nbytes) == 0)
                     return;
             } else {
                 if (nvshmemi_memcpy_tma_global_global<SCOPE>(
-                        (void *)dest, (const void *)source_actual, nbytes) == 0)
+                        registration, (void *)dest, (const void *)source_actual, nbytes) == 0)
                     return;
             }
         }
@@ -1203,16 +1249,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        if (nvshmemi_tma_smem_registered()) {
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        if (registration.is_valid()) {
             if (__isShared(dest)) {
                 if (nvshmemi_memcpy_tma_global_shared<SCOPE>(
-                        (void *)dest, (const void *)source_actual, nbytes) == 0) {
+                        registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
                     nvshmemi_threadgroup_sync<SCOPE>();
                     return;
                 }
             } else {
                 if (nvshmemi_memcpy_tma_global_global<SCOPE>(
-                        (void *)dest, (const void *)source_actual, nbytes) == 0) {
+                        registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
                     nvshmemi_threadgroup_sync<SCOPE>();
                     return;
                 }
@@ -1266,9 +1313,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         size_t nbytes = nelems * sizeof(T);
         /* TMA fast path when this CTA registered smem.  Fall through to P2P
          * stores on alignment/size/registration failure. */
-        if (nvshmemi_tma_smem_registered() &&
-            nvshmemi_memcpy_tma_nbi<SCOPE>((void *)dest_actual, (const void *)source, nbytes) ==
-                0) {
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        if (registration.is_valid() &&
+            nvshmemi_memcpy_tma_nbi<SCOPE>(registration, (void *)dest_actual, (const void *)source,
+                                           nbytes) == 0) {
             return;
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
@@ -1307,8 +1355,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         /* TMA when this CTA registered smem:
          * Both variants include internal syncs; the trailing sync below is
          * redundant in the TMA path but harmless. */
-        if (nvshmemi_tma_smem_registered() &&
-            nvshmemi_memcpy_tma<SCOPE>((void *)dest_actual, (const void *)source, nbytes) == 0) {
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        if (registration.is_valid() &&
+            nvshmemi_memcpy_tma<SCOPE>(registration, (void *)dest_actual, (const void *)source,
+                                       nbytes) == 0) {
             nvshmemi_threadgroup_sync<SCOPE>();
             return;
         }
@@ -1371,8 +1421,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
          * If the put route is via TMA, we need to ensure completion before we can issue the
          * signal_op, so we use a blocking TMA put here.
          */
-        if (nvshmemi_tma_smem_registered() &&
-            nvshmemi_memcpy_tma<SCOPE>((void *)dest_actual, (const void *)source, nbytes) == 0) {
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        if (registration.is_valid() &&
+            nvshmemi_memcpy_tma<SCOPE>(registration, (void *)dest_actual, (const void *)source,
+                                       nbytes) == 0) {
             nvshmemi_threadgroup_sync<SCOPE>();
             if (!myIdx) {
                 __threadfence_system();
