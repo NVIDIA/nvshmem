@@ -343,11 +343,6 @@ nvshmemi_fabric_handle_for_pe(int pe, const void* heap_addr) {
         nvshmemi_ld_and_get_le_id(pe), heap_addr);
 }
 
-enum class mbarrier_primary_wait_status : uint8_t {
-    complete,
-    complete_with_report,
-};
-
 struct mbarrier_primary_wait_raw_result {
     bool wait_complete;
     bool report;
@@ -524,44 +519,29 @@ struct alignas(16) handle_barrier_t {
         return {wait_complete != 0, report != 0};
     }
 
-    inline __device__ bool try_wait_primary_raw(uint64_t state, uint8_t& report) {
-        mbarrier_primary_wait_raw_result result = try_wait_primary_raw_result(state);
-        report = result.report ? uint8_t{1} : uint8_t{0};
-        return result.wait_complete;
-    }
-
-    inline __device__ bool try_wait_primary_by_parity_raw(int phase_parity, uint8_t& report) {
-        mbarrier_primary_wait_raw_result result =
-            try_wait_primary_by_parity_raw_result(phase_parity);
-        report = result.report ? uint8_t{1} : uint8_t{0};
-        return result.wait_complete;
-    }
-
-    inline __device__ mbarrier_primary_wait_status wait_primary_status(uint64_t state) {
-        uint8_t report = 0;
-        while (!try_wait_primary_raw(state, report)) {
+    inline __device__ bool wait_primary_report(uint64_t state) {
+        while (true) {
+            mbarrier_primary_wait_raw_result result = try_wait_primary_raw_result(state);
+            if (result.wait_complete) return result.report;
         }
-        return report ? mbarrier_primary_wait_status::complete_with_report
-                      : mbarrier_primary_wait_status::complete;
     }
 
-    inline __device__ mbarrier_primary_wait_status wait_primary_by_parity_status(int phase_parity) {
-        uint8_t report = 0;
-        while (!try_wait_primary_by_parity_raw(phase_parity, report)) {
+    inline __device__ bool wait_primary_by_parity_report(int phase_parity) {
+        while (true) {
+            mbarrier_primary_wait_raw_result result =
+                try_wait_primary_by_parity_raw_result(phase_parity);
+            if (result.wait_complete) return result.report;
         }
-        return report ? mbarrier_primary_wait_status::complete_with_report
-                      : mbarrier_primary_wait_status::complete;
     }
 
     inline __device__ void wait_primary(uint64_t state) {
-        [[maybe_unused]] mbarrier_primary_wait_status status = wait_primary_status(state);
-        assert(status == mbarrier_primary_wait_status::complete);
+        [[maybe_unused]] bool report = wait_primary_report(state);
+        assert(!report);
     }
 
     inline __device__ void wait_primary_by_parity(int phase_parity) {
-        [[maybe_unused]] mbarrier_primary_wait_status status =
-            wait_primary_by_parity_status(phase_parity);
-        assert(status == mbarrier_primary_wait_status::complete);
+        [[maybe_unused]] bool report = wait_primary_by_parity_report(phase_parity);
+        assert(!report);
     }
 
     // wait till data has been read from shared memory

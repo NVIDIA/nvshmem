@@ -57,10 +57,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_counted_submit_chunk(
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_drain_batch(
     handle_barrier_t *completion, uint32_t pending_bytes) {
     uint64_t token = completion->arrive_relaxed(pending_bytes);
-    mbarrier_primary_wait_status status = completion->wait_primary_status(token);
+    bool report = completion->wait_primary_report(token);
     completion->fabric_wait_sync_reads();
-    return status == mbarrier_primary_wait_status::complete_with_report ? NVSHMEMX_ERROR_INTERNAL
-                                                                        : NVSHMEMX_SUCCESS;
+    return report ? NVSHMEMX_ERROR_INTERNAL : NVSHMEMX_SUCCESS;
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_shared_source_block(
