@@ -221,11 +221,28 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
     return configure_bw_variant<SMEM_MODE, false, false>(bw_fn, smem_size);
 }
 
+/* Count logical NVSHMEM get calls issued by the selected threadgroup scope. */
+static size_t get_messages_per_iteration(size_t blocks, size_t threads) {
+    constexpr size_t kWarpSize = 32;
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            return blocks * threads;
+        case NVSHMEM_WARP:
+            return blocks * ((threads + kWarpSize - 1) / kWarpSize);
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            return blocks;
+        default:
+            return 0;
+    }
+}
+
 int main(int argc, char *argv[]) {
     int mype, npes;
     double *data_d = NULL;
     unsigned int *counter_d;
     double *d_bw_local = NULL, *d_bw_all = NULL;
+    double *d_msgrate_local = NULL, *d_msgrate_all = NULL;
     int exit_status = 1;
 
     read_args(argc, argv);
@@ -235,9 +252,11 @@ int main(int argc, char *argv[]) {
     void **h_tables = NULL;
     uint64_t *h_size_arr;
     double *h_bw = NULL;
+    double *h_msgrate = NULL;
 
     bool machine_readable = false;
     std::vector<std::vector<double>> bw_per_pair_per_size;
+    std::vector<std::vector<double>> msgrate_per_pair_per_size;
 
     bw_fn_t bw_fn = NULL;
     const SMEMToggle smem_mode = parse_smem_enabled();
@@ -273,9 +292,10 @@ int main(int argc, char *argv[]) {
     }
 
     array_size = max_size_log;
-    alloc_tables(&h_tables, 2, array_size);
+    alloc_tables(&h_tables, 3, array_size);
     h_size_arr = (uint64_t *)h_tables[0];
     h_bw = (double *)h_tables[1];
+    h_msgrate = (double *)h_tables[2];
 
     if (use_mmap) {
         data_d = (double *)allocate_mmap_buffer(max_size, mem_handle_type, use_egm, true);
@@ -293,11 +313,18 @@ int main(int argc, char *argv[]) {
 
     d_bw_local = (double *)nvshmem_malloc(sizeof(double));
     d_bw_all = (double *)nvshmem_malloc(npes * sizeof(double));
+    if (report_msgrate) {
+        d_msgrate_local = (double *)nvshmem_malloc(sizeof(double));
+        d_msgrate_all = (double *)nvshmem_malloc(npes * sizeof(double));
+    }
 
     if (mype == 0) {
         const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
         if (env) machine_readable = (std::atoi(env) != 0);
         bw_per_pair_per_size.assign(array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
+        if (report_msgrate)
+            msgrate_per_pair_per_size.assign(
+                array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
     }
 
     if (mype == 0 && !machine_readable) {
@@ -311,6 +338,7 @@ int main(int argc, char *argv[]) {
 
     {
         std::vector<double> h_bw_all(npes, 0.0);
+        std::vector<double> h_msgrate_all(npes, 0.0);
 
         std::array<cudaLaunchAttribute, 1> user_attrs{};
         int n_user_attrs = 0;
@@ -375,26 +403,41 @@ int main(int argc, char *argv[]) {
                     CUDA_CHECK(cudaGetLastError());
                     cudaEventElapsedTime(&milliseconds, start, stop);
                     h_bw[i] = size / (milliseconds * (B_TO_GB / (iter * MS_TO_S)));
+                    if (report_msgrate)
+                        h_msgrate[i] = calculate_msgrate(
+                            get_messages_per_iteration(max_blocks, max_threads), iter,
+                            milliseconds);
                 } else {
                     CUDA_CHECK(cudaDeviceSynchronize());
                     CUDA_CHECK(cudaGetLastError());
                     h_bw[i] = 0.0;
+                    if (report_msgrate) h_msgrate[i] = 0.0;
                 }
 
-                /* Gather all BW values to PE 0 */
+                /* Gather all values to PE 0. */
                 CUDA_CHECK(
                     cudaMemcpy(d_bw_local, &h_bw[i], sizeof(double), cudaMemcpyHostToDevice));
                 nvshmem_double_put(d_bw_all + mype, d_bw_local, 1, 0);
+                if (report_msgrate) {
+                    CUDA_CHECK(cudaMemcpy(d_msgrate_local, &h_msgrate[i], sizeof(double),
+                                          cudaMemcpyHostToDevice));
+                    nvshmem_double_put(d_msgrate_all + mype, d_msgrate_local, 1, 0);
+                }
                 nvshmem_barrier_all();
 
                 if (mype == 0) {
                     CUDA_CHECK(cudaMemcpy(h_bw_all.data(), d_bw_all, npes * sizeof(double),
                                           cudaMemcpyDeviceToHost));
+                    if (report_msgrate)
+                        CUDA_CHECK(cudaMemcpy(h_msgrate_all.data(), d_msgrate_all,
+                                              npes * sizeof(double), cudaMemcpyDeviceToHost));
                     if (!machine_readable) {
                         std::fprintf(stdout, "%14lu", (unsigned long)size);
                     }
                     for (int s = 0; s < npes / 2; s++) {
                         bw_per_pair_per_size[i][s] = h_bw_all[s];
+                        if (report_msgrate)
+                            msgrate_per_pair_per_size[i][s] = h_msgrate_all[s];
                         if (!machine_readable) {
                             std::fprintf(stdout, "%14.2f", h_bw_all[s]);
                         }
@@ -436,6 +479,32 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (mype == 0 && report_msgrate) {
+        const char *test_name = "shmem_get_bw_uni";
+        const int num_pairs = std::max(1, npes / 2);
+
+        std::vector<double> msgrate_avg(i, 0.0);
+        for (int j = 0; j < i; j++) {
+            double sum = 0.0;
+            for (int s = 0; s < num_pairs; s++) sum += msgrate_per_pair_per_size[j][s];
+            msgrate_avg[j] = sum / num_pairs;
+        }
+        print_basic_table(test_name, "None", "msgrate", "MMPS", '+', h_size_arr,
+                          msgrate_avg.data(), i);
+
+        if (npes > 2) {
+            std::vector<double> msgrate_pair(i, 0.0);
+            for (int s = 0; s < num_pairs; s++) {
+                for (int j = 0; j < i; j++)
+                    msgrate_pair[j] = msgrate_per_pair_per_size[j][s];
+                char subjob[32];
+                std::snprintf(subjob, sizeof(subjob), "PE%d_from_PE%d", s, s ^ (npes / 2));
+                print_basic_table(test_name, subjob, "msgrate", "MMPS", '+', h_size_arr,
+                                  msgrate_pair.data(), i);
+            }
+        }
+    }
+
 finalize:
 
     if (data_d) {
@@ -448,8 +517,10 @@ finalize:
 
     if (d_bw_local) nvshmem_free(d_bw_local);
     if (d_bw_all) nvshmem_free(d_bw_all);
+    if (d_msgrate_local) nvshmem_free(d_msgrate_local);
+    if (d_msgrate_all) nvshmem_free(d_msgrate_all);
 
-    if (h_tables) free_tables(h_tables, 2);
+    if (h_tables) free_tables(h_tables, 3);
     finalize_wrapper();
 
     return exit_status;
