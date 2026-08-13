@@ -301,6 +301,32 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_relaxed(uint64_t *ptr,
 #endif
 }
 
+template <typename Segment>
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_wqe_segment(
+    void *dst, const Segment &segment) {
+    static_assert(sizeof(Segment) % sizeof(uint32_t) == 0,
+                  "WQE segment size must be a multiple of 32 bits");
+
+    uint32_t *dst_words = reinterpret_cast<uint32_t *>(dst);
+
+#ifdef __clang_llvm_bitcode_lib__
+    // LLVM may eliminate stores to a WQE segment when the segment is subsequently read through an
+    // incompatible uint32_t pointer, make it alias-safe. The fixed-size builtin is lowered to
+    // word loads at optimization time.
+    const unsigned char *src_bytes = reinterpret_cast<const unsigned char *>(&segment);
+    for (int i = 0; i < sizeof(Segment) / sizeof(uint32_t); ++i) {
+        uint32_t word;
+        __builtin_memcpy(&word, src_bytes + i * sizeof(word), sizeof(word));
+        ibgda_store_relaxed(&dst_words[i], word);
+    }
+#else
+    // Continue using direct word loads in all other cases.
+    const uint32_t *src_words = reinterpret_cast<const uint32_t *>(&segment);
+    for (int i = 0; i < sizeof(Segment) / sizeof(uint32_t); ++i)
+        ibgda_store_relaxed(&dst_words[i], src_words[i]);
+#endif
+}
+
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_store_release(uint32_t *ptr,
                                                                                   uint32_t val) {
 #ifdef NVSHMEMI_IBGDA_PTX_OPTIMIZATION_STORE_RELEASE
@@ -602,10 +628,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_nop_wq
 
     // wqe_ptr will not be consumed by GPU.
     // WRITE_ONCE ensures that compiler will not removed this code.
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_dump_wqe(
@@ -631,15 +654,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_dump_w
 
     // wqe_ptr will not be consumed by GPU.
     // WRITE_ONCE ensures that compiler will not removed this code.
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)data_seg_ptr;
-    src = (uint32_t *)&data_seg;
-    for (int i = 0; i < sizeof(*data_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
+    ibgda_store_wqe_segment(data_seg_ptr, data_seg);
 }
 
 template <bool support_half_av_seg>
@@ -690,24 +706,14 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_rdma_w
     ctrl_seg.fm_ce_se = fm_ce_se;
     ctrl_seg.opmod_idx_opcode = HTOBE32((wqe_idx << 8) | MLX5_OPCODE_RDMA_WRITE);
 
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 
     if (av_seg_size > 0) {
         IBGDA_STORE_DCT_AV_SEG(dct_idx, av_seg_ptr);
     }
 
-    dst = (uint32_t *)raddr_seg_ptr;
-    src = (uint32_t *)&raddr_seg;
-    for (int i = 0; i < sizeof(*raddr_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)data_seg_ptr;
-    src = (uint32_t *)&data_seg;
-    for (int i = 0; i < sizeof(*data_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(raddr_seg_ptr, raddr_seg);
+    ibgda_store_wqe_segment(data_seg_ptr, data_seg);
 }
 
 template <bool support_half_av_seg>
@@ -762,24 +768,14 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_rdma_w
     ctrl_seg.fm_ce_se = fm_ce_se;
     ctrl_seg.opmod_idx_opcode = HTOBE32((wqe_idx << 8) | MLX5_OPCODE_RDMA_WRITE);
 
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 
     if (av_seg_size > 0) {
         IBGDA_STORE_DCT_AV_SEG(dct_idx, av_seg_ptr);
     }
 
-    dst = (uint32_t *)raddr_seg_ptr;
-    src = (uint32_t *)&raddr_seg;
-    for (int i = 0; i < sizeof(*raddr_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)inl_seg_ptr;
-    src = (uint32_t *)&inl_seg;
-    for (int i = 0; i < sizeof(*inl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(raddr_seg_ptr, raddr_seg);
+    ibgda_store_wqe_segment(inl_seg_ptr, inl_seg);
 
     switch (bytes) {
         case 1:
@@ -962,24 +958,14 @@ ibgda_write_rdma_write_inl_wqe_combine_warp(nvshmemi_ibgda_device_qp_t *qp, uint
     ctrl_seg.fm_ce_se = 0;
     ctrl_seg.opmod_idx_opcode = HTOBE32((wqe_idx << 8) | MLX5_OPCODE_RDMA_WRITE);
 
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 
     if (av_seg_size > 0) {
         IBGDA_STORE_DCT_AV_SEG(dct_idx, av_seg_ptr);
     }
 
-    dst = (uint32_t *)raddr_seg_ptr;
-    src = (uint32_t *)&raddr_seg;
-    for (int i = 0; i < sizeof(*raddr_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)inl_seg_ptr;
-    src = (uint32_t *)&inl_seg;
-    for (int i = 0; i < sizeof(*inl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(raddr_seg_ptr, raddr_seg);
+    ibgda_store_wqe_segment(inl_seg_ptr, inl_seg);
 
     uint32_t my_base_data_idx = my_tid * bytes;
     if (bytes <= 4) {
@@ -1023,10 +1009,7 @@ ibgda_write_rdma_write_inl_wqe_combine_warp(nvshmemi_ibgda_device_qp_t *qp, uint
 
     ctrl_seg_ptr = (ibgda_ctrl_seg_t *)out_wqes[nop_relative_wqe_idx];
 
-    dst = (uint32_t *)ctrl_seg_ptr;
-    src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 }
 
 /**
@@ -1087,22 +1070,12 @@ ibgda_write_rdma_write_inl_wqe_combine_warp_for_dci_8B(nvshmemi_ibgda_device_qp_
     ctrl_seg.fm_ce_se = 0;
     ctrl_seg.opmod_idx_opcode = HTOBE32((wqe_idx << 8) | MLX5_OPCODE_RDMA_WRITE);
 
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 
     IBGDA_STORE_DCT_AV_SEG(dct_idx, av_seg_ptr);
 
-    dst = (uint32_t *)raddr_seg_ptr;
-    src = (uint32_t *)&raddr_seg;
-    for (int i = 0; i < sizeof(*raddr_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)inl_seg_ptr;
-    src = (uint32_t *)&inl_seg;
-    for (int i = 0; i < sizeof(*inl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(raddr_seg_ptr, raddr_seg);
+    ibgda_store_wqe_segment(inl_seg_ptr, inl_seg);
 
     for (int i = 0; i < 2; ++i) {
         uint32_t my_data_idx = ((my_tid - base_tid) * 2 + i) * 4;
@@ -1133,10 +1106,7 @@ ibgda_write_rdma_write_inl_wqe_combine_warp_for_dci_8B(nvshmemi_ibgda_device_qp_
 
     ctrl_seg_ptr = (ibgda_ctrl_seg_t *)out_wqes[nop_relative_wqe_idx + base_out_wqe_idx];
 
-    dst = (uint32_t *)ctrl_seg_ptr;
-    src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 }
 
 template <bool support_half_av_seg>
@@ -1187,24 +1157,14 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_rdma_r
     ctrl_seg.fm_ce_se = fm_ce_se;
     ctrl_seg.opmod_idx_opcode = HTOBE32((wqe_idx << 8) | MLX5_OPCODE_RDMA_READ);
 
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 
     if (av_seg_size > 0) {
         IBGDA_STORE_DCT_AV_SEG(dct_idx, av_seg_ptr);
     }
 
-    dst = (uint32_t *)raddr_seg_ptr;
-    src = (uint32_t *)&raddr_seg;
-    for (int i = 0; i < sizeof(*raddr_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)data_seg_ptr;
-    src = (uint32_t *)&data_seg;
-    for (int i = 0; i < sizeof(*data_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(raddr_seg_ptr, raddr_seg);
+    ibgda_store_wqe_segment(data_seg_ptr, data_seg);
 }
 
 template <typename T>
@@ -1529,34 +1489,16 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_write_atomic
 
     ctrl_seg.fm_ce_se = fm_ce_se;
 
-    uint32_t *dst = (uint32_t *)ctrl_seg_ptr;
-    uint32_t *src = (uint32_t *)&ctrl_seg;
-    for (int i = 0; i < sizeof(*ctrl_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(ctrl_seg_ptr, ctrl_seg);
 
     if (av_seg_size > 0) {
         IBGDA_STORE_DCT_AV_SEG(dct_idx, av_seg_ptr);
     }
 
-    dst = (uint32_t *)raddr_seg_ptr;
-    src = (uint32_t *)&raddr_seg;
-    for (int i = 0; i < sizeof(*raddr_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)atomic_seg_1_ptr;
-    src = (uint32_t *)&atomic_seg_1;
-    for (int i = 0; i < sizeof(*atomic_seg_1_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)atomic_seg_2_ptr;
-    src = (uint32_t *)&atomic_seg_2;
-    for (int i = 0; i < sizeof(*atomic_seg_2_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
-
-    dst = (uint32_t *)data_seg_ptr;
-    src = (uint32_t *)&data_seg;
-    for (int i = 0; i < sizeof(*data_seg_ptr) / sizeof(uint32_t); ++i)
-        ibgda_store_relaxed(&dst[i], src[i]);
+    ibgda_store_wqe_segment(raddr_seg_ptr, raddr_seg);
+    ibgda_store_wqe_segment(atomic_seg_1_ptr, atomic_seg_1);
+    ibgda_store_wqe_segment(atomic_seg_2_ptr, atomic_seg_2);
+    ibgda_store_wqe_segment(data_seg_ptr, data_seg);
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_update_dbr(
