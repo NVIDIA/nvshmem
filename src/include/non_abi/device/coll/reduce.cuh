@@ -1484,7 +1484,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_pullred_wrapper_thread(
         // wait till the try_pullred is completed
         fabric_submit();
         uint64_t curr_state = handle_bar->arrive_relaxed(copy_bytes);
-        handle_bar->try_wait_token(curr_state);
+        handle_bar->wait_primary(curr_state);
     }
     __syncwarp();
 }

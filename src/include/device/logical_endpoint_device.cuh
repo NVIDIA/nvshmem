@@ -343,10 +343,14 @@ nvshmemi_fabric_handle_for_pe(int pe, const void* heap_addr) {
         nvshmemi_ld_and_get_le_id(pe), heap_addr);
 }
 
-/** PTX mbarrier.try_wait* … b64 rdy|cndInv — both predicate results as bool. */
-struct mbarrier_try_wait_rdy_cnd {
-    bool rdy;
-    bool cnd_inv;
+enum class mbarrier_primary_wait_status : uint8_t {
+    complete,
+    complete_with_report,
+};
+
+struct mbarrier_primary_wait_raw_result {
+    bool wait_complete;
+    bool report;
 };
 
 // to be allocated in shared memory
@@ -400,7 +404,7 @@ struct alignas(16) handle_barrier_t {
 
         if (pending_handle_bytes != 0) {
             uint64_t state = arrive_relaxed(pending_handle_bytes);
-            try_wait_token(state);
+            wait_primary(state);
             pending_handle_bytes = 0;
         }
 
@@ -479,63 +483,85 @@ struct alignas(16) handle_barrier_t {
         return state;
     }
 
-    // mbarrier.try_wait.phase_type::primary…b64 rdy|cndInv, [mbar], state
-    inline __device__ mbarrier_try_wait_rdy_cnd try_wait_token_rdy_cnd(uint64_t state) {
-        unsigned rdy_u = 0, cnd_u = 0;
+    inline __device__ mbarrier_primary_wait_raw_result try_wait_primary_raw_result(uint64_t state) {
+        unsigned wait_complete = 0;
+        unsigned report = 0;
         const unsigned long long smem_addr = static_cast<unsigned long long>(
             __cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
         asm volatile(
             "{\n\t"
-            ".reg .pred p_rdy;\n\t"
-            ".reg .pred p_cnd;\n\t"
+            ".reg .pred p_wait_complete;\n\t"
+            ".reg .pred p_report;\n\t"
             "mbarrier.try_wait.phase_type::primary.acquire.cta.shared::cta.b64 "
-            "p_rdy|p_cnd, [%2], %3;\n\t"
-            "selp.b32 %0, 1, 0, p_rdy;\n\t"
-            "selp.b32 %1, 1, 0, p_cnd;\n\t"
+            "p_wait_complete|p_report, [%2], %3;\n\t"
+            "selp.b32 %0, 1, 0, p_wait_complete;\n\t"
+            "selp.b32 %1, 1, 0, p_report;\n\t"
             "}"
-            : "=r"(rdy_u), "=r"(cnd_u)
+            : "=r"(wait_complete), "=r"(report)
             : "l"(smem_addr), "l"(state)
             : "memory");
-        return {rdy_u != 0u, cnd_u != 0u};
+        return {wait_complete != 0, report != 0};
     }
 
-    // mbarrier.try_wait.parity.phase_type::primary…b64 rdy|cndInv, [mbar], phaseParity
-    inline __device__ mbarrier_try_wait_rdy_cnd try_wait_parity_rdy_cnd(int phase_parity) {
-        unsigned rdy_u = 0, cnd_u = 0;
+    inline __device__ mbarrier_primary_wait_raw_result
+    try_wait_primary_by_parity_raw_result(int phase_parity) {
+        unsigned wait_complete = 0;
+        unsigned report = 0;
         const unsigned long long smem_addr = static_cast<unsigned long long>(
             __cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
         asm volatile(
             "{\n\t"
-            ".reg .pred p_rdy;\n\t"
-            ".reg .pred p_cnd;\n\t"
+            ".reg .pred p_wait_complete;\n\t"
+            ".reg .pred p_report;\n\t"
             "mbarrier.try_wait.parity.phase_type::primary.acquire.cta.shared::cta.b64 "
-            "p_rdy|p_cnd, [%2], %3;\n\t"
-            "selp.b32 %0, 1, 0, p_rdy;\n\t"
-            "selp.b32 %1, 1, 0, p_cnd;\n\t"
+            "p_wait_complete|p_report, [%2], %3;\n\t"
+            "selp.b32 %0, 1, 0, p_wait_complete;\n\t"
+            "selp.b32 %1, 1, 0, p_report;\n\t"
             "}"
-            : "=r"(rdy_u), "=r"(cnd_u)
+            : "=r"(wait_complete), "=r"(report)
             : "l"(smem_addr), "r"(phase_parity)
             : "memory");
-        return {rdy_u != 0u, cnd_u != 0u};
+        return {wait_complete != 0, report != 0};
     }
 
-    inline __device__ bool try_wait_phase(int phase_parity) {
-        return try_wait_parity_rdy_cnd(phase_parity).rdy;
+    inline __device__ bool try_wait_primary_raw(uint64_t state, uint8_t& report) {
+        mbarrier_primary_wait_raw_result result = try_wait_primary_raw_result(state);
+        report = result.report ? uint8_t{1} : uint8_t{0};
+        return result.wait_complete;
     }
 
-    /** Same as try_wait(state).rdy; optional err reports cnd_inv (e.g. invalid wait). */
-    inline __device__ bool try_wait_token_with_err(uint64_t state, uint8_t* err) {
-        mbarrier_try_wait_rdy_cnd t = try_wait_token_rdy_cnd(state);
-        if (err) *err = t.cnd_inv ? uint8_t{1} : uint8_t{0};
-        return t.rdy;
+    inline __device__ bool try_wait_primary_by_parity_raw(int phase_parity, uint8_t& report) {
+        mbarrier_primary_wait_raw_result result =
+            try_wait_primary_by_parity_raw_result(phase_parity);
+        report = result.report ? uint8_t{1} : uint8_t{0};
+        return result.wait_complete;
     }
 
-    inline __device__ bool try_wait_token(uint64_t state) {
-        uint8_t err = 0;
-        while (!try_wait_token_with_err(state, &err)) {
+    inline __device__ mbarrier_primary_wait_status wait_primary_status(uint64_t state) {
+        uint8_t report = 0;
+        while (!try_wait_primary_raw(state, report)) {
         }
-        assert(err == 0);
-        return true;
+        return report ? mbarrier_primary_wait_status::complete_with_report
+                      : mbarrier_primary_wait_status::complete;
+    }
+
+    inline __device__ mbarrier_primary_wait_status wait_primary_by_parity_status(int phase_parity) {
+        uint8_t report = 0;
+        while (!try_wait_primary_by_parity_raw(phase_parity, report)) {
+        }
+        return report ? mbarrier_primary_wait_status::complete_with_report
+                      : mbarrier_primary_wait_status::complete;
+    }
+
+    inline __device__ void wait_primary(uint64_t state) {
+        [[maybe_unused]] mbarrier_primary_wait_status status = wait_primary_status(state);
+        assert(status == mbarrier_primary_wait_status::complete);
+    }
+
+    inline __device__ void wait_primary_by_parity(int phase_parity) {
+        [[maybe_unused]] mbarrier_primary_wait_status status =
+            wait_primary_by_parity_status(phase_parity);
+        assert(status == mbarrier_primary_wait_status::complete);
     }
 
     // wait till data has been read from shared memory
