@@ -57,12 +57,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_counted_submit_chunk(
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_drain_batch(
     handle_barrier_t *completion, uint32_t pending_bytes) {
     uint64_t token = completion->arrive_relaxed(pending_bytes);
-    uint8_t barrier_error = 0;
-    while (!completion->try_wait_token_with_err(token, &barrier_error)) {
-        if (barrier_error) break;
-    }
+    mbarrier_primary_wait_status status = completion->wait_primary_status(token);
     completion->fabric_wait_sync_reads();
-    return barrier_error ? NVSHMEMX_ERROR_INTERNAL : NVSHMEMX_SUCCESS;
+    return status == mbarrier_primary_wait_status::complete_with_report ? NVSHMEMX_ERROR_INTERNAL
+                                                                        : NVSHMEMX_SUCCESS;
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_counted_put_shared_source_block(
@@ -313,7 +311,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_putmem_signal_counted_nbi_
 
     if (is_elected) {
         *cta_status = NVSHMEMX_SUCCESS;
-        completion->init(1);
+        /* This private barrier is always drained and invalidated by the counted call, so it
+         * never carries the deferred state managed by handle_barrier_t::init(). */
+        completion->reset_pending_handle_state();
+        completion->init_raw(1);
     }
     __syncthreads();
     if (source_is_shared)
