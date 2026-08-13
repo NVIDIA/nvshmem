@@ -1099,6 +1099,7 @@ set(TRANSPORT_INC_EXPORTS
     internal/host/scope_guard.h
     internal/host_transport/cudawrap.h
     internal/host_transport/nvshmemi_transport_defines.h
+    internal/host_transport/region.hpp
     internal/host_transport/transport.h
     non_abi/nvshmem_version.h
     non_abi/nvshmemx_error.h
