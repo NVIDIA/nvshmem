@@ -1389,7 +1389,6 @@ set(CPACK_SOURCE_IGNORE_FILES
 /.git/;\
 /.gitlab-ci.yml;\
 /bind.sh;\
-/README;\
 /testcommon.py;\
 /examples/examples_install/;\
 /include/non_abi/nvshmem_build_options.h$;\
