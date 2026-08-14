@@ -1,0 +1,3 @@
+-n 1K -w 100 -b 8 -e 4K --dir write --region_ops 8 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K --dir write --region_ops 64 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K --dir read --region_ops 64 --repetitions 5

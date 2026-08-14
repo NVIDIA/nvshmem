@@ -287,6 +287,7 @@ extern bool repetitions_requested;
 extern size_t step_factor;
 extern size_t max_size_log;
 extern size_t stride;
+extern size_t region_ops;
 extern size_t mem_handle_type;
 extern bool bidirectional;
 extern bool report_msgrate;

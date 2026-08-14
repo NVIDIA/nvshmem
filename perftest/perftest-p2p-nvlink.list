@@ -11,6 +11,8 @@
 /device/pt-to-pt/shmem_signal_ping_pong_latency
 /device/pt-to-pt/shmem_put_bw
 /device/pt-to-pt/shmem_get_bw
+/device/pt-to-pt/shmem_nbi_issue_rate
+/device/pt-to-pt/shmem_region_nbi_rate
 /device/pt-to-pt/shmem_flush_bench
 /device/coll/barrier_latency
 /device/coll/bcast_latency
@@ -20,6 +22,8 @@
 /device/coll/sync_latency
 /host/pt-to-pt/bw
 /host/pt-to-pt/latency
+/host/pt-to-pt/nbi_issue_rate
+/host/pt-to-pt/region_nbi_rate
 /host/pt-to-pt/stream_latency
 /host/coll/barrier_all_on_stream
 /host/coll/barrier_on_stream
