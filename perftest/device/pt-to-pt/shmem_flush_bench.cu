@@ -49,18 +49,12 @@
 #include <vector>
 #include "utils.h"
 
-/* smem layout when give_smem is in use: [barrier region 512 B][data].
- * When give_smem is NOT called, the barrier region is unused; we still
- * place the data at the same +512 offset so the two variants have
- * identical source alignment and cache behavior. (Hardcoded to match
- * NVSHMEMI_TMA_BARRIER_REGION_BYTES; the macro itself has a header
- * visibility quirk in this TU.) */
-constexpr size_t kSmemDataOffset = 512;
-
 template <bool USE_SMEM, bool USE_FLUSH>
 __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, size_t iter) {
     extern __shared__ char nvshmem_smem[];
     int tid = threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+    const size_t smem_data_offset =
+        static_cast<size_t>(nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY));
 
     if constexpr (USE_SMEM) {
         nvshmemx_give_smem(nvshmem_smem, (size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED));
@@ -70,7 +64,7 @@ __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, siz
     /* Source lives in smem.  Data starts after the barrier carve-out so the
      * TMA variant has room for its mbarriers; the st.global variant uses the
      * same offset for an apples-to-apples source pointer. */
-    double *src_smem = reinterpret_cast<double *>(nvshmem_smem + kSmemDataOffset);
+    double *src_smem = reinterpret_cast<double *>(nvshmem_smem + smem_data_offset);
 
     for (size_t i = 0; i < iter; i++) {
         /* Producer: fill src_smem with iteration-dependent data so the
@@ -98,7 +92,9 @@ __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, siz
             /* Quiet every iter: __threadfence_system (membar.sys, ~300 ns)
              * plus waits for all prior outbound stores to be remotely
              * visible.  Serializes the pipeline. */
-            nvshmem_quiet();
+            if (!tid) {
+                nvshmem_quiet();
+            }
         }
         __syncthreads();
     }
@@ -106,7 +102,10 @@ __global__ void pipelined_put_smem_src(double *dst, size_t nelems, int peer, siz
     /* Final quiet to ensure remote visibility for the bench's "after"
      * condition.  The quiet-per-iter variant has already synced each tile;
      * an extra quiet here is a no-op cost-wise. */
-    nvshmem_quiet();
+    if (!tid) {
+        nvshmem_quiet();
+    }
+    __syncthreads();
 
     if constexpr (USE_SMEM) nvshmemx_release_smem();
 }
@@ -155,22 +154,24 @@ int main(int argc, char *argv[]) {
     /* Size smem to the device's MAX per-CTA dynamic smem.  We want to run
      * an exhaustive sweep up to smem capacity, so we intentionally go
      * beyond NVSHMEMX_SMEM_RECOMMENDED (= 64 KiB, which doesn't fit a
-     * 64 KiB source tile + 512 B barrier reserve).  Clamp the user-supplied
+     * 64 KiB source tile plus the internal barrier reserve).  Clamp the user-supplied
      * max_size to whatever the device allows minus our barrier region. */
     {
         int dev = 0;
         int max_dyn_smem = 0;
+        const size_t smem_data_offset =
+            static_cast<size_t>(nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY));
         CUDA_CHECK(cudaGetDevice(&dev));
         CUDA_CHECK(
             cudaDeviceGetAttribute(&max_dyn_smem, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev));
         smem_size = max_dyn_smem;
-        size_t max_data_bytes = (size_t)smem_size - kSmemDataOffset;
+        size_t max_data_bytes = (size_t)smem_size - smem_data_offset;
         if (max_size > max_data_bytes) {
             if (mype == 0)
                 fprintf(stderr,
                         "clamping max_size from %zu to %zu (device max dynamic smem %d, "
                         "barrier reserve %zu)\n",
-                        max_size, max_data_bytes, max_dyn_smem, kSmemDataOffset);
+                        max_size, max_data_bytes, max_dyn_smem, smem_data_offset);
             max_size = max_data_bytes & ~(size_t)15; /* keep 16 B aligned */
         }
     }
