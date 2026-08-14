@@ -8,10 +8,4 @@ from .direct import *
 from .mem import *
 from .rma import *
 
-__all__ = (
-    amo.__all__
-    + collective.__all__
-    + direct.__all__
-    + mem.__all__
-    + rma.__all__
-)
+__all__ = (amo.__all__ + collective.__all__ + direct.__all__ + mem.__all__ + rma.__all__)

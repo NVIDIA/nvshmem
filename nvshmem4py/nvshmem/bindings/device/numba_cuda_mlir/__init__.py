@@ -15,8 +15,8 @@ def _find_nvshmem_include_path():
     nvshmem_home = os.environ.get("NVSHMEM_HOME")
     if nvshmem_home:
         for include_path in (
-            os.path.join(nvshmem_home, "src", "include"),
-            os.path.join(nvshmem_home, "include"),
+                os.path.join(nvshmem_home, "src", "include"),
+                os.path.join(nvshmem_home, "include"),
         ):
             if os.path.exists(os.path.join(include_path, "nvshmem.h")):
                 return include_path
@@ -42,8 +42,7 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
     from numba_cuda_mlir.extending import typing_registry as _typing_registry
     from numba_cuda_mlir.numba_cuda.typing import signature as _signature
     from numba_cuda_mlir.numba_cuda.typing.templates import (
-        ConcreteTemplate as _ConcreteTemplate,
-    )
+        ConcreteTemplate as _ConcreteTemplate, )
     from numba_cuda_mlir.types import CPointer as _CPointer
     from numba_cuda_mlir.types import int16 as _int16
     from numba_cuda_mlir.types import int32 as _int32
@@ -121,28 +120,20 @@ if os.path.exists(os.path.join(os.path.dirname(__file__), "_numbast.py")):
     INCLUDE_PATH = _find_nvshmem_include_path()
     PACKAGED_INCLUDE_PATH = find_nvidia_header_directory("nvshmem")
     if not INCLUDE_PATH or not os.path.isdir(INCLUDE_PATH):
-        raise RuntimeError(
-            f"NVSHMEM header directory INCLUDE_PATH={INCLUDE_PATH!r} does not exist. "
-            f"PACKAGED_INCLUDE_PATH={PACKAGED_INCLUDE_PATH!r}."
-        )
+        raise RuntimeError(f"NVSHMEM header directory INCLUDE_PATH={INCLUDE_PATH!r} does not exist. "
+                           f"PACKAGED_INCLUDE_PATH={PACKAGED_INCLUDE_PATH!r}.")
     if not os.path.isfile(os.path.join(INCLUDE_PATH, "nvshmem.h")):
         raise RuntimeError(f"nvshmem.h not found under INCLUDE_PATH={INCLUDE_PATH!r}")
 
     CCCL_INCLUDE_PATH = find_nvidia_header_directory("cccl")
     if not CCCL_INCLUDE_PATH or not os.path.isdir(CCCL_INCLUDE_PATH):
-        raise RuntimeError(
-            f"CCCL header directory CCCL_INCLUDE_PATH={CCCL_INCLUDE_PATH!r} does not exist."
-        )
+        raise RuntimeError(f"CCCL header directory CCCL_INCLUDE_PATH={CCCL_INCLUDE_PATH!r} does not exist.")
 
     this_folder = os.path.dirname(os.path.abspath(__file__))
     if not os.path.exists(os.path.join(this_folder, "entry_point.h")):
-        raise RuntimeError(
-            "entry_point.h not found, package may not be properly installed"
-        )
+        raise RuntimeError("entry_point.h not found, package may not be properly installed")
 
-    _append_nvrtc_search_paths(
-        INCLUDE_PATH, PACKAGED_INCLUDE_PATH, CCCL_INCLUDE_PATH, this_folder
-    )
+    _append_nvrtc_search_paths(INCLUDE_PATH, PACKAGED_INCLUDE_PATH, CCCL_INCLUDE_PATH, this_folder)
 
 else:
     warnings.warn("Numba-CUDA-MLIR device bindings are not enabled", NvshmemWarning)

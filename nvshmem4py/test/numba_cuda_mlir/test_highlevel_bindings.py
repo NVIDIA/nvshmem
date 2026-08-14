@@ -48,7 +48,7 @@ def test_highlevel_bindings(dev: Device):
 
         p(dest, mype, peer)
 
-    dest = nvshmem.core.array((1,), dtype="float32")
+    dest = nvshmem.core.array((1, ), dtype="float32")
 
     app_kernel[1, 1, 0](dest)
 

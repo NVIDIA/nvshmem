@@ -46,7 +46,7 @@ def ring_reduce(dst, src, nreduce, signal, chunk_size):
     # Use ffi.from_buffer to get array access
     src_block = ffi.from_buffer(src[src_offset:])
     dst_block = ffi.from_buffer(dst[dst_offset:])
-    signal_block = ffi.from_buffer(signal[block_idx : block_idx + 1])
+    signal_block = ffi.from_buffer(signal[block_idx:block_idx + 1])
 
     chunk_elems = chunk_size
     num_chunks = elems_per_block // chunk_elems
@@ -142,9 +142,9 @@ chunk_size = elems_per_block // num_chunk_per_block
 threads_per_block = 512
 
 # Allocate arrays
-src = nvshmem.core.array((nreduce,), dtype="int32")
-dst = nvshmem.core.array((nreduce,), dtype="int32")
-signal = nvshmem.core.array((num_blocks,), dtype="uint64")
+src = nvshmem.core.array((nreduce, ), dtype="int32")
+dst = nvshmem.core.array((nreduce, ), dtype="int32")
+signal = nvshmem.core.array((num_blocks, ), dtype="uint64")
 
 # Initialize data
 for i in range(nreduce):
@@ -159,9 +159,7 @@ for i in range(num_blocks):
 dev.sync()  # Flush default-stream init before kernel launch on user stream
 
 # Launch kernel
-ring_reduce[num_blocks, threads_per_block, stream, 0](
-    dst, src, nreduce, signal, chunk_size
-)
+ring_reduce[num_blocks, threads_per_block, stream, 0](dst, src, nreduce, signal, chunk_size)
 
 nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
 dev.sync()
@@ -169,9 +167,7 @@ dev.sync()
 # Check results
 expected_result = sum(range(1, npes + 1))
 for i in range(nreduce):
-    assert dst[i] == expected_result, (
-        f"PE {mype}: Mismatch at index {i}: got {dst[i]}, expected {expected_result}"
-    )
+    assert dst[i] == expected_result, (f"PE {mype}: Mismatch at index {i}: got {dst[i]}, expected {expected_result}")
 print(f"PE {mype}: Ring allreduce test passed")
 
 # Clean up

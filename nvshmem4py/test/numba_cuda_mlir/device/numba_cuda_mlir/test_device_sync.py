@@ -18,8 +18,10 @@ _sync_teams = [
 
 @pytest.mark.mpi
 @pytest.mark.parametrize("teams", _sync_teams)
-@pytest.mark.parametrize(
-    "func", [nvshmem.core.device.numba_cuda_mlir.sync, nvshmem.core.device.numba_cuda_mlir.sync_block, nvshmem.core.device.numba_cuda_mlir.sync_warp])
+@pytest.mark.parametrize("func", [
+    nvshmem.core.device.numba_cuda_mlir.sync, nvshmem.core.device.numba_cuda_mlir.sync_block,
+    nvshmem.core.device.numba_cuda_mlir.sync_warp
+])
 def test_device_sync(nvshmem_init_fini, teams, func):
     print(f"Testing {func.__name__} on team {teams}")
 

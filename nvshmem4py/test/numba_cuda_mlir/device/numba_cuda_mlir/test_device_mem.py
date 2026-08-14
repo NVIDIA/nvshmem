@@ -48,13 +48,9 @@ def test_device_get_peer_array(nvshmem_init_fini):
     node_rank = nvshmem.core.team_my_pe(node_team)
     node_size = nvshmem.core.team_n_pes(node_team)
     peer_node_rank = (node_rank + 1) % node_size
-    peer_pe = nvshmem.core.team_translate_pe(
-        node_team, peer_node_rank, nvshmem.core.Teams.TEAM_WORLD
-    )
+    peer_pe = nvshmem.core.team_translate_pe(node_team, peer_node_rank, nvshmem.core.Teams.TEAM_WORLD)
     predecessor_node_rank = (node_rank - 1) % node_size
-    expected_pe = nvshmem.core.team_translate_pe(
-        node_team, predecessor_node_rank, nvshmem.core.Teams.TEAM_WORLD
-    )
+    expected_pe = nvshmem.core.team_translate_pe(node_team, predecessor_node_rank, nvshmem.core.Teams.TEAM_WORLD)
 
     stream = dev.create_stream()
 

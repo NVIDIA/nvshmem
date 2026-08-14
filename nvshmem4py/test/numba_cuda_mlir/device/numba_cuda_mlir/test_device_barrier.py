@@ -19,7 +19,8 @@ _barrier_teams = [
 @pytest.mark.mpi
 @pytest.mark.parametrize("teams", _barrier_teams)
 @pytest.mark.parametrize("func", [
-    nvshmem.core.device.numba_cuda_mlir.barrier, nvshmem.core.device.numba_cuda_mlir.barrier_block, nvshmem.core.device.numba_cuda_mlir.barrier_warp
+    nvshmem.core.device.numba_cuda_mlir.barrier, nvshmem.core.device.numba_cuda_mlir.barrier_block,
+    nvshmem.core.device.numba_cuda_mlir.barrier_warp
 ])
 def test_device_barrier(nvshmem_init_fini, teams, func):
     print(f"Testing {func.__name__} on team {teams}")

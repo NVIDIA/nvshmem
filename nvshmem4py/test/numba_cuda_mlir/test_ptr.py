@@ -24,7 +24,7 @@ def test_ptr():
         other_ptr_typed = ptr(arr_ptr, int32(1))
         _ = other_ptr_typed
 
-    dest = nvshmem.core.array((1,), dtype="int16")
+    dest = nvshmem.core.array((1, ), dtype="int16")
 
     kernel_nvshmem[1, 1](dest)
 
