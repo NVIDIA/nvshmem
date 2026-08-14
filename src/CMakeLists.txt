@@ -1346,6 +1346,12 @@ install(
 )
 
 install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../skills/
+  DESTINATION share/skills
+  USE_SOURCE_PERMISSIONS
+)
+
+install(
   FILES ${CMAKE_CURRENT_SOURCE_DIR}/../changelog
   DESTINATION ./
 )
