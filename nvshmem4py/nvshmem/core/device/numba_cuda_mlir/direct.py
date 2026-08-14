@@ -27,6 +27,7 @@ def my_pe():
 
 @overload(my_pe, inline="always", typing_registry=typing_registry)
 def my_pe_ol():
+
     def impl():
         return bindings.my_pe()
 
@@ -39,6 +40,7 @@ def team_my_pe(team):
 
 @overload(team_my_pe, inline="always", typing_registry=typing_registry)
 def team_my_pe_ol(team):
+
     def impl(team):
         return bindings.team_my_pe(int32(team))
 
@@ -51,6 +53,7 @@ def team_n_pes(team):
 
 @overload(team_n_pes, inline="always", typing_registry=typing_registry)
 def team_n_pes_ol(team):
+
     def impl(team):
         return bindings.team_n_pes(int32(team))
 
@@ -63,6 +66,7 @@ def n_pes():
 
 @overload(n_pes, inline="always", typing_registry=typing_registry)
 def n_pes_ol():
+
     def impl():
         return bindings.n_pes()
 
@@ -75,6 +79,7 @@ def barrier_all():
 
 @overload(barrier_all, inline="always", typing_registry=typing_registry)
 def barrier_all_ol():
+
     def impl():
         return bindings.barrier_all()
 
@@ -87,6 +92,7 @@ def sync_all():
 
 @overload(sync_all, inline="always", typing_registry=typing_registry)
 def sync_all_ol():
+
     def impl():
         return bindings.sync_all()
 
@@ -99,6 +105,7 @@ def signal_op(signal_var, signal_val, signal_op, pe):
 
 @overload(signal_op, inline="always", typing_registry=typing_registry)
 def signal_op_ol(signal_var, signal_val, signal_op, pe):
+
     def impl(signal_var, signal_val, signal_op, pe):
         signal_varptr = ffi.from_buffer(signal_var)
         bindings.signal_op(signal_varptr, uint64(signal_val), int32(signal_op.value), int32(pe))
@@ -112,6 +119,7 @@ def signal_wait(signal_var, signal_op, signal_val):
 
 @overload(signal_wait, inline="always", typing_registry=typing_registry)
 def signal_wait_ol(signal_var, signal_op, signal_val):
+
     def impl(signal_var, signal_op, signal_val):
         signal_varptr = ffi.from_buffer(signal_var)
         return bindings.signal_wait_until(signal_varptr, int32(signal_op.value), uint64(signal_val))

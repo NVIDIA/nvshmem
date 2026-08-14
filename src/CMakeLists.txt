@@ -1405,6 +1405,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /include/non_abi/nvshmem_version.h$;\
 /nvshmem4py/cmake/addCybind.cmake;\
 /nvshmem4py/cmake/addNumbast.cmake;\
+/nvshmem4py/cmake/addNumbastMlir.cmake;\
 /nvshmem4py/build_assets/;\
 /perftest/perftest_install/;\
 /test/test_install/;\
@@ -1455,6 +1456,6 @@ add_custom_target(package_src_target
     COMMAND "${CMAKE_COMMAND}" --build . --target package_source
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     COMMENT "Package Build"
-    DEPENDS build_bindings_cybind build_bindings_numbast build_bindings_cute
+    DEPENDS build_bindings_cybind build_bindings_numbast build_bindings_numbast_mlir build_bindings_cute
     VERBATIM
 )
