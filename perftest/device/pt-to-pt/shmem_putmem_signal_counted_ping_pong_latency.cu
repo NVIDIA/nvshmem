@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
     int skip = warmup_iters;
 
     int array_size, i;
-    void **h_tables;
+    void **h_tables = NULL;
     uint64_t *h_size_arr;
     double *h_lat;
     perf_stats_t *h_lat_stats = NULL;
@@ -280,7 +280,7 @@ finalize:
         }
     }
     free(h_lat_stats);
-    free_tables(h_tables, 2);
+    if (h_tables) free_tables(h_tables, 2);
     finalize_wrapper();
 
     return exit_code;
