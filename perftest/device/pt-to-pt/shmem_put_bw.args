@@ -1,2 +1,4 @@
 -n 200 -w 20 -c 4 -t 1024 -e 32M --repetitions 3
 --bidir -n 200 -w 20 -c 4 -t 1024 -e 32M --repetitions 3
+-n 200 -w 20 -c 16 -t 1024 -e 32M --scope block --repetitions 3 
+--bidir -n 200 -w 20 -c 16 -t 1024 -e 32M --scope block --repetitions 3 
