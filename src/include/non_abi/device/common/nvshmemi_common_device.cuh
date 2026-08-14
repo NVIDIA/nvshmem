@@ -572,13 +572,6 @@ __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(
     return nvshmemi_tma_align_down_16((registration.size - kReserve) / num_buffers);
 }
 
-__device__ __forceinline__ uint8_t *nvshmemi_handle_thread_smem_slot(uintptr_t smem_base,
-                                                                     uint32_t thread_idx) {
-    return reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base) +
-                                       static_cast<size_t>(thread_idx) *
-                                           NVSHMEMI_HANDLE_THREAD_SMEM_STRIDE);
-}
-
 __device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers) {
     size_t smem_size = nvshmemi_tma_smem_size();
     constexpr size_t kReserve = (size_t)NVSHMEMI_SMEM_DATA_REGION_OFFSET;
@@ -597,6 +590,13 @@ __device__ __forceinline__ uint64_t *nvshmemi_tma_barrier_slot(int slot) {
 }
 
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+__device__ __forceinline__ uint8_t *nvshmemi_handle_thread_smem_slot(uintptr_t smem_base,
+                                                                     uint32_t thread_idx) {
+    return reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base) +
+                                       static_cast<size_t>(thread_idx) *
+                                           NVSHMEMI_HANDLE_THREAD_SMEM_STRIDE);
+}
+
 __device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(uintptr_t smem_base,
                                                                           int slot) {
     assert(slot >= 0);
