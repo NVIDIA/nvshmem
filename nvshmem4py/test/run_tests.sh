@@ -16,6 +16,8 @@
 #   NVSHMEM_HOME=$PWD/build bash nvshmem4py/test/run_tests.sh [SUITE]
 #
 #   SUITE: fmt, core, numba, numba_high_level_1, numba_high_level_2,
+#          numba_cuda_mlir, numba_cuda_mlir_high_level_1,
+#          numba_cuda_mlir_high_level_2, numba_cuda_mlir_nvls,
 #          cutedsl, cutedsl_high_level_1, cutedsl_high_level_2, nvls, all (default: all)
 #
 # Environment:
@@ -23,6 +25,7 @@
 #   CUDA_HOME                   - path to CUDA toolkit (default: /usr/local/cuda)
 #   RDMA_CORE_HOME              - path to rdma-core (default: /usr)
 #   VENV_DIR                    - where to create the virtualenv (default: $PROJECT_DIR/nvshmem4py_test_venv)
+#   NVSHMEM4PY_PROJECT_DIR      - source tree to use when sbatch spools this script
 #   MPI_RUN                     - mpirun command (default: mpirun --oversubscribe)
 #   NP                          - number of MPI ranks for most tests (default: 2)
 #   NP_TEAM                     - number of MPI ranks for team tests (default: NP)
@@ -41,8 +44,10 @@ set -x
 # Resolve NVSHMEM_HOME
 ########################################
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Script lives in nvshmem4py/test/, so project root is two levels up
-PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Script lives in nvshmem4py/test/, so project root is two levels up. An
+# explicit source tree is needed when the installed package is staged on
+# node-local scratch and sbatch executes a spooled script copy.
+PROJECT_DIR="${NVSHMEM4PY_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 if [ -z "$NVSHMEM_HOME" ]; then
     if [ -d "$PROJECT_DIR/build" ]; then
@@ -73,12 +78,12 @@ fi
 ########################################
 TEST_SUITE="${1:-all}"
 case "$(echo "$TEST_SUITE" | tr '[:upper:]' '[:lower:]')" in
-    fmt|core|numba|numba_high_level_1|numba_high_level_2|cutedsl|cutedsl_high_level_1|cutedsl_high_level_2|nvls|all)
+    fmt|core|numba|numba_high_level_1|numba_high_level_2|numba_cuda_mlir|numba_cuda_mlir_high_level_1|numba_cuda_mlir_high_level_2|numba_cuda_mlir_nvls|cutedsl|cutedsl_high_level_1|cutedsl_high_level_2|nvls|all)
         TEST_SUITE="$(echo "$TEST_SUITE" | tr '[:upper:]' '[:lower:]')"
         ;;
     *)
         echo "Invalid test suite: $TEST_SUITE"
-        echo "Allowed: fmt, core, numba, numba_high_level_1, numba_high_level_2, cutedsl, cutedsl_high_level_1, cutedsl_high_level_2, nvls, all"
+        echo "Allowed: fmt, core, numba, numba_high_level_1, numba_high_level_2, numba_cuda_mlir, numba_cuda_mlir_high_level_1, numba_cuda_mlir_high_level_2, numba_cuda_mlir_nvls, cutedsl, cutedsl_high_level_1, cutedsl_high_level_2, nvls, all"
         exit 1
         ;;
 esac
@@ -224,7 +229,15 @@ fi
 ########################################
 # Install dependencies
 ########################################
-pip install --force-reinstall "$WHEEL"
+WHEEL_INSTALL_TARGET="$WHEEL"
+case "$TEST_SUITE" in
+    numba_cuda_mlir*|all)
+        # Exercise the wheel's MLIR extra rather than relying on a transitive
+        # build dependency that is absent for downstream users.
+        WHEEL_INSTALL_TARGET="${WHEEL}[mlir]"
+        ;;
+esac
+pip install --force-reinstall "$WHEEL_INSTALL_TARGET"
 CUDA_NEXT_MAJOR=$((CUDA_MAJOR + 1))
 pip install "cuda-python>=${CUDA_MAJOR}.0,<${CUDA_NEXT_MAJOR}.0"
 pip install mpi4py --no-binary mpi4py
@@ -282,7 +295,7 @@ fi
 
 if [ -z "$NVSHMEM_DEVICE_BC" ]; then
     case "$TEST_SUITE" in
-        numba|numba_high_level_1|numba_high_level_2|cutedsl|cutedsl_high_level_1|cutedsl_high_level_2|nvls|all)
+        numba|numba_high_level_1|numba_high_level_2|numba_cuda_mlir*|cutedsl|cutedsl_high_level_1|cutedsl_high_level_2|nvls|all)
             echo "ERROR: No branch-matched libnvshmem_device*.bc found."
             echo "The local test harness would mix host libraries from this tree with the wheel's packaged device bitcode."
             echo "Build/install NVSHMEM with NVSHMEM_BUILD_BITCODE_LIBRARY=1 and point NVSHMEM_HOME at that install, or provide build/src/lib/libnvshmem_device*.bc."
@@ -437,6 +450,7 @@ MPI_RUN="${MPI_RUN:-mpirun --oversubscribe --allow-run-as-root --mca pml ob1 --m
 NP="${NP:-2}"
 NP_TEAM="${NP_TEAM:-$(( NP < 8 ? NP : 8 ))}"
 TEST_DIR="$PROJECT_DIR/nvshmem4py/test"
+NUMBA_CUDA_MLIR_TEST_DIR="$TEST_DIR/numba_cuda_mlir"
 
 EXIT_CODE=0
 
@@ -545,16 +559,20 @@ echo "================================================"
 
 pushd "$TEST_DIR/device/numba/" || exit 1
 
-# Run each collective test function in a separate mpirun invocation to avoid
-# nvjitlink crash from accumulated JIT compilations in a single process.
-export NVSHMEM_BOOTSTRAP=MPI
-for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
-    $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
-    if [ $? -ne 0 ]; then
-        echo "Test failed: High-level API Collective test (${coll_func})."
-        EXIT_CODE=$((EXIT_CODE + 1))
-    fi
-done
+if [ "${NVSHMEM4PY_SKIP_NUMBA_COLLECTIVES:-0}" = "1" ]; then
+    echo "Skipping Numba high-level collective tests on this target"
+else
+    # Run each collective test function in a separate mpirun invocation to avoid
+    # nvjitlink crash from accumulated JIT compilations in a single process.
+    export NVSHMEM_BOOTSTRAP=MPI
+    for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
+        $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
+        if [ $? -ne 0 ]; then
+            echo "Test failed: High-level API Collective test (${coll_func})."
+            EXIT_CODE=$((EXIT_CODE + 1))
+        fi
+    done
+fi
 
 export NVSHMEM_BOOTSTRAP=MPI
 $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
@@ -588,6 +606,123 @@ if [ $? -ne 0 ]; then
 fi
 
 popd || exit 1
+}
+
+run_numba_cuda_mlir_tests() {
+echo "================================================"
+echo "NUMBA CUDA MLIR smoke tests"
+echo "================================================"
+
+# Import both public spellings before invoking the GPU/LTO smoke programs.
+python3 -c 'from nvshmem.core.device import numba_cuda_mlir; from nvshmem.device.bindings import numba_cuda_mlir as bindings; assert numba_cuda_mlir is not None and bindings is not None'
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba CUDA MLIR public import"
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+# Keep per-patch coverage on L40S to operations that do not use the known
+# PCIe collective path. NVLink-specific device coverage remains in the
+# expanded NVLS suite.
+export NVSHMEM_BOOTSTRAP=MPI
+for test_program in test_get_version.py test_npe.py; do
+    $MPI_RUN -np $NP -- python3 "$NUMBA_CUDA_MLIR_TEST_DIR/$test_program" -i mpi
+    if [ $? -ne 0 ]; then
+        echo "Test failed: Numba CUDA MLIR ${test_program}"
+        EXIT_CODE=$((EXIT_CODE + 1))
+    fi
+done
+}
+
+run_numba_cuda_mlir_high_level_tests_1() {
+echo "================================================"
+echo "NUMBA-CUDA-MLIR high level API tests batch 1 (Collective/Sync/Barrier)"
+echo "================================================"
+
+pushd "$NUMBA_CUDA_MLIR_TEST_DIR/device/numba_cuda_mlir/" || exit 1
+
+# Run each collective test function in a separate mpirun invocation to avoid
+# compiler crashes from accumulated JIT compilations in a single process.
+export NVSHMEM_BOOTSTRAP=MPI
+for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
+    $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
+    if [ $? -ne 0 ]; then
+        echo "Test failed: Numba-CUDA-MLIR high-level API Collective test (${coll_func})."
+        EXIT_CODE=$((EXIT_CODE + 1))
+    fi
+done
+
+export NVSHMEM_BOOTSTRAP=MPI
+$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba-CUDA-MLIR high-level API Barrier All Sync test."
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+export NVSHMEM_BOOTSTRAP=MPI
+$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_barrier.py -v -s
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba-CUDA-MLIR high-level API Barrier test."
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+popd || exit 1
+}
+
+run_numba_cuda_mlir_high_level_tests_2() {
+echo "================================================"
+echo "NUMBA-CUDA-MLIR high level API tests batch 2 (RMA)"
+echo "================================================"
+
+pushd "$NUMBA_CUDA_MLIR_TEST_DIR/device/numba_cuda_mlir/" || exit 1
+
+export NVSHMEM_BOOTSTRAP=MPI
+$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba-CUDA-MLIR high-level API RMA test."
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+popd || exit 1
+}
+
+run_numba_cuda_mlir_nvls_tests() {
+echo "================================================"
+echo "NUMBA-CUDA-MLIR NVLS / NVSwitch tests"
+echo "================================================"
+
+# Keep the same EOS runtime setup as the shared NVLS suite. These tests use
+# hardware functionality that is unavailable on the L40S CI partition.
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH_NO_PIP_CUDA"
+export NVSHMEM_ENABLE_NIC_PE_MAPPING="${NVSHMEM_ENABLE_NIC_PE_MAPPING:-1}"
+export NVSHMEM_HCA_LIST="${NVSHMEM_HCA_LIST:-mlx5_0}"
+export NVSHMEM_MAX_TEAMS=1024
+export NVSHMEM_DISABLE_NCCL="${NVSHMEM_DISABLE_NCCL:-1}"
+NUMBA_CUDA_MLIR_NVLS_MPI_RUN="$MPI_RUN -x NVSHMEM_BOOTSTRAP -x NVSHMEM_DISABLE_NCCL -x NVSHMEM_ENABLE_NIC_PE_MAPPING -x NVSHMEM_HCA_LIST -x NVSHMEM_MAX_TEAMS -x LD_LIBRARY_PATH"
+
+pushd "$NUMBA_CUDA_MLIR_TEST_DIR/device/numba_cuda_mlir/" || exit 1
+
+export NVSHMEM_BOOTSTRAP=MPI
+$NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba-CUDA-MLIR high-level API Memory test"
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+export NVSHMEM_BOOTSTRAP=MPI
+$NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba-CUDA-MLIR high-level API AMO test"
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+popd || exit 1
+
+export NVSHMEM_BOOTSTRAP=MPI
+$NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- python3 "$NUMBA_CUDA_MLIR_TEST_DIR/test_ring_allreduce.py"
+if [ $? -ne 0 ]; then
+    echo "Test failed: Numba-CUDA-MLIR ring all-reduce example test."
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
 }
 
 run_cutedsl_tests() {
@@ -774,6 +909,14 @@ elif [ "$TEST_SUITE" = "numba_high_level_1" ]; then
     run_numba_high_level_tests_1
 elif [ "$TEST_SUITE" = "numba_high_level_2" ]; then
     run_numba_high_level_tests_2
+elif [ "$TEST_SUITE" = "numba_cuda_mlir" ]; then
+    run_numba_cuda_mlir_tests
+elif [ "$TEST_SUITE" = "numba_cuda_mlir_high_level_1" ]; then
+    run_numba_cuda_mlir_high_level_tests_1
+elif [ "$TEST_SUITE" = "numba_cuda_mlir_high_level_2" ]; then
+    run_numba_cuda_mlir_high_level_tests_2
+elif [ "$TEST_SUITE" = "numba_cuda_mlir_nvls" ]; then
+    run_numba_cuda_mlir_nvls_tests
 elif [ "$TEST_SUITE" = "cutedsl" ]; then
     run_cutedsl_tests
 elif [ "$TEST_SUITE" = "cutedsl_high_level_1" ]; then
@@ -787,10 +930,14 @@ else
     run_numba_tests
     run_numba_high_level_tests_1
     run_numba_high_level_tests_2
+    run_numba_cuda_mlir_tests
+    run_numba_cuda_mlir_high_level_tests_1
+    run_numba_cuda_mlir_high_level_tests_2
     run_cutedsl_tests
     run_cutedsl_high_level_tests_1
     run_cutedsl_high_level_tests_2
     run_nvls_tests
+    run_numba_cuda_mlir_nvls_tests
 fi
 
 ########################################
