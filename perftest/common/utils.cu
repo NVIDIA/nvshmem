@@ -1172,6 +1172,7 @@ bool repetitions_requested = false;
 size_t step_factor = 2;
 size_t max_size_log = 1;
 size_t stride = 1;
+size_t region_ops = 64;
 size_t mem_handle_type = MEM_TYPE_AUTO;
 bool bidirectional = false;
 bool report_msgrate = false;
@@ -1242,6 +1243,7 @@ void read_args(int argc, char **argv) {
                                            {"scope", required_argument, 0, 's'},
                                            {"atomic_op", required_argument, 0, 'a'},
                                            {"stride", required_argument, 0, 'i'},
+                                           {"region_ops", required_argument, 0, 0},
                                            {"mem_handle_type", required_argument, 0, 'm'},
                                            {0, 0, 0, 0}};
     /* getopt_long stores the option index here. */
@@ -1268,6 +1270,7 @@ void read_args(int argc, char **argv) {
                     "-o, --reduce_op <min, max, sum, prod, and, or, xor> \n"
                     "-s, --scope <thread, warp, block, all> \n"
                     "-i, --stride stride between elements \n"
+                    "--region_ops <logical operations per region> (region benchmarks) \n"
                     "-a, --atomic_op <inc, add, and, or, xor, set, swap, fetch_<inc, add, and, or, "
                     "xor>, compare_swap> \n"
                     "--bidir: run bidirectional test \n"
@@ -1320,6 +1323,11 @@ void read_args(int argc, char **argv) {
                     use_iteration_barrier = false;
                 } else if (strcmp(long_options[option_index].name, "no-final-barrier") == 0) {
                     use_final_barrier = false;
+                } else if (strcmp(long_options[option_index].name, "region_ops") == 0) {
+                    if (atol_scaled(optarg, &region_ops) || region_ops == 0) {
+                        fprintf(stderr, "--region_ops must be an integer greater than zero\n");
+                        exit(EXIT_FAILURE);
+                    }
                 }
 #if CUDART_VERSION >= 13000
                 else if (strcmp(long_options[option_index].name, "nucs") == 0) {

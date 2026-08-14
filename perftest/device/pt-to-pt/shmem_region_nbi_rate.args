@@ -1,0 +1,6 @@
+-n 1K -w 100 -b 8 -e 4K -c 1 -t 32 --scope thread --dir write --region_ops 8 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K -c 1 -t 32 --scope thread --dir write --region_ops 64 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K -c 4 -t 32 --scope thread --dir write --region_ops 8 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K -c 1 -t 32 --scope thread --dir read --region_ops 64 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K -c 1 -t 32 --scope block --dir write --region_ops 64 --repetitions 5
+-n 1K -w 100 -b 8 -e 4K -c 1 -t 32 --scope block --dir read --region_ops 64 --repetitions 5

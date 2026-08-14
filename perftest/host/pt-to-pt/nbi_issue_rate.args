@@ -1,0 +1,2 @@
+-n 100K -w 10K -b 8 -e 4K --dir write --repetitions 5
+-n 100K -w 10K -b 8 -e 4K --dir read --repetitions 5

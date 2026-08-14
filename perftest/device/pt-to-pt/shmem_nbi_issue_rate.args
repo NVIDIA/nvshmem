@@ -1,0 +1,4 @@
+-n 100K -w 10K -b 8 -e 4K -c 1 -t 32 --scope thread --dir write --repetitions 5
+-n 100K -w 10K -b 8 -e 4K -c 1 -t 32 --scope thread --dir read --repetitions 5
+-n 100K -w 10K -b 8 -e 4K -c 1 -t 32 --scope block --dir write --repetitions 5
+-n 100K -w 10K -b 8 -e 4K -c 1 -t 32 --scope block --dir read --repetitions 5
