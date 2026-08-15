@@ -1707,6 +1707,7 @@ static int nvshmemt_libfabric_submit_batch_rma_batch(struct nvshmem_transport *t
     batch->local_iov.clear();
     batch->local_desc.clear();
     batch->remote_iov.clear();
+    batch->total_bytes = 0;
     return 0;
 }
 
@@ -2047,8 +2048,16 @@ static int nvshmemt_libfabric_accumulate_batch_rma_impl(struct nvshmem_transport
     }
 
     nvshmemt_libfabric_endpoint_t *ep = state->eps[batch->ep_index].get();
+    size_t op_size = bytesdesc.elembytes * bytesdesc.nelems;
     size_t iov_limit = nvshmemt_libfabric_batch_rma_iov_limit(state, ep->domain_index);
-    if (batch->local_iov.size() >= iov_limit) {
+    size_t max_msg_size = state->prov_infos[ep->domain_index]->ep_attr->max_msg_size;
+    if (op_size > max_msg_size) {
+        return nvshmemt_libfabric_flush_batch_rma_region(tcurr, region);
+    }
+
+    bool exceeds_msg_size =
+        batch->total_bytes > max_msg_size || op_size > max_msg_size - batch->total_bytes;
+    if (batch->local_iov.size() >= iov_limit || exceeds_msg_size) {
         int status = nvshmemt_libfabric_submit_batch_rma_batch(tcurr, batch);
         *handled = true;
         if (status) {
@@ -2057,6 +2066,11 @@ static int nvshmemt_libfabric_accumulate_batch_rma_impl(struct nvshmem_transport
         batch->ep_index = get_next_ep(state, qp_index);
         ep = state->eps[batch->ep_index].get();
         iov_limit = nvshmemt_libfabric_batch_rma_iov_limit(state, ep->domain_index);
+        max_msg_size = state->prov_infos[ep->domain_index]->ep_attr->max_msg_size;
+        if (op_size > max_msg_size) {
+            *handled = false;
+            return nvshmemt_libfabric_flush_batch_rma_region(tcurr, region);
+        }
     }
 
     if (batch->local_iov.capacity() < iov_limit || batch->local_desc.capacity() < iov_limit ||
@@ -2071,7 +2085,6 @@ static int nvshmemt_libfabric_accumulate_batch_rma_impl(struct nvshmem_transport
         &reinterpret_cast<nvshmemt_libfabric_mem_handle_t *>(local->handle)->hdls[domain_idx];
     nvshmemt_libfabric_mem_handle_ep_t *remote_handle =
         &reinterpret_cast<nvshmemt_libfabric_mem_handle_t *>(remote->handle)->hdls[domain_idx];
-    size_t op_size = bytesdesc.elembytes * bytesdesc.nelems;
 
     struct iovec local_iov = {local->ptr, op_size};
     struct fi_rma_iov remote_iov = {};
@@ -2084,6 +2097,7 @@ static int nvshmemt_libfabric_accumulate_batch_rma_impl(struct nvshmem_transport
     batch->local_iov.push_back(local_iov);
     batch->local_desc.push_back(local_handle->local_desc);
     batch->remote_iov.push_back(remote_iov);
+    batch->total_bytes += op_size;
     if ((attrs->flags & NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS) == 0) {
         region->op_count++;
     }

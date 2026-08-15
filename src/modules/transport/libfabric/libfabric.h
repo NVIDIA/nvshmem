@@ -776,6 +776,7 @@ struct nvshmemt_libfabric_batch_rma_batch {
     int qp_index = NVSHMEMX_QP_DEFAULT;
     int ep_index = -1;
     nvshmemi_op_t op = NVSHMEMI_OP_SENTINEL;
+    size_t total_bytes = 0;
     std::vector<struct iovec> local_iov;
     std::vector<void *> local_desc;
     std::vector<struct fi_rma_iov> remote_iov;
