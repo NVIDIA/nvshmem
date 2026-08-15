@@ -107,12 +107,6 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_block_sl
     return slot != NULL && slot->generation == handle ? slot : NULL;
 }
 
-template <threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_region_submit(
-    const nvshmemi_region_info_t *region_info) {
-    nvshmemi_transfer_region_end<SCOPE>(region_info);
-}
-
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_start_block(
     nvshmemx_region_handle_t *handle, const nvshmemx_region_attrs_t *attrs) {
     int status = NVSHMEMX_SUCCESS;
@@ -160,7 +154,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_stop_block(
             if (slot->hints != NVSHMEMX_REGION_HINT_NONE) {
                 nvshmemi_region_info_t region_info = {slot->issuer_id, slot->generation,
                                                       slot->hints};
-                nvshmemi_region_submit<NVSHMEMI_THREADGROUP_BLOCK>(&region_info);
+                nvshmemi_transfer_region_end<NVSHMEMI_THREADGROUP_BLOCK>(&region_info);
             }
             cuda::atomic_ref<unsigned long long, cuda::thread_scope_device> state_ref(slot->state);
             state_ref.store(NVSHMEMI_REGION_SLOT_FREE, cuda::memory_order_release);
