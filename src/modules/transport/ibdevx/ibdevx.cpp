@@ -1313,7 +1313,7 @@ out:
     return status;
 }
 
-static void nvshmemt_ibdevx_prepare_batch_rma_wqe(struct ibdevx_ep *ep, uint64_t wqe_idx,
+static void nvshmemt_ibdevx_prepare_batch_rma_wqe(struct ibdevx_ep *ep, uint16_t wqe_idx,
                                                   const nvshmemt_batch_rma_entry &entry,
                                                   struct ibdevx_rw_wqe *wqe) {
     memset(wqe, 0, sizeof(*wqe));
@@ -1361,10 +1361,11 @@ static int nvshmemt_ibdevx_submit_batch_rma_region(struct nvshmem_transport *tcu
             }
         }
 
-        uint64_t first_wqe_idx = ep->wqe_bb_idx;
+        uint16_t first_wqe_idx = ep->wqe_bb_idx;
         struct ibdevx_rw_wqe *last_wqe = NULL;
         for (size_t i = 0; i < count; i++) {
-            uint64_t wqe_idx = first_wqe_idx + i;
+            /* The mlx5 WQE counter is 16 bits and must wrap within a multi-WQE batch. */
+            uint16_t wqe_idx = static_cast<uint16_t>(first_wqe_idx + i);
             char *wqe_address =
                 static_cast<char *>(ep->wq_buf) +
                 ((wqe_idx % get_ibdevx_qp_depth(state)) << NVSHMEMT_IBDEVX_WQE_BB_SHIFT);
