@@ -241,6 +241,31 @@ static inline void proxy_read_region_metadata(proxy_state_t *state, proxy_channe
     }
 }
 
+static inline void proxy_read_region_metadata_slot(proxy_state_t *state, proxy_channel_t *ch,
+                                                   uint64_t counter,
+                                                   nvshmemi_region_info_t *region_info) {
+    size_t slot = (counter & (state->channel_bufsize - 1)) / CHANNEL_ENTRY_BYTES;
+    char *metadata = ch->buf + state->channel_bufsize + slot * PROXY_REGION_METADATA_BYTES;
+    uint8_t *dest = reinterpret_cast<uint8_t *>(region_info);
+    int remaining = sizeof(*region_info);
+
+    for (size_t entry = 0; entry < PROXY_REGION_METADATA_ENTRIES; entry++) {
+        volatile uint64_t *request =
+            reinterpret_cast<volatile uint64_t *>(metadata + entry * CHANNEL_ENTRY_BYTES);
+        uint8_t flag = COUNTER_TO_FLAG(state, counter);
+        while ((*request & 1) != flag);
+
+        channel_bounce_buffer_t bounce;
+        bounce.whole_buffer = *request;
+        int data_bytes =
+            remaining < PROXY_CHANNEL_ENTRY_DATA_BYTES ? remaining : PROXY_CHANNEL_ENTRY_DATA_BYTES;
+        std::copy_n(bounce.bytes + PROXY_CHANNEL_ENTRY_CONTROL_BYTES, data_bytes, dest);
+        dest += data_bytes;
+        remaining -= data_bytes;
+        counter += CHANNEL_ENTRY_BYTES;
+    }
+}
+
 int nvshmemi_proxy_create_channels(proxy_state_t *proxy_state) {
     int status = 0;
 
@@ -252,9 +277,12 @@ int nvshmemi_proxy_create_channels(proxy_state_t *proxy_state) {
 
     for (int i = 0; i < proxy_state->channel_count; i++) {
         // for put/get
-        CUDA_RUNTIME_CHECK(cudaMallocHost((void **)&channels[i].buf, proxy_state->channel_bufsize,
+        size_t metadata_slots = proxy_state->channel_bufsize / CHANNEL_ENTRY_BYTES;
+        size_t channel_storage_bytes =
+            proxy_state->channel_bufsize + metadata_slots * PROXY_REGION_METADATA_BYTES;
+        CUDA_RUNTIME_CHECK(cudaMallocHost((void **)&channels[i].buf, channel_storage_bytes,
                                           0)); /* CPU reads, GPU writes */
-        memset(channels[i].buf, 0, proxy_state->channel_bufsize);
+        memset(channels[i].buf, 0, channel_storage_bytes);
 
         CUDA_RUNTIME_CHECK(cudaMalloc(
             &channels[i].issue, sizeof(uint64_t))); /* issue is not accessed through LD/ST by CPU
@@ -539,28 +567,26 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
         void *rptr = static_cast<char *>(nvshmemi_device_state.heap_base) + roffset;
         if (explicit_region) {
             nvshmemi_region_info_t region_info{};
-            proxy_read_region_metadata(state, ch, ch->processed + PROXY_DMA_REQ_BYTES,
-                                       &region_info);
+            proxy_read_region_metadata_slot(state, ch, ch->processed, &region_info);
             nvshmem_transport_op_attrs_t attrs{};
             attrs.hints = region_info.hints;
             attrs.issuer_id = region_info.issuer_id;
             attrs.region_id = region_info.region_id;
-            nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index,
-                                           &attrs);
+            nvshmemi_process_multisend_rma_with_hints(
+                state->transport[pe], state->transport_id[pe], pe, verb, rptr,
+                reinterpret_cast<void *>(laddr), size, qp_index, &attrs);
         } else if (tcurr->host_ops.rma_with_hints &&
                    proxy_dma_more_follows(state, ch, proxy_request_batch_idx, tcurr, pe, qp_index,
                                           verb)) {
             // Mark adjacent compatible requests for opportunistic implicit transport batching.
             nvshmem_transport_op_attrs_t attrs{};
             attrs.flags = NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
-            nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index,
-                                           &attrs);
+            nvshmemi_process_multisend_rma_with_hints(
+                state->transport[pe], state->transport_id[pe], pe, verb, rptr,
+                reinterpret_cast<void *>(laddr), size, qp_index, &attrs);
         } else {
             nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index,
-                                           nullptr);
+                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index);
         }
     }
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
@@ -570,7 +596,7 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
 
     *is_processed = 1;
 
-    proxy_update_processed(ch, explicit_region ? PROXY_REGION_DMA_REQ_BYTES : PROXY_DMA_REQ_BYTES);
+    proxy_update_processed(ch, PROXY_DMA_REQ_BYTES);
     TRACE(NVSHMEM_PROXY,
           "[%d] process_channel_put_dma/proxy_update_processed processed %ld complete %ld",
           state->nvshmemi_state->mype, ch->processed, *ch->complete);

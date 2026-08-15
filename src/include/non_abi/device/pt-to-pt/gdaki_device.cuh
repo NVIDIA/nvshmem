@@ -17,6 +17,7 @@
 #include "device_host_transport/nvshmem_common_gpunetio.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
+#include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/nvshmem_build_options.h"
 #include "utils_device.h"
 
@@ -709,6 +710,16 @@ __device__ static __forceinline__ void gdaki_submit_db(
     }
 }
 
+template <nvshmemi_region_operation_t REGION_OPERATION>
+__device__ static void gdaki_submit_region_db(nvshmemi_gpunetio_device_qp_t *qp,
+                                              uint64_t base_wqe_idx, uint32_t num_wqes) {
+    constexpr uint32_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
+    const nvshmemi_region_info_t *region = region_info.region_id != 0 ? &region_info : nullptr;
+    gdaki_submit_db(qp, base_wqe_idx, num_wqes, region);
+}
+
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
     const int num_wqes = 1;
@@ -732,12 +743,12 @@ gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
     return gdaki_quiet(qp);
 }
 
-template <nvshmemi_op_t channel_op, bool nbi>
+template <nvshmemi_op_t channel_op, bool nbi,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    nvshmemi_gpunetio_device_qp_t *selected_qp = nullptr,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+    nvshmemi_gpunetio_device_qp_t *selected_qp = nullptr, uint32_t region_active_count = 0) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     unsigned int amask = __activemask();
     bool can_coalesce_warp = selected_qp == nullptr && gdaki_can_coalesce_warp_pe(amask, proxy_pe);
@@ -878,7 +889,15 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
             }
 
             doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-            gdaki_submit_db(qp, base_wqe_idx, num_wqes, region_info);
+            if constexpr (nbi && REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+                if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+                    gdaki_submit_region_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes);
+                } else {
+                    gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+                }
+            } else {
+                gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+            }
         }
 
         remaining_size -= transfer_size;
@@ -909,11 +928,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
 
 static_assert(NVSHMEMI_GPUNETIO_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_GPUNETIO_MIN_QP_DEPTH >= 64) failed");
-template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi>
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT, uint32_t region_active_count = 0) {
     assert(SCOPE == NVSHMEMI_THREADGROUP_WARP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
 
     // Use only warp 0
@@ -1000,8 +1019,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     // Too many chunks. Use gdaki_rma_thread to handle it instead.
     if (unlikely(chunk_idx > tg_size)) {
         if (my_tid == 0) {
-            gdaki_rma_thread<channel_op, nbi>(req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp_index,
-                                              nullptr, region_info);
+            gdaki_rma_thread<channel_op, nbi, REGION_OPERATION>(req_rptr, req_lptr, bytes, dst_pe,
+                                                                proxy_pe, qp_index, nullptr,
+                                                                region_active_count);
         }
 
         goto out;
@@ -1079,7 +1099,15 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
         }
 
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes, region_info);
+        if constexpr (nbi && REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+            if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+                gdaki_submit_region_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes);
+            } else {
+                gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+            }
+        } else {
+            gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        }
         if (!nbi) {
             // CST, if required, has already been enqueued. We simply need to
             // do gdaki_quiet here.
@@ -1352,11 +1380,26 @@ nvshmemi_gdaki_rma_g(void *rptr, int dst_pe, nvshmemx_qp_handle_t qp_index = NVS
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_batch_rma_submit_pending_qps(
     const nvshmemi_region_info_t *region_info);
 
-template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
+template <nvshmemi_region_operation_t REGION_OPERATION>
+__device__ NVSHMEMI_STATIC void nvshmemi_gdaki_submit_region_if_threshold_reached(
+    uint32_t threshold) {
+    constexpr uint32_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
+    if (nvshmemi_region_batch_rma_reached_submission_threshold(&region_info, threshold)) {
+        nvshmemi_gdaki_batch_rma_submit_pending_qps(&region_info);
+    }
+}
+
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int dst_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    uint32_t region_active_count = 0;
+    if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+        region_active_count = nvshmemi_region_load_active_count();
+    }
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     int proxy_pe = gdaki_get_proxy_pe(dst_pe);
 #ifndef __clang_llvm_bitcode_lib__
@@ -1364,21 +1407,25 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_nbi(
 #else
     if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
 #endif
-        gdaki_rma_thread<channel_op, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe,
-                                           qp_index, nullptr, region_info);
+        gdaki_rma_thread<channel_op, true, REGION_OPERATION>((uint64_t)rptr, (uint64_t)lptr, bytes,
+                                                             dst_pe, proxy_pe, qp_index, nullptr,
+                                                             region_active_count);
 #ifndef __clang_llvm_bitcode_lib__
     } else {
-        gdaki_rma<SCOPE, channel_op, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe,
-                                           qp_index, region_info);
+        gdaki_rma<SCOPE, channel_op, true, REGION_OPERATION>(
+            (uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe, qp_index, region_active_count);
     }
 #else
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 #endif
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 &&
-        nvshmemi_region_batch_rma_reached_submission_threshold(region_info,
-                                                               state->region_batch_rma_threshold)) {
-        nvshmemi_gdaki_batch_rma_submit_pending_qps(region_info);
+    if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+        if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 &&
+            unlikely(state->region_batch_rma_threshold != 0 &&
+                     (region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+            nvshmemi_gdaki_submit_region_if_threshold_reached<REGION_OPERATION>(
+                state->region_batch_rma_threshold);
+        }
     }
 }
 

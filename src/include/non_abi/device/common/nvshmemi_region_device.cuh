@@ -13,6 +13,38 @@
 
 #ifdef __CUDA_ARCH__
 
+__device__ __forceinline__ uint32_t nvshmemi_region_lock_active_count(
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_device> &active_count_ref) {
+    uint32_t current = active_count_ref.load(cuda::memory_order_relaxed);
+
+    while (true) {
+        while ((current & NVSHMEMI_REGION_ACTIVE_COUNT_LOCK) != 0) {
+            current = active_count_ref.load(cuda::memory_order_relaxed);
+        }
+        if (active_count_ref.compare_exchange_weak(
+                current, current | NVSHMEMI_REGION_ACTIVE_COUNT_LOCK, cuda::memory_order_acquire,
+                cuda::memory_order_relaxed)) {
+            return current;
+        }
+    }
+}
+
+__device__ __forceinline__ void nvshmemi_region_increment_active_count() {
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(
+        *nvshmemi_device_state_d.region_active_count);
+    uint32_t count = nvshmemi_region_lock_active_count(active_count_ref);
+    assert(count < NVSHMEMI_REGION_ACTIVE_COUNT_MASK);
+    active_count_ref.store(count + 1, cuda::memory_order_release);
+}
+
+__device__ __forceinline__ void nvshmemi_region_decrement_active_count() {
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(
+        *nvshmemi_device_state_d.region_active_count);
+    uint32_t count = nvshmemi_region_lock_active_count(active_count_ref);
+    assert(count > 0);
+    active_count_ref.store(count - 1, cuda::memory_order_release);
+}
+
 __device__ __forceinline__ int nvshmemi_region_claim_slot(nvshmemx_region_handle_t *handle,
                                                           const nvshmemx_region_attrs_t *attrs) {
     if (handle == NULL) {
@@ -59,9 +91,7 @@ __device__ __forceinline__ int nvshmemi_region_claim_slot(nvshmemx_region_handle
             slot->hints = hints;
             slot->batch_rma.operation_ticket = 0;
             state_ref.store(NVSHMEMI_REGION_SLOT_ACTIVE, cuda::memory_order_release);
-            cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count(
-                *nvshmemi_device_state_d.region_active_count);
-            active_count.fetch_add(1u, cuda::memory_order_relaxed);
+            nvshmemi_region_increment_active_count();
             *handle = generation;
             return NVSHMEMX_SUCCESS;
         }
@@ -75,40 +105,6 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_block_sl
     nvshmemi_region_slot_t *slot =
         nvshmemi_region_find_slot(nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx());
     return slot != NULL && slot->generation == handle ? slot : NULL;
-}
-
-template <threadgroup_t SCOPE, nvshmemi_region_operation_t OPERATION>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_region_info_t nvshmemi_region_resolve() {
-    constexpr uint32_t supported_hints =
-        nvshmemi_region_operation_traits<OPERATION>::supported_hints;
-    nvshmemi_region_info_t info = {};
-    int my_idx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-
-    if (my_idx == 0) {
-        nvshmemi_region_slot_t *slot =
-            nvshmemi_region_find_slot(nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx());
-        if (slot != NULL && (slot->hints & supported_hints) != 0) {
-            info.issuer_id = slot->issuer_id;
-            info.region_id = slot->generation;
-            info.hints = slot->hints & supported_hints;
-        }
-    }
-
-    if (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
-        unsigned mask = __activemask();
-        info.issuer_id = __shfl_sync(mask, info.issuer_id, 0);
-        info.region_id = __shfl_sync(mask, info.region_id, 0);
-        info.hints = __shfl_sync(mask, info.hints, 0);
-    } else if (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        __shared__ nvshmemi_region_info_t shared_info;
-        if (my_idx == 0) {
-            shared_info = info;
-        }
-        __syncthreads();
-        info = shared_info;
-    }
-
-    return info;
 }
 
 template <threadgroup_t SCOPE>
@@ -128,6 +124,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_start_block(
         status = nvshmemi_region_claim_slot(handle, attrs);
         if (status == NVSHMEMX_SUCCESS) {
             local_handle = *handle;
+            nvshmemi_region_set_block_hints(
+                attrs == NULL ? static_cast<uint32_t>(NVSHMEMX_REGION_HINT_NONE) : attrs->hints);
         }
     }
 
@@ -166,9 +164,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_stop_block(
             }
             cuda::atomic_ref<unsigned long long, cuda::thread_scope_device> state_ref(slot->state);
             state_ref.store(NVSHMEMI_REGION_SLOT_FREE, cuda::memory_order_release);
-            cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count(
-                *nvshmemi_device_state_d.region_active_count);
-            active_count.fetch_sub(1u, cuda::memory_order_relaxed);
+            nvshmemi_region_decrement_active_count();
+            nvshmemi_region_set_block_hints(NVSHMEMX_REGION_HINT_NONE);
         }
     }
 

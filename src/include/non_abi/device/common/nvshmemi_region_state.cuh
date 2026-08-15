@@ -50,24 +50,52 @@ __device__ __forceinline__ bool nvshmemi_region_slot_has_hints(const nvshmemi_re
     return hints == NVSHMEMX_REGION_HINT_NONE || (slot->hints & hints) == hints;
 }
 
-__device__ __forceinline__ bool nvshmemi_region_any_active() {
-    /* Avoid probing the region table on the common path with no active device regions. */
+__device__ __forceinline__ uint32_t nvshmemi_region_load_active_count() {
     uint32_t *active_count = nvshmemi_device_state_d.region_active_count;
-    if (active_count == nullptr) {
-        return false;
-    }
-
     cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(*active_count);
-    return active_count_ref.load(cuda::memory_order_relaxed) != 0;
+    return active_count_ref.load(cuda::memory_order_relaxed);
 }
 
-__device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_slot(uint64_t gridid,
-                                                                             uint64_t block_id) {
+__device__ __forceinline__ bool nvshmemi_region_any_active() {
+    /* Avoid probing the region table on the common path with no active device regions. */
+    return (nvshmemi_region_load_active_count() & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0;
+}
+
+constexpr uint64_t NVSHMEMI_REGION_BLOCK_CACHE_TAG = static_cast<uint64_t>(UINT32_MAX) << 32;
+
+__device__ __forceinline__ uint64_t *nvshmemi_region_block_cache() {
+    __shared__ uint64_t token;
+    return &token;
+}
+
+__device__ __forceinline__ uint64_t nvshmemi_region_shared_load(const uint64_t *ptr) {
+    uint64_t value;
+    uint32_t address = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
+    asm volatile("ld.shared.u64 %0, [%1];" : "=l"(value) : "r"(address));
+    return value;
+}
+
+__device__ __forceinline__ void nvshmemi_region_set_block_hints(uint32_t hints) {
+    *nvshmemi_region_block_cache() = NVSHMEMI_REGION_BLOCK_CACHE_TAG | hints;
+}
+
+__device__ __forceinline__ uint32_t nvshmemi_region_get_block_hints() {
+    /* Static shared memory is not initialized at kernel launch. The upper tag distinguishes values
+     * published by region start/stop. An accidental initial tag match can only cause exact slot
+     * validation to reject a false positive. */
+    uint64_t token = nvshmemi_region_shared_load(nvshmemi_region_block_cache());
+    return (token & NVSHMEMI_REGION_BLOCK_CACHE_TAG) == NVSHMEMI_REGION_BLOCK_CACHE_TAG
+               ? static_cast<uint32_t>(token)
+               : NVSHMEMX_REGION_HINT_NONE;
+}
+
+__device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_active_slot(
+    uint64_t gridid, uint64_t block_id) {
     nvshmemi_region_slot_t *slots = nvshmemi_device_state_d.region_slots;
     uint32_t slots_len = nvshmemi_device_state_d.region_slots_len;
     uint32_t probe_limit = nvshmemi_device_state_d.region_slot_probe_limit;
 
-    if (!nvshmemi_region_any_active() || slots == nullptr || slots_len == 0 || probe_limit == 0) {
+    if (slots == nullptr || slots_len == 0 || probe_limit == 0) {
         return nullptr;
     }
 
@@ -85,22 +113,46 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_slot(uin
     return nullptr;
 }
 
-template <threadgroup_t SCOPE>
-__device__ __forceinline__ nvshmemi_region_info_t
-nvshmemi_region_resolve_leader(uint32_t supported_hints) {
-    nvshmemi_region_info_t info = {};
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() != 0) {
-        return info;
+__device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_slot(uint64_t gridid,
+                                                                             uint64_t block_id) {
+    if (!nvshmemi_region_any_active()) {
+        return nullptr;
     }
+    return nvshmemi_region_find_active_slot(gridid, block_id);
+}
 
+__device__ __forceinline__ nvshmemi_region_info_t
+nvshmemi_region_resolve_active_current(uint32_t supported_hints) {
+    nvshmemi_region_info_t info = {};
     nvshmemi_region_slot_t *slot =
-        nvshmemi_region_find_slot(nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx());
+        nvshmemi_region_find_active_slot(nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx());
     if (slot != nullptr && (slot->hints & supported_hints) != 0) {
         info.issuer_id = slot->issuer_id;
         info.region_id = slot->generation;
         info.hints = slot->hints & supported_hints;
     }
     return info;
+}
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ nvshmemi_region_info_t
+nvshmemi_region_resolve_active_leader(uint32_t supported_hints) {
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() != 0) {
+        return {};
+    }
+    return nvshmemi_region_resolve_active_current(supported_hints);
+}
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ nvshmemi_region_info_t
+nvshmemi_region_resolve_leader(uint32_t supported_hints) {
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() != 0) {
+        return {};
+    }
+    if (!nvshmemi_region_any_active()) {
+        return {};
+    }
+    return nvshmemi_region_resolve_active_leader<SCOPE>(supported_hints);
 }
 
 /* Device issuer IDs encode the owning slot. The generation distinguishes slot reuse. */

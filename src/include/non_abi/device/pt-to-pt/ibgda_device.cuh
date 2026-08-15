@@ -18,6 +18,7 @@
 #include "device_host_transport/nvshmem_common_ibgda.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
+#include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/nvshmem_build_options.h"
 #include "utils_device.h"
 
@@ -1687,6 +1688,17 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_submit_reque
     }
 }
 
+template <bool need_strong_flush, nvshmemi_region_operation_t REGION_OPERATION>
+__device__ NVSHMEMI_STATIC void ibgda_submit_region_requests(nvshmemi_ibgda_device_qp_t *qp,
+                                                             uint64_t base_wqe_idx,
+                                                             uint16_t num_wqes) {
+    constexpr uint32_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
+    const nvshmemi_region_info_t *region = region_info.region_id != 0 ? &region_info : nullptr;
+    ibgda_submit_requests<need_strong_flush>(qp, base_wqe_idx, num_wqes, region);
+}
+
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 ibgda_submit_ready(nvshmemi_ibgda_device_qp_t *qp) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
@@ -2179,12 +2191,13 @@ ibgda_quiet_with_cst(nvshmemi_ibgda_device_qp_t *qp, bool is_qp_shared_among_cta
     return ticket;
 }
 
-template <nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg>
+template <nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
     nvshmemi_ibgda_device_qp_t *selected_qp = nullptr, bool selected_qp_shared_among_ctas = false,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+    uint32_t region_active_count = 0) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     unsigned int amask = __activemask();
     bool can_coalesce_warp = selected_qp == nullptr && ibgda_can_coalesce_warp_pe(amask, proxy_pe);
@@ -2325,10 +2338,28 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
                 __threadfence_system();
             }
 
-            if (is_qp_shared_among_ctas) {
-                ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes, region_info);
+            if constexpr (nbi && REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+                if (is_qp_shared_among_ctas) {
+                    if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+                        ibgda_submit_region_requests<true, REGION_OPERATION>(qp, base_wqe_idx,
+                                                                             num_wqes);
+                    } else {
+                        ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes);
+                    }
+                } else {
+                    if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+                        ibgda_submit_region_requests<false, REGION_OPERATION>(qp, base_wqe_idx,
+                                                                              num_wqes);
+                    } else {
+                        ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
+                    }
+                }
             } else {
-                ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes, region_info);
+                if (is_qp_shared_among_ctas) {
+                    ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes);
+                } else {
+                    ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
+                }
             }
         }
 
@@ -2360,11 +2391,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma_thread(
 
 static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_IBGDA_MIN_QP_DEPTH >= 64) failed");
-template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg>
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi, bool support_half_av_seg,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
     uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT, uint32_t region_active_count = 0) {
     assert(SCOPE == NVSHMEMI_THREADGROUP_WARP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
 
     // Use only warp 0
@@ -2458,8 +2489,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
     // Too many chunks. Use ibgda_rma_thread to handle it instead.
     if (unlikely(chunk_idx > tg_size)) {
         if (my_tid == 0) {
-            ibgda_rma_thread<channel_op, nbi, support_half_av_seg>(
-                req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, false, region_info);
+            ibgda_rma_thread<channel_op, nbi, support_half_av_seg, REGION_OPERATION>(
+                req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, false,
+                region_active_count);
         }
         goto out;
     }
@@ -2530,10 +2562,28 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_rma(
             __threadfence_system();
         }
 
-        if (is_qp_shared_among_ctas) {
-            ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes, region_info);
+        if constexpr (nbi && REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+            if (is_qp_shared_among_ctas) {
+                if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+                    ibgda_submit_region_requests<true, REGION_OPERATION>(qp, base_wqe_idx,
+                                                                         num_wqes);
+                } else {
+                    ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes);
+                }
+            } else {
+                if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+                    ibgda_submit_region_requests<false, REGION_OPERATION>(qp, base_wqe_idx,
+                                                                          num_wqes);
+                } else {
+                    ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
+                }
+            }
         } else {
-            ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes, region_info);
+            if (is_qp_shared_among_ctas) {
+                ibgda_submit_requests<true>(qp, base_wqe_idx, num_wqes);
+            } else {
+                ibgda_submit_requests<false>(qp, base_wqe_idx, num_wqes);
+            }
         }
 
         if (!nbi) {
@@ -2901,11 +2951,26 @@ nvshmemi_ibgda_rma_g(void *rptr, int dst_pe, nvshmemx_qp_handle_t qp_index = NVS
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_batch_rma_submit_pending_qps(
     const nvshmemi_region_info_t *region_info);
 
-template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
+template <nvshmemi_region_operation_t REGION_OPERATION>
+__device__ NVSHMEMI_STATIC void nvshmemi_ibgda_submit_region_if_threshold_reached(
+    uint32_t threshold) {
+    constexpr uint32_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
+    if (nvshmemi_region_batch_rma_reached_submission_threshold(&region_info, threshold)) {
+        nvshmemi_ibgda_batch_rma_submit_pending_qps(&region_info);
+    }
+}
+
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int dst_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    uint32_t region_active_count = 0;
+    if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+        region_active_count = nvshmemi_region_load_active_count();
+    }
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     int proxy_pe = ibgda_get_proxy_pe(dst_pe);
 #ifndef __clang_llvm_bitcode_lib__
@@ -2914,32 +2979,37 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_nbi(
     if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
 #endif
         if (state->support_half_av_seg) {
-            ibgda_rma_thread<channel_op, true, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                     proxy_pe, qp_index, nullptr, false,
-                                                     region_info);
+            ibgda_rma_thread<channel_op, true, true, REGION_OPERATION>(
+                (uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, false,
+                region_active_count);
         } else {
-            ibgda_rma_thread<channel_op, true, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                      proxy_pe, qp_index, nullptr, false,
-                                                      region_info);
+            ibgda_rma_thread<channel_op, true, false, REGION_OPERATION>(
+                (uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, false,
+                region_active_count);
         }
 #ifndef __clang_llvm_bitcode_lib__
     } else {
         if (state->support_half_av_seg) {
-            ibgda_rma<SCOPE, channel_op, true, true>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                     proxy_pe, qp_index, region_info);
+            ibgda_rma<SCOPE, channel_op, true, true, REGION_OPERATION>(
+                (uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe, qp_index,
+                region_active_count);
         } else {
-            ibgda_rma<SCOPE, channel_op, true, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe,
-                                                      proxy_pe, qp_index, region_info);
+            ibgda_rma<SCOPE, channel_op, true, false, REGION_OPERATION>(
+                (uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe, qp_index,
+                region_active_count);
         }
     }
 #else
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 #endif
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 &&
-        nvshmemi_region_batch_rma_reached_submission_threshold(region_info,
-                                                               state->region_batch_rma_threshold)) {
-        nvshmemi_ibgda_batch_rma_submit_pending_qps(region_info);
+    if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+        if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 &&
+            unlikely(state->region_batch_rma_threshold != 0 &&
+                     (region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+            nvshmemi_ibgda_submit_region_if_threshold_reached<REGION_OPERATION>(
+                state->region_batch_rma_threshold);
+        }
     }
 }
 

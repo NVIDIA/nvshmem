@@ -1589,11 +1589,12 @@ out:
     return status;
 }
 
-static int nvshmemt_libfabric_prepare_rma_imm(struct nvshmem_transport *tcurr,
-                                              nvshmemt_libfabric_state_t *libfabric_state,
-                                              nvshmemt_libfabric_endpoint_t &ep, int pe,
-                                              rma_verb_t verb, int qp_index,
-                                              uint32_t *imm_data_value, uint32_t **imm_data) {
+static inline int nvshmemt_libfabric_prepare_rma_imm(struct nvshmem_transport *tcurr,
+                                                     nvshmemt_libfabric_state_t *libfabric_state,
+                                                     nvshmemt_libfabric_endpoint_t &ep, int pe,
+                                                     rma_verb_t verb, int qp_index,
+                                                     uint32_t *imm_data_value,
+                                                     uint32_t **imm_data) {
     *imm_data = NULL;
     if (!libfabric_state->use_staged_atomics ||
         (verb.desc != NVSHMEMI_OP_P && verb.desc != NVSHMEMI_OP_PUT)) {
@@ -1602,7 +1603,7 @@ static int nvshmemt_libfabric_prepare_rma_imm(struct nvshmem_transport *tcurr,
 
     auto [signal_state, sig_lk] = get_signal_state_locked(libfabric_state, ep);
     auto &seq_counter = signal_state->put_signal_seq_counter[pe];
-    uint32_t sequence_count;
+    uint32_t sequence_count = 0;
     int status =
         get_next_seq_num_with_retry(tcurr, seq_counter, &sequence_count, qp_index,
                                     NVSHMEMT_LIBFABRIC_TRY_AGAIN_CALL_SITE_RMA_IMPL_OP_PUT);
@@ -2117,22 +2118,12 @@ static int nvshmemt_libfabric_try_accumulate_batch_rma(struct nvshmem_transport 
     }
 }
 
-static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, int pe,
-                                             rma_verb_t verb, rma_memdesc_t *remote,
-                                             rma_memdesc_t *local, rma_bytesdesc_t bytesdesc,
-                                             int qp_index,
-                                             const nvshmem_transport_op_attrs_t *attrs) {
+template <bool with_attrs>
+static int nvshmemt_libfabric_rma_scalar(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
+                                         rma_memdesc_t *remote, rma_memdesc_t *local,
+                                         rma_bytesdesc_t bytesdesc, int qp_index,
+                                         const nvshmem_transport_op_attrs_t *attrs) {
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(tcurr);
-    if (attrs && (attrs->hints & NVSHMEMI_REGION_HINT_BATCH_RMA) != 0 && attrs->issuer_id &&
-        attrs->region_id) {
-        bool handled;
-        int status = nvshmemt_libfabric_try_accumulate_batch_rma(
-            tcurr, pe, verb, remote, local, bytesdesc, qp_index, attrs, &handled);
-        if (handled || status) {
-            return status;
-        }
-    }
-
     uint32_t imm_data_val = 0;
     uint32_t *imm_data = NULL;
     int status = 0;
@@ -2154,20 +2145,46 @@ static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, in
         return status;
     }
 
-    nvshmem_transport_op_attrs_t scalar_attrs = attrs ? *attrs : nvshmem_transport_op_attrs_t{};
-    if (libfabric_state->disable_implicit_batch_rma) {
-        scalar_attrs.flags &= ~NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
+    if constexpr (with_attrs) {
+        nvshmem_transport_op_attrs_t scalar_attrs;
+        if (attrs && libfabric_state->disable_implicit_batch_rma) {
+            scalar_attrs = *attrs;
+            scalar_attrs.flags &= ~NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
+            attrs = &scalar_attrs;
+        }
+
+        return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                           attrs, imm_data, ep);
+    } else {
+        return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                           nullptr, imm_data, ep);
+    }
+}
+
+static int nvshmemt_libfabric_rma_with_hints(struct nvshmem_transport *tcurr, int pe,
+                                             rma_verb_t verb, rma_memdesc_t *remote,
+                                             rma_memdesc_t *local, rma_bytesdesc_t bytesdesc,
+                                             int qp_index,
+                                             const nvshmem_transport_op_attrs_t *attrs) {
+    if (unlikely(attrs && (attrs->hints & NVSHMEMI_REGION_HINT_BATCH_RMA) != 0 &&
+                 attrs->issuer_id && attrs->region_id)) {
+        bool handled;
+        int status = nvshmemt_libfabric_try_accumulate_batch_rma(
+            tcurr, pe, verb, remote, local, bytesdesc, qp_index, attrs, &handled);
+        if (handled || status) {
+            return status;
+        }
     }
 
-    return nvshmemt_libfabric_rma_impl(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
-                                       attrs ? &scalar_attrs : nullptr, imm_data, ep);
+    return nvshmemt_libfabric_rma_scalar<true>(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                               attrs);
 }
 
 static int nvshmemt_libfabric_rma(struct nvshmem_transport *tcurr, int pe, rma_verb_t verb,
                                   rma_memdesc_t *remote, rma_memdesc_t *local,
                                   rma_bytesdesc_t bytesdesc, int qp_index) {
-    return nvshmemt_libfabric_rma_with_hints(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
-                                             nullptr);
+    return nvshmemt_libfabric_rma_scalar<false>(tcurr, pe, verb, remote, local, bytesdesc, qp_index,
+                                                nullptr);
 }
 
 static int nvshmemt_libfabric_gdr_signal(struct nvshmem_transport *transport, int pe,

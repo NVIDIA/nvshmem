@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include "utils_device.h"
+#include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
 #include "non_abi/nvshmemi_region_constants.h"
 #include "non_abi/nvshmemi_region_types.h"
@@ -58,9 +59,24 @@ struct nvshmemi_uint_for_float<double> {
 #ifndef likely
 #define likely(x) (__builtin_expect(!!(x), 1))
 #endif
+#ifndef unlikely
+#define unlikely(x) (__builtin_expect(!!(x), 0))
+#endif
 
-NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE
-    __device__ void check_channel_availability(uint64_t tail_idx) {
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ uint64_t
+nvshmemi_proxy_channel_issue() {
+    return *reinterpret_cast<volatile uint64_t *>(nvshmemi_device_state_d.proxy_channels_issue);
+}
+
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ uint64_t
+nvshmemi_proxy_channel_reserve(uint64_t bytes) {
+    return atomicAdd(
+        reinterpret_cast<unsigned long long *>(nvshmemi_device_state_d.proxy_channels_issue),
+        bytes);
+}
+
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void check_channel_availability(
+    uint64_t tail_idx) {
     uint64_t complete;
     complete = *((volatile uint64_t *)nvshmemi_device_state_d.proxy_channels_complete_local_ptr);
     if ((complete + nvshmemi_device_state_d.proxy_channel_buf_size - 1) < tail_idx) {
@@ -77,8 +93,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE
 }
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_quiet() {
-    uint64_t quiet_issue;
-    quiet_issue = (*(volatile uint64_t *)nvshmemi_device_state_d.proxy_channels_issue);
+    uint64_t quiet_issue = nvshmemi_proxy_channel_issue();
     atomicMax((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_quiet_issue,
               quiet_issue);
 
@@ -92,7 +107,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_qp_quiet(
     uint64_t idx, tail_idx, *req;
     int size = CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES;
 
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
@@ -159,8 +174,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_glo
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void
 nvshmemi_proxy_enforce_consistency_at_target(bool use_membar) {
-    uint64_t cst_issue;
-    cst_issue = (*(volatile uint64_t *)nvshmemi_device_state_d.proxy_channels_issue);
+    uint64_t cst_issue = nvshmemi_proxy_channel_issue();
     atomicMax((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_cst_issue,
               cst_issue);
 
@@ -188,8 +202,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void copy_to_channel(vo
     if (size_with_flags % CHANNEL_ENTRY_BYTES) {
         size_with_flags += CHANNEL_ENTRY_BYTES - (size_with_flags % CHANNEL_ENTRY_BYTES);
     }
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue,
-                    size_with_flags);
+    idx = nvshmemi_proxy_channel_reserve(size_with_flags);
     tail_idx = idx + (size_with_flags - 1);
 
     // flow-control
@@ -241,14 +254,54 @@ nvshmemi_proxy_write_region_metadata(uint64_t idx, const nvshmemi_region_info_t 
     }
 }
 
+NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void
+nvshmemi_proxy_write_region_metadata_slot(uint64_t idx, const nvshmemi_region_info_t *region_info) {
+    size_t slot =
+        (idx & (nvshmemi_device_state_d.proxy_channel_buf_size - 1)) / CHANNEL_ENTRY_BYTES;
+    uint8_t *metadata = static_cast<uint8_t *>(nvshmemi_device_state_d.proxy_channels_buf) +
+                        nvshmemi_device_state_d.proxy_channel_buf_size +
+                        slot * PROXY_REGION_METADATA_BYTES;
+    const uint8_t *src = reinterpret_cast<const uint8_t *>(region_info);
+    int remaining = sizeof(*region_info);
+
+    for (size_t entry = 0; entry < PROXY_REGION_METADATA_ENTRIES; entry++) {
+        channel_bounce_buffer_t bounce = {};
+        int data_bytes =
+            remaining < PROXY_CHANNEL_ENTRY_DATA_BYTES ? remaining : PROXY_CHANNEL_ENTRY_DATA_BYTES;
+        for (int i = 0; i < data_bytes; i++) {
+            bounce.bytes[i + PROXY_CHANNEL_ENTRY_CONTROL_BYTES] = src[i];
+        }
+        uint64_t counter = idx + entry * CHANNEL_ENTRY_BYTES;
+        bounce.bytes[0] = static_cast<char>(
+            !((counter >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1));
+        volatile uint64_t *dest =
+            reinterpret_cast<volatile uint64_t *>(metadata + entry * CHANNEL_ENTRY_BYTES);
+        *dest = bounce.whole_buffer;
+        src += data_bytes;
+        remaining -= data_bytes;
+    }
+}
+
+template <threadgroup_t SCOPE, nvshmemi_region_operation_t REGION_OPERATION>
+NVSHMEMI_STATIC __device__ NVSHMEMI_NOINLINE void nvshmemi_proxy_publish_region_request(
+    uint64_t idx, volatile uint64_t *request, uint64_t request_value) {
+    constexpr uint32_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    nvshmemi_region_info_t region_info =
+        nvshmemi_region_resolve_active_leader<SCOPE>(supported_hints);
+    bool batch_rma_region = (region_info.hints & NVSHMEMI_REGION_HINT_BATCH_RMA) != 0;
+    if (batch_rma_region) {
+        nvshmemi_proxy_write_region_metadata_slot(idx, &region_info);
+        request_value |= static_cast<uint64_t>(PROXY_GROUP_REGION) << 8;
+    }
+    *request = request_value;
+}
+
+template <bool CHECK_REGION, threadgroup_t SCOPE, nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma(
-    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index,
-    const nvshmemi_region_info_t *region_info) {
-    bool batch_rma_region =
-        region_info != nullptr && (region_info->hints & NVSHMEMI_REGION_HINT_BATCH_RMA) != 0;
+    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index) {
     uint64_t idx, tail_idx, *req;
-    int size = batch_rma_region ? PROXY_REGION_DMA_REQ_BYTES : PROXY_DMA_REQ_BYTES;
-    int group_size = PROXY_GROUP_SIZE_SINGLE | (batch_rma_region ? PROXY_GROUP_REGION : 0);
+    constexpr int size = PROXY_DMA_REQ_BYTES;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
     const uint64_t mask_lowest_byte = 0xFFFFFFFFFFFFFF00u;
@@ -263,13 +316,15 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
 
     /* idx is an every increasing counter. Since it is 64 bit integer, practically
     it will not overflow */
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
     check_channel_availability(tail_idx);
 
-    req = (uint64_t *)((uint8_t *)buf_ptr + (idx & (CHANNEL_BUF_SIZE - 1)));
+    uint64_t base_idx = idx;
+    volatile uint64_t *base_request = reinterpret_cast<volatile uint64_t *>(
+        static_cast<uint8_t *>(buf_ptr) + (idx & (CHANNEL_BUF_SIZE - 1)));
     uint64_t curr_flag = !((idx >> nvshmemi_device_state_d.proxy_channel_buf_logsize) & 1);
     /* curr_flag is either 0 or 1. Starting at idx = 0 to idx =
      * nvshmemi_device_state_d.proxy_channel_buf_size - 1, it will be 1, then for next
@@ -282,11 +337,9 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
     uint16_t pe_u16 = pe;
     uint64_t size_u64 = bytes;
 
-    /* base_request_t
-     * 32 | 8 | 8 | 8 | 8
-     * roffset_high | roffset_low | op | group_size | flag */
-    *((volatile uint64_t *)req) =
-        (uint64_t)((roffset << 24) | (op << 16) | (group_size << 8) | curr_flag);
+    /* base_request_t: roffset[39:0] | op[7:0] | group_size[7:0] | flag[7:0] */
+    uint64_t base_request_value = static_cast<uint64_t>((roffset << 24) | (op << 16) |
+                                                        (PROXY_GROUP_SIZE_SINGLE << 8) | curr_flag);
 
     /* put_dma_request_0
      * 56 | 8
@@ -316,9 +369,13 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
     *((volatile uint64_t *)req) = (uint64_t)((static_cast<uint64_t>(qp_index) << 32) |
                                              (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
 
-    if (batch_rma_region) {
-        nvshmemi_proxy_write_region_metadata(idx + CHANNEL_ENTRY_BYTES, region_info);
+    if constexpr (CHECK_REGION) {
+        /* Publish after the payload and any region metadata are ready. */
+        nvshmemi_proxy_publish_region_request<SCOPE, REGION_OPERATION>(base_idx, base_request,
+                                                                       base_request_value);
+        return;
     }
+    *base_request = base_request_value;
 }
 
 /*XXX : Only no const version is used*/
@@ -334,19 +391,27 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_proxy_rma
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    const nvshmemi_region_info_t *region_info = NULL) {
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     if (!bytes) {
         return;
     }
-    transfer_dma(rptr, lptr, bytes, pe, op, qp_index, region_info);
+    transfer_dma<false, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE>(
+        rptr, lptr, bytes, pe, op, qp_index);
+}
+
+template <threadgroup_t SCOPE, nvshmemi_region_operation_t REGION_OPERATION>
+NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_region_rma_nbi(
+    void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op,
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    if (!bytes) {
+        return;
+    }
+    transfer_dma<true, SCOPE, REGION_OPERATION>(rptr, lptr, bytes, pe, op, qp_index);
 }
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_region_end(
     const nvshmemi_region_info_t *region_info) {
-    uint64_t idx = atomicAdd(
-        reinterpret_cast<unsigned long long int *>(nvshmemi_device_state_d.proxy_channels_issue),
-        PROXY_REGION_END_REQ_BYTES);
+    uint64_t idx = nvshmemi_proxy_channel_reserve(PROXY_REGION_END_REQ_BYTES);
     uint64_t tail_idx = idx + PROXY_REGION_END_REQ_BYTES - 1;
     check_channel_availability(tail_idx);
 
@@ -380,7 +445,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
 
     /* idx is an ever increasing counter. Since it is 64 bit integer, practically
     it will not overflow */
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
@@ -576,7 +641,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_inl
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
 
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
@@ -651,7 +716,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void amo(
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
 
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
@@ -800,7 +865,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_fence() {
     uint64_t idx, tail_idx, *req;
     int size = sizeof(uint64_t);
 
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
@@ -826,7 +891,7 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void proxy_fence_qp(
     int size = CHANNEL_ENTRY_BYTES * num_qps + CHANNEL_ENTRY_BYTES;
     uint16_t pe_u16 = pe;
 
-    idx = atomicAdd((unsigned long long int *)nvshmemi_device_state_d.proxy_channels_issue, size);
+    idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
 
     // flow-control
