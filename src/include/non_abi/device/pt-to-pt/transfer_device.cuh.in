@@ -310,7 +310,9 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 #endif
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
         default: {
-            nvshmemi_proxy_region_end(region_info);
+            if (nvshmemi_device_state_d.proxy == NVSHMEMI_PROXY_FULL) {
+                nvshmemi_proxy_region_end(region_info);
+            }
             break;
         }
     }
