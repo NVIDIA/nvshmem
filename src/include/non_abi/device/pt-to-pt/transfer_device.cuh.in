@@ -239,38 +239,52 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 
 TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_PUT_SIGNAL)
 
-template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
+          nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_rma_nbi(
-    void *rptr, void *lptr, size_t bytes, int pe, nvshmemx_qp_handle_t qp_index,
-    const nvshmemi_region_info_t *region_info) {
-    switch (nvshmemi_device_state_d.selected_device_transport) {
+    void *rptr, void *lptr, size_t bytes, int pe, nvshmemx_qp_handle_t qp_index) {
+    nvshmemi_selected_device_transport_t transport =
+        nvshmemi_device_state_d.selected_device_transport;
+    if (likely(transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY)) {
+        if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
+            if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+                nvshmemi_proxy_region_rma_nbi<SCOPE, REGION_OPERATION>(rptr, lptr, bytes, pe,
+                                                                       channel_op, qp_index);
+            } else {
+                nvshmemi_proxy_rma_nbi(rptr, lptr, bytes, pe, channel_op, qp_index);
+            }
+        }
+        return;
+    }
+
+    switch (transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
-            nvshmemi_ibgda_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index, region_info);
+            nvshmemi_ibgda_rma_nbi<SCOPE, channel_op, REGION_OPERATION>(rptr, lptr, bytes, pe,
+                                                                        qp_index);
             break;
 #endif
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_GPUNETIO_GDAKI:
-            nvshmemi_gdaki_rma_nbi<SCOPE, channel_op>(rptr, lptr, bytes, pe, qp_index, region_info);
+            nvshmemi_gdaki_rma_nbi<SCOPE, channel_op, REGION_OPERATION>(rptr, lptr, bytes, pe,
+                                                                        qp_index);
             break;
 #endif
-        case NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY:
-        default: {
-            int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-            if (!myIdx)
-                nvshmemi_proxy_rma_nbi(rptr, lptr, bytes, pe, channel_op, qp_index, region_info);
+        default:
+            assert(false);
             break;
-        }
     }
 }
 
-#define TRANSFER_DECL_RMA_NBI(SCOPE)                                                 \
-    template __device__ void nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>(      \
-        void *rptr, void *lptr, size_t bytes, int pe, nvshmemx_qp_handle_t qp_index, \
-        const nvshmemi_region_info_t *region_info);                                  \
-    template __device__ void nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>(      \
-        void *rptr, void *lptr, size_t bytes, int pe, nvshmemx_qp_handle_t qp_index, \
-        const nvshmemi_region_info_t *region_info);
+#define TRANSFER_DECL_RMA_NBI_OP(SCOPE, OP, REGION_OPERATION)                        \
+    template __device__ void nvshmemi_transfer_rma_nbi<SCOPE, OP, REGION_OPERATION>( \
+        void *rptr, void *lptr, size_t bytes, int pe, nvshmemx_qp_handle_t qp_index);
+
+#define TRANSFER_DECL_RMA_NBI(SCOPE)                                                    \
+    TRANSFER_DECL_RMA_NBI_OP(SCOPE, NVSHMEMI_OP_PUT, NVSHMEMI_REGION_OPERATION_NONE)    \
+    TRANSFER_DECL_RMA_NBI_OP(SCOPE, NVSHMEMI_OP_GET, NVSHMEMI_REGION_OPERATION_NONE)    \
+    TRANSFER_DECL_RMA_NBI_OP(SCOPE, NVSHMEMI_OP_PUT, NVSHMEMI_REGION_OPERATION_NBI_RMA) \
+    TRANSFER_DECL_RMA_NBI_OP(SCOPE, NVSHMEMI_OP_GET, NVSHMEMI_REGION_OPERATION_NBI_RMA)
 
 TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_RMA_NBI)
 

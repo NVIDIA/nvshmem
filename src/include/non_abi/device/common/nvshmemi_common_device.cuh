@@ -1328,6 +1328,27 @@ nvshmemi_g(const T *source, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_
     }
 }
 
+template <threadgroup_t SCOPE, nvshmemi_op_t CHANNEL_OP,
+          nvshmemi_region_operation_t REGION_OPERATION>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_rma_nbi(void *rptr, void *lptr, size_t bytes,
+                                                               int pe,
+                                                               nvshmemx_qp_handle_t qp_index) {
+    if constexpr (REGION_OPERATION == NVSHMEMI_REGION_OPERATION_NONE) {
+        nvshmemi_transfer_rma_nbi<SCOPE, CHANNEL_OP, NVSHMEMI_REGION_OPERATION_NONE>(
+            rptr, lptr, bytes, pe, qp_index);
+    } else {
+        constexpr uint32_t supported_hints =
+            nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+        if (unlikely((nvshmemi_region_get_block_hints() & supported_hints) != 0)) {
+            nvshmemi_transfer_rma_nbi<SCOPE, CHANNEL_OP, REGION_OPERATION>(rptr, lptr, bytes, pe,
+                                                                           qp_index);
+        } else {
+            nvshmemi_transfer_rma_nbi<SCOPE, CHANNEL_OP, NVSHMEMI_REGION_OPERATION_NONE>(
+                rptr, lptr, bytes, pe, qp_index);
+        }
+    }
+}
+
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
@@ -1362,15 +1383,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
-        if (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
-            nvshmemi_region_info_t region_info = nvshmemi_region_resolve<SCOPE, REGION_OPERATION>();
-            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>(
-                (void *)source, (void *)dest, nelems * sizeof(T), pe, qp_index,
-                region_info.region_id ? &region_info : NULL);
-        } else {
-            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
-                                                              nelems * sizeof(T), pe, qp_index);
-        }
+        nvshmemi_rma_nbi<SCOPE, NVSHMEMI_OP_GET, REGION_OPERATION>(
+            (void *)source, (void *)dest, nelems * sizeof(T), pe, qp_index);
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 }
@@ -1465,15 +1479,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
-        if (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
-            nvshmemi_region_info_t region_info = nvshmemi_region_resolve<SCOPE, REGION_OPERATION>();
-            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>(
-                (void *)dest, (void *)source, nelems * sizeof(T), pe, qp_index,
-                region_info.region_id ? &region_info : NULL);
-        } else {
-            nvshmemi_transfer_rma_nbi<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
-                                                              nelems * sizeof(T), pe, qp_index);
-        }
+        nvshmemi_rma_nbi<SCOPE, NVSHMEMI_OP_PUT, REGION_OPERATION>(
+            (void *)dest, (void *)source, nelems * sizeof(T), pe, qp_index);
     }
 }
 

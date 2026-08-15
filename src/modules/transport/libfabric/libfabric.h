@@ -828,11 +828,6 @@ struct nvshmemt_libfabric_state_t {
      * Slot 0 = NVSHMEMX_QP_HOST, slot 1 = proxy. Each slot is SPSC.
      * -1 = no pending batched ops. */
     std::array<int, 2> pending_batch_ep;
-    std::unique_ptr<nvshmemi_region_lifecycle<nvshmemt_libfabric_batch_rma_region,
-                                              NVSHMEM_TRANSPORT_REGION_ROLE_COUNT>>
-        batch_rma_regions;
-    size_t region_host_batch_max_ops = 0;
-    bool disable_implicit_batch_rma = false;
 
     /* Required for staged_amo */
     std::vector<std::unique_ptr<threadSafeOpQueue>> op_queue;
@@ -875,6 +870,13 @@ struct nvshmemt_libfabric_state_t {
     /* Deferred work queue (PR#19): holds signal ops and standalone acks that
      * would otherwise cause recursion during completion processing. */
     nvshmemt_libfabric_deferred_work_queue_t deferred_work_queue;
+
+    /* Keep optional region state after the latency-sensitive scalar RMA state. */
+    std::unique_ptr<nvshmemi_region_lifecycle<nvshmemt_libfabric_batch_rma_region,
+                                              NVSHMEM_TRANSPORT_REGION_ROLE_COUNT>>
+        batch_rma_regions;
+    size_t region_host_batch_max_ops = 0;
+    bool disable_implicit_batch_rma = false;
 };
 
 typedef struct {

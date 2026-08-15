@@ -580,7 +580,7 @@ typedef struct {
     uint64_t *proxy_channel_g_buf_head_ptr; /* next location to be assigned to a thread */
     uint64_t proxy_channel_g_buf_size;      /* Total size of g_buf in bytes */
     uint64_t proxy_channel_g_buf_log_size;  /* Total size of g_buf in bytes */
-    uint64_t *proxy_channels_issue;         /* last byte of the last request */
+    uint64_t *proxy_channels_issue; /* next channel byte; high bit marks active device regions */
     uint64_t *
         proxy_channels_complete; /* shared betwen CPU and GPU threads - only write by CPU thread and
                                       read by GPU threads. This is allocated on the system memory */

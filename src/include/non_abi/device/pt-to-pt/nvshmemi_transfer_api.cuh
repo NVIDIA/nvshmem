@@ -50,11 +50,11 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     void *rptr, void *lptr, size_t bytes, void *sig_addr, uint64_t signal, nvshmemi_amo_t sig_op,
     int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 
-template <threadgroup_t SCOPE, nvshmemi_op_t channel_op>
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    const nvshmemi_region_info_t *region_info = NULL);
+    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 
 template <threadgroup_t SCOPE>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_region_end(

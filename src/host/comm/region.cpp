@@ -59,6 +59,9 @@ uint64_t nvshmemi_region_next_id() {
 }
 }  // namespace
 
+/* Avoid an out-of-line region-state query on the common no-region host RMA path. */
+uint32_t nvshmemi_region_host_active_hints = NVSHMEMX_REGION_HINT_NONE;
+
 bool nvshmemi_region_host_prepare_rma_attrs(nvshmem_transport_op_attrs_t *attrs) {
     if (!region_state.has_hints(NVSHMEMI_REGION_HINT_BATCH_RMA)) {
         return false;
@@ -121,6 +124,7 @@ int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_regio
 
     uint64_t region_id = nvshmemi_region_next_id();
     region_state.start(region_id, hints);
+    nvshmemi_region_host_active_hints = hints;
     *handle = region_id;
 
     TRACE(NVSHMEM_P2P, "Host region start: issuer=%llu region=%llu hints=0x%x",
@@ -150,6 +154,7 @@ int nvshmemx_region_stop(nvshmemx_region_handle_t handle) {
           static_cast<unsigned long long>(region_state.region_id()));
 
     region_state.reset();
+    nvshmemi_region_host_active_hints = NVSHMEMX_REGION_HINT_NONE;
 
     return NVSHMEMX_SUCCESS;
 }
