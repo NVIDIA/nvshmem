@@ -638,9 +638,10 @@ __device__ __forceinline__ void nvshmemi_drain_handle_slot_if_owned(uintptr_t sm
  * threads have synchronized, so that caller must not restrict the drain to
  * its own physical warp. */
 __device__ __forceinline__ void nvshmemi_handle_quiet_all() {
-    if (!nvshmemi_tma_smem_registered()) return;
+    const auto registration = nvshmemi_tma_get_smem_registration();
+    if (!registration.is_valid()) return;
 
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
     for (uint32_t slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
         handle_barrier_t *barrier = nvshmemi_handle_barrier_slot(smem_base, (int)slot);
         if (barrier->has_pending_handle()) {
@@ -653,13 +654,14 @@ __device__ __forceinline__ void nvshmemi_handle_quiet_all() {
  * Owners are physical warp leaders: warp scope uses its physical warp,
  * warpgroup scope uses its first physical warp, and block scope uses warp 0. */
 __device__ __forceinline__ void nvshmemi_handle_quiet_owned() {
-    if (!nvshmemi_tma_smem_registered()) return;
+    const auto registration = nvshmemi_tma_get_smem_registration();
+    if (!registration.is_valid()) return;
 
     uint32_t tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     if ((tid % warpSize) != 0) return;
     uint32_t warp_idx_in_block = tid / warpSize;
 
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
 
     /* Warp and block threadgroups have compact threadgroup indices that match
      * their physical owner-warp mapping.  Block scope is owned by physical
@@ -2125,8 +2127,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_get_wrapper_thread(
  * double-buffering can overlap TMA loads with fabric puts. */
 template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_threadgroup_specialized(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len,
-    CUlogicalEndpointId dest_le_id, bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
+    size_t smem_chunk_size) {
     static_assert(SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK,
                   "specialized handle put requires a multi-warp threadgroup");
     assert((len % CFT_HANDLE_TX_SIZE) == 0);
@@ -2151,7 +2154,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
 
     cuda::std::array<uint8_t *, TMA_COPY_NUM_STAGES> smem_data_buf;
     smem_data_buf[0] =
@@ -2267,7 +2270,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
 
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_use_threadgroup_specialized_handle_path(
-    size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, size_t smem_chunk_size) {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
         return nvshmemi_threadgroup_size<SCOPE>() >= 2 * warpSize &&
                is_thrdgrp_smem_rsc_available<SCOPE>(smem_chunk_size, 2 * TMA_COPY_NUM_STAGES);
@@ -2285,8 +2288,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_use_threadgroup_specializ
  */
 template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generic(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len,
-    CUlogicalEndpointId dest_le_id, bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
+    size_t smem_chunk_size) {
     /* Threadgroups share the per-block TMA SMEM region and handle barriers.
      * Resource availability is checked before using the selected threadgroup.
      */
@@ -2309,7 +2313,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
 
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
     // Copy-style handle operations allocate one SMEM/barrier pair per calling threadgroup.
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
@@ -2386,44 +2390,49 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
 
 template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len,
-    CUlogicalEndpointId dest_le_id, bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
+    size_t smem_chunk_size) {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        if (nvshmemi_use_threadgroup_specialized_handle_path<SCOPE>(smem_chunk_size)) {
+        if (nvshmemi_use_threadgroup_specialized_handle_path<SCOPE>(registration,
+                                                                    smem_chunk_size)) {
             nvshmemi_handle_put_TX_size_threadgroup_specialized<cft_handle_kind, SCOPE>(
-                dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
+                registration, dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
             return;
         }
     }
 
-    nvshmemi_handle_put_TX_size_generic<cft_handle_kind, SCOPE>(dst, src, len, dest_le_id,
-                                                                is_blocking, smem_chunk_size);
+    nvshmemi_handle_put_TX_size_generic<cft_handle_kind, SCOPE>(
+        registration, dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
 }
 
 template <>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void
 nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Unicast, NVSHMEMI_THREADGROUP_WARP>(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len,
-    CUlogicalEndpointId dest_le_id, bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
+    size_t smem_chunk_size) {
     nvshmemi_handle_put_TX_size_generic<le_fabric_handle_kind::Unicast, NVSHMEMI_THREADGROUP_WARP>(
-        dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
+        registration, dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
 }
 
 template <>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void
 nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Multicast, NVSHMEMI_THREADGROUP_WARP>(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len,
-    CUlogicalEndpointId dest_le_id, bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
+    size_t smem_chunk_size) {
     nvshmemi_handle_put_TX_size_generic<le_fabric_handle_kind::Multicast,
-                                        NVSHMEMI_THREADGROUP_WARP>(dst, src, len, dest_le_id,
-                                                                   is_blocking, smem_chunk_size);
+                                        NVSHMEMI_THREADGROUP_WARP>(
+        registration, dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
 }
 
 // Function used for 1 single sub 16B data transfer
 template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len,
-    CUlogicalEndpointId dest_le_id, bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
+    size_t smem_chunk_size) {
     /* Threadgroups share the per-block TMA SMEM region and handle barriers.
      * Resource availability is checked before using the selected threadgroup.
      */
@@ -2445,7 +2454,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
     // Effectively group ID in scope (e.g., warpID if scope is warp, blockID if scope is block)
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
     // Copy data to shared memory using threads
@@ -2487,8 +2496,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
  *
  */
 template <typename T, int SMEM_CHUNK_SIZE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *__restrict__ dst,
-                                                                         const T src, int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst, const T src,
+    int pe) {
     // This scalar p() path stages one payload in the first 16B of the common
     // per-thread handle slot. Larger payloads should use the regular handle put path.
     static_assert(sizeof(T) <= CFT_HANDLE_TX_SIZE, "CFT handle p supports payloads up to 16B");
@@ -2500,7 +2510,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     int lane_idx = thrd_idx_in_blk % warpSize;
     int leader_lane = __ffs(mask) - 1;
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
     int warp_idx_in_block = thrd_idx_in_blk / warpSize;
 
     /*
@@ -2602,8 +2612,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(void *_
  * to local global memory. */
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_generic(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len, int pe,
-    [[maybe_unused]] bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, int pe, [[maybe_unused]] bool is_blocking,
+    size_t smem_chunk_size) {
     /* Threadgroups share the per-block TMA SMEM region and handle barriers.
      * Resource availability is checked before using the selected threadgroup.
      */
@@ -2620,7 +2631,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
 
     auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
@@ -2718,8 +2729,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
  * TMA drains. */
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threadgroup_specialized(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len, int pe,
-    [[maybe_unused]] bool is_blocking, size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, int pe, [[maybe_unused]] bool is_blocking,
+    size_t smem_chunk_size) {
     static_assert(SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK,
                   "specialized handle get requires a multi-warp threadgroup");
     assert((len % CFT_HANDLE_TX_SIZE) == 0);
@@ -2740,7 +2752,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
     uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
-    uintptr_t smem_base = nvshmemi_tma_smem_base();
+    uintptr_t smem_base = registration.base;
 
     cuda::std::array<uint8_t *, TMA_COPY_NUM_STAGES> smem_data_buf;
     smem_data_buf[0] =
@@ -2871,27 +2883,28 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
 
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated(
-    void *__restrict__ dst, const void *__restrict__ src, size_t len, int pe, bool is_blocking,
-    size_t smem_chunk_size) {
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, int pe, bool is_blocking, size_t smem_chunk_size) {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        if (nvshmemi_use_threadgroup_specialized_handle_path<SCOPE>(smem_chunk_size)) {
+        if (nvshmemi_use_threadgroup_specialized_handle_path<SCOPE>(registration,
+                                                                    smem_chunk_size)) {
             nvshmemi_handle_get_emulated_threadgroup_specialized<SCOPE>(
-                dst, src, len, pe, is_blocking, smem_chunk_size);
+                registration, dst, src, len, pe, is_blocking, smem_chunk_size);
             return;
         }
     }
 
-    nvshmemi_handle_get_emulated_generic<SCOPE>(dst, src, len, pe, is_blocking, smem_chunk_size);
+    nvshmemi_handle_get_emulated_generic<SCOPE>(registration, dst, src, len, pe, is_blocking,
+                                                smem_chunk_size);
 }
 
 template <>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void
-nvshmemi_handle_get_emulated<NVSHMEMI_THREADGROUP_WARP>(void *__restrict__ dst,
-                                                        const void *__restrict__ src, size_t len,
-                                                        int pe, bool is_blocking,
-                                                        size_t smem_chunk_size) {
-    nvshmemi_handle_get_emulated_generic<NVSHMEMI_THREADGROUP_WARP>(dst, src, len, pe, is_blocking,
-                                                                    smem_chunk_size);
+nvshmemi_handle_get_emulated<NVSHMEMI_THREADGROUP_WARP>(
+    const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
+    const void *__restrict__ src, size_t len, int pe, bool is_blocking, size_t smem_chunk_size) {
+    nvshmemi_handle_get_emulated_generic<NVSHMEMI_THREADGROUP_WARP>(registration, dst, src, len, pe,
+                                                                    is_blocking, smem_chunk_size);
 }
 
 /* Handle PUT is supported for non-thread scopes.  The destination address must
@@ -2911,24 +2924,26 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *sr
         assert(nvshmemi_ld_and_check_valid_le_id(pe));
         CUlogicalEndpointId dest_le_id = nvshmemi_ld_and_get_le_id((pe));
         size_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
+        const auto registration = nvshmemi_tma_get_smem_registration();
 
         uint32_t num_threadgroups =
             NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
                                        nvshmemi_threadgroup_size<SCOPE>());
         size_t smem_chunk_size = nvshmemi_tma_align_down_16(
-            nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) / num_threadgroups);
+            nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES) / num_threadgroups);
 
         if (adjusted_size) {
             nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Unicast, SCOPE>(
-                dst, src, adjusted_size, dest_le_id, is_blocking, smem_chunk_size);
+                registration, dst, src, adjusted_size, dest_le_id, is_blocking, smem_chunk_size);
         }
 
         size_t remaining_size = len - adjusted_size;
         if (remaining_size) {
             nvshmemi_threadgroup_sync<SCOPE>();
             nvshmemi_handle_put_sub_TX_size<le_fabric_handle_kind::Unicast, SCOPE>(
-                nvshmemi_ptr_add(dst, adjusted_size), nvshmemi_ptr_add(src, adjusted_size),
-                remaining_size, dest_le_id, is_blocking, smem_chunk_size);
+                registration, nvshmemi_ptr_add(dst, adjusted_size),
+                nvshmemi_ptr_add(src, adjusted_size), remaining_size, dest_le_id, is_blocking,
+                smem_chunk_size);
         }
     }
 }
@@ -2941,7 +2956,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p(void *__restrict
         return;
     }
 
-    nvshmemi_handle_p_emulated<T, NVSHMEMI_SMEM_BUF_SIZE>(dst, src, pe);
+    const auto registration = nvshmemi_tma_get_smem_registration();
+    nvshmemi_handle_p_emulated<T, NVSHMEMI_SMEM_BUF_SIZE>(registration, dst, src, pe);
 }
 
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET
@@ -3129,14 +3145,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *sr
 
         assert(nvshmemi_is_addr_offset_aligned(src, CFT_HANDLE_TX_SIZE));
         assert(nvshmemi_ld_and_check_valid_le_id(pe));
+        const auto registration = nvshmemi_tma_get_smem_registration();
 
         uint32_t num_threadgroups =
             NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
                                        nvshmemi_threadgroup_size<SCOPE>());
         size_t smem_chunk_size = nvshmemi_tma_align_down_16(
-            nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) / num_threadgroups);
+            nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES) / num_threadgroups);
 
-        nvshmemi_handle_get_emulated<SCOPE>(dst, src, len, pe, is_blocking, smem_chunk_size);
+        nvshmemi_handle_get_emulated<SCOPE>(registration, dst, src, len, pe, is_blocking,
+                                            smem_chunk_size);
 #else
         assert(0 && "nvshmemi_handle_get: not supported");
 #endif
@@ -3153,11 +3171,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
     } else {
         // address must be aligned to CFT_HANDLE_TX_SIZE
         assert(nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE));
+        const auto registration = nvshmemi_tma_get_smem_registration();
 
         size_t smem_chunk_size;
         if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
             // Preserve the block-specialized path's full-stage allocation.
-            smem_chunk_size = nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES);
+            smem_chunk_size = nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES);
         } else {
             /* Threadgroups in a block share each SMEM stage.  Give every calling
              * threadgroup the largest non-overlapping, 16B-aligned chunk, matching
@@ -3166,7 +3185,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
                 NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
                                            nvshmemi_threadgroup_size<SCOPE>());
             smem_chunk_size = nvshmemi_tma_align_down_16(
-                nvshmemi_smem_data_buf_size(TMA_COPY_NUM_STAGES) / num_threadgroups);
+                nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES) / num_threadgroups);
         }
 
         // round low to nearest multiple of CFT_HANDLE_TX_SIZE
@@ -3175,15 +3194,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
         CUlogicalEndpointId mc_le_id = PARSE_LE_ID(team->mc_leid_with_flag);
         if (adjusted_size) {
             nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Multicast, SCOPE>(
-                dst, src, adjusted_size, mc_le_id, true, smem_chunk_size);
+                registration, dst, src, adjusted_size, mc_le_id, true, smem_chunk_size);
         }
 
         len -= adjusted_size;
         if (len) {
             nvshmemi_threadgroup_sync<SCOPE>();
             nvshmemi_handle_put_sub_TX_size<le_fabric_handle_kind::Multicast, SCOPE>(
-                nvshmemi_ptr_add(dst, adjusted_size), nvshmemi_ptr_add(src, adjusted_size), len,
-                mc_le_id, true, smem_chunk_size);
+                registration, nvshmemi_ptr_add(dst, adjusted_size),
+                nvshmemi_ptr_add(src, adjusted_size), len, mc_le_id, true, smem_chunk_size);
             len = 0;
         }
     }
