@@ -2983,8 +2983,9 @@ struct nvshmemi_fabric_atomic_type<le_fabric_atomic_op::Add, T> {
 };
 
 template <le_fabric_atomic_op Op, typename T>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_once(T *__restrict__ dst, T value,
-                                                                       T compare, int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
+nvshmemi_handle_atomic_once(const nvshmemi_tma_smem_registration_t &registration,
+                            T *__restrict__ dst, T value, T compare, int pe) {
     const unsigned active_mask = __activemask();
     const uint32_t active_threads = __popc(active_mask);
     const uint32_t thread_idx =
@@ -2993,7 +2994,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_once(T *__rest
     const uint32_t leader_lane = __ffs(active_mask) - 1;
     const uint32_t warp_idx_in_block = thread_idx / warpSize;
 
-    const uintptr_t smem_base = nvshmemi_tma_smem_base();
+    const uintptr_t smem_base = registration.base;
     /* fabric.try_atom always operates on a 16B destination block. Its regular
      * source occupies 16B, while CAS requires a 32B-aligned 32B source whose
      * lower and upper halves contain the compare and swap blocks respectively.
@@ -3071,24 +3072,26 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_atomic_bits_equal(T lhs, 
 }
 
 template <typename T>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_swap_impl(T *__restrict__ dst,
-                                                                            T value, int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_swap_impl(
+    const nvshmemi_tma_smem_registration_t &registration, T *__restrict__ dst, T value, int pe) {
     T compare{};
     while (true) {
-        T old = nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(dst, value, compare, pe);
+        T old = nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(registration, dst, value,
+                                                                      compare, pe);
         if (nvshmemi_atomic_bits_equal(old, compare)) return old;
         compare = old;
     }
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE __half
-nvshmemi_handle_half_atomic_add_impl(__half *__restrict__ dst, __half value, int pe) {
+nvshmemi_handle_half_atomic_add_impl(const nvshmemi_tma_smem_registration_t &registration,
+                                     __half *__restrict__ dst, __half value, int pe) {
     /* Handle atomics require dst to be 16B-aligned, so the scalar half is the
      * low lane of this word. Use bitwise word operations to keep the adjacent
      * half unchanged, including negative zero and NaN payloads. */
     uint32_t *word = reinterpret_cast<uint32_t *>(dst);
-    uint32_t expected =
-        nvshmemi_handle_atomic_once<le_fabric_atomic_op::Or>(word, uint32_t{0}, uint32_t{0}, pe);
+    uint32_t expected = nvshmemi_handle_atomic_once<le_fabric_atomic_op::Or>(
+        registration, word, uint32_t{0}, uint32_t{0}, pe);
     const __half_raw value_raw = static_cast<__half_raw>(value);
 
     while (true) {
@@ -3096,38 +3099,43 @@ nvshmemi_handle_half_atomic_add_impl(__half *__restrict__ dst, __half value, int
         const __half new_value = __hadd(__half(old_raw), __half(value_raw));
         const uint32_t desired =
             (expected & 0xffff0000U) | static_cast<uint32_t>(static_cast<__half_raw>(new_value).x);
-        const uint32_t observed =
-            nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(word, desired, expected, pe);
+        const uint32_t observed = nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(
+            registration, word, desired, expected, pe);
         if (observed == expected) return __half(old_raw);
         expected = observed;
     }
 }
 
 template <typename T, nvshmemi_amo_t Amo>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_fetch_impl(T *__restrict__ dst,
-                                                                             T value, T compare,
-                                                                             int pe) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
+nvshmemi_handle_atomic_fetch_impl(const nvshmemi_tma_smem_registration_t &registration,
+                                  T *__restrict__ dst, T value, T compare, int pe) {
     if constexpr (Amo == NVSHMEMI_AMO_ADD || Amo == NVSHMEMI_AMO_FETCH_ADD ||
                   Amo == NVSHMEMI_AMO_INC || Amo == NVSHMEMI_AMO_FETCH_INC ||
                   Amo == NVSHMEMI_AMO_SIGNAL_ADD) {
         if constexpr (std::is_same_v<T, __half>) {
-            return nvshmemi_handle_half_atomic_add_impl(dst, value, pe);
+            return nvshmemi_handle_half_atomic_add_impl(registration, dst, value, pe);
         } else {
-            return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Add>(dst, value, T{}, pe);
+            return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Add>(registration, dst, value,
+                                                                         T{}, pe);
         }
     } else if constexpr (Amo == NVSHMEMI_AMO_AND || Amo == NVSHMEMI_AMO_FETCH_AND) {
-        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::And>(dst, value, T{}, pe);
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::And>(registration, dst, value, T{},
+                                                                     pe);
     } else if constexpr (Amo == NVSHMEMI_AMO_OR || Amo == NVSHMEMI_AMO_FETCH_OR ||
                          Amo == NVSHMEMI_AMO_FETCH) {
-        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Or>(dst, value, T{}, pe);
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Or>(registration, dst, value, T{},
+                                                                    pe);
     } else if constexpr (Amo == NVSHMEMI_AMO_XOR || Amo == NVSHMEMI_AMO_FETCH_XOR) {
-        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Xor>(dst, value, T{}, pe);
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Xor>(registration, dst, value, T{},
+                                                                     pe);
     } else if constexpr (Amo == NVSHMEMI_AMO_COMPARE_SWAP) {
-        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(dst, value, compare, pe);
+        return nvshmemi_handle_atomic_once<le_fabric_atomic_op::Cas>(registration, dst, value,
+                                                                     compare, pe);
     } else {
         static_assert(Amo == NVSHMEMI_AMO_SWAP || Amo == NVSHMEMI_AMO_SET,
                       "unsupported fabric atomic operation");
-        return nvshmemi_handle_atomic_swap_impl(dst, value, pe);
+        return nvshmemi_handle_atomic_swap_impl(registration, dst, value, pe);
     }
 }
 #endif
@@ -3239,6 +3247,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_can_use_handle_atomic(T *
         return nvshmemi_is_le_atomic_implemented(pe, target);
     }
 #else
+    (void)target;
+    (void)pe;
     return false;
 #endif
 }
@@ -3248,7 +3258,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_fetch(T *targe
                                                                         T compare, int pe) {
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     assert((nvshmemi_handle_atomic_is_supported<T, Amo>()));
-    return nvshmemi_handle_atomic_fetch_impl<T, Amo>(target, value, compare, pe);
+    const auto registration = nvshmemi_tma_get_smem_registration();
+    return nvshmemi_handle_atomic_fetch_impl<T, Amo>(registration, target, value, compare, pe);
 #else
     /* Compile-only stub. nvshmemi_can_use_handle_atomic() returns false under
      * the same feature gate, so normal dispatch cannot execute this path. */
@@ -3264,7 +3275,8 @@ template <typename T, nvshmemi_amo_t Amo>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_atomic_nonfetch(T *target, T value,
                                                                               int pe) {
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    (void)nvshmemi_handle_atomic_fetch_impl<T, Amo>(target, value, T{}, pe);
+    const auto registration = nvshmemi_tma_get_smem_registration();
+    (void)nvshmemi_handle_atomic_fetch_impl<T, Amo>(registration, target, value, T{}, pe);
 #else
     /* Compile-only stub; see nvshmemi_handle_atomic_fetch() above. */
     (void)target;
