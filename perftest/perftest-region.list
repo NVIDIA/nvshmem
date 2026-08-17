@@ -1,4 +1,5 @@
 /host/pt-to-pt/nbi_issue_rate
+/host/pt-to-pt/halo_exchange_rate
 /host/pt-to-pt/region_nbi_rate
 /device/pt-to-pt/shmem_nbi_issue_rate
 /device/pt-to-pt/shmem_region_nbi_rate

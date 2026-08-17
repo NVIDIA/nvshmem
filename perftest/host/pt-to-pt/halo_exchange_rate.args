@@ -1,0 +1,1 @@
+-n 1K -w 100 -b 8 -e 256 --region_ops 64 --repetitions 5
