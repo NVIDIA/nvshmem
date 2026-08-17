@@ -9,7 +9,7 @@
 
 #ifndef NVSHMEMI_NOINLINE
 #if defined(__clang_llvm_bitcode_lib__)
-#define NVSHMEMI_NOINLINE __attribute__((__noinline__))
+#define NVSHMEMI_NOINLINE __attribute__((noinline))
 #else
 #define NVSHMEMI_NOINLINE __noinline__
 #endif
