@@ -289,6 +289,7 @@ int main(int argc, char *argv[]) {
 
     if (npes < 2 || (npes & (npes - 1)) != 0) {
         fprintf(stderr, "This test requires a power-of-two number of processes (>= 2)\n");
+        return_code = 1;
         goto finalize;
     }
 
@@ -327,11 +328,13 @@ int main(int argc, char *argv[]) {
     if (num_locality_domains < 2) {
         fprintf(stderr, "PE %d: need >= 2 locality domains for this test, found %d\n", mype,
                 num_locality_domains);
+        return_code = 1;
         goto finalize;
     }
     if (min_size < num_locality_domains * sizeof(double)) {
         fprintf(stderr, "PE %d: min_size needs to be at least %zu for this test, found %zu\n", mype,
                 (size_t)num_locality_domains * sizeof(double), min_size);
+        return_code = 1;
         goto finalize;
     }
 
@@ -406,7 +409,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (!configure_bw_mode(&bw_fn, &bw_tma_fn)) goto finalize;
+    if (!configure_bw_mode(&bw_fn, &bw_tma_fn)) {
+        return_code = 1;
+        goto finalize;
+    }
 
     /* Register scratch smem for NVSHMEM's block-scope global-to-global TMA path.
        Requires NVSHMEM_TMA_POLICY=ENABLE, sm_90+, and at least two full warps;
@@ -419,6 +425,7 @@ int main(int argc, char *argv[]) {
                     "Localized global-to-global TMA requires at least 64 threads per CTA "
                     "(requested %d)\n",
                     max_threads);
+            return_code = 1;
             goto finalize;
         }
         smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
@@ -524,6 +531,7 @@ int main(int argc, char *argv[]) {
                         "PE %d: nvshmemx_buffer_register_symmetric failed "
                         "for locality domain %d\n",
                         mype, n);
+                return_code = 1;
                 goto finalize;
             }
             CUDA_CHECK(cudaMemset(data_d[n], 0, alloc_size));
