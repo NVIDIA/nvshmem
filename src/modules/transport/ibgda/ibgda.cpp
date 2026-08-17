@@ -436,10 +436,10 @@ static int ibgda_parse_nic_handler_request(ibgda_nic_handler_t *out_loc, const c
 
     if (loc == IBGDA_NIC_HANDLER_CPU_MAPPING && !use_gpu_cpu_mapping) {
         status = NVSHMEMX_ERROR_NOT_SUPPORTED;
-        NVSHMEMI_ERROR_JMP(
-            status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
-            "NVSHMEM_IBGDA_NIC_HANDLER=cpu requires a GPU CPU mapping backend.\n"
-            "please use one of NVSHMEM_IBGDA_NIC_HANDLER=auto/gpu/cpu_host_memory instead.\n");
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
+                           "NVSHMEM_IBGDA_NIC_HANDLER=cpu requires a GPU CPU mapping backend.\n"
+                           "Enable GDRCopy or the internal CUDA DMA-BUF backend, or use one of "
+                           "NVSHMEM_IBGDA_NIC_HANDLER=auto/gpu/cpu_host_memory instead.\n");
     }
 
     if (status == 0) {
@@ -1058,8 +1058,10 @@ static int ibgda_gpu_mem_alloc(struct ibgda_mem_object **pmobject, size_t size, 
         } else
 #endif
         {
-            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
-                               "host_mapping requires a GPU CPU mapping backend\n");
+            NVSHMEMI_ERROR_JMP(
+                status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
+                "IBGDA host mapping requires a GPU CPU mapping backend. Enable GDRCopy or the "
+                "internal CUDA DMA-BUF backend.\n");
         }
     }
 

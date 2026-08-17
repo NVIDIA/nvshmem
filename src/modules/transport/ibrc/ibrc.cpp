@@ -1580,7 +1580,11 @@ int nvshmemt_ibrc_amo(struct nvshmem_transport *tcurr, int pe, void * /*curetptr
         }
     }
 
-    NVSHMEMI_ERROR_EXIT("RMA/AMO verb %d not implemented\n", verb.desc);
+    NVSHMEMI_ERROR_JMP(
+        status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
+        "IBRC remote atomic verb %d with element size %d is unsupported without a GPU CPU "
+        "mapping. Enable GDRCopy or the internal CUDA DMA-BUF backend.\n",
+        verb.desc, bytesdesc.elembytes);
 
 post_op:
     status = ibv_post_send(ep->qp, sr, bad_sr);
