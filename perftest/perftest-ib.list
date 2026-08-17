@@ -17,6 +17,7 @@
 /device/coll/reduction_latency
 /device/coll/sync_latency
 /host/pt-to-pt/bw
+/host/pt-to-pt/halo_exchange_rate
 /host/pt-to-pt/latency
 /host/pt-to-pt/stream_latency
 /host/pt-to-pt/nbi_issue_rate

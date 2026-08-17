@@ -1,4 +1,5 @@
 nvshmem_add_perftest(bw.cpp)
+nvshmem_add_perftest(halo_exchange_rate.cpp)
 nvshmem_add_perftest(latency.cpp)
 nvshmem_add_perftest(nbi_issue_rate.cpp)
 nvshmem_add_perftest(region_nbi_rate.cpp)
