@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -907,7 +907,8 @@ int nvshmemt_ucx_local_amo(struct nvshmem_transport *transport, int pe, void * /
     }
 #endif
     NVSHMEMI_ERROR_PRINT(
-        "AMO %d not supported with the current configuration (GPU CPU mapping disabled)\n",
+        "UCX atomic verb %d is unsupported without a GPU CPU mapping. Enable GDRCopy or the "
+        "internal CUDA DMA-BUF backend.\n",
         verb.desc);
     return NVSHMEMX_ERROR_INTERNAL;
 }
@@ -1085,7 +1086,8 @@ fetch_atomic:
     }
 #endif
     NVSHMEMI_ERROR_PRINT(
-        "AMO %d not supported with the current configuration (GPU CPU mapping disabled)\n",
+        "UCX atomic verb %d is unsupported without a GPU CPU mapping. Enable GDRCopy or the "
+        "internal CUDA DMA-BUF backend.\n",
         verb.desc);
     return NVSHMEMX_ERROR_INTERNAL;
 }

@@ -166,9 +166,11 @@ int libfabric_configure_gpu_cpu_mapping(nvshmemt_libfabric_state_t *libfabric_st
         INFO(libfabric_state->log_level,
              "Coherent platform detected; using a forced PCIe GPU CPU mapping.");
     } else if (libfabric_state->use_staged_atomics) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                           "Coherent platform with libfabric staged atomics requires a GPU CPU "
-                           "mapping backend with forced PCIe support.\n");
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INTERNAL, out,
+            "Coherent platform with libfabric staged atomics requires a GPU CPU mapping backend "
+            "with forced PCIe support. Use a compatible GDRCopy library or the internal CUDA "
+            "DMA-BUF backend.\n");
     } else {
         INFO(libfabric_state->log_level,
              "Coherent platform detected but forced PCIe mapping is unavailable; continuing "
@@ -2572,7 +2574,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
             {
                 NVSHMEMI_ERROR_PRINT(
                     "GPU CPU mapping support is unavailable. Unable to register GPU memory "
-                    "handle info.");
+                    "handle info. Enable GDRCopy or the internal CUDA DMA-BUF backend.");
                 status = NVSHMEMX_ERROR_INVALID_VALUE;
                 goto out;
             }
@@ -3411,9 +3413,11 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     }
 #else
     if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                           "EFA Provider requires GPU CPU mapping support, but it was disabled"
-                           " at compile time.\n");
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "EFA provider requires GPU CPU mapping support, but it was disabled at compile time. "
+            "Rebuild with NVSHMEM_USE_GDRCOPY=ON to enable GDRCopy or the internal CUDA DMA-BUF "
+            "backend.\n");
     }
 #endif
 
