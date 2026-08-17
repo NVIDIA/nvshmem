@@ -278,6 +278,7 @@ int main(int argc, char *argv[]) {
 
     if (npes < 2 || (npes & (npes - 1)) != 0) {
         fprintf(stderr, "This test requires a power-of-two number of processes (>= 2)\n");
+        exit_status = 1;
         goto finalize;
     }
 
@@ -285,10 +286,16 @@ int main(int argc, char *argv[]) {
 
     switch (smem_mode) {
         case SMEMToggle::ENABLE:
-            if (!configure_bw_mode<SMEMToggle::ENABLE>(&bw_fn, &smem_size)) goto finalize;
+            if (!configure_bw_mode<SMEMToggle::ENABLE>(&bw_fn, &smem_size)) {
+                exit_status = 1;
+                goto finalize;
+            }
             break;
         case SMEMToggle::DISABLE:
-            if (!configure_bw_mode<SMEMToggle::DISABLE>(&bw_fn, &smem_size)) goto finalize;
+            if (!configure_bw_mode<SMEMToggle::DISABLE>(&bw_fn, &smem_size)) {
+                exit_status = 1;
+                goto finalize;
+            }
             break;
     }
 
@@ -370,6 +377,7 @@ int main(int argc, char *argv[]) {
                 if (status != 0) {
                     fprintf(stderr, "nvshmemx_collective_launch_attr (warmup) failed: %d\n",
                             status);
+                    exit_status = status;
                     goto finalize;
                 }
             }
@@ -388,6 +396,7 @@ int main(int argc, char *argv[]) {
                     if (status != 0) {
                         fprintf(stderr, "nvshmemx_collective_launch_attr (timed) failed: %d\n",
                                 status);
+                        exit_status = status;
                         goto finalize;
                     }
                 }
