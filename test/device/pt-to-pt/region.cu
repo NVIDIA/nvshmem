@@ -20,6 +20,7 @@ constexpr int TOTAL_ELEMS = NUM_KERNELS * ELEMS_PER_KERNEL;
 constexpr int WARP_CHUNK = 31;
 constexpr int PATTERN_SCALE = 100000;
 constexpr int SCOPE_TEST_ELEMS = THREADS_PER_BLOCK;
+constexpr int REGION_LIFECYCLE_RACE_ITERS = 1024;
 
 __device__ int flat_thread_id() {
     return threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
@@ -204,6 +205,31 @@ __global__ void region_block_stop_only_kernel(int *source, int *recv, int *get_r
     nvshmem_quiet();
 }
 
+__global__ void region_lifecycle_race_kernel(int *status) {
+    nvshmemx_region_attrs_t attrs = NVSHMEMX_REGION_ATTRS_INITIALIZER;
+    attrs.hints = NVSHMEMX_REGION_HINT_BATCH_RMA;
+
+    if (blockIdx.x == 0) {
+        for (int i = 0; i < REGION_LIFECYCLE_RACE_ITERS; i++) {
+            nvshmemx_qp_quiet_block(NVSHMEMX_PE_ALL, nullptr, NVSHMEMX_QP_ALL);
+        }
+        return;
+    }
+
+    for (int i = 0; i < REGION_LIFECYCLE_RACE_ITERS; i++) {
+        nvshmemx_region_handle_t region = 0;
+        int rc = nvshmemx_region_start_block(&region, &attrs);
+        if (rc != NVSHMEMX_SUCCESS) {
+            record_error(status, 50);
+        }
+        __nanosleep(100);
+        rc = nvshmemx_region_stop_block(region);
+        if (rc != NVSHMEMX_SUCCESS) {
+            record_error(status, 51);
+        }
+    }
+}
+
 static int check_device_status(int *status_d, const char *name) {
     int status = 0;
     CUDA_CHECK(cudaMemcpy(&status, status_d, sizeof(int), cudaMemcpyDeviceToHost));
@@ -277,6 +303,12 @@ int main(int argc, char **argv) {
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     status |= check_device_status(status_d, "invalid region arguments");
+
+    CUDA_CHECK(cudaMemset(status_d, 0, sizeof(int)));
+    region_lifecycle_race_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK>>>(status_d);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    status |= check_device_status(status_d, "concurrent region lifecycle");
     nvshmem_barrier_all();
 
     CUDA_CHECK(cudaStreamCreateWithFlags(&streams[0], cudaStreamNonBlocking));

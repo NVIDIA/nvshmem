@@ -89,7 +89,10 @@ nvshmemi_transfer_submit_active_region_slow();
 
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE bool nvshmemi_transfer_submit_active_region() {
-    return nvshmemi_region_any_active() && nvshmemi_transfer_submit_active_region_slow<SCOPE>();
+    /* Region start/stop publish this block-local value collectively, so every member of a warp or
+     * block takes the same branch into the threadgroup barrier in the slow path. */
+    return (nvshmemi_region_get_block_hints() & NVSHMEMI_REGION_SUPPORTED_HINTS) != 0 &&
+           nvshmemi_transfer_submit_active_region_slow<SCOPE>();
 }
 
 __device__ NVSHMEMI_TRANSFER_INLINE void nvshmemi_transfer_syncapi_update_mem() {
