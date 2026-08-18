@@ -27,6 +27,7 @@
 #include "internal/host/nvmlwrap.h"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmem_internal.h"
+#include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "internal/host/scope_guard.h"
 #include "internal/host_transport/region.hpp"
@@ -1605,6 +1606,7 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         status = cudaDeviceSynchronize();
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Teams cleanup device synchronization failed \n");
+        nvshmemi_region_host_reset();
 
         /* barrier to ensure all previous ops are complete */
         nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);

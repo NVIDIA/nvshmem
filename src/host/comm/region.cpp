@@ -106,6 +106,11 @@ int nvshmemi_region_host_flush_active() {
     return status;
 }
 
+void nvshmemi_region_host_reset() {
+    region_state.reset();
+    nvshmemi_region_host_active_hints = NVSHMEMX_REGION_HINT_NONE;
+}
+
 int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_region_attrs_t *attrs) {
     NVTX_FUNC_RANGE_IN_GROUP(RMA_NONBLOCKING);
     NVSHMEMI_CHECK_INIT_STATUS();
@@ -153,8 +158,7 @@ int nvshmemx_region_stop(nvshmemx_region_handle_t handle) {
           static_cast<unsigned long long>(nvshmemi_region_host_issuer_id),
           static_cast<unsigned long long>(region_state.region_id()));
 
-    region_state.reset();
-    nvshmemi_region_host_active_hints = NVSHMEMX_REGION_HINT_NONE;
+    nvshmemi_region_host_reset();
 
     return NVSHMEMX_SUCCESS;
 }
