@@ -11,6 +11,7 @@ nvshmem_add_test(nvrtc_numba_ltoir.cpp)
 nvshmem_add_test(nvshmemx_init_status.cpp)
 nvshmem_add_test(static_init.cpp)
 nvshmem_add_test(init_loop.cpp)
+nvshmem_add_test(region_reinit.cpp)
 nvshmem_add_test(global_exit.cpp)
 nvshmem_add_test(nvshmem_team_shared_init.cpp)
 

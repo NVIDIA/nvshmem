@@ -17,5 +17,6 @@ bool nvshmemi_region_host_prepare_rma_attrs(nvshmem_transport_op_attrs_t *attrs)
 int nvshmemi_region_flush(struct nvshmemi_state_dec *state, nvshmem_transport_region_role_t role,
                           uint64_t issuer_id, uint64_t region_id);
 int nvshmemi_region_host_flush_active();
+void nvshmemi_region_host_reset();
 
 #endif
