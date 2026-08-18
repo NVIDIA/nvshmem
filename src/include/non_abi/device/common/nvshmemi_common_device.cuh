@@ -1339,7 +1339,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_rma_nbi(void *rptr, void 
     } else {
         constexpr uint32_t supported_hints =
             nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
-        if (unlikely((nvshmemi_region_get_block_hints() & supported_hints) != 0)) {
+        if ((nvshmemi_region_get_block_hints() & supported_hints) != 0) {
             nvshmemi_transfer_rma_nbi<SCOPE, CHANNEL_OP, REGION_OPERATION>(rptr, lptr, bytes, pe,
                                                                            qp_index);
         } else {
