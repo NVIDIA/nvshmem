@@ -36,6 +36,12 @@ We welcome contributions in the following areas:
 - **Documentation**: Improvements to README, comments, or usage examples
 - **Test coverage**: New tests that exercise existing functionality
 
+## Vendored GPUNetIO Source
+
+- `externals/gpunetio` is a vendored copy of [GPUNetIO](https://github.com/NVIDIA-DOCA/gpunetio).
+- Please do not submit NVSHMEM pull requests that modify this directory.
+- Submit bug reports, feature requests, and code contributions to the [GPUNetIO upstream repository](https://github.com/NVIDIA-DOCA/gpunetio) instead. NVSHMEM periodically imports upstream releases.
+
 ## Making Your Contribution Successful
 
 To help us review and integrate your contribution efficiently:
