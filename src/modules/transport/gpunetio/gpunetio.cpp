@@ -3078,7 +3078,7 @@ int nvshmemt_init(nvshmem_transport_t *t, nvshmemi_cuda_fn_table *table, int api
     // GPUNetIO for the different QPs.
     transport->host_ops.progress = nullptr;
     transport->no_proxy = true;
-    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
+    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED | NVSHMEM_TRANSPORT_ATTR_MULTI_NIC_ENABLED;
     transport->is_successfully_initialized = true;
     transport->max_op_len = 1ULL << 30;
     transport->type = options->GPUNETIO_ENABLE_GDAKI ? NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO
