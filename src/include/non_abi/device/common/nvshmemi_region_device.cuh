@@ -80,17 +80,30 @@ __device__ __forceinline__ int nvshmemi_region_claim_slot(nvshmemx_region_handle
         if (state_ref.compare_exchange_strong(expected, NVSHMEMI_REGION_SLOT_INITIALIZING,
                                               cuda::memory_order_acquire,
                                               cuda::memory_order_relaxed)) {
-            uint64_t generation = slot->generation + 1;
-            if (generation == 0) {
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_device> generation_ref(slot->generation);
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_device> issuer_ref(slot->issuer_id);
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_device> gridid_ref(slot->gridid);
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_device> block_id_ref(slot->block_id);
+            cuda::atomic_ref<uint32_t, cuda::thread_scope_device> hints_ref(slot->hints);
+            cuda::atomic_ref<uint32_t, cuda::thread_scope_device> operation_ticket_ref(
+                slot->batch_rma.operation_ticket);
+
+            uint64_t generation = generation_ref.load(cuda::memory_order_relaxed) + 1;
+            if (generation == 0 || generation > NVSHMEMI_REGION_SLOT_GENERATION_MAX) {
                 generation = 1;
             }
-            slot->generation = generation;
-            slot->issuer_id = nvshmemi_region_issuer_from_slot(slot_index);
-            slot->gridid = gridid;
-            slot->block_id = block_id;
-            slot->hints = hints;
-            slot->batch_rma.operation_ticket = 0;
-            state_ref.store(NVSHMEMI_REGION_SLOT_ACTIVE, cuda::memory_order_release);
+            /* Publish the new generation before mutable metadata. Readers that observe any new
+             * release-published key field must also observe this generation and reject an older
+             * ACTIVE state. */
+            generation_ref.store(generation, cuda::memory_order_relaxed);
+            issuer_ref.store(nvshmemi_region_issuer_from_slot(slot_index),
+                             cuda::memory_order_relaxed);
+            gridid_ref.store(gridid, cuda::memory_order_release);
+            block_id_ref.store(block_id, cuda::memory_order_release);
+            hints_ref.store(hints, cuda::memory_order_release);
+            operation_ticket_ref.store(0, cuda::memory_order_relaxed);
+            state_ref.store(nvshmemi_region_slot_state(NVSHMEMI_REGION_SLOT_ACTIVE, generation),
+                            cuda::memory_order_release);
             nvshmemi_region_increment_active_count();
             *handle = generation;
             return NVSHMEMX_SUCCESS;
@@ -104,7 +117,10 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_block_sl
     nvshmemx_region_handle_t handle) {
     nvshmemi_region_slot_t *slot =
         nvshmemi_region_find_slot(nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx());
-    return slot != NULL && slot->generation == handle ? slot : NULL;
+    return slot != NULL && cuda::atomic_ref<uint64_t, cuda::thread_scope_device>(slot->generation)
+                                   .load(cuda::memory_order_relaxed) == handle
+               ? slot
+               : NULL;
 }
 
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_start_block(
@@ -151,9 +167,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_stop_block(
         if (slot == NULL) {
             status = NVSHMEMX_ERROR_INVALID_VALUE;
         } else {
-            if (slot->hints != NVSHMEMX_REGION_HINT_NONE) {
-                nvshmemi_region_info_t region_info = {slot->issuer_id, slot->generation,
-                                                      slot->hints};
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_device> issuer_ref(slot->issuer_id);
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_device> generation_ref(slot->generation);
+            uint32_t hints = cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
+                                 .load(cuda::memory_order_relaxed);
+            if (hints != NVSHMEMX_REGION_HINT_NONE) {
+                nvshmemi_region_info_t region_info = {
+                    issuer_ref.load(cuda::memory_order_relaxed),
+                    generation_ref.load(cuda::memory_order_relaxed), hints};
                 nvshmemi_transfer_region_end<NVSHMEMI_THREADGROUP_BLOCK>(&region_info);
             }
             cuda::atomic_ref<unsigned long long, cuda::thread_scope_device> state_ref(slot->state);

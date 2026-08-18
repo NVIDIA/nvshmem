@@ -59,6 +59,7 @@ static_assert(NVSHMEMI_REGION_SLOT_FREE == 0,
 
 /* Keep lookup-hot fields in the first 32 bytes and isolate each slot in a 64-byte extent. */
 struct alignas(NVSHMEMI_REGION_SLOT_BYTES) nvshmemi_region_slot {
+    /* Active states encode the slot generation above the low phase bits. */
     unsigned long long state;
     uint64_t gridid;
     uint64_t block_id;

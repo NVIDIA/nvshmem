@@ -211,6 +211,11 @@ __global__ void region_lifecycle_race_kernel(int *status) {
 
     if (blockIdx.x == 0) {
         for (int i = 0; i < REGION_LIFECYCLE_RACE_ITERS; i++) {
+            int active = 0;
+            int rc = nvshmemx_region_is_active(NVSHMEMX_REGION_HINT_NONE, &active);
+            if (rc != NVSHMEMX_SUCCESS || active != 0) {
+                record_error(status, 52);
+            }
             nvshmemx_qp_quiet_block(NVSHMEMX_PE_ALL, nullptr, NVSHMEMX_QP_ALL);
         }
         return;
