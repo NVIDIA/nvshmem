@@ -2632,7 +2632,8 @@ static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, r
                                              (static_cast<uint32_t>(wqe_bb_idx) << 8));
     }
 
-    auto *remote_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(remote->handle);
+    const auto *remote_handle =
+        gpunetio_get_dev_mem_handle(remote->handle, ep->device_->selected_dev_slot);
     wqe->raddr.raddr = htobe64(reinterpret_cast<uintptr_t>(remote->ptr));
     wqe->raddr.rkey = htobe32(remote_handle->rkey);
 
@@ -2640,7 +2641,8 @@ static int nvshmemt_gpunetio_host_rma(struct nvshmem_transport *tcurr, int pe, r
         assert(bytesdesc.nelems < (UINT32_MAX / bytesdesc.elembytes));
         wqe->data.data_seg.byte_count =
             htobe32(static_cast<uint32_t>(bytesdesc.nelems * bytesdesc.elembytes));
-        auto *local_handle = reinterpret_cast<nvshmemt_ib_common_mem_handle *>(local->handle);
+        const auto *local_handle =
+            gpunetio_get_dev_mem_handle(local->handle, ep->device_->selected_dev_slot);
         wqe->data.data_seg.lkey = htobe32(local_handle->lkey);
         wqe->data.data_seg.addr = htobe64(reinterpret_cast<uintptr_t>(local->ptr));
     } else {
