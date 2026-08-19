@@ -1,1 +1,1 @@
--n 1000 -w 10 --repetitions 3
+-n 1000 -w 10 --repetitions 3 --use_smem 0
