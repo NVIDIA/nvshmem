@@ -41,6 +41,7 @@
  * skipped (no proxy/CQ flush in the hot path).
  */
 
+#include <algorithm>
 #include <stdio.h>
 #include <assert.h>
 #include <cstdlib>
@@ -172,12 +173,27 @@ int main(int argc, char *argv[]) {
     {
         int dev = 0;
         int max_dyn_smem = 0;
+        size_t max_static_smem = 0;
         const size_t smem_data_offset =
             static_cast<size_t>(nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY));
         CUDA_CHECK(cudaGetDevice(&dev));
         CUDA_CHECK(
             cudaDeviceGetAttribute(&max_dyn_smem, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev));
-        smem_size = max_dyn_smem;
+
+        /* cudaFuncSetAttribute limits static plus requested dynamic smem. Account for the
+         * largest static allocation among the four specializations before requesting one common
+         * dynamic allocation size. */
+        auto account_static_smem = [&](auto kernel) {
+            cudaFuncAttributes attributes = {};
+            CUDA_CHECK(cudaFuncGetAttributes(&attributes, kernel));
+            max_static_smem = std::max(max_static_smem, attributes.sharedSizeBytes);
+        };
+        account_static_smem(pipelined_put_smem_src<true, true>);
+        account_static_smem(pipelined_put_smem_src<true, false>);
+        account_static_smem(pipelined_put_smem_src<false, true>);
+        account_static_smem(pipelined_put_smem_src<false, false>);
+
+        smem_size = max_dyn_smem - static_cast<int>(max_static_smem);
         size_t max_data_bytes = (size_t)smem_size - smem_data_offset;
         if (max_size > max_data_bytes) {
             if (mype == 0) {
