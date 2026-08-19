@@ -235,6 +235,7 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
 
         min_elems = max(static_cast<size_t>(1), min_size / sizeof(float));
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(float));
+        std::fill(h_sum_stats.begin(), h_sum_stats.end(), perf_stats_t{});
         RUN_ITERS_OP(float, float, , sum, 512);
         if (!mype) {
             print_device_collective_table("device_reduction", "float-sum-t", "latency", "us", '-',
@@ -284,6 +285,7 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         }
         min_elems = max(static_cast<size_t>(1), min_size / sizeof(float));
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(float));
+        std::fill(h_sum_stats.begin(), h_sum_stats.end(), perf_stats_t{});
         RUN_ITERS_OP(float, float, _warp, sum, 4096);
         if (!mype) {
             print_device_collective_table("device_reduction", "float-sum-w", "latency", "us", '-',
@@ -333,6 +335,7 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, const void *source, int
         }
         min_elems = max(static_cast<size_t>(1), min_size / sizeof(float));
         max_elems = max(static_cast<size_t>(1), max_size / sizeof(float));
+        std::fill(h_sum_stats.begin(), h_sum_stats.end(), perf_stats_t{});
         RUN_ITERS_OP(float, float, _block, sum, max_elems);
         if (!mype) {
             print_device_collective_table("device_reduction", "float-sum-b", "latency", "us", '-',
