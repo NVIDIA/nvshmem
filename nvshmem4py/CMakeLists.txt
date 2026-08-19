@@ -75,11 +75,14 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" AND NVSHMEM_BU
     )
 endif()
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbastMlir.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba_cuda_mlir/_numbast.py"))
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbastMlir.cmake" AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND Python3_VERSION VERSION_GREATER_EQUAL "3.11" AND (NVSHMEM_FORCE_REBUILD_PYTHON_LIB OR NOT EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/numba_cuda_mlir/_numbast.py"))
     include(cmake/addNumbastMlir.cmake)
     AddNumbastMlir(
         VERSION "0.10.1"
     )
+    if(TARGET package_src_target)
+        add_dependencies(package_src_target build_bindings_numbast_mlir)
+    endif()
 endif()
 
 set(CUTEAST_OUTPUT "${CMAKE_SOURCE_DIR}/nvshmem4py/nvshmem/bindings/device/cute/_cuteast.py")
