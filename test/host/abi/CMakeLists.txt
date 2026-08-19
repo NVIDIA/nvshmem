@@ -21,6 +21,16 @@ set(NVSHMEM_HOST_C_API_INCLUDE_ARGS
     --include-dir "${NVSHMEM_HOST_PUBLIC_INCLUDE_DIR}"
     --include-dir "$<JOIN:$<TARGET_PROPERTY:nvshmem_host,INTERFACE_INCLUDE_DIRECTORIES>,$<SEMICOLON>--include-dir$<SEMICOLON>>")
 
+set(NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE_ARGS)
+foreach(NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE IN LISTS CMAKE_CUDA_ARCHITECTURES)
+  # CMake uses a false value (typically OFF) to suppress architecture flags.
+  # In that case, let the generator use its sm_90 fallback.
+  if(NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE)
+    list(APPEND NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE_ARGS
+         --cuda-architecture "${NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE}")
+  endif()
+endforeach()
+
 set(NVSHMEM_HOST_C_API_SOURCE_OBJECT_ARGS)
 if(SubBuild)
   # The source-prep target checks each source object, so a public definition
@@ -38,6 +48,7 @@ add_custom_command(
   OUTPUT "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
           --nvcc "${CMAKE_CUDA_COMPILER}"
+          ${NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE_ARGS}
           ${NVSHMEM_HOST_C_API_INCLUDE_ARGS}
           --input "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
           --output "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"
@@ -67,6 +78,7 @@ if(SubBuild)
   add_custom_target(update_host_public_c_api_manifest
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_host_c_api_abi.py"
             --nvcc "${CMAKE_CUDA_COMPILER}"
+            ${NVSHMEM_HOST_C_API_CUDA_ARCHITECTURE_ARGS}
             ${NVSHMEM_HOST_C_API_INCLUDE_ARGS}
             --input "${CMAKE_CURRENT_SOURCE_DIR}/host_public_c_abi_input.cu"
             --output "${NVSHMEM_HOST_C_API_GENERATED_SOURCE}"

@@ -17,6 +17,10 @@ PUBLIC_API_NAME = re.compile(r"\b(nvshmem(?:x|id)?_[A-Za-z0-9_]+)\s*\(")
 PUBLIC_API_SYMBOL = re.compile(r"nvshmem(?:x|id)?_[A-Za-z0-9_]+")
 DEMANGLED_FUNCTION_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(")
 LINE_DIRECTIVE = re.compile(r"^\s*#.*$", re.MULTILINE)
+CUDA_ARCHITECTURE = re.compile(
+    r"(?P<architecture>(?P<number>\d+)[a-z]*)(?:-(?:real|virtual))?$"
+)
+DEFAULT_CUDA_ARCHITECTURE = "90"
 MANIFEST_HEADER = """# This list is generated. Do not edit manually.
 # Public C APIs exported by libnvshmem_host.so.
 #
@@ -66,6 +70,20 @@ def manifest_contents(symbols: set[str]) -> str:
     return MANIFEST_HEADER + "\n".join(sorted(symbols)) + "\n"
 
 
+def minimum_cuda_architecture(architectures: list[str]) -> str:
+    """Return CMake's lowest CUDA architecture, defaulting to sm_90."""
+
+    values = []
+    for architecture in architectures:
+        match = CUDA_ARCHITECTURE.fullmatch(architecture)
+        if not match:
+            raise RuntimeError(f"invalid CUDA architecture: {architecture}")
+        values.append((int(match.group("number")), match.group("architecture")))
+    if not values:
+        return DEFAULT_CUDA_ARCHITECTURE
+    return min(values)[1]
+
+
 def preprocess(args: argparse.Namespace) -> str:
     command = [
         args.nvcc,
@@ -73,6 +91,7 @@ def preprocess(args: argparse.Namespace) -> str:
         "-x",
         "cu",
         f"-std=c++{args.cxx_standard}",
+        f"-arch=sm_{minimum_cuda_architecture(args.cuda_architecture)}",
     ]
     command.extend(f"-I{include_dir}" for include_dir in args.include_dir)
     command.append(args.input)
@@ -344,6 +363,7 @@ def write_if_changed(path: pathlib.Path, contents: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--nvcc", required=True)
+    parser.add_argument("--cuda-architecture", action="append", default=[])
     parser.add_argument("--include-dir", action="append", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
