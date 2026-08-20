@@ -92,7 +92,7 @@ __device__ __forceinline__ uint32_t nvshmemi_region_load_active_count() {
 }
 
 __device__ __forceinline__ bool nvshmemi_region_any_active() {
-    /* Avoid probing the region table on the common path with no active device regions. */
+    /* Avoid probing the region table when no active device region can affect an operation. */
     return (nvshmemi_region_load_active_count() & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0;
 }
 
@@ -123,9 +123,6 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_active_s
 
 __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_slot(uint64_t gridid,
                                                                              uint64_t block_id) {
-    if (!nvshmemi_region_any_active()) {
-        return nullptr;
-    }
     return nvshmemi_region_find_active_slot(gridid, block_id);
 }
 
