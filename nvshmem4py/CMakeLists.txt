@@ -42,6 +42,22 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addCybind.cmake" OR
     )
 endif()
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbastMlir.cmake" AND
+   NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND Python3_VERSION VERSION_GREATER_EQUAL "3.11")
+    set(MLIR_VENV_DIR "${CMAKE_BINARY_DIR}/externals/venv_numbast_mlir")
+    set(MLIR_VENV_PYTHON_EXECUTABLE "${MLIR_VENV_DIR}/bin/python3")
+    add_custom_target(
+        setup_py_bindings_mlir_env
+        COMMAND mkdir -p ${CMAKE_BINARY_DIR}/externals
+        COMMAND mkdir -p ${BINDINGS_OUTPUT_DIR}
+        COMMAND ${Python3_EXECUTABLE} -m venv ${MLIR_VENV_DIR}
+        COMMAND ${MLIR_VENV_PYTHON_EXECUTABLE} -m pip install --upgrade pip
+        COMMAND ${MLIR_VENV_PYTHON_EXECUTABLE} -m pip install -r ${CMAKE_SOURCE_DIR}/nvshmem4py/requirements_build.txt
+        COMMAND touch ${BINDINGS_OUTPUT_DIR}/setup_py_bindings_mlir_env.txt
+        COMMENT "Setting up Numbast MLIR binding environment"
+    )
+endif()
+
 
 # Additional cleanup to clean the build/externals dir
 set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
@@ -118,17 +134,9 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND
     generateCuteBindings()
 endif()
 
-# Avoid race conditions by serializing pip installs.
+# Cybind and Numbast share the base binding-generator environment.
 if(TARGET pip_install_cybind AND TARGET pip_install_numbast)
     add_dependencies(pip_install_numbast pip_install_cybind)
-endif()
-
-if(TARGET pip_install_numbast_mlir AND TARGET pip_install_numbast)
-    add_dependencies(pip_install_numbast_mlir pip_install_numbast)
-endif()
-
-if(TARGET pip_install_numbast_mlir AND TARGET pip_install_cybind)
-    add_dependencies(pip_install_numbast_mlir pip_install_cybind)
 endif()
 
 
