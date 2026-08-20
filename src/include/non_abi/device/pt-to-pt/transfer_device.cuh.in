@@ -308,7 +308,8 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
         bool region_active = thread_region_active;
         if constexpr (SCOPE != NVSHMEMI_THREADGROUP_THREAD) {
-            region_active = __builtin_expect(nvshmemi_region_group_any_active<SCOPE>(), 0);
+            /* Same-address warp loads coalesce and avoid a shuffle before transport dispatch. */
+            region_active = unlikely(nvshmemi_region_any_active());
         }
         if (region_active &&
             nvshmemi_transfer_try_direct_region_rma_nbi<SCOPE, channel_op, REGION_OPERATION>(

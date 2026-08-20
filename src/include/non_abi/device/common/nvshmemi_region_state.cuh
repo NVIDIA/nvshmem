@@ -145,19 +145,6 @@ nvshmemi_region_resolve_active_current(uint32_t supported_hints) {
     return info;
 }
 
-template <threadgroup_t SCOPE>
-__device__ __forceinline__ bool nvshmemi_region_group_any_active() {
-    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
-        return nvshmemi_region_any_active();
-    } else {
-        unsigned int mask = __activemask();
-        int source_lane = __ffs(mask) - 1;
-        int lane = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
-        bool any_active = lane == source_lane ? nvshmemi_region_any_active() : false;
-        return __shfl_sync(mask, any_active, source_lane);
-    }
-}
-
 /* Device issuer IDs encode the owning slot. The generation distinguishes slot reuse. */
 __device__ __forceinline__ uint64_t nvshmemi_region_issuer_from_slot(uint32_t slot_index) {
     return static_cast<uint64_t>(slot_index) + 1;
