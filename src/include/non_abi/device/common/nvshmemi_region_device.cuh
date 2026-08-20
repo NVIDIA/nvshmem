@@ -29,7 +29,10 @@ __device__ __forceinline__ uint32_t nvshmemi_region_lock_active_count(
     }
 }
 
-__device__ __forceinline__ void nvshmemi_region_increment_active_count() {
+__device__ __forceinline__ void nvshmemi_region_increment_active_count(uint32_t hints) {
+    if (hints == NVSHMEMX_REGION_HINT_NONE) {
+        return;
+    }
     cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(
         *nvshmemi_device_state_d.region_active_count);
     uint32_t count = nvshmemi_region_lock_active_count(active_count_ref);
@@ -37,7 +40,10 @@ __device__ __forceinline__ void nvshmemi_region_increment_active_count() {
     active_count_ref.store(count + 1, cuda::memory_order_release);
 }
 
-__device__ __forceinline__ void nvshmemi_region_decrement_active_count() {
+__device__ __forceinline__ void nvshmemi_region_decrement_active_count(uint32_t hints) {
+    if (hints == NVSHMEMX_REGION_HINT_NONE) {
+        return;
+    }
     cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(
         *nvshmemi_device_state_d.region_active_count);
     uint32_t count = nvshmemi_region_lock_active_count(active_count_ref);
@@ -104,7 +110,7 @@ __device__ __forceinline__ int nvshmemi_region_claim_slot(nvshmemx_region_handle
             operation_ticket_ref.store(0, cuda::memory_order_relaxed);
             state_ref.store(nvshmemi_region_slot_state(NVSHMEMI_REGION_SLOT_ACTIVE, generation),
                             cuda::memory_order_release);
-            nvshmemi_region_increment_active_count();
+            nvshmemi_region_increment_active_count(hints);
             *handle = generation;
             return NVSHMEMX_SUCCESS;
         }
@@ -177,7 +183,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_stop_block(
             }
             cuda::atomic_ref<unsigned long long, cuda::thread_scope_device> state_ref(slot->state);
             state_ref.store(NVSHMEMI_REGION_SLOT_FREE, cuda::memory_order_release);
-            nvshmemi_region_decrement_active_count();
+            nvshmemi_region_decrement_active_count(hints);
         }
     }
 
