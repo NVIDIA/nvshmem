@@ -502,8 +502,6 @@ static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *ou
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO;
     } else if (req == "gpu") {
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB;
-    } else if (req == "gpu_sm_bf") {
-        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_BF;
     } else if (req == "cpu") {
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
     } else {
