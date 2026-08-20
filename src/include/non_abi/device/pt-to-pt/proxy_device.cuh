@@ -282,24 +282,31 @@ nvshmemi_proxy_write_region_metadata_slot(uint64_t idx, const nvshmemi_region_in
     }
 }
 
-template <threadgroup_t SCOPE, nvshmemi_region_operation_t REGION_OPERATION>
-NVSHMEMI_STATIC __device__ NVSHMEMI_NOINLINE void nvshmemi_proxy_publish_region_request(
-    uint64_t idx, volatile uint64_t *request, uint64_t request_value,
-    const nvshmemi_region_info_t *region_info) {
+template <nvshmemi_region_operation_t REGION_OPERATION>
+NVSHMEMI_STATIC __device__ NVSHMEMI_NOINLINE bool nvshmemi_proxy_try_publish_region_request(
+    uint64_t idx, volatile uint64_t *request, uint64_t request_value) {
+    constexpr uint32_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
+    if (region_info.region_id == 0) {
+        return false;
+    }
+
     bool batch_rma_region =
-        nvshmemi_region_info_has_hints(region_info, NVSHMEMI_REGION_HINT_BATCH_RMA);
+        nvshmemi_region_info_has_hints(&region_info, NVSHMEMI_REGION_HINT_BATCH_RMA);
     if (batch_rma_region) {
-        nvshmemi_proxy_write_region_metadata_slot(idx, region_info);
+        nvshmemi_proxy_write_region_metadata_slot(idx, &region_info);
         request_value |= static_cast<uint64_t>(PROXY_GROUP_REGION) << 8;
     }
     *request = request_value;
+    return true;
 }
 
-template <bool CHECK_REGION, threadgroup_t SCOPE, nvshmemi_region_operation_t REGION_OPERATION>
+template <bool CHECK_REGION, nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma(
-    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index,
-    const nvshmemi_region_info_t *region_info) {
+    void *rptr, void *lptr, size_t bytes, int pe, int channel_op, nvshmemx_qp_handle_t qp_index) {
     uint64_t idx, tail_idx, *req;
+    uint32_t region_active_count = 0;
     constexpr int size = PROXY_DMA_REQ_BYTES;
     void *buf_ptr = nvshmemi_device_state_d.proxy_channels_buf;
     void *base_ptr = nvshmemi_device_state_d.heap_base;
@@ -317,6 +324,11 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
     it will not overflow */
     idx = nvshmemi_proxy_channel_reserve(size);
     tail_idx = idx + (size - 1);
+
+    if constexpr (CHECK_REGION) {
+        /* Start the count load before request construction to hide some of its latency. */
+        region_active_count = nvshmemi_region_load_active_count();
+    }
 
     // flow-control
     check_channel_availability(tail_idx);
@@ -369,10 +381,11 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
                                              (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
 
     if constexpr (CHECK_REGION) {
-        /* Publish after the payload and any region metadata are ready. */
-        nvshmemi_proxy_publish_region_request<SCOPE, REGION_OPERATION>(
-            base_idx, base_request, base_request_value, region_info);
-        return;
+        if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0) &&
+            nvshmemi_proxy_try_publish_region_request<REGION_OPERATION>(base_idx, base_request,
+                                                                        base_request_value)) {
+            return;
+        }
     }
     *base_request = base_request_value;
 }
@@ -394,18 +407,16 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_pro
     if (!bytes) {
         return;
     }
-    transfer_dma<false, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE>(
-        rptr, lptr, bytes, pe, op, qp_index, nullptr);
+    transfer_dma<false, NVSHMEMI_REGION_OPERATION_NONE>(rptr, lptr, bytes, pe, op, qp_index);
 }
 
-template <threadgroup_t SCOPE, nvshmemi_region_operation_t REGION_OPERATION>
+template <nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_region_rma_nbi(
-    void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op, nvshmemx_qp_handle_t qp_index,
-    const nvshmemi_region_info_t *region_info) {
+    void *rptr, void *lptr, size_t bytes, int pe, nvshmemi_op_t op, nvshmemx_qp_handle_t qp_index) {
     if (!bytes) {
         return;
     }
-    transfer_dma<true, SCOPE, REGION_OPERATION>(rptr, lptr, bytes, pe, op, qp_index, region_info);
+    transfer_dma<true, REGION_OPERATION>(rptr, lptr, bytes, pe, op, qp_index);
 }
 
 NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_proxy_region_end(

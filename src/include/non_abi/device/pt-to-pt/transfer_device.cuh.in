@@ -251,23 +251,14 @@ TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_PUT_SIGNAL)
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
           nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ bool
-nvshmemi_transfer_try_region_rma_nbi(void *rptr, void *lptr, size_t bytes, int pe,
-                                     nvshmemx_qp_handle_t qp_index) {
+nvshmemi_transfer_try_direct_region_rma_nbi(nvshmemi_selected_device_transport_t transport,
+                                            void *rptr, void *lptr, size_t bytes, int pe,
+                                            nvshmemx_qp_handle_t qp_index) {
     constexpr uint32_t supported_hints =
         nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
     nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
     if (region_info.region_id == 0) {
         return false;
-    }
-
-    nvshmemi_selected_device_transport_t transport =
-        nvshmemi_device_state_d.selected_device_transport;
-    if (likely(transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY)) {
-        if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
-            nvshmemi_proxy_region_rma_nbi<SCOPE, REGION_OPERATION>(
-                rptr, lptr, bytes, pe, channel_op, qp_index, &region_info);
-        }
-        return true;
     }
 
     switch (transport) {
@@ -294,21 +285,36 @@ template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
           nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_rma_nbi(
     void *rptr, void *lptr, size_t bytes, int pe, nvshmemx_qp_handle_t qp_index) {
-    if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
-        if (__builtin_expect(nvshmemi_region_group_any_active<SCOPE>(), 0) &&
-            nvshmemi_transfer_try_region_rma_nbi<SCOPE, channel_op, REGION_OPERATION>(
-                rptr, lptr, bytes, pe, qp_index)) {
-            return;
-        }
-    }
-
     nvshmemi_selected_device_transport_t transport =
         nvshmemi_device_state_d.selected_device_transport;
     if (likely(transport == NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY)) {
         if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
-            nvshmemi_proxy_rma_nbi(rptr, lptr, bytes, pe, channel_op, qp_index);
+            if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+                nvshmemi_proxy_region_rma_nbi<REGION_OPERATION>(rptr, lptr, bytes, pe, channel_op,
+                                                                qp_index);
+            } else {
+                nvshmemi_proxy_rma_nbi(rptr, lptr, bytes, pe, channel_op, qp_index);
+            }
         }
         return;
+    }
+
+    bool thread_region_active = false;
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD &&
+                  REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+        thread_region_active = unlikely(nvshmemi_region_any_active());
+    }
+
+    if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
+        bool region_active = thread_region_active;
+        if constexpr (SCOPE != NVSHMEMI_THREADGROUP_THREAD) {
+            region_active = __builtin_expect(nvshmemi_region_group_any_active<SCOPE>(), 0);
+        }
+        if (region_active &&
+            nvshmemi_transfer_try_direct_region_rma_nbi<SCOPE, channel_op, REGION_OPERATION>(
+                transport, rptr, lptr, bytes, pe, qp_index)) {
+            return;
+        }
     }
 
     switch (transport) {
