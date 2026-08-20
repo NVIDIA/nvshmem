@@ -682,9 +682,9 @@ __device__ static __forceinline__ void nvshmemi_gdaki_batch_rma_mark_qp_pending(
     nvshmemi_batch_rma_mark_qp_pending(pending_qps, qp_count, qp_index);
 }
 
-__device__ static __forceinline__ void gdaki_submit_db(
-    nvshmemi_gpunetio_device_qp_t *qp, uint64_t base_wqe_idx, uint32_t num_wqes,
-    const nvshmemi_region_info_t *region_info = nullptr) {
+__device__ static __forceinline__ void gdaki_submit_db(nvshmemi_gpunetio_device_qp_t *qp,
+                                                       uint64_t base_wqe_idx, uint32_t num_wqes,
+                                                       const nvshmemi_region_info_t *region_info) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
 
     uint64_t mask = ~((uint64_t)(state->num_requests_in_batch - 1));
@@ -711,23 +711,13 @@ __device__ static __forceinline__ void gdaki_submit_db(
 }
 
 template <nvshmemi_region_operation_t REGION_OPERATION>
-__device__ static void gdaki_submit_region_db(nvshmemi_gpunetio_device_qp_t *qp,
-                                              uint64_t base_wqe_idx, uint32_t num_wqes) {
-    constexpr uint32_t supported_hints =
-        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
-    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
-    const nvshmemi_region_info_t *region = region_info.region_id != 0 ? &region_info : nullptr;
-    gdaki_submit_db(qp, base_wqe_idx, num_wqes, region);
-}
-
-template <nvshmemi_region_operation_t REGION_OPERATION>
-__device__ static __forceinline__ void gdaki_submit_nbi_db(nvshmemi_gpunetio_device_qp_t *qp,
-                                                           uint64_t base_wqe_idx,
-                                                           uint32_t num_wqes) {
+__device__ static __forceinline__ void gdaki_submit_nbi_db(
+    nvshmemi_gpunetio_device_qp_t *qp, uint64_t base_wqe_idx, uint32_t num_wqes,
+    const nvshmemi_region_info_t *region_info) {
     if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
-        gdaki_submit_region_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, region_info);
     } else {
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
     }
 }
 
@@ -749,7 +739,7 @@ gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
                                         (uint64_t)qp->ibuf.buf, qp->ibuf.lkey, sizeof(char));
 
     doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, base_wqe_idx);
-    gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+    gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
 
     return gdaki_quiet(qp);
 }
@@ -758,8 +748,8 @@ template <nvshmemi_op_t channel_op, bool nbi,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT,
-    nvshmemi_gpunetio_device_qp_t *selected_qp = nullptr) {
+    nvshmemx_qp_handle_t qp_index, nvshmemi_gpunetio_device_qp_t *selected_qp,
+    const nvshmemi_region_info_t *region_info) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     unsigned int amask = __activemask();
     bool can_coalesce_warp = selected_qp == nullptr && gdaki_can_coalesce_warp_pe(amask, proxy_pe);
@@ -901,9 +891,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
 
             doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
             if constexpr (nbi) {
-                gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes);
+                gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
             } else {
-                gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+                gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
             }
         }
 
@@ -939,7 +929,7 @@ template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemx_qp_handle_t qp_index, const nvshmemi_region_info_t *region_info) {
     assert(SCOPE == NVSHMEMI_THREADGROUP_WARP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
     // Use only warp 0
     int my_tid = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -1025,8 +1015,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     // Too many chunks. Use gdaki_rma_thread to handle it instead.
     if (unlikely(chunk_idx > tg_size)) {
         if (my_tid == 0) {
-            gdaki_rma_thread<channel_op, nbi, REGION_OPERATION>(req_rptr, req_lptr, bytes, dst_pe,
-                                                                proxy_pe, qp_index);
+            gdaki_rma_thread<channel_op, nbi, REGION_OPERATION>(
+                req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, region_info);
         }
 
         goto out;
@@ -1105,9 +1095,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
 
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
         if constexpr (nbi) {
-            gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes);
+            gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
         } else {
-            gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+            gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
         }
         if (!nbi) {
             // CST, if required, has already been enqueued. We simply need to
@@ -1198,7 +1188,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma
             "block %d thread %d\n",
             qp->qp.sq_num, base_wqe_idx, my_wqe_idx, my_tid, blockIdx.x, threadIdx.x);
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
     }
 
     if (can_coalesce_warp) {
@@ -1343,7 +1333,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_gdaki_rma_g_impl(
 
     if (fm_ce_se > 0) {
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
         gdaki_quiet(qp);
     }
 
@@ -1381,22 +1371,18 @@ nvshmemi_gdaki_rma_g(void *rptr, int dst_pe, nvshmemx_qp_handle_t qp_index = NVS
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_batch_rma_submit_pending_qps(
     const nvshmemi_region_info_t *region_info);
 
-template <nvshmemi_region_operation_t REGION_OPERATION>
-__device__ NVSHMEMI_STATIC void nvshmemi_gdaki_submit_region_if_threshold_reached(
-    uint32_t threshold) {
-    constexpr uint32_t supported_hints =
-        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
-    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
-    if (nvshmemi_region_batch_rma_reached_submission_threshold(&region_info, threshold)) {
-        nvshmemi_gdaki_batch_rma_submit_pending_qps(&region_info);
+__device__ NVSHMEMI_STATIC void nvshmemi_gdaki_submit_region(
+    const nvshmemi_region_info_t *region_info, uint32_t threshold) {
+    if (nvshmemi_region_batch_rma_should_submit(region_info, threshold)) {
+        nvshmemi_gdaki_batch_rma_submit_pending_qps(region_info);
     }
 }
 
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_nbi(
-    void *rptr, void *lptr, size_t bytes, int dst_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    void *rptr, void *lptr, size_t bytes, int dst_pe, nvshmemx_qp_handle_t qp_index,
+    const nvshmemi_region_info_t *region_info) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     int proxy_pe = gdaki_get_proxy_pe(dst_pe);
 #ifndef __clang_llvm_bitcode_lib__
@@ -1404,12 +1390,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_nbi(
 #else
     if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
 #endif
-        gdaki_rma_thread<channel_op, true, REGION_OPERATION>((uint64_t)rptr, (uint64_t)lptr, bytes,
-                                                             dst_pe, proxy_pe, qp_index);
+        gdaki_rma_thread<channel_op, true, REGION_OPERATION>(
+            reinterpret_cast<uint64_t>(rptr), reinterpret_cast<uint64_t>(lptr), bytes, dst_pe,
+            proxy_pe, qp_index, nullptr, region_info);
 #ifndef __clang_llvm_bitcode_lib__
     } else {
-        gdaki_rma<SCOPE, channel_op, true, REGION_OPERATION>((uint64_t)rptr, (uint64_t)lptr, bytes,
-                                                             dst_pe, proxy_pe, qp_index);
+        gdaki_rma<SCOPE, channel_op, true, REGION_OPERATION>(
+            reinterpret_cast<uint64_t>(rptr), reinterpret_cast<uint64_t>(lptr), bytes, dst_pe,
+            proxy_pe, qp_index, region_info);
     }
 #else
     }
@@ -1418,8 +1406,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_nbi(
     if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
         if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 &&
             unlikely(state->region_batch_rma_threshold != 0)) {
-            nvshmemi_gdaki_submit_region_if_threshold_reached<REGION_OPERATION>(
-                state->region_batch_rma_threshold);
+            nvshmemi_gdaki_submit_region(region_info, state->region_batch_rma_threshold);
         }
     }
 }
@@ -1437,12 +1424,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma(
 #else
     if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
 #endif
-        gdaki_rma_thread<channel_op, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe,
-                                            qp_index);
+        gdaki_rma_thread<channel_op, false>(reinterpret_cast<uint64_t>(rptr),
+                                            reinterpret_cast<uint64_t>(lptr), bytes, dst_pe,
+                                            proxy_pe, qp_index, nullptr, nullptr);
 #ifndef __clang_llvm_bitcode_lib__
     } else {
-        gdaki_rma<SCOPE, channel_op, false>((uint64_t)rptr, (uint64_t)lptr, bytes, dst_pe, proxy_pe,
-                                            qp_index);
+        gdaki_rma<SCOPE, channel_op, false>(reinterpret_cast<uint64_t>(rptr),
+                                            reinterpret_cast<uint64_t>(lptr), bytes, dst_pe,
+                                            proxy_pe, qp_index, nullptr);
     }
 #else
     }
@@ -1543,7 +1532,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_amo_nonfetch_impl(
             pe, op, my_tid, qp->qp.sq_num, base_wqe_idx, my_wqe_idx, num_wqes_per_cmd, num_wqes,
             need_additional_wqe);
 
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
     }
 
     if (can_coalesce_warp) {
@@ -1670,7 +1659,7 @@ nvshmemi_gdaki_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
         }
 
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
         gdaki_quiet(qp);
     }
 
@@ -1818,18 +1807,20 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
             }
 
             doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-            gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+            gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
             if (!is_nbi) {
                 gdaki_quiet(qp);
             }
         }
     } else {
         if (gdaki_use_address_stable_amo(pe, qp_index)) {
-            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>((uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe,
-                                                    qp_index, qp);
+            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
+                                                    reinterpret_cast<uintptr_t>(lptr), bytes, pe,
+                                                    pe, qp_index, qp, nullptr);
         } else {
-            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>((uintptr_t)rptr, (uintptr_t)lptr, bytes, pe,
-                                                    pe);
+            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
+                                                    reinterpret_cast<uintptr_t>(lptr), bytes, pe,
+                                                    pe, NVSHMEMX_QP_DEFAULT, nullptr, nullptr);
         }
 
         num_wqes = num_atomic_wqes_per_cmd + (need_additional_wqe ? 1 : 0);
@@ -1862,7 +1853,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
         }
 
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
         if (!is_nbi) {
             gdaki_quiet(qp);
         }
@@ -2022,7 +2013,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
         }
 
         doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes);
+        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
         if (!is_nbi) {
             gdaki_quiet(qp);
         }

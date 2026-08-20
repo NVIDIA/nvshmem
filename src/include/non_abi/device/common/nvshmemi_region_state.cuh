@@ -96,34 +96,6 @@ __device__ __forceinline__ bool nvshmemi_region_any_active() {
     return (nvshmemi_region_load_active_count() & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0;
 }
 
-constexpr uint64_t NVSHMEMI_REGION_BLOCK_CACHE_TAG = static_cast<uint64_t>(UINT32_MAX) << 32;
-
-__device__ __forceinline__ uint64_t *nvshmemi_region_block_cache() {
-    __shared__ uint64_t token;
-    return &token;
-}
-
-__device__ __forceinline__ uint64_t nvshmemi_region_shared_load(const uint64_t *ptr) {
-    uint64_t value;
-    uint32_t address = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
-    asm volatile("ld.shared.u64 %0, [%1];" : "=l"(value) : "r"(address));
-    return value;
-}
-
-__device__ __forceinline__ void nvshmemi_region_set_block_hints(uint32_t hints) {
-    *nvshmemi_region_block_cache() = NVSHMEMI_REGION_BLOCK_CACHE_TAG | hints;
-}
-
-__device__ __forceinline__ uint32_t nvshmemi_region_get_block_hints() {
-    /* Static shared memory is not initialized at kernel launch. The upper tag distinguishes values
-     * published by region start/stop. An accidental tag match can only select the region-aware
-     * path; exact table resolution rejects a false owner match. */
-    uint64_t token = nvshmemi_region_shared_load(nvshmemi_region_block_cache());
-    return (token & NVSHMEMI_REGION_BLOCK_CACHE_TAG) == NVSHMEMI_REGION_BLOCK_CACHE_TAG
-               ? static_cast<uint32_t>(token)
-               : NVSHMEMX_REGION_HINT_NONE;
-}
-
 __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_active_slot(
     uint64_t gridid, uint64_t block_id, uint64_t *generation = nullptr) {
     nvshmemi_region_slot_t *slots = nvshmemi_device_state_d.region_slots;
@@ -174,6 +146,19 @@ nvshmemi_region_resolve_active_current(uint32_t supported_hints) {
         }
     }
     return info;
+}
+
+template <threadgroup_t SCOPE>
+__device__ __forceinline__ bool nvshmemi_region_group_any_active() {
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        return nvshmemi_region_any_active();
+    } else {
+        unsigned int mask = __activemask();
+        int source_lane = __ffs(mask) - 1;
+        int lane = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
+        bool any_active = lane == source_lane ? nvshmemi_region_any_active() : false;
+        return __shfl_sync(mask, any_active, source_lane);
+    }
 }
 
 template <threadgroup_t SCOPE>
@@ -241,7 +226,7 @@ nvshmemi_region_slot_index(const nvshmemi_region_info_t *region_info) {
     return slot == nullptr ? UINT32_MAX : static_cast<uint32_t>(region_info->issuer_id - 1);
 }
 
-__device__ __forceinline__ bool nvshmemi_region_batch_rma_reached_submission_threshold(
+__device__ __forceinline__ bool nvshmemi_region_batch_rma_should_submit(
     const nvshmemi_region_info_t *region_info, uint32_t threshold) {
     if (!nvshmemi_region_info_has_hints(region_info, NVSHMEMI_REGION_HINT_BATCH_RMA) ||
         threshold == 0) {
