@@ -155,16 +155,24 @@ __device__ __forceinline__ bool nvshmemi_region_info_has_hints(
     return region_info != nullptr && (region_info->hints & hints) == hints;
 }
 
-__device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_slot_from_info(
-    const nvshmemi_region_info_t *region_info) {
+__device__ __forceinline__ uint32_t
+nvshmemi_region_slot_index(const nvshmemi_region_info_t *region_info) {
     if (region_info == nullptr || region_info->hints == NVSHMEMX_REGION_HINT_NONE ||
         region_info->issuer_id == 0 ||
         region_info->issuer_id > nvshmemi_device_state_d.region_slots_len) {
+        return UINT32_MAX;
+    }
+    return static_cast<uint32_t>(region_info->issuer_id - 1);
+}
+
+__device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_slot_from_info(
+    const nvshmemi_region_info_t *region_info) {
+    uint32_t slot_index = nvshmemi_region_slot_index(region_info);
+    if (slot_index == UINT32_MAX) {
         return nullptr;
     }
 
-    nvshmemi_region_slot_t *slot =
-        &nvshmemi_device_state_d.region_slots[static_cast<uint32_t>(region_info->issuer_id - 1)];
+    nvshmemi_region_slot_t *slot = &nvshmemi_device_state_d.region_slots[slot_index];
     unsigned long long state =
         cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>(slot->state)
             .load(cuda::memory_order_acquire);
@@ -181,12 +189,6 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_slot_from_inf
         return nullptr;
     }
     return slot;
-}
-
-__device__ __forceinline__ uint32_t
-nvshmemi_region_slot_index(const nvshmemi_region_info_t *region_info) {
-    nvshmemi_region_slot_t *slot = nvshmemi_region_slot_from_info(region_info);
-    return slot == nullptr ? UINT32_MAX : static_cast<uint32_t>(region_info->issuer_id - 1);
 }
 
 __device__ __forceinline__ bool nvshmemi_region_batch_rma_should_submit(
