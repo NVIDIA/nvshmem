@@ -65,7 +65,7 @@ Classify the release as:
 - 3.7 or earlier;
 - 3.8 or later.
 
-Do not assume `latest` or silently treat an unknown version as 3.8. If the version remains unknown, give only conditional guidance and request the installed version before emitting final exports.
+Do not assume `latest` or silently treat an unknown version as 3.8. If the version remains unknown, request the installed version before continuing.
 
 Determine the selected remote transport: IBRC, IBDevX, IBGDA, GPUNetIO, UCX, or libfabric. If automatic selection makes the transport ambiguous, ask for the relevant initialization log or the intended transport.
 
