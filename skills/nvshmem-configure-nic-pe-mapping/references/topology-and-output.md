@@ -179,6 +179,8 @@ Show the complete indexed expansion and the applicable modulo or BLOCK calculati
 
 ### Exact Exports
 
+Never return an NVSHMEM environment-variable assignment, export block, or conditional example unless the complete installed NVSHMEM version is identified.
+
 For every final explicit common-HCA recommendation, use a single fenced `bash` block. Include only variables supported by the resolved release/transport and exactly one of `NVSHMEM_HCA_PE_MAPPING` and `NVSHMEM_HCA_LIST`.
 
 For automatic/provider-controlled cases, emit only verified supported controls and state explicitly that neither common-HCA selection variable is valid. If required evidence or a user decision is unresolved, state `Exact export block withheld: <reason>` rather than silently omitting or fabricating the block.

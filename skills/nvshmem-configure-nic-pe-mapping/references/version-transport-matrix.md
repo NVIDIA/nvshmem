@@ -12,6 +12,7 @@
 ## Precedence and Terms
 
 This reference bundles the **NVSHMEM 3.8 or later BLOCK contract** for common IB paths. The contract's transport scope is defined in its section below.
+Never return an NVSHMEM environment-variable assignment, export block, or conditional example unless the complete installed NVSHMEM version is identified.
 
 Apply evidence in this order:
 
