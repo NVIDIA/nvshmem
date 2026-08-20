@@ -161,27 +161,6 @@ __device__ __forceinline__ bool nvshmemi_region_group_any_active() {
     }
 }
 
-template <threadgroup_t SCOPE>
-__device__ __forceinline__ nvshmemi_region_info_t
-nvshmemi_region_resolve_active_leader(uint32_t supported_hints) {
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() != 0) {
-        return {};
-    }
-    return nvshmemi_region_resolve_active_current(supported_hints);
-}
-
-template <threadgroup_t SCOPE>
-__device__ __forceinline__ nvshmemi_region_info_t
-nvshmemi_region_resolve_leader(uint32_t supported_hints) {
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() != 0) {
-        return {};
-    }
-    if (!nvshmemi_region_any_active()) {
-        return {};
-    }
-    return nvshmemi_region_resolve_active_leader<SCOPE>(supported_hints);
-}
-
 /* Device issuer IDs encode the owning slot. The generation distinguishes slot reuse. */
 __device__ __forceinline__ uint64_t nvshmemi_region_issuer_from_slot(uint32_t slot_index) {
     return static_cast<uint64_t>(slot_index) + 1;

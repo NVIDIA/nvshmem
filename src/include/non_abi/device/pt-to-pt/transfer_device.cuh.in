@@ -89,7 +89,12 @@ nvshmemi_transfer_submit_active_region_slow();
 
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE bool nvshmemi_transfer_submit_active_region() {
-    return nvshmemi_transfer_submit_active_region_slow<SCOPE>();
+    bool region_active = false;
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 && nvshmemi_region_any_active()) {
+        region_active = nvshmemi_transfer_submit_active_region_slow<SCOPE>();
+    }
+    nvshmemi_threadgroup_sync<SCOPE>();
+    return region_active;
 }
 
 __device__ NVSHMEMI_TRANSFER_INLINE void nvshmemi_transfer_syncapi_update_mem() {
@@ -378,12 +383,11 @@ template <threadgroup_t SCOPE>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ bool
 nvshmemi_transfer_submit_active_region_slow() {
     nvshmemi_region_info_t region_info =
-        nvshmemi_region_resolve_leader<SCOPE>(NVSHMEMI_REGION_SUPPORTED_HINTS);
+        nvshmemi_region_resolve_active_current(NVSHMEMI_REGION_SUPPORTED_HINTS);
     bool region_active = region_info.region_id != 0;
     if (region_active) {
         nvshmemi_transfer_region_end<SCOPE>(&region_info);
     }
-    nvshmemi_threadgroup_sync<SCOPE>();
     return region_active;
 }
 
