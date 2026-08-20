@@ -134,8 +134,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_start_block(
         status = nvshmemi_region_claim_slot(handle, attrs);
         if (status == NVSHMEMX_SUCCESS) {
             local_handle = *handle;
-            nvshmemi_region_set_block_hints(
-                attrs == NULL ? static_cast<uint32_t>(NVSHMEMX_REGION_HINT_NONE) : attrs->hints);
         }
     }
 
@@ -180,7 +178,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_stop_block(
             cuda::atomic_ref<unsigned long long, cuda::thread_scope_device> state_ref(slot->state);
             state_ref.store(NVSHMEMI_REGION_SLOT_FREE, cuda::memory_order_release);
             nvshmemi_region_decrement_active_count();
-            nvshmemi_region_set_block_hints(NVSHMEMX_REGION_HINT_NONE);
         }
     }
 
