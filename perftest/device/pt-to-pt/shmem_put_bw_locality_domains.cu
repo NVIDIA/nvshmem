@@ -276,8 +276,8 @@ int main(int argc, char *argv[]) {
     uint64_t *h_size_arr;
     double *h_bw = NULL;
 
-    bool machine_readable = false;
-    std::vector<std::vector<double>> bw_per_pair_per_size;
+    std::vector<std::vector<perf_stats_t>> bw_stats_per_pair_per_size;
+    std::vector<perf_stats_t> bw_avg_stats_per_size;
 
     bw_fn_t bw_fn = NULL;
     bw_tma_fn_t bw_tma_fn = NULL;
@@ -589,21 +589,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (mype == 0) {
-        const char *env = std::getenv("NVSHMEM_MACHINE_READABLE_OUTPUT");
-        if (env) {
-            machine_readable = (std::atoi(env) != 0);
-        }
-        bw_per_pair_per_size.assign(array_size, std::vector<double>(std::max(1, npes / 2), 0.0));
-    }
-
-    if (mype == 0 && !machine_readable) {
-        std::fprintf(stdout, "\nshmem_put_bw_locality_domains%s (GB/s)\n", use_tma ? " [TMA]" : "");
-        std::fprintf(stdout, "%14s", "size (B)");
-        for (int s = 0; s < npes / 2; s++) {
-            std::fprintf(stdout, "  PE %d -> PE %d", s, s ^ (npes / 2));
-        }
-        std::fprintf(stdout, "\n");
-        std::fflush(stdout);
+        bw_stats_per_pair_per_size.assign(array_size,
+                                          std::vector<perf_stats_t>(std::max(1, npes / 2)));
+        bw_avg_stats_per_size.resize(array_size);
     }
 
     /* ------------------------------------------------------------------ */
@@ -777,19 +765,12 @@ int main(int argc, char *argv[]) {
                 if (mype == 0) {
                     CUDA_CHECK(cudaMemcpy(h_bw_all.data(), d_bw_all, npes * sizeof(double),
                                           cudaMemcpyDeviceToHost));
-                    if (!machine_readable) {
-                        std::fprintf(stdout, "%14lu", (unsigned long)size);
-                    }
+                    double bw_sum = 0.0;
                     for (int s = 0; s < npes / 2; s++) {
-                        bw_per_pair_per_size[i][s] = h_bw_all[s];
-                        if (!machine_readable) {
-                            std::fprintf(stdout, "%14.2f", h_bw_all[s]);
-                        }
+                        perf_stats_add(bw_stats_per_pair_per_size[i][s], h_bw_all[s]);
+                        bw_sum += h_bw_all[s];
                     }
-                    if (!machine_readable) {
-                        std::fprintf(stdout, "\n");
-                        std::fflush(stdout);
-                    }
+                    perf_stats_add(bw_avg_stats_per_size[i], bw_sum / (npes / 2));
                 }
             }
 
@@ -797,31 +778,30 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if (mype == 0 && machine_readable) {
+    if (mype == 0) {
         const char *test_name =
             use_tma ? "shmem_put_bw_locality_domains_tma" : "shmem_put_bw_locality_domains";
         const int num_pairs = std::max(1, npes / 2);
 
         std::vector<double> bw_avg(i, 0.0);
         for (int j = 0; j < i; j++) {
-            double sum = 0.0;
-            for (int s = 0; s < num_pairs; s++) {
-                sum += bw_per_pair_per_size[j][s];
-            }
-            bw_avg[j] = sum / num_pairs;
+            bw_avg[j] = bw_avg_stats_per_size[j].mean;
         }
-        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, bw_avg.data(), i);
+        print_basic_table(test_name, "None", "BW", "GB/sec", '+', h_size_arr, bw_avg.data(), i,
+                          bw_avg_stats_per_size.data());
 
         if (npes > 2) {
             std::vector<double> bw_pair(i, 0.0);
+            std::vector<perf_stats_t> stats(i);
             for (int s = 0; s < num_pairs; s++) {
                 for (int j = 0; j < i; j++) {
-                    bw_pair[j] = bw_per_pair_per_size[j][s];
+                    bw_pair[j] = bw_stats_per_pair_per_size[j][s].mean;
+                    stats[j] = bw_stats_per_pair_per_size[j][s];
                 }
                 char subjob[32];
                 std::snprintf(subjob, sizeof(subjob), "PE%d_to_PE%d", s, s ^ (npes / 2));
                 print_basic_table(test_name, subjob, "BW", "GB/sec", '+', h_size_arr,
-                                  bw_pair.data(), i);
+                                  bw_pair.data(), i, stats.data());
             }
         }
     }
