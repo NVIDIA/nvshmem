@@ -320,7 +320,7 @@ static void print_read_args_summary() {
         "stride: %zu, datatype: %s, reduce_op: %s, threadgroup_scope: %s, atomic_op: %s, dir: %s, "
         "report_msgrate: %d, bidirectional: %d, putget_issue :%s, use_graph: %d, use_mmap: %d, "
         "mem_handle_type: %zu, use_egm: %d, use_smem: %d, iteration_barrier: %d, "
-        "final_barrier: %d"
+        "final_barrier: %d, final_quiet_only: %d"
 #if CUDART_VERSION >= 13000
         ", use_nucs: %d"
 #endif
@@ -329,7 +329,7 @@ static void print_read_args_summary() {
         datatype.name.c_str(), reduce_op.name.c_str(), threadgroup_scope.name.c_str(),
         test_amo.name.c_str(), dir.name.c_str(), report_msgrate, bidirectional,
         putget_issue.name.c_str(), use_graph, use_mmap, mem_handle_type, use_egm, use_smem,
-        use_iteration_barrier, use_final_barrier
+        use_iteration_barrier, use_final_barrier, use_final_quiet_only
 #if CUDART_VERSION >= 13000
         ,
         use_nucs
@@ -1182,6 +1182,7 @@ bool use_egm = false;
 bool use_smem = true;
 bool use_iteration_barrier = true;
 bool use_final_barrier = true;
+bool use_final_quiet_only = false;
 #if CUDART_VERSION >= 13000
 bool use_nucs = false;
 #endif
@@ -1226,6 +1227,7 @@ void read_args(int argc, char **argv) {
                                            {"use_smem", required_argument, 0, 0},
                                            {"no-iteration-barrier", no_argument, 0, 0},
                                            {"no-final-barrier", no_argument, 0, 0},
+                                           {"final-quiet-only", no_argument, 0, 0},
 #if CUDART_VERSION >= 13000
                                            {"nucs", no_argument, 0, 0},
 #endif
@@ -1285,6 +1287,8 @@ void read_args(int argc, char **argv) {
                     "put/get bandwidth and latency tests) \n"
                     "--no-final-barrier (Disable the final inter-CTA barrier and quiet in "
                     "applicable put/get bandwidth tests) \n"
+                    "--final-quiet-only (Quiet once per CTA after its final issue without "
+                    "inter-CTA synchronization; requires --no-iteration-barrier) \n"
                     "-m, --mem_handle_type: <0:auto, 1:posix_fd, 2:fabric> (for mmaped buffer) \n"
                     "--cudagraph (Use CUDA graph to amortize launch overhead) \n"
                     "--nucs (Enable NVLink-utilization-centric CTA scheduling on cooperative "
@@ -1322,6 +1326,9 @@ void read_args(int argc, char **argv) {
                 } else if (strcmp(long_options[option_index].name, "no-iteration-barrier") == 0) {
                     use_iteration_barrier = false;
                 } else if (strcmp(long_options[option_index].name, "no-final-barrier") == 0) {
+                    use_final_barrier = false;
+                } else if (strcmp(long_options[option_index].name, "final-quiet-only") == 0) {
+                    use_final_quiet_only = true;
                     use_final_barrier = false;
                 } else if (strcmp(long_options[option_index].name, "region_ops") == 0) {
                     if (atol_scaled(optarg, &region_ops) || region_ops == 0) {
@@ -1403,6 +1410,11 @@ void read_args(int argc, char **argv) {
                 abort();
         }
     }
+    if (use_final_quiet_only && use_iteration_barrier) {
+        fprintf(stderr, "--final-quiet-only requires --no-iteration-barrier\n");
+        exit(EXIT_FAILURE);
+    }
+
     max_size_log = 1;
     size_t tmp = max_size;
     while (tmp) {
