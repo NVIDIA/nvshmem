@@ -285,15 +285,15 @@ nvshmemi_proxy_write_region_metadata_slot(uint64_t idx, const nvshmemi_region_in
 template <nvshmemi_region_operation_t REGION_OPERATION>
 NVSHMEMI_STATIC __device__ NVSHMEMI_NOINLINE bool nvshmemi_proxy_try_publish_region_request(
     uint64_t idx, volatile uint64_t *request, uint64_t request_value) {
-    constexpr uint32_t supported_hints =
-        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
+    constexpr nvshmemi_region_hints_t supported_hints =
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints();
     nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
     if (region_info.region_id == 0) {
         return false;
     }
 
     bool batch_rma_region =
-        nvshmemi_region_info_has_hints(&region_info, NVSHMEMI_REGION_HINT_BATCH_RMA);
+        nvshmemi_region_info_has_hints(&region_info, nvshmemi_region_hints_batch_rma());
     if (batch_rma_region) {
         nvshmemi_proxy_write_region_metadata_slot(idx, &region_info);
         request_value |= static_cast<uint64_t>(PROXY_GROUP_REGION) << 8;

@@ -21,10 +21,6 @@
 
 #ifdef __CUDA_ARCH__
 
-__device__ __forceinline__ bool nvshmemi_region_hints_are_valid(uint32_t hints) {
-    return (hints & ~NVSHMEMI_REGION_SUPPORTED_HINTS) == 0;
-}
-
 __device__ __forceinline__ uint32_t nvshmemi_region_probe_start(uint64_t gridid, uint64_t block_id,
                                                                 uint32_t slots_len) {
     if (slots_len <= 1) {
@@ -79,10 +75,11 @@ __device__ __forceinline__ bool nvshmemi_region_slot_matches(nvshmemi_region_slo
 }
 
 __device__ __forceinline__ bool nvshmemi_region_slot_has_hints(nvshmemi_region_slot_t *slot,
-                                                               uint32_t hints) {
-    uint32_t slot_hints = cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
-                              .load(cuda::memory_order_relaxed);
-    return hints == NVSHMEMX_REGION_HINT_NONE || (slot_hints & hints) == hints;
+                                                               nvshmemi_region_hints_t hints) {
+    nvshmemi_region_hints_t slot_hints{
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
+            .load(cuda::memory_order_relaxed)};
+    return slot_hints.contains(hints);
 }
 
 __device__ __forceinline__ uint32_t nvshmemi_region_load_active_count() {
@@ -127,19 +124,20 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_find_slot(uin
 }
 
 __device__ __forceinline__ nvshmemi_region_info_t
-nvshmemi_region_resolve_active_current(uint32_t supported_hints) {
+nvshmemi_region_resolve_active_current(nvshmemi_region_hints_t supported_hints) {
     nvshmemi_region_info_t info = {};
+    const uint32_t supported_hints_value = supported_hints.value();
     uint64_t generation = 0;
     nvshmemi_region_slot_t *slot = nvshmemi_region_find_active_slot(
         nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx(), &generation);
     if (slot != nullptr) {
         uint32_t hints = cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
                              .load(cuda::memory_order_relaxed);
-        if ((hints & supported_hints) != 0) {
+        if ((hints & supported_hints_value) != 0) {
             info.issuer_id = cuda::atomic_ref<uint64_t, cuda::thread_scope_device>(slot->issuer_id)
                                  .load(cuda::memory_order_relaxed);
             info.region_id = generation;
-            info.hints = hints & supported_hints;
+            info.hints = hints & supported_hints_value;
         }
     }
     return info;
@@ -151,13 +149,13 @@ __device__ __forceinline__ uint64_t nvshmemi_region_issuer_from_slot(uint32_t sl
 }
 
 __device__ __forceinline__ bool nvshmemi_region_info_has_hints(
-    const nvshmemi_region_info_t *region_info, uint32_t hints) {
-    return region_info != nullptr && (region_info->hints & hints) == hints;
+    const nvshmemi_region_info_t *region_info, nvshmemi_region_hints_t hints) {
+    return region_info != nullptr && nvshmemi_region_hints_t{region_info->hints}.contains(hints);
 }
 
 __device__ __forceinline__ uint32_t
 nvshmemi_region_slot_index(const nvshmemi_region_info_t *region_info) {
-    if (region_info == nullptr || region_info->hints == NVSHMEMX_REGION_HINT_NONE ||
+    if (region_info == nullptr || nvshmemi_region_hints_t{region_info->hints}.empty() ||
         region_info->issuer_id == 0 ||
         region_info->issuer_id > nvshmemi_device_state_d.region_slots_len) {
         return UINT32_MAX;
@@ -178,14 +176,14 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_slot_from_inf
             .load(cuda::memory_order_acquire);
     uint64_t issuer_id = cuda::atomic_ref<uint64_t, cuda::thread_scope_device>(slot->issuer_id)
                              .load(cuda::memory_order_relaxed);
-    uint32_t hints = cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
-                         .load(cuda::memory_order_acquire);
+    nvshmemi_region_hints_t hints{cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
+                                      .load(cuda::memory_order_acquire)};
     uint64_t generation = cuda::atomic_ref<uint64_t, cuda::thread_scope_device>(slot->generation)
                               .load(cuda::memory_order_relaxed);
     if (!nvshmemi_region_slot_state_is_active(state) ||
         nvshmemi_region_slot_state_generation(state) != generation ||
         issuer_id != region_info->issuer_id || generation != region_info->region_id ||
-        (hints & region_info->hints) != region_info->hints) {
+        !hints.contains(nvshmemi_region_hints_t{region_info->hints})) {
         return nullptr;
     }
     return slot;
@@ -193,7 +191,7 @@ __device__ __forceinline__ nvshmemi_region_slot_t *nvshmemi_region_slot_from_inf
 
 __device__ __forceinline__ bool nvshmemi_region_batch_rma_should_submit(
     const nvshmemi_region_info_t *region_info, uint32_t threshold) {
-    if (!nvshmemi_region_info_has_hints(region_info, NVSHMEMI_REGION_HINT_BATCH_RMA) ||
+    if (!nvshmemi_region_info_has_hints(region_info, nvshmemi_region_hints_batch_rma()) ||
         threshold == 0) {
         return false;
     }

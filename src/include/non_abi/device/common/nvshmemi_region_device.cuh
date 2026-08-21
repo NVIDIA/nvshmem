@@ -29,8 +29,9 @@ __device__ __forceinline__ uint32_t nvshmemi_region_lock_active_count(
     }
 }
 
-__device__ __forceinline__ void nvshmemi_region_increment_active_count(uint32_t hints) {
-    if (hints == NVSHMEMX_REGION_HINT_NONE) {
+__device__ __forceinline__ void nvshmemi_region_increment_active_count(
+    nvshmemi_region_hints_t hints) {
+    if (hints.empty()) {
         return;
     }
     cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(
@@ -40,8 +41,9 @@ __device__ __forceinline__ void nvshmemi_region_increment_active_count(uint32_t 
     active_count_ref.store(count + 1, cuda::memory_order_release);
 }
 
-__device__ __forceinline__ void nvshmemi_region_decrement_active_count(uint32_t hints) {
-    if (hints == NVSHMEMX_REGION_HINT_NONE) {
+__device__ __forceinline__ void nvshmemi_region_decrement_active_count(
+    nvshmemi_region_hints_t hints) {
+    if (hints.empty()) {
         return;
     }
     cuda::atomic_ref<uint32_t, cuda::thread_scope_device> active_count_ref(
@@ -57,8 +59,8 @@ __device__ __forceinline__ int nvshmemi_region_claim_slot(nvshmemx_region_handle
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
-    uint32_t hints =
-        attrs == NULL ? static_cast<uint32_t>(NVSHMEMX_REGION_HINT_NONE) : attrs->hints;
+    nvshmemi_region_hints_t hints{attrs == NULL ? static_cast<uint32_t>(NVSHMEMX_REGION_HINT_NONE)
+                                                : attrs->hints};
     if (!nvshmemi_region_hints_are_valid(hints)) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
@@ -106,7 +108,7 @@ __device__ __forceinline__ int nvshmemi_region_claim_slot(nvshmemx_region_handle
                              cuda::memory_order_relaxed);
             gridid_ref.store(gridid, cuda::memory_order_release);
             block_id_ref.store(block_id, cuda::memory_order_release);
-            hints_ref.store(hints, cuda::memory_order_release);
+            hints_ref.store(hints.value(), cuda::memory_order_release);
             operation_ticket_ref.store(0, cuda::memory_order_relaxed);
             state_ref.store(nvshmemi_region_slot_state(NVSHMEMI_REGION_SLOT_ACTIVE, generation),
                             cuda::memory_order_release);
@@ -173,12 +175,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_region_stop_block(
         } else {
             cuda::atomic_ref<uint64_t, cuda::thread_scope_device> issuer_ref(slot->issuer_id);
             cuda::atomic_ref<uint64_t, cuda::thread_scope_device> generation_ref(slot->generation);
-            uint32_t hints = cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
-                                 .load(cuda::memory_order_relaxed);
-            if (hints != NVSHMEMX_REGION_HINT_NONE) {
+            nvshmemi_region_hints_t hints{
+                cuda::atomic_ref<uint32_t, cuda::thread_scope_device>(slot->hints)
+                    .load(cuda::memory_order_relaxed)};
+            if (!hints.empty()) {
                 nvshmemi_region_info_t region_info = {
                     issuer_ref.load(cuda::memory_order_relaxed),
-                    generation_ref.load(cuda::memory_order_relaxed), hints};
+                    generation_ref.load(cuda::memory_order_relaxed), hints.value()};
                 nvshmemi_transfer_region_end<NVSHMEMI_THREADGROUP_BLOCK>(&region_info);
             }
             cuda::atomic_ref<unsigned long long, cuda::thread_scope_device> state_ref(slot->state);
@@ -202,13 +205,14 @@ __device__ __forceinline__ int nvshmemi_region_is_active(uint32_t hints, int *ac
     if (active == NULL) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
-    if (!nvshmemi_region_hints_are_valid(hints)) {
+    nvshmemi_region_hints_t internal_hints{hints};
+    if (!nvshmemi_region_hints_are_valid(internal_hints)) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
     nvshmemi_region_slot_t *slot =
         nvshmemi_region_find_slot(nvshmemi_get_grid_id(), nvshmemi_get_flat_blk_idx());
-    *active = slot != NULL && nvshmemi_region_slot_has_hints(slot, hints);
+    *active = slot != NULL && nvshmemi_region_slot_has_hints(slot, internal_hints);
     return NVSHMEMX_SUCCESS;
 }
 
