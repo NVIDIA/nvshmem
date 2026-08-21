@@ -583,9 +583,9 @@ enum class nvshmemi_gpu_sharing_t {
 
 /*
  * Classifies the run by walking the cross-PE pe_info pairs and, on a non-NONE
- * result, logs an INFO line naming the offending pair and the reason. Detection
- * relies only on hostHash + PCIe coordinates + UUID — fields already exchanged
- * via nvshmemi_detect_same_device — never on prop.name.
+ * result, PE 0 logs an INFO line naming the offending pair and the reason.
+ * Detection relies only on hostHash + PCIe coordinates + UUID — fields already
+ * exchanged via nvshmemi_detect_same_device — never on prop.name.
  */
 static nvshmemi_gpu_sharing_t nvshmemi_classify_gpu_sharing(const nvshmemi_state_t *state) {
     if (state->pe_info == nullptr) {
@@ -623,13 +623,15 @@ static nvshmemi_gpu_sharing_t nvshmemi_classify_gpu_sharing(const nvshmemi_state
         return kind;
     }
 
-    const char *reason = (kind == nvshmemi_gpu_sharing_t::MPS_MLOPART)
-                             ? "MPS MLOPart partitions"
-                             : "multiple PEs per GPU (MPG)";
-    INFO(NVSHMEM_INIT,
-         "NVLS: disabled because PEs %d and %d share the same physical GPU "
-         "(%s); NVLS multicast cannot span this configuration\n",
-         i, j, reason);
+    if (state->mype == 0) {
+        const char *reason = (kind == nvshmemi_gpu_sharing_t::MPS_MLOPART)
+                                 ? "MPS MLOPart partitions"
+                                 : "multiple PEs per GPU (MPG)";
+        INFO(NVSHMEM_INIT,
+             "NVLS: disabled because PEs %d and %d share the same physical GPU "
+             "(%s); NVLS multicast cannot span this configuration\n",
+             i, j, reason);
+    }
     return kind;
 }
 
