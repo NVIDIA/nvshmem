@@ -254,9 +254,8 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ bool
 nvshmemi_transfer_try_direct_region_rma_nbi(nvshmemi_selected_device_transport_t transport,
                                             void *rptr, void *lptr, size_t bytes, int pe,
                                             nvshmemx_qp_handle_t qp_index) {
-    constexpr uint32_t supported_hints =
-        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints;
-    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
+    nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(
+        nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints());
     if (region_info.region_id == 0) {
         return false;
     }
@@ -355,7 +354,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     const nvshmemi_region_info_t *region_info) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     if (myIdx != 0 ||
-        !nvshmemi_region_info_has_hints(region_info, NVSHMEMI_REGION_HINT_BATCH_RMA)) {
+        !nvshmemi_region_info_has_hints(region_info, nvshmemi_region_hints_batch_rma())) {
         return;
     }
 
@@ -390,7 +389,7 @@ template <threadgroup_t SCOPE>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ bool
 nvshmemi_transfer_submit_active_region_slow() {
     nvshmemi_region_info_t region_info =
-        nvshmemi_region_resolve_active_current(NVSHMEMI_REGION_SUPPORTED_HINTS);
+        nvshmemi_region_resolve_active_current(nvshmemi_region_supported_hints());
     bool region_active = region_info.region_id != 0;
     if (region_active) {
         nvshmemi_transfer_region_end<SCOPE>(&region_info);

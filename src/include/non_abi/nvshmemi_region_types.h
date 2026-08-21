@@ -18,9 +18,56 @@
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/nvshmemi_region_constants.h"
 
-#define NVSHMEMI_REGION_SUPPORTED_HINTS ((uint32_t)NVSHMEMI_REGION_HINT_BATCH_RMA)
 static_assert(NVSHMEMI_REGION_HINT_BATCH_RMA == NVSHMEMX_REGION_HINT_BATCH_RMA,
               "Public and internal batch RMA hint values must match.");
+
+#if defined(__CUDACC__) || defined(__CUDACC_RTC__)
+#define NVSHMEMI_REGION_HOST_DEVICE __host__ __device__
+#else
+#define NVSHMEMI_REGION_HOST_DEVICE
+#endif
+
+/* Public attributes and shared metadata keep their uint32_t representation. */
+class nvshmemi_region_hints_t {
+   public:
+    NVSHMEMI_REGION_HOST_DEVICE explicit constexpr nvshmemi_region_hints_t(uint32_t value)
+        : value_(value) {}
+
+    NVSHMEMI_REGION_HOST_DEVICE constexpr uint32_t value() const { return value_; }
+    NVSHMEMI_REGION_HOST_DEVICE constexpr bool empty() const {
+        return value_ == NVSHMEMX_REGION_HINT_NONE;
+    }
+    NVSHMEMI_REGION_HOST_DEVICE constexpr bool contains(nvshmemi_region_hints_t required) const {
+        return (value_ & required.value_) == required.value_;
+    }
+    NVSHMEMI_REGION_HOST_DEVICE constexpr bool intersects(nvshmemi_region_hints_t other) const {
+        return (value_ & other.value_) != 0;
+    }
+    NVSHMEMI_REGION_HOST_DEVICE constexpr nvshmemi_region_hints_t operator&(
+        nvshmemi_region_hints_t other) const {
+        return nvshmemi_region_hints_t{value_ & other.value_};
+    }
+
+   private:
+    uint32_t value_;
+};
+
+NVSHMEMI_REGION_HOST_DEVICE constexpr nvshmemi_region_hints_t nvshmemi_region_hints_none() {
+    return nvshmemi_region_hints_t{NVSHMEMX_REGION_HINT_NONE};
+}
+
+NVSHMEMI_REGION_HOST_DEVICE constexpr nvshmemi_region_hints_t nvshmemi_region_hints_batch_rma() {
+    return nvshmemi_region_hints_t{NVSHMEMI_REGION_HINT_BATCH_RMA};
+}
+
+NVSHMEMI_REGION_HOST_DEVICE constexpr nvshmemi_region_hints_t nvshmemi_region_supported_hints() {
+    return nvshmemi_region_hints_t{NVSHMEMI_REGION_HINT_BATCH_RMA};
+}
+
+NVSHMEMI_REGION_HOST_DEVICE constexpr bool nvshmemi_region_hints_are_valid(
+    nvshmemi_region_hints_t hints) {
+    return nvshmemi_region_supported_hints().contains(hints);
+}
 
 typedef enum {
     NVSHMEMI_REGION_OPERATION_NONE = 0,
@@ -30,13 +77,19 @@ typedef enum {
 
 template <nvshmemi_region_operation_t OPERATION>
 struct nvshmemi_region_operation_traits {
-    static constexpr uint32_t supported_hints = NVSHMEMX_REGION_HINT_NONE;
+    NVSHMEMI_REGION_HOST_DEVICE static constexpr nvshmemi_region_hints_t supported_hints() {
+        return nvshmemi_region_hints_none();
+    }
 };
 
 template <>
 struct nvshmemi_region_operation_traits<NVSHMEMI_REGION_OPERATION_NBI_RMA> {
-    static constexpr uint32_t supported_hints = NVSHMEMI_REGION_HINT_BATCH_RMA;
+    NVSHMEMI_REGION_HOST_DEVICE static constexpr nvshmemi_region_hints_t supported_hints() {
+        return nvshmemi_region_hints_batch_rma();
+    }
 };
+
+#undef NVSHMEMI_REGION_HOST_DEVICE
 
 typedef struct {
     uint64_t issuer_id;

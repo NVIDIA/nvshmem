@@ -696,7 +696,7 @@ __device__ static __forceinline__ void gdaki_submit_db(nvshmemi_gpunetio_device_
             &(qp->qp.sq_rsvd_index));
     bool defer_submission =
         state->region_batch_rma_pending_qps != nullptr &&
-        nvshmemi_region_info_has_hints(region_info, NVSHMEMI_REGION_HINT_BATCH_RMA) &&
+        nvshmemi_region_info_has_hints(region_info, nvshmemi_region_hints_batch_rma()) &&
         nvshmemi_region_slot_index(region_info) != UINT32_MAX;
     bool batch_limit_reached = ((base_wqe_idx & mask) != (new_wqe_idx & mask)) ||
                                (num_wqes >= state->num_requests_in_batch);

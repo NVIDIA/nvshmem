@@ -13,23 +13,19 @@
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host_transport/transport.h"
 #include "non_abi/nvshmemi_region_constants.h"
+#include "non_abi/nvshmemi_region_types.h"
 #include "non_abi/nvshmemx_error.h"
 
 namespace {
-bool nvshmemi_region_hints_are_valid(uint32_t hints) {
-    constexpr uint32_t supported_hints = NVSHMEMX_REGION_HINT_BATCH_RMA;
-    return (hints & ~supported_hints) == 0;
-}
-
 class nvshmemi_region_host_state {
    public:
     bool active() const { return active_; }
-    bool has_hints(uint32_t hints) const {
-        return active_ && (hints == NVSHMEMX_REGION_HINT_NONE || (hints_ & hints) == hints);
+    bool has_hints(nvshmemi_region_hints_t hints) const {
+        return active_ && hints_.contains(hints);
     }
     uint64_t region_id() const { return region_id_; }
 
-    void start(uint64_t region_id, uint32_t hints) {
+    void start(uint64_t region_id, nvshmemi_region_hints_t hints) {
         region_id_ = region_id;
         hints_ = hints;
         active_ = true;
@@ -38,12 +34,12 @@ class nvshmemi_region_host_state {
     void reset() {
         active_ = false;
         region_id_ = 0;
-        hints_ = NVSHMEMX_REGION_HINT_NONE;
+        hints_ = nvshmemi_region_hints_none();
     }
 
    private:
     uint64_t region_id_ = 0;
-    uint32_t hints_ = NVSHMEMX_REGION_HINT_NONE;
+    nvshmemi_region_hints_t hints_ = nvshmemi_region_hints_none();
     bool active_ = false;
 };
 
@@ -63,7 +59,7 @@ uint64_t nvshmemi_region_next_id() {
 uint32_t nvshmemi_region_host_active_hints = NVSHMEMX_REGION_HINT_NONE;
 
 bool nvshmemi_region_host_prepare_rma_attrs(nvshmem_transport_op_attrs_t *attrs) {
-    if (!region_state.has_hints(NVSHMEMI_REGION_HINT_BATCH_RMA)) {
+    if (!region_state.has_hints(nvshmemi_region_hints_batch_rma())) {
         return false;
     }
 
@@ -93,7 +89,7 @@ int nvshmemi_region_flush(nvshmemi_state_t *state, nvshmem_transport_region_role
 }
 
 int nvshmemi_region_host_flush_active() {
-    if (!region_state.has_hints(NVSHMEMI_REGION_HINT_BATCH_RMA)) {
+    if (!region_state.has_hints(nvshmemi_region_hints_batch_rma())) {
         return NVSHMEMX_SUCCESS;
     }
 
@@ -118,8 +114,8 @@ int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_regio
     if (handle == nullptr) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
-    uint32_t hints =
-        attrs == nullptr ? static_cast<uint32_t>(NVSHMEMX_REGION_HINT_NONE) : attrs->hints;
+    nvshmemi_region_hints_t hints{
+        attrs == nullptr ? static_cast<uint32_t>(NVSHMEMX_REGION_HINT_NONE) : attrs->hints};
     if (!nvshmemi_region_hints_are_valid(hints)) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
@@ -129,12 +125,12 @@ int nvshmemx_region_start(nvshmemx_region_handle_t *handle, const nvshmemx_regio
 
     uint64_t region_id = nvshmemi_region_next_id();
     region_state.start(region_id, hints);
-    nvshmemi_region_host_active_hints = hints;
+    nvshmemi_region_host_active_hints = hints.value();
     *handle = region_id;
 
     TRACE(NVSHMEM_P2P, "Host region start: issuer=%llu region=%llu hints=0x%x",
           static_cast<unsigned long long>(nvshmemi_region_host_issuer_id),
-          static_cast<unsigned long long>(region_id), hints);
+          static_cast<unsigned long long>(region_id), hints.value());
 
     return NVSHMEMX_SUCCESS;
 }
@@ -170,10 +166,11 @@ int nvshmemx_region_is_active(uint32_t hints, int *active) {
     if (active == nullptr) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
-    if (!nvshmemi_region_hints_are_valid(hints)) {
+    nvshmemi_region_hints_t internal_hints{hints};
+    if (!nvshmemi_region_hints_are_valid(internal_hints)) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
-    *active = region_state.has_hints(hints) ? 1 : 0;
+    *active = region_state.has_hints(internal_hints) ? 1 : 0;
     return NVSHMEMX_SUCCESS;
 }
