@@ -628,7 +628,7 @@ int main(int argc, char *argv[]) {
 
         if (blocks_per_domain * num_locality_domains != num_blocks && mype == 0) {
             fprintf(stderr,
-                    "WARNING: -c %d not divisible by num_locality_domains %d. "
+                    "WARNING: -c %zu not divisible by num_locality_domains %d. "
                     "Using %d blocks per domain (%d total)\n",
                     num_blocks, num_locality_domains, blocks_per_domain,
                     blocks_per_domain * num_locality_domains);
