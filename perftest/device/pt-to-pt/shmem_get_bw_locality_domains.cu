@@ -77,7 +77,15 @@ __device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter
     __syncthreads();
 }
 
-template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+__device__ __forceinline__ void cta_quiet() {
+    __syncthreads();
+    if (!threadIdx.x) {
+        nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER, bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                          int iter) {
     int i;
@@ -94,12 +102,14 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
 }
 
-template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER, bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                         int iter) {
     int i;
@@ -123,12 +133,14 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
 }
 
-template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER, bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                           int iter) {
     int i;
@@ -150,7 +162,9 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
 }
@@ -158,7 +172,7 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
 /* TMA-enabled block-scope global-to-global get. Shared memory is registered as
  * NVSHMEM scratch space only; source and destination remain in localized global
  * allocations. NVSHMEM falls back to its non-TMA path when routing is unavailable. */
-template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER, bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                              int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
@@ -179,10 +193,12 @@ __global__ void bw_block_tma(double *data_d, volatile unsigned int *counter_d, s
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true>(counter_d, ++barrier_epoch);
     }
-    if constexpr (!USE_FINAL_BARRIER) {
+    if constexpr (!USE_FINAL_BARRIER && !USE_FINAL_QUIET_ONLY) {
         __syncthreads();
     }
     nvshmemx_release_smem();
@@ -193,24 +209,24 @@ typedef void (*bw_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t
 typedef void (*bw_tma_fn_t)(double *data_d, volatile unsigned int *counter_d, size_t len, int peer,
                             int iter, int smem_size);
 
-template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER, bool USE_FINAL_QUIET_ONLY>
 static bool configure_bw_variant(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
-    *bw_tma_fn = bw_block_tma<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+    *bw_tma_fn = bw_block_tma<USE_ITERATION_BARRIER, USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>;
 
     switch (threadgroup_scope.type) {
         case NVSHMEM_THREAD:
-            *bw_fn = bw_thread<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            *bw_fn = bw_thread<USE_ITERATION_BARRIER, USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>;
             DEBUG_PRINT("Using thread-scope get (iteration_barrier=%d, final_barrier=%d)\n",
                         (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
             break;
         case NVSHMEM_WARP:
-            *bw_fn = bw_warp<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            *bw_fn = bw_warp<USE_ITERATION_BARRIER, USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>;
             DEBUG_PRINT("Using warp-scope get (iteration_barrier=%d, final_barrier=%d)\n",
                         (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
             break;
         case NVSHMEM_BLOCK:
         case NVSHMEM_ALL_SCOPES:
-            *bw_fn = bw_block<USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            *bw_fn = bw_block<USE_ITERATION_BARRIER, USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>;
             DEBUG_PRINT("Using block-scope get (iteration_barrier=%d, final_barrier=%d)\n",
                         (int)USE_ITERATION_BARRIER, (int)USE_FINAL_BARRIER);
             break;
@@ -223,17 +239,20 @@ static bool configure_bw_variant(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
 }
 
 static bool configure_bw_mode(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
+    if (use_final_quiet_only) {
+        return configure_bw_variant<false, false, true>(bw_fn, bw_tma_fn);
+    }
     if (use_iteration_barrier) {
         if (use_final_barrier) {
-            return configure_bw_variant<true, true>(bw_fn, bw_tma_fn);
+            return configure_bw_variant<true, true, false>(bw_fn, bw_tma_fn);
         }
-        return configure_bw_variant<true, false>(bw_fn, bw_tma_fn);
+        return configure_bw_variant<true, false, false>(bw_fn, bw_tma_fn);
     }
 
     if (use_final_barrier) {
-        return configure_bw_variant<false, true>(bw_fn, bw_tma_fn);
+        return configure_bw_variant<false, true, false>(bw_fn, bw_tma_fn);
     }
-    return configure_bw_variant<false, false>(bw_fn, bw_tma_fn);
+    return configure_bw_variant<false, false, false>(bw_fn, bw_tma_fn);
 }
 
 int main(int argc, char *argv[]) {
@@ -291,7 +310,9 @@ int main(int argc, char *argv[]) {
     /* Reset all per-node inter-block counters to zero. */
     auto reset_counters = [&]() {
         for (auto *ptr : counter_d_arr) {
-            CUDA_CHECK(cudaMemset(ptr, 0, sizeof(unsigned int) * 2));
+            if (ptr) {
+                CUDA_CHECK(cudaMemset(ptr, 0, sizeof(unsigned int) * 2));
+            }
         }
     };
 
@@ -562,9 +583,11 @@ int main(int argc, char *argv[]) {
     }
 
     counter_d_arr.resize(num_locality_domains, nullptr);
-    for (int n = 0; n < num_locality_domains; n++) {
-        CUDA_CHECK(cudaMalloc((void **)&counter_d_arr[n], sizeof(unsigned int) * 2));
-        CUDA_CHECK(cudaMemset(counter_d_arr[n], 0, sizeof(unsigned int) * 2));
+    if (use_iteration_barrier || use_final_barrier) {
+        for (int n = 0; n < num_locality_domains; n++) {
+            CUDA_CHECK(cudaMalloc((void **)&counter_d_arr[n], sizeof(unsigned int) * 2));
+            CUDA_CHECK(cudaMemset(counter_d_arr[n], 0, sizeof(unsigned int) * 2));
+        }
     }
 
     CUDA_CHECK(cudaDeviceSynchronize());

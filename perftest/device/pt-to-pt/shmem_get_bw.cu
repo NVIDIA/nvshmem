@@ -40,6 +40,14 @@ __device__ __forceinline__ void inter_cta_barrier(volatile unsigned int *counter
     }
 }
 
+__device__ __forceinline__ void cta_quiet() {
+    __syncthreads();
+    if (!threadIdx.x) {
+        nvshmem_quiet();
+    }
+    __syncthreads();
+}
+
 template <SMEMToggle SMEM_MODE>
 class smem_registration_guard {
    public:
@@ -64,7 +72,8 @@ class smem_registration_guard {
 /* SMEMToggle::ENABLE opts get bandwidth kernels into NVSHMEM's TMA-capable path by
  * registering dynamic shared memory at kernel entry. CFT handles are limited to
  * warp/block scope, but thread scope still uses this registration for TMA-only paths. */
-template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER,
+          bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
                          int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
@@ -84,12 +93,15 @@ __global__ void bw_block(double *data_d, volatile unsigned int *counter_d, size_
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true, false>(counter_d, ++barrier_epoch);
     }
 }
 
-template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER,
+          bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
                         int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
@@ -116,12 +128,15 @@ __global__ void bw_warp(double *data_d, volatile unsigned int *counter_d, size_t
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true, false>(counter_d, ++barrier_epoch);
     }
 }
 
-template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER,
+          bool USE_FINAL_QUIET_ONLY>
 __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size_t len, int pe,
                           int npes, int iter, int smem_size) {
     extern __shared__ char nvshmem_smem[];
@@ -146,7 +161,9 @@ __global__ void bw_thread(double *data_d, volatile unsigned int *counter_d, size
         }
     }
 
-    if constexpr (USE_FINAL_BARRIER) {
+    if constexpr (USE_FINAL_QUIET_ONLY) {
+        cta_quiet();
+    } else if constexpr (USE_FINAL_BARRIER) {
         inter_cta_barrier<true, false>(counter_d, ++barrier_epoch);
     }
 }
@@ -158,13 +175,15 @@ static SMEMToggle parse_smem_enabled() {
     return use_smem ? SMEMToggle::ENABLE : SMEMToggle::DISABLE;
 }
 
-template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER>
+template <SMEMToggle SMEM_MODE, bool USE_ITERATION_BARRIER, bool USE_FINAL_BARRIER,
+          bool USE_FINAL_QUIET_ONLY>
 static bool configure_bw_variant(bw_fn_t *bw_fn, int *smem_size) {
     *smem_size = 0;
 
     switch (threadgroup_scope.type) {
         case NVSHMEM_THREAD:
-            *bw_fn = bw_thread<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            *bw_fn = bw_thread<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER,
+                               USE_FINAL_QUIET_ONLY>;
             DEBUG_PRINT(
                 "Using thread-scope get (smem=%d, iteration_barrier=%d, "
                 "final_barrier=%d)\n",
@@ -172,34 +191,39 @@ static bool configure_bw_variant(bw_fn_t *bw_fn, int *smem_size) {
                 (int)USE_FINAL_BARRIER);
             if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
                 *smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
-                CUDA_CHECK(cudaFuncSetAttribute(
-                    bw_thread<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>,
-                    cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+                CUDA_CHECK(cudaFuncSetAttribute(bw_thread<SMEM_MODE, USE_ITERATION_BARRIER,
+                                                          USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>,
+                                                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                *smem_size));
             }
             break;
         case NVSHMEM_WARP:
-            *bw_fn = bw_warp<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            *bw_fn =
+                bw_warp<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>;
             DEBUG_PRINT("Using warp-scope get (smem=%d, iteration_barrier=%d, final_barrier=%d)\n",
                         (int)(SMEM_MODE == SMEMToggle::ENABLE), (int)USE_ITERATION_BARRIER,
                         (int)USE_FINAL_BARRIER);
             if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
                 *smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
-                CUDA_CHECK(cudaFuncSetAttribute(
-                    bw_warp<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>,
-                    cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+                CUDA_CHECK(cudaFuncSetAttribute(bw_warp<SMEM_MODE, USE_ITERATION_BARRIER,
+                                                        USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>,
+                                                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                *smem_size));
             }
             break;
         case NVSHMEM_BLOCK:
         case NVSHMEM_ALL_SCOPES:
-            *bw_fn = bw_block<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>;
+            *bw_fn =
+                bw_block<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>;
             DEBUG_PRINT("Using block-scope get (smem=%d, iteration_barrier=%d, final_barrier=%d)\n",
                         (int)(SMEM_MODE == SMEMToggle::ENABLE), (int)USE_ITERATION_BARRIER,
                         (int)USE_FINAL_BARRIER);
             if constexpr (SMEM_MODE == SMEMToggle::ENABLE) {
                 *smem_size = NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED;
-                CUDA_CHECK(cudaFuncSetAttribute(
-                    bw_block<SMEM_MODE, USE_ITERATION_BARRIER, USE_FINAL_BARRIER>,
-                    cudaFuncAttributeMaxDynamicSharedMemorySize, *smem_size));
+                CUDA_CHECK(cudaFuncSetAttribute(bw_block<SMEM_MODE, USE_ITERATION_BARRIER,
+                                                         USE_FINAL_BARRIER, USE_FINAL_QUIET_ONLY>,
+                                                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                *smem_size));
             }
             break;
         default:
@@ -212,17 +236,20 @@ static bool configure_bw_variant(bw_fn_t *bw_fn, int *smem_size) {
 
 template <SMEMToggle SMEM_MODE>
 static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
+    if (use_final_quiet_only) {
+        return configure_bw_variant<SMEM_MODE, false, false, true>(bw_fn, smem_size);
+    }
     if (use_iteration_barrier) {
         if (use_final_barrier) {
-            return configure_bw_variant<SMEM_MODE, true, true>(bw_fn, smem_size);
+            return configure_bw_variant<SMEM_MODE, true, true, false>(bw_fn, smem_size);
         }
-        return configure_bw_variant<SMEM_MODE, true, false>(bw_fn, smem_size);
+        return configure_bw_variant<SMEM_MODE, true, false, false>(bw_fn, smem_size);
     }
 
     if (use_final_barrier) {
-        return configure_bw_variant<SMEM_MODE, false, true>(bw_fn, smem_size);
+        return configure_bw_variant<SMEM_MODE, false, true, false>(bw_fn, smem_size);
     }
-    return configure_bw_variant<SMEM_MODE, false, false>(bw_fn, smem_size);
+    return configure_bw_variant<SMEM_MODE, false, false, false>(bw_fn, smem_size);
 }
 
 /* Count logical NVSHMEM get calls issued by the selected threadgroup scope. */
@@ -244,7 +271,7 @@ static size_t get_messages_per_iteration(size_t blocks, size_t threads) {
 int main(int argc, char *argv[]) {
     int mype, npes;
     double *data_d = NULL;
-    unsigned int *counter_d;
+    unsigned int *counter_d = NULL;
     double *d_bw_local = NULL, *d_bw_all = NULL;
     double *d_msgrate_local = NULL, *d_msgrate_all = NULL;
     int exit_status = 1;
@@ -318,8 +345,10 @@ int main(int argc, char *argv[]) {
         CUDA_CHECK(cudaMemset(data_d, 0, max_size));
     }
 
-    CUDA_CHECK(cudaMalloc((void **)&counter_d, sizeof(unsigned int) * 2));
-    CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+    if (use_iteration_barrier || use_final_barrier) {
+        CUDA_CHECK(cudaMalloc((void **)&counter_d, sizeof(unsigned int) * 2));
+        CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+    }
 
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -374,7 +403,9 @@ int main(int argc, char *argv[]) {
             int status;
 
             /* warmup */
-            CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+            if (counter_d) {
+                CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+            }
             {
                 void *args[] = {&data_d, &counter_d, &len, &mype, &npes, &iter_warmup, &smem_size};
                 status = nvshmemx_collective_launch_attr(&cl_attr, (const void *)bw_fn, args);
@@ -390,7 +421,9 @@ int main(int argc, char *argv[]) {
 
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 /* timed run */
-                CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+                if (counter_d) {
+                    CUDA_CHECK(cudaMemset(counter_d, 0, sizeof(unsigned int) * 2));
+                }
                 {
                     void *args[] = {&data_d, &counter_d,  &len,      &mype,
                                     &npes,   &iter_timed, &smem_size};
