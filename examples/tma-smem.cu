@@ -123,6 +123,9 @@ int main(int c, char *v[]) {
                                         cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
     }
 
+    /* Ensure all PEs have initialized their receive buffers before any put begins. */
+    nvshmem_barrier_all();
+
     /* Launch kernel: fill smem, give to NVSHMEM, put from smem to remote gmem */
     tma_smem_put_kernel<<<1, NUM_ELEMS, smem_size>>>(recv_data, NUM_ELEMS, mype, npes);
     CUDA_CHECK(cudaGetLastError());
