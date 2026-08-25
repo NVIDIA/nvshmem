@@ -17,10 +17,13 @@ awk '!/nvvm-reflect-ftz/' "$INPUT" \
     | { [ -n "$FTZ_NODE" ] && sed "/^\!llvm\.module\.flags = /s/$FTZ_NODE, //" || cat; } \
     > "$OUTPUT.tmp"
 
-# Compatibility was validated between NVSHMEM bitcode produced by LLVM 22.1.8
-# and CUTLASS 4.6.1.
+# TODO: Re-evaluate Steps 2 and 3 once CUTLASS can consume NVSHMEM bitcode
+# produced by LLVM 22.1.8 without these workarounds. CUTLASS 4.7.0's
+# LLVM 23 RC (23a60f15f2fcafcf67b95b0a035053579958b732) compilation path is
+# currently partly incompatible with the affected NVPTX intrinsics in that
+# bitcode.
 #
-# Step 2: Replace an NVPTX intrinsic that fails in CUTLASS 4.6.1's CUDA 12
+# Steps 2 and 3: Replace NVPTX intrinsics that fail in CUTLASS 4.7.0's CUDA 12
 # libNVVM backend when linked from the LLVM 22.1.8 bitcode.
 #
 # Replacements applied:
@@ -28,10 +31,17 @@ awk '!/nvvm-reflect-ftz/' "$INPUT" \
 #       -> inline PTX asm "activemask.b32"
 #       The inline asm bypasses CUTLASS's incompatible intrinsic translation.
 #
-#   - Remove the declaration for the replaced intrinsic.
+#   - @llvm.nvvm.isspacep.local(ptr %pointer)
+#       -> inline PTX asm "isspacep.local"
+#       The inline asm preserves the operation while bypassing CUTLASS's
+#       incompatible intrinsic translation.
+#
+#   - Remove declarations for both replaced intrinsics.
 sed \
     -e 's/\(tail \)\{0,1\}call noundef i32 @llvm\.nvvm\.activemask()/call i32 asm sideeffect "activemask.b32 $0;", "=r"()/g' \
     -e '/^declare i32 @llvm\.nvvm\.activemask/d' \
+    -e 's/\(tail \)\{0,1\}call \(noundef \)\{0,1\}i1 @llvm\.nvvm\.isspacep\.local(ptr \([^)]*\))/call i1 asm sideeffect "isspacep.local $0, $1;", "=b,l"(ptr \3)/g' \
+    -e '/^declare i1 @llvm\.nvvm\.isspacep\.local/d' \
     "$OUTPUT.tmp" > "$OUTPUT"
 
 rm -f "$OUTPUT.tmp"
