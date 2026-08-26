@@ -256,17 +256,6 @@ int nvshmemi_load_shmem() {
 
     return 0;
 }
-
-int nvshmemi_dlclose_shmem() {
-    int status;
-
-    status = dlclose(nvshmemi_shmem_handle);
-    if (status) {
-        fprintf(stderr, "unable to dlclose shmem.\n");
-        return -1;
-    }
-    return 0;
-}
 #endif
 
 void select_device() {
@@ -500,9 +489,8 @@ void finalize_wrapper() {
 #endif
 #ifdef NVSHMEMTEST_SHMEM_SUPPORT
     if (use_shmem) {
+        // Keep OpenSHMEM libraries mapped through process exit.
         shmem_fn_table.fn_shmem_finalize();
-        // Calling dlclose will cause oshrun to segfault at termination.
-        // nvshmemi_dlclose_shmem();
     }
 #endif
 }
