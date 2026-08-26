@@ -17,6 +17,31 @@ from test_device_rma import (_compile_kernel, _nvshmem_stream)
 
 
 @pytest.mark.mpi
+def test_device_fence_and_quiet(nvshmem_init_fini):
+    """Compile and launch the public thread-level ordering primitives."""
+    dev = Device()
+    dev.set_current()
+
+    @cute.kernel
+    def test_fence_and_quiet_kernel():
+        tidx, _, _ = cute.arch.thread_idx()
+        if tidx == 0:
+            nvshmem_cute.fence()
+            nvshmem_cute.quiet()
+
+    @cute.jit
+    def test_fence_and_quiet_launcher():
+        test_fence_and_quiet_kernel().launch(
+            grid=[1, 1, 1],
+            block=[cute.size(WARP_SIZE, mode=[0]), 1, 1],
+        )
+
+    compiled = _compile_kernel(test_fence_and_quiet_launcher)
+    compiled()
+    dev.sync()
+
+
+@pytest.mark.mpi
 @pytest.mark.parametrize("team", [nvshmem.core.Teams.TEAM_NODE])
 def test_device_sync(nvshmem_init_fini, team):
     dev = Device()
