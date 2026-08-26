@@ -6,7 +6,7 @@ from nvshmem.core import SmemAmount, Teams
 
 __all__ = [
     "SmemAmount", "ask_smem", "give_smem", "release_smem", "my_pe", "team_my_pe", "team_n_pes", "n_pes", "barrier_all",
-    "sync_all", "signal_op", "signal_wait"
+    "sync_all", "fence", "quiet", "signal_op", "signal_wait"
 ]
 
 from cutlass import cute
@@ -198,6 +198,22 @@ def sync_all():
     """
     team = Teams.TEAM_WORLD
     return bindings.team_sync(team)
+
+
+@cute.jit
+def fence():
+    """Order prior and later operations to the same target PE without completing them.
+
+    This is the thread-level device ``nvshmem_fence`` primitive. Use
+    :func:`quiet` when completion of outstanding operations is required.
+    """
+    return bindings.fence()
+
+
+@cute.jit
+def quiet():
+    """Complete outstanding device-initiated NVSHMEM operations for the calling thread."""
+    return bindings.quiet()
 
 
 @cute.jit
