@@ -226,17 +226,6 @@ int nvshmemi_load_mpi() {
 
     return 0;
 }
-
-int nvshmemi_dlclose_mpi() {
-    int status;
-
-    status = dlclose(nvshmemi_mpi_handle);
-    if (status) {
-        fprintf(stderr, "unable to dlclose MPI.\n");
-        return -1;
-    }
-    return 0;
-}
 #endif
 
 #ifdef NVSHMEMTEST_SHMEM_SUPPORT
@@ -502,8 +491,11 @@ void finalize_wrapper() {
 
 #ifdef NVSHMEMTEST_MPI_SUPPORT
     if (use_mpi || use_uid) {
+        /* MPI_Finalize is sufficient for these short-lived executables. Keep MPI libraries mapped
+         * through process exit because implementations may install process-global hooks that
+         * remain reachable during teardown.
+         */
         mpi_fn_table.fn_MPI_Finalize();
-        nvshmemi_dlclose_mpi();
     }
 #endif
 #ifdef NVSHMEMTEST_SHMEM_SUPPORT
