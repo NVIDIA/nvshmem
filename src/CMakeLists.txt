@@ -47,6 +47,7 @@ ExternalProject_Add(nvshmem_device_project
                                 -DNVSHMEM_GPUNETIO_SUPPORT=${NVSHMEM_GPUNETIO_SUPPORT}
                                 -DGPUNETIO_INCLUDE=${GPUNETIO_INCLUDE}
                                 -DCUTLASS_HOME=${CUTLASS_HOME}
+                                -DCUDA_HOME=${CUDAToolkit_Root}
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                                 -DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}
