@@ -14,6 +14,7 @@ from .cynvshmem cimport *
 # Types
 ###############################################################################
 
+ctypedef nvshmemx_region_attrs_t region_attrs
 ctypedef nvshmemx_uniqueid_args_v1 uniqueid_args
 ctypedef nvshmem_team_config_v2 team_config
 ctypedef nvshmemx_init_args_v2 init_args
@@ -32,6 +33,7 @@ ctypedef CUlibrary Library
 ctypedef nvshmemx_signal_op_t _Signal_op
 ctypedef nvshmemx_tma_policy_t _Tma_policy
 ctypedef nvshmemx_smem_amount_t _Smem_amount
+ctypedef nvshmemx_region_hint_t _Region_hint
 ctypedef nvshmemx_cmp_type_t _Cmp_type
 ctypedef nvshmemx_thread_support_t _Thread_support
 ctypedef nvshmemx_proxy_status_t _Proxy_status

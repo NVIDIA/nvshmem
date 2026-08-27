@@ -313,6 +313,11 @@ class Smem_amount(_IntEnum):
     SMEM_BARRIERS_ONLY = NVSHMEMX_SMEM_BARRIERS_ONLY
     MAX = NVSHMEMX_SMEM_AMOUNT_MAX
 
+class Region_hint(_IntEnum):
+    """See `nvshmemx_region_hint_t`."""
+    NONE = NVSHMEMX_REGION_HINT_NONE
+    BATCH_RMA = NVSHMEMX_REGION_HINT_BATCH_RMA
+
 class Cmp_type(_IntEnum):
     """See `nvshmemx_cmp_type_t`."""
     CMP_EQ = NVSHMEM_CMP_EQ

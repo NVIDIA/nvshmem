@@ -34,6 +34,10 @@ ctypedef enum nvshmemx_smem_amount_t "nvshmemx_smem_amount_t":
     NVSHMEMX_SMEM_BARRIERS_ONLY "NVSHMEMX_SMEM_BARRIERS_ONLY" = 2
     NVSHMEMX_SMEM_AMOUNT_MAX "NVSHMEMX_SMEM_AMOUNT_MAX" = 32767
 
+ctypedef enum nvshmemx_region_hint_t "nvshmemx_region_hint_t":
+    NVSHMEMX_REGION_HINT_NONE "NVSHMEMX_REGION_HINT_NONE" = 0
+    NVSHMEMX_REGION_HINT_BATCH_RMA "NVSHMEMX_REGION_HINT_BATCH_RMA" = (1u << 0)
+
 ctypedef enum nvshmemx_cmp_type_t "nvshmemx_cmp_type_t":
     NVSHMEM_CMP_EQ "NVSHMEM_CMP_EQ" = 0
     NVSHMEM_CMP_NE "NVSHMEM_CMP_NE"
@@ -151,6 +155,10 @@ ctypedef struct nvshmemx_uniqueid_v1 'nvshmemx_uniqueid_v1':
 ctypedef int nvshmemx_qp_handle_t 'nvshmemx_qp_handle_t'
 ctypedef uint64_t nvshmemx_team_uniqueid_t 'nvshmemx_team_uniqueid_t'
 ctypedef int32_t nvshmem_team_t 'nvshmem_team_t'
+ctypedef uint64_t nvshmemx_region_handle_t 'nvshmemx_region_handle_t'
+ctypedef struct nvshmemx_region_attrs_t 'nvshmemx_region_attrs_t':
+    uint32_t hints
+    char reserved[60]
 ctypedef nvshmemx_uniqueid_v1 nvshmemx_uniqueid_t 'nvshmemx_uniqueid_t'
 ctypedef struct nvshmemx_uniqueid_args_v1 'nvshmemx_uniqueid_args_v1':
     int version
