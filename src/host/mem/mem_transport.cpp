@@ -229,10 +229,10 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     int flag = false;
     nvmlDevice_t local_device;
     nvmlGpuFabricInfoV_t fabricInfo = {}, fabricInfo1 = {}, fabricInfo2 = {};
-    nvmlPlatformInfo_t platformInfo = {}, platformInfo1 = {}, platformInfo2 = {};
+    nvshmemi_nvmlPlatformInfo_v2_t platformInfo = {}, platformInfo1 = {}, platformInfo2 = {};
     const unsigned char zero[NVML_GPU_FABRIC_UUID_LEN] = {0};
     nvmlGpuFabricInfoV_t *pe_fabricInfo = nullptr;
-    std::vector<nvmlPlatformInfo_t> pe_platformInfo;
+    std::vector<nvshmemi_nvmlPlatformInfo_v2_t> pe_platformInfo;
     fabricInfo.version = nvmlGpuFabricInfo_v2;
     fabricInfo1.version = nvmlGpuFabricInfo_v2;
     fabricInfo2.version = nvmlGpuFabricInfo_v2;
@@ -335,7 +335,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
 
             pe_platformInfo.resize(npes);
 
-            platformInfo.version = nvmlPlatformInfo_v2;
+            platformInfo.version = NVSHMEMI_NVML_PLATFORM_INFO_V2;
             nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
             NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL,
                                      out, "nvmlDeviceGetPlatformInfo failed with NVML error %d\n",
@@ -344,8 +344,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             pe_platformInfo[mype] = platformInfo;
 
             status = nvshmemi_boot_handle.allgather(
-                (void *)&platformInfo, (void *)pe_platformInfo.data(), sizeof(nvmlPlatformInfo_t),
-                &nvshmemi_boot_handle);
+                (void *)&platformInfo, (void *)pe_platformInfo.data(),
+                sizeof(nvshmemi_nvmlPlatformInfo_v2_t), &nvshmemi_boot_handle);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "allgather of pe_platformInfo failed \n");
             platformInfo1 = pe_platformInfo[mype];
