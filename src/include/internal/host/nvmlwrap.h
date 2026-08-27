@@ -39,13 +39,11 @@ typedef nvmlGpuFabricInfo_v2_t nvmlGpuFabricInfoV_t;
 
 #endif
 
-#if ((NVML_API_VERSION < 12) || (CUDA_VERSION < 12080))
-
-#ifndef nvmlPlatformInfo_v2
-#define nvmlPlatformInfo_v2 (unsigned int)(sizeof(nvmlPlatformInfo_v2_t) | (2 << 24U))
-#endif
-
-/* Structure for platform info */
+/* NVML API v12 does not guarantee PlatformInfo v2; nvmlPlatformInfo_t may alias v1. */
+#if defined(nvmlPlatformInfo_v2)
+typedef nvmlPlatformInfo_v2_t nvshmemi_nvmlPlatformInfo_v2_t;
+#define NVSHMEMI_NVML_PLATFORM_INFO_V2 nvmlPlatformInfo_v2
+#else
 typedef struct {
     unsigned int version;      //!< the API version number
     unsigned char ibGuid[16];  //!< Infiniband GUID reported by platform (for Blackwell, ibGuid is 8
@@ -60,9 +58,9 @@ typedef struct {
     unsigned char hostId;     //!< Index of the node within the slot containing this GPU
     unsigned char peerType;   //!< Platform indicated NVLink-peer type (e.g. switch present or not)
     unsigned char moduleId;   //!< ID of this GPU within the node
-} nvmlPlatformInfo_v2_t;
-typedef nvmlPlatformInfo_v2_t nvmlPlatformInfo_t;
-
+} nvshmemi_nvmlPlatformInfo_v2_t;
+#define NVSHMEMI_NVML_PLATFORM_INFO_V2 \
+    (unsigned int)(sizeof(nvshmemi_nvmlPlatformInfo_v2_t) | (2U << 24U))
 #endif
 /* end NVML Header defs. */
 
@@ -88,7 +86,7 @@ struct nvml_function_table {
     nvmlReturn_t (*nvmlDeviceGetFieldValues)(nvmlDevice_t device, unsigned int count,
                                              nvmlFieldValue_t *values);
     nvmlReturn_t (*nvmlDeviceGetPlatformInfo)(nvmlDevice_t device,
-                                              nvmlPlatformInfo_t *platformInfo);
+                                              nvshmemi_nvmlPlatformInfo_v2_t *platformInfo);
 };
 
 int nvshmemi_nvml_ftable_init(struct nvml_function_table *nvml_ftable, void **nvml_handle);
