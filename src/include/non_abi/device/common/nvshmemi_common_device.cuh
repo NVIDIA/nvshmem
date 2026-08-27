@@ -2006,7 +2006,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_mcast_recvLL(T *dest, con
     if (TYPE_IS_FLOAT(T)) {
         for (int i = myIdx; i < num_subelems; i += groupSize) {
             float data1, flag1;
-            volatile uint32_t flagu32;
+            uint32_t flagu32;
             do {
                 asm volatile("ld.volatile.global.v2.f32 {%0, %1}, [%2];"
                              : "=f"(data1), "=f"(flag1)
