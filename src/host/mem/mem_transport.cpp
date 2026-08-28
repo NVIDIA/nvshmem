@@ -45,6 +45,11 @@ struct nvshmemi_cuda_clique_record {
     uint8_t query_valid = 0;  // Whether all CUDA clique queries completed with consistent results.
 };
 
+bool nvshmemi_cuda_clique_record_is_valid(const nvshmemi_cuda_clique_record &record) {
+    const CUuuid null_uuid{};
+    return record.query_valid && memcmp(&record.cluster_uuid, &null_uuid, sizeof(null_uuid)) != 0;
+}
+
 const char *nvshmemi_cuda_clique_type_name(size_t type) {
     switch (static_cast<CUcliqueType>(type)) {
         case CU_CLIQUE_TYPE_UNICAST_POINTER:
@@ -63,8 +68,8 @@ const char *nvshmemi_cuda_clique_type_name(size_t type) {
 bool nvshmemi_cuda_clique_records_match(const nvshmemi_cuda_clique_record &lhs,
                                         const nvshmemi_cuda_clique_record &rhs, size_t type) {
     const uint32_t type_bit = 1u << type;
-    return lhs.query_valid && rhs.query_valid && (lhs.valid_types & type_bit) &&
-           (rhs.valid_types & type_bit) &&
+    return nvshmemi_cuda_clique_record_is_valid(lhs) && nvshmemi_cuda_clique_record_is_valid(rhs) &&
+           (lhs.valid_types & type_bit) && (rhs.valid_types & type_bit) &&
            memcmp(&lhs.cluster_uuid, &rhs.cluster_uuid, sizeof(CUuuid)) == 0 &&
            lhs.clique_ids[type] == rhs.clique_ids[type];
 }
@@ -131,12 +136,11 @@ int nvshmemi_discover_cuda_cliques(
         return status;
     }
 
-    if (!std::all_of(
-            peer_records.begin(), peer_records.end(),
-            [](const nvshmemi_cuda_clique_record &record) { return record.query_valid != 0; })) {
+    if (!std::all_of(peer_records.begin(), peer_records.end(),
+                     nvshmemi_cuda_clique_record_is_valid)) {
         INFO(NVSHMEM_MEM,
-             "CUDA fabric clique discovery is unavailable on at least one PE; using legacy NVML "
-             "discovery");
+             "CUDA fabric clique discovery returned invalid data on at least one PE; using "
+             "legacy NVML discovery");
         return 0;
     }
 
