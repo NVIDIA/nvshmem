@@ -44,6 +44,8 @@ When an exact archive is unavailable, inspect the relevant `latest` root and its
 3. Answer concisely with direct official links. State the documentation version when one was requested or applicability matters.
 4. If an exact archive cannot be retrieved and latest is a different version, say so. Offer clearly labeled latest context only if useful.
 
+Keep answers user-facing. Do not disclose internal retrieval mechanics or attempted-source details; report only conclusions, applicable versions, evidence links, and material uncertainty.
+
 If live pages cannot be retrieved, return the appropriate root links, state that their contents were not verified, and avoid documentation-backed technical claims.
 
 ### Handle NVSHMEM4Py
