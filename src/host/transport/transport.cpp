@@ -391,6 +391,10 @@ int nvshmemi_transport_finalize_one(nvshmemi_state_t *state, int transport_id) {
 
     assert(state->transports);
     nvshmem_transport_t transport = state->transports[transport_id];
+    if (!transport) {
+        return status;
+    }
+
     if (transport->is_successfully_initialized) {
         if (transport->type == NVSHMEM_TRANSPORT_LIB_CODE_IBGDA) {
             nvshmemi_device_state.ibgda_is_initialized = false;
