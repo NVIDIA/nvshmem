@@ -1882,6 +1882,10 @@ static void nvshmemi_init_msg(void) {
 
 int nvshmemi_proxy_level(nvshmemi_state_t *state) {
     for (int i = 0; i < state->num_initialized_transports; i++) {
+        /* Slots are cleared when a transport fails to connect and is finalized. */
+        if (!state->transports[i]) {
+            continue;
+        }
         if (state->transports[i]->is_successfully_initialized) {
             if (state->transports[i]->no_proxy) {
                 continue;
