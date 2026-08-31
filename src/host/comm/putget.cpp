@@ -487,8 +487,13 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
     int status = 0;
     const bool has_mapped_peer = nvshmemi_state->heap_obj->get_local_pe_bases()[pe] != nullptr;
 
+#if defined(NVSHMEM_FORCE_CFT) && (!defined(NVSHMEM_CFT_HANDLES_SUPPORT) || CUDART_VERSION < 13050)
+    status = NVSHMEMX_ERROR_NOT_SUPPORTED;
+    goto out;
+#endif
+
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
-#if defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+#if defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) || defined(NVSHMEM_FORCE_CFT)
     constexpr bool prioritize_cft = true;
 #else
     constexpr bool prioritize_cft = false;
@@ -509,7 +514,15 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
 
         status = nvshmemi_cft_rma(custrm, cuev, verb, lptr, rptr, cft_bytesdesc, sig_addr, signal,
                                   sig_op, pe);
-        if (status != NVSHMEMX_ERROR_NOT_SUPPORTED) {
+        if (status == NVSHMEMX_ERROR_NOT_SUPPORTED) {
+#if defined(NVSHMEM_FORCE_CFT)
+            /* CFT is required, so preserve the unsupported error and prohibit fallback. */
+            goto out;
+#else
+            /* Unsupported means this route was unavailable; clear it before trying a fallback. */
+            status = NVSHMEMX_SUCCESS;
+#endif
+        } else {
             goto out;
         }
         status = NVSHMEMX_SUCCESS;
@@ -518,6 +531,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
 
     /* Use the mapped pointer immediately unless CFT was prioritized; otherwise it is the
      * fallback. */
+#if !defined(NVSHMEM_FORCE_CFT)
     if (has_mapped_peer) {
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
         status = nvshmemi_order_after_cft_fence(pe, !verb.is_stream || verb.is_nbi,
@@ -529,6 +543,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                                                       lptr, rptr, lstride, rstride, sig_op, pe);
         goto out;
     }
+#endif
 
     /* Remote Peer strided ops, G operations, and put_signal are not supported for remote
      * transports. */

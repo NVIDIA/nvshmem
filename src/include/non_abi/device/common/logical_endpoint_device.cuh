@@ -6,6 +6,9 @@
 #ifndef __logical_endpoint_device_cuh__
 #define __logical_endpoint_device_cuh__
 
+#if !defined(__CUDACC_RTC__)
+#include <assert.h>
+#endif
 #include "non_abi/c/nvshmem_build_options.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
@@ -41,16 +44,31 @@ __device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int, const voi
     return false;
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return false; }
-
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int, size_t, threadgroup_t,
-                                                                         const void *,
-                                                                         const void *) {
+__device__ __forceinline__ bool nvshmemi_is_cft_forced() {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#else
     return false;
+#endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int) { return false; }
+__device__ __forceinline__ void nvshmemi_cft_force_unsupported() {
+#if defined(NVSHMEM_FORCE_CFT)
+    asm volatile("trap;");
+#endif
+}
+
+__device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return nvshmemi_is_cft_forced(); }
+
+template <bool REQUIRE_TX_SIZE_MULTIPLE>
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int, size_t, threadgroup_t,
+                                                                   const void *, const void *) {
+    return nvshmemi_is_cft_forced();
+}
+
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int) {
+    return nvshmemi_is_cft_forced();
+}
 
 #else
 
@@ -293,7 +311,9 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_reduce_le_implemented(
 }
 
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_ld_and_check_valid_le_id(pe);
 #else
@@ -301,12 +321,29 @@ __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
 #endif
 }
 
+__device__ __forceinline__ bool nvshmemi_is_cft_forced() {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#else
+    return false;
+#endif
+}
+
+__device__ __forceinline__ void nvshmemi_cft_force_unsupported() {
+#if defined(NVSHMEM_FORCE_CFT)
+    assert(false && "NVSHMEM_FORCE_CFT: CFT route is unsupported");
+    asm volatile("trap;");
+#endif
+}
+
 template <bool REQUIRE_TX_SIZE_MULTIPLE>
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe, size_t size,
-                                                                         threadgroup_t scope,
-                                                                         const void* le_addr,
-                                                                         const void* tma_addr) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int pe, size_t size,
+                                                                   threadgroup_t scope,
+                                                                   const void* le_addr,
+                                                                   const void* tma_addr) {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_le_implemented<REQUIRE_TX_SIZE_MULTIPLE>(pe, size, scope, le_addr, tma_addr);
 #else
@@ -314,8 +351,10 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe,
 #endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int pe) {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_le_implemented(pe);
 #else
@@ -325,7 +364,8 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe)
 
 __device__ __forceinline__ bool nvshmemi_is_multicast_le_supported_and_prioritized(
     uint64_t le_id_with_flag, size_t size, threadgroup_t scope) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) &&                                         \
+    (defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) || defined(NVSHMEM_FORCE_CFT)) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_multicast_le_implemented(le_id_with_flag, size, scope);
 #else
@@ -336,7 +376,8 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_le_supported_and_prioritiz
 template <threadgroup_t SCOPE>
 __device__ __forceinline__ bool nvshmemi_is_multicast_reduce_le_supported_and_prioritized(
     uint64_t le_id_with_flag, size_t size) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) &&                                         \
+    (defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) || defined(NVSHMEM_FORCE_CFT)) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(le_id_with_flag, size);
 #else

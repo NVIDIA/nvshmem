@@ -381,6 +381,11 @@ nvshmemi_transfer_submit_active_region_slow() {
 template <typename T>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ T nvshmemi_transfer_amo_fetch(
     void *rptr, T value, T compare, int pe, nvshmemi_amo_t op, nvshmemx_qp_handle_t qp_index) {
+#if defined(NVSHMEM_FORCE_CFT)
+    assert(false && "NVSHMEM_FORCE_CFT: CFT atomic route is unsupported");
+    asm volatile("trap;");
+    return T{};
+#endif
     nvshmemi_transfer_submit_active_region<NVSHMEMI_THREADGROUP_THREAD>();
     switch (nvshmemi_device_state_d.selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
@@ -411,6 +416,11 @@ TRANSFER_REPT_FOR_EXTENDED_AMO_TYPES(TRANSFER_DECL_AMO_FETCH);
 template <typename T>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_amo_nonfetch(
     void *rptr, T value, int pe, nvshmemi_amo_t op, nvshmemx_qp_handle_t qp_index) {
+#if defined(NVSHMEM_FORCE_CFT)
+    assert(false && "NVSHMEM_FORCE_CFT: CFT atomic route is unsupported");
+    asm volatile("trap;");
+    return;
+#endif
     switch (nvshmemi_device_state_d.selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
