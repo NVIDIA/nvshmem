@@ -103,6 +103,10 @@ nvshmem_add_default_off_option(NVSHMEM_GPU_COLL_USE_LDST "Enables Load/Store in 
 nvshmem_add_default_off_option(NVSHMEM_TIMEOUT_DEVICE_POLLING "Enable timeouts for NVSHMEM device-side polling functions (e.g. wait_until)")
 nvshmem_add_default_on_option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable NVSHMEM Logical Endpoint support")
 nvshmem_add_default_off_option(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT "Prioritize logical endpoint over pointer based P2P for CFT handles")
+nvshmem_add_default_off_option(NVSHMEM_FORCE_CFT "Force CFT handles and report unsupported instead of falling back")
+if (NVSHMEM_FORCE_CFT AND NOT NVSHMEM_CFT_HANDLES_SUPPORT)
+  message(FATAL_ERROR "NVSHMEM_FORCE_CFT requires NVSHMEM_CFT_HANDLES_SUPPORT=ON")
+endif()
 
 message( "\n__BUILD__\n")
 nvshmem_add_default_off_option(NVSHMEM_DEBUG "Toggles NVSHMEM debug compilation settings")
@@ -229,6 +233,7 @@ NVSHMEM_USE_GDRCOPY=${NVSHMEM_USE_GDRCOPY} \
 NVSHMEM_USE_MLX5DV=${NVSHMEM_USE_MLX5DV} \
 NVSHMEM_CFT_HANDLES_SUPPORT=${NVSHMEM_CFT_HANDLES_SUPPORT} \
 NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT=${NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT} \
+NVSHMEM_FORCE_CFT=${NVSHMEM_FORCE_CFT} \
 NVSHMEM_VERBOSE=${NVSHMEM_VERBOSE} \
 CUDA_HOME=${CUDA_HOME} \
 LIBFABRIC_HOME=${LIBFABRIC_HOME} \

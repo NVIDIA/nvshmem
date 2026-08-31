@@ -1454,10 +1454,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T
 nvshmemi_g(const T *source, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) && !nvshmemi_is_cft_forced()) {
         T *source_actual = (T *)((char *)(peer_base_addr) +
                                  ((char *)source - (char *)(nvshmemi_device_state_d.heap_base)));
         return *source_actual;
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
+        return T{};
+#endif
     } else {
         return nvshmemi_transfer_rma_g<T>((void *)source, pe, qp_index);
     }
@@ -1480,8 +1485,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized<true>(pe, nelems * sizeof(T), SCOPE, source,
-                                                        dest)) {
+        !nvshmemi_cft_preempts_pointer_path<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1504,6 +1508,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
+#endif
     } else {
         nvshmemi_rma_nbi<SCOPE, NVSHMEMI_OP_GET, REGION_OPERATION>(
             (void *)source, (void *)dest, nelems * sizeof(T), pe, qp_index);
@@ -1519,8 +1527,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized<true>(pe, nelems * sizeof(T), SCOPE, source,
-                                                        dest)) {
+        !nvshmemi_cft_preempts_pointer_path<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1547,6 +1554,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
 #endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
+#endif
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_GET>((void *)source, (void *)dest,
                                                       nelems * sizeof(T), pe, qp_index);
@@ -1559,7 +1570,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
     T *dest, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-    if (nvshmemi_peer_reachable(peer_base_addr) && !nvshmemi_is_le_supported_and_prioritized(pe)) {
+    if (nvshmemi_peer_reachable(peer_base_addr) && !nvshmemi_cft_preempts_pointer_path(pe)) {
         T *dest_actual = (T *)((char *)(peer_base_addr) +
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = value;
@@ -1570,6 +1581,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
         } else {
             nvshmemi_handle_p<T>((void *)dest, value, pe);
         }
+#endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
 #endif
     } else {
         nvshmemi_transfer_rma_p<T>((void *)dest, value, pe, qp_index);
@@ -1585,8 +1600,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T), SCOPE, dest,
-                                                         source)) {
+        !nvshmemi_cft_preempts_pointer_path<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1604,6 +1618,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
+#endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
 #endif
     } else {
         nvshmemi_rma_nbi<SCOPE, NVSHMEMI_OP_PUT, REGION_OPERATION>(
@@ -1630,8 +1648,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T), SCOPE, dest,
-                                                         source)) {
+        !nvshmemi_cft_preempts_pointer_path<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1649,6 +1666,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>((void *)source, (void *)dest, nelems * sizeof(T), pe, true);
+#endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
 #endif
     } else {
         nvshmemi_transfer_rma<SCOPE, NVSHMEMI_OP_PUT>((void *)dest, (void *)source,
@@ -1671,7 +1692,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     const bool can_use_atomic_handle = false;
 #endif
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized(pe)) {
+        !nvshmemi_cft_preempts_pointer_path(pe)) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
@@ -1680,9 +1701,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
         nvshmemi_handle_p((void *)sig_addr, signal, pe);
 #endif
-    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && nvshmemi_use_ldst_path() &&
-               nvshmemi_peer_reachable(peer_base_addr) &&
-               (!can_use_atomic_handle || !nvshmemi_is_le_supported_and_prioritized(pe))) {
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && !nvshmemi_is_cft_forced() &&
+               nvshmemi_use_ldst_path() && nvshmemi_peer_reachable(peer_base_addr) &&
+               (!can_use_atomic_handle || !nvshmemi_cft_preempts_pointer_path(pe))) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
@@ -1691,6 +1712,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && can_use_atomic_handle) {
         nvshmemi_handle_atomic_nonfetch<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, signal, pe);
+#endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
 #endif
     } else {
         nvshmemi_transfer_amo_nonfetch<uint64_t>((void *)sig_addr, signal, pe,
@@ -1706,8 +1731,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T), SCOPE, dest,
-                                                         source)) {
+        !nvshmemi_cft_preempts_pointer_path<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1745,6 +1769,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
 
             nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
+#endif
+#if defined(NVSHMEM_FORCE_CFT)
+    } else if (nvshmemi_is_cft_forced()) {
+        nvshmemi_cft_force_unsupported();
 #endif
     } else {
         if (is_nbi) {
@@ -3678,13 +3706,25 @@ template <typename T, nvshmemi_amo_t Amo>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_can_use_handle_atomic(T *target, int pe) {
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if constexpr (!nvshmemi_handle_atomic_is_supported<T, Amo>()) {
+#if defined(NVSHMEM_FORCE_CFT)
+        nvshmemi_cft_force_unsupported();
+#endif
         return false;
     } else {
-        return nvshmemi_is_le_atomic_implemented(pe, target);
+        const bool is_implemented = nvshmemi_is_le_atomic_implemented(pe, target);
+#if defined(NVSHMEM_FORCE_CFT)
+        if (!is_implemented) {
+            nvshmemi_cft_force_unsupported();
+        }
+#endif
+        return is_implemented;
     }
 #else
     (void)target;
     (void)pe;
+#if defined(NVSHMEM_FORCE_CFT)
+    nvshmemi_cft_force_unsupported();
+#endif
     return false;
 #endif
 }

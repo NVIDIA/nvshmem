@@ -472,6 +472,11 @@ __device__ inline void nvshmemi_tile_cpy_nvl_threadgroup_dim(src_tensor_t src_te
     }
 #endif  // LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 
+#if defined(NVSHMEM_FORCE_CFT)
+    nvshmemi_cft_force_unsupported();
+    return;
+#endif
+
     // check for vector len == 4
     // Conditions: ptr must be aligned to int4, shape must be a multiple of 16, stride must be a
     // multiple of 16
