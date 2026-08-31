@@ -358,6 +358,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_nvls_allpush_thr
         }
 #endif
 
+#if defined(NVSHMEM_FORCE_CFT)
+        nvshmemi_cft_force_unsupported();
+        return;
+#endif
         nvshmemi_threadgroup_sync<SCOPE>();
         T *dst_ptr = (T *)nvshmemi_mc_ptr(teami, (void *)(dest + dest_offset));
         nvshmemi_mcast_memcpy_threadgroup<T, SCOPE>(dst_ptr, source, nelems * sizeof(T));
@@ -531,6 +535,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
         !nvshmemi_tma_smem_registered() ||
         !nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE) || __isShared(src) ||
         !nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src)) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
 
@@ -544,6 +549,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
         const size_t copy_bytes = row_bytes * valid_minor_dim;
         /* Fully contiguous tiles use one handle copy; ensure that transaction size is supported. */
         if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, copy_bytes, scope)) {
+            nvshmemi_cft_force_unsupported();
             return false;
         }
 
@@ -558,6 +564,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
      */
     if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
         ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
 
@@ -572,6 +579,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
 
     return true;
 #else
+    nvshmemi_cft_force_unsupported();
     return false;
 #endif
 }

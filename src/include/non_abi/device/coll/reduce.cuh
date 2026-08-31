@@ -1786,6 +1786,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_twoshot_t
                 }
             }
 #endif
+#if defined(NVSHMEM_FORCE_CFT)
+            nvshmemi_cft_force_unsupported();
+            return;
+#endif
             nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 0>(teami, dest_ptr, source_ptr,
                                                                  my_nelems);
         }
@@ -1825,6 +1829,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_add_reduce_nvls_oneshot_t
                     return;
                 }
             }
+#endif
+#if defined(NVSHMEM_FORCE_CFT)
+            nvshmemi_cft_force_unsupported();
+            return;
 #endif
             nvshmemi_add_reduce_mcast_threadroup<TYPE, SCOPE, 1>(teami, dest, source, elems_per_pe);
         }
@@ -2237,6 +2245,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
             !nvshmemi_tma_smem_registered() || __isShared(src_tensor.data()) ||
             __isShared(dst_tensor.data()) ||
             !nvshmemi_is_addr_offset_aligned(src_tensor.data(), CFT_HANDLE_TX_SIZE)) {
+            nvshmemi_cft_force_unsupported();
             return false;
         }
 
@@ -2245,6 +2254,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
              * 16B-aligned local destination address.
              */
             if (!nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst_tensor.data())) {
+                nvshmemi_cft_force_unsupported();
                 return false;
             }
         } else {
@@ -2252,6 +2262,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
              * offset must be 16B-aligned.
              */
             if (!nvshmemi_is_addr_offset_aligned(dst_tensor.data(), CFT_HANDLE_TX_SIZE)) {
+                nvshmemi_cft_force_unsupported();
                 return false;
             }
         }
@@ -2269,6 +2280,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
          */
         if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
             ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+            nvshmemi_cft_force_unsupported();
             return false;
         }
 
@@ -2285,6 +2297,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
         return true;
     }
 #endif
+    nvshmemi_cft_force_unsupported();
     return false;
 }
 
