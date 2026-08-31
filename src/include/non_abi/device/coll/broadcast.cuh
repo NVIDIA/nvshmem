@@ -498,6 +498,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
         !nvshmemi_is_addr_offset_aligned(dst_tensor.data(), CFT_HANDLE_TX_SIZE) ||
         __isShared(src_tensor.data()) ||
         !nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src_tensor.data())) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
     const int src_stride_minor_dim = get_stride_element<minor_dim>(src_tensor);
@@ -512,6 +513,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
         const size_t copy_bytes = row_bytes * valid_minor_dim;
         /* Fully contiguous tiles use one handle copy; ensure that transaction size is supported. */
         if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, copy_bytes, scope)) {
+            nvshmemi_cft_force_unsupported();
             return false;
         }
 
@@ -528,6 +530,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
      */
     if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
         ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
 
@@ -543,6 +546,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
     }
     return true;
 #else
+    nvshmemi_cft_force_unsupported();
     return false;
 #endif
 }
