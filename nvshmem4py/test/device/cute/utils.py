@@ -21,6 +21,7 @@ mpi_init = _utils.mpi_init
 get_local_rank_per_node = _utils.get_local_rank_per_node
 
 _CUTE_DTYPE_MAP = {
+    "bfloat16": cute.BFloat16,
     "float32": cute.Float32,
     "float64": cute.Float64,
     "int8": cute.Int8,
@@ -34,6 +35,7 @@ _CUTE_DTYPE_MAP = {
 }
 
 _TORCH_DTYPE_MAP = {
+    "bfloat16": torch.bfloat16,
     "float32": torch.float32,
     "float64": torch.float64,
     "int8": torch.int8,
@@ -74,6 +76,9 @@ def _fill_cute_tensor(tensor, dtype_name, value):
 
 def _read_cute_tensor(tensor, dtype_name):
     view = _torch_view_of_cute_tensor(tensor, dtype_name)
+    if view.dtype is torch.bfloat16:
+        # NumPy has no bfloat16; hand back the exact float32 promotion instead.
+        view = view.float()
     return view.detach().cpu().numpy()
 
 
