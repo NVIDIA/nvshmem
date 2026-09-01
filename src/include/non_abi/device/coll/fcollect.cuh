@@ -384,11 +384,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
                                    ((sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0)) ||
                                     (is_half_prec && (nelems % 4 == 0) &&
                                      (nvshmemi_device_state_d.team_pool[team]->size % 2 == 0))));
-    /* DISABLE non NVLS LL for hybrid MNNVL configurations. */
-    valid_ll_configuration &=
-        (nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_WORLD_INDEX]->are_gpus_p2p_connected ||
-         nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_SHARED]->is_team_node ||
-         !nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_NODE_INDEX]->are_gpus_p2p_connected);
+    /* Disable non-NVLS LL unless every PE agreed that the job topology supports it. */
+    valid_ll_configuration &= nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_supported;
     /* This 2-level selection logic is implemented to reduce code duplication of calling leaf
      * functions on the device code */
     switch (fcollect_algo) {
