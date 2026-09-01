@@ -30,7 +30,7 @@ Guide safe, version-aware NVSHMEM and NVSHMEM4Py installations on workstations, 
 
 Use the detailed intake under `Resolve the Request`.
 
-- **Required:** API surface, target type, administrator and target-scope authority, installation scope and prefix, and enough target-system facts to assess documented requirements.
+- **Required:** API surface, target type, administrator and target-scope authority, installation scope and prefix, launcher/bootstrap selection or `recommend`, and enough target-system facts to assess documented requirements.
 - **Optional:** A complete NVSHMEM version, defaulting to `latest`, and a preferred installation method.
 - **Conditional:** Source-build configuration when source is selected.
 - **Probe choice:** Required before direct target inspection: user-run probe or agent-run probe.
@@ -64,7 +64,7 @@ Report conflicts instead of silently merging them. Execution always requires cur
 
 Before running any target probe or other system-inspection command, ask for and resolve the installation intake. Do not infer an answer from the current shell when the user has not yet chosen the intended target or installation scope.
 
-Ask the following questions verbatim in one numbered message. Omit only a question whose answer is already explicit, unambiguous, and non-conflicting in the request or state file. Do not probe, retrieve version-specific documentation, or propose an installation method until the user answers Question 7.
+Ask the following questions verbatim in one numbered message. Omit only a question whose answer is already explicit, unambiguous, and non-conflicting in the request or state file. Do not probe, retrieve version-specific documentation, or propose an installation method until the user answers Question 8.
 
 1. **API:** Which NVSHMEM interface do you need: `C/C++`, `Python (NVSHMEM4Py)`, or `both`?
 2. **Version:** Which complete NVSHMEM version do you want? Reply `latest` to use the newest fully documented release.
@@ -73,12 +73,13 @@ Ask the following questions verbatim in one numbered message. Omit only a questi
 5. **Scope:** Where should NVSHMEM be installed: `user-owned prefix`, `system packages`, `container`, `virtual environment`, ? Include the exact prefix or environment path when it is not a container or system packages.
 6. **Method:** Do you prefer a method: `binary archive`, `system repository/package`,  `source build`, `HPC SDK container`, `PyPI`, `Conda`,  ? Reply `recommend` if you have no preference.
 7. **Probe:** May I run the bundled read-only system probe on the target shell? Reply `agent-run`, or reply `user-run` and I will give you the command to run and paste back.
+8. **Launcher:** Which launcher/bootstrap should the application and two-PE validation use: `mpirun/mpiexec`, `nvshmrun`, `srun`, `oshrun`, another launcher, or `recommend`?
 
-Interpret `administrator`, `unprivileged` exactly as stated. If Question 4 is unanswered after one prompt, record `unknown` and apply the unprivileged planning default from `Safety and Defaults`. Reject a scope that the recorded authority cannot modify and offer feasible alternatives. If Question 2 supplies an incomplete version such as `major.minor`, treat it as a prefix query: use `$nvshmem-docs` to resolve the newest fully documented matching release, show the complete resolved version, and obtain confirmation before executing version-specific commands. Otherwise preserve the literal requested version or `latest`.
+Interpret `administrator`, `unprivileged` exactly as stated. If Question 4 is unanswered after one prompt, record `unknown` and apply the unprivileged planning default from `Safety and Defaults`. Reject a scope that the recorded authority cannot modify and offer feasible alternatives. If Question 2 supplies an incomplete version such as `major.minor`, treat it as a prefix query: use `$nvshmem-docs` to resolve the newest fully documented matching release, show the complete resolved version, and obtain confirmation before executing version-specific commands. Otherwise preserve the literal requested version or `latest`. Treat Question 8 as launcher/bootstrap intent, not proof that the launcher is installed or compatible. After the probe, verify an explicit selection against the observed commands and versioned documentation. For `recommend`, select the compatible launcher implied by the execution environment when unambiguous; ask when multiple compatible choices remain. If none is available, record `none` rather than inventing a launcher, continue install planning when a launcher is not an installation prerequisite, and mark multi-PE runtime validation as blocked until a compatible launcher is available.
 
-After Question 7 is answered, run or provide the bundled probe as selected. Do not ask the user for facts that the chosen unprivileged probe can collect. Ask the following conditional questions only when their condition applies:
+After Question 8 is answered, run or provide the bundled probe as selected. Do not ask the user for facts that the chosen unprivileged probe can collect. Ask the following conditional questions only when their condition applies:
 
-- **Source build:** “What GPU and network topology will the build support (nodes, GPUs per node, and interconnect)? Which RDMA NICs/link layer or fabric provider are required? Which launcher/bootstrap will the application use? Which CUDA architectures must be built? Should the build include Python bindings, tests, examples, Hydra, or packages?” Read [source-build.md](references/source-build.md).
+- **Source build:** “What GPU and network topology will the build support (nodes, GPUs per node, and interconnect)? Which RDMA NICs/link layer or fabric provider are required? Which CUDA architectures must be built? Should the build include Python bindings, tests, examples, Hydra, or packages?” Read [source-build.md](references/source-build.md).
 - **Managed Slurm/HPC cluster:** “May the resulting install be visible from every intended compute node, and does site policy permit the selected user prefix or container runtime?”
 - **Shared cluster prefix:** “Who owns this prefix, and do all participating compute nodes mount the same path?”
 - **Existing or new container:** “Which runtime will be used (`Docker`, `Apptainer/Singularity`, or another approved runtime), and is GPU and required network-device passthrough permitted by site policy?”
@@ -87,6 +88,8 @@ After Question 7 is answered, run or provide the bundled probe as selected. Do n
 If the requested API is `Python (NVSHMEM4Py)` and the requested method is `binary archive` or `system repository/package`, reject that method combination before selecting artifacts or presenting commands. NVSHMEM4Py must be installed through a supported Python package channel (`PyPI` or `Conda`); select `source build` only when the user explicitly needs to build the bindings. Do not treat a native NVSHMEM archive or system NVSHMEM package as an NVSHMEM4Py installer or request one from the user. For `both`, an archive or system package may supply the C/C++ runtime, but NVSHMEM4Py still requires its own PyPI, Conda, or explicitly requested source-build installation.
 
 Record every answer in `Target Summary`, marking supplied answers as observed user intent and unanswered optional values as `unknown`.
+
+Record the resolved launcher and applicable bootstrap in `Target Summary` or `Requirements Check`, using `none` or `not applicable` explicitly when appropriate. A Python import, native-library load, or single-PE run does not replace the two-PE same-node runtime test. Never silently omit that test when launcher, GPU, scheduler, or allocation prerequisites are unavailable.
 
 After the user selects a probe path, do not ask for information that can be obtained through the chosen unprivileged inspection.
 
