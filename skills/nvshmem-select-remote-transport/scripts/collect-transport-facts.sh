@@ -25,6 +25,10 @@ note_missing() {
     diagnostics+=("$1")
 }
 
+request_manual_follow_up() {
+    manual_follow_ups+=("$1")
+}
+
 print_file() {
     local label=$1
     local path=$2
@@ -72,10 +76,13 @@ while (($#)); do
 done
 
 diagnostics=()
+manual_follow_ups=()
 version_ok=0
 plugins_ok=0
 gpu_ok=0
-network_ok=0
+fabric_ok=0
+verbs_ok=0
+mlx5_rdma_visible=0
 
 nvshmem_prefix=''
 prefix_source='unresolved'
@@ -123,7 +130,28 @@ fi
 
 if [[ -n "$info_bin" ]]; then
     printf 'nvshmem_info: %s\n' "$info_bin"
-    version_output=$("$info_bin" -n 2>&1)
+    info_prefix_library_path=''
+    if [[ -n "$nvshmem_prefix" ]]; then
+        for libdir in "$nvshmem_prefix/lib" "$nvshmem_prefix/lib64"; do
+            [[ -d "$libdir" ]] || continue
+            if [[ -n "$info_prefix_library_path" ]]; then
+                info_prefix_library_path+=":$libdir"
+            else
+                info_prefix_library_path=$libdir
+            fi
+        done
+    fi
+
+    if [[ -n "$info_prefix_library_path" ]]; then
+        printf 'nvshmem_info_prefix_library_path: %s\n' "$info_prefix_library_path"
+        info_ld_library_path=$info_prefix_library_path
+        if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+            info_ld_library_path+=":$LD_LIBRARY_PATH"
+        fi
+        version_output=$(env LD_LIBRARY_PATH="$info_ld_library_path" "$info_bin" -n 2>&1)
+    else
+        version_output=$("$info_bin" -n 2>&1)
+    fi
     version_rc=$?
     printf '%s\n' "$version_output"
     printf 'nvshmem_info_exit_status: %d\n' "$version_rc"
@@ -135,22 +163,44 @@ else
 fi
 
 if ((version_ok == 0)) && [[ -n "$nvshmem_prefix" ]]; then
-    header_evidence=''
-    for header in \
-        "$nvshmem_prefix/include/nvshmem.h" \
-        "$nvshmem_prefix/include/nvshmem_common.h" \
-        "$nvshmem_prefix/include/nvshmemx.h"; do
-        if [[ -r "$header" ]]; then
-            matches=$(grep -E '^#[[:space:]]*define[[:space:]]+NVSHMEM(_VERSION|_MAJOR_VERSION|_MINOR_VERSION|_PATCH_VERSION|_VERSION_MAJOR|_VERSION_MINOR|_VERSION_PATCH)' "$header" 2>/dev/null || true)
+    version_file="$nvshmem_prefix/version.txt"
+    if [[ -r "$version_file" ]]; then
+        version_file_evidence=$(grep -E '^NVSHMEM_(BASE|ARTIFACT|PACKAGE)_VERSION[[:space:]]*:=[[:space:]]*[0-9]+\.[0-9]+([.][0-9]+)?([^[:space:]]*)?[[:space:]]*$' "$version_file" 2>/dev/null || true)
+        if [[ -n "$version_file_evidence" ]]; then
+            printf 'version_file: %s\n%s\n' "$version_file" "$version_file_evidence"
+            version_ok=1
+        fi
+    fi
+fi
+
+if ((version_ok == 0)) && [[ -n "$nvshmem_prefix" ]]; then
+    version_header="$nvshmem_prefix/include/non_abi/nvshmem_version.h"
+    if [[ -r "$version_header" ]]; then
+        version_header_evidence=$(grep -E '^#[[:space:]]*define[[:space:]]+NVSHMEM_VENDOR_(BASE|ARTIFACT|PACKAGE)_VERSION_STRING[[:space:]]+"[0-9]+\.[0-9]+([.][0-9]+)?[^"]*"' "$version_header" 2>/dev/null || true)
+        if [[ -n "$version_header_evidence" ]]; then
+            printf 'header: %s\n%s\n' "$version_header" "$version_header_evidence"
+            version_ok=1
+        fi
+    fi
+fi
+
+if ((version_ok == 0)) && [[ -n "$nvshmem_prefix" ]]; then
+    for version_header in \
+        "$nvshmem_prefix/include/non_abi/nvshmem_version.h" \
+        "$nvshmem_prefix/include/device_host_transport/nvshmem_constants.h"; do
+        if [[ -r "$version_header" ]]; then
+            matches=$(grep -E '^#[[:space:]]*define[[:space:]]+NVSHMEM_VENDOR_((MAJOR|MINOR|PATCH)_VERSION[[:space:]]+[0-9]+|VERSION_STAGE(_NUMBER)?[[:space:]]+"[^"]*")([[:space:]]|$)' "$version_header" 2>/dev/null || true)
             if [[ -n "$matches" ]]; then
-                printf 'header: %s\n%s\n' "$header" "$matches"
-                header_evidence+="$matches "
+                printf 'header: %s\n%s\n' "$version_header" "$matches"
+            fi
+            if grep -Eq 'NVSHMEM_VENDOR_MAJOR_VERSION[[:space:]]+[0-9]+([[:space:]]|$)' <<< "$matches" &&
+                grep -Eq 'NVSHMEM_VENDOR_MINOR_VERSION[[:space:]]+[0-9]+([[:space:]]|$)' <<< "$matches" &&
+                grep -Eq 'NVSHMEM_VENDOR_PATCH_VERSION[[:space:]]+[0-9]+([[:space:]]|$)' <<< "$matches"; then
+                version_ok=1
+                break
             fi
         fi
     done
-    if grep -Eq '[0-9]+' <<< "$header_evidence"; then
-        version_ok=1
-    fi
 fi
 if ((version_ok == 0)); then
     note_missing 'exact NVSHMEM version was not found'
@@ -158,6 +208,8 @@ fi
 
 section nvshmem-plugins
 plugin_count=0
+plugin_file_count=0
+declare -A plugin_transports_seen=()
 if [[ -n "$nvshmem_prefix" && -d "$nvshmem_prefix" ]]; then
     shopt -s nullglob
     for libdir in "$nvshmem_prefix/lib" "$nvshmem_prefix/lib64"; do
@@ -170,12 +222,26 @@ if [[ -n "$nvshmem_prefix" && -d "$nvshmem_prefix" ]]; then
         for plugin in "${plugin_files[@]}"; do
             [[ -e "$plugin" || -L "$plugin" ]] || continue
             printf 'plugin: %s\n' "$plugin"
-            ((plugin_count += 1))
+            ((plugin_file_count += 1))
+            plugin_filename=${plugin##*/}
+            plugin_transport=${plugin_filename#libnvshmem_transport_}
+            plugin_transport=${plugin_transport#nvshmem_transport_}
+            plugin_transport=${plugin_transport%%.so*}
+            if [[ -n "$plugin_transport" ]]; then
+                plugin_transports_seen["$plugin_transport"]=1
+            fi
         done
     done
     shopt -u nullglob
     plugins_ok=1
+    plugin_count=${#plugin_transports_seen[@]}
+    if ((plugin_count)); then
+        while IFS= read -r plugin_transport; do
+            printf 'plugin_transport: %s\n' "$plugin_transport"
+        done < <(printf '%s\n' "${!plugin_transports_seen[@]}" | sort)
+    fi
     printf 'plugin_count_in_selected_prefix: %d\n' "$plugin_count"
+    printf 'plugin_file_count_in_selected_prefix: %d\n' "$plugin_file_count"
 else
     printf 'selected_prefix_inventory: unavailable\n'
     if command -v ldconfig >/dev/null 2>&1; then
@@ -212,9 +278,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     if run_probe gpu_inventory nvidia-smi --query-gpu=index,name,pci.bus_id,compute_cap,driver_version --format=csv,noheader; then
         gpu_ok=1
     fi
-    if run_probe gpu_topology nvidia-smi topo -m; then
-        network_ok=1
-    fi
+    run_probe gpu_topology nvidia-smi topo -m || true
     run_probe gpu_p2p_read nvidia-smi topo -p2p r || true
 else
     printf 'nvidia_smi: not found\n'
@@ -222,6 +286,10 @@ else
 fi
 if ((gpu_ok == 0)) && command -v nvidia-smi >/dev/null 2>&1; then
     note_missing 'nvidia-smi did not return a GPU inventory'
+fi
+if ((gpu_ok == 0)); then
+    request_manual_follow_up 'nvidia-smi --query-gpu=index,name,pci.bus_id,compute_cap,driver_version --format=csv,noheader'
+    request_manual_follow_up 'nvidia-smi topo -m'
 fi
 
 section kernel-driver
@@ -274,7 +342,7 @@ section rdma-ports
 shopt -s nullglob
 ib_devices=(/sys/class/infiniband/*)
 if ((${#ib_devices[@]})); then
-    network_ok=1
+    fabric_ok=1
     for ibdev_path in "${ib_devices[@]}"; do
         ibdev=${ibdev_path##*/}
         printf 'rdma_device: %s\n' "$ibdev"
@@ -283,7 +351,11 @@ if ((${#ib_devices[@]})); then
         print_file '  vendor' "$ibdev_path/device/vendor" || true
         print_file '  device' "$ibdev_path/device/device" || true
         driver_link=$(readlink -f "$ibdev_path/device/driver" 2>/dev/null || true)
-        [[ -n "$driver_link" ]] && printf '  driver: %s\n' "${driver_link##*/}"
+        if [[ -n "$driver_link" ]]; then
+            driver_name=${driver_link##*/}
+            printf '  driver: %s\n' "$driver_name"
+            [[ "$driver_name" == mlx5_core ]] && mlx5_rdma_visible=1
+        fi
         net_paths=("$ibdev_path"/device/net/*)
         for net_path in "${net_paths[@]}"; do
             [[ -e "$net_path" ]] && printf '  netdev: %s\n' "${net_path##*/}"
@@ -312,15 +384,53 @@ else
 fi
 if command -v rdma >/dev/null 2>&1; then
     run_probe rdma_version rdma -V || true
-    run_probe rdma_links rdma link show || true
+    if ! run_probe rdma_links rdma link show; then
+        request_manual_follow_up 'rdma link show'
+    fi
 else
     printf 'rdma: not found\n'
 fi
 if command -v ibv_devinfo >/dev/null 2>&1; then
-    run_probe verbs_devices ibv_devinfo -l || true
+    printf 'verbs_devices:\n'
+    verbs_output=$(ibv_devinfo -l 2>&1)
+    verbs_rc=$?
+    printf '%s\n' "$verbs_output"
+    printf 'verbs_devices_exit_status: %d\n' "$verbs_rc"
+    if ((verbs_rc == 0)) && grep -Eq '^[[:space:]]*[1-9][0-9]* HCAs? found:' <<< "$verbs_output"; then
+        verbs_ok=1
+    fi
 else
     printf 'ibv_devinfo: not found\n'
 fi
+if ((mlx5_rdma_visible && verbs_ok == 0)); then
+    note_missing 'mlx5 RDMA hardware is visible in sysfs but no verbs HCA is accessible in this execution context'
+    request_manual_follow_up 'ibstatus'
+    request_manual_follow_up 'ibv_devinfo -l'
+fi
+
+section gdrcopy
+gdrcopy_driver_evidence=0
+if [[ -e /dev/gdrdrv ]]; then
+    printf 'gdrcopy_device: /dev/gdrdrv present\n'
+    gdrcopy_driver_evidence=1
+else
+    printf 'gdrcopy_device: /dev/gdrdrv not_visible\n'
+fi
+if [[ -d /sys/module/gdrdrv ]]; then
+    printf 'gdrcopy_module: gdrdrv loaded\n'
+    print_file gdrcopy_module_version /sys/module/gdrdrv/version || true
+    print_file gdrcopy_module_initstate /sys/module/gdrdrv/initstate || true
+    gdrcopy_driver_evidence=1
+else
+    printf 'gdrcopy_module: gdrdrv not_loaded\n'
+fi
+
+if ((gdrcopy_driver_evidence)); then
+    printf 'gdrcopy_status: driver_present\n'
+else
+    printf 'gdrcopy_status: driver_not_detected\n'
+fi
+printf 'gdrcopy_note: userspace library hints are reported under provider-stacks; their absence does not disprove a custom installation\n'
 
 section provider-stacks
 if command -v ucx_info >/dev/null 2>&1; then
@@ -333,7 +443,7 @@ fi
 if command -v fi_info >/dev/null 2>&1; then
     run_probe libfabric_version fi_info --version || true
     if run_probe libfabric_providers fi_info -l; then
-        network_ok=1
+        fabric_ok=1
     fi
 else
     printf 'fi_info: not found\n'
@@ -355,8 +465,8 @@ if command -v ldconfig >/dev/null 2>&1; then
 fi
 
 section diagnostics
-if ((network_ok == 0)); then
-    note_missing 'neither GPU topology nor an RDMA/libfabric provider inventory was available'
+if ((fabric_ok == 0)); then
+    note_missing 'neither an RDMA device nor a libfabric provider inventory was available'
 fi
 if ((${#diagnostics[@]})); then
     for diagnostic in "${diagnostics[@]}"; do
@@ -365,8 +475,15 @@ if ((${#diagnostics[@]})); then
 else
     printf 'none\n'
 fi
+if ((${#manual_follow_ups[@]})); then
+    printf 'manual_follow_up_context: run these commands manually in the target host or exact launch environment and return their complete output\n'
+    for follow_up_command in "${manual_follow_ups[@]}"; do
+        printf 'manual_follow_up_command: %s\n' "$follow_up_command"
+    done
+fi
 
-if ((version_ok && plugins_ok && gpu_ok && network_ok)); then
+if ((version_ok && plugins_ok && gpu_ok && fabric_ok)) &&
+    ((${#diagnostics[@]} == 0 && ${#manual_follow_ups[@]} == 0)); then
     printf 'collector_status: complete\n'
     exit 0
 fi

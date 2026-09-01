@@ -1,7 +1,7 @@
 # Kernel and API Fit Analysis
 
 Use this reference after system eligibility is known. Kernel fit can rank only candidates that
-passed hard version, plugin, fabric, provider, and prerequisite gates.
+passed hard plugin, fabric, provider, prerequisite, and any applicable release-specific gates.
 
 ## Contents
 

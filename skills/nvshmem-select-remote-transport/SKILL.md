@@ -21,22 +21,19 @@ Focus on read-only system probes and source inspection. Do not run NVSHMEM appli
 
 ## Prerequisites
 
-- Keep [transport-matrix.md](references/transport-matrix.md) and [kernel-fit.md](references/kernel-fit.md) readable as part of the skill package. Read both before ranking transports.
-- Require an exact NVSHMEM version and an inventory of installed transport plugins for an unconditional recommendation.
-- Require the selected CUDA kernel/application source or an equivalent communication profile.
-- Collect target-node evidence through an already available unprivileged shell or obtain it from the user. Never request root access or inspect a login node as if it were the target compute node.
-- Use the sibling `$nvshmem-docs` workflow, or its readable `../nvshmem-docs/SKILL.md`, only when the user requests current/exact official verification or the bundled matrix cannot establish release applicability.
+- Require an inventory of installed transport plugins before recommending a transport that must be available in the selected installation.
+- Record the installed NVSHMEM version when it is readily available, but do not require patch-level version verification for ordinary transport selection or stable settings such as `NVSHMEM_REMOTE_TRANSPORT`.
+- Require exact-version evidence only when the decision depends on a release gate, known issue, changed setting, or release-specific operation or memory-mode limitation.
+- Use the sibling `$nvshmem-docs` workflow, or its readable `../nvshmem-docs/SKILL.md`, when the user requests current/exact official verification or an exact-version-sensitive decision cannot be resolved from the bundled matrix. Do not invoke it merely because the target patch differs from a source version reviewed by the matrix.
 - Require no API key, privileged command, network access for inspection, or benchmark execution.
-
-If direct target-node access is unavailable, provide the bundled collector and request its complete labeled output.
 
 ## Inputs
 
-### Required for an Unconditional Recommendation
+### Core Recommendation Inputs
 
-- Exact NVSHMEM version and installed transport-plugin inventory.
+- Installed transport-plugin inventory, or explicit user confirmation of the available transport.
 - Target fabric/provider: InfiniBand, RoCE, EFA, Slingshot/CXI, UCX-managed, or NVLink-only.
-- Selected CUDA kernel/application source, or a profile covering:
+- For kernel/workload analysis only, selected CUDA kernel/application source, or a profile covering:
   - host, on-stream, or device API use;
   - RMA, AMO, signaling, synchronization, or collective operations;
   - typical and range of message sizes;
@@ -47,6 +44,7 @@ If direct target-node access is unavailable, provide the bundled collector and r
 
 ### Optional
 
+- Exact NVSHMEM patch version when the decision is not release-sensitive.
 - `NVSHMEM_PREFIX`, CMake cache, module/container details, launcher command, environment, and NVSHMEM configuration files.
 - GPU, NIC, driver, kernel, OFED/rdma-core, UCX, libfabric, GPUNetIO, or DOCA details not available through inspection.
 - GPU-to-NIC topology and local PE binding.
@@ -54,26 +52,21 @@ If direct target-node access is unavailable, provide the bundled collector and r
 - Required atomics, registered user buffers, VMM, DCI/DCT, multi-NIC, Spectrum-X, or custom-QP features.
 - Preferred or prohibited transports.
 
-Inspect before asking. Ask only for missing facts that can change eligibility, ranking, or the emitted configuration. When required evidence remains unavailable, return conditional branches instead of inventing it.
+Do not re-ask facts the user already supplied. Prefer one best-evidence recommendation over a list of conditional branches. State material assumptions and unknowns, but withhold the selection configuration only when no candidate passes a hard gate or the setting itself cannot be resolved safely.
 
 ## Instructions
 
-### 1. Resolve the Target
+### 1. Establish the Evidence Source
 
-- Identify the application, exactly selected kernel or host call path, deployment, NVSHMEM version, job scale, and optimization goal.
-- Treat assessment and recommendation as read-only. Do not patch application code or change launcher/system configuration.
-- Limit source inspection to the selected kernel, its device call graph, and directly corresponding host/on-stream call sites. Ignore unrelated NVSHMEM kernels.
-- Determine whether the relevant communication can cross nodes. Local P2P/NVLink traffic does not use the selected remote transport.
+First establish whether the agent runs on the target system; ask unless the user already answered or supplied a complete target-system probe. Never infer this from the shell, scheduler, hostname, hardware, or repository.
 
-### 2. Collect System Evidence
-
-When already on the target compute node, announce the read-only probe and invoke the bundled collector:
+If yes, announce the read-only probe and invoke the bundled collector without a prefix:
 
 ```text
 run_script("scripts/collect-transport-facts.sh")
 ```
 
-When the installation prefix is known, pass it explicitly rather than relying on shell expansion:
+If it resolves an NVSHMEM prefix, tell the user which installation will be analyzed. Otherwise ask for an absolute prefix and rerun:
 
 ```text
 run_script("scripts/collect-transport-facts.sh", "--prefix", "/opt/nvshmem")
@@ -81,11 +74,22 @@ run_script("scripts/collect-transport-facts.sh", "--prefix", "/opt/nvshmem")
 
 Replace the example prefix with the resolved absolute prefix. Resolve the script relative to this `SKILL.md`. Preserve partial output when it exits with status 2.
 
-When not on the target node, ask the user to run `bash scripts/collect-transport-facts.sh [--prefix PATH]` there and return the complete output. Do not infer cluster-wide uniformity from one node without stating the assumption.
+If the collector emits `manual_follow_up_command` entries, stop automatic probing and ask the user to run those commands manually in the target host or exact allocation/container used to launch NVSHMEM. Resume after the user returns their complete output. Do not repeat a command when equivalent successful output was already supplied.
+
+If no, request complete output from `bash scripts/collect-transport-facts.sh` on the target, or its GPU/driver, NIC/fabric/provider, RDMA/provider-stack, and job-scale facts. Do not request an NVSHMEM prefix in this branch. Use installation evidence already supplied; otherwise eligibility remains conditional.
+
+### 2. Choose the Analysis Scope
+
+Ask one question with exactly two choices: **kernel/workload analysis** or **system eligibility only**. Skip this when already answered.
+
+- For kernel/workload analysis, inspect only the selected kernel, its reachable device call graph, and directly corresponding host/on-stream calls when source is supplied. Otherwise use the communication-profile fields in [kernel-fit.md](references/kernel-fit.md). Do not search for other kernels.
+- For system eligibility only, request no source/profile details. Select the compatibility-first default among candidates that pass the static system gates, emit its minimal selection configuration, and state that workload-specific performance was not assessed.
+
+Treat assessment as read-only. Identify the job scale and optimization goal, and determine whether relevant communication can cross nodes; local P2P/NVLink traffic does not use the remote transport.
 
 ### 3. Classify the Communication
 
-Read [kernel-fit.md](references/kernel-fit.md) and record:
+When kernel/workload analysis was selected, read [kernel-fit.md](references/kernel-fit.md) and record:
 
 - API surface and exact operations;
 - remote versus local paths;
@@ -102,31 +106,36 @@ Do not infer a high message rate merely from many logical elements. Account for 
 Read [transport-matrix.md](references/transport-matrix.md) completely. Exclude a candidate when any required condition is disproven:
 
 - plugin unavailable in the selected NVSHMEM installation;
-- exact release or operation unsupported;
+- target release or required operation is known to be unsupported;
 - fabric/provider mismatch;
 - missing driver, peer-memory/DMA-BUF, GDRCopy, DevX, UCX, libfabric, GPUNetIO, or DOCA prerequisite;
 - incompatible memory mode, registered-buffer use, scale, or required feature.
 
-Treat a missing fact as `conditional`, not `eligible`. Keep build support, runtime loadability, and hardware suitability separate.
+Treat a missing fact as conditional only when it can invalidate the proposed configuration. Otherwise recommend the documented or compatibility-first default and list the missing fact under confidence and unknowns. Keep build support, runtime loadability, and hardware suitability separate.
+
+For this skill, a loaded `gdrdrv` kernel module or visible `/dev/gdrdrv` device is sufficient positive evidence that the GDRCopy prerequisite is present. Do not require `pkg-config`, `ldconfig`, or a discovered `libgdrapi` path in addition, and do not treat missing userspace-library hints as evidence that GDRCopy is absent.
 
 For IBGDA, evaluate both the GPU data path and a separate host remote transport. For GPUNetIO GDAKI, require `gpunetio` as the remote transport. Never enable IBGDA and GPUNetIO GDAKI together.
 
 ### 5. Rank Eligible Candidates
 
-Apply these rules in order without assigning artificial scores:
+For system eligibility only, do not apply workload-fit rules. After hard eligibility, select a compatibility-first system default: IBRC for Mellanox InfiniBand or verified RoCE, native libfabric for EFA or Slingshot/CXI, a site-required UCX path, or `none` for a proven local-only deployment. Emit the selection block and do not claim it is the fastest. For kernel/workload analysis, apply these rules in order without assigning artificial scores:
 
-1. **Fabric-native gate:** Prefer libfabric with `efa` on EFA and `cxi` on Slingshot/CXI when the exact release supports the required operations and memory mode.
-2. **No remote network:** Select `none` only when all relevant PEs communicate within a peer-reachable NVLink domain and no remote path is required.
-3. **Fine-grained parallel device traffic:** Favor an eligible GDAKI path when many GPU issuers submit small independent remote operations and a CPU proxy would serialize them.
-4. **GDAKI choice:**
+1. **Mellanox/IB family gate:** On Mellanox InfiniBand or verified RoCE, evaluate the native IB paths first. Use IBRC as the conservative baseline, then consider IBDevX, IBGDA, or GPUNetIO only when their prerequisites and workload fit justify them.
+2. **Other native-fabric gate:** Prefer libfabric with `efa` on EFA and `cxi` on Slingshot/CXI when no known release-specific operation or memory-mode limitation conflicts with the application.
+3. **No remote network:** Select `none` only when all relevant PEs communicate within a peer-reachable NVLink domain and no remote path is required.
+4. **Fine-grained parallel device traffic:** Favor an eligible GDAKI path when many GPU issuers submit small independent remote operations and a CPU proxy would serialize them.
+5. **GDAKI choice:**
    - Favor IBGDA when DCI/DCT connection scaling is required, GPUNetIO is absent, or the exact release has stronger required operation coverage.
    - Favor GPUNetIO GDAKI when its RC connection scale is acceptable and a unified GPUNetIO CPU/GPU path or verified DOCA feature is useful.
    - Do not treat GPUNetIO design goals as proof that it outperforms IBGDA for this workload.
-5. **Proxy-friendly traffic:** Favor a proxy path for host/on-stream-dominant work, packed larger transfers, low message concurrency, or latency-sensitive isolated operations.
-6. **Mellanox proxy choice:** Use IBRC as the conservative verbs default. Recommend IBDevX only when mlx5 DevX is available, its exact operation coverage is sufficient, and a concrete requirement such as avoiding a GDRCopy-dependent path justifies it. Do not claim general IBDevX superiority.
-7. **UCX choice:** Favor UCX for a UCX-controlled deployment or a verified release-specific capability unavailable from the native alternatives. Preserve its experimental/status caveats from the exact documentation.
+6. **Proxy-friendly traffic:** Favor a proxy path for host/on-stream-dominant work, packed larger transfers, low message concurrency, or latency-sensitive isolated operations.
+7. **Mellanox proxy choice:** Use IBRC as the conservative verbs default. Recommend IBDevX only when mlx5 DevX is available, its required operation coverage is sufficient, and a concrete requirement such as avoiding a GDRCopy-dependent path justifies it. Do not claim general IBDevX superiority.
+8. **UCX choice:** Favor UCX for a UCX-controlled deployment or a verified release-specific capability unavailable from the native alternatives. Preserve the bundled experimental/status caveats; consult exact documentation only when the selection depends on a release-specific detail.
 
 If two candidates remain close, choose the compatibility-first option as the recommendation, report the other as runner-up, and state that static analysis cannot establish the performance winner.
+
+Order the recommendation and candidate discussion by the target fabric. On Mellanox InfiniBand or verified RoCE, lead with IBRC, IBDevX, and IBGDA/GPUNetIO as applicable; do not lead with libfabric. On EFA or Slingshot/CXI, lead with the matching native libfabric provider.
 
 ### 6. Emit Minimal Selection Configuration
 
@@ -145,7 +154,7 @@ Emit only the variables required to select the resolved configuration:
 
 Do not add HCA mapping, QP counts, batching, NIC handlers, memory-mode changes, or provider tuning to this block. Put mandatory compatibility preconditions outside the block and route mapping/tuning to the appropriate sibling skill.
 
-Withhold an unconditional export block when version, plugin, provider, operation coverage, or kernel profile is unresolved.
+Default to emitting the minimal selection block for the recommended best-evidence configuration. Withhold it only when no viable candidate passes the hard gates or a required value cannot be resolved, such as a missing plugin, fabric/provider mismatch, or mandatory incompatible memory mode. Do not withhold merely because the patch version, workload profile, optional capability, or performance winner is unknown.
 
 ### 7. Return the Recommendation
 
@@ -195,7 +204,7 @@ State the documentation version consulted when live verification was used. Descr
 ## Examples
 
 - `Use $nvshmem-select-remote-transport. Inspect this target compute node and src/exchange.cu, then recommend a throughput-oriented transport for 256 PEs with 8 local PEs per node.`
-- `Use $nvshmem-select-remote-transport with the attached collector output and communication profile. Recommend a compatibility-first transport for 32 PEs with 8 local PEs per node, and withhold exports if required evidence is missing.`
+- `Use $nvshmem-select-remote-transport with the attached collector output and communication profile. Recommend a compatibility-first transport for 32 PEs with 8 local PEs per node, emit the minimal selection exports, and state any assumptions.`
 
 
 ## Guardrails
@@ -211,12 +220,13 @@ State the documentation version consulted when live verification was used. Descr
 ## Troubleshooting
 
 - If the collector exits with status 2, preserve its output and resolve only the missing facts listed under `diagnostics`.
+- When `nvidia-smi`, `ibstatus`, `ibv_devinfo`, or `rdma link` fails or cannot see devices while static sysfs/module evidence suggests hardware exists, treat device access as unresolved rather than treating the hardware as absent. Ask the user to run the failed commands manually in the target host or exact launch environment; do not retry with privileges or infer eligibility from host-visible sysfs alone.
 - If a plugin is missing or fails to initialize, verify the selected prefix and dependencies, then route runtime failures to `$nvshmem-troubleshoot-and-report-bugs`.
-- If the recommendation remains conditional, obtain the exact version, provider, operation coverage, or kernel profile before emitting exports.
+- If a specialized capability remains conditional, recommend the best supported fallback and emit its configuration. Ask for exact version, provider, or operation evidence only when it could change the setting or no fallback passes the hard gates.
 
 ## Limitations
 
 - Static analysis estimates architectural fit; it does not validate runtime correctness, measure performance, or guarantee the fastest transport.
-- The bundled compatibility matrix is release-sensitive; verify the exact target release against its official documentation when the matrix cannot establish applicability.
+- Some compatibility details are release-sensitive; verify the exact target release only when the recommendation depends on one of them.
 - The collector describes one node and one selected installation. It does not prove cluster-wide uniformity, working RoCE, or complete operation coverage.
-- Incomplete source, topology, plugin, or provider evidence requires a conditional recommendation with no unconditional exports.
+- Incomplete evidence lowers confidence and must be disclosed, but does not by itself prevent a best-evidence recommendation or minimal exports.
