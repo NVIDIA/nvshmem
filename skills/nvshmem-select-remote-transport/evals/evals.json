@@ -136,16 +136,16 @@
     },
     {
       "id": "nvshmem-select-remote-transport-009",
-      "prompt": "Use nvshmem-select-remote-transport with the attached Mellanox facts. The application team can only say that it uses NVSHMEM somewhere in a large binary; they cannot provide source, API usage, message sizes, concurrency, or a communication profile. It has 16 PEs and wants the fastest transport.",
+      "prompt": "Use nvshmem-select-remote-transport with the attached Mellanox facts. The application team chooses system eligibility only. It has 16 PEs and wants the fastest transport.",
       "files": [
         "evals/files/mellanox-ibgda.txt"
       ],
-      "expected_output": "The agent makes only a conditional compatibility-first assessment, withholds unconditional exports, requests the material kernel/profile fields, and rejects the unsupported request for a guaranteed fastest transport.",
+      "expected_output": "The agent honors the explicit no-workload choice, recommends IBRC as the compatibility-first Mellanox system default, emits NVSHMEM_REMOTE_TRANSPORT=ibrc, and does not claim it is the fastest transport.",
       "assertions": [
         "The agent does not infer GDAKI fit merely from the available plugin and fast hardware",
-        "The agent withholds unconditional exports because the required communication profile is absent",
-        "The missing fields requested are limited to API surface, operations, physical sizes, issuing concurrency, fan-out, and completion behavior",
-        "The response does not promise a fastest transport or require a benchmark"
+        "The agent does not request kernel source or communication-profile fields after the user chose system eligibility only",
+        "The response recommends the conservative IBRC system default and emits only NVSHMEM_REMOTE_TRANSPORT=ibrc",
+        "The agent does not search for kernels, promise a fastest transport, or require a benchmark"
       ],
       "expected_skill": "nvshmem-select-remote-transport",
       "expected_script": "None"
@@ -157,11 +157,11 @@
         "evals/files/unknown-version.txt",
         "evals/files/fine-grained.cu"
       ],
-      "expected_output": "The agent identifies IBGDA as a conditional architectural fit but withholds exact exports because the NVSHMEM version is unresolved and exact release compatibility cannot be established offline.",
+      "expected_output": "The agent does not block on the missing patch version. It recommends and emits the conservative IBRC fallback, while identifying IBGDA as a conditional architectural fit pending its specific prerequisites.",
       "assertions": [
-        "The agent treats the absent exact version as unresolved eligibility rather than filling it in from the path",
-        "The response may identify conditional IBGDA fit but does not provide an unconditional export block",
-        "The agent asks for nvshmem-info -n output or equivalent exact installed-version evidence",
+        "The agent does not invent the missing version or require a live documentation lookup",
+        "The selection block contains NVSHMEM_REMOTE_TRANSPORT=ibrc as the best-supported fallback",
+        "The agent keeps IBGDA conditional on its missing driver, registration, and release-specific prerequisite evidence rather than withholding every recommendation",
         "The agent respects the request not to use live network documentation"
       ],
       "expected_skill": "nvshmem-select-remote-transport",
