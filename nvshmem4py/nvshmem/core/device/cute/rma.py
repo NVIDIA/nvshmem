@@ -94,6 +94,9 @@ def put_block(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put_block(dst_ptr, src_ptr, nelems, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_block(dst_ptr, src_ptr, nelems, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -154,6 +157,9 @@ def put_nbi_block(dst, src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_put_nbi_block(dst_ptr, src_ptr, nelems, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_nbi_block(dst_ptr, src_ptr, nelems, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -217,6 +223,9 @@ def put_warp(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put_warp(dst_ptr, src_ptr, nelems, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_warp(dst_ptr, src_ptr, nelems, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -277,6 +286,9 @@ def put_nbi_warp(dst, src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_put_nbi_warp(dst_ptr, src_ptr, nelems, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_nbi_warp(dst_ptr, src_ptr, nelems, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -340,6 +352,9 @@ def put(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put(dst_ptr, src_ptr, nelems, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put(dst_ptr, src_ptr, nelems, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -400,6 +415,9 @@ def put_nbi(dst, src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_put_nbi(dst_ptr, src_ptr, nelems, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_nbi(dst_ptr, src_ptr, nelems, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -466,6 +484,9 @@ def get_block(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_get_block(dst_ptr, src_ptr, nelems, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_get_block(dst_ptr, src_ptr, nelems, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -526,6 +547,9 @@ def get_nbi_block(dst, src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_get_nbi_block(dst_ptr, src_ptr, nelems, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_get_nbi_block(dst_ptr, src_ptr, nelems, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -589,6 +613,9 @@ def get_warp(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_get_warp(dst_ptr, src_ptr, nelems, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_get_warp(dst_ptr, src_ptr, nelems, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -649,6 +676,9 @@ def get_nbi_warp(dst, src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_get_nbi_warp(dst_ptr, src_ptr, nelems, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_get_nbi_warp(dst_ptr, src_ptr, nelems, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -712,6 +742,9 @@ def get(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_get(dst_ptr, src_ptr, nelems, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_get(dst_ptr, src_ptr, nelems, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -772,6 +805,9 @@ def get_nbi(dst, src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_get_nbi(dst_ptr, src_ptr, nelems, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_get_nbi(dst_ptr, src_ptr, nelems, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -849,6 +885,9 @@ def put_signal_block(dst, src, signal_var, signal_val, signal_op, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put_signal_block(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_signal_block(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -920,6 +959,9 @@ def put_signal_nbi_block(dst, src, signal_var, signal_val, signal_op, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_put_signal_nbi_block(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_signal_nbi_block(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -994,6 +1036,9 @@ def put_signal_warp(dst, src, signal_var, signal_val, signal_op, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put_signal_warp(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_signal_warp(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -1065,6 +1110,9 @@ def put_signal_nbi_warp(dst, src, signal_var, signal_val, signal_op, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_put_signal_nbi_warp(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_signal_nbi_warp(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
@@ -1139,6 +1187,9 @@ def put_signal(dst, src, signal_var, signal_val, signal_op, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put_signal(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_signal(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -1211,6 +1262,9 @@ def put_signal_nbi(dst, src, signal_var, signal_val, signal_op, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_put_signal_nbi(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_put_signal_nbi(dst_ptr, src_ptr, nelems, signal_var_ptr, signal_val, signal_op, pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 
@@ -1272,6 +1326,9 @@ def p(dst, src, pe):
     elif const_expr(dtype == cutlass.Float16):
         return half_p(dst_ptr, cute_cast(src, cutlass.Float16), pe)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_p(dst_ptr, cute_cast(src, cutlass.BFloat16), pe)
+
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
 
 # g variations
@@ -1332,5 +1389,8 @@ def g(src, pe):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_g(src_ptr, pe)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_g(src_ptr, pe)
 
     raise RuntimeError(f"Unsupported CuTe dtype for RMA dispatch: {dtype}")
