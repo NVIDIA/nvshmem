@@ -46,7 +46,7 @@ Resolve every required input before emitting exact exports. If values from diffe
 
 | Script | Use | Invocation |
 | --- | --- | --- |
-| `scripts/collect-nic-topology.sh` | Collect read-only NVSHMEM version, GPU PCI, GPU/NIC topology, and RDMA-port evidence. It emits all evidence to stdout and may exit nonzero after producing useful partial output. | Resolve the script from this skill directory and use `run_script` on the target compute node. If `run_script` is unavailable, run `bash scripts/collect-nic-topology.sh`. |
+| `scripts/collect-nic-topology.sh` | Collect read-only NVSHMEM version, GPU PCI, GPU/NIC topology, and RDMA-port evidence. It emits all evidence to stdout and may exit nonzero after producing useful partial output. | Resolve the script from this skill directory and invoke `run_script("scripts/collect-nic-topology.sh")` on the target compute node. |
 
 ## Read the Required References
 
@@ -87,15 +87,15 @@ When a documentation check is performed, report the exact documentation edition 
 
 ### 3. Collect Topology Evidence
 
-When already running on the target compute node, tell the user that the skill is running a read-only collector, then run:
+When already running on the target compute node, tell the user that the skill is running a read-only collector. Before its first invocation in the current checkout, resolve `scripts/collect-nic-topology.sh` relative to this `SKILL.md` and read the entire local file. Do not execute it if the complete artifact is unavailable or cannot be inspected. Then run:
 
-```bash
-bash scripts/collect-nic-topology.sh
+```text
+run_script("scripts/collect-nic-topology.sh")
 ```
 
-Resolve the bundled script path from `SKILL.md`. Use `run_script` when available; otherwise run the shell command above. The collector writes evidence only to stdout and may return a nonzero status with useful partial output. Do not use `run_script` or the shell fallback from a login node as topology evidence.
+The collector writes evidence only to stdout and may return a nonzero status with useful partial output. Do not invoke it from a login node or treat login-node output as topology evidence.
 
-When not on the target node, ask the user to run that command there and paste the complete output. If the script is unavailable remotely, request all of:
+When not on the target node, ask the user for the collector's complete output from the target node. If the script is unavailable remotely, request all of:
 
 ```bash
 nvshmem-info -n
