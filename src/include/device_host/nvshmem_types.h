@@ -44,7 +44,7 @@
 #define REDUCE_PADDING 32
 #define TIMEOUT_PADDING 16
 #define COLL_ENV_VARS_PADDING 472
-#define COLL_ENV_VARS_V2_PADDING 416
+#define COLL_ENV_VARS_V2_PADDING 415
 
 #define NVSHMEMI_TEAM_DUP_COUNT 128
 #define NVSHMEMI_NVLS_MAX_CTA_COUNT NVSHMEMI_TEAM_DUP_COUNT
@@ -183,6 +183,7 @@
      COLL_ENV_PARAMS_SCALAR_INVALID,            /* reduce_maxloc_algo */           \
      COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* fcollect_ll128_threahold */     \
      COLL_ENV_PARAMS_ULSCALAR_INVALID,          /* reduce_nvls_threshold */        \
+     false,                                     /* fcollect_ll_supported */        \
      {0}}
 
 #define NVSHMEMI_TIMEOUT_INITIALIZER                                   \
@@ -526,6 +527,7 @@ typedef struct {
     int reduce_maxloc_algo;
     size_t fcollect_ll128_threshold;
     size_t reduce_nvls_threshold;
+    bool fcollect_ll_supported;
     char padding[COLL_ENV_VARS_V2_PADDING];
 } gpu_coll_env_params_v2;
 static_assert(sizeof(gpu_coll_env_params_v2) == 512, "gpu_coll_env_params_v2 must be 512 bytes.");

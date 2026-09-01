@@ -1278,6 +1278,36 @@ static int init_team_node() {
     return 0;
 }
 
+static int init_fcollect_ll_support() {
+    int local_support = nvshmemi_team_world->are_gpus_p2p_connected ||
+                        nvshmemi_team_shared->is_team_node ||
+                        !nvshmemi_team_node->are_gpus_p2p_connected;
+    std::vector<int> support_all(nvshmemi_state->npes);
+
+    int status = nvshmemi_boot_handle.allgather(&local_support, support_all.data(), sizeof(int),
+                                                &nvshmemi_boot_handle);
+    if (status != 0) {
+        NVSHMEMI_ERROR_PRINT("allgather of fcollect LL support failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    size_t supported_count = std::count(support_all.begin(), support_all.end(), 1);
+    bool global_support = supported_count == support_all.size();
+    bool mixed_support = supported_count != 0 && !global_support;
+
+    nvshmemi_device_state.gpu_coll_env_params_var.fcollect_ll_supported = global_support;
+
+    if (nvshmemi_state->mype == 0) {
+        INFO(NVSHMEM_INIT, "FCOLLECT LL support: %zu/%d PEs locally eligible; job-wide=%d",
+             supported_count, nvshmemi_state->npes, global_support);
+    }
+    if (mixed_support && !local_support) {
+        INFO(NVSHMEM_INIT, "FCOLLECT LL disabled job-wide due to this PE's local topology");
+    }
+
+    return 0;
+}
+
 static int init_team_same_mype_node() {
     /* Initialize NVSHMEMX_TEAM_SAME_MYPE_NODE */
     if (nvshmemi_team_allocate_team(
@@ -1686,6 +1716,11 @@ int nvshmemi_team_init(void) {
     }
 
     status = init_team_node();
+    if (status) {
+        return status;
+    }
+
+    status = init_fcollect_ll_support();
     if (status) {
         return status;
     }
