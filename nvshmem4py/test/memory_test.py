@@ -160,6 +160,27 @@ def test_interop_torch():
     print("Ending test Torch interop buffer")
 
 
+def test_interop_torch_fp8():
+    print("Testing Torch interop buffer with FP8 dtypes")
+    if not _torch_enabled:
+        print("WARNING: Torch not found. Not running FP8 Torch Interop test")
+        return
+    for dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        tensor = nvshmem.core.tensor((16, 32), dtype=dtype)
+        assert tensor.dtype == dtype
+        assert tensor.element_size() == 1
+        # FP8 elementwise assignment isn't available in every Torch version, so
+        # write through a byte view.
+        byte_view = tensor.view(torch.uint8)
+        assert byte_view.numel() == 16 * 32
+        byte_view[:] = 0xA5
+        assert byte_view.min().item() == 0xA5
+        assert byte_view.max().item() == 0xA5
+        print(dtype, tuple(tensor.shape))
+        nvshmem.core.free_tensor(tensor)
+    print("Ending test Torch interop buffer with FP8 dtypes")
+
+
 def test_interop_cupy():
     print("Testing CuPy interop mem")
     if not _cupy_enabled:
@@ -614,6 +635,7 @@ if __name__ == '__main__':
         test_peer_tensor()
         test_interop_cupy()
         test_interop_torch()
+        test_interop_torch_fp8()
         test_del_buffer()
         test_mc_buffer()
         test_mc_tensor()
