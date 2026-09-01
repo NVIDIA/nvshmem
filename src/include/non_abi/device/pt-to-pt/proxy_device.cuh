@@ -283,23 +283,20 @@ nvshmemi_proxy_write_region_metadata_slot(uint64_t idx, const nvshmemi_region_in
 }
 
 template <nvshmemi_region_operation_t REGION_OPERATION>
-NVSHMEMI_STATIC __device__ NVSHMEMI_NOINLINE bool nvshmemi_proxy_try_publish_region_request(
+NVSHMEMI_STATIC __device__ NVSHMEMI_NOINLINE void nvshmemi_proxy_resolve_and_publish_request(
     uint64_t idx, volatile uint64_t *request, uint64_t request_value) {
     constexpr nvshmemi_region_hints_t supported_hints =
         nvshmemi_region_operation_traits<REGION_OPERATION>::supported_hints();
     nvshmemi_region_info_t region_info = nvshmemi_region_resolve_active_current(supported_hints);
-    if (region_info.region_id == 0) {
-        return false;
-    }
-
-    bool batch_rma_region =
-        nvshmemi_region_info_has_hints(&region_info, nvshmemi_region_hints_batch_rma());
-    if (batch_rma_region) {
-        nvshmemi_proxy_write_region_metadata_slot(idx, &region_info);
-        request_value |= static_cast<uint64_t>(PROXY_GROUP_REGION) << 8;
+    if (region_info.region_id != 0) {
+        bool batch_rma_region =
+            nvshmemi_region_info_has_hints(&region_info, nvshmemi_region_hints_batch_rma());
+        if (batch_rma_region) {
+            nvshmemi_proxy_write_region_metadata_slot(idx, &region_info);
+            request_value |= static_cast<uint64_t>(PROXY_GROUP_REGION) << 8;
+        }
     }
     *request = request_value;
-    return true;
 }
 
 template <bool CHECK_REGION, nvshmemi_region_operation_t REGION_OPERATION>
@@ -381,9 +378,9 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void transfer_dma
                                              (static_cast<uint64_t>(pe_u16) << 16) | curr_flag);
 
     if constexpr (CHECK_REGION) {
-        if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0) &&
-            nvshmemi_proxy_try_publish_region_request<REGION_OPERATION>(base_idx, base_request,
-                                                                        base_request_value)) {
+        if (unlikely((region_active_count & NVSHMEMI_REGION_ACTIVE_COUNT_MASK) != 0)) {
+            nvshmemi_proxy_resolve_and_publish_request<REGION_OPERATION>(base_idx, base_request,
+                                                                         base_request_value);
             return;
         }
     }
