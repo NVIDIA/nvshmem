@@ -4,6 +4,7 @@
  */
 
 #include "transport_ib_common.h"
+#include <algorithm>           // for min_element
 #include <assert.h>            // for assert
 #include <cuda.h>              // for CUdeviceptr, CU_MEM_RA...
 #include <cuda_runtime.h>      // for cudaGetLastError, cuda...
@@ -639,7 +640,6 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
                                              int num_candidate_devs) {
     nvshmemt_ib_common_state_t state = (nvshmemt_ib_common_state_t)t->state;
     int status = 0;
-    int *peer_counts = nullptr;
     int max_selected = state->max_selected_dev_ids > 0 ? state->max_selected_dev_ids : 1;
     bool capped = false;
 
@@ -687,20 +687,24 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
     }
 
     if (state->max_selected_dev_ids > 1 && t->n_pes > 1) {
-        peer_counts = (int *)calloc(t->n_pes, sizeof(int));
-        NVSHMEMI_NULL_ERROR_JMP(peer_counts, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "Unable to allocate selected NIC counts.\n");
-        status = t->boot_handle->allgather(&state->n_selected_dev_ids, peer_counts, sizeof(int),
-                                           t->boot_handle);
+        std::vector<int> peer_counts(t->n_pes);
+        status = t->boot_handle->allgather(&state->n_selected_dev_ids, peer_counts.data(),
+                                           sizeof(int), t->boot_handle);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Allgather of selected NIC counts failed.\n");
-        for (int pe = 0; pe < t->n_pes; ++pe) {
-            if (peer_counts[pe] != state->n_selected_dev_ids) {
-                NVSHMEMI_ERROR_JMP(
-                    status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                    "Selected NIC count differs across PEs: local PE has %d, PE %d has %d.\n",
-                    state->n_selected_dev_ids, pe, peer_counts[pe]);
-            }
+        int min_count = *std::min_element(peer_counts.begin(), peer_counts.end());
+
+        if (min_count <= 0) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                               "At least one PE selected no usable NICs.\n");
+        }
+
+        if (state->n_selected_dev_ids > min_count) {
+            NVSHMEMI_WARN_PRINT(
+                "Selected NIC count differs across PEs; truncating local count from %d to the "
+                "global minimum of %d.\n",
+                state->n_selected_dev_ids, min_count);
+            state->n_selected_dev_ids = min_count;
         }
     }
 
@@ -709,7 +713,6 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
          state->n_selected_dev_ids);
 
 out:
-    free(peer_counts);
     return status;
 }
 
