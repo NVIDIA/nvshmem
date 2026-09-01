@@ -66,13 +66,15 @@ If yes, announce the read-only probe and invoke the bundled collector without a 
 run_script("scripts/collect-transport-facts.sh")
 ```
 
+Before the first invocation in the current checkout, resolve the script relative to this `SKILL.md` and read the entire local file. Do not execute it if the complete artifact is unavailable or cannot be inspected. The collector does not override the locale globally; it applies the C locale only to commands whose output it parses.
+
 If it resolves an NVSHMEM prefix, tell the user which installation will be analyzed. Otherwise ask for an absolute prefix and rerun:
 
 ```text
 run_script("scripts/collect-transport-facts.sh", "--prefix", "/opt/nvshmem")
 ```
 
-Replace the example prefix with the resolved absolute prefix. Resolve the script relative to this `SKILL.md`. Preserve partial output when it exits with status 2.
+Replace the example prefix with the resolved absolute prefix. Preserve partial output when it exits with status 2.
 
 If the collector emits `manual_follow_up_command` entries, stop automatic probing and ask the user to run those commands manually in the target host or exact allocation/container used to launch NVSHMEM. Resume after the user returns their complete output. Do not repeat a command when equivalent successful output was already supplied.
 

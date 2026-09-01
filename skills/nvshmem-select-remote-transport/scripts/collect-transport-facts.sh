@@ -7,7 +7,6 @@
 # output is still useful but one or more categories are incomplete.
 
 set -u
-export LC_ALL=C
 
 usage() {
     printf '%s\n' \
@@ -148,9 +147,9 @@ if [[ -n "$info_bin" ]]; then
         if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
             info_ld_library_path+=":$LD_LIBRARY_PATH"
         fi
-        version_output=$(env LD_LIBRARY_PATH="$info_ld_library_path" "$info_bin" -n 2>&1)
+        version_output=$(LC_ALL=C env LD_LIBRARY_PATH="$info_ld_library_path" "$info_bin" -n 2>&1)
     else
-        version_output=$("$info_bin" -n 2>&1)
+        version_output=$(LC_ALL=C "$info_bin" -n 2>&1)
     fi
     version_rc=$?
     printf '%s\n' "$version_output"
@@ -238,7 +237,7 @@ if [[ -n "$nvshmem_prefix" && -d "$nvshmem_prefix" ]]; then
     if ((plugin_count)); then
         while IFS= read -r plugin_transport; do
             printf 'plugin_transport: %s\n' "$plugin_transport"
-        done < <(printf '%s\n' "${!plugin_transports_seen[@]}" | sort)
+        done < <(printf '%s\n' "${!plugin_transports_seen[@]}" | LC_ALL=C sort)
     fi
     printf 'plugin_count_in_selected_prefix: %d\n' "$plugin_count"
     printf 'plugin_file_count_in_selected_prefix: %d\n' "$plugin_file_count"
@@ -257,7 +256,7 @@ fi
 
 section nvshmem-configuration
 printf 'transport_related_environment:\n'
-selection_environment=$(env | grep -E '^(NVSHMEM_(REMOTE_TRANSPORT|IB_ENABLE_IBGDA|GPUNETIO_ENABLE_GDAKI|LIBFABRIC_PROVIDER|BOOTSTRAP|SYMMETRIC_SIZE|DISABLE_CUDA_VMM|ENABLE_NIC_PE_MAPPING|HCA_LIST|HCA_PE_MAPPING)|UCX_TLS|FI_PROVIDER|FI_EFA_ENABLE_SHM_TRANSFER)=' | sort || true)
+selection_environment=$(env | LC_ALL=C grep -E '^(NVSHMEM_(REMOTE_TRANSPORT|IB_ENABLE_IBGDA|GPUNETIO_ENABLE_GDAKI|LIBFABRIC_PROVIDER|BOOTSTRAP|SYMMETRIC_SIZE|DISABLE_CUDA_VMM|ENABLE_NIC_PE_MAPPING|HCA_LIST|HCA_PE_MAPPING)|UCX_TLS|FI_PROVIDER|FI_EFA_ENABLE_SHM_TRANSFER)=' | LC_ALL=C sort || true)
 if [[ -n "$selection_environment" ]]; then
     printf '%s\n' "$selection_environment"
 else
@@ -392,7 +391,7 @@ else
 fi
 if command -v ibv_devinfo >/dev/null 2>&1; then
     printf 'verbs_devices:\n'
-    verbs_output=$(ibv_devinfo -l 2>&1)
+    verbs_output=$(LC_ALL=C ibv_devinfo -l 2>&1)
     verbs_rc=$?
     printf '%s\n' "$verbs_output"
     printf 'verbs_devices_exit_status: %d\n' "$verbs_rc"
@@ -436,7 +435,7 @@ section provider-stacks
 if command -v ucx_info >/dev/null 2>&1; then
     run_probe ucx_version ucx_info -v || true
     printf 'ucx_transports:\n'
-    ucx_info -d 2>&1 | grep -E '^#.*(Transport|Device):' || printf 'not reported\n'
+    LC_ALL=C ucx_info -d 2>&1 | LC_ALL=C grep -E '^#.*(Transport|Device):' || printf 'not reported\n'
 else
     printf 'ucx_info: not found\n'
 fi
