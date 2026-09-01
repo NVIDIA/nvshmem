@@ -16,9 +16,12 @@ import nvshmem.bindings.device.cute as nvshmem_cute_bindings
 
 _KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
 
-rma_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
+rma_dtypes = [
+    "bfloat16", "float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"
+]
 
 _TORCH_DTYPE_MAP = {
+    "bfloat16": torch.bfloat16,
     "float32": torch.float32,
     "float64": torch.float64,
     "int8": torch.int8,

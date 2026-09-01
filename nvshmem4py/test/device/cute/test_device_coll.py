@@ -26,6 +26,7 @@ from utils import (
 # TODO: float32 collectives hit proxy timeout on PCIe systems (L40S). Investigate.
 # Excluding float32 until the root cause is found.
 coll_dtypes = [
+    "bfloat16",
     pytest.param("float32", marks=pytest.mark.xfail(reason="proxy timeout on PCIe (Bug TBD)", strict=False)),
     "float64",
     "int8",
@@ -39,6 +40,8 @@ coll_dtypes = [
 ]
 
 _NUMPY_DTYPE_MAP = {
+    # NumPy has no bfloat16, and _read_cute_tensor promotes it to float32.
+    "bfloat16": np.float32,
     "float32": np.float32,
     "float64": np.float64,
     "int8": np.int8,
