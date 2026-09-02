@@ -1606,9 +1606,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
         }
 #endif
     } else {
-        nvshmemi_transfer_put_signal<SCOPE>((void *)dest, (void *)source, nelems * sizeof(T),
-                                            (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe,
-                                            is_nbi, qp_index);
+        if (is_nbi) {
+            nvshmemi_transfer_put_signal_nbi<SCOPE>((void *)dest, (void *)source,
+                                                    nelems * sizeof(T), (void *)sig_addr, signal,
+                                                    (nvshmemi_amo_t)sig_op, pe, qp_index);
+        } else {
+            nvshmemi_transfer_put_signal<SCOPE>((void *)dest, (void *)source, nelems * sizeof(T),
+                                                (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op,
+                                                pe, qp_index);
+        }
     }
 }
 

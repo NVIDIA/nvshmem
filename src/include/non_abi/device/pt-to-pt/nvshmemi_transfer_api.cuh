@@ -4,6 +4,8 @@
  */
 
 #include <cuda_runtime.h>
+#include "device/nvshmem_device_macros.h"
+#include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host_transport/nvshmem_constants.h"
 #include "non_abi/nvshmemi_region_types.h"
@@ -32,6 +34,20 @@
 #define NVSHMEMI_TRANSFER_STATIC
 #endif
 
+template <threadgroup_t SCOPE>
+NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ bool
+nvshmemi_transfer_submit_active_region_slow();
+
+template <threadgroup_t SCOPE>
+NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ bool nvshmemi_transfer_submit_active_region() {
+    bool region_active = false;
+    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 && nvshmemi_region_any_active()) {
+        region_active = nvshmemi_transfer_submit_active_region_slow<SCOPE>();
+    }
+    nvshmemi_threadgroup_sync<SCOPE>();
+    return region_active;
+}
+
 template <typename T>
 NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_rma_p(
     void *rptr, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
@@ -46,9 +62,28 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 
 template <threadgroup_t SCOPE>
-NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_put_signal(
+NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void
+nvshmemi_transfer_put_signal_dispatch(void *rptr, void *lptr, size_t bytes, void *sig_addr,
+                                      uint64_t signal, nvshmemi_amo_t sig_op, int pe, bool is_nbi,
+                                      nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
+
+/* Keep blocking-only region submission outside the shared dispatcher to preserve its code shape. */
+template <threadgroup_t SCOPE>
+NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void nvshmemi_transfer_put_signal(
     void *rptr, void *lptr, size_t bytes, void *sig_addr, uint64_t signal, nvshmemi_amo_t sig_op,
-    int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
+    int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemi_transfer_submit_active_region<SCOPE>();
+    nvshmemi_transfer_put_signal_dispatch<SCOPE>(rptr, lptr, bytes, sig_addr, signal, sig_op, pe,
+                                                 false, qp_index);
+}
+
+template <threadgroup_t SCOPE>
+NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE __device__ void nvshmemi_transfer_put_signal_nbi(
+    void *rptr, void *lptr, size_t bytes, void *sig_addr, uint64_t signal, nvshmemi_amo_t sig_op,
+    int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    nvshmemi_transfer_put_signal_dispatch<SCOPE>(rptr, lptr, bytes, sig_addr, signal, sig_op, pe,
+                                                 true, qp_index);
+}
 
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>

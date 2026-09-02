@@ -83,20 +83,6 @@
     FN_TEMPLATE(NVSHMEMI_THREADGROUP_BLOCK)
 
 #ifdef __CUDA_ARCH__
-template <threadgroup_t SCOPE>
-NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ bool
-nvshmemi_transfer_submit_active_region_slow();
-
-template <threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE bool nvshmemi_transfer_submit_active_region() {
-    bool region_active = false;
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0 && nvshmemi_region_any_active()) {
-        region_active = nvshmemi_transfer_submit_active_region_slow<SCOPE>();
-    }
-    nvshmemi_threadgroup_sync<SCOPE>();
-    return region_active;
-}
-
 __device__ NVSHMEMI_TRANSFER_INLINE void nvshmemi_transfer_syncapi_update_mem() {
     __threadfence(); /* 1. Ensures consitency op is not called before the prior test/wait condition
                         has been met
@@ -202,12 +188,10 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
 TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_RMA)
 
 template <threadgroup_t SCOPE>
-NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_transfer_put_signal(
-    void *rptr, void *lptr, size_t bytes, void *sig_addr, uint64_t signal, nvshmemi_amo_t sig_op,
-    int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index) {
-    if (!is_nbi) {
-        nvshmemi_transfer_submit_active_region<SCOPE>();
-    }
+NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void
+nvshmemi_transfer_put_signal_dispatch(void *rptr, void *lptr, size_t bytes, void *sig_addr,
+                                      uint64_t signal, nvshmemi_amo_t sig_op, int pe, bool is_nbi,
+                                      nvshmemx_qp_handle_t qp_index) {
     switch (nvshmemi_device_state_d.selected_device_transport) {
 #ifdef NVSHMEM_IBGDA_SUPPORT
         case NVSHMEMI_DEVICE_TRANSPORT_TYPE_IBGDA:
@@ -230,10 +214,7 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
                 if (is_nbi == 0) {
                     nvshmemi_proxy_quiet(false, pe, &qp_index, 1);
                     if (SCOPE == nvshmemi_threadgroup_thread) {
-                        __threadfence_block(); /* to prevent reuse of src buffer before quiet
-                                            completion for warp/block scope, following sync op will
-                                            accomplish that
-                                          */
+                        __threadfence_block(); /* Prevent source reuse before quiet completes. */
                     }
                 }
             }
@@ -241,12 +222,12 @@ NVSHMEMI_TRANSFER_STATIC NVSHMEMI_TRANSFER_INLINE __device__ void nvshmemi_trans
     }
 }
 
-#define TRANSFER_DECL_PUT_SIGNAL(SCOPE)                                        \
-    template __device__ void nvshmemi_transfer_put_signal<SCOPE>(              \
+#define TRANSFER_DECL_PUT_SIGNAL_DISPATCH(SCOPE)                               \
+    template __device__ void nvshmemi_transfer_put_signal_dispatch<SCOPE>(     \
         void *rptr, void *lptr, size_t bytes, void *sig_rptr, uint64_t signal, \
         nvshmemi_amo_t sig_op, int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index);
 
-TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_PUT_SIGNAL)
+TRANSFER_REPT_FOR_ALL_SCOPES(TRANSFER_DECL_PUT_SIGNAL_DISPATCH)
 
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
           nvshmemi_region_operation_t REGION_OPERATION>
