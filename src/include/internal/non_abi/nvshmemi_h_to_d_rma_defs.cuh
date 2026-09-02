@@ -86,7 +86,7 @@ __global__ void nvshmemi_proxy_rma_signal_entrypoint_blocking(void *rptr, void *
 #ifdef __CUDA_ARCH__
     nvshmemi_transfer_put_signal<NVSHMEMI_THREADGROUP_THREAD>(
         (void *)rptr, (void *)lptr, (size_t)(bytesdesc.nelems * bytesdesc.elembytes),
-        (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe, false);
+        (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe);
     nvshmemi_transfer_quiet<NVSHMEMI_THREADGROUP_THREAD>(true);
 #endif
 }

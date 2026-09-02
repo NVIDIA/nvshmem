@@ -41,7 +41,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_rma(
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_put_signal(
     void* /*rptr*/, void* /*lptr*/, size_t /*bytes*/, void* /*sig_addr*/, uint64_t /*signal*/,
-    nvshmemi_amo_t /*sig_op*/, int /*pe*/, bool /*is_nbi*/,
+    nvshmemi_amo_t /*sig_op*/, int /*pe*/,
+    nvshmemx_qp_handle_t /*qp_index*/ = NVSHMEMX_QP_DEFAULT) {}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_put_signal_nbi(
+    void* /*rptr*/, void* /*lptr*/, size_t /*bytes*/, void* /*sig_addr*/, uint64_t /*signal*/,
+    nvshmemi_amo_t /*sig_op*/, int /*pe*/,
     nvshmemx_qp_handle_t /*qp_index*/ = NVSHMEMX_QP_DEFAULT) {}
 
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,
