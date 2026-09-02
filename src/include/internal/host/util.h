@@ -150,31 +150,41 @@
     toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_local_pe_bases()[peer]) + \
                      ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
 
-#define NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(toPtr, fromPtr, peer)                                  \
-    if (nvshmemi_device_state.enable_rail_opt) {                                                  \
-        int proxy_pe = (peer / nvshmemi_state->npes_node) * nvshmemi_state->npes_node +           \
-                       nvshmemi_state->mype_node;                                                 \
-        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[proxy_pe]) +    \
-                         +((int)(peer % nvshmemi_state->npes_node) - nvshmemi_state->mype_node) * \
-                             nvshmemi_device_state.heap_size +                                    \
-                         ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));          \
-        peer = proxy_pe;                                                                          \
-    } else {                                                                                      \
-        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[peer]) +        \
-                         ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));          \
+static inline int nvshmemi_get_transport_pe(int target_pe) {
+    if (!nvshmemi_device_state.enable_rail_opt) {
+        return target_pe;
     }
+
+    return (target_pe / nvshmemi_state->npes_node) * nvshmemi_state->npes_node +
+           nvshmemi_state->mype_node;
+}
+
+struct nvshmemi_unmapped_ptr_translation {
+    void *remote_ptr;
+    int transport_pe;
+};
+
+static inline nvshmemi_unmapped_ptr_translation nvshmemi_translate_unmapped_ptr(
+    void *symmetric_ptr, int target_pe, const std::vector<void *> &remote_pe_bases) {
+    const int transport_pe = nvshmemi_get_transport_pe(target_pe);
+    ptrdiff_t rail_offset = 0;
+
+    if (nvshmemi_device_state.enable_rail_opt) {
+        rail_offset = static_cast<ptrdiff_t>(target_pe % nvshmemi_state->npes_node -
+                                             nvshmemi_state->mype_node) *
+                      static_cast<ptrdiff_t>(nvshmemi_device_state.heap_size);
+    }
+
+    auto *remote_base = static_cast<char *>(remote_pe_bases[transport_pe]);
+    auto *heap_base = static_cast<char *>(nvshmemi_device_state.heap_base);
+    auto *remote_ptr = remote_base + rail_offset + (static_cast<char *>(symmetric_ptr) - heap_base);
+
+    return {remote_ptr, transport_pe};
+}
 
 #define NVSHMEMU_UNMAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                      \
     toPtr = (void *)((char *)(nvshmemi_device_state.peer_heap_base_remote[peer]) + \
                      ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
-
-#define NVSHMEMU_PE_TRANSLATE(peer)                                                 \
-    do {                                                                            \
-        if (nvshmemi_device_state.enable_rail_opt) {                                \
-            peer = (peer / nvshmemi_state->npes_node) * nvshmemi_state->npes_node + \
-                   nvshmemi_state->mype_node;                                       \
-        }                                                                           \
-    } while (0)
 
 int nvshmemu_get_num_gpus_per_node();
 

@@ -215,7 +215,9 @@ static inline bool proxy_dma_more_follows(proxy_state_t *state, proxy_channel_t 
         next_qp_index = next_dma_req_2->qp_index;
     }
 
-    return next_pe == pe && next_qp_index == qp_index && state->transport[next_pe] == tcurr;
+    const int next_transport_pe = nvshmemi_get_transport_pe(next_pe);
+    return next_pe == pe && next_qp_index == qp_index &&
+           state->transport[next_transport_pe] == tcurr;
 }
 
 static inline void proxy_read_region_metadata(proxy_state_t *state, proxy_channel_t *ch,
@@ -563,8 +565,12 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
         verb.is_nbi = 1;
         verb.is_stream = 0;
         verb.cstrm = NULL;
-        struct nvshmem_transport *tcurr = state->transport[pe];
         void *rptr = static_cast<char *>(nvshmemi_device_state.heap_base) + roffset;
+        const auto translation = nvshmemi_translate_unmapped_ptr(
+            rptr, pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
+        const int transport_id = state->transport_id[translation.transport_pe];
+        struct nvshmem_transport *tcurr = state->transport[translation.transport_pe];
+
         if (explicit_region) {
             nvshmemi_region_info_t region_info{};
             proxy_read_region_metadata_slot(state, ch, ch->processed, &region_info);
@@ -572,21 +578,21 @@ inline int process_channel_dma(proxy_state_t *state, proxy_channel_t *ch, int *i
             attrs.hints = region_info.hints;
             attrs.issuer_id = region_info.issuer_id;
             attrs.region_id = region_info.region_id;
-            nvshmemi_process_multisend_rma_with_hints(
-                state->transport[pe], state->transport_id[pe], pe, verb, rptr,
-                reinterpret_cast<void *>(laddr), size, qp_index, &attrs);
+            nvshmemi_process_multisend_rma_with_hints(tcurr, transport_id, translation, verb, rptr,
+                                                      reinterpret_cast<void *>(laddr), size,
+                                                      qp_index, &attrs);
         } else if (tcurr->host_ops.rma_with_hints &&
                    proxy_dma_more_follows(state, ch, proxy_request_batch_idx, tcurr, pe, qp_index,
                                           verb)) {
             // Mark adjacent compatible requests for opportunistic implicit transport batching.
             nvshmem_transport_op_attrs_t attrs{};
             attrs.flags = NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
-            nvshmemi_process_multisend_rma_with_hints(
-                state->transport[pe], state->transport_id[pe], pe, verb, rptr,
-                reinterpret_cast<void *>(laddr), size, qp_index, &attrs);
+            nvshmemi_process_multisend_rma_with_hints(tcurr, transport_id, translation, verb, rptr,
+                                                      reinterpret_cast<void *>(laddr), size,
+                                                      qp_index, &attrs);
         } else {
-            nvshmemi_process_multisend_rma(state->transport[pe], state->transport_id[pe], pe, verb,
-                                           rptr, reinterpret_cast<void *>(laddr), size, qp_index);
+            nvshmemi_process_multisend_rma(tcurr, transport_id, translation, verb, rptr,
+                                           reinterpret_cast<void *>(laddr), size, qp_index);
         }
     }
 #if defined(NVSHMEM_PPC64LE) || defined(NVSHMEM_AARCH64)
@@ -677,25 +683,26 @@ inline int process_channel_inline(proxy_state_t *state, proxy_channel_t *ch, int
         rma_memdesc_t localdesc, remotedesc;
         rma_bytesdesc_t bytes;
         rma_verb_t verb;
-        void *remote = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
-        void *remote_actual;
-        NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(remote_actual, remote, pe);
-        void *local = (void *)&lvalue;
-        struct nvshmem_transport *tcurr = state->transport[pe];
-        int t = state->transport_id[pe];
+        void *symmetric_ptr = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
+        const auto [remote_ptr, transport_pe] = nvshmemi_translate_unmapped_ptr(
+            symmetric_ptr, pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
+        void *local_ptr = (void *)&lvalue;
+        struct nvshmem_transport *tcurr = state->transport[transport_pe];
+        int t = state->transport_id[transport_pe];
 
         verb.desc = NVSHMEMI_OP_P;
         verb.is_nbi = 0;
 
-        localdesc.ptr = local;
+        localdesc.ptr = local_ptr;
         localdesc.handle = NULL;
-        remotedesc.ptr = remote_actual;
-        nvshmemi_get_remote_mem_handle(&remotedesc, NULL, remote, pe, t);
+        remotedesc.ptr = remote_ptr;
+        nvshmemi_get_remote_mem_handle(&remotedesc, NULL, symmetric_ptr, transport_pe, t);
 
         bytes.nelems = 1;
         bytes.elembytes = size;
 
-        status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytes, qp_index);
+        status = tcurr->host_ops.rma(tcurr, transport_pe, verb, &remotedesc, &localdesc, bytes,
+                                     qp_index);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_inline\n");
             exit(-1);
@@ -785,9 +792,9 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
     {
         amo_verb_t verb;
         amo_bytesdesc_t bytes;
-        amo_memdesc_t memdesc;
-        void *remote = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
-        void *remote_actual =
+        amo_memdesc_t memdesc{};
+        void *symmetric_ptr = (void *)((char *)(nvshmemi_device_state.heap_base) + roffset);
+        void *remote_ptr =
             (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[pe]) + roffset);
         int t = state->transport_id[pe];
         struct nvshmem_transport *tcurr = state->transport[pe];
@@ -795,12 +802,11 @@ int process_channel_amo(proxy_state_t *state, proxy_channel_t *ch, int *is_proce
         verb.desc = amo_op;
         verb.is_float = is_float;
 
-        memset(&memdesc, 0, sizeof(amo_memdesc_t));
-        memdesc.remote_memdesc.ptr = remote_actual;
+        memdesc.remote_memdesc.ptr = remote_ptr;
         memdesc.remote_memdesc.offset = roffset;
         memdesc.val = lvalue;
         memdesc.cmp = cvalue;
-        nvshmemi_get_remote_mem_handle(&memdesc.remote_memdesc, NULL, remote, pe, t);
+        nvshmemi_get_remote_mem_handle(&memdesc.remote_memdesc, NULL, symmetric_ptr, pe, t);
         // pick spot in g buffer for fetch value
         if ((amo_op > NVSHMEMI_AMO_END_OF_NONFETCH)) {
             uint64_t g_buf_counter = ((*reinterpret_cast<uint64_t *>(req_3)) & 0xFFFFFFFFFFFFFF00u);
@@ -1126,11 +1132,11 @@ inline int process_channel_qp_fence(proxy_state_t *proxy_state, proxy_channel_t 
             num_pe = 1;
         }
         for (int j = 0; j < num_pe; j++) {
-            int pe = base_pe + j;
-            NVSHMEMU_PE_TRANSLATE(pe);
-            struct nvshmem_transport *tcurr = proxy_state->transport[pe];
+            const int target_pe = base_pe + j;
+            const int transport_pe = nvshmemi_get_transport_pe(target_pe);
+            struct nvshmem_transport *tcurr = proxy_state->transport[transport_pe];
             if (tcurr->host_ops.fence) {
-                status = tcurr->host_ops.fence(tcurr, pe, qp_index, is_multi);
+                status = tcurr->host_ops.fence(tcurr, transport_pe, qp_index, is_multi);
             }
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_qp_fence\n");
@@ -1185,11 +1191,11 @@ inline int process_channel_qp_quiet(proxy_state_t *proxy_state, proxy_channel_t 
             start_pe = qp_sync_req_0->pe;
         }
         for (int j = start_pe; j < start_pe + num_pe; j++) {
-            int pe = j % state->npes;
-            NVSHMEMU_PE_TRANSLATE(pe);
-            struct nvshmem_transport *tcurr = proxy_state->transport[pe];
+            const int target_pe = j % state->npes;
+            const int transport_pe = nvshmemi_get_transport_pe(target_pe);
+            struct nvshmem_transport *tcurr = proxy_state->transport[transport_pe];
             if (tcurr->host_ops.quiet) {
-                status = tcurr->host_ops.quiet(tcurr, pe, qp_sync_req_0->qp_index);
+                status = tcurr->host_ops.quiet(tcurr, transport_pe, qp_sync_req_0->qp_index);
             }
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_qp_quiet\n");
@@ -1260,7 +1266,7 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     std::vector<rma_bytesdesc_t> write_bytes_vec;
     size_t chunk_size, local_chunk_size, remote_chunk_size, size_remaining;
     amo_verb_t sig_verb;
-    amo_memdesc_t sig_target_desc;
+    amo_memdesc_t sig_target_desc{};
     amo_bytesdesc_t sig_bytes_desc;
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT;
 
@@ -1324,9 +1330,6 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
 #endif
 
     const int target_pe = ps_req_2->pe;
-    int transport_pe = target_pe;
-    NVSHMEMU_PE_TRANSLATE(transport_pe);
-
     if ((nvshmemi_op_t)base_req->op >= NVSHMEMI_OP_QP_OP_OFFSET) {
         qp_index = ps_req_2->qp_index;
     }
@@ -1342,21 +1345,24 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
                           ((uint64_t)(ps_req_0->laddr_write_2) << 8) | ps_req_1->laddr_write_low);
     size_remaining =
         (size_t)(((size_t)(ps_req_1->write_size_high) << 16) | (ps_req_1->write_size_low));
+    const auto write_translation = nvshmemi_translate_unmapped_ptr(
+        rwrite_ptr, target_pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
+    auto *write_remote_ptr = static_cast<char *>(write_translation.remote_ptr);
+    const int transport_pe = write_translation.transport_pe;
+    const int transport_id = state->transport_id[transport_pe];
     while (size_remaining) {
         write_bytes_desc.srcstride = 1;
         write_bytes_desc.deststride = 1;
         write_bytes_desc.elembytes = 1;
         write_local_desc.ptr = lwrite_ptr;
-        int write_pe = target_pe;
-        NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(write_remote_desc.ptr, rwrite_ptr, write_pe);
-        assert(transport_pe == write_pe);
+        write_remote_desc.ptr = write_remote_ptr;
         write_remote_desc.offset = (char *)rwrite_ptr - (char *)nvshmemi_device_state.heap_base;
         local_chunk_size = size_remaining;
         remote_chunk_size = size_remaining;
         nvshmemi_get_local_mem_handle(&write_local_desc.handle, &local_chunk_size, lwrite_ptr,
-                                      state->transport_id[write_pe]);
-        nvshmemi_get_remote_mem_handle(&write_remote_desc, &remote_chunk_size, rwrite_ptr, write_pe,
-                                       state->transport_id[write_pe]);
+                                      transport_id);
+        nvshmemi_get_remote_mem_handle(&write_remote_desc, &remote_chunk_size, rwrite_ptr,
+                                       transport_pe, transport_id);
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         write_bytes_desc.nelems = chunk_size;
 
@@ -1367,10 +1373,10 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
         size_remaining -= chunk_size;
         lwrite_ptr = (char *)lwrite_ptr + chunk_size;
         rwrite_ptr = (char *)rwrite_ptr + chunk_size;
+        write_remote_ptr += chunk_size;
     }
 
     /* build signal parameters */
-    memset(&sig_target_desc, 0, sizeof(amo_memdesc_t));
     sig_verb.desc = (nvshmemi_amo_t)ps_req_3->sig_op;
     sig_verb.is_float = 0;
     rsig_offset =
@@ -1380,11 +1386,12 @@ inline int process_channel_put_signal(proxy_state_t *state, proxy_channel_t *ch,
     sig_target_desc.val = (uint64_t)(((uint64_t)(ps_req_4->sigval_high) << 32) |
                                      ((uint64_t)(ps_req_4->sigval_3) << 16) |
                                      ((uint64_t)(ps_req_4->sigval_2) << 8) | ps_req_3->sigval_low);
-    int signal_pe = target_pe;
-    NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(sig_target_desc.remote_memdesc.ptr, rsig_ptr, signal_pe);
-    assert(transport_pe == signal_pe);
-    nvshmemi_get_remote_mem_handle(&sig_target_desc.remote_memdesc, NULL, rsig_ptr, signal_pe,
-                                   state->transport_id[signal_pe]);
+    const auto [signal_remote_ptr, signal_transport_pe] = nvshmemi_translate_unmapped_ptr(
+        rsig_ptr, target_pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
+    sig_target_desc.remote_memdesc.ptr = signal_remote_ptr;
+    assert(transport_pe == signal_transport_pe);
+    nvshmemi_get_remote_mem_handle(&sig_target_desc.remote_memdesc, NULL, rsig_ptr,
+                                   signal_transport_pe, transport_id);
     sig_bytes_desc.elembytes = sizeof(uint64_t);
 
     TRACE(NVSHMEM_PROXY, "process_channel_put_signal laddr %p pe %d", lwrite_ptr, transport_pe);
