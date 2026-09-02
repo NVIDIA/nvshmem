@@ -499,7 +499,7 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
         compile_kwargs = dict(kwargs)
 
         # Call cute.compile() - it will create its own context if needed
-        compilerd_func = cute.compile(kernel_fn, *args, **compile_kwargs)
+        compiled_func = cute.compile(kernel_fn, *args, **compile_kwargs)
     finally:
         # Re-enter our context and location if we exited them
         if context_exited and _CUTE_MLIR_CONTEXT is not None:
@@ -508,8 +508,8 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
             _CUTE_MLIR_LOCATION.__enter__()
     # NOTE! assumes that device is already set current.
     dev = Device()
-    compilerd_func = compilerd_func.to(dev.device_id)
-    cuda_library = compilerd_func.jit_module.cuda_library
+    compiled_func = compiled_func.to(dev.device_id)
+    cuda_library = compiled_func.jit_module.cuda_library
     nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
     nvshmem.core.library_init(nvshmem_kernel)
-    return compilerd_func, nvshmem_kernel
+    return compiled_func, nvshmem_kernel
