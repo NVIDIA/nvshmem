@@ -237,9 +237,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                                           uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                           cudaStream_t cstrm) {
     rma_verb_t verb = {desc, is_nbi, is_stream, cstrm};
-    int t = nvshmemi_state->selected_transport_for_rma[pe];
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, 1, 1};
-    struct nvshmem_transport *tcurr = (t >= 0) ? nvshmemi_state->transports[t] : NULL;
     int status = 0;
 
     /* Mapper Peer */
@@ -258,24 +256,28 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
         goto out;
     }
 
-    /* IBGDA will not set the RMA transport because it doesn't work on host APIs.
-     * On stream will work though.
-     */
-    if (t < 0 && !verb.is_stream) {
-        NVSHMEMI_ERROR_EXIT("[%d] rma not supported on transport to pe: %d \n",
-                            nvshmemi_state->mype, pe);
-    }
-
     /* off stream */
     if (!verb.is_stream) {
+        const auto translation = nvshmemi_translate_unmapped_ptr(
+            rptr, pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
+        const int transport_id =
+            nvshmemi_state->selected_transport_for_rma[translation.transport_pe];
+        /* IBGDA will not set the RMA transport because it doesn't work on host APIs. */
+        if (transport_id < 0) {
+            NVSHMEMI_ERROR_EXIT("[%d] rma not supported on transport to pe: %d \n",
+                                nvshmemi_state->mype, translation.transport_pe);
+        }
+        struct nvshmem_transport *tcurr = nvshmemi_state->transports[transport_id];
+
         if (verb.desc == NVSHMEMI_OP_P) {
             rma_memdesc_t localdesc, remotedesc;
             localdesc.ptr = lptr;
             localdesc.handle = NULL;
-            NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(remotedesc.ptr, rptr, pe);
-            nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, pe, t);
-            status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytesdesc,
-                                         NVSHMEMX_QP_HOST);
+            remotedesc.ptr = translation.remote_ptr;
+            nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, translation.transport_pe,
+                                           transport_id);
+            status = tcurr->host_ops.rma(tcurr, translation.transport_pe, verb, &remotedesc,
+                                         &localdesc, bytesdesc, NVSHMEMX_QP_HOST);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
                 exit(-1);
@@ -286,11 +288,12 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                          0) &&
                 verb.is_nbi && (verb.desc == NVSHMEMI_OP_PUT || verb.desc == NVSHMEMI_OP_GET) &&
                 lstride == 1 && rstride == 1 && nvshmemi_region_host_prepare_rma_attrs(&attrs)) {
-                nvshmemi_process_multisend_rma_with_hints(
-                    tcurr, t, pe, verb, rptr, lptr, nelems * elembytes, NVSHMEMX_QP_HOST, &attrs);
+                nvshmemi_process_multisend_rma_with_hints(tcurr, transport_id, translation, verb,
+                                                          rptr, lptr, nelems * elembytes,
+                                                          NVSHMEMX_QP_HOST, &attrs);
             } else {
-                nvshmemi_process_multisend_rma(tcurr, t, pe, verb, rptr, lptr, nelems * elembytes,
-                                               NVSHMEMX_QP_HOST);
+                nvshmemi_process_multisend_rma(tcurr, transport_id, translation, verb, rptr, lptr,
+                                               nelems * elembytes, NVSHMEMX_QP_HOST);
             }
         }
         goto out;
