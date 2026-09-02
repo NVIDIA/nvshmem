@@ -196,7 +196,7 @@ static inline void nvshmemi_process_multisend_rma_impl(int transport_id, int pe,
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         bytes.nelems = chunk_size;
         const size_t next_size_remaining = size_remaining - chunk_size;
-        status = submit(&remotedesc, &localdesc, bytes, next_size_remaining > 0);
+        status = submit(pe, &remotedesc, &localdesc, bytes, next_size_remaining > 0);
         if (unlikely(status)) {
             NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
             exit(-1);
@@ -210,8 +210,8 @@ static inline void nvshmemi_process_multisend_rma_impl(int transport_id, int pe,
 static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcurr, int transport_id,
                                                   int pe, rma_verb_t verb, void *rptr, void *lptr,
                                                   size_t size, nvshmemx_qp_handle_t qp_index) {
-    auto submit = [tcurr, pe, verb, qp_index](rma_memdesc_t *remote, rma_memdesc_t *local,
-                                              rma_bytesdesc_t bytes, bool) {
+    auto submit = [tcurr, verb, qp_index](int pe, rma_memdesc_t *remote, rma_memdesc_t *local,
+                                          rma_bytesdesc_t bytes, bool) {
         return tcurr->host_ops.rma(tcurr, pe, verb, remote, local, bytes, qp_index);
     };
     nvshmemi_process_multisend_rma_impl(transport_id, pe, rptr, lptr, size, submit);
@@ -222,8 +222,8 @@ static inline void nvshmemi_process_multisend_rma_with_hints(
     void *lptr, size_t size, nvshmemx_qp_handle_t qp_index,
     const nvshmem_transport_op_attrs_t *attrs) {
     const bool use_rma_hints = attrs != nullptr && tcurr->host_ops.rma_with_hints != nullptr;
-    auto submit = [tcurr, pe, verb, qp_index, attrs, use_rma_hints](
-                      rma_memdesc_t *remote, rma_memdesc_t *local, rma_bytesdesc_t bytes,
+    auto submit = [tcurr, verb, qp_index, attrs, use_rma_hints](
+                      int pe, rma_memdesc_t *remote, rma_memdesc_t *local, rma_bytesdesc_t bytes,
                       bool more_follows) {
         if (!use_rma_hints) {
             return tcurr->host_ops.rma(tcurr, pe, verb, remote, local, bytes, qp_index);
