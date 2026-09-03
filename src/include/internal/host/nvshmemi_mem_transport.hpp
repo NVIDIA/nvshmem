@@ -8,6 +8,7 @@
 
 #include <cstdlib>
 #include <climits>
+#include <iterator>
 #include <memory>
 #include <map>
 #include <algorithm>
@@ -22,9 +23,6 @@ class nvshmemi_transport_view;
 
 enum class nvshmemi_clique_discovery_mode : uint8_t { LEGACY_NVML, CUDA_CLIQUE_API };
 inline constexpr size_t nvshmemi_num_cuda_clique_types = 4;
-
-static_assert(sizeof(nvshmem_mem_handle_t) % sizeof(uint64_t) == 0,
-              "nvshmem_mem_handle_t size is not a multiple of 8B");
 
 /**
  * This is a singleton class managing memory kind specific business logic for p2p transport
@@ -152,14 +150,9 @@ class nvshmemi_mem_remote_transport final {
     int release_mem_handles(nvshmem_mem_handle_t *handles,
                             const nvshmemi_transport_view &transports);
 
-    int is_mem_handle_null(nvshmem_mem_handle_t *handle) {
-        NVSHMEMU_FOR_EACH(i, (sizeof(nvshmem_mem_handle_t) / sizeof(uint64_t))) {
-            if (*((uint64_t *)handle + i) != (uint64_t)0) {
-                return 0;
-            }
-        }
-
-        return 1;
+    static bool is_mem_handle_null(const nvshmem_mem_handle_t &handle) {
+        return std::all_of(std::cbegin(handle.reserved), std::cend(handle.reserved),
+                           [](char byte) { return byte == 0; });
     }
 
    private:

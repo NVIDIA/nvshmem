@@ -714,14 +714,12 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
     local_le_handles_.resize(state->num_initialized_transports);
     p2p_le_handles_.resize(state->num_initialized_transports * state->npes);
 
-    NVSHMEMU_FOR_EACH_IF(
-        i, state->num_initialized_transports,
-        (NVSHMEMU_IS_BIT_SET(state->transport_bitmap, i) &&
-         NVSHMEMI_TRANSPORT_IS_CAP(transports[i], state->mype,
-                                   NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)),
-        {
+    for (int i = 0; i < state->num_initialized_transports; i++) {
+        if (NVSHMEMU_IS_BIT_SET(state->transport_bitmap, i) &&
+            NVSHMEMI_TRANSPORT_IS_CAP(transports[i], state->mype,
+                                      NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
             INFO(NVSHMEM_MEM, "[%d] heap type: %s exporting logical endpoint %d", state->mype,
-                 typeid(decltype(this)).name(), static_cast<int>(i));
+                 typeid(decltype(this)).name(), i);
 
             // Export the logical endpoint to LE fabric handle
             int export_status = CUPFN(
@@ -730,11 +728,11 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
                                         PARSE_LE_ID(unicast_endpoint_ids_with_flag_[state->mype]),
                                         LE_IPC_HANDLE_TYPE));
             if (export_status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT("cuLogicalEndpointExport failed for transport %d\n",
-                                     static_cast<int>(i));
+                NVSHMEMI_ERROR_PRINT("cuLogicalEndpointExport failed for transport %d\n", i);
                 local_status = NVSHMEMX_ERROR_INTERNAL;
             }
-        });
+        }
+    }
 
     status = converge_unicast_endpoint_status(local_status);
     if (status != NVSHMEMX_SUCCESS) {
@@ -758,13 +756,11 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
         bool imported_endpoint = false;
         le_id = 0;
 
-        NVSHMEMU_FOR_EACH_IF(
-            j, state->num_initialized_transports,
-            (NVSHMEMU_IS_BIT_SET(state->transport_map[state->mype * state->npes + k], j) &&
-             !imported_endpoint && local_status == NVSHMEMX_SUCCESS &&
-             NVSHMEMI_TRANSPORT_IS_CAP(state->transports[j], k,
-                                       NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)),
-            {
+        for (int j = 0; j < state->num_initialized_transports; j++) {
+            if (NVSHMEMU_IS_BIT_SET(state->transport_map[state->mype * state->npes + k], j) &&
+                !imported_endpoint && local_status == NVSHMEMX_SUCCESS &&
+                NVSHMEMI_TRANSPORT_IS_CAP(state->transports[j], k,
+                                          NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
                 int reserve_status =
                     CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdReserve(&le_id, 1 /* count */));
                 if (reserve_status != CUDA_SUCCESS) {
@@ -798,7 +794,8 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
                      "[%d] heap type: %s imported LE pe: %d, peer: %d, le id: %u, transport: %d",
                      state->mype, typeid(decltype(this)).name(), state->mype, k, le_id, j);
                 break;  // as long as 1 transport is successful, we can break
-            });
+            }
+        }
         if (!imported_endpoint) {
             NVSHMEMI_WARN_PRINT("[%d] No logical-endpoint-capable transport found for peer %d\n",
                                 state->mype, k);
@@ -1064,7 +1061,7 @@ teardown_hooks:
                                  out, "release memory failed for p2p on heap dynamic (my PE)\n");
     }
 
-    NVSHMEMU_FOR_EACH(i, cumem_handles_.size()) {
+    for (size_t i = 0; i < cumem_handles_.size(); i++) {
         // Don't release mem handles corresponding to user buffer
         // which have been released as part of unmap
         if (is_cumem_handle_released(i)) {
@@ -1087,14 +1084,15 @@ teardown_hooks:
 
     /* Release and Unmap memory for peer PE */
     if (!peer_heap_base_p2p_.empty()) {
-        NVSHMEMU_FOR_EACH_IF(
-            i, cfg_.npes, ((int)i != cfg_.mype) && peer_heap_base_p2p_[i] != NULL, {
+        for (int i = 0; i < cfg_.npes; i++) {
+            if (i != cfg_.mype && peer_heap_base_p2p_[i] != NULL) {
                 INFO(NVSHMEM_MEM, "calling release_memory on buf: %p size: %zu\n",
                      peer_heap_base_p2p_[i], heap_size_);
                 status = release_memory(peer_heap_base_p2p_[i], heap_size_);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "release memory failed for p2p on heap dynamic (peer PE)\n");
-            });
+            }
+        }
     }
 
     status = CUPFN(nvshmemi_cuda_syms,
@@ -1140,13 +1138,14 @@ int nvshmemi_symmetric_heap_static::cleanup_symmetric_heap() {
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                               "free_heap_memory failed \n");
 
-        NVSHMEMU_FOR_EACH_IF(
-            i, cfg_.npes, ((int)i != cfg_.mype) && peer_heap_base_p2p_[i] != NULL, {
+        for (int i = 0; i < cfg_.npes; i++) {
+            if (i != cfg_.mype && peer_heap_base_p2p_[i] != NULL) {
                 INFO(NVSHMEM_MEM, "calling release_memory on buf: %p \n", peer_heap_base_p2p_[i]);
                 status = release_memory(peer_heap_base_p2p_[i]);
                 NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                                       "release memory failed for p2p on heap static\n");
-            });
+            }
+        }
     }
 
     INFO(NVSHMEM_MEM, "[%d] Leaving %s::cleanup_symmetric_heap\n", cfg_.mype,
@@ -1406,7 +1405,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_unbind_multicast_endpoint(
 }
 
 void nvshmemi_symmetric_heap_vidmem_dynamic_vmm::print_cumem_handles(void) const {
-    NVSHMEMU_FOR_EACH(i, get_cumem_handle_size()) {
+    for (size_t i = 0; i < get_cumem_handle_size(); i++) {
         INFO(NVSHMEM_MEM,
              "[%d] UC mem_handle: %lld mc_offset: %ld mmap_offset: %ld mmap_size: %zu\n", cfg_.mype,
              get_cumem_handle_ptr(i), get_cumem_handle_alloc_offset(i),
@@ -1951,14 +1950,15 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
 
     /* Release and Unmap memory for peer PE */
     if (!peer_heap_base_p2p_.empty()) {
-        NVSHMEMU_FOR_EACH_IF(
-            i, cfg_.npes, ((int)i != cfg_.mype) && peer_heap_base_p2p_[i] != NULL, {
+        for (int i = 0; i < cfg_.npes; i++) {
+            if (i != cfg_.mype && peer_heap_base_p2p_[i] != NULL) {
                 INFO(NVSHMEM_MEM, "release_memory as part of unmap_mem buf: %p size: %zu\n",
                      peer_heap_base_p2p_[i], heap_size_);
                 status = release_memory((char *)peer_heap_base_p2p_[i] + heap_offset, size);
                 NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                       "release memory failed for p2p on heap dynamic (peer PE)\n");
-            });
+            }
+        }
     }
 
     // memory handles of user buffer retrieved using cuMemRetainAllocationHandle() need to be

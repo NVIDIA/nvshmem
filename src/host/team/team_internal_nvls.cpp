@@ -77,10 +77,10 @@ void nvshmemi_nvls_rsc::invalidate_rsc(void) {
     prop_ = {};
     virt_alloc_size_ = 0;
     n_devices_ = 0;
-    NVSHMEMU_FOR_EACH(i, cumc_handles_.size()) {
-        int status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(cumc_handles_[i].first));
+    for (const auto &handle_info : cumc_handles_) {
+        int status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(handle_info.first));
         INFO(NVSHMEM_TEAM, "Releasing multicast group handle %lld on GPU device %d (status = %d)\n",
-             cumc_handles_[i].first, current_dev_, status);
+             handle_info.first, current_dev_, status);
     }
 
     current_dev_ = (CUdevice)(-1);
