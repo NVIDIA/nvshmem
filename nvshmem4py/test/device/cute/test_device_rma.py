@@ -11,6 +11,7 @@ from cutlass.cute.typing import Int32
 from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 
 import nvshmem.core
+from nvshmem.core.interop.cute import cute_compile_helper
 import nvshmem.core.device.cute as nvshmem_cute
 import nvshmem.bindings.device.cute as nvshmem_cute_bindings
 
@@ -61,11 +62,7 @@ def _nvshmem_stream():
 
 
 def _compile_kernel(kernel, *example_args):
-    compiled = cute.compile(kernel, *example_args)
-    compiled = compiled.to(Device().device_id)
-    cuda_library = compiled.jit_module.cuda_library
-    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
-    nvshmem.core.library_init(nvshmem_kernel)
+    compiled, nvshmem_kernel = cute_compile_helper(kernel, *example_args)
     _KERNEL_OBJECTS.append(nvshmem_kernel)
     return compiled
 
