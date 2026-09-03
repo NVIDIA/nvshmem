@@ -182,10 +182,6 @@ static inline nvshmemi_unmapped_ptr_translation nvshmemi_translate_unmapped_ptr(
     return {remote_ptr, transport_pe};
 }
 
-#define NVSHMEMU_UNMAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                      \
-    toPtr = (void *)((char *)(nvshmemi_device_state.peer_heap_base_remote[peer]) + \
-                     ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
-
 int nvshmemu_get_num_gpus_per_node();
 
 uint64_t nvshmemu_getHostHash();
