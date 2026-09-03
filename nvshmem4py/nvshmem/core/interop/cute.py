@@ -511,5 +511,6 @@ def cute_compile_helper(kernel_fn, *args, **kwargs):
     compiled_func = compiled_func.to(dev.device_id)
     cuda_library = compiled_func.jit_module.cuda_library
     nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
+    nvshmem_kernel._keepalive = compiled_func
     nvshmem.core.library_init(nvshmem_kernel)
     return compiled_func, nvshmem_kernel
