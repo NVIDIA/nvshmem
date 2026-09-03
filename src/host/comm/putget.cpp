@@ -16,11 +16,12 @@
 #include "device_host_transport/nvshmem_common_transport.h"  // for NVSHMEMI_OP_PUT
 #include "internal/host/debug.h"                             // for INFO, NVSHMEM_P2P
 #include "internal/host/nvshmem_internal.h"                  // for NVSHMEMI_CHECK_...
-#include "internal/host/nvshmem_nvtx.hpp"                    // for nvtx_cond_range
-#include "internal/host/nvshmemi_symmetric_heap.hpp"         // for nvshmemi_symmet...
-#include "internal/host/nvshmemi_types.h"                    // for nvshmemi_state
-#include "internal/host/util.h"                              // for CUDA_RUNTIME_CH...
-#include "internal/host_transport/transport.h"               // for rma_bytesdesc_t
+#include "internal/host/nvshmemi_rma_translation.hpp"
+#include "internal/host/nvshmem_nvtx.hpp"             // for nvtx_cond_range
+#include "internal/host/nvshmemi_symmetric_heap.hpp"  // for nvshmemi_symmet...
+#include "internal/host/nvshmemi_types.h"             // for nvshmemi_state
+#include "internal/host/util.h"                       // for CUDA_RUNTIME_CH...
+#include "internal/host_transport/transport.h"        // for rma_bytesdesc_t
 #include "internal/host/nvshmemi_region.h"
 
 #define NOT_A_CUDA_STREAM ((cudaStream_t)0)
@@ -195,7 +196,6 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
     const int stream_idx = distance % nvshmemi_options.MAX_PEER_STREAMS;
     cudaStream_t custrm = nvshmemi_state->custreams[stream_idx];
     cudaEvent_t cuev = nvshmemi_state->cuevents[stream_idx];
-    void *destptr_actual, *srcptr_actual;
     rma_memdesc_t dest, src;
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, lstride, rstride};
 
@@ -206,13 +206,13 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
 
     if ((verb.desc == NVSHMEMI_OP_P) || (verb.desc == NVSHMEMI_OP_PUT) ||
         (verb.desc == NVSHMEMI_OP_PUT_SIGNAL)) {
-        NVSHMEMU_MAPPED_PTR_TRANSLATE(destptr_actual, remote, pe)
-        dest.ptr = (void *)destptr_actual;
+        dest.ptr = nvshmemi_translate_mapped_ptr(remote, pe,
+                                                 nvshmemi_state->heap_obj->get_local_pe_bases());
         dest.offset = (char *)remote - (char *)(nvshmemi_device_state.heap_base);
         src.ptr = local;
     } else {
-        NVSHMEMU_MAPPED_PTR_TRANSLATE(srcptr_actual, remote, pe)
-        src.ptr = (void *)srcptr_actual;
+        src.ptr = nvshmemi_translate_mapped_ptr(remote, pe,
+                                                nvshmemi_state->heap_obj->get_local_pe_bases());
         src.offset = (char *)remote - (char *)(nvshmemi_device_state.heap_base);
         dest.ptr = local;
         bytesdesc.srcstride = rstride;

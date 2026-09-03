@@ -19,6 +19,7 @@
 #include "internal/host/custom_malloc.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_handle_table.hpp"
+#include "internal/host/nvshmemi_rma_translation.hpp"
 #include "internal/host/nvshmemi_types.h"
 #include "non_abi/nvshmemx_error.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"

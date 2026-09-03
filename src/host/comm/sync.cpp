@@ -14,6 +14,7 @@
 #include "host/nvshmemx_api.h"                        // for nvshmemx_int32_...
 #include "non_abi/nvshmemx_error.h"                   // for NVSHMEMI_NZ_EXIT
 #include "internal/host/nvshmem_internal.h"           // for nvshmemi_signal...
+#include "internal/host/nvshmemi_rma_translation.hpp"
 #include "internal/host/cuda_interface_sync.h"        // for call_nvshmemi_i...
 #include "internal/host/nvshmem_nvtx.hpp"             // for nvtx_cond_range
 #include "internal/host/nvshmemi_symmetric_heap.hpp"  // for nvshmemi_symmet...
@@ -87,8 +88,8 @@ void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_o
     int status = 0;
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET &&
         nvshmemi_state->heap_obj->get_local_pe_bases()[pe] != NULL) {
-        void *peer_addr;
-        NVSHMEMU_MAPPED_PTR_TRANSLATE(peer_addr, sig_addr, pe)
+        void *peer_addr = nvshmemi_translate_mapped_ptr(
+            sig_addr, pe, nvshmemi_state->heap_obj->get_local_pe_bases());
         // cuStreamWriteValue64 currently fails with EGM memory, so disabling it
         // on detecting EGM address. TODO: Remove this constraint once the
         // issue is fixed.
