@@ -16,8 +16,6 @@ metadata:
 
 Prepare an application for NVSHMEM's TMA-backed device-side transfers without changing its put/get APIs or unrelated kernels. Assess the target, choose the correct shared-memory path, make the smallest safe change, and explain launch-time requirements.
 
-Prefer the exact target-version [NVSHMEM TMA documentation](https://archive.docs.nvidia.com/nvshmem/api/3.7.0/tma.html) when it differs from these references.
-
 ## Prerequisites
 
 - Require readable CUDA/C++ source for a patch or code review. A static assessment needs no GPU, installed NVSHMEM runtime, or cluster access.
