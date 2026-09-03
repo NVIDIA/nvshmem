@@ -53,6 +53,9 @@ int main(int argc, char *argv[]) {
     int *data_d = NULL;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
 
     int iter = iters;
     int skip = warmup_iters;

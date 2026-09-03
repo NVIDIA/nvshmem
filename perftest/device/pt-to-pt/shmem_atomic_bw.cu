@@ -43,6 +43,9 @@ int main(int argc, char *argv[]) {
     uint64_t set_value = 1;
     unsigned int *counter_d;
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(uint64_t))) {
+        return EXIT_FAILURE;
+    }
     size_t dynamic_smem_size = 0;
 
     int max_blocks = num_blocks, max_threads = threads_per_block;

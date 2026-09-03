@@ -19,6 +19,7 @@ namespace {
 
 constexpr int kValidationThreads = 256;
 constexpr int kValidationMaxBlocks = 4096;
+constexpr size_t kWarpSize = 32;
 
 uint64_t validation_pattern(int source_pe, int locality_domain, size_t message_size,
                             size_t repetition) {
@@ -255,6 +256,20 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, bw_tma_fn_t *bw_tma_fn) {
     return configure_bw_variant<false, false, false>(bw_fn, bw_tma_fn);
 }
 
+static size_t get_messages_per_domain(size_t blocks, size_t threads) {
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            return blocks * threads;
+        case NVSHMEM_WARP:
+            return blocks * (threads / kWarpSize);
+        case NVSHMEM_BLOCK:
+        case NVSHMEM_ALL_SCOPES:
+            return blocks;
+        default:
+            return 0;
+    }
+}
+
 int main(int argc, char *argv[]) {
     int mype, npes;
     int num_locality_domains = 0;
@@ -285,6 +300,13 @@ int main(int argc, char *argv[]) {
     int return_code = 0;
 
     read_args(argc, argv);
+    if (threadgroup_scope.type == NVSHMEM_WARP && threads_per_block % kWarpSize != 0) {
+        fprintf(stderr,
+                "shmem_get_bw_locality_domains: warp scope requires threads per CTA to be a "
+                "multiple of %zu\n",
+                kWarpSize);
+        return EXIT_FAILURE;
+    }
     int max_threads = threads_per_block;
 
     int array_size, i;
@@ -365,9 +387,7 @@ int main(int argc, char *argv[]) {
         return_code = 1;
         goto finalize;
     }
-    if (min_size < num_locality_domains * sizeof(double)) {
-        fprintf(stderr, "PE %d: min_size needs to be at least %zu for this test, found %zu\n", mype,
-                (size_t)num_locality_domains * sizeof(double), min_size);
+    if (!validate_message_size_range(sizeof(double), static_cast<size_t>(num_locality_domains))) {
         return_code = 1;
         goto finalize;
     }
@@ -521,6 +541,17 @@ int main(int argc, char *argv[]) {
                 "Grid clamp disabled because both inter-CTA barriers are disabled "
                 "(blocks_per_domain=%d)\n",
                 blocks_per_domain);
+        }
+    }
+
+    {
+        const size_t messages_per_domain =
+            get_messages_per_domain(static_cast<size_t>(blocks_per_domain), threads_per_block);
+        if (messages_per_domain == 0 ||
+            !validate_message_size_range(
+                sizeof(double), messages_per_domain * static_cast<size_t>(num_locality_domains))) {
+            return_code = 1;
+            goto finalize;
         }
     }
 

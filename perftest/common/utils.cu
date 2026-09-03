@@ -1345,10 +1345,16 @@ void read_args(int argc, char **argv) {
                 repetitions_requested = true;
                 break;
             case 'c':
-                atol_scaled(optarg, &num_blocks);
+                if (atol_scaled(optarg, &num_blocks) || num_blocks == 0) {
+                    fprintf(stderr, "--ctas must be greater than zero\n");
+                    exit(EXIT_FAILURE);
+                }
                 break;
             case 't':
-                atol_scaled(optarg, &threads_per_block);
+                if (atol_scaled(optarg, &threads_per_block) || threads_per_block == 0) {
+                    fprintf(stderr, "--threads_per_cta must be greater than zero\n");
+                    exit(EXIT_FAILURE);
+                }
                 break;
             case 'm':
                 atol_scaled(optarg, &mem_handle_type);
@@ -1403,6 +1409,43 @@ void read_args(int argc, char **argv) {
     }
 
     assert(min_size <= max_size);
+}
+
+bool validate_message_size_range(size_t element_size, size_t operation_groups) {
+    if (min_size == 0 || max_size < min_size || step_factor < 2) {
+        fprintf(stderr,
+                "invalid message-size range: min_size must be positive and no greater than "
+                "max_size; step must be at least two\n");
+        return false;
+    }
+    if (element_size == 0 || operation_groups == 0) {
+        fprintf(stderr, "invalid element size or operation-group count\n");
+        return false;
+    }
+
+    const size_t size_multiple = element_size * operation_groups;
+    size_t size = min_size;
+    while (true) {
+        if (size % size_multiple != 0) {
+            fprintf(stderr,
+                    "invalid message size %zu: each size must be a multiple of %zu bytes "
+                    "(%zu-byte elements split across %zu operation group%s)\n",
+                    size, size_multiple, element_size, operation_groups,
+                    operation_groups == 1 ? "" : "s");
+            return false;
+        }
+
+        if (size == max_size) {
+            break;
+        }
+        if (size > max_size / step_factor) {
+            size = max_size;
+        } else {
+            size *= step_factor;
+        }
+    }
+
+    return true;
 }
 
 #define LOAD_SYM(handle, symbol, funcptr, optional, ret)        \

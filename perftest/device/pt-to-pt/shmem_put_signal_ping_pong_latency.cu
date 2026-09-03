@@ -69,6 +69,9 @@ int main(int argc, char *argv[]) {
     cudaStream_t stream;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
     int iter = iters;
     int skip = warmup_iters;
 

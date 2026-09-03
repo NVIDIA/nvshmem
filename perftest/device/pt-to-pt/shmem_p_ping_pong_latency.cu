@@ -88,9 +88,11 @@ int main(int argc, char *argv[]) {
     uint64_t *flag_d = NULL;
     int *data_d = NULL;
 
-    sleep(10);
-
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
+    sleep(10);
     int iter = iters;
     int skip = warmup_iters;
 

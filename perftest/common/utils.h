@@ -376,6 +376,9 @@ void print_host_collective_table(const char *job_name, const char *subjob_name,
                                  uint64_t *size, double **value, int num_entries, size_t num_iters,
                                  const perf_stats_t *stats = nullptr);
 void read_args(int argc, char **argv);
+// element_size is the byte width of one operation element; operation_groups is the number of
+// independent operations across which each requested message is split.
+bool validate_message_size_range(size_t element_size, size_t operation_groups = 1);
 void *allocate_mmap_buffer(size_t size, int mem_handle_type, bool use_egm = false,
                            bool reset_zero = false);
 void free_mmap_buffer(void *ptr);
