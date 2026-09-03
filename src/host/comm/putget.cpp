@@ -204,15 +204,16 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
         nvshmemi_state->used_internal_streams = 1;
     }
 
+    void *const mapped_ptr =
+        nvshmemi_translate_mapped_ptr(remote, pe, nvshmemi_state->heap_obj->get_local_pe_bases());
+
     if ((verb.desc == NVSHMEMI_OP_P) || (verb.desc == NVSHMEMI_OP_PUT) ||
         (verb.desc == NVSHMEMI_OP_PUT_SIGNAL)) {
-        dest.ptr = nvshmemi_translate_mapped_ptr(remote, pe,
-                                                 nvshmemi_state->heap_obj->get_local_pe_bases());
+        dest.ptr = mapped_ptr;
         dest.offset = (char *)remote - (char *)(nvshmemi_device_state.heap_base);
         src.ptr = local;
     } else {
-        src.ptr = nvshmemi_translate_mapped_ptr(remote, pe,
-                                                nvshmemi_state->heap_obj->get_local_pe_bases());
+        src.ptr = mapped_ptr;
         src.offset = (char *)remote - (char *)(nvshmemi_device_state.heap_base);
         dest.ptr = local;
         bytesdesc.srcstride = rstride;
@@ -258,14 +259,14 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
 
     /* off stream */
     if (!verb.is_stream) {
-        const auto translation = nvshmemi_translate_unmapped_ptr(
+        const auto remote_target = nvshmemi_translate_unmapped_ptr(
             rptr, pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
-        const int transport_id =
-            nvshmemi_state->selected_transport_for_rma[translation.transport_pe];
+        const auto transport_pe = remote_target.transport_pe;
+        const int transport_id = nvshmemi_state->selected_transport_for_rma[transport_pe.value()];
         /* IBGDA will not set the RMA transport because it doesn't work on host APIs. */
         if (transport_id < 0) {
             NVSHMEMI_ERROR_EXIT("[%d] rma not supported on transport to pe: %d \n",
-                                nvshmemi_state->mype, translation.transport_pe);
+                                nvshmemi_state->mype, transport_pe.value());
         }
         struct nvshmem_transport *tcurr = nvshmemi_state->transports[transport_id];
 
@@ -273,11 +274,11 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
             rma_memdesc_t localdesc, remotedesc;
             localdesc.ptr = lptr;
             localdesc.handle = NULL;
-            remotedesc.ptr = translation.remote_ptr;
-            nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, translation.transport_pe,
+            remotedesc.ptr = remote_target.remote_ptr;
+            nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, transport_pe.value(),
                                            transport_id);
-            status = tcurr->host_ops.rma(tcurr, translation.transport_pe, verb, &remotedesc,
-                                         &localdesc, bytesdesc, NVSHMEMX_QP_HOST);
+            status = tcurr->host_ops.rma(tcurr, transport_pe.value(), verb, &remotedesc, &localdesc,
+                                         bytesdesc, NVSHMEMX_QP_HOST);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
                 exit(-1);
@@ -288,11 +289,11 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                          0) &&
                 verb.is_nbi && (verb.desc == NVSHMEMI_OP_PUT || verb.desc == NVSHMEMI_OP_GET) &&
                 lstride == 1 && rstride == 1 && nvshmemi_region_host_prepare_rma_attrs(&attrs)) {
-                nvshmemi_process_multisend_rma_with_hints(tcurr, transport_id, translation, verb,
+                nvshmemi_process_multisend_rma_with_hints(tcurr, transport_id, remote_target, verb,
                                                           rptr, lptr, nelems * elembytes,
                                                           NVSHMEMX_QP_HOST, &attrs);
             } else {
-                nvshmemi_process_multisend_rma(tcurr, transport_id, translation, verb, rptr, lptr,
+                nvshmemi_process_multisend_rma(tcurr, transport_id, remote_target, verb, rptr, lptr,
                                                nelems * elembytes, NVSHMEMX_QP_HOST);
             }
         }

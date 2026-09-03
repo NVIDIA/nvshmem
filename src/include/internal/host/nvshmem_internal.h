@@ -174,9 +174,10 @@ static inline void nvshmemi_get_remote_mem_handle(rma_memdesc_t *handle, size_t 
 /* symmetric_ptr is a symmetric address on the local PE.
    local_ptr is a local address, either symmetric or not. */
 template <typename Submit>
-static inline void nvshmemi_process_multisend_rma_impl(
-    int transport_id, nvshmemi_unmapped_ptr_translation translation, void *symmetric_ptr,
-    void *local_ptr, size_t size, Submit submit) {
+static inline void nvshmemi_process_multisend_rma_impl(int transport_id,
+                                                       nvshmemi_remote_rma_target remote_target,
+                                                       void *symmetric_ptr, void *local_ptr,
+                                                       size_t size, Submit submit) {
     rma_memdesc_t localdesc, remotedesc;
     rma_bytesdesc_t bytes;
     bytes.srcstride = 1;
@@ -186,8 +187,8 @@ static inline void nvshmemi_process_multisend_rma_impl(
     size_t chunk_size;
     size_remaining = size;
     int status;
-    auto *remote_ptr = static_cast<char *>(translation.remote_ptr);
-    const int transport_pe = translation.transport_pe;
+    auto *remote_ptr = static_cast<char *>(remote_target.remote_ptr);
+    const auto transport_pe = remote_target.transport_pe;
 
     while (size_remaining) {
         localdesc.ptr = local_ptr;
@@ -197,8 +198,8 @@ static inline void nvshmemi_process_multisend_rma_impl(
         remote_chunk_size = size_remaining;
         nvshmemi_get_local_mem_handle(&localdesc.handle, &local_chunk_size, local_ptr,
                                       transport_id);
-        nvshmemi_get_remote_mem_handle(&remotedesc, &remote_chunk_size, symmetric_ptr, transport_pe,
-                                       transport_id);
+        nvshmemi_get_remote_mem_handle(&remotedesc, &remote_chunk_size, symmetric_ptr,
+                                       transport_pe.value(), transport_id);
         chunk_size = std::min(local_chunk_size, std::min(remote_chunk_size, size_remaining));
         bytes.nelems = chunk_size;
         const size_t next_size_remaining = size_remaining - chunk_size;
@@ -215,41 +216,42 @@ static inline void nvshmemi_process_multisend_rma_impl(
 }
 
 static inline void nvshmemi_process_multisend_rma(struct nvshmem_transport *tcurr, int transport_id,
-                                                  nvshmemi_unmapped_ptr_translation translation,
+                                                  nvshmemi_remote_rma_target remote_target,
                                                   rma_verb_t verb, void *symmetric_ptr,
                                                   void *local_ptr, size_t size,
                                                   nvshmemx_qp_handle_t qp_index) {
-    auto submit = [tcurr, verb, qp_index](int transport_pe, rma_memdesc_t *remote,
+    auto submit = [tcurr, verb, qp_index](nvshmemi_transport_pe transport_pe, rma_memdesc_t *remote,
                                           rma_memdesc_t *local, rma_bytesdesc_t bytes, bool) {
-        return tcurr->host_ops.rma(tcurr, transport_pe, verb, remote, local, bytes, qp_index);
+        return tcurr->host_ops.rma(tcurr, transport_pe.value(), verb, remote, local, bytes,
+                                   qp_index);
     };
-    nvshmemi_process_multisend_rma_impl(transport_id, translation, symmetric_ptr, local_ptr, size,
+    nvshmemi_process_multisend_rma_impl(transport_id, remote_target, symmetric_ptr, local_ptr, size,
                                         submit);
 }
 
 static inline void nvshmemi_process_multisend_rma_with_hints(
-    struct nvshmem_transport *tcurr, int transport_id,
-    nvshmemi_unmapped_ptr_translation translation, rma_verb_t verb, void *symmetric_ptr,
-    void *local_ptr, size_t size, nvshmemx_qp_handle_t qp_index,
-    const nvshmem_transport_op_attrs_t *attrs) {
+    struct nvshmem_transport *tcurr, int transport_id, nvshmemi_remote_rma_target remote_target,
+    rma_verb_t verb, void *symmetric_ptr, void *local_ptr, size_t size,
+    nvshmemx_qp_handle_t qp_index, const nvshmem_transport_op_attrs_t *attrs) {
     const bool use_rma_hints = attrs != nullptr && tcurr->host_ops.rma_with_hints != nullptr;
     auto submit = [tcurr, verb, qp_index, attrs, use_rma_hints](
-                      int transport_pe, rma_memdesc_t *remote, rma_memdesc_t *local,
-                      rma_bytesdesc_t bytes, bool more_follows) {
+                      nvshmemi_transport_pe transport_pe, rma_memdesc_t *remote,
+                      rma_memdesc_t *local, rma_bytesdesc_t bytes, bool more_follows) {
         if (!use_rma_hints) {
-            return tcurr->host_ops.rma(tcurr, transport_pe, verb, remote, local, bytes, qp_index);
+            return tcurr->host_ops.rma(tcurr, transport_pe.value(), verb, remote, local, bytes,
+                                       qp_index);
         }
 
         if (more_follows) {
             nvshmem_transport_op_attrs_t chunk_attrs = *attrs;
             chunk_attrs.flags |= NVSHMEM_TRANSPORT_OP_FLAG_MORE_FOLLOWS;
-            return tcurr->host_ops.rma_with_hints(tcurr, transport_pe, verb, remote, local, bytes,
-                                                  qp_index, &chunk_attrs);
+            return tcurr->host_ops.rma_with_hints(tcurr, transport_pe.value(), verb, remote, local,
+                                                  bytes, qp_index, &chunk_attrs);
         }
-        return tcurr->host_ops.rma_with_hints(tcurr, transport_pe, verb, remote, local, bytes,
-                                              qp_index, attrs);
+        return tcurr->host_ops.rma_with_hints(tcurr, transport_pe.value(), verb, remote, local,
+                                              bytes, qp_index, attrs);
     };
-    nvshmemi_process_multisend_rma_impl(transport_id, translation, symmetric_ptr, local_ptr, size,
+    nvshmemi_process_multisend_rma_impl(transport_id, remote_target, symmetric_ptr, local_ptr, size,
                                         submit);
 }
 
