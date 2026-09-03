@@ -889,7 +889,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
                 __threadfence_system();
             }
 
-            doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
+            doca_gpu_dev_verbs_mark_wqes_ready<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU,
+                                               DOCA_GPUNETIO_VERBS_QP_SQ,
+                                               DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS,
+                                               DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
+                &(qp->qp), base_wqe_idx, my_wqe_idx);
             if constexpr (nbi) {
                 gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
             } else {
@@ -1093,7 +1097,10 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
             __threadfence_system();
         }
 
-        doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
+        doca_gpu_dev_verbs_mark_wqes_ready<
+            DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU, DOCA_GPUNETIO_VERBS_QP_SQ,
+            DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
+            &(qp->qp), base_wqe_idx, my_wqe_idx);
         if constexpr (nbi) {
             gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
         } else {
