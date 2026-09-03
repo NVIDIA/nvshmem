@@ -705,7 +705,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
     int le_query_status = 0;
     CUlogicalEndpointId le_id = 0;
     nvshmemi_state_t *state = nvshmemi_state;
-    nvshmem_transport_t *transports = (nvshmem_transport_t *)state->transports;
+    const auto transports = make_transport_view(*state);
     std::vector<CUlogicalEndpointFabricHandle> local_le_handles_(state->num_initialized_transports);
     std::vector<CUlogicalEndpointFabricHandle> p2p_le_handles_(state->num_initialized_transports *
                                                                state->npes);
@@ -715,9 +715,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
     p2p_le_handles_.resize(state->num_initialized_transports * state->npes);
 
     for (int i = 0; i < state->num_initialized_transports; i++) {
-        if (NVSHMEMU_IS_BIT_SET(state->transport_bitmap, i) &&
-            NVSHMEMI_TRANSPORT_IS_CAP(transports[i], state->mype,
-                                      NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
+        if (transports.active_has_cap(i, state->mype, NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
             INFO(NVSHMEM_MEM, "[%d] heap type: %s exporting logical endpoint %d", state->mype,
                  typeid(decltype(this)).name(), i);
 
@@ -757,10 +755,9 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::exchange_endpoints() {
         le_id = 0;
 
         for (int j = 0; j < state->num_initialized_transports; j++) {
-            if (NVSHMEMU_IS_BIT_SET(state->transport_map[state->mype * state->npes + k], j) &&
-                !imported_endpoint && local_status == NVSHMEMX_SUCCESS &&
-                NVSHMEMI_TRANSPORT_IS_CAP(state->transports[j], k,
-                                          NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
+            if (!imported_endpoint && local_status == NVSHMEMX_SUCCESS &&
+                transports.active_between_has_cap(state->mype, k, state->npes, j,
+                                                  NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT)) {
                 int reserve_status =
                     CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointIdReserve(&le_id, 1 /* count */));
                 if (reserve_status != CUDA_SUCCESS) {

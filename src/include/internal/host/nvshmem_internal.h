@@ -58,7 +58,6 @@
         }                                               \
     } while (0)
 
-#define NVSHMEMI_TRANSPORT_IS_CAP(transport, cap_idx, flag) ((transport)->cap[(cap_idx)] & flag)
 #define NVSHMEMI_TRANSPORT_OPS_IS_GET_MEM(transport) ((transport)->host_ops.get_mem_handle != NULL)
 #define NVSHMEMI_TRANSPORT_OPS_IS_RELEASE_MEM(transport) \
     ((transport)->host_ops.release_mem_handle != NULL)

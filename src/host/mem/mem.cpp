@@ -19,6 +19,7 @@
 #include "non_abi/nvshmem_build_options.h"                       // IWYU pragma: keep
 #include "internal/host/nvshmem_internal.h"                      // for nvshmem_lo...
 #include "internal/common/error_codes_internal.h"                // for NVSHMEMI_I...
+#include "internal/host/nvshmemi_transport_view.hpp"             // for nvshmemi_t...
 #include "internal/host/nvshmemi_types.h"                        // for nvshmemi_s...
 #include "internal/host/util.h"                                  // for CUDA_RUNTI...
 #include "internal/host_transport/nvshmemi_transport_defines.h"  // for nvshmem_me...
@@ -27,6 +28,11 @@
 #ifdef NVSHMEM_USE_DLMALLOC
 #include "dlmalloc.h"
 #endif
+
+static nvshmemi_transport_view make_transport_view(const nvshmemi_state_t &state) {
+    return {state.num_initialized_transports, state.transports, state.transport_bitmap,
+            state.transport_map};
+}
 
 static int buffer_register(nvshmem_transport_t transport, void *addr, size_t length) {
     nvshmem_local_buf_cache_t *cache = (nvshmem_local_buf_cache_t *)transport->cache_handle;
@@ -230,10 +236,11 @@ out_error_unlocked:
 int nvshmemx_buffer_register(void *addr, size_t length) {
     int status_global = NVSHMEMX_SUCCESS;
     int status_local;
+    const auto transports = make_transport_view(*nvshmemi_state);
 
-    for (int i = 0; i < nvshmemi_state->num_initialized_transports; i++) {
-        if (NVSHMEMU_IS_BIT_SET(nvshmemi_state->transport_bitmap, i)) {
-            status_local = buffer_register(nvshmemi_state->transports[i], addr, length);
+    for (int i = 0; i < transports.num_transports(); i++) {
+        if (transports.is_active(i)) {
+            status_local = buffer_register(transports.transport(i), addr, length);
             if (status_local) {
                 NVSHMEMI_ERROR_PRINT("Buffer addition for transport %d failed with error %d\n", i,
                                      status_local);
@@ -309,10 +316,11 @@ out_unlock:
 int nvshmemx_buffer_unregister(void *addr) {
     int status_global = NVSHMEMX_SUCCESS;
     int status_local;
+    const auto transports = make_transport_view(*nvshmemi_state);
 
-    for (int i = 0; i < nvshmemi_state->num_initialized_transports; i++) {
-        if (NVSHMEMU_IS_BIT_SET(nvshmemi_state->transport_bitmap, i)) {
-            status_local = buffer_unregister(nvshmemi_state->transports[i], addr);
+    for (int i = 0; i < transports.num_transports(); i++) {
+        if (transports.is_active(i)) {
+            status_local = buffer_unregister(transports.transport(i), addr);
             if (status_local) {
                 NVSHMEMI_ERROR_PRINT("Buffer removal for transport %d failed with error %d\n", i,
                                      status_local);
@@ -371,9 +379,10 @@ void nvshmemi_transport_buffer_unregister_all(nvshmem_transport_t transport) {
 }
 
 void nvshmemx_buffer_unregister_all() {
-    for (int i = 0; i < nvshmemi_state->num_initialized_transports; i++) {
-        if (NVSHMEMU_IS_BIT_SET(nvshmemi_state->transport_bitmap, i)) {
-            buffer_unregister_all(nvshmemi_state->transports[i]);
+    const auto transports = make_transport_view(*nvshmemi_state);
+    for (int i = 0; i < transports.num_transports(); i++) {
+        if (transports.is_active(i)) {
+            buffer_unregister_all(transports.transport(i));
         }
     }
 
