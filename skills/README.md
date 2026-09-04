@@ -23,7 +23,7 @@ This folder provides skills for NVSHMEM to be used by AI agents.
 ## Installation and Usage
 The skills can be installed and used in different ways:
 - Point your agent to this skills directory and tell it to use the skills.
-- Use symlinks to link the skills to your personal skills directory. The path is agent-specific, e.g. `~/.agents/skills/` or `~/.claude/skills/`).
+- Use symlinks to link the skills to your personal skills directory. The path is agent-specific, e.g. `~/.agents/skills/`, `~/.cursor/skills/`, or `~/.claude/skills/`).
 ```
 ln -s "$NVSHMEM_SKILLS_DIRECTORY/nvshmem-*" ~/.agents/skills/
 ```
@@ -49,3 +49,11 @@ npx skills add nvidia/skills --skill nvshmem-configure-nic-pe-mapping --yes
 npx skills add nvidia/skills --skill nvshmem-select-remote-transport --yes
 npx skills add nvidia/skills --skill nvshmem-collect-performance-data --yes
 ```
+
+### Testing and Model Support
+The skills have been evaluated with GPT-5.5, GPT-5.6 Sol and Claude Opus 5. We recommend using at least a medium thinking effort.
+
+### Support and Community
+- Report reproducible bugs, request skills, or ask questions through
+  [GitHub Issues](https://github.com/NVIDIA/nvshmem/issues).
+- Contact the maintainers at [nvshmem@nvidia.com](mailto:nvshmem@nvidia.com).
