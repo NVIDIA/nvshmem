@@ -87,7 +87,7 @@ When a documentation check is performed, report the exact documentation edition 
 
 ### 3. Collect Topology Evidence
 
-When already running on the target compute node, tell the user that the skill is running a read-only collector. Before its first invocation in the current checkout, resolve `scripts/collect-nic-topology.sh` relative to this `SKILL.md` and read the entire local file. Do not execute it if the complete artifact is unavailable or cannot be inspected. Then run:
+When already running on the target compute node, tell the user that the skill is running a read-only collector. Before its first invocation in the current checkout, inspect the complete bundled [collector script](scripts/collect-nic-topology.sh). Run only that inspected file; if it is unavailable or incomplete, do not execute it. Then run:
 
 ```text
 run_script("scripts/collect-nic-topology.sh")

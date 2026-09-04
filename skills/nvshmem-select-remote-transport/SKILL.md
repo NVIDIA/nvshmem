@@ -60,13 +60,11 @@ Do not re-ask facts the user already supplied. Prefer one best-evidence recommen
 
 First establish whether the agent runs on the target system; ask unless the user already answered or supplied a complete target-system probe. Never infer this from the shell, scheduler, hostname, hardware, or repository.
 
-If yes, announce the read-only probe and invoke the bundled collector without a prefix:
+If yes, inspect the complete bundled [collector script](scripts/collect-transport-facts.sh) before its first invocation in the current checkout. Run only that inspected file; if it is unavailable or incomplete, do not execute it. Then announce the read-only probe and invoke the collector without a prefix:
 
 ```text
 run_script("scripts/collect-transport-facts.sh")
 ```
-
-Before the first invocation in the current checkout, resolve the script relative to this `SKILL.md` and read the entire local file. Do not execute it if the complete artifact is unavailable or cannot be inspected. The collector does not override the locale globally; it applies the C locale only to commands whose output it parses.
 
 If it resolves an NVSHMEM prefix, tell the user which installation will be analyzed. Otherwise ask for an absolute prefix and rerun:
 
