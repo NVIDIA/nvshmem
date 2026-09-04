@@ -35,19 +35,19 @@ Do not reproduce the specialists' technical guidance in this router. Invoke:
 
 ### Required
 
-- Obtain the user's NVSHMEM performance goal or selected service. When the request is vague, obtain the user's choice from the menu in the instructions before invoking a specialist.
+- Obtain the user's NVSHMEM performance objective or selected service. When the request is underspecified, require an explicit selection among the workflow alternatives in Section 2 before invoking a specialist.
 
 ### Optional
 
 - Reuse any supplied performance report, raw logs, exact NVSHMEM version and installation prefix, source or kernel path, fabric and provider, job scale, PE-to-GPU binding, GPU/NIC topology, selected transport, tuning constraints, and optimization goal.
 - Reuse relevant results and unresolved conditions from an earlier specialist in the same workflow.
-- Ask only for information needed to choose the route. Let the selected specialist inspect the environment or request its own required inputs.
+- Ask only for information needed to resolve the routing target. Let the selected specialist inspect the environment or request its own required inputs.
 
 Prefer the current explicit user request, then explicit invocation arguments, then non-conflicting context and prior specialist output. Report conflicting values instead of choosing silently.
 
 ## Instructions
 
-### 1. Choose a Route
+### 1. Resolve the Routing Target
 
 Honor an explicitly named specialist or workflow. Otherwise classify the concrete objective:
 
@@ -58,26 +58,26 @@ Honor an explicitly named specialist or workflow. Otherwise classify the concret
 
 Invoke one specialist for a single concrete request. State which specialist is being invoked and why.
 
-### 2. Present the Menu for a Vague Request
+### 2. Resolve an Underspecified Performance Request
 
-When the user asks only to improve or tune NVSHMEM performance, do not choose a specialist or run anything. Present these paths and ask the user to select one:
+When the request states only a general intent to improve or tune NVSHMEM performance, do not select a specialist or run anything. Present these workflow alternatives and require an explicit selection:
 
-1. **Baseline first:** collect initial performance and system data, then choose an optimization workflow.
-2. **Optimize directly:** skip collection and choose one of:
-   - remote transport selection for inter-node communication;
-   - NIC-to-PE mapping for topology-aware remote-transport placement;
-   - TMA assessment or enablement for eligible peer GPU/NVLink kernel paths.
+1. **Baseline characterization workflow:** collect initial performance and system evidence before selecting an optimization domain.
+2. **Targeted optimization workflow:** proceed without preliminary collection and select one of:
+   - inter-node remote-transport selection;
+   - topology-aware NIC-to-PE mapping;
+   - TMA suitability assessment or enablement for eligible peer-GPU/NVLink kernel paths.
 
-Allow the user to collect data only and stop. Briefly distinguish the three optimization choices without recommending one from absent evidence.
+Permit performance-data collection as the terminal scope. Briefly distinguish the three optimization domains without recommending one in the absence of supporting evidence.
 
 ### 3. Sequence Explicit Multi-Stage Workflows
 
-1. Invoke performance data collection first only when the user requests it, selects it from the menu, or explicitly chooses a baseline-first sequence. Let that skill obtain its required benchmark selection before any run.
+1. Invoke performance data collection first only when the user requests it, selects the baseline characterization workflow, or explicitly specifies a collection-first sequence. Let that skill obtain its required benchmark selection before any run.
 2. Invoke remote transport selection before NIC-to-PE mapping when both are requested. Pass the selected transport, version, provider, topology evidence, and unresolved conditions into the mapping workflow.
 3. Invoke TMA separately. Do not treat TMA as a remote-transport optimization or infer that inter-node benchmark evidence establishes TMA eligibility.
 4. Invoke no unrequested specialist. Let the active specialist resolve its own prerequisites instead of filling them in.
 
-After data collection completes, invoke an optimizer already selected by the user. If none was selected, present the three optimization choices again and wait.
+After data collection completes, invoke an optimization specialist already selected by the user. If no optimization domain was selected, present the three targeted optimization alternatives again and require an explicit selection.
 
 ### 4. Preserve the Handoff
 
@@ -119,6 +119,6 @@ Action: Invoke $nvshmem-select-remote-transport because the request concerns an 
 
 | Error or condition | Cause | Solution |
 | --- | --- | --- |
-| No route can be selected | The request says only to improve performance. | Present the baseline-first and three direct-optimization options; wait for the user to choose. |
+| Routing target is underspecified | The request states only a general intent to improve performance. | Present the baseline-characterization and targeted-optimization workflows; require an explicit selection. |
 | A requested specialist is unavailable | Its skill is not installed or enabled. | Name the unavailable specialist and ask the user to enable it or choose another route. |
 | Supplied settings conflict | The request and earlier context specify different topology, transport, or constraints. | Report the conflict and ask which value to preserve before handing off. |
