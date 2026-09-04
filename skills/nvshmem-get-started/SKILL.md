@@ -1,6 +1,6 @@
 ---
 name: nvshmem-get-started
-description: Guide NVSHMEM beginners through fit assessment, mental models, first C/C++ or Python NVSHMEM programs, compilation, launching, and next steps. Use for onboarding.
+description: Guide NVSHMEM beginners through assessment, mental models, first C/C++ or Python NVSHMEM programs, compilation, launching, and next steps. Use for onboarding.
 license: Apache-2.0
 metadata:
   author: NVIDIA NVSHMEM Team <nvshmem@nvidia.com>

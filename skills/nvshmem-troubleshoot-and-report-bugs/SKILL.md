@@ -1,6 +1,6 @@
 ---
 name: nvshmem-troubleshoot-and-report-bugs
-description: Diagnose NVSHMEM runtime failures and prepare bug reports for launch, initialization, crashes, hangs, correctness, transport, or topology issues.
+description: Diagnose NVSHMEM runtime failures and prepare bug reports for launch, crashes, hangs, correctness, transport, or topology issues.
 license: Apache-2.0
 metadata:
   version: "1.0.0"
