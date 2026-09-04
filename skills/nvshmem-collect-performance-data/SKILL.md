@@ -42,6 +42,7 @@ For an unspecified request, require only the suite choice first. Do not collect 
 ### Optional
 
 - exact message-size ranges, datatype, atomic operation, thread-group scope, CUDA graph, mmap, EGM, bidirectional, or other selected-test options;
+- an exact `NVSHMEM_REMOTE_TRANSPORT` execution override;
 - an installation or source tree containing the selected test's standard `.args` file;
 - a caller-provided launcher command, binding policy, artifact-directory name, or reporting notes;
 - an identical matched baseline for range assessment;
@@ -51,7 +52,7 @@ For an unspecified request, require only the suite choice first. Do not collect 
 
 | Script | Use | Invocation |
 | --- | --- | --- |
-| `scripts/collect-performance-environment.sh` | Collect read-only NVSHMEM, GPU, network, RDMA, launcher, topology, and allowlisted environment evidence. It writes to stdout and can exit with status 2 after producing useful partial output. | Resolve the script from this skill directory and use `run_script` on every participating compute node. If `run_script` is unavailable, run `bash scripts/collect-performance-environment.sh`; retain complete output even when it exits nonzero. |
+| `scripts/collect-performance-environment.sh` | Collect read-only NVSHMEM, GPU, network, RDMA, launcher, topology, and allowlisted environment evidence. It writes to stdout and can exit with status 2 after producing useful partial output. | Run on every participating compute node as `collect-performance-environment.sh [--prefix PATH]`; retain complete output even when it exits nonzero. |
 
 ## Instructions
 
@@ -99,6 +100,8 @@ Resolve these values from the user, environment, or direct inspection:
 
 Resolve `PERF_ROOT` from an explicit path first, then `$NVSHMEM_PREFIX/bin/perftest`, then `$NVSHMEM_HOME/bin/perftest`. Do not search the filesystem for alternate installations. Check only the selected executable paths with `test -x`.
 
+If the user supplies a remote-transport override, use that exact value for every probe and measured command. Otherwise do not ask for, select, or inject one; preserve the inherited setting or NVSHMEM default. Route transport-recommendation requests to `nvshmem-select-remote-transport` rather than invoking it automatically.
+
 Prefer a caller-provided, known-good launcher. Otherwise use this order:
 
 1. `srun --overlap` inside an active Slurm allocation;
@@ -106,6 +109,8 @@ Prefer a caller-provided, known-good launcher. Otherwise use this order:
 3. `mpirun` only after a two-rank launcher and hostname preflight succeeds.
 
 Never run a benchmark on a login node. For a same-node run, prove two ranks start on one hostname and use distinct GPUs. For a two-node run, prove one rank starts on each of two distinct hostnames. Do not call a run inter-node without distinct hostname evidence.
+
+Before each placement probe, retain `00-preflight.command`, `00-preflight.stdout`, `00-preflight.stderr`, and `00-preflight.status` in its placement directory. Require every rank to report rank/local rank, hostname, and applicable GPU visibility or binding.
 
 Create a new artifact directory without overwriting prior data:
 
@@ -125,10 +130,10 @@ Use additional placement directories for custom suites when needed. Store stdout
 Collect evidence before benchmarks on every participating compute node. Tell the user that the bundled collector is read-only, then run:
 
 ```text
-run_script("scripts/collect-performance-environment.sh")
+run_script("scripts/collect-performance-environment.sh", "--prefix", "<resolved-prefix>")
 ```
 
-Resolve the script relative to this `SKILL.md`. If `run_script` is unavailable, use `bash scripts/collect-performance-environment.sh`. Redirect each node's complete output to `environment/<hostname>.txt`. Preserve partial output even when the collector exits with status 2.
+Resolve the script relative to this `SKILL.md` and pass the already resolved installation with `--prefix`. If `run_script` is unavailable, use `bash scripts/collect-performance-environment.sh --prefix <resolved-prefix>`. Redirect each node's complete output to `environment/<hostname>.txt`. Preserve partial output even when the collector exits with status 2.
 
 If direct target access is unavailable, give the user the collector plus the selected launcher preflight and benchmark commands. Ask them to return the complete stdout, stderr, exit statuses, and hostname output. Do not treat login-node evidence as compute-node evidence.
 
@@ -137,26 +142,26 @@ If direct target access is unavailable, give the user the collector plus the sel
 Before measured tests, run a minimal device-side probe for every placement using the selected launcher and resolved executable:
 
 ```bash
-NVSHMEM_INFO=1 "$PERF_ROOT/device/pt-to-pt/shmem_put_latency" \
+NVSHMEM_INFO=1 NVSHMEM_DEBUG=INFO "$PERF_ROOT/device/pt-to-pt/shmem_put_latency" \
   -b 4 -e 4 -n 1 -w 1 -t 1 -s thread
 ```
 
-Place the launcher before the executable in the actual command. For example, a Slurm placement uses `NVSHMEM_INFO=1 srun ... "$PERF_ROOT/..."`. Capture the information output, selected devices and transport, stdout, stderr, and status. Stop that placement if initialization fails or if rank/GPU placement is wrong.
+Place the launcher before the executable in the actual command. Retain the command, stdout, stderr, and status as `01-init.*`, plus successfully initialized transport paths and PE/GPU/NIC selection. Treat runtime debug success messages—not the `NVSHMEM_INFO` default—as transport proof; mark absent proof incomplete. Mark the placement invalid or incomplete and stop on initialization failure, wrong placement, or mismatch with a supplied remote-transport override. Other initialized paths such as P2P or IBGDA may coexist and are not a mismatch.
 
-Do not add `NVSHMEM_DEBUG`, force a transport, select an HCA, disable P2P, or change a tuning variable merely to make the probe pass.
+Keep `NVSHMEM_INFO=1` and `NVSHMEM_DEBUG=INFO` probe-only. Do not select an HCA, disable P2P, or change a tuning variable merely to make the probe pass.
 
 ### Run Selected Tests
 
 Use the selected test's standard adjacent `.args` configuration when available. Look beneath the installation's `share/src/perftest` tree or an explicitly supplied source tree for the matching relative `.args` file.
 
-- For the default suite, use the first nonempty normal line for each test. For `shmem_put_bw`, select the non-`--bidir` line.
-- If the `.args` file has multiple semantic variants, explain only the relevant choices and require a selection instead of running all variants.
+- For the default suite, use the first nonempty normal line for each test. For `shmem_put_bw`, deterministically use the first nonempty line without `--bidir` and record its complete scope, CTA-count, and threads-per-CTA configuration.
+- This default-suite rule takes precedence over variant prompting. For custom or non-default suites, explain only relevant semantic variants and require a selection instead of running all variants.
 - If no `.args` file is available, inspect the selected executable's `--help` and use its built-in defaults unless the user requested specific limits.
 - Use `--repetitions 3` when supported. If native repetitions are unavailable, run the identical process three times and retain each raw result.
-- Set `NVSHMEM_MACHINE_READABLE_OUTPUT=1`; fall back to the human-readable table when the installed version does not emit machine-readable rows.
+- Set `NVSHMEM_MACHINE_READABLE_OUTPUT=1`; when a remote-transport override was supplied, set it on every measured command too. Fall back to the human-readable table when the installed version does not emit machine-readable rows.
 - Run benchmarks serially. Do not overlap tests or silently change message-size ranges, datatypes, atomic operations, scopes, CUDA graph mode, mmap mode, or bidirectionality.
 
-Record the fully resolved command before execution. Preserve all pre-existing `NVSHMEM_*`, CUDA, provider, launcher, and binding variables in the report.
+Record the fully resolved command before execution. Preserve all other pre-existing `NVSHMEM_*`, CUDA, provider, launcher, and binding variables. Report inherited, requested, and effective remote-transport values; an explicit request overrides only inherited `NVSHMEM_REMOTE_TRANSPORT`.
 
 ### Validate Results
 
@@ -184,7 +189,8 @@ Use relative artifact paths in the report so the entire directory can be submitt
 - collection completeness and missing placements;
 - selected tests and rationale;
 - system, software, GPU, NIC, and topology evidence;
-- PE/node/GPU binding and `NVSHMEM_INFO` transport evidence;
+- launcher-preflight hostname/binding artifacts and runtime initialization proof;
+- inherited, requested, effective, and successfully initialized transport paths plus PE/GPU/NIC evidence;
 - summary and full result tables;
 - exact commands and exit statuses;
 - validation findings, anomalies, assumptions, and raw-log links.
@@ -199,7 +205,7 @@ Return the artifact directory and a concise Markdown handoff. Copy the report te
 | --- | --- |
 | Collection status | `complete`, `incomplete`, or `invalid`, plus unavailable placements and the reason. |
 | Scope and placement | Selected tests, rationale, node count, total PEs, PEs per node, and PE-to-GPU binding. |
-| Environment evidence | Relative paths to per-node collector output, NVSHMEM version, GPU/NIC topology, launcher, and selected transport. |
+| Environment evidence | Relative paths to per-node collector output, NVSHMEM version, GPU/NIC topology, launcher, remote-transport configuration, and runtime initialization proof. |
 | Results | A summary table, complete native-unit result curves, three-repetition evidence, and paths to stdout, stderr, commands, and exit statuses. |
 | Validation and comparison | Per-run validity, anomalies, assumptions, and either a matched-baseline comparison or `Range assessment: not performed (no matched baseline supplied)`. |
 
@@ -211,7 +217,7 @@ Collect the recommended suite after the user selects it:
 
 ```text
 User: Run the recommended device sanity suite with two PEs on the allocated node.
-Action: Use run_script("scripts/collect-performance-environment.sh"), then collect the four device put/get bandwidth and latency tests with the resolved two-PE placement.
+Action: Use run_script("scripts/collect-performance-environment.sh", "--prefix", "<resolved-prefix>"), then collect the four device put/get bandwidth and latency tests with the resolved two-PE placement.
 Output: Return the artifact-directory path and NVSHMEM_PERFORMANCE_REPORT.md with the same-node results.
 ```
 

@@ -24,6 +24,7 @@
 | NVIDIA driver | {{NODE1_DRIVER}} | {{NODE2_DRIVER}} |
 | CUDA | {{NODE1_CUDA}} | {{NODE2_CUDA}} |
 | NVSHMEM | {{NODE1_NVSHMEM}} | {{NODE2_NVSHMEM}} |
+| NVSHMEM prefix/source | {{NODE1_NVSHMEM_PREFIX}} | {{NODE2_NVSHMEM_PREFIX}} |
 | Launcher/bootstrap | {{NODE1_LAUNCHER}} | {{NODE2_LAUNCHER}} |
 | Active NIC/RDMA ports | {{NODE1_NICS}} | {{NODE2_NICS}} |
 
@@ -43,11 +44,17 @@ Environment evidence files: `environment/{{NODE1_ENVIRONMENT_FILE}}`; `{{NODE2_E
 | --- | --- | ---: | --- | --- | --- |
 | {{PLACEMENT}} | {{HOSTNAME}} | {{PE}} | {{GPU_IDENTITY}} | {{LINK_CLASS}} | {{NIC_TRANSPORT}} |
 
+### Launcher Preflight Evidence
+
+| Placement | Expected | Observed rank/host/GPU binding | Result | Command | Stdout | Stderr | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| {{PLACEMENT}} | {{EXPECTED_PLACEMENT}} | {{OBSERVED_PREFLIGHT}} | {{PREFLIGHT_RESULT}} | `{{PREFLIGHT_COMMAND}}` | `{{PREFLIGHT_STDOUT}}` | `{{PREFLIGHT_STDERR}}` | `{{PREFLIGHT_STATUS}}` |
+
 ### NVSHMEM Initialization Evidence
 
-| Placement | Probe status | Selected transport/devices | Raw stdout | Raw stderr |
-| --- | --- | --- | --- | --- |
-| {{PLACEMENT}} | {{PROBE_STATUS}} | {{PROBE_TRANSPORT}} | `{{PROBE_STDOUT}}` | `{{PROBE_STDERR}}` |
+| Placement | Result | Successfully initialized transports | PE/GPU/NIC selection | Command | Stdout | Stderr | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| {{PLACEMENT}} | {{PROBE_RESULT}} | {{INITIALIZED_TRANSPORTS}} | {{PROBE_DEVICE_SELECTION}} | `{{PROBE_COMMAND}}` | `{{PROBE_STDOUT}}` | `{{PROBE_STDERR}}` | `{{PROBE_STATUS}}` |
 
 ## Result Summary
 
@@ -70,6 +77,10 @@ Repeat this section for every selected test and placement. Retain all valid rows
 ## Commands and Configuration
 
 ### Relevant Environment
+
+| Setting | Inherited | Requested override | Effective |
+| --- | --- | --- | --- |
+| `NVSHMEM_REMOTE_TRANSPORT` | {{INHERITED_REMOTE_TRANSPORT}} | {{REQUESTED_REMOTE_TRANSPORT_OR_NONE}} | {{EFFECTIVE_REMOTE_TRANSPORT}} |
 
 ```text
 {{RELEVANT_ENVIRONMENT}}
@@ -98,6 +109,7 @@ Command record: `commands.md`
 ## Artifact Index
 
 - Environment evidence: `environment/`
+- Launcher preflight and initialization evidence: placement directories
 - Same-node results: `same-node/`
 - Two-node results: `two-node/`
 - Command record: `commands.md`
