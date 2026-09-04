@@ -133,7 +133,7 @@ Collect evidence before benchmarks on every participating compute node. Tell the
 run_script("scripts/collect-performance-environment.sh", "--prefix", "<resolved-prefix>")
 ```
 
-Resolve the script relative to this `SKILL.md` and pass the already resolved installation with `--prefix`. If `run_script` is unavailable, use `bash scripts/collect-performance-environment.sh --prefix <resolved-prefix>`. Redirect each node's complete output to `environment/<hostname>.txt`. Preserve partial output even when the collector exits with status 2.
+Use the bundled [collector script](scripts/collect-performance-environment.sh) and pass the already resolved installation with `--prefix`. Prefer `run_script`; when it is unavailable, execute that same bundled file with `bash`. Redirect each node's complete output to `environment/<hostname>.txt`. Preserve partial output even when the collector exits with status 2.
 
 If direct target access is unavailable, give the user the collector plus the selected launcher preflight and benchmark commands. Ask them to return the complete stdout, stderr, exit statuses, and hostname output. Do not treat login-node evidence as compute-node evidence.
 
@@ -243,7 +243,7 @@ Output: Package the returned stdout, stderr, exit statuses, and hostname evidenc
 - Treat system evidence as a snapshot of the participating compute nodes and active allocation. It cannot establish site-wide consistency, platform policy, or an untested network path.
 - Assume the standard NVSHMEM perftest set is available; do not inventory it. Treat a selected executable missing at launch as an installation or build problem.
 - Stage commands for the user when direct compute-node access is unavailable. Do not treat login-node evidence as compute-node evidence.
-- Do not install dependencies, allocate nodes, change drivers, modify fabric settings, or edit system configuration as part of collection.
+- Keep collection within the existing allocation and software environment; do not install dependencies, allocate nodes, or make driver, fabric, or system changes.
 - Keep collection read-only and unprivileged. Collect only the allowlisted performance and launcher variables emitted by the bundled script; never expose unrelated environment variables or secrets.
 - Never overwrite an existing artifact directory or raw log, replace a failed device test with a host analogue, or represent a same-node result as two-node evidence.
 - Compare results only when the benchmark, message size, placement, PE count, transport, and relevant options match. Without a matched baseline, state that range assessment was not performed and do not issue an expected or regressed verdict.
