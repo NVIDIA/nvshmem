@@ -6,7 +6,42 @@
 set -u
 exec 2>&1
 
+usage() {
+    printf '%s\n' \
+        'Usage: collect-nic-topology.sh [--prefix PATH]' \
+        '' \
+        'Collect labeled, read-only NVSHMEM version, GPU, and NIC topology evidence.' \
+        'Run this on the target compute node. No workload or benchmark is run.'
+}
+
+prefix_arg=''
+prefix_arg_set=0
+while (($#)); do
+    case "$1" in
+        --prefix)
+            if (($# < 2)) || [[ -z "$2" ]]; then
+                printf 'error: --prefix requires PATH\n' >&2
+                usage >&2
+                exit 64
+            fi
+            prefix_arg=$2
+            prefix_arg_set=1
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            printf 'error: unknown argument: %s\n' "$1" >&2
+            usage >&2
+            exit 64
+            ;;
+    esac
+done
+
 critical_failures=0
+version_ok=0
 diagnostics=()
 
 add_diagnostic() {
@@ -26,19 +61,88 @@ print_command_result() {
     fi
 }
 
+nvshmem_prefix=''
+prefix_source='unresolved'
+if ((prefix_arg_set)); then
+    nvshmem_prefix=$prefix_arg
+    prefix_source='--prefix'
+elif [[ -n "${NVSHMEM_PREFIX:-}" ]]; then
+    nvshmem_prefix=$NVSHMEM_PREFIX
+    prefix_source='NVSHMEM_PREFIX'
+elif command -v nvshmem-info >/dev/null 2>&1; then
+    info_on_path=$(command -v nvshmem-info)
+    nvshmem_prefix=$(dirname "$(dirname "$info_on_path")")
+    prefix_source='nvshmem-info on PATH'
+fi
+
+printf '[collector]\n'
+printf 'prefix_source=%q\n' "$prefix_source"
+if [[ -n "$nvshmem_prefix" ]]; then
+    printf 'nvshmem_prefix=%q\n' "$nvshmem_prefix"
+    if [[ ! -d "$nvshmem_prefix" || ! -r "$nvshmem_prefix" ]]; then
+        critical_failures=1
+        add_diagnostic "resolved NVSHMEM prefix is not a readable directory: $nvshmem_prefix"
+    fi
+else
+    printf 'nvshmem_prefix=unresolved\n'
+fi
+
 printf '[nvshmem-version]\n'
-if command -v nvshmem-info >/dev/null 2>&1; then
-    nvshmem_output="$(nvshmem-info -n 2>&1)"
+info_bin=''
+info_source='unavailable'
+if [[ -n "$nvshmem_prefix" && -f "$nvshmem_prefix/bin/nvshmem-info" &&
+    -x "$nvshmem_prefix/bin/nvshmem-info" ]]; then
+    info_bin="$nvshmem_prefix/bin/nvshmem-info"
+    info_source='resolved prefix'
+elif command -v nvshmem-info >/dev/null 2>&1; then
+    info_bin=$(command -v nvshmem-info)
+    info_source='PATH'
+fi
+
+if [[ -n "$info_bin" ]]; then
+    printf 'nvshmem_info=%q\n' "$info_bin"
+    printf 'nvshmem_info_source=%q\n' "$info_source"
+
+    info_prefix_library_path=''
+    if [[ "$info_source" == 'resolved prefix' ]]; then
+        for libdir in "$nvshmem_prefix/lib" "$nvshmem_prefix/lib64"; do
+            [[ -d "$libdir" ]] || continue
+            if [[ -n "$info_prefix_library_path" ]]; then
+                info_prefix_library_path+=":$libdir"
+            else
+                info_prefix_library_path=$libdir
+            fi
+        done
+    fi
+    printf 'nvshmem_info_prefix_library_path=%q\n' "${info_prefix_library_path:-none}"
+
+    if [[ -n "$info_prefix_library_path" ]]; then
+        info_ld_library_path=$info_prefix_library_path
+        if [[ -n "${LD_LIBRARY_PATH:-}" ]]; then
+            info_ld_library_path+=":$LD_LIBRARY_PATH"
+        fi
+        nvshmem_output="$(LC_ALL=C env LD_LIBRARY_PATH="$info_ld_library_path" "$info_bin" -n 2>&1)"
+    else
+        nvshmem_output="$(LC_ALL=C "$info_bin" -n 2>&1)"
+    fi
     nvshmem_status=$?
     print_command_result 'nvshmem-info -n' "$nvshmem_output" "$nvshmem_status"
     if ((nvshmem_status != 0)); then
+        critical_failures=1
         add_diagnostic 'nvshmem-info -n failed; provide the installed NVSHMEM version explicitly.'
     elif [[ -z "$nvshmem_output" ]]; then
+        critical_failures=1
         add_diagnostic 'nvshmem-info -n returned no version text; provide the installed NVSHMEM version explicitly.'
+    elif ! grep -Eq '[0-9]+\.[0-9]+([.][0-9]+)?' <<< "$nvshmem_output"; then
+        critical_failures=1
+        add_diagnostic 'nvshmem-info -n did not report a recognizable NVSHMEM version.'
+    else
+        version_ok=1
     fi
 else
     printf 'command=%q status=unavailable\n' 'nvshmem-info -n'
-    add_diagnostic 'nvshmem-info is not on PATH; provide the installed NVSHMEM version explicitly.'
+    critical_failures=1
+    add_diagnostic 'nvshmem-info is unavailable; provide --prefix, set NVSHMEM_PREFIX, or supply the installed version explicitly.'
 fi
 
 printf '[gpu-pci]\n'
@@ -146,7 +250,7 @@ else
     done
 fi
 
-if ((critical_failures == 0)); then
+if ((critical_failures == 0 && version_ok)); then
     printf 'status=complete\n'
     exit 0
 fi
