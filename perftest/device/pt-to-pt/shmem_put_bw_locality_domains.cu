@@ -19,7 +19,6 @@ namespace {
 
 constexpr int kValidationThreads = 256;
 constexpr int kValidationMaxBlocks = 4096;
-constexpr size_t kWarpSize = 32;
 
 uint64_t validation_pattern(int sender_pe, int locality_domain, size_t message_size,
                             size_t repetition) {

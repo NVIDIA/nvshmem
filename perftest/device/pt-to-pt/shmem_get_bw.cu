@@ -14,7 +14,6 @@
 #include "utils.h"
 
 enum class SMEMToggle { DISABLE, ENABLE };
-constexpr size_t kWarpSize = 32;
 
 /* counter_d[0] counts CTA arrivals across all enabled barriers, while
  * counter_d[1] records the most recently released barrier epoch. */

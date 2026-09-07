@@ -31,6 +31,9 @@
 #define MEM_TYPE_POSIX_FD 1
 #define MEM_TYPE_FABRIC 2
 #define MEM_GRANULARITY 536870912  // 512MB
+
+constexpr size_t kWarpSize = 32;
+
 #if defined(NVSHMEM_HOSTLIB_ONLY)
 #define NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED ((size_t)0)
 #else

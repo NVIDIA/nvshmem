@@ -12,8 +12,6 @@
 #include <unistd.h>
 #include "utils.h"
 
-#define THREADS_PER_WARP 32
-
 template <bool USE_ITERATION_BARRIER>
 __device__ __forceinline__ void latency_thread_iteration_sync() {
     if constexpr (USE_ITERATION_BARRIER) {
@@ -223,11 +221,11 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
             nelems = size / sizeof(int);
 
-            test_latency_warp(data_d, nelems, mype, skip, test_cubin_warp, THREADS_PER_WARP,
+            test_latency_warp(data_d, nelems, mype, skip, test_cubin_warp, kWarpSize,
                               dynamic_smem_size);
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 cudaEventRecord(start);
-                test_latency_warp(data_d, nelems, mype, iter, test_cubin_warp, THREADS_PER_WARP,
+                test_latency_warp(data_d, nelems, mype, iter, test_cubin_warp, kWarpSize,
                                   dynamic_smem_size);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());
