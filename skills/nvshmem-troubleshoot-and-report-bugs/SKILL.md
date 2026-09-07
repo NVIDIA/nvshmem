@@ -21,7 +21,7 @@ Diagnose NVSHMEM runtime failures from high-signal evidence. Match documented pr
 
 - Require no credentials, API keys, or privileged access.
 - Work from the user's exact launch command, complete output, and generated logs. Use direct read-only inspection only when the user supplies access and asks for it.
-- Keep `$nvshmem-docs` available to verify version-specific behavior and `$nvshmem-install` available for installation or build handoffs. When a sibling skill is not registered, read its `SKILL.md` directly.
+- Use `$nvshmem-docs` when it is registered to verify version-specific behavior, and `$nvshmem-install` when it is registered for installation or build handoffs. Otherwise use the live official documentation linked from the bundled knowledge base.
 - Keep [troubleshooting-knowledge-base.md](references/troubleshooting-knowledge-base.md) available for diagnosis and [bug-report-template.md](references/bug-report-template.md) available for escalation.
 
 ## Inputs
@@ -35,10 +35,31 @@ Diagnose NVSHMEM runtime failures from high-signal evidence. Match documented pr
 
 - Do not confirm a root cause from paraphrased errors, incomplete PE output, a partial signature match, or timing changes alone.
 - Treat the bundled knowledge base as a routing snapshot, not current authority. Require live official documentation for version-specific claims.
-- Do not claim that a fixed-in release proves every earlier release is affected or that an upgrade is compatible without checking the collected environment.
+- Do not claim that a fixed-in release proves every earlier release is affected. Treat upgrade compatibility as unverified until it has been checked against the collected environment.
 - Do not perform privileged platform changes or directly submit reports. Provide read-only checks, administrator questions, and paste-ready Markdown instead.
+- Follow the human-in-the-loop execution boundary below for every command or tool action.
 
 ## Instructions
+
+### Human-in-the-Loop Execution Boundary
+
+Keep diagnosis, artifact inspection, command construction, and report drafting read-only. The default tool allowlist is limited to:
+
+- read-only inspection and search of user-provided artifacts in authorized paths, using `rg`, `sed -n`, `head`, `tail`, `wc`, `stat`, or `file`;
+- read-only retrieval of official NVSHMEM documentation through `$nvshmem-docs` or web search/open operations; and
+- drafting diagnostic commands and report text in the response.
+
+All other tool actions are denied by default. In particular, do not invoke file-write or deletion operations, process or job launch/control, package management, configuration changes, privileged operations, uploads, connectors, or external create/update/submit actions on the user's behalf.
+
+If the user asks for a non-destructive state-changing diagnostic action that remains within this skill's scope, pause immediately before it and:
+
+1. Show the exact command or action and its resolved targets.
+2. Explain its expected effects, whether it is reversible, and any data and destination involved.
+3. Obtain the user's explicit confirmation for that exact action immediately before execution.
+
+A request to diagnose, reproduce, fix, prepare, or report a bug is not by itself confirmation to perform a state-changing action. Do not infer confirmation from credentials, tool availability, shell access, or earlier approval of a different action. If the command, target, data, destination, or scope changes, disclose the change and confirm again.
+
+Destructive or irreversible operations, direct report submission, artifact upload, and privileged platform changes remain outside this skill's scope even after confirmation. Return paste-ready report text and administrator handoff instructions instead.
 
 ### Start With the Command and Output
 
@@ -90,7 +111,7 @@ Classify the result as exactly one of:
 
 Use class 1 whenever a bundled entry is confirmed, even when that entry assigns ownership to an external component; state ownership separately in `Diagnosis`. Use class 4 only when no bundled or versioned documented issue matches. For partial signature matches, use class 3 or 4 rather than calling the match confirmed. Treat a similar release-note symptom as a lead, not proof that the user has the same defect. A release note that says only that a bug was fixed establishes the fix release, not every affected earlier release. Describe an older installed version as predating a candidate fix unless official evidence explicitly establishes that it is affected or a controlled upgrade test confirms the match.
 
-Invoke `$nvshmem-docs` with the complete detected version before asserting environment-variable behavior, requirements, limitations, known issues, fixes, or upgrade guidance. Ask for the complete version when logs do not provide it and a version claim matters. When the sibling skill is not registered, read and follow `../nvshmem-docs/SKILL.md` directly.
+Use `$nvshmem-docs` with the complete detected version before making version-sensitive claims. Ask for the version if it is missing; if live verification is unavailable, label those claims unverified and non-actionable.
 
 Before recommending a target upgrade, verify that release's compatibility and known issues against the collected CUDA, driver, GPU, CPU, NCCL, bootstrap, and transport context. If that context is incomplete, present the release as a candidate test and name the missing compatibility checks instead of calling it suitable.
 
@@ -103,7 +124,7 @@ Separate:
 
 If no entry matches, say exactly: `No matching entry was found in the bundled NVSHMEM troubleshooting knowledge base.` Then provide a likely diagnosis, confidence, competing explanations, and targeted next checks.
 
-For a likely external issue, identify the likely owner and give concrete next checks. Do not stop at “not NVSHMEM.” Route installation and build failures to `$nvshmem-install`; route performance-only regressions to an available NVSHMEM performance skill, or to `$nvshmem-docs` when none is available.
+For a likely external issue, identify the likely owner and give concrete next checks. Do not stop at “not NVSHMEM.” Route installation and build failures to `$nvshmem-install` when registered; otherwise identify the appropriate installation/build handoff without attempting an unregistered-skill fallback. Route performance-only regressions to an available NVSHMEM performance skill, or to `$nvshmem-docs` when none is available.
 
 Do not perform privileged platform changes. For IMEX, driver, fabric-manager, device-node, kernel-module, NIC, or scheduler configuration, provide read-only checks and tell the user what to ask the administrator to verify.
 
