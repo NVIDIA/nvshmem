@@ -1,6 +1,6 @@
 ---
 name: nvshmem-get-started
-description: Guide NVSHMEM beginners through assessment, mental models, first C/C++ or Python NVSHMEM programs, compilation, launching, and next steps. Use for onboarding.
+description: Use when NVSHMEM beginners want a tutorial-style overview on assessment, mental models, first C/C++ or Python NVSHMEM programs, compilation, launching, and next steps.
 license: Apache-2.0
 metadata:
   author: NVIDIA NVSHMEM Team <nvshmem@nvidia.com>
@@ -74,7 +74,7 @@ Explain when another model may be simpler:
 - Prefer MPI when communication is coarse-grained, CPU-driven send and receive is sufficient, or symmetric allocation would complicate the design.
 - Reconsider NVSHMEM when the target cannot provide the required GPU, launcher, bootstrap, or transport environment.
 
-Ask where communication is initiated, whether it is fine- or coarse-grained, which operations dominate, whether communication must occur inside kernels, and what GPU/node topology is targeted. Conclude with one of `strong fit`, `possible fit`, or `likely simpler with another model`, and explain the deciding factors. Link to the official [NVSHMEM Introduction and Advantages](https://docs.nvidia.com/nvshmem/api/latest/introduction.html#advantages-of-nvshmem).
+First determine whether the prompt already contains enough communication detail to assess fit. If it does, immediately conclude with one of `strong fit`, `possible fit`, or `likely simpler with another model` and explain the deciding factors; do not defer the recommendation behind a checklist of questions. Otherwise ask only for the missing decision-critical facts: where communication is initiated, whether it is fine- or coarse-grained, which operations dominate, whether communication must occur inside kernels, and what GPU/node topology is targeted. Then give the same explicit conclusion. Link to the official [NVSHMEM Introduction and Advantages](https://docs.nvidia.com/nvshmem/api/latest/introduction.html#advantages-of-nvshmem).
 
 ### Teach the Mental Model
 
@@ -141,6 +141,8 @@ nvcc -rdc=true \
 ```
 
 Explain that `NVSHMEM_HOME` names the installed prefix and `NVCC_GENCODE` must select the target GPU architecture. For CMake, prefer the config files installed with NVSHMEM and use `find_package` in config mode; inspect the installed package before naming an imported target.
+
+After the build command, state that the resulting NVSHMEM binary is still a multi-PE program and must be launched with `nvshmrun`, `mpirun`, or `srun` at a chosen PE count, typically one PE per GPU for the first run. Point the user to the launcher command shapes in [Run a Precompiled Program](#run-a-precompiled-program); do not leave `nvcc` or the CMake build as the final step.
 
 #### Run a Precompiled Program
 
