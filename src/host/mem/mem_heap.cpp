@@ -152,6 +152,8 @@ void nvshmemi_symmetric_heap::set_heap_registration(
 }
 
 namespace {
+std::unique_ptr<nvshmemi_symmetric_heap> symmetric_heap_owner;
+
 nvshmemi_make_heap_result make_heap_failure(int status) {
     nvshmemi_make_heap_result result;
     result.status = status;
@@ -229,8 +231,10 @@ int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_
     int status = NVSHMEMX_SUCCESS;
 
     if (state->heap_obj != nullptr) {
+        assert(state->heap_obj == symmetric_heap_owner.get());
         return status;
     }
+    assert(symmetric_heap_owner == nullptr);
 
     state->vmm_heap = nullptr;
     state->nvls_obs = nullptr;
@@ -241,7 +245,8 @@ int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmem symmetric heap creation failed \n");
 
-    state->heap_obj = result.heap.release();
+    symmetric_heap_owner = std::move(result.heap);
+    state->heap_obj = symmetric_heap_owner.get();
     state->vmm_heap = result.vmm_heap;
     state->nvls_obs = result.nvls_obs;
 
@@ -335,11 +340,12 @@ out:
 
 void nvshmemi_fini_symmetric_heap(nvshmemi_state_t *state) {
     // State holds non-owning heap aliases.
+    assert(state->heap_obj == symmetric_heap_owner.get());
     state->nvls_obs = nullptr;
     state->handle_table = nullptr;
-    NVSHMEMU_HOST_PTR_DELETE(state->heap_obj);
     state->heap_obj = nullptr;
     state->vmm_heap = nullptr;
+    symmetric_heap_owner.reset();
 }
 
 /**
@@ -419,17 +425,6 @@ void nvshmemi_symmetric_heap::set_heap_size_attr(size_t mem_granularity, size_t 
                  4 * (*alignbytes) +
                  20 * (*alignbytes);  // alignbytes, providing capacity for 2 allocations for
                                       // the library and 10 allocations for the user
-}
-
-int nvshmemi_symmetric_heap::cleanup_mspace(void) {
-    if (heap_mspace_ != nullptr) {
-        NVSHMEMU_HOST_PTR_DELETE(heap_mspace_);
-    }
-    if (mmap_mspace_ != nullptr) {
-        NVSHMEMU_HOST_PTR_DELETE(mmap_mspace_);
-    }
-
-    return 0;
 }
 
 int nvshmemi_symmetric_heap::allgather_peer_base() {
@@ -521,15 +516,15 @@ int nvshmemi_symmetric_heap_sysmem_static_shm::free_heap_memory(void *unused_add
 }
 
 int nvshmemi_symmetric_heap_static::setup_mspace() {
-    heap_mspace_ = new mspace(heap_base_, heap_size_);
+    heap_mspace_ = std::make_unique<mspace>(heap_base_, heap_size_);
     heap_mspace_->track_large_chunks(1);
     return 0;
 }
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::setup_mspace() {
-    heap_mspace_ = new mspace(heap_base_, physical_internal_heap_size_);
+    heap_mspace_ = std::make_unique<mspace>(heap_base_, physical_internal_heap_size_);
     heap_mspace_->track_large_chunks(1);
-    mmap_mspace_ = new mspace(heap_base_, physical_internal_heap_size_);
+    mmap_mspace_ = std::make_unique<mspace>(heap_base_, physical_internal_heap_size_);
     mmap_mspace_->track_large_chunks(1);
     return 0;
 }
@@ -2261,7 +2256,7 @@ std::map<void *, size_t> *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::get_mmappe
 
 const std::map<void *, size_t> *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::get_mmapped_buf()
     const {
-    const mspace *mmap_mspace = mmap_mspace_;
+    const mspace *mmap_mspace = mmap_mspace_.get();
     return mmap_mspace->get_inuse_chunks();
 }
 

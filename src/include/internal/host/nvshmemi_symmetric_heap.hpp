@@ -205,11 +205,6 @@ class nvshmemi_symmetric_heap {
     virtual int setup_mspace() = 0;
 
     /**
-     * This function will destroy the mspace container initialized in setup_mspace()
-     */
-    int cleanup_mspace(void);
-
-    /**
      * Given a mem_granualarity, this API will compute heap size attributes such as heapextra
      * alignbytes and logarithmic2 value of mem_granularity
      */
@@ -243,8 +238,8 @@ class nvshmemi_symmetric_heap {
     nvshmemi_mem_remote_transport *remote_ref_ =
         nullptr;                                     // holds an instance of remote abstraction
     nvshmemi_mem_p2p_transport *p2p_ref_ = nullptr;  // holds an instance of memp2p abstraction
-    mspace *heap_mspace_ = nullptr;
-    mspace *mmap_mspace_ = nullptr;  // mspace for mmaped region
+    std::unique_ptr<mspace> heap_mspace_;
+    std::unique_ptr<mspace> mmap_mspace_;  // mspace for mmaped region
     // track indices of mc_handles created for mmaped user buffers
     // needed for selectively unbinding them on unmap
     std::unordered_map<void *, size_t> idx_in_mmap_mc_handles_;

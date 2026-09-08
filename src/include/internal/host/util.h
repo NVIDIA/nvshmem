@@ -244,14 +244,6 @@ void nvshmemi_gpunetio_get_device_state(void **state);
         }                           \
     } while (0)
 
-#define NVSHMEMU_HOST_PTR_DELETE(ptr) \
-    do {                              \
-        if ((ptr) != nullptr) {       \
-            delete (ptr);             \
-            (ptr) = nullptr;          \
-        }                             \
-    } while (0)
-
 /* Inspired from C++ bitset */
 #define NVSHMEMU_IS_BIT_SET(bmp, bitpos) ((bmp) & (1 << (bitpos)))
 #define NVSHMEMU_SET_BIT(bmp, bitpos) ((bmp) | (1 << (bitpos)))
