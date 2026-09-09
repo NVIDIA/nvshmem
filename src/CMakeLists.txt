@@ -1213,6 +1213,9 @@ if(NVSHMEM_BUILD_PACKAGES AND NVSHMEM_BUILD_HYDRA_LAUNCHER)
   add_dependencies(nvshmem_host git_commit hydra)
 endif()
 add_dependencies(nvshmem_host nvshmem_device_project-build)
+if(TARGET libnvshmem_device_ltoir)
+  add_dependencies(nvshmem_host libnvshmem_device_ltoir)
+endif()
 
 # Start Installation definitions
 install(CODE "
