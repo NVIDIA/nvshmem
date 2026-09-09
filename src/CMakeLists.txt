@@ -37,6 +37,7 @@ ExternalProject_Add(nvshmem_device_project
                     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/device
                     CMAKE_ARGS  ${my_cmake_args}
                                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                                -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                                 -DNVSHMEM_PREFIX=${NVSHMEM_PREFIX}
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
                                 -DNVSHMEM_VERBOSE=${NVSHMEM_VERBOSE}
@@ -61,7 +62,8 @@ ExternalProject_Add(nvshmem_device_project
                                 -DPROJECT_VERSION=${PROJECT_VERSION}
 				$ENV{CMAKE_CCACHE_FLAGS}
                     CMAKE_CACHE_ARGS ${my_cmake_cache_args}
-                    STEP_TARGETS build install
+                    INSTALL_COMMAND ""
+                    STEP_TARGETS build
                     BUILD_ALWAYS TRUE
                     BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a
                     )
@@ -1220,7 +1222,10 @@ endif()
 # Start Installation definitions
 install(CODE "
   # Patch NVSHMEM target files
-  file(GLOB_RECURSE targets_files \"${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/Export/*/NVSHMEM*Targets*.cmake\")
+  file(GLOB_RECURSE targets_files
+    \"${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/Export/*/NVSHMEM*Targets*.cmake\"
+    \"${CMAKE_CURRENT_BINARY_DIR}/device/CMakeFiles/Export/*/NVSHMEMDeviceTargets*.cmake\"
+  )
   foreach(targets_file IN LISTS targets_files)
     message(STATUS \"Processing targets_file=\${targets_file}\")
     file(READ \"\${targets_file}\" _file_contents)
@@ -1230,8 +1235,6 @@ install(CODE "
     file(WRITE \"\${targets_file}\" \"\${_file_contents}\")
   endforeach()
 ")
-
-
 # This makes sure the device config file is included as well
 install(CODE "
   # Patch NVSHMEM target files
@@ -1288,32 +1291,17 @@ install(
   PUBLIC_HEADER DESTINATION include
 )
 
-install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a
-  DESTINATION lib/
-  PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-              GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-)
-
-install(
-  FILES ${CMAKE_BINARY_DIR}/lib/cmake/nvshmem/NVSHMEMDeviceTargets.cmake
-  DESTINATION lib/cmake/nvshmem/
-  PERMISSIONS OWNER_READ OWNER_WRITE
-              GROUP_READ WORLD_READ
-)
-
-install(
-  FILES ${CMAKE_BINARY_DIR}/lib/cmake/nvshmem/NVSHMEMDeviceTargets-$<LOWER_CASE:${CMAKE_BUILD_TYPE}>.cmake
-  DESTINATION lib/cmake/nvshmem/
-  PERMISSIONS OWNER_READ OWNER_WRITE
-              GROUP_READ WORLD_READ
-)
+# Install the ExternalProject's device library and CMake package exports
+# directly to the active top-level prefix. The generated subproject script
+# inherits CMAKE_INSTALL_PREFIX, including a cmake --install --prefix override.
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/device/cmake_install.cmake")
 
 install(
   DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib/
   DESTINATION lib
   FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                    GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  PATTERN "libnvshmem_device.a" EXCLUDE
 )
 
 install(
