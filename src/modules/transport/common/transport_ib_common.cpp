@@ -824,6 +824,7 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_d
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
     int n_pes = t->n_pes;
     int status = 0;
+    int local_connect_status = NVSHMEMX_SUCCESS;
     int first_ep_idx;
     bool is_initial_call = (ib_state->ep == nullptr);
 
@@ -920,18 +921,41 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_d
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather of ep handles failed \n");
 
-    /* Connect endpoints */
-    for (int i = first_ep_idx; i < first_ep_idx + qps_to_create; i++) {
+    /* Connect endpoints locally, then establish job-wide consensus. */
+    for (int i = first_ep_idx;
+         i < first_ep_idx + qps_to_create && local_connect_status == NVSHMEMX_SUCCESS; i++) {
         for (int j = 0; j < n_pes; j++) {
             int ep_idx = i * n_pes + j;
             int handle_idx = j * qps_to_create + (i - first_ep_idx);
 
-            status = ib_state->ib_transport_ftable->ep_connect(ib_state->ep[ep_idx],
-                                                               &ep_handles[handle_idx]);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "transport create connect failed \n");
+            local_connect_status = ib_state->ib_transport_ftable->ep_connect(
+                ib_state->ep[ep_idx], &ep_handles[handle_idx]);
+            if (local_connect_status != NVSHMEMX_SUCCESS) {
+                NVSHMEMI_ERROR_PRINT("transport create connect failed \n");
+                break;
+            }
         }
     }
+
+    if (n_pes > 1) {
+        std::vector<int> peer_connect_status(n_pes);
+        status = t->boot_handle->allgather(&local_connect_status, peer_connect_status.data(),
+                                           sizeof(local_connect_status), t->boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Allgather of IB endpoint connection statuses failed.\n");
+
+        for (int pe = 0; pe < n_pes; ++pe) {
+            if (peer_connect_status[pe] != NVSHMEMX_SUCCESS) {
+                if (local_connect_status == NVSHMEMX_SUCCESS) {
+                    NVSHMEMI_ERROR_PRINT("IB endpoint connection failed on PE %d.\n", pe);
+                }
+                status = peer_connect_status[pe];
+                goto out;
+            }
+        }
+    }
+    status = local_connect_status;
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "IB endpoint connection failed.\n");
 
     /* Populate out_qp_indices array with QP numbers */
     if (out_qp_indices != nullptr) {
