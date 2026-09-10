@@ -594,7 +594,11 @@ struct alignas(16) handle_barrier_t {
 
     // wait till data has been read from shared memory
     inline __device__ void fabric_wait_sync_reads() {
+#if CUDART_VERSION >= 13050
+        asm volatile("fabric.wait.sync_restrict::read 0;\n" ::: "memory");
+#else
         asm volatile("fabric.wait.sync_restrict::reads;\n" ::: "memory");
+#endif
     }
 
     inline __device__ void inval() {
