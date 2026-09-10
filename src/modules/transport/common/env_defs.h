@@ -222,8 +222,9 @@ NVSHMEMI_ENV_DEF(GPUNETIO_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPOR
                  "- cpu: use CPU.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_GPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of GPU-data-path RC QPs per peer PE in the GPUNetIO transport "
-                 "(default 2). Only takes effect when NVSHMEM_GPUNETIO_ENABLE_GDAKI=1. "
-                 "Otherwise, the GPU data path is disabled and this value is ignored.")
+                 "(default 2, or 8 with directNIC). Only takes effect when "
+                 "NVSHMEM_GPUNETIO_ENABLE_GDAKI=1. Otherwise, the GPU data path is disabled "
+                 "and this value is ignored.")
 NVSHMEMI_ENV_DEF(GPUNETIO_RC_MAP_BY, string, "none", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies how GPU-data-path RC QPs are assigned. "
                  "Choices are: cta, sm, warp, none.\n\n"
@@ -234,8 +235,8 @@ NVSHMEMI_ENV_DEF(GPUNETIO_RC_MAP_BY, string, "none", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "across all default GPU-data-path RC QPs.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_CPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of CPU-data-path RC QPs per peer PE in the GPUNetIO transport "
-                 "(default 2). The CPU data path is always active and does not require GDAKI. "
-                 "This value must be > 0.")
+                 "(default 2, or 8 with directNIC). The CPU data path is always active "
+                 "and does not require GDAKI. This value must be > 0.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_REQUESTS_IN_BATCH, int, 32, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of requests to be batched before submitting to the NIC. "
                  "It will be rounded up to the nearest power of 2. "

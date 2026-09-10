@@ -1499,12 +1499,20 @@ int nvshmemt_gpunetio_state_t::init_nic_devices(nvshmem_transport *transport,
 
     for (int dev_id : dev_ids) {
         auto &device = *devices[dev_id];
-        // Need 8 QPs for achieving bandwidth in data direct device
-        if (options->GPUNETIO_ENABLE_GDAKI && device.common_device.data_direct &&
-            !options->GPUNETIO_NUM_RC_PER_PE_GPU_provided) {
-            options->GPUNETIO_NUM_RC_PER_PE_GPU = 8;
-            INFO(log_level,
-                 "Setting GPUNETIO_NUM_RC_PER_PE_GPU = 8 as data direct device is detected");
+        if (device.common_device.data_direct) {
+            // Need 8 QPs per active data path for achieving peak bandwidth on a data direct device.
+            // The CPU data path is always active.
+            if (!options->GPUNETIO_NUM_RC_PER_PE_CPU_provided) {
+                options->GPUNETIO_NUM_RC_PER_PE_CPU = 8;
+                INFO(log_level,
+                     "Setting GPUNETIO_NUM_RC_PER_PE_CPU = 8 as data direct device is detected");
+            }
+            // Update GPU QPs only if GDAKI is enabled.
+            if (options->GPUNETIO_ENABLE_GDAKI && !options->GPUNETIO_NUM_RC_PER_PE_GPU_provided) {
+                options->GPUNETIO_NUM_RC_PER_PE_GPU = 8;
+                INFO(log_level,
+                     "Setting GPUNETIO_NUM_RC_PER_PE_GPU = 8 as data direct device is detected");
+            }
         }
 
         // Report whether we need to do atomic endianness conversions on 8 byte operands.
