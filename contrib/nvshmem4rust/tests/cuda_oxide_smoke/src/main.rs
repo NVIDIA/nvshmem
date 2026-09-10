@@ -5,7 +5,8 @@
 
 #![allow(clippy::missing_safety_doc)]
 
-use cuda_core::{CudaContext, CudaModule, DriverError, LaunchConfig, memory, sys};
+use cuda_core::simt::memory;
+use cuda_core::{CudaContext, CudaModule, DriverError, LaunchConfig, sys};
 use cuda_device::{kernel, thread};
 use nvshmem::{Runtime, SymmetricBuffer};
 use nvshmem_cuda_oxide_test_support::{

@@ -2,6 +2,7 @@
 name = "nvshmem"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
 license = "Apache-2.0"
 
 [lib]
@@ -9,5 +10,5 @@ name = "nvshmem"
 path = "src/lib.rs"
 
 [dependencies]
-cuda-core = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-core" }
+cuda-core = "@NVSHMEM_CUDA_CORE_VERSION@"
 libloading = "0.8"

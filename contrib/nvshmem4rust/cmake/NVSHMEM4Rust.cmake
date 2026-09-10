@@ -37,7 +37,9 @@ function(generateRustBindings)
     endif()
 
     set(NVSHMEM_CUDA_OXIDE_ROOT "" CACHE PATH
-        "Path to a CUDA-Oxide checkout")
+        "Path to the CUDA-Oxide checkout used by device tests")
+    set(NVSHMEM_CUDA_CORE_VERSION "0.3.1" CACHE STRING
+        "cuda-core crate version used by the generated Rust packages")
     set(NVSHMEM_CARGO_OXIDE_EXECUTABLE "" CACHE FILEPATH
         "Path to the cargo-oxide executable")
     set(NVSHMEM_RUST_TEST_ARCH "sm_90" CACHE STRING
@@ -46,13 +48,6 @@ function(generateRustBindings)
         "NVSHMEM device LTOIR passed to the CUDA-Oxide tests")
     set(NVSHMEM_HOST_LIB_DIR "" CACHE PATH
         "Directory containing libnvshmem_host for the CUDA-Oxide tests")
-    if(NOT GENERATERUST_HOST_ONLY AND
-       NOT EXISTS "${NVSHMEM_CUDA_OXIDE_ROOT}/crates/cuda-core")
-        message(FATAL_ERROR
-            "Set NVSHMEM_CUDA_OXIDE_ROOT to a CUDA-Oxide checkout so the "
-            "generated runtime crate has a valid cuda-core dependency")
-    endif()
-
     set(NVSHMEM_BINDING_HEADERS
         "${NVSHMEM_INCLUDE_DIR}/nvshmem_host.h"
         "${NVSHMEM_INCLUDE_DIR}/host/nvshmem_api.h"
