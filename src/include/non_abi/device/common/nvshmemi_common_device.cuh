@@ -3593,8 +3593,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t nvshmemi_handle_mcast_memcpy_thr
     nvshmemi_team_t *team, T *__restrict__ dst, const T *__restrict__ src, size_t len) {
 #if __CUDA_ARCH__ >= 1000
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
-        assert(0 && "nvshmemi_handle_mcast_memcpy_threadgroup: not implemented for thread scope");
-        return 0;
+        assert(nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE));
+        assert(IS_VALID_LE_ID(team->mc_leid_with_flag));
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        nvshmemi_handle_put_thread<le_fabric_handle_kind::Multicast>(
+            registration, src, dst, len, PARSE_LE_ID(team->mc_leid_with_flag), true);
+        len = 0;
     } else {
         // address must be aligned to CFT_HANDLE_TX_SIZE
         assert(nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE));
