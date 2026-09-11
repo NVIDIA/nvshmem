@@ -13,7 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "device_host/nvshmem_common.cuh"
+#include "device_host/nvshmem_api_macros.h"
+#include "device_host/nvshmem_types.h"
 #include "device_host_transport/nvshmem_constants.h"
 #include "host/nvshmem_macros.h"
 #include "host/nvshmem_coll_api.h"
@@ -29,18 +30,15 @@ int nvshmemi_init_thread(int requested_thread_support, int *provided_thread_supp
 extern "C" {
 #endif
 
-#define NVSHMEMI_UNUSED_ARG(ARG) (void)(ARG)
-
 // Library initialization
-#define NONZERO_EXIT(status, ...)                                                              \
-    do {                                                                                       \
-        if (status != 0) {                                                                     \
-            fprintf(stderr, "%s:%d: non-zero status: %d: %s, exiting... ", __FILE__, __LINE__, \
-                    status, strerror(errno));                                                  \
-            fprintf(stderr, __VA_ARGS__);                                                      \
-            exit(-1);                                                                          \
-        }                                                                                      \
-    } while (0)
+static inline void nvshmemi_check_init_status(int status) {
+    if (status != 0) {
+        fprintf(stderr, "%s:%d: non-zero status: %d: %s, exiting... ", __FILE__, __LINE__, status,
+                strerror(errno));
+        fprintf(stderr, "aborting due to error in nvshmemi_init_thread \n");
+        exit(-1);
+    }
+}
 
 int nvshmemx_init_status();
 
@@ -49,7 +47,7 @@ static inline void nvshmem_init() {
     nvshmemi_version_t app_nvshmem_version = {
         NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
     status = nvshmemi_init_thread(requested, &provided, 0, NULL, app_nvshmem_version);
-    NONZERO_EXIT(status, "aborting due to error in nvshmemi_init_thread \n");
+    nvshmemi_check_init_status(status);
 }
 
 static inline int nvshmem_init_thread(int requested, int *provided) {
@@ -57,7 +55,7 @@ static inline int nvshmem_init_thread(int requested, int *provided) {
     nvshmemi_version_t app_nvshmem_version = {
         NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
     status = nvshmemi_init_thread(requested, provided, 0, NULL, app_nvshmem_version);
-    NONZERO_EXIT(status, "aborting due to error in nvshmemi_init_thread \n");
+    nvshmemi_check_init_status(status);
     return status;
 }
 

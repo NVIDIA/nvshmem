@@ -6,6 +6,8 @@
 #ifndef _NVSHMEMX_TILE_API_HPP_
 #define _NVSHMEMX_TILE_API_HPP_
 #include <cuda_runtime.h>
+#include "device_host/nvshmem_api_macros.h"
+#include "device_host/nvshmem_types.h"
 #include "device_host/nvshmem_tensor.h"
 
 namespace nvshmemx {

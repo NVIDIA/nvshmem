@@ -7,27 +7,13 @@
 #define _NVSHMEM_TENSOR_H_
 
 #if !defined __CUDACC_RTC__
-#include <stdint.h>
 #include <limits.h>
 #else
-#include "cuda/std/cstdint"
 #include <cuda/std/climits>
-#include <cuda/std/cstddef>
-#if !defined SIZE_MAX
-#define SIZE_MAX (1ULL << 63)
 #endif
-#endif
+
 #include <cuda_runtime.h>
-#ifdef NVSHMEM_COMPLEX_SUPPORT
-#include <complex.h>
-#endif
-#include "cuda_fp16.h"
-#include "cuda_bf16.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "non_abi/nvshmemx_error.h"
-#include "device_host/nvshmem_types.h"
-#include "device_host_transport/nvshmem_constants.h"
+
 #include "non_abi/nvshmemi_cccl_compat.h"
 
 template <int v>
@@ -100,7 +86,7 @@ typedef enum {
     NVLS_ONE_SHOT_PULL_NBI = 1,
     NVLS_TWO_SHOT_PUSH_NBI = 2,
     NVLS_TWO_SHOT_PULL_NBI = 3,
-    NVSHMEMI_TILE_COLL_ALGO_SENTINEL = INT_MAX
+    NVSHMEMX_TILE_COLL_ALGO_SENTINEL = INT_MAX
 } tile_coll_algo_t;
 
 typedef enum {
@@ -108,7 +94,7 @@ typedef enum {
     PEER_PULL_NBI = 0,  // Both PULL/PUSH have same behavior
     REMOTE_PUSH_NBI = 1,
     REMOTE_PULL_NBI = 1,
-    NVSHMEMI_TILE_ALGO_SENTINEL = INT_MAX
+    NVSHMEMX_TILE_ALGO_SENTINEL = INT_MAX
 } tile_algo_t;
 
 }  // namespace nvshmemx

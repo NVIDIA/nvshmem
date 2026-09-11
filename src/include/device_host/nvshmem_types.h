@@ -24,20 +24,47 @@
 #define NVSHMEMI_TYPES_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
 #endif
 
-#define INIT_ARGS_V2_PADDING 92
-#define INIT_ARGS_PADDING 96
+#define NVSHMEMX_INIT_ARGS_V2_RESERVED_BYTES 92
+#define NVSHMEMX_INIT_ARGS_V1_RESERVED_BYTES 96
+#define NVSHMEM_TEAM_CONFIG_V2_RESERVED_BYTES 48
+#define NVSHMEM_TEAM_CONFIG_V1_RESERVED_BYTES 56
 #define INIT_ARGS_SCALAR_INVALID -1
-#define TEAM_CONFIG_V2_PADDING 48
-#define TEAM_CONFIG_PADDING 56
 #define TEAM_CONFIG_SCALAR_INVALID -1
-#define TEAM_ULSCALAR_INVALID 0xFFFFFFFFFFFFFFFF
+#define TEAM_ULSCALAR_INVALID 0xFFFFFFFFFFFFFFFFULL
 
-#define NVSHMEM_INIT_ATTR_VER 1
+typedef enum {
+    NVSHMEM_SIGNAL_SET = 9,
+    NVSHMEM_SIGNAL_ADD = 10,
+} nvshmemx_signal_op_t;
 
 typedef int nvshmemx_qp_handle_t;
 typedef uint64_t nvshmemx_team_uniqueid_t;
 typedef int32_t nvshmem_team_t;
 typedef nvshmem_team_t nvshmemx_team_t;
+
+typedef enum {
+    NVSHMEM_TEAM_INVALID = -1,
+    NVSHMEM_TEAM_WORLD = 0,
+    NVSHMEM_TEAM_WORLD_INDEX = 0,
+    NVSHMEM_TEAM_SHARED = 1,
+    NVSHMEM_TEAM_SHARED_INDEX = 1,
+    NVSHMEMX_TEAM_NODE = 2,
+    NVSHMEM_TEAM_NODE_INDEX = 2,
+    NVSHMEMX_TEAM_SAME_MYPE_NODE = 3,
+    NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX = 3,
+    NVSHMEM_TEAM_SAME_GPU_INDEX = 4,
+    NVSHMEM_TEAM_GPU_LEADERS_INDEX = 5,
+    NVSHMEM_TEAM_MC_SHARED = 6,
+    NVSHMEM_TEAM_MC_SHARED_INDEX = 6,
+    NVSHMEM_TEAMS_MIN = 7,
+    NVSHMEM_TEAM_INDEX_MAX = INT_MAX
+} nvshmem_team_id_t;
+
+typedef struct {
+    int major;
+    int minor;
+    int patch;
+} nvshmemi_version_t;
 
 typedef enum nvshmemx_smem_amount_t {
     NVSHMEMX_SMEM_RECOMMENDED = 0,
@@ -67,7 +94,7 @@ typedef struct {
     int version;
     nvshmemx_uniqueid_args_t uid_args;
     int cuda_device_id;
-    char content[INIT_ARGS_V2_PADDING];
+    char content[NVSHMEMX_INIT_ARGS_V2_RESERVED_BYTES];
 } nvshmemx_init_args_v2;
 NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmemx_init_args_v2) == 128,
                              "init_args_v2 must be 128 bytes.");
@@ -75,7 +102,7 @@ NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmemx_init_args_v2) == 128,
 typedef struct {
     int version;
     nvshmemx_uniqueid_args_t uid_args;
-    char content[INIT_ARGS_PADDING];
+    char content[NVSHMEMX_INIT_ARGS_V1_RESERVED_BYTES];
 } nvshmemx_init_args_v1;
 NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmemx_init_args_v1) == 128,
                              "init_args_v1 must be 128 bytes.");
@@ -104,7 +131,7 @@ typedef struct {
     int version;
     int num_contexts;
     nvshmemx_team_uniqueid_t uniqueid;
-    char padding[TEAM_CONFIG_V2_PADDING];
+    char padding[NVSHMEM_TEAM_CONFIG_V2_RESERVED_BYTES];
 } nvshmem_team_config_v2;
 NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmem_team_config_v2) == 64,
                              "team_config_v2 must be 64 bytes.");
@@ -112,7 +139,7 @@ NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmem_team_config_v2) == 64,
 typedef struct {
     int version;
     int num_contexts;
-    char padding[TEAM_CONFIG_PADDING];
+    char padding[NVSHMEM_TEAM_CONFIG_V1_RESERVED_BYTES];
 } nvshmem_team_config_v1;
 NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmem_team_config_v1) == 64,
                              "team_config_v1 must be 64 bytes.");
@@ -120,13 +147,6 @@ NVSHMEMI_TYPES_STATIC_ASSERT(sizeof(nvshmem_team_config_v1) == 64,
 typedef nvshmem_team_config_v2 nvshmem_team_config_t;
 
 #define NVSHMEM_TEAM_UNIQUID_INITIALIZER TEAM_ULSCALAR_INVALID
-
-#define nvshmemx_init_init_attr_ver_only(attr)                                     \
-    do {                                                                           \
-        attr.version = (1 << 16) + sizeof(nvshmemx_init_attr_t);                   \
-        attr.args.version = (1 << 16) + sizeof(nvshmemx_init_args_t);              \
-        attr.args.uid_args.version = (1 << 16) + sizeof(nvshmemx_uniqueid_args_t); \
-    } while (0);
 
 #define NVSHMEM_INIT_ARGS_V2_IDENTIFIER (2 << 16) + sizeof(nvshmemx_init_args_t)
 #define NVSHMEMX_INIT_ARGS_V2_INITIALIZER           \
@@ -152,21 +172,14 @@ typedef nvshmem_team_config_v2 nvshmem_team_config_t;
      NULL,                            /* mpi_comm */ \
      NVSHMEMX_INIT_ARGS_INITIALIZER}
 
-#define NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER (2 << 16) + sizeof(nvshmem_team_config_t)
-#define NVSHMEMI_TEAM_CONFIG_INITIALIZER                           \
-    {NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER, /* version */      \
-     TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
-     TEAM_ULSCALAR_INVALID,                     /* uniqueid */     \
+#define NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER (2 << 16) + sizeof(nvshmem_team_config_t)
+#define NVSHMEM_TEAM_CONFIG_INITIALIZER                           \
+    {NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER, /* version */      \
+     TEAM_CONFIG_SCALAR_INVALID,               /* num_contexts */ \
+     NVSHMEM_TEAM_UNIQUID_INITIALIZER,         /* uniqueid */     \
      {0}}
-#define NVSHMEM_TEAM_CONFIG_INITIALIZER NVSHMEMI_TEAM_CONFIG_INITIALIZER
 #define NVSHMEM_TEAM_CONFIG_MASK_NUM_CONTEXTS 0x0000000000000001
 #define NVSHMEM_TEAM_CONFIG_MASK_UNIQUEID 0x0000000000000002
-
-#define NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER (1 << 16) + sizeof(nvshmem_team_config_v1)
-#define NVSHMEMI_TEAM_CONFIG_V1_INITIALIZER                        \
-    {NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER, /* version */      \
-     TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
-     {0}}
 
 #undef NVSHMEMI_TYPES_STATIC_ASSERT
 

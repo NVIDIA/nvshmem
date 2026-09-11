@@ -11,18 +11,13 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "device_host_transport/nvshmem_constants.h"
-#include "device_host/nvshmem_common.cuh"
+#include "device_host/nvshmem_api_macros.h"
+#include "device_host/nvshmem_types.h"
 #include "non_abi/nvshmem_version.h"
 #include "host/nvshmemx_coll_api.h"
 #include "host/nvshmem_macros.h"
 #include "non_abi/nvshmemx_error.h"
 #include "host/nvshmem_api.h"
-
-int nvshmemi_collective_launch(const void *func, dim3 gridDims, dim3 blockDims, void **args,
-                               size_t sharedMem, cudaStream_t stream);
-
-int nvshmemi_collective_launch_query_gridsize(const void *func, dim3 blockDims, void **args,
-                                              size_t sharedMem, int *gridsize);
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,10 +46,12 @@ static inline int nvshmemx_init_attr(unsigned int flags, nvshmemx_init_attr_t *a
         NVSHMEM_VENDOR_MAJOR_VERSION, NVSHMEM_VENDOR_MINOR_VERSION, NVSHMEM_VENDOR_PATCH_VERSION};
     if (attributes != NULL && attributes->version != NVSHMEM_INIT_ATTR_V2_IDENTIFIER &&
         attributes->version != NVSHMEM_INIT_ATTR_V1_IDENTIFIER) {
-        nvshmemx_init_init_attr_ver_only((*attributes));
+        attributes->version = (1 << 16) + sizeof(nvshmemx_init_attr_t);
+        attributes->args.version = (1 << 16) + sizeof(nvshmemx_init_args_t);
+        attributes->args.uid_args.version = (1 << 16) + sizeof(nvshmemx_uniqueid_args_t);
     }
     status = nvshmemi_init_thread(requested, &provided, flags, attributes, app_nvshmem_version);
-    NONZERO_EXIT(status, "aborting due to error in nvshmemi_init_thread \n");
+    nvshmemi_check_init_status(status);
     return status;
 }
 

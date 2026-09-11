@@ -1350,7 +1350,7 @@ static int init_team_same_mype_node() {
 static int init_team_same_gpu() {
     int start = -1, stride = -1, size = 0;
 
-    /* Initialize team NVSHMEMI_TEAM_SAME_GPU */
+    /* Initialize team NVSHMEM_TEAM_SAME_GPU_INDEX */
     nvshmem_transport_pe_info_t *pe_info = nvshmemi_state->pe_info;
     for (int pe = 0; pe < nvshmemi_state->npes; pe++) {
         if (pe_info[pe].hostHash != pe_info[nvshmemi_state->mype].hostHash ||
@@ -1360,7 +1360,7 @@ static int init_team_same_gpu() {
         }
         int ret = check_for_linear_stride(pe, &start, &stride, &size);
         if (ret < 0) {
-            NVSHMEMI_ERROR_EXIT("Could not form NVSHMEMI_TEAM_SAME_GPU\n");
+            NVSHMEMI_ERROR_EXIT("Could not form NVSHMEM_TEAM_SAME_GPU_INDEX\n");
             break;
         }
     }
@@ -1386,7 +1386,7 @@ static int init_team_same_gpu() {
     nvshmemi_team_same_gpu->size = size;
     nvshmemi_team_same_gpu->is_team_node = true;
     nvshmemi_team_same_gpu->is_team_same_mype_node = false;
-    INFO(NVSHMEM_INIT, "NVSHMEMI_TEAM_SAME_GPU: start=%d, stride=%d, size=%d",
+    INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SAME_GPU_INDEX: start=%d, stride=%d, size=%d",
          nvshmemi_team_same_gpu->start, nvshmemi_team_same_gpu->stride,
          nvshmemi_team_same_gpu->size);
 
@@ -1400,7 +1400,7 @@ static int init_team_same_gpu() {
 }
 
 static int init_team_gpu_leaders() {
-    /* Initialize team NVSHMEMI_TEAM_GPU_LEADERS */
+    /* Initialize team NVSHMEM_TEAM_GPU_LEADERS_INDEX */
     std::vector<int> scratch(nvshmemi_state->npes);
 
     if (nvshmemi_team_same_gpu->start ==
@@ -1445,7 +1445,8 @@ static int init_team_gpu_leaders() {
             if (scratch[i] != -1) {
                 if (scratch[i] != last_mype + 1) {
                     WARN(
-                        "NVSHMEMI_TEAM_GPU_LEADERS could not be formed, Limited MPG support will "
+                        "NVSHMEM_TEAM_GPU_LEADERS_INDEX could not be formed, Limited MPG support "
+                        "will "
                         "not be available\n");
                     break;
                 } else {
@@ -1457,7 +1458,7 @@ static int init_team_gpu_leaders() {
          * nvshmemi_team_gpu_leaders */
         nvshmemi_team_gpu_leaders->is_team_node = false;
         nvshmemi_team_gpu_leaders->is_team_same_mype_node = false;
-        INFO(NVSHMEM_INIT, "NVSHMEMI_TEAM_GPU_LEADERS: start=%d, stride=%d, size=%d",
+        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_GPU_LEADERS_INDEX: start=%d, stride=%d, size=%d",
              nvshmemi_team_gpu_leaders->start, nvshmemi_team_gpu_leaders->stride,
              nvshmemi_team_gpu_leaders->size);
     } else {
@@ -2217,7 +2218,7 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
         (*new_team)->config.version = NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER;
         (*new_team)->config.num_contexts = TEAM_CONFIG_SCALAR_INVALID;
     } else {
-        (*new_team)->config = NVSHMEMI_TEAM_CONFIG_INITIALIZER;
+        (*new_team)->config = NVSHMEM_TEAM_CONFIG_INITIALIZER;
         (*new_team)->config.uniqueid = parent_team->config.uniqueid;
     }
     (*new_team)->config.num_contexts = parent_team->config.num_contexts;
@@ -2395,8 +2396,7 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
 
     INFO(NVSHMEM_COLL, "entering nvshmemi_team_split_from_non_strided_parent with parent ID %d\n",
          parent_team->team_idx);
-    if (config == NULL &&
-        parent_team->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER) {
+    if (config == NULL && parent_team->config.version == NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER) {
         ;
     } else if (config == NULL) {
         NVSHMEMI_ERROR_PRINT("Unable to initialize unstrided team with NULL config\n");
@@ -2431,8 +2431,8 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
         }
 
         if (config == NULL) {
-            myteam->config = NVSHMEMI_TEAM_CONFIG_INITIALIZER;
-            myteam->config.version = NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER;
+            myteam->config = NVSHMEM_TEAM_CONFIG_INITIALIZER;
+            myteam->config.version = NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER;
             myteam->config.uniqueid = parent_team->config.uniqueid;
             myteam->config.num_contexts = parent_team->config.num_contexts;
             myteam->config_mask = parent_team->config_mask;

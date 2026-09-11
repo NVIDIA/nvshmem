@@ -969,6 +969,7 @@ set(INC_EXPORTS
     bootstrap_device_host/nvshmem_uniqueid.h
     device_host/nvshmem_proxy_channel.h
     device_host/nvshmem_types.h
+    device_host/nvshmem_api_macros.h
     non_abi/device_host/nvshmemi_types.h
     device_host_transport/nvshmem_common_transport.h
     device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp

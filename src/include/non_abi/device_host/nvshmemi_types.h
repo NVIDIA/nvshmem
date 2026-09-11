@@ -54,6 +54,12 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
 #define TEAM_SCALAR_INVALID -1
 #define TEAM_USCALAR_INVALID 0xFFFFFFFF
 #define TEAM_ULSCALAR_DEFAULT 0
+
+#define NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER (1 << 16) + sizeof(nvshmem_team_config_v1)
+#define NVSHMEMI_TEAM_CONFIG_V1_INITIALIZER                        \
+    {NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER, /* version */      \
+     TEAM_CONFIG_SCALAR_INVALID,                /* num_contexts */ \
+     {0}}
 #define STATE_SCALAR_INVALID -1
 #define STATE_USCALAR_INVALID 0xFFFFFFFF
 #define STATE_ULSCALAR_INVALID 0xFFFFFFFFFFFFFFFF
@@ -81,7 +87,7 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
         TEAM_SCALAR_INVALID,         /* stride */                                      \
         TEAM_SCALAR_INVALID,         /* size */                                        \
         TEAM_SCALAR_INVALID,         /* team_idx */                                    \
-        NVSHMEMI_TEAM_CONFIG_INITIALIZER,                                              \
+        NVSHMEM_TEAM_CONFIG_INITIALIZER,                                               \
         TEAM_SCALAR_INVALID, /* config_mask */                                         \
         NULL,                /* nccl_comm */                                           \
         NVSHMEMI_RED_REX_INITIALIZER,                                                  \

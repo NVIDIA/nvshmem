@@ -14,6 +14,8 @@
 #include <cuda/std/climits>
 #endif
 
+#include "device_host/nvshmem_types.h"
+
 typedef enum {
     NVSHMEMI_OP_PUT = 1,
     NVSHMEMI_OP_P = 2,
@@ -35,8 +37,6 @@ typedef enum {
     NVSHMEMI_OP_QUIET_QP = 108,
     NVSHMEMI_OP_SENTINEL = INT_MAX,
 } nvshmemi_op_t;
-
-typedef enum { NVSHMEM_SIGNAL_SET = 9, NVSHMEM_SIGNAL_ADD = 10 } nvshmemx_signal_op_t;
 
 typedef enum {
     NVSHMEMI_AMO_ACK = 1,

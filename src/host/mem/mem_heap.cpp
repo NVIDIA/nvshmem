@@ -1216,8 +1216,8 @@ int nvshmemi_symmetric_heap_sysmem_static_shm::release_memory(void * /*buf*/, si
                  all PEs at cleanup time, so there is no step needed to release buffer range */
 }
 
-int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(nvshmemi_team_t *team,
-                                                                              uint64_t mem_size) {
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(
+    nvshmemi_team_t *team, [[maybe_unused]] uint64_t mem_size) {
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     int status = 0;
     int le_query_status = 0;
@@ -1335,7 +1335,6 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(nv
     return status;
 #else
     team->mc_leid_with_flag = 0;
-    NVSHMEMI_UNUSED_ARG(mem_size);
     return 0;
 #endif
 }

@@ -99,8 +99,8 @@ void nvshmemxi_sync_all_on_stream(cudaStream_t stream) {
     if (nvshmemi_is_limited_mpg_run) {
         // sync PEs on the same GPU
         nvshmemi_mps_sync_gpu_on_stream(stream);
-        if (nvshmem_team_my_pe(NVSHMEMI_TEAM_SAME_GPU) == 0) {
-            nvshmemxi_sync_on_stream(NVSHMEMI_TEAM_GPU_LEADERS, stream);
+        if (nvshmem_team_my_pe(NVSHMEM_TEAM_SAME_GPU_INDEX) == 0) {
+            nvshmemxi_sync_on_stream(NVSHMEM_TEAM_GPU_LEADERS_INDEX, stream);
         }
         nvshmemi_mps_sync_gpu_on_stream(stream);
     } else {
