@@ -18,7 +18,7 @@
 #include <string.h>                                      // for memset, memcmp
 #include <cmath>                                         // for ceil
 #include "../coll/rdxn/rdxn.h"                           // for nvshmemi_call...
-#include "device_host/nvshmem_types.h"                   // for nvshmemi_team_t
+#include "non_abi/device_host/nvshmemi_types.h"          // for nvshmemi_team_t
 #include "cpu_coll.h"                                    // for nccl_ftable
 #include "bootstrap_device_host/nvshmem_uniqueid.h"      // for nvshmemx_team_uniqueid_t
 #include "device_host/nvshmem_common.cuh"                // for nvshmemi_pe_i...

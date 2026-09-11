@@ -21,7 +21,7 @@
 #include "internal/device/nvshmemi_device.h"
 #include "internal/common/error_codes_internal.h"
 #include "device_host/nvshmem_common.cuh"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"

@@ -12,7 +12,7 @@
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host/nvshmem_common.cuh"
 #include "internal/host/nvshmem_internal.h"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 #include "internal/host/util.h"
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"

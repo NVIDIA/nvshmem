@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_types.h"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 
 #define CHANNEL_COUNT 1
 #define COUNTER_TO_FLAG(state, counter) ((uint8_t)(!((counter >> state->channel_bufsize_log) & 1)))

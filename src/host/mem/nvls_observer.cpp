@@ -12,7 +12,7 @@
 #include <map>
 #include <typeinfo>
 #include <vector>
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 #include "host/nvshmem_api.h"
 #include "host/nvshmemx_api.h"
 #include "non_abi/nvshmemx_error.h"

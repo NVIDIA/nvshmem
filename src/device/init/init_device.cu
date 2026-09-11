@@ -23,7 +23,7 @@
 #include "internal/common/error_codes_internal.h"
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
 #include "device_host/nvshmem_common.cuh"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"

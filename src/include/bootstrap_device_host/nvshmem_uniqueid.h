@@ -26,7 +26,11 @@ typedef struct {
     int version;
     char internal[UNIQUEID_PADDING];
 } nvshmemx_uniqueid_v1;
+#if defined(__cplusplus)
 static_assert(sizeof(nvshmemx_uniqueid_v1) == 128, "uniqueid_v1 must be 128 bytes.");
+#else
+_Static_assert(sizeof(nvshmemx_uniqueid_v1) == 128, "uniqueid_v1 must be 128 bytes.");
+#endif
 
 typedef nvshmemx_uniqueid_v1 nvshmemx_uniqueid_t;
 
@@ -36,7 +40,11 @@ typedef struct {
     int myrank;
     int nranks;
 } nvshmemx_uniqueid_args_v1;
+#if defined(__cplusplus)
 static_assert(sizeof(nvshmemx_uniqueid_args_v1) == 24, "uniqueid_args_v1 must be 24 bytes.");
+#else
+_Static_assert(sizeof(nvshmemx_uniqueid_args_v1) == 24, "uniqueid_args_v1 must be 24 bytes.");
+#endif
 
 typedef nvshmemx_uniqueid_args_v1 nvshmemx_uniqueid_args_t;
 

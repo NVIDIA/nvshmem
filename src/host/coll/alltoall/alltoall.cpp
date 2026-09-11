@@ -4,16 +4,16 @@
  */
 
 #include "alltoall.h"
-#include <cuda_runtime.h>                    // for cudaStreamSynchronize
-#include <stddef.h>                          // for size_t, ptrdiff_t
-#include <stdint.h>                          // for int16_t, int32_t, int64_t
-#include "device_host/nvshmem_common.cuh"    // for NVSHMEMI_REPT_FOR_STAN...
-#include "device_host/nvshmem_types.h"       // for nvshmem_team_t
-#include "host/nvshmem_coll_api.h"           // for nvshmem_alltoallmem
-#include "internal/host/nvshmem_internal.h"  // for nvshmemi_state, nvshme...
-#include "internal/host/nvshmemi_types.h"    // for nvshmemi_state
-#include "internal/host/nvshmem_nvtx.hpp"    // for nvtx_cond_range, NVTX_...
-#include "internal/host/util.h"              // for CUDA_RUNTIME_CHECK
+#include <cuda_runtime.h>                        // for cudaStreamSynchronize
+#include <stddef.h>                              // for size_t, ptrdiff_t
+#include <stdint.h>                              // for int16_t, int32_t, int64_t
+#include "device_host/nvshmem_common.cuh"        // for NVSHMEMI_REPT_FOR_STAN...
+#include "non_abi/device_host/nvshmemi_types.h"  // for nvshmem_team_t
+#include "host/nvshmem_coll_api.h"               // for nvshmem_alltoallmem
+#include "internal/host/nvshmem_internal.h"      // for nvshmemi_state, nvshme...
+#include "internal/host/nvshmemi_types.h"        // for nvshmemi_state
+#include "internal/host/nvshmem_nvtx.hpp"        // for nvtx_cond_range, NVTX_...
+#include "internal/host/util.h"                  // for CUDA_RUNTIME_CHECK
 
 #define DEFN_NVSHMEM_TYPENAME_ALLTOALL(TYPENAME, TYPE)                                            \
     int nvshmem_##TYPENAME##_alltoall(nvshmem_team_t team, TYPE *dest, const TYPE *source,        \

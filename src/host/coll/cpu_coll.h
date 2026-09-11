@@ -6,20 +6,20 @@
 #ifndef NVSHMEMI_COLL_CPU_H
 #define NVSHMEMI_COLL_CPU_H 1
 
-#include <cuda.h>                              // for CUdeviceptr, CU_STREAM...
-#include <cuda_fp16.h>                         // for half
-#include <driver_types.h>                      // for CUstream_st, cudaStream_t
-#include <limits.h>                            // for CHAR_MIN
-#include <stdint.h>                            // for uint64_t
-#include <stdio.h>                             // for size_t, stderr, fflush
-#include "cpu_coll.h"                          // lines 15-15
-#include "device_host/nvshmem_common.cuh"      // for P2P_SYNC_ON_STREAM, RDXN_OPS_AND
-#include "device_host/nvshmem_types.h"         // for nvshmemi_team_t
-#include "internal/host/nvshmem_internal.h"    // for nvshmemi_cuda_syms
-#include "internal/host/nvshmemi_team.h"       // for nvshmemi_ptr, nvshmemi...
-#include "internal/host/nvshmemi_types.h"      // for nvshmemi_state, nvshme...
-#include "internal/host_transport/cudawrap.h"  // for CUPFN, nvshmemi_cuda_f...
-#include "non_abi/nvshmemx_error.h"            // for NVSHMEMI_NZ_EXIT
+#include <cuda.h>                                // for CUdeviceptr, CU_STREAM...
+#include <cuda_fp16.h>                           // for half
+#include <driver_types.h>                        // for CUstream_st, cudaStream_t
+#include <limits.h>                              // for CHAR_MIN
+#include <stdint.h>                              // for uint64_t
+#include <stdio.h>                               // for size_t, stderr, fflush
+#include "cpu_coll.h"                            // lines 15-15
+#include "device_host/nvshmem_common.cuh"        // for P2P_SYNC_ON_STREAM, RDXN_OPS_AND
+#include "non_abi/device_host/nvshmemi_types.h"  // for nvshmemi_team_t
+#include "internal/host/nvshmem_internal.h"      // for nvshmemi_cuda_syms
+#include "internal/host/nvshmemi_team.h"         // for nvshmemi_ptr, nvshmemi...
+#include "internal/host/nvshmemi_types.h"        // for nvshmemi_state, nvshme...
+#include "internal/host_transport/cudawrap.h"    // for CUPFN, nvshmemi_cuda_f...
+#include "non_abi/nvshmemx_error.h"              // for NVSHMEMI_NZ_EXIT
 
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"                           // for ncclDataType_t, ncclResult_t

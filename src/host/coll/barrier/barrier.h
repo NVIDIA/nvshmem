@@ -6,7 +6,7 @@
 #ifndef NVSHMEMI_BARRIER_CPU_H
 #define NVSHMEMI_BARRIER_CPU_H
 #include <driver_types.h>
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 
 int nvshmemi_call_barrier_on_stream_kernel(nvshmem_team_t team, cudaStream_t stream);
 int nvshmemi_call_sync_on_stream_kernel(nvshmem_team_t team, cudaStream_t stream);

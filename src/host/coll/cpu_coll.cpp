@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <algorithm>
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"

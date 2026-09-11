@@ -9,7 +9,7 @@
 #include <string>
 #include <unordered_map>
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 #include "host/nvshmemx_api.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/debug.h"

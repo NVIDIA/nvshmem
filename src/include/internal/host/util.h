@@ -29,7 +29,7 @@
 #include <stddef.h>
 #include <sstream>
 #include <inttypes.h>
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 #include "non_abi/nvshmemx_error.h"
 #include "internal/common/error_codes_internal.h"
 #include "internal/host/debug.h"

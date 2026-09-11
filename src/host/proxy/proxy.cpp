@@ -2,21 +2,21 @@
  * Copyright (c) 2016-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-#include <algorithm>                       // for copy
-#include <assert.h>                        // for assert
-#include <cuda.h>                          // for CUDA_SUCCESS
-#include <cuda_runtime.h>                  // for cudaFreeHost
-#include <driver_types.h>                  // for cudaStreamNon...
-#include <inttypes.h>                      // for PRIu64
-#include <math.h>                          // for log2
-#include <pthread.h>                       // for pthread_create
-#include <stdint.h>                        // for uint64_t, uin...
-#include <stdio.h>                         // for fprintf, NULL
-#include <stdlib.h>                        // for exit, free
-#include <string.h>                        // for memset, memcpy
-#include <unistd.h>                        // IWYU pragma: keep for getpid in NVSHMEM_TRACE case
-#include "device_host/nvshmem_types.h"     // for nvshmemi_devi...
-#include "device_host/nvshmem_common.cuh"  // for nvshmemi_devi...
+#include <algorithm>       // for copy
+#include <assert.h>        // for assert
+#include <cuda.h>          // for CUDA_SUCCESS
+#include <cuda_runtime.h>  // for cudaFreeHost
+#include <driver_types.h>  // for cudaStreamNon...
+#include <inttypes.h>      // for PRIu64
+#include <math.h>          // for log2
+#include <pthread.h>       // for pthread_create
+#include <stdint.h>        // for uint64_t, uin...
+#include <stdio.h>         // for fprintf, NULL
+#include <stdlib.h>        // for exit, free
+#include <string.h>        // for memset, memcpy
+#include <unistd.h>        // IWYU pragma: keep for getpid in NVSHMEM_TRACE case
+#include "non_abi/device_host/nvshmemi_types.h"              // for nvshmemi_devi...
+#include "device_host/nvshmem_common.cuh"                    // for nvshmemi_devi...
 #include "device_host_transport/nvshmem_constants.h"         // for CHANNEL_BUF_S...
 #include "host/nvshmem_api.h"                                // for nvshmem_globa...
 #include "non_abi/nvshmemx_error.h"                          // for NVSHMEMI_ERRO...

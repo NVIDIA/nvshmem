@@ -4,7 +4,7 @@
  */
 
 #include "host/nvshmem_macros.h"
-#include "device_host/nvshmem_types.h"
+#include "non_abi/device_host/nvshmemi_types.h"
 
 #ifndef NVSHMEMI_COLL_H
 #define NVSHMEMI_COLL_H

@@ -9,7 +9,7 @@
 #include <stdint.h>                                              // for uintptr_t
 #include <string.h>                                              // for memcpy, NULL
 #include <sys/types.h>                                           // for off_t
-#include "device_host/nvshmem_types.h"                           // for nvshmemi_team_t
+#include "non_abi/device_host/nvshmemi_types.h"                  // for nvshmemi_team_t
 #include "non_abi/nvshmemx_error.h"                              // for NVSHMEMI_NE_ERR...
 #include "internal/host/debug.h"                                 // for WARN
 #include "internal/host/nvshmem_internal.h"                      // for nvshmemi_cuda_syms
