@@ -252,6 +252,14 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_le_implemented(uint64_t le
         return false;
     }
 
+    if (scope == NVSHMEMI_THREADGROUP_THREAD) {
+        const size_t thread_idx =
+            threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+        const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
+        return handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
+               nvshmemi_smem_data_buf_size(1) >= CFT_HANDLE_TX_SIZE;
+    }
+
     return is_thrdgrp_smem_rsc_available(scope);
 #else
     return false;
