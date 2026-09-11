@@ -58,15 +58,19 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DEFN_FCOLLECT_TEST_KERNEL)
 #endif
 #undef DEFN_FCOLLECT_TEST_KERNEL
 
-#define DO_FCOLLECT_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                            \
-    if (use_cubin) {                                                                          \
-        DO_FCOLLECT_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);                     \
-    } else {                                                                                  \
-        test_##TYPENAME##_fcollect##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-            team, (TYPE *)dest, (TYPE *)source, nelems, iters, _dynamic_smem_size);           \
-    }                                                                                         \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                   \
-    cudaStreamSynchronize(cstrm);
+#define DO_FCOLLECT_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                                \
+    do {                                                                                          \
+        if (use_cubin) {                                                                          \
+            DO_FCOLLECT_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);                     \
+        } else {                                                                                  \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##TYPENAME##_fcollect##SC_SUFFIX,              \
+                                              _dynamic_smem_size);                                \
+            test_##TYPENAME##_fcollect##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+                team, (TYPE *)dest, (TYPE *)source, nelems, iters, _dynamic_smem_size);           \
+        }                                                                                         \
+        CUDA_RUNTIME_CHECK(cudaGetLastError());                                                   \
+        CUDA_RUNTIME_CHECK(cudaStreamSynchronize(cstrm));                                         \
+    } while (0);
 
 int main(int argc, char **argv) {
     int status = 0;
@@ -81,6 +85,7 @@ int main(int argc, char **argv) {
 #ifdef _NVSHMEM_DEBUG
     int mype;
 #endif
+    _dynamic_smem_size = SMEM_SIZE_RECOMMENDED;
     read_args(argc, argv);
     alloc_size = MAX_ELEMS * (MAX_NPES + 1) * sizeof(LARGEST_DT);
 
@@ -162,7 +167,8 @@ int main(int argc, char **argv) {
     iters = 50;
     num_threads = 1;
     team = NVSHMEM_TEAM_WORLD;
-    for (nelems = 1; nelems < MAX_ELEMS; nelems *= 2) {
+    for (nelems = _min_size ? (_min_size + sizeof(float) - 1) / sizeof(float) : 1;
+         nelems < MAX_ELEMS; nelems *= 2) {
         DO_FCOLLECT_TEST(thread, , , float, float)
     }
     COLL_CHECK_ERRS_D();

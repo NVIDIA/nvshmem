@@ -160,7 +160,9 @@ int test(launch_alltoall_ptr_t launch_alltoall, launch_ring_ptr_t launch_ring) {
     int mype = nvshmem_my_pe();
     int npes = nvshmem_n_pes();
 
-    for (size = sizeof(T); size <= max_msg_size; size *= 2) {
+    const size_t min_size =
+        _min_size ? ((_min_size + sizeof(T) - 1) / sizeof(T)) * sizeof(T) : sizeof(T);
+    for (size = min_size; size <= max_msg_size; size *= 2) {
 #ifdef _RING_
         nvshmem_barrier_all();
 
