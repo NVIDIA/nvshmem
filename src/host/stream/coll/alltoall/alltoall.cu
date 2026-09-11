@@ -11,14 +11,18 @@
 
 #include "internal/host/util.h"
 #include "non_abi/device/coll/alltoall.cuh"
+#include "device/nvshmemx_defines.h"
 
 template <typename TYPE>
 __global__ void alltoall_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,
                                           size_t nelems, int in_cuda_graph) {
 #ifdef __CUDA_ARCH__
+    extern __shared__ char smem[];
+    nvshmemx_give_smem(smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     if (!blockIdx.x) {
         nvshmemi_alltoall_threadgroup<TYPE, NVSHMEMI_THREADGROUP_BLOCK>(team, dest, source, nelems);
     }
+    nvshmemx_release_smem();
 #endif
 }
 
@@ -45,7 +49,8 @@ void nvshmemi_call_alltoall_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
         in_cuda_graph = 1;
     }
 
-    alltoall_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, 0, stream>>>(
+    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    alltoall_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, smem_size, stream>>>(
         team, dest, source, nelems, in_cuda_graph);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
 }
