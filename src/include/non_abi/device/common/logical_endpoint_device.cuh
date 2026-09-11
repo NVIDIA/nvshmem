@@ -190,10 +190,20 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, 
         }
     }
 
-    /* The handle path stages global local buffers through shared memory; shared
-     * local buffers can be consumed or produced by fabric directly. */
-    return ((scope != NVSHMEMI_THREADGROUP_THREAD) && nvshmemi_tma_smem_registered() &&
-            is_thrdgrp_smem_rsc_available(scope) &&
+    bool has_smem_resources;
+    if (scope == NVSHMEMI_THREADGROUP_THREAD) {
+        const size_t thread_idx =
+            threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+        const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
+        has_smem_resources = handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
+                             nvshmemi_smem_data_buf_size(1) >= CFT_HANDLE_TX_SIZE;
+    } else {
+        has_smem_resources = is_thrdgrp_smem_rsc_available(scope);
+    }
+
+    /* Thread scope serializes access to the full staging tile. Other scopes
+     * retain their existing partitioned SMEM and barrier allocation. */
+    return (nvshmemi_tma_smem_registered() && has_smem_resources &&
             nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) &&
             nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)tma_addr) &&
             nvshmemi_ld_and_check_valid_le_id(pe));
@@ -400,7 +410,8 @@ struct mbarrier_primary_wait_raw_result {
 struct alignas(16) handle_tracking_state_t {
     uint32_t initialized_slots;
     uint32_t pending_slots;
-    uint64_t reserved;
+    uint32_t thread_mutex;
+    uint32_t reserved;
 };
 
 static_assert(sizeof(handle_tracking_state_t) == NVSHMEMI_HANDLE_TRACKING_STATE_BYTES,

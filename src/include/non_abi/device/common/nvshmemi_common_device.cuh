@@ -689,6 +689,32 @@ __device__ __forceinline__ char *nvshmemi_counted_state_slot(uintptr_t smem_base
            (uintptr_t)slot * NVSHMEMI_COUNTED_STATE_SLOT_BYTES;
 }
 
+__device__ __forceinline__ uint32_t *nvshmemi_cft_thread_mutex(uintptr_t smem_base) {
+    return &nvshmemi_handle_tracking_state(smem_base)->thread_mutex;
+}
+
+__device__ __forceinline__ void nvshmemi_cft_thread_mutex_init(uintptr_t smem_base) {
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_block>{*nvshmemi_cft_thread_mutex(smem_base)}
+        .store(0, cuda::memory_order_relaxed);
+}
+
+__device__ __forceinline__ void nvshmemi_cft_thread_mutex_lock(uintptr_t smem_base) {
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_block> lock{
+        *nvshmemi_cft_thread_mutex(smem_base)};
+    for (;;) {
+        uint32_t expected = 0;
+        if (lock.compare_exchange_weak(expected, 1, cuda::memory_order_acquire,
+                                       cuda::memory_order_relaxed)) {
+            return;
+        }
+    }
+}
+
+__device__ __forceinline__ void nvshmemi_cft_thread_mutex_unlock(uintptr_t smem_base) {
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_block>{*nvshmemi_cft_thread_mutex(smem_base)}
+        .store(0, cuda::memory_order_release);
+}
+
 template <bool INVALIDATE>
 __device__ __forceinline__ void nvshmemi_drain_handle_slot_if_owned(uintptr_t smem_base,
                                                                     uint32_t selected_slots,
@@ -829,7 +855,13 @@ __device__ __forceinline__ void nvshmemi_handle_release_all() {
 template <threadgroup_t SCOPE>
 __device__ __forceinline__ void nvshmemi_handle_quiet() {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        const auto registration = nvshmemi_tma_get_smem_registration();
+        if (!registration.is_valid()) {
+            return;
+        }
+        nvshmemi_cft_thread_mutex_lock(registration.base);
         nvshmemi_handle_quiet_all();
+        nvshmemi_cft_thread_mutex_unlock(registration.base);
     } else {
         // Publish every issuer's pending state before physical warp leaders
         // drain their owned slots in parallel. The trailing synchronization
@@ -2811,10 +2843,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
 
     /*
      * Scalar PUTs share handle barriers and staging SMEM with copy paths.
-     * Acquire the slot before overwriting SMEM so a previous owner is drained,
-     * and retain pending completions from this owner in the same batch.
+     * Serialize access to both resources before overwriting SMEM, then acquire
+     * the barrier slot so a previous owner is drained.
      */
     if (lane_idx == leader_lane) {
+        nvshmemi_cft_thread_mutex_lock(smem_base);
         handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         handle_bar->ensure_handle_tx_capacity(completion_bytes);
     }
@@ -2849,6 +2882,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
     if (lane_idx == leader_lane) {
         handle_bar->record_pending_handle(completion_bytes);
         handle_bar->drain_pending_handle(true);
+        nvshmemi_cft_thread_mutex_unlock(smem_base);
     }
     __syncwarp(mask);
 }
@@ -3155,25 +3189,105 @@ nvshmemi_handle_get_emulated<NVSHMEMI_THREADGROUP_WARP>(
                                                                     is_blocking, smem_chunk_size);
 }
 
-/* Handle PUT is supported for non-thread scopes.  The destination address must
- * be CFT_HANDLE_TX_SIZE-aligned; a sub-TX-size payload tail is handled below. */
+/* Serialize thread-scope handle puts over the CTA-wide staging tile. Deferred
+ * completion remains on the issuing physical warp's handle barrier; the mutex
+ * can be released once fabric has consumed the shared source. */
+template <le_fabric_handle_kind cft_handle_kind>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_thread(
+    const nvshmemi_tma_smem_registration_t &registration, const void *src, void *dst, size_t len,
+    CUlogicalEndpointId dest_le_id, bool is_blocking) {
+    const uint32_t tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
+    const uint32_t warp_idx_in_block = tid / warpSize;
+    const uintptr_t smem_base = registration.base;
+
+    nvshmemi_cft_thread_mutex_lock(smem_base);
+
+    handle_barrier_t *handle_bar =
+        nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+    handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+    fence_async_proxy();
+
+    auto dst_handle = nvshmemi_fabric_handle_for_le_id<cft_handle_kind>(dest_le_id, dst);
+    const bool is_src_shared = __isShared(src);
+    uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
+    const size_t staging_size = nvshmemi_smem_data_buf_size(registration, 1);
+    const size_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
+    size_t byte_offset = 0;
+
+    __mbarrier_t *tma_bar_ptr = nullptr;
+    if (!is_src_shared && adjusted_size != 0) {
+        tma_bar_ptr = reinterpret_cast<__mbarrier_t *>(nvshmemi_tma_barrier_slot(smem_base, 0));
+        __mbarrier_init(tma_bar_ptr, 1);
+        nvshmemi_tma_fence_proxy_async_shared_cta();
+    }
+
+    while (byte_offset < adjusted_size) {
+        const uint32_t copy_bytes = static_cast<uint32_t>(
+            staging_size < (adjusted_size - byte_offset) ? staging_size
+                                                         : (adjusted_size - byte_offset));
+        const void *fabric_src = nvshmemi_ptr_add(src, byte_offset);
+        if (!is_src_shared) {
+            nvshmemi_tma_g2s_copy_thread(0, smem_data_buf, tma_bar_ptr,
+                                         nvshmemi_ptr_add(src, byte_offset), copy_bytes);
+            fabric_src = smem_data_buf;
+        }
+
+        nvshmemi_try_put_wrapper_thread<cft_handle_kind>(0, fabric_src, dst_handle, byte_offset,
+                                                         handle_bar, copy_bytes);
+        handle_bar->fabric_wait_sync_reads();
+        byte_offset += copy_bytes;
+    }
+
+    const uint32_t remaining = static_cast<uint32_t>(len - adjusted_size);
+    if (remaining != 0) {
+        const void *fabric_src = nvshmemi_ptr_add(src, adjusted_size);
+        if (!is_src_shared) {
+            for (uint32_t i = 0; i < remaining; i++) {
+                smem_data_buf[i] = reinterpret_cast<const uint8_t *>(src)[adjusted_size + i];
+            }
+            fabric_src = smem_data_buf;
+        }
+        fence_async_proxy();
+        nvshmemi_try_put_wrapper_thread<cft_handle_kind>(0, fabric_src, dst_handle, adjusted_size,
+                                                         handle_bar, remaining);
+        handle_bar->fabric_wait_sync_reads();
+    }
+
+    if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
+        handle_bar->drain_pending_handle(true);
+    } else {
+        handle_bar->publish_pending_handle();
+    }
+    if (tma_bar_ptr != nullptr) {
+        __mbarrier_inval(tma_bar_ptr);
+    }
+
+    nvshmemi_cft_thread_mutex_unlock(smem_base);
+}
+
+/* The destination address must be CFT_HANDLE_TX_SIZE-aligned; non-thread
+ * scopes retain their existing partitioned paths and thread scope uses the
+ * serialized full-tile implementation above. */
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *src, void *dst,
                                                                   size_t len, int pe,
                                                                   bool is_blocking) {
-    if constexpr (SCOPE != NVSHMEMI_THREADGROUP_THREAD) {
-        if (pe == nvshmemi_device_state_d.mype) {
-            nvshmemi_memcpy_threadgroup<SCOPE>(dst, src, len);
-            return;
-        }
+    if (pe == nvshmemi_device_state_d.mype) {
+        nvshmemi_memcpy_threadgroup<SCOPE>(dst, src, len);
+        return;
+    }
 
-        // address must be aligned to CFT_HANDLE_TX_SIZE
-        assert(nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE));
-        assert(nvshmemi_ld_and_check_valid_le_id(pe));
+    // address must be aligned to CFT_HANDLE_TX_SIZE
+    assert(nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE));
+    assert(nvshmemi_ld_and_check_valid_le_id(pe));
+    const auto registration = nvshmemi_tma_get_smem_registration();
+
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        nvshmemi_handle_put_thread<le_fabric_handle_kind::Unicast>(
+            registration, src, dst, len, nvshmemi_ld_and_get_le_id(pe), is_blocking);
+    } else {
         CUlogicalEndpointId dest_le_id = nvshmemi_ld_and_get_le_id((pe));
         size_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
-        const auto registration = nvshmemi_tma_get_smem_registration();
-
         uint32_t num_threadgroups =
             NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
                                        nvshmemi_threadgroup_size<SCOPE>());
@@ -3396,21 +3510,70 @@ nvshmemi_handle_atomic_fetch_impl(const nvshmemi_tma_smem_registration_t &regist
 }
 #endif
 
+/* Serialize thread-scope handle gets over the CTA-wide staging tile. Fabric
+ * completion is consumed before copying each tile to the caller's destination,
+ * so the shared tile can safely pass to the next mutex owner. */
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_thread(
+    const nvshmemi_tma_smem_registration_t &registration, const void *src, void *dst, size_t len,
+    int pe) {
+    const uint32_t tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
+    const uint32_t warp_idx_in_block = tid / warpSize;
+    const uintptr_t smem_base = registration.base;
+
+    nvshmemi_cft_thread_mutex_lock(smem_base);
+
+    handle_barrier_t *handle_bar =
+        nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+    handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
+    fence_async_proxy();
+
+    auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
+    const bool is_dst_shared = __isShared(dst);
+    uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
+    const size_t staging_size = nvshmemi_smem_data_buf_size(registration, 1);
+    size_t byte_offset = 0;
+
+    while (byte_offset < len) {
+        const uint32_t copy_bytes = static_cast<uint32_t>(
+            staging_size < (len - byte_offset) ? staging_size : (len - byte_offset));
+        void *fabric_dst = is_dst_shared ? nvshmemi_ptr_add(dst, byte_offset) : smem_data_buf;
+
+        nvshmemi_issue_get_wrapper_thread(0, fabric_dst, src_handle, byte_offset, handle_bar,
+                                          copy_bytes);
+        handle_bar->drain_pending_handle(false);
+
+        if (!is_dst_shared) {
+            nvshmemi_tma_s2g_copy_thread<0>(0, smem_data_buf, nvshmemi_ptr_add(dst, byte_offset),
+                                            copy_bytes);
+        }
+        byte_offset += copy_bytes;
+    }
+
+    handle_bar->drain_pending_handle(true);
+    if (is_dst_shared) {
+        fence_proxy_fabric2generic_alias();
+    }
+
+    nvshmemi_cft_thread_mutex_unlock(smem_base);
+}
+
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *src, void *dst,
                                                                   size_t len, int pe,
                                                                   bool is_blocking) {
-    if constexpr (SCOPE != NVSHMEMI_THREADGROUP_THREAD) {
 #if __CUDA_ARCH__ >= 1000
-        if (pe == nvshmemi_device_state_d.mype) {
-            nvshmemi_memcpy_threadgroup<SCOPE>(dst, src, len);
-            return;
-        }
+    if (pe == nvshmemi_device_state_d.mype) {
+        nvshmemi_memcpy_threadgroup<SCOPE>(dst, src, len);
+        return;
+    }
 
-        assert(nvshmemi_is_addr_offset_aligned(src, CFT_HANDLE_TX_SIZE));
-        assert(nvshmemi_ld_and_check_valid_le_id(pe));
-        const auto registration = nvshmemi_tma_get_smem_registration();
+    assert(nvshmemi_is_addr_offset_aligned(src, CFT_HANDLE_TX_SIZE));
+    assert(nvshmemi_ld_and_check_valid_le_id(pe));
+    const auto registration = nvshmemi_tma_get_smem_registration();
 
+    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
+        nvshmemi_handle_get_thread(registration, src, dst, len, pe);
+    } else {
         uint32_t num_threadgroups =
             NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
                                        nvshmemi_threadgroup_size<SCOPE>());
@@ -3419,10 +3582,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *sr
 
         nvshmemi_handle_get_emulated<SCOPE>(registration, dst, src, len, pe, is_blocking,
                                             smem_chunk_size);
-#else
-        assert(0 && "nvshmemi_handle_get: not supported");
-#endif
     }
+#else
+    assert(0 && "nvshmemi_handle_get: not supported");
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>
