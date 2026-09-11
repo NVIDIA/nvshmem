@@ -1221,24 +1221,11 @@ endif()
 
 # Start Installation definitions
 install(CODE "
-  # Patch NVSHMEM target files
+  # Patch NVSHMEM host and device target files
   file(GLOB_RECURSE targets_files
     \"${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/Export/*/NVSHMEM*Targets*.cmake\"
     \"${CMAKE_CURRENT_BINARY_DIR}/device/CMakeFiles/Export/*/NVSHMEMDeviceTargets*.cmake\"
   )
-  foreach(targets_file IN LISTS targets_files)
-    message(STATUS \"Processing targets_file=\${targets_file}\")
-    file(READ \"\${targets_file}\" _file_contents)
-    string(REPLACE \"\\\${_IMPORT_PREFIX}/bin\" \"\\\${NVSHMEM_BIN_DIR}\" _file_contents \"\${_file_contents}\")
-        string(REPLACE \"\\\${_IMPORT_PREFIX}/include\" \"\\\${NVSHMEM_INCLUDE_DIR}\" _file_contents \"\${_file_contents}\")
-    string(REPLACE \"\\\${_IMPORT_PREFIX}/lib\" \"\\\${NVSHMEM_LIB_DIR}\" _file_contents \"\${_file_contents}\")
-    file(WRITE \"\${targets_file}\" \"\${_file_contents}\")
-  endforeach()
-")
-# This makes sure the device config file is included as well
-install(CODE "
-  # Patch NVSHMEM target files
-  file(GLOB_RECURSE targets_files \"${CMAKE_BINARY_DIR}/lib/cmake/NVSHMEM*Targets*.cmake\")
   foreach(targets_file IN LISTS targets_files)
     message(STATUS \"Processing targets_file=\${targets_file}\")
     file(READ \"\${targets_file}\" _file_contents)
