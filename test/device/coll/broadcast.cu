@@ -55,11 +55,23 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DEFN_TEST_BROADCAST_KERNEL)
 }
 #endif
 
-#define DO_BROADCAST_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                        \
-    test_##TYPENAME##_broadcast##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-        team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                   \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                \
-    cudaStreamSynchronize(cstrm);
+#define DO_BROADCAST_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                                \
+    do {                                                                                           \
+        size_t min_nelems = _min_size ? (_min_size + sizeof(TYPE) - 1) / sizeof(TYPE) : 1;         \
+        for (nelems = min_nelems; nelems <= max_nelems; nelems *= 2) {                             \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##TYPENAME##_broadcast##SC_SUFFIX,              \
+                                              _dynamic_smem_size);                                 \
+            test_##TYPENAME##_broadcast##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+                team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                   \
+            CUDA_RUNTIME_CHECK(cudaGetLastError());                                                \
+            cudaError_t sync_status = cudaStreamSynchronize(cstrm);                                \
+            if (sync_status != cudaSuccess) {                                                      \
+                fprintf(stderr, "broadcast %s failed: team=%d scope=%s nelems=%zu bytes=%zu\n",    \
+                        #TYPENAME, team, #SC, nelems, nelems * sizeof(TYPE));                      \
+            }                                                                                      \
+            CUDA_RUNTIME_CHECK(sync_status);                                                       \
+        }                                                                                          \
+    } while (0);
 
 int main(int argc, char **argv) {
     int status = 0;
@@ -67,9 +79,11 @@ int main(int argc, char **argv) {
     size_t alloc_size = 0;
     LARGEST_DT *d_buffer, *source, *dest;
     size_t nelems;
+    size_t max_nelems;
     cudaStream_t cstrm;
     unsigned long long int errs;
 
+    _dynamic_smem_size = SMEM_SIZE_RECOMMENDED;
     read_args(argc, argv);
     alloc_size = MAX_ELEMS * 2 * sizeof(LARGEST_DT);
 
@@ -111,22 +125,18 @@ int main(int argc, char **argv) {
 
             /* threaded */
             num_threads = 1;
-            for (nelems = 1; nelems <= ELEMS_PER_THREAD; nelems *= 2) {
-                NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DO_BROADCAST_TEST, thread, , )
-            }
+            max_nelems = ELEMS_PER_THREAD;
+            NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DO_BROADCAST_TEST, thread, , )
             DEBUG_PRINT("%d: broadcast thread passed\n", mype);
             /* warp */
             num_threads = 32;
-            for (nelems = 1; nelems <= ELEMS_PER_THREAD * num_threads; nelems *= 2) {
-                NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DO_BROADCAST_TEST, warp, _warp, x)
-            }
+            max_nelems = ELEMS_PER_THREAD * num_threads;
+            NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DO_BROADCAST_TEST, warp, _warp, x)
             DEBUG_PRINT("%d: broadcast warp passed\n", mype);
             /* block */
             num_threads = NVSHM_TEST_NUM_TPB;
-            for (nelems = 1; nelems <= ELEMS_PER_THREAD * num_threads; nelems *= 2) {
-                NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DO_BROADCAST_TEST, block, _block,
-                                                                 x)
-            }
+            max_nelems = ELEMS_PER_THREAD * num_threads;
+            NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DO_BROADCAST_TEST, block, _block, x)
             DEBUG_PRINT("%d: broadcast block passed\n", mype);
             COLL_CHECK_ERRS_D();
             nvshmem_barrier_all();
