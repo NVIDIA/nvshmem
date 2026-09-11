@@ -107,6 +107,8 @@ static int *team_ret_val = nullptr;
 static int *team_ret_val_reduced = nullptr;
 static int *device_team_ret_val = nullptr;
 static int *device_team_ret_val_reduced = nullptr;
+/* Four ints form one aligned 16-byte lane, avoiding masked sub-16-byte CFT transfers. */
+static constexpr size_t TEAM_RET_VAL_REDUCTION_INTS = 4;
 
 nvshmemi_team_creation_psync_t *nvshmemi_team_creation_psync = NULL;
 
@@ -678,7 +680,7 @@ size_t nvshmemi_get_teams_mem_requirement() {
     size_t psync_size = get_psync_len_per_team();
     size_t teams_mem_req = sizeof(long) * nvshmemi_max_teams * psync_size + /* psync's */
                            2 * N_PSYNC_BYTES +                              /* psync_pool_avail */
-                           2 * sizeof(int) +                                /* team_ret_val */
+                           2 * TEAM_RET_VAL_REDUCTION_INTS * sizeof(int) +  /* team_ret_val */
                            2 * sizeof(long) * nvshmemi_max_teams            /* storing counters */
 #ifdef NVSHMEM_USE_NCCL
                            + sizeof(ncclUniqueId)
@@ -1580,19 +1582,19 @@ static int init_team_pool_and_psync() {
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_GPU_LEADERS_INDEX);
 
     /* Initialize an integer used to agree on an equal return value across PEs in team creation: */
-    team_ret_val = (int *)malloc(sizeof(int) * 2);
+    team_ret_val = (int *)malloc(sizeof(int) * 2 * TEAM_RET_VAL_REDUCTION_INTS);
     if (!team_ret_val) {
         NVSHMEMI_ERROR_PRINT("team_ret_val allocation failed \n");
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
-    team_ret_val_reduced = &team_ret_val[1];
+    team_ret_val_reduced = &team_ret_val[TEAM_RET_VAL_REDUCTION_INTS];
 
-    device_team_ret_val = (int *)nvshmemi_malloc(sizeof(int) * 2);
+    device_team_ret_val = (int *)nvshmemi_malloc(sizeof(int) * 2 * TEAM_RET_VAL_REDUCTION_INTS);
     if (!device_team_ret_val) {
         NVSHMEMI_ERROR_PRINT("device_team_ret_val allocation failed \n");
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
-    device_team_ret_val_reduced = &device_team_ret_val[1];
+    device_team_ret_val_reduced = &device_team_ret_val[TEAM_RET_VAL_REDUCTION_INTS];
 
     return 0;
 }
@@ -1817,12 +1819,18 @@ int nvshmemi_team_split_node(nvshmemi_team_t *parent_team, nvshmem_team_t *new_t
 int nvshmemi_team_split_same_mype_node(nvshmemi_team_t *parent_team, nvshmem_team_t *new_team);
 
 int nvshmemi_team_check_collective_error(nvshmem_team_t team_idx) {
-    /* This OR reduction assures all PEs return the same value.  */
-    CUDA_RUNTIME_CHECK(
-        cudaMemcpy(device_team_ret_val, team_ret_val, sizeof(int), cudaMemcpyHostToDevice));
+    /* Reduce one aligned 16-byte lane so CFT does not require a masked sub-16-byte PUT. Only
+     * element zero carries status; zero is the identity for the nonnegative status values. */
+    for (size_t i = 1; i < TEAM_RET_VAL_REDUCTION_INTS; i++) {
+        team_ret_val[i] = NVSHMEMX_SUCCESS;
+    }
+    CUDA_RUNTIME_CHECK(cudaMemcpy(device_team_ret_val, team_ret_val,
+                                  TEAM_RET_VAL_REDUCTION_INTS * sizeof(int),
+                                  cudaMemcpyHostToDevice));
     CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
     nvshmemi_call_rdxn_on_stream_kernel<int, RDXN_OPS_MAX>(
-        team_idx, device_team_ret_val_reduced, device_team_ret_val, 1, nvshmemi_state->my_stream);
+        team_idx, device_team_ret_val_reduced, device_team_ret_val, TEAM_RET_VAL_REDUCTION_INTS,
+        nvshmemi_state->my_stream);
     CUDA_RUNTIME_CHECK(cudaStreamSynchronize(nvshmemi_state->my_stream));
     CUDA_RUNTIME_CHECK(cudaMemcpy(team_ret_val_reduced, device_team_ret_val_reduced, sizeof(int),
                                   cudaMemcpyDeviceToHost));

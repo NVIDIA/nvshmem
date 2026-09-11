@@ -11,6 +11,7 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
+#include "device/nvshmemx_defines.h"
 #include "team_internal.h"
 #include "internal/host/util.h"
 
@@ -45,8 +46,9 @@ template <typename TYPE, rdxn_ops_t OP>
 void nvshmemi_call_reduce_kernel(int start, int stride, int size, TYPE *dst, const TYPE *source,
                                  size_t nreduce, TYPE *pWrk, volatile long *pSync,
                                  volatile long *sync_counter) {
+    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
     nvshmemi_reduce_kernel<TYPE, OP>
-        <<<1, 1>>>(start, stride, size, dst, source, nreduce, pWrk, pSync, sync_counter);
+        <<<1, 1, smem_size>>>(start, stride, size, dst, source, nreduce, pWrk, pSync, sync_counter);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
     CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
 }
