@@ -113,6 +113,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
             deferred_get_state[1] = 0;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
+            nvshmemi_cft_thread_mutex_init(smem_base);
             if (nvshmemi_unicast_le_available()) {
                 for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
                     nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
@@ -123,7 +124,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
             tracking->pending_slots = 0;
             tracking->reserved = 0;
             /* Publish the registration only after its deferred-completion
-             * metadata has been initialized. */
+             * metadata and thread-scope mutex have been initialized. */
             __threadfence_block();
 #endif
             nvshmemi_tma_publish_smem_registration(registration_slot,
