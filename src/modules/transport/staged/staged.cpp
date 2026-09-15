@@ -1121,6 +1121,462 @@ static void staged_server_loop(nvshmem_transport_t transport, staged_startup_lat
     }
 }
 
+static int staged_execute_self_rma(nvshmem_transport_t transport, const staged_client_op_t& op) {
+    auto* s = static_cast<transport_staged_state_t*>(transport->state);
+    const auto& rma = std::get<staged_rma_op_t>(op.operation);
+    uint64_t total = static_cast<uint64_t>(rma.bytesdesc.elembytes) * rma.bytesdesc.nelems;
+    char* dst = nullptr;
+    const char* src = nullptr;
+
+    if (rma.verb.desc == NVSHMEMI_OP_P || rma.verb.desc == NVSHMEMI_OP_PUT) {
+        dst = static_cast<char*>(rma.remote.ptr);
+        src = static_cast<const char*>(rma.local.ptr);
+    } else if (rma.verb.desc == NVSHMEMI_OP_G || rma.verb.desc == NVSHMEMI_OP_GET) {
+        dst = static_cast<char*>(rma.local.ptr);
+        src = static_cast<const char*>(rma.remote.ptr);
+    } else {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
+        uint64_t remaining = total;
+        uint64_t offset = 0;
+        while (remaining > 0) {
+            size_t chunk =
+                remaining > s->bounce_bytes ? s->bounce_bytes : static_cast<size_t>(remaining);
+            int status = staged_copy_to_host(transport, s->rdma.client_bounce(), src + offset,
+                                             chunk, nullptr, "self RMA D2H");
+            if (status) {
+                return status;
+            }
+            status = staged_copy_from_host(transport, dst + offset, s->rdma.client_bounce(), chunk,
+                                           nullptr, "self RMA H2D");
+            if (status) {
+                return status;
+            }
+            remaining -= chunk;
+            offset += chunk;
+        }
+        return 0;
+    }
+
+    if (!s->cuda.client_stream) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] self RMA requires a Green client stream");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    return staged_cuda_copy_sync(s, dst, src, static_cast<size_t>(total), s->cuda.client_stream,
+                                 "self RMA copy");
+}
+
+static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t& op) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    const auto& rma = std::get<staged_rma_op_t>(op.operation);
+    staged_qp_t& qp = staged_get_qp(s, 0, op.pe);
+    const staged_ep_handle_t& rep = qp.remote_endpoint();
+    const char* src = static_cast<const char*>(rma.local.ptr);
+    uint64_t total = static_cast<uint64_t>(rma.bytesdesc.elembytes) * rma.bytesdesc.nelems;
+    uint64_t remote_addr = reinterpret_cast<uint64_t>(rma.remote.ptr);
+    size_t slot_bytes = s->bounce_bytes;
+    int depth = std::max(1, s->pipeline_depth);
+    uint64_t total_chunks = (total + slot_bytes - 1) / slot_bytes;
+
+    const bool src_needs_cuda_copy = staged_pointer_needs_cuda_copy(src);
+    const bool cuda_copy =
+        src_needs_cuda_copy && s->cuda.copy_policy == staged_copy_policy_t::STREAM;
+    std::array<staged_response_state_t::ticket, STAGED_MAX_PIPELINE_DEPTH> response_tickets{};
+
+    auto post_copy = [&](uint64_t chunk_idx) -> int {
+        int slot = static_cast<int>(chunk_idx % static_cast<uint64_t>(depth));
+        size_t slot_offset = staged_slot_offset(s, slot);
+        uint64_t offset = chunk_idx * slot_bytes;
+        size_t chunk = static_cast<size_t>(std::min<uint64_t>(slot_bytes, total - offset));
+        char* bounce = static_cast<char*>(s->rdma.client_bounce()) + slot_offset;
+
+        TRACE(s->log_level,
+              "[STAGED PE%d client] put post_copy pe=%d chunk=%lu slot=%d offset=%lu "
+              "bytes=%zu src=%p remote_addr=0x%lx",
+              transport->my_pe, op.pe, static_cast<unsigned long>(chunk_idx), slot,
+              static_cast<unsigned long>(offset), chunk, src + offset,
+              static_cast<unsigned long>(remote_addr + offset));
+
+        if (!src_needs_cuda_copy) {
+            memcpy(bounce, src + offset, chunk);
+            return 0;
+        }
+
+        if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
+            return staged_copy_to_host(transport, bounce, src + offset, chunk,
+                                       s->cuda.client_stream, "PUT D2H");
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
+            cudaError_t cerr = cudaMemcpyAsync(bounce, src + offset, chunk, cudaMemcpyDefault,
+                                               s->cuda.client_stream);
+            if (cerr != cudaSuccess) {
+                NVSHMEMI_ERROR_PRINT("[STAGED] cudaMemcpyAsync D2H failed: %s",
+                                     cudaGetErrorString(cerr));
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+            cerr = cudaEventRecord(s->cuda.client_events[slot], s->cuda.client_stream);
+            if (cerr != cudaSuccess) {
+                NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventRecord failed: %s",
+                                     cudaGetErrorString(cerr));
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+        }
+        return 0;
+    };
+
+    auto wait_copy = [&](uint64_t chunk_idx) -> int {
+        int slot = static_cast<int>(chunk_idx % static_cast<uint64_t>(depth));
+        if (!cuda_copy) {
+            return 0;
+        }
+        {
+            std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
+            cudaError_t cerr = cudaEventSynchronize(s->cuda.client_events[slot]);
+            if (cerr != cudaSuccess) {
+                NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventSynchronize failed: %s",
+                                     cudaGetErrorString(cerr));
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+        }
+        return 0;
+    };
+
+    auto send_chunk = [&](uint64_t chunk_idx) -> int {
+        int slot = static_cast<int>(chunk_idx % static_cast<uint64_t>(depth));
+        size_t slot_offset = staged_slot_offset(s, slot);
+        uint64_t offset = chunk_idx * slot_bytes;
+        size_t chunk = static_cast<size_t>(std::min<uint64_t>(slot_bytes, total - offset));
+
+        int status = wait_copy(chunk_idx);
+        if (status) {
+            return status;
+        }
+        TRACE(s->log_level,
+              "[STAGED PE%d client] d2h_done pe=%d chunk=%lu slot=%d offset=%lu bytes=%zu",
+              transport->my_pe, op.pe, static_cast<unsigned long>(chunk_idx), slot,
+              static_cast<unsigned long>(offset), chunk);
+
+        status =
+            post_rdma_write_wait(s, qp, static_cast<char*>(s->rdma.client_bounce()) + slot_offset,
+                                 chunk, rep.bounce_addr + slot_offset, rep.rkey);
+        if (status) {
+            staged_fail_control(s);
+            return status;
+        }
+        TRACE(s->log_level,
+              "[STAGED PE%d client] rdma_done pe=%d chunk=%lu slot=%d offset=%lu bytes=%zu",
+              transport->my_pe, op.pe, static_cast<unsigned long>(chunk_idx), slot,
+              static_cast<unsigned long>(offset), chunk);
+
+        status = s->responses.reserve(&response_tickets[slot]);
+        if (status != 0) {
+            return status;
+        }
+
+        staged_ctrl_msg_t ctrl{};
+        ctrl.op = staged_ctrl_op_t::CHUNK_DONE;
+        ctrl.addr = remote_addr + offset;
+        ctrl.bytes = chunk;
+        ctrl.value = slot_offset;
+        ctrl.request_id = response_tickets[slot].request_id;
+        status = send_ctrl(s, qp, &ctrl);
+        if (status) {
+            return status;
+        }
+        TRACE(s->log_level,
+              "[STAGED PE%d client] sent_chunk req=%lu pe=%d chunk=%lu slot=%d bytes=%zu",
+              transport->my_pe, static_cast<unsigned long>(response_tickets[slot].request_id),
+              op.pe, static_cast<unsigned long>(chunk_idx), slot, chunk);
+        return 0;
+    };
+
+    auto wait_ack = [&](uint64_t chunk_idx) -> int {
+        int slot = static_cast<int>(chunk_idx % static_cast<uint64_t>(depth));
+        TRACE(s->log_level, "[STAGED PE%d client] wait_ack req=%lu pe=%d chunk=%lu slot=%d",
+              transport->my_pe, static_cast<unsigned long>(response_tickets[slot].request_id),
+              op.pe, static_cast<unsigned long>(chunk_idx), slot);
+
+        int status = staged_wait_response(s, response_tickets[slot], nullptr);
+        if (status) {
+            return status;
+        }
+        TRACE(s->log_level, "[STAGED PE%d client] ack_done req=%lu pe=%d chunk=%lu slot=%d",
+              transport->my_pe, static_cast<unsigned long>(response_tickets[slot].request_id),
+              op.pe, static_cast<unsigned long>(chunk_idx), slot);
+        return 0;
+    };
+
+    uint64_t next_post = 0;
+    uint64_t next_send = 0;
+    uint64_t next_ack = 0;
+
+    while (next_ack < total_chunks) {
+        while (next_post < total_chunks && next_post - next_ack < static_cast<uint64_t>(depth)) {
+            int status = post_copy(next_post);
+            if (status) {
+                return status;
+            }
+            next_post++;
+        }
+
+        if (next_send < next_post) {
+            int status = send_chunk(next_send);
+            if (status) {
+                return status;
+            }
+            next_send++;
+            continue;
+        }
+
+        int status = wait_ack(next_ack);
+        if (status) {
+            return status;
+        }
+        next_ack++;
+    }
+
+    return 0;
+}
+
+static int staged_execute_get(nvshmem_transport_t transport, staged_client_op_t& op) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    const auto& rma = std::get<staged_rma_op_t>(op.operation);
+    staged_qp_t& qp = staged_get_qp(s, 0, op.pe);
+    char* dst = static_cast<char*>(rma.local.ptr);
+    uint64_t remaining = static_cast<uint64_t>(rma.bytesdesc.elembytes) * rma.bytesdesc.nelems;
+    uint64_t offset = 0;
+    uint64_t remote_addr = reinterpret_cast<uint64_t>(rma.remote.ptr);
+
+    while (remaining > 0) {
+        size_t chunk =
+            remaining > s->bounce_bytes ? s->bounce_bytes : static_cast<size_t>(remaining);
+        staged_response_state_t::ticket response_ticket;
+        int status = s->responses.reserve(&response_ticket);
+        if (status != 0) {
+            return status;
+        }
+
+        staged_ctrl_msg_t req{};
+        req.op = staged_ctrl_op_t::GET_REQ;
+        req.addr = remote_addr + offset;
+        req.bytes = chunk;
+        req.request_id = response_ticket.request_id;
+        req.reply_addr = reinterpret_cast<uint64_t>(s->rdma.client_bounce());
+        req.reply_rkey = s->rdma.bounce_mr()->rkey;
+
+        status = send_ctrl(s, qp, &req);
+        if (status) {
+            return status;
+        }
+
+        status = staged_wait_response(s, response_ticket, nullptr);
+        if (status) {
+            return status;
+        }
+
+        status = staged_copy_from_host(transport, dst + offset, s->rdma.client_bounce(), chunk,
+                                       s->cuda.client_stream, "GET H2D");
+        if (status) {
+            return status;
+        }
+
+        remaining -= chunk;
+        offset += chunk;
+    }
+
+    return 0;
+}
+
+static int staged_store_amo_return(nvshmem_transport_t transport, const amo_memdesc_t& target,
+                                   const amo_bytesdesc_t& bytesdesc, uint64_t value) {
+    auto* s = static_cast<transport_staged_state_t*>(transport->state);
+    if (!target.retptr) {
+        return 0;
+    }
+
+    if (target.retflag) {
+        g_elem_t ret{};
+        ret.data = value;
+        ret.flag = target.retflag;
+        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
+                                     s->cuda.client_stream, "AMO return store");
+    } else if (bytesdesc.elembytes == sizeof(uint16_t)) {
+        uint16_t ret = static_cast<uint16_t>(value);
+        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
+                                     s->cuda.client_stream, "AMO return store");
+    } else if (bytesdesc.elembytes == sizeof(uint32_t)) {
+        uint32_t ret = static_cast<uint32_t>(value);
+        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
+                                     s->cuda.client_stream, "AMO return store");
+    } else {
+        uint64_t ret = value;
+        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
+                                     s->cuda.client_stream, "AMO return store");
+    }
+}
+
+static int staged_execute_amo(nvshmem_transport_t transport, staged_client_op_t& op) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    const auto& amo = std::get<staged_amo_op_t>(op.operation);
+    staged_qp_t& qp = staged_get_qp(s, 0, op.pe);
+    bool is_fetch = amo.verb.desc > NVSHMEMI_AMO_END_OF_NONFETCH;
+
+    if (op.pe == transport->my_pe) {
+        uint64_t old_value = 0;
+        staged_ctrl_msg_t local_msg{};
+        local_msg.flags =
+            static_cast<uint32_t>(amo.verb.desc) | (amo.verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0);
+        local_msg.bytes = static_cast<uint64_t>(amo.bytesdesc.elembytes);
+        local_msg.value = amo.target.val;
+        local_msg.cmp = amo.target.cmp;
+
+        int status = 0;
+        {
+            std::lock_guard<std::mutex> lk(s->memory.amo_mutex);
+            status = staged_apply_amo(transport, amo.target.remote_memdesc.ptr, local_msg,
+                                      &old_value, s->cuda.client_stream, s->rdma.client_bounce());
+        }
+        if (status) {
+            return status;
+        }
+        if (is_fetch) {
+            return staged_store_amo_return(transport, amo.target, amo.bytesdesc, old_value);
+        }
+        return 0;
+    }
+
+    staged_response_state_t::ticket response_ticket;
+    int status = s->responses.reserve(&response_ticket);
+    if (status != 0) {
+        return status;
+    }
+    staged_ctrl_msg_t ctrl{};
+    ctrl.op = staged_ctrl_op_t::AMO;
+    ctrl.flags =
+        static_cast<uint32_t>(amo.verb.desc) | (amo.verb.is_float ? NVSHMEMI_AMO_FLOAT_BIT : 0);
+    if (is_fetch) {
+        ctrl.flags |= STAGED_CTRL_AMO_FETCH;
+    }
+    ctrl.addr = reinterpret_cast<uint64_t>(amo.target.remote_memdesc.ptr);
+    ctrl.bytes = static_cast<uint64_t>(amo.bytesdesc.elembytes);
+    ctrl.value = amo.target.val;
+    ctrl.cmp = amo.target.cmp;
+    ctrl.request_id = response_ticket.request_id;
+
+    status = send_ctrl(s, qp, &ctrl);
+    if (status) {
+        return status;
+    }
+
+    staged_response_t response{};
+    status = staged_wait_response(s, response_ticket, &response);
+    if (status) {
+        return status;
+    }
+    if (is_fetch) {
+        return staged_store_amo_return(transport, amo.target, amo.bytesdesc, response.value);
+    }
+    return 0;
+}
+
+static int staged_execute_client_op(nvshmem_transport_t transport, staged_client_op_t& op) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    if (s->workers.stopping()) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    if (op.pe < 0 || op.pe >= s->rdma.num_pes()) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    if (std::holds_alternative<staged_amo_op_t>(op.operation)) {
+        return staged_execute_amo(transport, op);
+    }
+
+    if (op.pe == transport->my_pe) {
+        return staged_execute_self_rma(transport, op);
+    }
+
+    const auto& rma = std::get<staged_rma_op_t>(op.operation);
+    if (rma.verb.desc == NVSHMEMI_OP_P || rma.verb.desc == NVSHMEMI_OP_PUT) {
+        return staged_execute_put(transport, op);
+    } else if (rma.verb.desc == NVSHMEMI_OP_G || rma.verb.desc == NVSHMEMI_OP_GET) {
+        return staged_execute_get(transport, op);
+    }
+
+    return NVSHMEMX_ERROR_INTERNAL;
+}
+
+static void staged_client_loop(nvshmem_transport_t transport, staged_startup_latch_t& startup) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    staged_worker_cuda_scope_t cuda_scope(s->cuda, "client");
+    int status = cuda_scope.status();
+    startup.report(status);
+    if (status) {
+        staged_fail_control(s);
+        return;
+    }
+
+    staged_operation_state_t::work_item item;
+    while (s->operations.take(&item)) {
+        staged_client_op_t& op = *item.operation;
+        if (const auto* rma = std::get_if<staged_rma_op_t>(&op.operation)) {
+            TRACE(s->log_level, "[STAGED PE%d client] begin seq=%lu %s pe=%d bytes=%lu",
+                  transport->my_pe, static_cast<unsigned long>(item.sequence),
+                  staged_rma_name(rma->verb), op.pe,
+                  static_cast<unsigned long>(rma->bytesdesc.elembytes) *
+                      static_cast<unsigned long>(rma->bytesdesc.nelems));
+        } else {
+            const auto& amo = std::get<staged_amo_op_t>(op.operation);
+            TRACE(s->log_level, "[STAGED PE%d client] begin seq=%lu amo pe=%d bytes=%d",
+                  transport->my_pe, static_cast<unsigned long>(item.sequence), op.pe,
+                  amo.bytesdesc.elembytes);
+        }
+
+        status = staged_execute_client_op(transport, op);
+        TRACE(s->log_level, "[STAGED PE%d client] end seq=%lu status=%d", transport->my_pe,
+              static_cast<unsigned long>(item.sequence), status);
+
+        if (status != 0) {
+            s->workers.fail(status);
+        }
+        int completion_status = s->operations.complete(item.token, status);
+        if (completion_status != 0) {
+            if (status == 0) {
+                s->workers.fail(completion_status);
+            }
+            return;
+        }
+        if (status != 0) {
+            return;
+        }
+    }
+}
+
+static int staged_submit_client_op(transport_staged_state_t* s, staged_client_op_t op, bool wait) {
+    const bool is_rma = std::holds_alternative<staged_rma_op_t>(op.operation);
+    staged_operation_state_t::ticket ticket;
+    int status = s->operations.submit(std::move(op), wait, &ticket);
+    if (status != 0) {
+        return status;
+    }
+    TRACE(s->log_level, "[STAGED client] enqueue slot=%zu generation=%lu kind=%s wait=%d",
+          ticket.index, static_cast<unsigned long>(ticket.generation), is_rma ? "rma" : "amo",
+          wait ? 1 : 0);
+    return wait ? s->operations.wait(ticket) : 0;
+}
+
+static int staged_quiet_all(transport_staged_state_t* s) {
+    int status = s->operations.quiet();
+    TRACE(s->log_level, "[STAGED client] quiet status=%d", status);
+    return status;
+}
+
 }  // namespace
+
+/* ═══════════════════════  transport interface  ═══════════════════ */
 
 }  // namespace nvshmemi
