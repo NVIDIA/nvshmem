@@ -693,6 +693,425 @@ static int post_rdma_write_wait(transport_staged_state_t* s, staged_qp_t& qp, vo
     });
 }
 
+static size_t staged_slot_offset(transport_staged_state_t* s, int slot) {
+    return static_cast<size_t>(slot) * s->bounce_bytes;
+}
+
+static bool staged_pointer_needs_cuda_copy(const void* ptr) {
+    cudaPointerAttributes attrs{};
+    cudaError_t err = cudaPointerGetAttributes(&attrs, ptr);
+    if (err != cudaSuccess) {
+        (void)cudaGetLastError();
+        return false;
+    }
+
+    return attrs.type == cudaMemoryTypeDevice || attrs.type == cudaMemoryTypeManaged;
+}
+
+#ifdef NVSHMEM_USE_GDRCOPY
+/* Caller holds memory.mem_handle_mutex in shared mode for the lifetime of the returned pointer. */
+static staged_mem_handle_info_t* staged_mem_handle_info_for_ptr(transport_staged_state_t* s,
+                                                                const void* ptr, size_t bytes) {
+    if (!ptr) {
+        return nullptr;
+    }
+
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    auto it = std::find_if(s->memory.mem_handle_infos.begin(), s->memory.mem_handle_infos.end(),
+                           [addr, bytes](const staged_mem_handle_info_t* info) {
+                               if (!info || !info->ptr) {
+                                   return false;
+                               }
+                               const uintptr_t begin = reinterpret_cast<uintptr_t>(info->ptr);
+                               if (addr < begin) {
+                                   return false;
+                               }
+                               const size_t offset = static_cast<size_t>(addr - begin);
+                               return offset <= info->size && bytes <= info->size - offset;
+                           });
+    return it == s->memory.mem_handle_infos.end() ? nullptr : *it;
+}
+
+#endif
+
+enum class staged_copy_direction_t {
+    DEVICE_TO_HOST,
+    HOST_TO_DEVICE,
+};
+
+static int staged_copy_host_device(nvshmem_transport_t transport, void* dst, const void* src,
+                                   size_t bytes, cudaStream_t stream, const char* label,
+                                   staged_copy_direction_t direction) {
+    auto* s = static_cast<transport_staged_state_t*>(transport->state);
+    if (bytes == 0) {
+        return 0;
+    }
+
+    const void* gpu_ptr = direction == staged_copy_direction_t::DEVICE_TO_HOST ? src : dst;
+    if (!staged_pointer_needs_cuda_copy(gpu_ptr)) {
+        memcpy(dst, src, bytes);
+        return 0;
+    }
+
+#ifdef NVSHMEM_USE_GDRCOPY
+    if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
+        std::shared_lock<std::shared_mutex> handle_lock(s->memory.mem_handle_mutex);
+        auto* info = staged_mem_handle_info_for_ptr(s, gpu_ptr, bytes);
+        if (!info || !info->cpu_mapping.mapped || !info->cpu_mapping.cpu_ptr) {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] %s requires a GPU CPU mapping for GPU address %p (bytes=%zu)", label,
+                gpu_ptr, bytes);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+
+        const uintptr_t addr = reinterpret_cast<uintptr_t>(gpu_ptr);
+        const uintptr_t begin = reinterpret_cast<uintptr_t>(info->ptr);
+        void* mapped_gpu_ptr = static_cast<char*>(info->cpu_mapping.cpu_ptr) + (addr - begin);
+        std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
+        int status =
+            direction == staged_copy_direction_t::DEVICE_TO_HOST
+                ? nvshmemt_gpu_cpu_copy_from(&s->memory.gpu_cpu_mapping_state, &info->cpu_mapping,
+                                             dst, mapped_gpu_ptr, bytes)
+                : nvshmemt_gpu_cpu_copy_to(&s->memory.gpu_cpu_mapping_state, &info->cpu_mapping,
+                                           mapped_gpu_ptr, src, bytes);
+        if (status != 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] %s GPU CPU mapping %s copy failed: %d", label,
+                                 direction == staged_copy_direction_t::DEVICE_TO_HOST
+                                     ? "device-to-host"
+                                     : "host-to-device",
+                                 status);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        if (direction == staged_copy_direction_t::HOST_TO_DEVICE) {
+            STORE_BARRIER();
+        }
+        return 0;
+    }
+#endif
+
+    if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] %s has no GPU CPU mapping; refusing CUDA fallback", label);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    return staged_cuda_copy_sync(s, dst, src, bytes, stream, label);
+}
+
+static int staged_copy_to_host(nvshmem_transport_t transport, void* host_dst, const void* src,
+                               size_t bytes, cudaStream_t stream, const char* label) {
+    return staged_copy_host_device(transport, host_dst, src, bytes, stream, label,
+                                   staged_copy_direction_t::DEVICE_TO_HOST);
+}
+
+static int staged_copy_from_host(nvshmem_transport_t transport, void* dst, const void* host_src,
+                                 size_t bytes, cudaStream_t stream, const char* label) {
+    return staged_copy_host_device(transport, dst, host_src, bytes, stream, label,
+                                   staged_copy_direction_t::HOST_TO_DEVICE);
+}
+
+static const char* staged_rma_name(const rma_verb_t& verb) {
+    switch (verb.desc) {
+        case NVSHMEMI_OP_P:
+            return "p";
+        case NVSHMEMI_OP_PUT:
+            return verb.is_nbi ? "put_nbi" : "put";
+        case NVSHMEMI_OP_G:
+            return "g";
+        case NVSHMEMI_OP_GET:
+            return verb.is_nbi ? "get_nbi" : "get";
+        default:
+            return "unknown";
+    }
+}
+
+static int staged_complete_response(transport_staged_state_t* s, const staged_ctrl_msg_t& msg) {
+    staged_response_t response{};
+    response.value = msg.value;
+    response.status = static_cast<int>(msg.status);
+    return s->responses.complete(msg.request_id, response);
+}
+
+static int staged_wait_response(transport_staged_state_t* s,
+                                staged_response_state_t::ticket response_ticket,
+                                staged_response_t* response) {
+    staged_response_t received{};
+    int status = s->responses.wait(response_ticket, &received);
+    if (status != 0) {
+        return status;
+    }
+    if (response) {
+        *response = received;
+    }
+    return received.status;
+}
+
+template <typename T>
+static int staged_compute_amo_value(T old_value, const staged_ctrl_msg_t& msg, T* new_value_out) {
+    T new_value = old_value;
+    uint32_t op_flags = msg.flags & STAGED_CTRL_AMO_OP_MASK;
+    bool is_float = (op_flags & NVSHMEMI_AMO_FLOAT_BIT) != 0;
+    nvshmemi_amo_t op =
+        static_cast<nvshmemi_amo_t>(op_flags & ~static_cast<uint32_t>(NVSHMEMI_AMO_FLOAT_BIT));
+    switch (op) {
+        case NVSHMEMI_AMO_INC:
+        case NVSHMEMI_AMO_FETCH_INC:
+            new_value = old_value + static_cast<T>(1);
+            break;
+        case NVSHMEMI_AMO_SIGNAL:
+        case NVSHMEMI_AMO_SIGNAL_SET:
+        case NVSHMEMI_AMO_SET:
+        case NVSHMEMI_AMO_SWAP:
+            new_value = static_cast<T>(msg.value);
+            break;
+        case NVSHMEMI_AMO_SIGNAL_ADD:
+        case NVSHMEMI_AMO_ADD:
+        case NVSHMEMI_AMO_FETCH_ADD:
+            new_value = is_float ? nvshmemt_float_atomic_add<T>(old_value, msg.value)
+                                 : old_value + static_cast<T>(msg.value);
+            break;
+        case NVSHMEMI_AMO_AND:
+        case NVSHMEMI_AMO_FETCH_AND:
+            new_value = old_value & static_cast<T>(msg.value);
+            break;
+        case NVSHMEMI_AMO_OR:
+        case NVSHMEMI_AMO_FETCH_OR:
+            new_value = old_value | static_cast<T>(msg.value);
+            break;
+        case NVSHMEMI_AMO_XOR:
+        case NVSHMEMI_AMO_FETCH_XOR:
+            new_value = old_value ^ static_cast<T>(msg.value);
+            break;
+        case NVSHMEMI_AMO_COMPARE_SWAP:
+            new_value =
+                (old_value == static_cast<T>(msg.cmp)) ? static_cast<T>(msg.value) : old_value;
+            break;
+        case NVSHMEMI_AMO_FETCH:
+            new_value = old_value;
+            break;
+        default:
+            NVSHMEMI_ERROR_PRINT("[STAGED] AMO verb %u not implemented yet",
+                                 msg.flags & STAGED_CTRL_AMO_OP_MASK);
+            return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    *new_value_out = new_value;
+    return 0;
+}
+
+template <typename T>
+static int staged_apply_amo_t(nvshmem_transport_t transport, T* target,
+                              const staged_ctrl_msg_t& msg, uint64_t* old_value_out,
+                              cudaStream_t stream, void* host_scratch) {
+    static_assert(sizeof(T) <= 8, "staged AMO only supports up to 8-byte elements");
+
+    T old_value{};
+    T new_value{};
+    int status = 0;
+
+    T* scratch = static_cast<T*>(host_scratch);
+    status = staged_copy_to_host(transport, scratch, target, sizeof(*scratch), stream,
+                                 "AMO load target");
+    if (status) {
+        return status;
+    }
+    old_value = *scratch;
+
+    status = staged_compute_amo_value(old_value, msg, &new_value);
+    if (status) {
+        return status;
+    }
+
+    *scratch = new_value;
+    status = staged_copy_from_host(transport, target, scratch, sizeof(*scratch), stream,
+                                   "AMO store target");
+    if (status) {
+        return status;
+    }
+
+    *old_value_out = static_cast<uint64_t>(old_value);
+    return 0;
+}
+
+static int staged_apply_amo(nvshmem_transport_t transport, void* target,
+                            const staged_ctrl_msg_t& msg, uint64_t* old_value, cudaStream_t stream,
+                            void* host_scratch) {
+    if (msg.bytes == sizeof(uint16_t)) {
+        return staged_apply_amo_t(transport, reinterpret_cast<uint16_t*>(target), msg, old_value,
+                                  stream, host_scratch);
+    } else if (msg.bytes == sizeof(uint32_t)) {
+        return staged_apply_amo_t(transport, reinterpret_cast<uint32_t*>(target), msg, old_value,
+                                  stream, host_scratch);
+    } else if (msg.bytes == sizeof(uint64_t)) {
+        return staged_apply_amo_t(transport, reinterpret_cast<uint64_t*>(target), msg, old_value,
+                                  stream, host_scratch);
+    }
+
+    NVSHMEMI_ERROR_PRINT("[STAGED] AMO size %lu not implemented yet",
+                         static_cast<unsigned long>(msg.bytes));
+    return NVSHMEMX_ERROR_INTERNAL;
+}
+
+/* ── server thread: handles incoming control messages ──────────── */
+static void staged_server_loop(nvshmem_transport_t transport, staged_startup_latch_t& startup) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    staged_worker_cuda_scope_t cuda_scope(s->cuda, "server");
+    int status = cuda_scope.status();
+    if (status) {
+        startup.report(status);
+        staged_fail_control(s);
+        return;
+    }
+
+    const size_t num_qps = staged_total_qps(s);
+    for (size_t q = 0; q < num_qps; ++q) {
+        const int pe = static_cast<int>(q % static_cast<size_t>(s->rdma.num_pes()));
+        if (pe == transport->my_pe) {
+            continue;
+        }
+        staged_qp_t& qp = s->rdma.qp_at(q);
+        for (int i = 0; i < STAGED_RQ_DEPTH; ++i) {
+            if (qp.post_receive(static_cast<size_t>(i)) != 0) {
+                NVSHMEMI_ERROR_PRINT("[STAGED server] failed to post initial control receive");
+                startup.report(NVSHMEMX_ERROR_INTERNAL);
+                staged_fail_control(s);
+                return;
+            }
+        }
+    }
+
+    startup.report(0);
+
+    while (!s->workers.stopping()) {
+        bool made_progress = false;
+        for (size_t q = 0; q < num_qps; ++q) {
+            const int pe = static_cast<int>(q % static_cast<size_t>(s->rdma.num_pes()));
+            if (pe == transport->my_pe) {
+                continue;
+            }
+            staged_qp_t& qp = s->rdma.qp_at(q);
+
+            struct ibv_wc wc;
+            int n = ibv_poll_cq(qp.recv_cq(), 1, &wc);
+            if (n < 0) {
+                NVSHMEMI_ERROR_PRINT(
+                    "[STAGED server] ibv_poll_cq failed while receiving control "
+                    "messages");
+                staged_fail_control(s);
+                return;
+            }
+            if (n == 0) {
+                continue;
+            }
+            made_progress = true;
+
+            if (wc.status != IBV_WC_SUCCESS) {
+                NVSHMEMI_ERROR_PRINT("[STAGED server] control receive failed: %s",
+                                     ibv_wc_status_str(wc.status));
+                staged_fail_control(s);
+                return;
+            }
+
+            int buf_idx = static_cast<int>(wc.wr_id);
+            if (buf_idx < 0 || buf_idx >= STAGED_RQ_DEPTH) {
+                NVSHMEMI_ERROR_PRINT("[STAGED server] invalid control receive buffer index %d",
+                                     buf_idx);
+                staged_fail_control(s);
+                return;
+            }
+            staged_ctrl_msg_t& msg = qp.ctrl_message(static_cast<size_t>(buf_idx));
+
+            if (msg.op == staged_ctrl_op_t::RESPONSE) {
+                if (staged_complete_response(s, msg) != 0) {
+                    NVSHMEMI_ERROR_PRINT(
+                        "[STAGED server] received an unknown or duplicate response id %lu",
+                        static_cast<unsigned long>(msg.request_id));
+                    staged_fail_control(s);
+                    return;
+                }
+            } else if (msg.op == staged_ctrl_op_t::CHUNK_DONE) {
+                /* A chunk was RDMA-written to this peer's bounce buffer. */
+                char* dst = reinterpret_cast<char*>(msg.addr);
+                size_t slot_offset = static_cast<size_t>(msg.value);
+                size_t len = static_cast<size_t>(msg.bytes);
+                TRACE(s->log_level,
+                      "[STAGED PE%d server] chunk_done req=%lu bytes=%zu slot=%zu dst=%p",
+                      transport->my_pe, static_cast<unsigned long>(msg.request_id), len,
+                      slot_offset, dst);
+                int status = staged_copy_from_host(
+                    transport, dst, static_cast<char*>(qp.server_bounce()) + slot_offset, len,
+                    s->cuda.server_stream, "PUT H2D");
+                TRACE(s->log_level, "[STAGED PE%d server] h2d_done req=%lu bytes=%zu status=%d",
+                      transport->my_pe, static_cast<unsigned long>(msg.request_id), len, status);
+
+                staged_ctrl_msg_t ack{};
+                ack.op = staged_ctrl_op_t::RESPONSE;
+                ack.request_id = msg.request_id;
+                ack.status = status;
+                if (send_ctrl(s, qp, &ack)) {
+                    return;
+                }
+            } else if (msg.op == staged_ctrl_op_t::GET_REQ) {
+                char* src = reinterpret_cast<char*>(msg.addr);
+                size_t len = static_cast<size_t>(msg.bytes);
+                bool rdma_write_failed = false;
+
+                int status = staged_copy_to_host(transport, qp.server_bounce(), src, len,
+                                                 s->cuda.server_stream, "GET D2H");
+                if (!status) {
+                    status = post_rdma_write_wait(s, qp, qp.server_bounce(), len, msg.reply_addr,
+                                                  msg.reply_rkey);
+                    rdma_write_failed = status != 0;
+                }
+
+                staged_ctrl_msg_t resp{};
+                resp.op = staged_ctrl_op_t::RESPONSE;
+                resp.request_id = msg.request_id;
+                resp.status = status;
+                if (send_ctrl(s, qp, &resp)) {
+                    return;
+                }
+                if (rdma_write_failed) {
+                    staged_fail_control(s);
+                    return;
+                }
+            } else if (msg.op == staged_ctrl_op_t::AMO) {
+                void* target = reinterpret_cast<void*>(msg.addr);
+                uint64_t old_value = 0;
+                int status = 0;
+                {
+                    std::lock_guard<std::mutex> lk(s->memory.amo_mutex);
+                    status = staged_apply_amo(transport, target, msg, &old_value,
+                                              s->cuda.server_stream, qp.server_bounce());
+                }
+
+                staged_ctrl_msg_t resp{};
+                resp.op = staged_ctrl_op_t::RESPONSE;
+                resp.request_id = msg.request_id;
+                resp.value = (msg.flags & STAGED_CTRL_AMO_FETCH) ? old_value : 0;
+                resp.status = status;
+                if (send_ctrl(s, qp, &resp)) {
+                    return;
+                }
+            } else {
+                NVSHMEMI_ERROR_PRINT("[STAGED server] invalid control message opcode %u",
+                                     static_cast<unsigned int>(msg.op));
+                staged_fail_control(s);
+                return;
+            }
+
+            /* Re-post recv on the QP that delivered the message. */
+            if (qp.post_receive(static_cast<size_t>(buf_idx)) != 0) {
+                NVSHMEMI_ERROR_PRINT("[STAGED server] failed to repost control receive");
+                staged_fail_control(s);
+                return;
+            }
+        }
+        if (!made_progress) {
+            std::this_thread::yield();
+        }
+    }
+}
+
 }  // namespace
 
 }  // namespace nvshmemi
