@@ -2049,4 +2049,313 @@ static int nvshmemt_staged_show_info(nvshmem_transport_t, int) { return 0; }
 
 /* ═══  init  ═════════════════════════════════════════════════════ */
 
+extern "C" int nvshmemt_init(nvshmem_transport_t* t,
+                             [[maybe_unused]] struct nvshmemi_cuda_fn_table* cuda_syms,
+                             int api_version) {
+    if (NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version) != NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] incompatible transport API version %d (plugin major %d)",
+                             NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version),
+                             NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    nvshmem_transport_t transport =
+        static_cast<nvshmem_transport_t>(calloc(1, sizeof(struct nvshmem_transport)));
+    if (!transport) {
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
+
+    transport_staged_state_t* state = new transport_staged_state_t();
+    char selected_dev_name[64] = {};
+    nvshmemt_hca_info hca_list[STAGED_MAX_HCA_LIST] = {};
+    const char* hca_env = nullptr;
+    bool hca_list_requested = false;
+    bool hca_list_provided = false;
+    bool hca_list_is_exclude = false;
+    int hca_list_count = 0;
+    int num_devices = 0;
+    int fork_init_status = 0;
+    struct ibv_device** dev_list = nullptr;
+
+    auto& options = state->options;
+    int status = nvshmemi_env_options_init(&options);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "Unable to initialize transport options.");
+    nvshmemt_ib_common_sanitize_timeout(&options);
+    nvshmemt_ib_common_sanitize_retry_cnt(&options);
+    state->log_level = nvshmemt_common_get_log_level(&options);
+    INFO(state->log_level, "[STAGED] API version=%d plugin major=%d",
+         NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version), NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION);
+
+    /* ── tunables ── */
+    state->bounce_bytes = options.STAGED_BOUNCE_SIZE;
+    if (state->bounce_bytes == 0 || state->bounce_bytes > STAGED_MAX_BOUNCE_BYTES) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] NVSHMEM_STAGED_BOUNCE_SIZE=%zu is outside the supported range 1-%zu",
+            state->bounce_bytes, STAGED_MAX_BOUNCE_BYTES);
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
+    }
+    state->pipeline_depth = options.STAGED_PIPELINE_DEPTH;
+    if (state->pipeline_depth < 1 || state->pipeline_depth > STAGED_MAX_PIPELINE_DEPTH) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_STAGED_PIPELINE_DEPTH=%d is outside 1-%d",
+                             state->pipeline_depth, STAGED_MAX_PIPELINE_DEPTH);
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
+    }
+    if (strcasecmp(options.STAGED_COPY_POLICY, "STREAM") == 0) {
+        state->cuda.copy_policy = staged_copy_policy_t::STREAM;
+        if (options.STAGED_GREEN_CTX_SMS <= 0) {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] NVSHMEM_STAGED_GREEN_CTX_SMS must be greater than zero for STREAM");
+            status = NVSHMEMX_ERROR_INVALID_VALUE;
+            goto out;
+        }
+        INFO(state->log_level, "[STAGED] copy policy STREAM selected");
+    } else if (strcasecmp(options.STAGED_COPY_POLICY, "GDRCOPY") == 0) {
+        state->cuda.copy_policy = staged_copy_policy_t::GDRCOPY;
+#ifdef NVSHMEM_USE_GDRCOPY
+        if (options.DISABLE_GDRCOPY) {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] NVSHMEM_STAGED_COPY_POLICY=GDRCOPY requires GPU CPU mapping, but "
+                "NVSHMEM_DISABLE_GDRCOPY=1 is set");
+            status = NVSHMEMX_ERROR_INVALID_VALUE;
+            goto out;
+        }
+
+        if (!nvshmemt_gpu_cpu_mapping_init(&state->memory.gpu_cpu_mapping_state, cuda_syms,
+                                           state->log_level, options.GDRCOPY_USE_INTERNAL_DMABUF)) {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] NVSHMEM_STAGED_COPY_POLICY=GDRCOPY requires a usable GPU CPU "
+                "mapping backend; staged initialization failed");
+            status = NVSHMEMX_ERROR_INTERNAL;
+            goto out;
+        }
+        INFO(state->log_level, "[STAGED] copy policy GDRCOPY selected (%s backend)",
+             nvshmemt_gpu_cpu_mapping_backend_name(&state->memory.gpu_cpu_mapping_state));
+#else
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] NVSHMEM_STAGED_COPY_POLICY=GDRCOPY requested, but NVSHMEM was "
+            "built without GPU CPU mapping support");
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
+#endif
+    } else {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] invalid NVSHMEM_STAGED_COPY_POLICY='%s'; expected STREAM or GDRCOPY",
+            options.STAGED_COPY_POLICY);
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
+    }
+
+    /* ── Open IB device ── */
+    hca_env = options.HCA_LIST;
+    hca_list_requested = options.HCA_LIST_provided && hca_env[0];
+    hca_list_provided = options.ENABLE_NIC_PE_MAPPING && hca_list_requested;
+    hca_list_is_exclude = hca_list_provided && hca_env[0] == '^';
+
+    if (hca_list_requested && !options.ENABLE_NIC_PE_MAPPING) {
+        NVSHMEMI_WARN_PRINT(
+            "[STAGED] ignoring NVSHMEM_HCA_LIST because NVSHMEM_ENABLE_NIC_PE_MAPPING=0; "
+            "using the first active filtered port");
+    }
+    if (options.ENABLE_NIC_PE_MAPPING && options.HCA_PE_MAPPING_provided &&
+        options.HCA_PE_MAPPING[0]) {
+        if (hca_list_provided) {
+            NVSHMEMI_WARN_PRINT(
+                "[STAGED] ignoring NVSHMEM_HCA_PE_MAPPING because NVSHMEM_HCA_LIST is set");
+        } else {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] NVSHMEM_HCA_PE_MAPPING is not supported; select the single staged "
+                "HCA/port with NVSHMEM_HCA_LIST");
+            status = NVSHMEMX_ERROR_INVALID_VALUE;
+            goto out;
+        }
+    }
+
+    if (hca_list_provided) {
+        hca_list_count =
+            nvshmemt_parse_hca_list(hca_env, hca_list, STAGED_MAX_HCA_LIST, state->log_level);
+        if (hca_list_count <= 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_HCA_LIST='%s' did not contain a usable HCA",
+                                 hca_env);
+            status = NVSHMEMX_ERROR_INVALID_VALUE;
+            goto out;
+        }
+
+        if (!hca_list_is_exclude) {
+            snprintf(selected_dev_name, sizeof(selected_dev_name), "%s", hca_list[0].name);
+            if (hca_list[0].port == 0) {
+                NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_HCA_LIST='%s' has invalid port 0", hca_env);
+                status = NVSHMEMX_ERROR_INVALID_VALUE;
+                goto out;
+            }
+            if (hca_list_count > 1) {
+                NVSHMEMI_WARN_PRINT(
+                    "[STAGED] NVSHMEM_HCA_LIST has %d entries; staged currently uses only the "
+                    "first (%s:%d)",
+                    hca_list_count, selected_dev_name, hca_list[0].port);
+            }
+        }
+    }
+
+    fork_init_status = ibv_fork_init();
+    if (fork_init_status != 0) {
+        NVSHMEMI_WARN_PRINT("[STAGED] ibv_fork_init returned %d; continuing without fork safety",
+                            fork_init_status);
+    }
+
+    dev_list = ibv_get_device_list(&num_devices);
+    if (!dev_list || num_devices == 0) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] no IB devices found");
+        status = NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+
+    for (int i = 0; i < num_devices && !state->rdma.context(); ++i) {
+        const char* name = ibv_get_device_name(dev_list[i]);
+        if (!name || !nvshmemt_check_hca_prefix(&options, name) ||
+            (!hca_list_is_exclude && selected_dev_name[0] &&
+             strcmp(name, selected_dev_name) != 0)) {
+            continue;
+        }
+
+        struct ibv_context* ctx = ibv_open_device(dev_list[i]);
+        if (!ctx) {
+            continue;
+        }
+
+        struct ibv_device_attr device_attr{};
+        if (ibv_query_device(ctx, &device_attr) != 0 || device_attr.phys_port_cnt == 0) {
+            ibv_close_device(ctx);
+            continue;
+        }
+
+        const int requested_port =
+            (!hca_list_is_exclude && selected_dev_name[0]) ? hca_list[0].port : -1;
+        for (int port = 1; port <= device_attr.phys_port_cnt; ++port) {
+            if (requested_port > 0 && port != requested_port) {
+                continue;
+            }
+            if (hca_list_is_exclude) {
+                bool excluded = false;
+                for (int hca = 0; hca < hca_list_count; ++hca) {
+                    const nvshmemt_hca_info& entry = hca_list[hca];
+                    if (strcmp(entry.name, name) == 0 && (entry.port == -1 || entry.port == port)) {
+                        excluded = true;
+                        break;
+                    }
+                }
+                if (excluded) {
+                    continue;
+                }
+            }
+
+            struct ibv_port_attr candidate_port_attr{};
+            if (ibv_query_port(ctx, port, &candidate_port_attr) != 0 ||
+                candidate_port_attr.state != IBV_PORT_ACTIVE ||
+                (candidate_port_attr.link_layer != IBV_LINK_LAYER_INFINIBAND &&
+                 candidate_port_attr.link_layer != IBV_LINK_LAYER_ETHERNET)) {
+                continue;
+            }
+
+            int gid_index = -1;
+            union ibv_gid gid{};
+            int gid_status =
+                staged_query_usable_gid(state, ctx, port, &candidate_port_attr, &gid_index, &gid);
+            if (gid_status != NVSHMEMX_SUCCESS) {
+                if (hca_list_provided && !hca_list_is_exclude) {
+                    NVSHMEMI_ERROR_PRINT("[STAGED] selected HCA '%s' port %d has no usable GID",
+                                         name, port);
+                    ibv_close_device(ctx);
+                    status = gid_status == NVSHMEMX_ERROR_INVALID_VALUE
+                                 ? NVSHMEMX_ERROR_INVALID_VALUE
+                                 : NVSHMEMX_ERROR_INTERNAL;
+                    goto out;
+                }
+                INFO(state->log_level,
+                     "[STAGED] skipping HCA '%s' port %d because no usable GID was found", name,
+                     port);
+                continue;
+            }
+
+            state->rdma.set_context(ctx);
+            state->rdma.set_ib_port(port);
+            state->rdma.set_local_gid_index(static_cast<uint8_t>(gid_index));
+            state->rdma.set_local_gid(gid);
+            snprintf(selected_dev_name, sizeof(selected_dev_name), "%s", name);
+            break;
+        }
+        if (!state->rdma.context()) {
+            ibv_close_device(ctx);
+        }
+    }
+    ibv_free_device_list(dev_list);
+    dev_list = nullptr;
+
+    if (!state->rdma.context()) {
+        if (hca_list_provided) {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] NVSHMEM_HCA_LIST='%s' did not match an active HCA/port with a usable GID",
+                hca_env);
+        } else {
+            NVSHMEMI_ERROR_PRINT("[STAGED] no usable HCA found");
+        }
+        status = hca_list_provided ? NVSHMEMX_ERROR_INVALID_VALUE : NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+    INFO(state->log_level, "[STAGED] using device '%s' port %d", selected_dev_name,
+         state->rdma.ib_port());
+
+    /* ── PD ── */
+    state->rdma.set_protection_domain(ibv_alloc_pd(state->rdma.context()));
+    if (!state->rdma.protection_domain()) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] ibv_alloc_pd failed");
+        status = NVSHMEMX_ERROR_INTERNAL;
+        goto out;
+    }
+
+    INFO(state->log_level,
+         "[STAGED] device=%s port=%d slot=%zu pipeline_depth=%d; one RC QP per PE will be "
+         "allocated during endpoint connection",
+         selected_dev_name, state->rdma.ib_port(), state->bounce_bytes, state->pipeline_depth);
+
+    transport->state = state;
+    transport->host_ops.can_reach_peer = nvshmemt_staged_can_reach_peer;
+    transport->host_ops.connect_endpoints = nvshmemt_staged_connect_endpoints;
+    transport->host_ops.get_mem_handle = nvshmemt_staged_get_mem_handle;
+    transport->host_ops.release_mem_handle = nvshmemt_staged_release_mem_handle;
+    transport->host_ops.rma = nvshmemt_staged_rma;
+    transport->host_ops.amo = nvshmemt_staged_amo;
+    transport->host_ops.fence = nvshmemt_staged_fence;
+    transport->host_ops.quiet = nvshmemt_staged_quiet;
+    transport->host_ops.finalize = nvshmemt_staged_finalize;
+    transport->host_ops.show_info = nvshmemt_staged_show_info;
+    transport->host_ops.put_signal = nvshmemt_put_signal;
+
+    transport->attr = NVSHMEM_TRANSPORT_ATTR_CONNECTED;
+    transport->is_successfully_initialized = true;
+    transport->atomics_complete_on_quiet = true;
+    transport->api_version = api_version < NVSHMEM_TRANSPORT_INTERFACE_VERSION
+                                 ? api_version
+                                 : NVSHMEM_TRANSPORT_INTERFACE_VERSION;
+    transport->n_devices = 0;
+    transport->max_op_len = SIZE_MAX;
+    /* Control-channel AMO responses are written by the host in host endian for every size. */
+    transport->atomic_host_endian_min_size = 0;
+    *t = transport;
+    return 0;
+
+out:
+#ifdef NVSHMEM_USE_GDRCOPY
+    nvshmemt_gpu_cpu_mapping_fini(&state->memory.gpu_cpu_mapping_state);
+#endif
+    if (dev_list) {
+        ibv_free_device_list(dev_list);
+    }
+    delete state;
+    free(transport);
+    return status ? status : NVSHMEMX_ERROR_INTERNAL;
+}
+
 }  // namespace nvshmemi

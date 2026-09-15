@@ -1,0 +1,2 @@
+nvshmem_add_transport(nvshmem_transport_staged staged.cpp ON ON ON OFF)
+target_link_libraries(nvshmem_transport_staged PRIVATE CUDA::cuda_driver ibverbs)

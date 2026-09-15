@@ -199,6 +199,12 @@ int nvshmemi_transport_init(nvshmemi_state_t *state) {
         transport_name = "gpunetio";
     }
 #endif
+#ifdef NVSHMEM_STAGED_SUPPORT
+    if (!transport_name && strncasecmp(nvshmemi_options.REMOTE_TRANSPORT, "staged",
+                                       TRANSPORT_STRING_MAX_LENGTH) == 0) {
+        transport_name = "staged";
+    }
+#endif
 
     if (transport_name) {
         INFO(NVSHMEM_INIT, "Selected remote transport: %s", transport_name);

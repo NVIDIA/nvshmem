@@ -441,13 +441,13 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
         host_memory = true;
     }
 
-#if defined(HAVE_IBV_ACCESS_RELAXED_ORDERING)
-#if HAVE_IBV_ACCESS_RELAXED_ORDERING == 1
+#if defined(HAVE_IBV_ACCESS_RELAXED_ORDERING) && HAVE_IBV_ACCESS_RELAXED_ORDERING
     // IBV_ACCESS_RELAXED_ORDERING has been introduced to rdma-core since v28.0.
     if (relaxed_ordering) {
         ro_flag = IBV_ACCESS_RELAXED_ORDERING;
     }
-#endif
+#else
+    (void)relaxed_ordering;
 #endif
 
     if (ftable->reg_dmabuf_mr != nullptr && !host_memory && dmabuf_support &&

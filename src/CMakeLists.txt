@@ -699,25 +699,6 @@ check_source_compiles(C
 
 set(ACTIVE_TRANSPORTS)
 
-# Compile the staged foundation without exposing an incomplete transport plugin. CUDA Green
-# Context declarations are available starting in CUDA 12.6, and a verbs-enabled transport ensures
-# this target does not add an InfiniBand-header dependency to otherwise dependency-light builds.
-if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.6 AND
-   (NVSHMEM_IBRC_SUPPORT OR NVSHMEM_IBDEVX_SUPPORT OR NVSHMEM_IBGDA_SUPPORT OR
-    NVSHMEM_GPUNETIO_SUPPORT))
-  add_library(nvshmem_staged_foundation_compile OBJECT
-              modules/transport/staged/staged.cpp)
-  nvshmem_library_set_base_config(nvshmem_staged_foundation_compile)
-  target_include_directories(nvshmem_staged_foundation_compile
-                             PRIVATE include
-                                     modules/transport/common)
-  target_link_libraries(nvshmem_staged_foundation_compile
-                        PRIVATE CUDA::cudart_static CUDA::cuda_driver ibverbs)
-  # The staged stack intentionally has no entry point until its activation commit.
-  target_compile_options(nvshmem_staged_foundation_compile
-                         PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-function>)
-endif()
-
 if(NVSHMEM_UCX_SUPPORT)
   add_library(
     nvshmem_transport_ucx SHARED
@@ -909,6 +890,34 @@ if(NVSHMEM_LIBFABRIC_SUPPORT)
     )
   endif()
   set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_libfabric)
+endif()
+
+if(NVSHMEM_STAGED_SUPPORT)
+  if(CUDAToolkit_VERSION VERSION_LESS 12.6)
+    message(FATAL_ERROR "NVSHMEM_STAGED_SUPPORT requires CUDA 12.6 or newer for CUDA Green Contexts")
+  endif()
+  add_library(
+    nvshmem_transport_staged SHARED
+  )
+  nvshmem_library_set_base_config(nvshmem_transport_staged)
+  target_sources(nvshmem_transport_staged PRIVATE
+                 modules/transport/staged/staged.cpp
+                 modules/transport/common/transport_common.cpp
+                 modules/transport/common/transport_ib_common.cpp
+  )
+  target_link_options(nvshmem_transport_staged PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../nvshmem_transport.sym")
+  target_include_directories(nvshmem_transport_staged
+                             PRIVATE include
+                             modules/transport/common
+  )
+  target_link_libraries(nvshmem_transport_staged PRIVATE CUDA::cudart_static CUDA::cuda_driver ibverbs)
+  if(NVSHMEM_USE_GDRCOPY)
+    target_sources(nvshmem_transport_staged PRIVATE
+                   modules/transport/common/transport_gdr_common.cpp
+                   modules/transport/common/transport_gdr_dmabuf.cpp
+    )
+  endif()
+  set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_staged)
 endif()
 
 set_target_properties(${ACTIVE_TRANSPORTS}
@@ -1175,6 +1184,8 @@ set(TRANSPORT_EXPORTS
     ibrc/ibrc.cpp
     libfabric/libfabric.cpp
     libfabric/libfabric.h
+    staged/staged.cpp
+    staged/staged_config.h
     ucx/ucx.cpp
     ucx/ucx.h
 )
@@ -1188,6 +1199,7 @@ set(TRANSPORT_CMAKE_EXPORTS
     common/CMakeLists.txt
     gpunetio/CMakeLists.txt
     libfabric/CMakeLists.txt
+    staged/CMakeLists.txt
     ibdevx/CMakeLists.txt
     ibgda/CMakeLists.txt
     ibrc/CMakeLists.txt

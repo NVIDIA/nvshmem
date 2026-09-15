@@ -344,9 +344,10 @@ NVSHMEMI_ENV_DEF(DISABLE_SELF_WRITE_CE_COLL, bool, false, NVSHMEMI_ENV_CAT_HIDDE
 
 NVSHMEMI_ENV_DEF(ASSERT_ATOMICS_SYNC, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Bypass flush on wait_until at target")
-NVSHMEMI_ENV_DEF(
-    REMOTE_TRANSPORT, string, NVSHMEMI_ENV_TRANSPORT_DEFAULT, NVSHMEMI_ENV_CAT_TRANSPORT,
-    "Selected transport for remote operations: ibrc, ucx, libfabric, ibdevx, gpunetio, none")
+NVSHMEMI_ENV_DEF(REMOTE_TRANSPORT, string, NVSHMEMI_ENV_TRANSPORT_DEFAULT,
+                 NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Selected transport for remote operations: ibrc, ucx, libfabric, ibdevx, "
+                 "gpunetio, staged, none")
 NVSHMEMI_ENV_DEF(ENABLE_MULTI_PORT, bool, true, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Enable transports to use multiple selected NICs per PE.")
 NVSHMEMI_ENV_DEF(IBGDA_ENABLE_MULTI_PORT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,

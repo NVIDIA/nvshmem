@@ -56,6 +56,12 @@ NVSHMEMI_ENV_DEF(DISABLE_GDRCOPY, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable GDRCopy and CUDA DMA-BUF GPU CPU mappings in supported transports")
 NVSHMEMI_ENV_DEF(GDRCOPY_USE_INTERNAL_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Use the internal CUDA DMA-BUF CPU-mapping backend instead of libgdrapi")
+NVSHMEMI_ENV_DEF(STAGED_COPY_POLICY, string, "STREAM", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Select the staged transport local copy policy: STREAM or GDRCOPY")
+NVSHMEMI_ENV_DEF(STAGED_BOUNCE_SIZE, size, (size_t)(16 * 1024 * 1024), NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Size of each staged transport bounce-buffer slot (1 byte to 4 GiB - 1 byte)")
+NVSHMEMI_ENV_DEF(STAGED_PIPELINE_DEPTH, int, 4, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of slots in each staged transport bounce-buffer ring (1-16)")
 NVSHMEMI_ENV_DEF(STAGED_GREEN_CTX_SMS, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Minimum positive SM count requested for staged STREAM Green contexts")
 NVSHMEMI_ENV_DEF(DISABLE_DATA_DIRECT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
