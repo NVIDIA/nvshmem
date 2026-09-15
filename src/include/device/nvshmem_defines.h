@@ -16,6 +16,7 @@
 #include "device/nvshmem_device_macros.h"
 #include "device_host/nvshmem_common.cuh"
 #include "non_abi/nvshmem_build_options.h"
+#include "non_abi/device/common/nvshmemi_type_traits.cuh"
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
     defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
 #include "non_abi/device/pt-to-pt/transfer_device.cuh"
@@ -758,6 +759,16 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_fence() {
             return nvshmemi_handle_atomic_fetch<Type, NVSHMEMI_AMO_FETCH_ADD>(                     \
                 target, value, decltype(value){}, pe);                                             \
         } else {                                                                                   \
+            if constexpr (nvshmemi_is_float_type<Type>()) {                                        \
+                if (nvshmemi_device_state_d.selected_device_transport !=                           \
+                    NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY) {                                        \
+                    printf("[%d] nvshmem" #Prefix "_" #Name                                        \
+                           "_atomic_fetch_add is not supported for PE %d by IBGDA / GDAKI\n",      \
+                           nvshmemi_device_state_d.mype, pe);                                      \
+                    assert(0);                                                                     \
+                    return {};                                                                     \
+                }                                                                                  \
+            }                                                                                      \
             return nvshmemi_transfer_amo_fetch<Type>((void *)target, value, decltype(value){}, pe, \
                                                      NVSHMEMI_AMO_FETCH_ADD);                      \
         }                                                                                          \
@@ -819,6 +830,16 @@ NVSHMEM_TYPE_ATOMIC_FETCH_ADD_CAST(size, size_t, unsigned long long int)
         } else if (can_use_handle_atomic) {                                             \
             nvshmemi_handle_atomic_nonfetch<Type, NVSHMEMI_AMO_ADD>(target, value, pe); \
         } else {                                                                        \
+            if constexpr (nvshmemi_is_float_type<Type>()) {                             \
+                if (nvshmemi_device_state_d.selected_device_transport !=                \
+                    NVSHMEMI_DEVICE_TRANSPORT_TYPE_PROXY) {                             \
+                    printf("[%d] nvshmem" #Prefix "_" #Name                             \
+                           "_atomic_add is not supported for PE %d by IBGDA / GDAKI\n", \
+                           nvshmemi_device_state_d.mype, pe);                           \
+                    assert(0);                                                          \
+                    return;                                                             \
+                }                                                                       \
+            }                                                                           \
             nvshmemi_transfer_amo_nonfetch<Type>(target, value, pe, NVSHMEMI_AMO_ADD);  \
         }                                                                               \
     }

@@ -972,6 +972,7 @@ set(INC_EXPORTS
     device_host_transport/nvshmem_common_transport.h
     device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
     non_abi/device/common/nvshmemi_common_device.cuh
+    non_abi/device/common/nvshmemi_type_traits.cuh
     non_abi/device/common/nvshmemi_region_device.cuh
     non_abi/device/common/nvshmemi_region_state.cuh
     non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh

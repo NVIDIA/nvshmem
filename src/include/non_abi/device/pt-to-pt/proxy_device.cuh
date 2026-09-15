@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include "utils_device.h"
+#include "non_abi/device/common/nvshmemi_type_traits.cuh"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
 #include "non_abi/nvshmemi_region_constants.h"
@@ -19,24 +20,6 @@
 /* this file does not directly use the definitions from device_host/nvshmem_proxy_channel.h */
 /* But the way the requests are filled in directly represents those structures. */
 #include "device_host/nvshmem_proxy_channel.h"  // IWYU pragma: keep
-
-/* Type trait to identify floating-point types for AMO dispatch. */
-template <typename T>
-__host__ __device__ constexpr bool nvshmemi_is_float_type() {
-    return false;
-}
-template <>
-__host__ __device__ constexpr bool nvshmemi_is_float_type<__half>() {
-    return true;
-}
-template <>
-__host__ __device__ constexpr bool nvshmemi_is_float_type<float>() {
-    return true;
-}
-template <>
-__host__ __device__ constexpr bool nvshmemi_is_float_type<double>() {
-    return true;
-}
 
 /* Map float types to same-sized unsigned integer for CAS-based emulation. */
 template <typename T>
