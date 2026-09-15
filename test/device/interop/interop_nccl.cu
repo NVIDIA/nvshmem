@@ -10,6 +10,7 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 
+#include <cuda.h>
 #include <cuda_runtime.h>
 
 #include <cstdarg>
@@ -69,6 +70,16 @@ static void init_nvshmem_and_select_device() {
     int npes_per_gpu = (npes_node + dev_count - 1) / dev_count;
     CUDA_CHECK(cudaSetDevice(mype_node / npes_per_gpu));
     nvshmem_barrier_all();
+}
+
+static bool is_vmm_backed(void *ptr) {
+    CUmemGenericAllocationHandle allocation_handle;
+    CUresult retain_status = cuMemRetainAllocationHandle(&allocation_handle, ptr);
+    if (retain_status == CUDA_SUCCESS) {
+        cuMemRelease(allocation_handle);
+    }
+
+    return retain_status == CUDA_SUCCESS;
 }
 
 static void log_status(int mype, int npes, const char *fmt, ...) {
@@ -257,6 +268,14 @@ int main() {
     scratch = (ncclUniqueId *)nvshmem_malloc(sizeof(ncclUniqueId));
     if (scratch == nullptr) {
         fprintf(stderr, "nvshmem_malloc failed for NCCL unique ID scratch\n");
+        status = -1;
+        goto out;
+    }
+    if (!is_vmm_backed(scratch)) {
+        if (mype == 0) {
+            std::fprintf(stderr,
+                         "interop_nccl requires CUDA VMM-backed NVSHMEM symmetric allocations\n");
+        }
         status = -1;
         goto out;
     }
