@@ -1583,4 +1583,448 @@ static int staged_quiet_all(transport_staged_state_t* s) {
 
 /* ═══════════════════════  transport interface  ═══════════════════ */
 
+static int nvshmemt_staged_can_reach_peer(int* access, nvshmem_transport_pe_info_t*,
+                                          nvshmem_transport_t) {
+    *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
+              NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS;
+    return 0;
+}
+
+static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, int* out_qp_indices,
+                                             int num_qps) {
+    if (out_qp_indices != nullptr && num_qps > 0) {
+        /* Host requests use the transport's PE-indexed internal QPs. */
+        std::fill_n(out_qp_indices, num_qps, NVSHMEMX_QP_DEFAULT);
+        return 0;
+    }
+
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
+    const int n = t->n_pes;
+    const int me = t->my_pe;
+
+    int local_status = 0;
+    if (n <= 0 || me < 0 || me >= n || !s->rdma.qps_empty() || s->rdma.bounce_region() ||
+        s->rdma.bounce_mr()) {
+        local_status = NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    struct ibv_port_attr port_attr{};
+    if (!local_status && ibv_query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr) != 0) {
+        NVSHMEMI_ERROR_PRINT("[STAGED PE%d] ibv_query_port failed for port %d: %s", me,
+                             s->rdma.ib_port(), strerror(errno));
+        local_status = NVSHMEMX_ERROR_INTERNAL;
+    }
+    if (!local_status) {
+        s->rdma.set_local_lid(port_attr.lid);
+        s->rdma.set_path_mtu(port_attr.active_mtu ? port_attr.active_mtu : IBV_MTU_4096);
+        if (s->rdma.path_mtu() > IBV_MTU_4096) {
+            s->rdma.set_path_mtu(IBV_MTU_4096);
+        }
+    }
+
+    if (!local_status && port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
+        if (s->rdma.local_lid() == 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED PE%d] InfiniBand port %d has no LID", me,
+                                 s->rdma.ib_port());
+            local_status = NVSHMEMX_ERROR_INTERNAL;
+        }
+    } else if (!local_status) {
+        if (port_attr.link_layer != IBV_LINK_LAYER_ETHERNET) {
+            NVSHMEMI_ERROR_PRINT("[STAGED PE%d] unsupported link layer %u on port %d", me,
+                                 port_attr.link_layer, s->rdma.ib_port());
+            local_status = NVSHMEMX_ERROR_INTERNAL;
+        }
+    }
+    if (!local_status &&
+        (s->options.IB_PKEY_INDEX < 0 || s->options.IB_PKEY_INDEX >= port_attr.pkey_tbl_len)) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED PE%d] invalid NVSHMEM_IB_PKEY_INDEX %d for port %d: expected 0 <= "
+            "NVSHMEM_IB_PKEY_INDEX < pkey_tbl_len (%hu)",
+            me, s->options.IB_PKEY_INDEX, s->rdma.ib_port(), port_attr.pkey_tbl_len);
+        local_status = NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    if (!local_status) {
+        INFO(s->log_level, "[STAGED PE%d] using GID index %u MTU enum %d", me,
+             static_cast<unsigned int>(s->rdma.local_gid_index()),
+             static_cast<int>(s->rdma.path_mtu()));
+        if (port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
+            INFO(s->log_level, "[STAGED PE%d] using InfiniBand LID %u", me, s->rdma.local_lid());
+        }
+
+        cudaError_t cerr = cudaGetDevice(&s->cuda.device);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED PE%d] cudaGetDevice failed during endpoint setup: %s", me,
+                                 cudaGetErrorString(cerr));
+            local_status = NVSHMEMX_ERROR_INTERNAL;
+        }
+    }
+    if (!local_status && s->cuda.copy_policy == staged_copy_policy_t::STREAM) {
+        local_status = staged_init_green_context(s);
+    }
+
+    int status = staged_collective_setup_status(t, local_status, "local endpoint setup");
+    if (status) {
+        return status;
+    }
+
+    status = staged_create_qp_resources(s, n, 1);
+    status = staged_collective_setup_status(t, status, "QP and bounce-buffer setup");
+    if (status) {
+        return status;
+    }
+
+    /* Bootstrap all-to-all requires a contiguous block of QP handles per destination PE. */
+    const size_t total_qps = staged_total_qps(s);
+    std::vector<staged_ep_handle_t> local_eps(total_qps);
+    for (int qp_slot = 0; qp_slot < s->rdma.qps_per_pe(); ++qp_slot) {
+        for (int pe = 0; pe < n; ++pe) {
+            staged_qp_t& qp = staged_get_qp(s, qp_slot, pe);
+            staged_ep_handle_t& ep =
+                local_eps[static_cast<size_t>(pe) * s->rdma.qps_per_pe() + qp_slot];
+            ep.qpn = qp.qp()->qp_num;
+            ep.rkey = s->rdma.bounce_mr()->rkey;
+            ep.bounce_addr = reinterpret_cast<uint64_t>(qp.server_bounce());
+            ep.gid = s->rdma.local_gid();
+            ep.lid = s->rdma.local_lid();
+
+            TRACE(s->log_level, "[STAGED PE%d] QP slot %d for PE%d: qpn=%u rkey=0x%x bounce=0x%lx",
+                  me, qp_slot, pe, ep.qpn, ep.rkey, static_cast<unsigned long>(ep.bounce_addr));
+        }
+    }
+
+    if (!t->boot_handle->alltoall) {
+        NVSHMEMI_ERROR_PRINT("[STAGED PE%d] bootstrap alltoall is unavailable", me);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    std::vector<staged_ep_handle_t> remote_eps(total_qps);
+    int rc =
+        t->boot_handle->alltoall(local_eps.data(), remote_eps.data(),
+                                 sizeof(staged_ep_handle_t) * s->rdma.qps_per_pe(), t->boot_handle);
+    if (rc != 0) {
+        NVSHMEMI_ERROR_PRINT("[STAGED PE%d] endpoint exchange failed", me);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    /* ── Connect QPs: INIT → RTR → RTS ── */
+    int qp_connect_status = 0;
+    for (size_t q = 0; q < total_qps; ++q) {
+        const int pe = static_cast<int>(q % static_cast<size_t>(n));
+        const int qp_slot = static_cast<int>(q / static_cast<size_t>(n));
+        if (pe == me) {
+            continue;
+        }
+        staged_qp_t& qp = staged_get_qp(s, qp_slot, pe);
+        qp.remote_endpoint() = remote_eps[static_cast<size_t>(pe) * s->rdma.qps_per_pe() + qp_slot];
+        const staged_ep_handle_t& remote_ep = qp.remote_endpoint();
+
+        char gid_str[INET6_ADDRSTRLEN] = {};
+        inet_ntop(AF_INET6, remote_ep.gid.raw, gid_str, sizeof(gid_str));
+        TRACE(s->log_level, "[STAGED PE%d] remote PE%d QP slot %d qpn=%u lid=%u gid=%s", me, pe,
+              qp_slot, remote_ep.qpn, remote_ep.lid, gid_str);
+
+        /* RTR */
+        struct ibv_qp_attr rtr_attr{};
+        rtr_attr.qp_state = IBV_QPS_RTR;
+        rtr_attr.path_mtu = s->rdma.path_mtu();
+        rtr_attr.dest_qp_num = remote_ep.qpn;
+        rtr_attr.rq_psn = 0;
+        rtr_attr.max_dest_rd_atomic = 1;
+        rtr_attr.min_rnr_timer = 12;
+        rtr_attr.ah_attr.dlid = remote_ep.lid;
+        rtr_attr.ah_attr.sl = static_cast<uint8_t>(s->options.IB_SL);
+        rtr_attr.ah_attr.src_path_bits = 0;
+        rtr_attr.ah_attr.static_rate = 0;
+        rtr_attr.ah_attr.port_num = static_cast<uint8_t>(s->rdma.ib_port());
+
+        bool use_grh = port_attr.link_layer == IBV_LINK_LAYER_ETHERNET;
+        if (port_attr.link_layer == IBV_LINK_LAYER_INFINIBAND) {
+            const nvshmemt_ib_qp_path path = nvshmemt_ib_select_qp_path(
+                &s->rdma.local_gid(), s->rdma.local_lid(), remote_ep.lid,
+                remote_ep.gid.global.subnet_prefix, remote_ep.gid.global.interface_id);
+            rtr_attr.ah_attr.dlid = path.dlid;
+            use_grh = s->options.IB_FORCE_GRH || nvshmemt_ib_common_port_requires_grh(&port_attr) ||
+                      path.grh_required;
+        }
+        if (use_grh) {
+            rtr_attr.ah_attr.is_global = 1;
+            rtr_attr.ah_attr.grh.dgid = remote_ep.gid;
+            rtr_attr.ah_attr.grh.sgid_index = s->rdma.local_gid_index();
+            rtr_attr.ah_attr.grh.hop_limit = STAGED_GRH_HOP_LIMIT;
+            rtr_attr.ah_attr.grh.traffic_class = static_cast<uint8_t>(s->options.IB_TRAFFIC_CLASS);
+            rtr_attr.ah_attr.grh.flow_label = 0;
+        } else {
+            rtr_attr.ah_attr.is_global = 0;
+        }
+
+        if (ibv_modify_qp(qp.qp(), &rtr_attr,
+                          IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+                              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
+            NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTR failed for PE%d: %s", me, qp_slot,
+                                 pe, strerror(errno));
+            qp_connect_status = NVSHMEMX_ERROR_INTERNAL;
+            continue;
+        }
+
+        /* RTS */
+        struct ibv_qp_attr rts_attr{};
+        rts_attr.qp_state = IBV_QPS_RTS;
+        rts_attr.sq_psn = 0;
+        rts_attr.timeout = static_cast<uint8_t>(s->options.IB_TIMEOUT);
+        rts_attr.retry_cnt = static_cast<uint8_t>(s->options.IB_RETRY_CNT);
+        rts_attr.rnr_retry = 7;
+        rts_attr.max_rd_atomic = 1;
+        if (ibv_modify_qp(qp.qp(), &rts_attr,
+                          IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                              IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC)) {
+            NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTS failed for PE%d: %s", me, qp_slot,
+                                 pe, strerror(errno));
+            qp_connect_status = NVSHMEMX_ERROR_INTERNAL;
+            continue;
+        }
+
+        INFO(s->log_level, "[STAGED PE%d] connected QP slot %d to PE%d", me, qp_slot, pe);
+    }
+
+    status = staged_collective_setup_status(t, qp_connect_status, "QP connection");
+    if (status) {
+        return status;
+    }
+
+    /* ── Launch workers ── */
+    s->workers.reset();
+    int worker_start_status = 0;
+    try {
+        s->workers.start([t] { staged_server_loop(t); }, [t] { staged_client_loop(t); });
+    } catch (const std::exception& err) {
+        NVSHMEMI_ERROR_PRINT("[STAGED PE%d] failed to start worker thread: %s", me, err.what());
+        worker_start_status = NVSHMEMX_ERROR_INTERNAL;
+    }
+    if (!worker_start_status) {
+        worker_start_status = s->workers.wait_for_start(2);
+    }
+    if (worker_start_status) {
+        staged_stop_workers(s);
+    }
+
+    status = staged_collective_setup_status(t, worker_start_status, "worker startup");
+    if (status) {
+        staged_stop_workers(s);
+        return status;
+    }
+
+    INFO(s->log_level, "[STAGED PE%d] transport ready", me);
+    return 0;
+}
+
+#ifdef NVSHMEM_USE_GDRCOPY
+static int staged_release_gpu_cpu_mapping(transport_staged_state_t* s,
+                                          staged_mem_handle_info_t& info) {
+    std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
+    return nvshmemt_gpu_cpu_unmap(&s->memory.gpu_cpu_mapping_state, &info.cpu_mapping);
+}
+#endif
+
+static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void* buf,
+                                          size_t length, nvshmem_transport_t t,
+                                          bool /* local_only */) {
+    staged_mem_handle_t* handle = reinterpret_cast<staged_mem_handle_t*>(mem_handle);
+
+    if (!handle) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
+    memset(handle, 0, sizeof(*mem_handle));
+
+#ifdef NVSHMEM_USE_GDRCOPY
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
+    if (s->cuda.copy_policy != staged_copy_policy_t::GDRCOPY ||
+        !staged_pointer_needs_cuda_copy(buf)) {
+        return 0;
+    }
+
+    if (check_egm(buf, t->egm_map)) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] CPU-mapping policy cannot map EGM allocation %p len=%zu; "
+            "memory registration failed",
+            buf, length);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    /*
+     * Same-physical multi-VA case (mmap into symmetric heap): pin with VA1
+     * (alias), keep buf (VA2) as the lookup key. See nvbug 5072809 / IBRC.
+     */
+    void* alias_va_ptr = nullptr;
+    if (t->alias_va_map != nullptr && t->alias_va_map->count(buf)) {
+        alias_va_ptr = t->alias_va_map->operator[](buf);
+    }
+
+    auto handle_info = std::make_unique<staged_mem_handle_info_t>();
+    handle_info->ptr = buf;
+    handle_info->size = length;
+    void* mapping_buf = alias_va_ptr ? alias_va_ptr : buf;
+    int mapping_status = 0;
+    {
+        /* Application code can register buffers concurrently. Serialize all GPU CPU mapping
+         * operations with worker copies and teardown. */
+        std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
+        mapping_status =
+            nvshmemt_gpu_cpu_map(&s->memory.gpu_cpu_mapping_state, mapping_buf, length,
+                                 NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE, &handle_info->cpu_mapping);
+    }
+    if (mapping_status != 0) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] CPU-mapping policy (%s) failed for %p len=%zu status=%d; "
+            "memory registration failed",
+            nvshmemt_gpu_cpu_mapping_backend_name(&s->memory.gpu_cpu_mapping_state), mapping_buf,
+            length, mapping_status);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    handle->local_info = handle_info.release();
+    {
+        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
+        s->memory.mem_handle_infos.insert(
+            static_cast<staged_mem_handle_info_t*>(handle->local_info));
+    }
+    return 0;
+#else
+    (void)buf;
+    (void)length;
+    (void)t;
+    return 0;
+#endif
+}
+
+static int nvshmemt_staged_release_mem_handle(nvshmem_mem_handle_t* mem_handle,
+                                              nvshmem_transport_t t) {
+    staged_mem_handle_t* handle = reinterpret_cast<staged_mem_handle_t*>(mem_handle);
+    if (!handle || !handle->local_info) {
+        return 0;
+    }
+
+#ifdef NVSHMEM_USE_GDRCOPY
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
+    staged_mem_handle_info_t* handle_info =
+        static_cast<staged_mem_handle_info_t*>(handle->local_info);
+    bool retrying_retired_cleanup = false;
+    {
+        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
+        auto it = s->memory.mem_handle_infos.find(handle_info);
+        if (it != s->memory.mem_handle_infos.end()) {
+            s->memory.mem_handle_infos.erase(it);
+        } else {
+            auto retired_it = s->memory.retired_mem_handle_infos.find(handle_info);
+            if (retired_it == s->memory.retired_mem_handle_infos.end()) {
+                return 0;
+            }
+            retrying_retired_cleanup = true;
+        }
+    }
+
+    int status = staged_release_gpu_cpu_mapping(s, *handle_info);
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping cleanup failed status=%d", status);
+        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
+        s->memory.retired_mem_handle_infos.insert(handle_info);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    if (retrying_retired_cleanup) {
+        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
+        s->memory.retired_mem_handle_infos.erase(handle_info);
+    }
+    delete handle_info;
+    handle->local_info = nullptr;
+#else
+    (void)t;
+    handle->local_info = nullptr;
+#endif
+    return 0;
+}
+
+/* ═══  RMA  ═══════════════════════════════════════════════════════ */
+
+static int nvshmemt_staged_rma(nvshmem_transport_t tcurr, int pe, rma_verb_t verb,
+                               rma_memdesc_t* remote, rma_memdesc_t* local,
+                               rma_bytesdesc_t bytesdesc, int /* qp_index */) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(tcurr->state);
+    if (verb.desc != NVSHMEMI_OP_P && verb.desc != NVSHMEMI_OP_PUT && verb.desc != NVSHMEMI_OP_G &&
+        verb.desc != NVSHMEMI_OP_GET) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    auto op =
+        std::make_shared<staged_client_op_t>(pe, staged_rma_op_t{verb, *remote, *local, bytesdesc});
+
+    return staged_submit_client_op(s, op, !verb.is_nbi);
+}
+
+static int nvshmemt_staged_fence(nvshmem_transport_t, int, int, int) { return 0; }
+static int nvshmemt_staged_quiet(nvshmem_transport_t tcurr, int, int) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(tcurr->state);
+    return staged_quiet_all(s);
+}
+
+/* ═══  AMO (control channel)  ════════════════════════════════════ */
+
+static int nvshmemt_staged_amo(nvshmem_transport_t tcurr, int pe, void*, amo_verb_t verb,
+                               amo_memdesc_t* target, amo_bytesdesc_t bytesdesc, int) {
+    if (bytesdesc.elembytes != sizeof(uint16_t) && bytesdesc.elembytes != sizeof(uint32_t) &&
+        bytesdesc.elembytes != sizeof(uint64_t)) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] AMO verb %d with size %d not implemented yet", verb.desc,
+                             bytesdesc.elembytes);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(tcurr->state);
+
+    auto op = std::make_shared<staged_client_op_t>(pe, staged_amo_op_t{verb, *target, bytesdesc});
+
+    return staged_submit_client_op(s, op, true);
+}
+
+/* ═══  finalize  ═════════════════════════════════════════════════ */
+
+static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
+    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
+    if (!s) {
+        return 0;
+    }
+
+    staged_quiet_all(s);
+
+    s->workers.stop();
+
+    std::unordered_set<staged_mem_handle_info_t*> mem_handle_infos;
+    {
+        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
+        mem_handle_infos.swap(s->memory.mem_handle_infos);
+        mem_handle_infos.insert(s->memory.retired_mem_handle_infos.begin(),
+                                s->memory.retired_mem_handle_infos.end());
+        s->memory.retired_mem_handle_infos.clear();
+    }
+    for (auto* info : mem_handle_infos) {
+#ifdef NVSHMEM_USE_GDRCOPY
+        int status = staged_release_gpu_cpu_mapping(s, *info);
+        if (status) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping final cleanup failed status=%d", status);
+        }
+#endif
+        delete info;
+    }
+#ifdef NVSHMEM_USE_GDRCOPY
+    nvshmemt_gpu_cpu_mapping_fini(&s->memory.gpu_cpu_mapping_state);
+#endif
+
+    delete s;
+    transport->state = nullptr;
+    return 0;
+}
+
+static int nvshmemt_staged_show_info(nvshmem_transport_t, int) { return 0; }
+
+/* ═══  init  ═════════════════════════════════════════════════════ */
+
 }  // namespace nvshmemi
