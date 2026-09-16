@@ -85,3 +85,4 @@ Use $nvshmem-docs to explain NVSHMEM_THREAD_SERIALIZED.
 Use $nvshmem-docs to find NVSHMEM4Py installation documentation for NVSHMEM 3.5.21.
 Use $nvshmem-docs to check whether NVSHMEM4Py 0.2.2 is compatible with NVSHMEM 3.6.5.
 ```
+<!-- ci trigger -->
