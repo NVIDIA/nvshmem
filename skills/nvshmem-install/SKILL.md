@@ -157,3 +157,5 @@ Resolve `latest`, ask about administrator authority, inspect the system, and rec
 Request: “Build NVSHMEM from source with IBGDA for these Infiniband-connected GPUs.”
 
 Inspect the GPU, NIC, launcher, and dependency environment; verify the requested release and IBGDA prerequisites through `$nvshmem-docs`; then present a complete CMake configuration, installation sequence, and same-node and two-node validation plan before requesting approval.
+
+<!-- ci trigger -->
