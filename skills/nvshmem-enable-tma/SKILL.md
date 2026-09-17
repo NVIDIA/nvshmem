@@ -137,3 +137,5 @@ Use $nvshmem-enable-tma to inspect a shared-tile-to-GMEM-to-put sequence and, if
 
 Use $nvshmem-enable-tma to assess an NVSHMEM 3.6 application running on A100 peers connected only through InfiniBand.
 ```
+
+<!-- ci trigger -->
