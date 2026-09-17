@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Note - For packaging reasons, do not move this file from src/include/non_abi */
+
+#pragma once
+
+#include "device_host/nvshmem_version.h"
+
+// clang-format off
+
+#define NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION @TRANSPORT_VERSION_MAJOR@
+#define NVSHMEM_TRANSPORT_PLUGIN_MINOR_VERSION @TRANSPORT_VERSION_MINOR@
+#define NVSHMEM_TRANSPORT_PLUGIN_PATCH_VERSION @TRANSPORT_VERSION_PATCH@
+#define NVSHMEM_BOOTSTRAP_PLUGIN_MAJOR_VERSION @BOOTSTRAP_VERSION_MAJOR@
+#define NVSHMEM_BOOTSTRAP_PLUGIN_MINOR_VERSION @BOOTSTRAP_VERSION_MINOR@
+#define NVSHMEM_BOOTSTRAP_PLUGIN_PATCH_VERSION @BOOTSTRAP_VERSION_PATCH@
+#define NVSHMEM_BUILD_VARS @INFO_BUILD_VARS@
+
+// clang-format on

@@ -18,7 +18,7 @@
  * the ABI for transport modules.
  */
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "non_abi/nvshmem_version.h"
+#include "non_abi/nvshmemi_build_version.h"
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "non_abi/nvshmemx_error.h"
 #include "non_abi/nvshmem_build_options.h"

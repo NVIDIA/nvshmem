@@ -6,7 +6,7 @@
 #define NVSHMEMI_BOOTSTRAP_H
 
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
-#include "non_abi/nvshmem_version.h"
+#include "non_abi/nvshmemi_build_version.h"
 /* Version = major * 10000 + minor * 100 + patch*/
 /* ABI Introduced in NVSHMEM 2.8.0 */
 #define NVSHMEMI_BOOTSTRAP_ABI_VERSION                \

@@ -15,7 +15,7 @@
 #endif
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device_host_transport/nvshmem_common_gpunetio.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 #include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/nvshmem_build_options.h"

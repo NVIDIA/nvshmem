@@ -15,7 +15,7 @@
 #include <map>
 
 #include "device_host/nvshmem_common.cuh"
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 #include "internal/host/custom_malloc.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_handle_table.hpp"

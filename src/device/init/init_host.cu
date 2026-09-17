@@ -16,7 +16,7 @@
 #include <cuda_runtime.h>
 
 #include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmem_version.h"
+#include "non_abi/nvshmemi_build_version.h"
 #include "non_abi/nvshmemx_error.h"
 #include "internal/device/nvshmemi_device.h"
 #include "internal/common/error_codes_internal.h"

@@ -15,7 +15,7 @@
 #endif
 
 #include "device_host/nvshmem_types.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 #include "non_abi/nvshmemi_region_constants.h"
 
 static_assert(NVSHMEMI_REGION_HINT_BATCH_RMA == NVSHMEMX_REGION_HINT_BATCH_RMA,

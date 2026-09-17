@@ -4,7 +4,7 @@
  */
 
 #include "transport_common.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 #include <assert.h>
 #include <stdint.h>  // for uint64_t, uintptr_t
 #include <stdlib.h>  // for atoi, calloc, free, realloc

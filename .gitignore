@@ -50,7 +50,8 @@
 # Generated sources
 src/device/comm/transfer_device.cu
 src/include/non_abi/nvshmem_build_options.h
-src/include/non_abi/nvshmem_version.h
+src/include/device_host/nvshmem_version.h
+src/include/non_abi/nvshmemi_build_version.h
 src/include/non_abi/device/pt-to-pt/transfer_device.cuh
 
 # gtest artifacts

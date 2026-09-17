@@ -17,7 +17,7 @@
 #include <strings.h>           // for strcasecmp
 #include <unistd.h>            // for access, close, sysconf
 #include <vector>              // for vector
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
 #include "non_abi/nvshmemx_error.h"            // for NVSHMEMX_ERROR_INTERNAL
 #include "non_abi/nvshmem_build_options.h"     // for NVSHMEM_USE_MLX5DV

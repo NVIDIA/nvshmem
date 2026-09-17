@@ -15,8 +15,8 @@
 #include <deque>                     // for deque
 #include <unordered_map>
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvsh...
-#include "device_host_transport/nvshmem_constants.h"
-#include "non_abi/nvshmem_version.h"
+#include "device_host_transport/nvshmemi_constants.h"
+#include "non_abi/nvshmemi_build_version.h"
 #include "non_abi/nvshmemx_error.h"                                        // for NVSH...
 #include "non_abi/nvshmem_build_options.h"                                 // IWYU pragma: keep
 #include "internal/host_transport/nvshmemi_transport_defines.h"            // for nvsh...

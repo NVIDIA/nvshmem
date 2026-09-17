@@ -173,7 +173,7 @@ if ((version_ok == 0)) && [[ -n "$nvshmem_prefix" ]]; then
 fi
 
 if ((version_ok == 0)) && [[ -n "$nvshmem_prefix" ]]; then
-    version_header="$nvshmem_prefix/include/non_abi/nvshmem_version.h"
+    version_header="$nvshmem_prefix/include/device_host/nvshmem_version.h"
     if [[ -r "$version_header" ]]; then
         version_header_evidence=$(grep -E '^#[[:space:]]*define[[:space:]]+NVSHMEM_VENDOR_(BASE|ARTIFACT|PACKAGE)_VERSION_STRING[[:space:]]+"[0-9]+\.[0-9]+([.][0-9]+)?[^"]*"' "$version_header" 2>/dev/null || true)
         if [[ -n "$version_header_evidence" ]]; then
@@ -185,6 +185,7 @@ fi
 
 if ((version_ok == 0)) && [[ -n "$nvshmem_prefix" ]]; then
     for version_header in \
+        "$nvshmem_prefix/include/device_host/nvshmem_version.h" \
         "$nvshmem_prefix/include/non_abi/nvshmem_version.h" \
         "$nvshmem_prefix/include/device_host_transport/nvshmem_constants.h"; do
         if [[ -r "$version_header" ]]; then

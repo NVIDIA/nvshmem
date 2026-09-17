@@ -27,7 +27,7 @@
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "non_abi/device_host/nvshmemi_types.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 
 #if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 extern "C" {

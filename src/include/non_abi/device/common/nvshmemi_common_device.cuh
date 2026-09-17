@@ -20,7 +20,7 @@
 #include "non_abi/nvshmem_build_options.h"
 #include "device_host/nvshmem_common.cuh"
 #include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "device_host_transport/nvshmemi_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
