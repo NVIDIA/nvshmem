@@ -195,3 +195,5 @@ Treat its `Mapping` and `Exact Exports` sections as mandatory gates. Do not retu
 - Do not emit legacy IBGDA multi-port controls as the primary 3.8-or-later control.
 - Do not generate provider-native UCX or libfabric settings; explain them without inventing values.
 - Do not overwrite user files or change the system while collecting evidence.
+
+<!-- ci trigger -->
