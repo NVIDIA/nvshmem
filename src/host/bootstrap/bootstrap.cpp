@@ -17,7 +17,7 @@
 #include "internal/host/nvshmemi_bootstrap_library.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/util.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 #define LEGACY_BOOTSTRAP_MODULE_MPI "nvshmem_bootstrap_mpi.so"
 #define LEGACY_BOOTSTRAP_MODULE_PMI "nvshmem_bootstrap_pmi.so"

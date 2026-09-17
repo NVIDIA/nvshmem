@@ -16,7 +16,7 @@
 #include "device_host/nvshmem_version.h"
 #include "host/nvshmemx_coll_api.h"
 #include "host/nvshmem_macros.h"
-#include "non_abi/nvshmemx_error.h"
+#include "device_host/nvshmemx_status.h"
 #include "host/nvshmem_api.h"
 
 #ifdef __cplusplus

@@ -31,7 +31,7 @@
 #include "device_host_transport/nvshmemi_constants.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
 #include "non_abi/nvshmemi_build_version.h"
 #include "rdma/fabric.h"

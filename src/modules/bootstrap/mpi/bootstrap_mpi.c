@@ -12,7 +12,7 @@
 #include "bootstrap_util.h"
 #include "internal/bootstrap_host/nvshmemi_bootstrap.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 static MPI_Comm bootstrap_comm = MPI_COMM_NULL;
 static int nvshmem_initialized_mpi = 0;

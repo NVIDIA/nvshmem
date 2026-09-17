@@ -9,7 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/bootstrap_host/nvshmemi_bootstrap.h"
 #include "bootstrap_util.h"

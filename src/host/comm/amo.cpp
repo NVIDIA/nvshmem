@@ -7,7 +7,7 @@
 #include <stddef.h>                        // for ptrdiff_t, size_t
 #include <stdint.h>                        // for int32_t, int64_t, uint32_t
 #include "host/nvshmem_api.h"              // for nvshmem_double_atomic_fetch
-#include "non_abi/nvshmemx_error.h"        // for NVSHMEMI_ERROR_PRINT
+#include "non_abi/nvshmemi_error.h"        // for NVSHMEMI_ERROR_PRINT
 #include "internal/host/nvshmemi_types.h"  // for nvshmemi_state, nvshmemi_s...
 
 #define NVSHMEM_TYPE_INC_NOT_IMPLEMENTED(Name, TYPE)                                \

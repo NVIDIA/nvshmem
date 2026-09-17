@@ -9,7 +9,7 @@
 #include <stdint.h>  // for uint64_t, uintptr_t
 #include <stdlib.h>  // for atoi, calloc, free, realloc
 #include <utility>
-#include "non_abi/nvshmemx_error.h"  // for NVSHMEMI_ERROR_PRINT, NVSHMEMX_E...
+#include "non_abi/nvshmemi_error.h"  // for NVSHMEMI_ERROR_PRINT, NVSHMEMX_E...
 
 struct transport_mem_handle_info_cache {
     void **cache;

@@ -33,7 +33,7 @@
 #include "device_host_transport/nvshmem_common_transport.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "non_abi/nvshmemi_build_version.h"
 #include "internal/host_transport/transport.h"
 #include "transport_common.h"

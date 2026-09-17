@@ -970,6 +970,7 @@ set(INC_EXPORTS
     bootstrap_device_host/nvshmem_uniqueid.h
     device_host/nvshmem_constants.h
     device_host/nvshmem_version.h
+    device_host/nvshmemx_status.h
     device_host/nvshmem_proxy_channel.h
     device_host/nvshmem_types.h
     device_host/nvshmem_api_macros.h
@@ -1025,7 +1026,7 @@ set(INC_EXPORTS
     host/nvshmemx_coll_api.h
     non_abi/nvshmemi_cccl_compat.h
     non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemx_error.h
+    non_abi/nvshmemi_error.h
     non_abi/nvshmem_build_options.h
     non_abi/nvshmemi_build_version.h
     nvshmem.h
@@ -1071,11 +1072,12 @@ endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 set(BOOTSTRAP_INC_EXPORTS
     bootstrap_device_host/nvshmem_uniqueid.h
     device_host/nvshmem_version.h
+    device_host/nvshmemx_status.h
     bootstrap_host_transport/env_defs_internal.h
     internal/bootstrap_host/nvshmemi_bootstrap.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
     non_abi/nvshmemi_build_version.h
-    non_abi/nvshmemx_error.h
+    non_abi/nvshmemi_error.h
 )
 
 foreach(SHARE ${BOOTSTRAP_INC_EXPORTS})
@@ -1108,6 +1110,7 @@ set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
     device_host/nvshmem_constants.h
     device_host/nvshmem_version.h
+    device_host/nvshmemx_status.h
     device_host_transport/nvshmem_common_ibgda.h
     device_host_transport/nvshmem_common_gpunetio.h
     device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
@@ -1122,7 +1125,7 @@ set(TRANSPORT_INC_EXPORTS
     non_abi/nvshmemi_region_constants.h
     non_abi/nvshmemi_region_types.h
     non_abi/nvshmemi_build_version.h
-    non_abi/nvshmemx_error.h
+    non_abi/nvshmemi_error.h
     non_abi/nvshmem_build_options.h
 )
 

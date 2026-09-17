@@ -18,7 +18,7 @@
 
 #include "non_abi/nvshmem_build_options.h"
 #include "non_abi/nvshmemi_build_version.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "internal/device/nvshmemi_device.h"
 #include "internal/common/error_codes_internal.h"
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"

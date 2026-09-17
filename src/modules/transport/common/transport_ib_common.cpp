@@ -19,7 +19,7 @@
 #include <vector>              // for vector
 #include "device_host_transport/nvshmemi_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
-#include "non_abi/nvshmemx_error.h"            // for NVSHMEMX_ERROR_INTERNAL
+#include "non_abi/nvshmemi_error.h"            // for NVSHMEMX_ERROR_INTERNAL
 #include "non_abi/nvshmem_build_options.h"     // for NVSHMEM_USE_MLX5DV
 #include "transport_common.h"                  // for LOAD_SYM, INFO, MAXPAT...
 

@@ -15,7 +15,7 @@
 #include "env_defs.h"
 #include "internal/bootstrap_host/nvshmemi_bootstrap.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 

@@ -17,7 +17,7 @@
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/nvshmemi_bootstrap_library.h"
 #include "non_abi/nvshmemi_build_version.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 #define API_STATUS_INTERNAL(expr, code_block, ...) \
     do {                                           \

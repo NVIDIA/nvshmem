@@ -11,7 +11,7 @@
 #include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/nvshmem_nvtx.hpp"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "internal/host_transport/transport.h"
 #include "internal/host/util.h"
 

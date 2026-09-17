@@ -21,7 +21,7 @@
 #include "internal/host/nvshmemi_handle_table.hpp"
 #include "internal/host/nvshmemi_rma_translation.hpp"
 #include "internal/host/nvshmemi_types.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/cudawrap.h"
 #include "internal/host_transport/transport.h"

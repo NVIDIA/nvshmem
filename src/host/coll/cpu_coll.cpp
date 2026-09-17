@@ -14,7 +14,7 @@
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/util.h"
 #include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 #ifdef NVSHMEM_USE_NCCL
 #include <dlfcn.h>  // for dlsym, dlopen, RTLD...

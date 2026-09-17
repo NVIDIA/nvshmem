@@ -9,7 +9,7 @@
 #include "device_host/nvshmem_types.h"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 #ifdef __CUDA_ARCH__
 

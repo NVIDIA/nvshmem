@@ -8,7 +8,7 @@
 #include <dlfcn.h>
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/bootstrap_host/nvshmemi_bootstrap.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 
 #define GET_SYMBOL(lib_handle, name, var, status)                                                \
     do {                                                                                         \

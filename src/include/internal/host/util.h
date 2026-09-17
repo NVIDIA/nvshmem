@@ -30,7 +30,7 @@
 #include <sstream>
 #include <inttypes.h>
 #include "non_abi/device_host/nvshmemi_types.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/nvshmemi_error.h"
 #include "internal/common/error_codes_internal.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmemi_types.h"

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "non_abi/nvshmemx_error.h"
+#include "device_host/nvshmemx_status.h"
 
 TEST(nvshmemx_status_string, KnownValuesMatchEnumeratorNames) {
     EXPECT_STREQ(nvshmemx_status_string(NVSHMEMX_SUCCESS), "NVSHMEMX_SUCCESS");
