@@ -230,3 +230,5 @@ State the documentation version consulted when live verification was used. Descr
 - Some compatibility details are release-sensitive; verify the exact target release only when the recommendation depends on one of them.
 - The collector describes one node and one selected installation. It does not prove cluster-wide uniformity, working RoCE, or complete operation coverage.
 - Incomplete evidence lowers confidence and must be disclosed, but does not by itself prevent a best-evidence recommendation or minimal exports.
+
+<!-- ci trigger -->
