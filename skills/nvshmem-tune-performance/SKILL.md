@@ -122,3 +122,5 @@ Action: Invoke $nvshmem-select-remote-transport because the request concerns an 
 | Routing target is underspecified | The request states only a general intent to improve performance. | Present the baseline-characterization and targeted-optimization workflows; require an explicit selection. |
 | A requested specialist is unavailable | Its skill is not installed or enabled. | Name the unavailable specialist and ask the user to enable it or choose another route. |
 | Supplied settings conflict | The request and earlier context specify different topology, transport, or constraints. | Report the conflict and ask which value to preserve before handing off. |
+
+<!-- ci trigger -->
