@@ -247,3 +247,5 @@ Output: Package the returned stdout, stderr, exit statuses, and hostname evidenc
 - Keep collection read-only and unprivileged. Collect only the allowlisted performance and launcher variables emitted by the bundled script; never expose unrelated environment variables or secrets.
 - Never overwrite an existing artifact directory or raw log, replace a failed device test with a host analogue, or represent a same-node result as two-node evidence.
 - Compare results only when the benchmark, message size, placement, PE count, transport, and relevant options match. Without a matched baseline, state that range assessment was not performed and do not issue an expected or regressed verdict.
+
+<!-- ci trigger -->
