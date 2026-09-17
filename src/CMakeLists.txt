@@ -967,7 +967,7 @@ configure_file(include/non_abi/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE
 
 set(INC_EXPORTS
     ${INC_EXPORTS}
-    bootstrap_device_host/nvshmem_uniqueid.h
+    device_host/nvshmem_uniqueid.h
     device_host/nvshmem_constants.h
     device_host/nvshmem_version.h
     device_host/nvshmemx_status.h
@@ -1070,7 +1070,7 @@ foreach(SHARE ${BOOTSTRAP_EXPORTS})
 endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 
 set(BOOTSTRAP_INC_EXPORTS
-    bootstrap_device_host/nvshmem_uniqueid.h
+    device_host/nvshmem_uniqueid.h
     device_host/nvshmem_version.h
     device_host/nvshmemx_status.h
     bootstrap_host_transport/env_defs_internal.h
