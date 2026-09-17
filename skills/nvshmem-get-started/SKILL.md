@@ -220,3 +220,5 @@ Use $nvshmem-get-started to help me run my first NVSHMEM4Py program with two GPU
 ```
 
 Read the NVSHMEM4Py program guide, collect the Python environment and launcher context, obtain current version-matched Python API and launch details from `$nvshmem-docs`, and provide a user-runnable small-run plan.
+
+<!-- ci trigger -->
