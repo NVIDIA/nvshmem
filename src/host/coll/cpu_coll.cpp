@@ -8,13 +8,13 @@
 #include <stdlib.h>
 #include <algorithm>
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "non_abi/device_host/nvshmemi_types.h"
+#include "non_abi/device_host/nvshmemi_runtime_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/util.h"
 #include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemi_error.h"
+#include "non_abi/nvshmemi_error_macros.h"
 
 #ifdef NVSHMEM_USE_NCCL
 #include <dlfcn.h>  // for dlsym, dlopen, RTLD...

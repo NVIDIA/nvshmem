@@ -10,7 +10,7 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "device_host/nvshmem_constants.h"
+#include "device_host/nvshmem_api_constants.h"
 #include "device_host/nvshmem_api_macros.h"
 #include "device_host/nvshmem_types.h"
 #include "device_host/nvshmem_version.h"

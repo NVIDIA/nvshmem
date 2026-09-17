@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef _NVSHMEM_CONSTANTS_H_
-#define _NVSHMEM_CONSTANTS_H_
+#ifndef NVSHMEM_API_CONSTANTS_H
+#define NVSHMEM_API_CONSTANTS_H
 
 #if !defined __CUDACC_RTC__
 #include <limits.h>

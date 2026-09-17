@@ -5,14 +5,14 @@
 
 #ifndef NVSHMEMI_FCOLLECT_CPU_H
 #define NVSHMEMI_FCOLLECT_CPU_H
-#include <driver_types.h>                        // for cudaStream_t, CUstr...
-#include <stddef.h>                              // for size_t
-#include "non_abi/device_host/nvshmemi_types.h"  // for nvshmemi_team_t
-#include "cpu_coll.h"                            // for nvshmemi_get_nccl_dt
-#include "device_host/nvshmem_common.cuh"        // for nvshmemi_team_pool
-#include "internal/host/nvshmem_internal.h"      // for nvshmemi_use_nccl
-#include "internal/host/util.h"                  // for NCCL_CHECK
-#include "non_abi/nvshmem_build_options.h"       // for NVSHMEM_USE_NCCL
+#include <driver_types.h>                                // for cudaStream_t, CUstr...
+#include <stddef.h>                                      // for size_t
+#include "non_abi/device_host/nvshmemi_runtime_types.h"  // for nvshmemi_team_t
+#include "cpu_coll.h"                                    // for nvshmemi_get_nccl_dt
+#include "device_host/nvshmem_common.cuh"                // for nvshmemi_team_pool
+#include "internal/host/nvshmem_internal.h"              // for nvshmemi_use_nccl
+#include "internal/host/util.h"                          // for NCCL_CHECK
+#include "non_abi/nvshmem_build_options.h"               // for NVSHMEM_USE_NCCL
 #include "internal/host/nvshmemi_team.h"
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"  // for ncclComm, ncclComm_t

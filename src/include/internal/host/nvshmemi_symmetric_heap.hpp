@@ -22,7 +22,7 @@
 #include "internal/host/util.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/cudawrap.h"
-#include "non_abi/nvshmemi_error.h"
+#include "non_abi/nvshmemi_error_macros.h"
 #include "device_host/logical_endpoint_types.h"
 
 // Forward declarations

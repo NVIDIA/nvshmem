@@ -11,7 +11,7 @@
 #include <string.h>
 #include <unistd.h>  // IWYU pragma: keep
 // IWYU pragma: no_include <bits/getopt_core.h>
-#include "non_abi/nvshmemi_build_version.h"
+#include "non_abi/nvshmemi_build_metadata.h"
 #include "internal/host/util.h"
 
 int opt_env = 0;

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef _NVSHMEMI_ERROR_H_
-#define _NVSHMEMI_ERROR_H_
+#ifndef NVSHMEMI_ERROR_MACROS_H
+#define NVSHMEMI_ERROR_MACROS_H
 #if !defined __CUDACC_RTC__
 #include <errno.h>
 #include <stdio.h>

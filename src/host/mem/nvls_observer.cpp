@@ -12,10 +12,10 @@
 #include <map>
 #include <typeinfo>
 #include <vector>
-#include "non_abi/device_host/nvshmemi_types.h"
+#include "non_abi/device_host/nvshmemi_runtime_types.h"
 #include "host/nvshmem_api.h"
 #include "host/nvshmemx_api.h"
-#include "non_abi/nvshmemi_error.h"
+#include "non_abi/nvshmemi_error_macros.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_mem_transport.hpp"

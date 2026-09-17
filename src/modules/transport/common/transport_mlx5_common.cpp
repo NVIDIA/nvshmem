@@ -9,7 +9,7 @@
 #include "transport_mlx5_common.h"
 #include "transport_common.h"
 #include "mlx5_ifc.h"
-#include "non_abi/nvshmemi_error.h"
+#include "non_abi/nvshmemi_error_macros.h"
 
 bool nvshmemt_ib_common_query_mlx5_caps(struct ibv_context *context) {
     int status;

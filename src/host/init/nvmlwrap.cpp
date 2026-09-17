@@ -8,7 +8,7 @@
 #include <dlfcn.h>                                       // for dlsym, dlclose, dlopen
 #include <stdio.h>                                       // for NULL, snprintf
 #include <string.h>                                      // for memset
-#include "non_abi/nvshmemi_error.h"                      // for NVSHMEMI_ERROR_PRINT
+#include "non_abi/nvshmemi_error_macros.h"               // for NVSHMEMI_ERROR_PRINT
 #include "internal/host/debug.h"                         // for INFO, NVSHMEM_INIT
 #include "internal/host/util.h"                          // for nvshmemi_options
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_options_s

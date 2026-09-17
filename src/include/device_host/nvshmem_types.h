@@ -16,7 +16,7 @@
 #include <cuda/std/cstdint>
 #endif
 
-#include "device_host/nvshmem_uniqueid.h"
+#include "device_host/nvshmemx_uniqueid.h"
 
 #if defined(__cplusplus)
 #define NVSHMEMI_TYPES_STATIC_ASSERT(condition, message) static_assert(condition, message)

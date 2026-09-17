@@ -17,13 +17,13 @@
 #endif
 
 #include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemi_build_version.h"
-#include "non_abi/nvshmemi_error.h"
+#include "non_abi/nvshmemi_build_metadata.h"
+#include "non_abi/nvshmemi_error_macros.h"
 #include "internal/device/nvshmemi_device.h"
 #include "internal/common/error_codes_internal.h"
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
 #include "device_host/nvshmem_common.cuh"
-#include "non_abi/device_host/nvshmemi_types.h"
+#include "non_abi/device_host/nvshmemi_runtime_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
 #include "device_host_transport/nvshmem_common_ibgda.h"

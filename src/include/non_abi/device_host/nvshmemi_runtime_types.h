@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef NVSHMEMI_DEVICE_HOST_TYPES_H
-#define NVSHMEMI_DEVICE_HOST_TYPES_H
+#ifndef NVSHMEMI_RUNTIME_TYPES_H
+#define NVSHMEMI_RUNTIME_TYPES_H
 
 #include "device_host/nvshmem_types.h"
 
@@ -488,4 +488,4 @@ static_assert(sizeof(nvshmemi_device_host_state_v1) == 848,
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 
-#endif /* NVSHMEMI_DEVICE_HOST_TYPES_H */
+#endif /* NVSHMEMI_RUNTIME_TYPES_H */

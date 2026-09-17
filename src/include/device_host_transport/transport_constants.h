@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef _NVSHMEMI_CONSTANTS_H_
-#define _NVSHMEMI_CONSTANTS_H_
+#ifndef NVSHMEM_TRANSPORT_CONSTANTS_H
+#define NVSHMEM_TRANSPORT_CONSTANTS_H
 
 #if !defined __CUDACC_RTC__
 #include <limits.h>
@@ -12,7 +12,7 @@
 #include <cuda/std/climits>
 #endif
 
-#include "device_host/nvshmem_constants.h"
+#include "device_host/nvshmem_api_constants.h"
 
 #define CHANNEL_BUF_SIZE (1 << CHANNEL_BUF_SIZE_LOG)
 #define CHANNEL_BUF_SIZE_LOG 22

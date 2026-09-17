@@ -4,15 +4,15 @@
  */
 
 #include "barrier.h"
-#include <cuda_runtime.h>                        // for cudaStreamSynchronize
-#include "device_host/nvshmem_common.cuh"        // for NVSHMEM_TEAM_WORLD
-#include "non_abi/device_host/nvshmemi_types.h"  // for nvshmem_team_t
-#include "host/nvshmem_api.h"                    // for nvshmem_quiet
-#include "host/nvshmem_coll_api.h"               // for nvshmem_barrier, nvshm...
-#include "internal/host/nvshmem_internal.h"      // for nvshmemi_state, nvshme...
-#include "internal/host/nvshmemi_types.h"        // for nvshmemi_state
-#include "internal/host/nvshmem_nvtx.hpp"        // for nvtx_cond_range, COLL_OPT
-#include "internal/host/util.h"                  // for nvshmemi_check_state_a...
+#include <cuda_runtime.h>                                // for cudaStreamSynchronize
+#include "device_host/nvshmem_common.cuh"                // for NVSHMEM_TEAM_WORLD
+#include "non_abi/device_host/nvshmemi_runtime_types.h"  // for nvshmem_team_t
+#include "host/nvshmem_api.h"                            // for nvshmem_quiet
+#include "host/nvshmem_coll_api.h"                       // for nvshmem_barrier, nvshm...
+#include "internal/host/nvshmem_internal.h"              // for nvshmemi_state, nvshme...
+#include "internal/host/nvshmemi_types.h"                // for nvshmemi_state
+#include "internal/host/nvshmem_nvtx.hpp"                // for nvtx_cond_range, COLL_OPT
+#include "internal/host/util.h"                          // for nvshmemi_check_state_a...
 
 void nvshmemi_barrier(nvshmem_team_t team) {
     nvshmem_quiet();

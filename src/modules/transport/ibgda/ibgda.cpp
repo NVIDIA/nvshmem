@@ -29,9 +29,9 @@
 #include "device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp"
 #include "internal/host_transport/cudawrap.h"            // for CUPFN, nvshmemi_cuda_fn_table
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_options_s, nvshmem...
-#include "non_abi/nvshmemi_error.h"                      // for NVSHMEMX_ERROR_INTERNAL
+#include "non_abi/nvshmemi_error_macros.h"               // for NVSHMEMX_ERROR_INTERNAL
 #include "non_abi/nvshmem_build_options.h"               // IWYU pragma: keep
-#include "non_abi/nvshmemi_build_version.h"
+#include "non_abi/nvshmemi_build_metadata.h"
 #include "infiniband/mlx5dv.h"  // for DEVX_SET, DEVX_ST_SZ_BYTES
 #include "infiniband/verbs.h"   // for ibv_ah_attr, ibv_port_attr
 #include "mlx5_ifc.h"           // for mlx5_ifc_qpc_bits, mlx5_ifc...

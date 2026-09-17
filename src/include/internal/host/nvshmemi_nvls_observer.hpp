@@ -12,7 +12,7 @@
 #include <vector>
 #include "internal/host/nvshmemi_heap_observer.hpp"
 #include "internal/host/nvshmemi_types.h"
-#include "non_abi/device_host/nvshmemi_types.h"
+#include "non_abi/device_host/nvshmemi_runtime_types.h"
 
 class nvshmemi_symmetric_heap_vidmem_dynamic_vmm;
 struct nvshmemi_team_dec;

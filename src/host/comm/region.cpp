@@ -14,7 +14,7 @@
 #include "internal/host_transport/transport.h"
 #include "non_abi/nvshmemi_region_constants.h"
 #include "non_abi/nvshmemi_region_types.h"
-#include "non_abi/nvshmemi_error.h"
+#include "non_abi/nvshmemi_error_macros.h"
 
 namespace {
 class nvshmemi_region_host_state {

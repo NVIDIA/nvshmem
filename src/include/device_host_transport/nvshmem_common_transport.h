@@ -14,7 +14,7 @@
 #include <cuda/std/climits>
 #endif
 
-#include "device_host/nvshmem_constants.h"
+#include "device_host/nvshmem_api_constants.h"
 #include "device_host/nvshmem_types.h"
 
 typedef enum {

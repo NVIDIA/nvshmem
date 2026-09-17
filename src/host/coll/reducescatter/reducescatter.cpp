@@ -4,15 +4,15 @@
  */
 
 #include "reducescatter.h"
-#include <cuda_runtime.h>                        // for cudaStreamSynchronize
-#include <stddef.h>                              // for size_t
-#include "device_host/nvshmem_common.cuh"        // for RDXN_OPS_max, RDXN_OPS...
-#include "non_abi/device_host/nvshmemi_types.h"  // for nvshmem_team_t
-#include "host/nvshmem_coll_api.h"               // for nvshmem_char_max_reduce
-#include "internal/host/nvshmem_internal.h"      // for nvshmemi_state, nvshme...
-#include "internal/host/nvshmemi_types.h"        // for nvshmemi_state
-#include "internal/host/nvshmem_nvtx.hpp"        // for nvtx_cond_range, NVTX_...
-#include "internal/host/util.h"                  // for CUDA_RUNTIME_CHECK
+#include <cuda_runtime.h>                                // for cudaStreamSynchronize
+#include <stddef.h>                                      // for size_t
+#include "device_host/nvshmem_common.cuh"                // for RDXN_OPS_max, RDXN_OPS...
+#include "non_abi/device_host/nvshmemi_runtime_types.h"  // for nvshmem_team_t
+#include "host/nvshmem_coll_api.h"                       // for nvshmem_char_max_reduce
+#include "internal/host/nvshmem_internal.h"              // for nvshmemi_state, nvshme...
+#include "internal/host/nvshmemi_types.h"                // for nvshmemi_state
+#include "internal/host/nvshmem_nvtx.hpp"                // for nvtx_cond_range, NVTX_...
+#include "internal/host/util.h"                          // for CUDA_RUNTIME_CHECK
 
 #define DEFN_NVSHMEM_TYPENAME_OP_REDUCESCATTER(TYPENAME, TYPE, OP)                         \
     int nvshmem_##TYPENAME##_##OP##_reducescatter(nvshmem_team_t team, TYPE *dest,         \

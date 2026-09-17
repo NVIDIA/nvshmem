@@ -962,19 +962,19 @@ target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 
 # Start header configuration and export
 configure_file(include/device_host/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/device_host/nvshmem_version.h @ONLY)
-configure_file(include/non_abi/nvshmemi_build_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmemi_build_version.h @ONLY)
+configure_file(include/non_abi/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmemi_build_metadata.h @ONLY)
 configure_file(include/non_abi/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmem_build_options.h)
 
 set(INC_EXPORTS
     ${INC_EXPORTS}
-    device_host/nvshmem_uniqueid.h
-    device_host/nvshmem_constants.h
+    device_host/nvshmemx_uniqueid.h
+    device_host/nvshmem_api_constants.h
     device_host/nvshmem_version.h
     device_host/nvshmemx_status.h
     device_host/nvshmem_proxy_channel.h
     device_host/nvshmem_types.h
     device_host/nvshmem_api_macros.h
-    non_abi/device_host/nvshmemi_types.h
+    non_abi/device_host/nvshmemi_runtime_types.h
     device_host_transport/nvshmem_common_transport.h
     device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
     non_abi/device/common/nvshmemi_common_device.cuh
@@ -1017,7 +1017,7 @@ set(INC_EXPORTS
     device_host/nvshmem_tensor.h
     device_host_transport/nvshmem_common_ibgda.h
     device_host_transport/nvshmem_common_gpunetio.h
-    device_host_transport/nvshmemi_constants.h
+    device_host_transport/transport_constants.h
     non_abi/device/team/nvshmemi_team_defines.cuh
     host/nvshmem_api.h
     host/nvshmem_coll_api.h
@@ -1026,9 +1026,9 @@ set(INC_EXPORTS
     host/nvshmemx_coll_api.h
     non_abi/nvshmemi_cccl_compat.h
     non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemi_error.h
+    non_abi/nvshmemi_error_macros.h
     non_abi/nvshmem_build_options.h
-    non_abi/nvshmemi_build_version.h
+    non_abi/nvshmemi_build_metadata.h
     nvshmem.h
     nvshmem_host.h
     nvshmemx.h
@@ -1070,14 +1070,14 @@ foreach(SHARE ${BOOTSTRAP_EXPORTS})
 endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 
 set(BOOTSTRAP_INC_EXPORTS
-    device_host/nvshmem_uniqueid.h
+    device_host/nvshmemx_uniqueid.h
     device_host/nvshmem_version.h
     device_host/nvshmemx_status.h
     bootstrap_host_transport/env_defs_internal.h
     internal/bootstrap_host/nvshmemi_bootstrap.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
-    non_abi/nvshmemi_build_version.h
-    non_abi/nvshmemi_error.h
+    non_abi/nvshmemi_build_metadata.h
+    non_abi/nvshmemi_error_macros.h
 )
 
 foreach(SHARE ${BOOTSTRAP_INC_EXPORTS})
@@ -1108,14 +1108,14 @@ configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
 
 set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
-    device_host/nvshmem_constants.h
+    device_host/nvshmem_api_constants.h
     device_host/nvshmem_version.h
     device_host/nvshmemx_status.h
     device_host_transport/nvshmem_common_ibgda.h
     device_host_transport/nvshmem_common_gpunetio.h
     device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
     device_host_transport/nvshmem_common_transport.h
-    device_host_transport/nvshmemi_constants.h
+    device_host_transport/transport_constants.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
     internal/host/scope_guard.h
     internal/host_transport/cudawrap.h
@@ -1124,8 +1124,8 @@ set(TRANSPORT_INC_EXPORTS
     internal/host_transport/transport.h
     non_abi/nvshmemi_region_constants.h
     non_abi/nvshmemi_region_types.h
-    non_abi/nvshmemi_build_version.h
-    non_abi/nvshmemi_error.h
+    non_abi/nvshmemi_build_metadata.h
+    non_abi/nvshmemi_error_macros.h
     non_abi/nvshmem_build_options.h
 )
 
@@ -1408,7 +1408,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /examples/examples_install/;\
 /include/non_abi/nvshmem_build_options.h$;\
 /include/device_host/nvshmem_version.h$;\
-/include/non_abi/nvshmemi_build_version.h$;\
+/include/non_abi/nvshmemi_build_metadata.h$;\
 /nvshmem4py/cmake/addCybind.cmake;\
 /nvshmem4py/cmake/addNumbast.cmake;\
 /nvshmem4py/cmake/addNumbastMlir.cmake;\

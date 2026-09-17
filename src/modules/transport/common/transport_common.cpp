@@ -4,12 +4,12 @@
  */
 
 #include "transport_common.h"
-#include "device_host_transport/nvshmemi_constants.h"
+#include "device_host_transport/transport_constants.h"
 #include <assert.h>
 #include <stdint.h>  // for uint64_t, uintptr_t
 #include <stdlib.h>  // for atoi, calloc, free, realloc
 #include <utility>
-#include "non_abi/nvshmemi_error.h"  // for NVSHMEMI_ERROR_PRINT, NVSHMEMX_E...
+#include "non_abi/nvshmemi_error_macros.h"  // for NVSHMEMI_ERROR_PRINT, NVSHMEMX_E...
 
 struct transport_mem_handle_info_cache {
     void **cache;

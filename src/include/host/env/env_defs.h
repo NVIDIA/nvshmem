@@ -26,7 +26,7 @@
 #endif
 #include "non_abi/nvshmem_build_options.h"  // for NVSHMEM_IBGDA_SUPPORT
 #include "non_abi/nvshmemi_region_constants.h"
-#include "non_abi/nvshmemi_build_version.h"
+#include "non_abi/nvshmemi_build_metadata.h"
 
 #define ENV_DEFS_STRINGIFY(x) #x
 #define ENV_DEFS_TOSTRING(x) ENV_DEFS_STRINGIFY(x)

@@ -11,7 +11,7 @@
 #include <cuda_runtime.h>
 #include <tuple>
 #include <vector>
-#include "non_abi/device_host/nvshmemi_types.h"
+#include "non_abi/device_host/nvshmemi_runtime_types.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
 
