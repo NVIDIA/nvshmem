@@ -177,3 +177,5 @@ Use these patterns when the investigation stalls:
 - **Pre-start failure:** Given `error while loading shared libraries` before any PE enters NVSHMEM, state why INFO logging cannot help, identify the loader as the emitting component, and route an NVSHMEM-library installation problem to `$nvshmem-install`.
 - **Confirmed bundled match:** Given `No more teams available` plus matching team-usage conditions, classify it as a confirmed bundled match, verify `NVSHMEM_MAX_TEAMS` for the complete version, and propose one minimal rerun.
 - **No match:** State the required no-match sentence, separate observation from inference, give one discriminating test, and offer a filled report only if the issue remains unresolved or looks like an NVSHMEM defect.
+
+<!-- ci trigger -->
