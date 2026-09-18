@@ -41,7 +41,7 @@ if(NOT SubBuild)
   endif()
 
   project(NVSHMEMTest VERSION 1.0.0
-          LANGUAGES CUDA CXX)
+          LANGUAGES C CUDA CXX)
 
   if (DEFINED ENV{NVSHMEM_PREFIX})
     set(NVSHMEM_PREFIX_DEFAULT $ENV{NVSHMEM_PREFIX})
@@ -153,6 +153,11 @@ if (NOT SubBuild)
 endif()
 
 add_subdirectory(common)
+
+if(NOT SubBuild)
+  include(${NVSHMEM_TEST_TLD}/../cmake_config/NVSHMEMHeaderContracts.cmake)
+  nvshmem_add_header_contract_targets(nvshmem_installed "${NVSHMEM_PREFIX}/include")
+endif()
 
 if(NOT DEFINED NVSHMEM_BUILD_BITCODE_CUBIN_TESTS)
   set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS ON)
