@@ -1758,6 +1758,31 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/,
         ep_end_idx = libfabric_state->eps.size();
     }
 
+    /* EFA consumes completion entries from its CQ because it needs the operation
+     * contexts stored in those entries. Other providers use a completion counter:
+     * their CQs are selectively completed and normally contain only error events. */
+    if (libfabric_state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+        for (int i = ep_start_idx; i < ep_end_idx; i++) {
+            const nvshmemt_libfabric_endpoint_t &ep = *libfabric_state->eps[i];
+            status =
+                fi_cntr_wait(ep.counter, ep.submitted_ops, NVSHMEMT_LIBFABRIC_QUIET_TIMEOUT_MS);
+            if (status) {
+                uint64_t completed_ops = fi_cntr_read(ep.counter);
+                uint64_t error_ops = fi_cntr_readerr(ep.counter);
+                /* fi_strerror accepts the positive form of libfabric error codes. */
+                NVSHMEMI_ERROR_PRINT("Error in quiet operation for endpoint %d (submitted=%" PRIu64
+                                     ", completed=%" PRIu64 ", errors=%" PRIu64
+                                     ", status=%d): %s.\n",
+                                     i, ep.submitted_ops, completed_ops, error_ops, status,
+                                     fi_strerror(status * -1));
+                /* Preserve the CQ's provider-specific error report when one is available. */
+                (void)nvshmemt_libfabric_progress(tcurr, qp_index);
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+        }
+        return NVSHMEMX_SUCCESS;
+    }
+
     for (;;) {
         /* host_ep_submit_guard is held across the whole iteration (including
          * the progress call below) so the underlying lock can be non-recursive:
@@ -2962,6 +2987,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     struct fid_mr *mr;
     struct fi_av_attr av_attr;
     struct fi_cq_attr cq_attr;
+    struct fi_cntr_attr cntr_attr;
     size_t ep_namelen = NVSHMEMT_LIBFABRIC_EP_LEN;
     int status = 0;
     size_t total_num_eps;
@@ -3036,6 +3062,10 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         cq_attr.wait_obj = FI_WAIT_NONE;
         cq_attr.size = 32768;
     }
+
+    memset(&cntr_attr, 0, sizeof(struct fi_cntr_attr));
+    cntr_attr.events = FI_CNTR_EVENTS_COMP;
+    cntr_attr.wait_obj = FI_WAIT_UNSPEC;
 
     memset(&av_attr, 0, sizeof(struct fi_av_attr));
     av_attr.type = FI_AV_TABLE;
@@ -3220,10 +3250,17 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
         state->eps[i]->submitted_ops = 0;
         state->eps[i]->completed_ops = 0;
+        state->eps[i]->counter = NULL;
 
         status = fi_cq_open(domain, &cq_attr, &state->eps[i]->cq, NULL);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Unable to open completion queue for endpoint.\n");
+
+        if (state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+            status = fi_cntr_open(domain, &cntr_attr, &state->eps[i]->counter, NULL);
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Unable to open completion counter for endpoint.\n");
+        }
 
         status = fi_endpoint(domain, state->prov_infos[i], &state->eps[i]->endpoint, NULL);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -3268,6 +3305,13 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->cq->fid, flags);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Unable to bind endpoint to completion queue.\n");
+
+        if (state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+            flags = FI_READ | FI_WRITE;
+            status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->counter->fid, flags);
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Unable to bind endpoint to completion counter.\n");
+        }
 
         status = fi_enable(state->eps[i]->endpoint);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -3347,6 +3391,10 @@ out:
             if (state->eps[i]->cq) {
                 fi_close(&state->eps[i]->cq->fid);
                 state->eps[i]->cq = NULL;
+            }
+            if (state->eps[i]->counter) {
+                fi_close(&state->eps[i]->counter->fid);
+                state->eps[i]->counter = NULL;
             }
         }
         state->recv_buf.clear();
@@ -3428,6 +3476,13 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
             status = fi_close(&libfabric_state->eps[i]->cq->fid);
             if (status) {
                 NVSHMEMI_WARN_PRINT("Unable to close fabric cq: %d: %s\n", status,
+                                    fi_strerror(status * -1));
+            }
+        }
+        if (libfabric_state->eps[i]->counter) {
+            status = fi_close(&libfabric_state->eps[i]->counter->fid);
+            if (status) {
+                NVSHMEMI_WARN_PRINT("Unable to close fabric counter: %d: %s\n", status,
                                     fi_strerror(status * -1));
             }
         }

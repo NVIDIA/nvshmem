@@ -302,6 +302,7 @@ typedef enum {
 typedef struct {
     struct fid_ep *endpoint;
     struct fid_cq *cq;
+    struct fid_cntr *counter;
     uint64_t submitted_ops;
     uint64_t completed_ops;
     int domain_index;
