@@ -805,17 +805,6 @@ out:
     return status;
 }
 
-int nvshmemi_setup_stream_priorities(nvshmemi_state_t *state) {
-    int status = 0;
-    int leastPriority, greatestPriority;
-
-    CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-    CUDA_RUNTIME_CHECK(
-        cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking, greatestPriority));
-
-    return status;
-}
-
 int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
     INFO(NVSHMEM_INIT, "In nvshmemi_teardown_handles");
     int status = 0;
@@ -1306,10 +1295,6 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
                                 transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Invalid context pointer passed to nvshmemid_hostlib_init_attr.\n");
-
-    status = nvshmemi_setup_stream_priorities(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem setup stream priorities failed \n");
 
     status = nvshmemi_coll_common_cpu_init();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cpu collective setup failed \n");
