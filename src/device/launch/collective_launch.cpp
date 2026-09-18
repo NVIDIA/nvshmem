@@ -3,17 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <algorithm>                                 // for std::any_of, std::copy_n
-#include <array>                                     // for std::array
-#include <cuda.h>                                    // for CUDA_SUCCESS
-#include <cuda_runtime.h>                            // for cudaGetErrorString
-#include <driver_types.h>                            // for cudaError_t, cud...
-#include <limits.h>                                  // for INT_MAX, INT_MIN
-#include <stdio.h>                                   // for fprintf, stderr
-#include <vector_types.h>                            // for dim3
-#include "device/nvshmemx_collective_launch_apis.h"  // for nvshmemx_collect...
-#include "internal/device/nvshmemi_device.h"         // for nvshmemi_device_...
-#include "non_abi/nvshmemi_error_macros.h"           // for NVSHMEMI_NE_ERRO...
+#include <algorithm>                                // for std::any_of, std::copy_n
+#include <array>                                    // for std::array
+#include <cuda.h>                                   // for CUDA_SUCCESS
+#include <cuda_runtime.h>                           // for cudaGetErrorString
+#include <driver_types.h>                           // for cudaError_t, cud...
+#include <limits.h>                                 // for INT_MAX, INT_MIN
+#include <stdio.h>                                  // for fprintf, stderr
+#include <vector_types.h>                           // for dim3
+#include "c_api/nvshmemx_collective_launch_apis.h"  // for nvshmemx_collect...
+#include "internal/device/nvshmemi_device.h"        // for nvshmemi_device_...
+#include "non_abi/c/nvshmemi_error_macros.h"        // for NVSHMEMI_NE_ERRO...
 
 #define CUDA_RUNTIME_CHECK_GOTO(stmt, res, label)                                 \
     do {                                                                          \

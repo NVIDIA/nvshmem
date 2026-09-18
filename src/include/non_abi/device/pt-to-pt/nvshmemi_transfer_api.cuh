@@ -7,8 +7,8 @@
 #include "device/nvshmem_device_macros.h"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device_host_transport/transport_constants.h"
-#include "non_abi/nvshmemi_region_types.h"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
 
 #ifndef NVSHMEMI_NOINLINE
 #if defined(__clang_llvm_bitcode_lib__)

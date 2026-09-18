@@ -14,7 +14,7 @@
 
 #include <cuda_runtime.h>
 
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \

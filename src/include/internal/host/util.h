@@ -29,13 +29,13 @@
 #include <stddef.h>
 #include <sstream>
 #include <inttypes.h>
-#include "non_abi/device_host/nvshmemi_runtime_types.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/common/error_codes_internal.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmemi_types.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #ifndef likely
 #define likely(x) (__builtin_expect(!!(x), 1))

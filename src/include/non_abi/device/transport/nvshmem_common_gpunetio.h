@@ -218,7 +218,7 @@ static_assert(sizeof(nvshmemi_gpunetio_device_state_v1) == 2256,
 
 typedef nvshmemi_gpunetio_device_state_v1 nvshmemi_gpunetio_device_state_t;
 
-#include "device_host/nvshmemi_extern_constant.h"
+#include "non_abi/device/common/nvshmemi_extern_constant.h"
 
 #ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_gpunetio_device_state_t nvshmemi_gpunetio_device_state_d;

@@ -14,7 +14,7 @@
 #include <cuda/std/cstdint>
 #endif
 
-#include "device_host/nvshmem_version.h"
+#include "c_api/nvshmem_version.h"
 
 /* This is not the NVSHMEM release version, it is the supported OpenSHMEM spec version. */
 #define NVSHMEM_MAJOR_VERSION 1

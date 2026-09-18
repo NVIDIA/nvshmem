@@ -6,7 +6,7 @@
 #ifndef TRANSFER_DEVICE_CUH
 #define TRANSFER_DEVICE_CUH
 
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #if defined(NVSHMEM_BUILD_P2P_ONLY)
 // P2P-only builds replace every nvshmemi_transfer_* call site with a P2P
@@ -16,7 +16,7 @@
 
 #include <cuda_runtime.h>
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "device/nvshmem_device_macros.h"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"

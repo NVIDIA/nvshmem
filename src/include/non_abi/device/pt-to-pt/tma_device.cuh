@@ -8,7 +8,7 @@
 #define TMA_DEVICE_CUH
 
 #include <cuda_runtime.h>
-#include "device_host/nvshmem_types.h"
+#include "c_api/nvshmem_types.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 #ifdef __CUDA_ARCH__

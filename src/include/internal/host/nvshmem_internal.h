@@ -14,18 +14,18 @@
 #include <vector>
 #include <map>
 
-#include "device_host/nvshmem_common.cuh"
-#include "device_host_transport/transport_constants.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/host/custom_malloc.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_handle_table.hpp"
 #include "internal/host/nvshmemi_rma_translation.hpp"
 #include "internal/host/nvshmemi_types.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/cudawrap.h"
 #include "internal/host_transport/transport.h"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #define NVSHMEMI_LOCAL_BUF_CACHE_DEFAULT_SIZE 64
 

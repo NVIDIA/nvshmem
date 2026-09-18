@@ -12,7 +12,7 @@
 #include <cuda/std/climits>
 #endif
 
-#include "device_host/nvshmem_api_constants.h"
+#include "c_api/nvshmem_api_constants.h"
 
 #define CHANNEL_BUF_SIZE (1 << CHANNEL_BUF_SIZE_LOG)
 #define CHANNEL_BUF_SIZE_LOG 22

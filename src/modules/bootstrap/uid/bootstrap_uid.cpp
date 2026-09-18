@@ -14,7 +14,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include "device_host/nvshmemx_uniqueid.h"
+#include "c_api/nvshmemx_uniqueid.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "bootstrap_uid_remap.h"
 #include "bootstrap_uid_types.hpp"

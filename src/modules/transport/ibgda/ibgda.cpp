@@ -5,33 +5,33 @@
 
 #include <assert.h>  // for assert
 #include <atomic>
-#include <cuda.h>                                        // for CUDA_SUCCESS, CUdevice, CUd...
-#include <cuda_runtime.h>                                // for cudaFree, cudaMalloc, cudaM...
-#include <driver_types.h>                                // for cudaSuccess, cudaMemcpyHost...
-#include <endian.h>                                      // for htobe32, htobe64
-#include <errno.h>                                       // for ENOMEM
-#include <linux/types.h>                                 // for __be32
-#include <math.h>                                        // for ceil, log2
-#include <stddef.h>                                      // for NULL, size_t, offsetof
-#include <stdint.h>                                      // for uint8_t, uint64_t, uint32_t
-#include <stdio.h>                                       // for fprintf, stderr, printf
-#include <stdlib.h>                                      // for free, calloc, malloc, posix...
-#include <unistd.h>                                      // for _SC_PAGESIZE
-#include <string.h>                                      // for memset, memcpy, strcmp, strstr
-#include <sys/types.h>                                   // for off_t
-#include <algorithm>                                     // for for_each, remove_if, max
-#include <cctype>                                        // for tolower, isspace
-#include <mutex>                                         // for lock_guard, mutex
-#include <new>                                           // for nothrow
-#include <string>                                        // for basic_string, string, opera...
-#include <vector>                                        // for vector
-#include "device_host_transport/nvshmem_common_ibgda.h"  // for nvshmemi_ibgda_device_state_t
-#include "device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp"
+#include <cuda.h>                                           // for CUDA_SUCCESS, CUdevice, CUd...
+#include <cuda_runtime.h>                                   // for cudaFree, cudaMalloc, cudaM...
+#include <driver_types.h>                                   // for cudaSuccess, cudaMemcpyHost...
+#include <endian.h>                                         // for htobe32, htobe64
+#include <errno.h>                                          // for ENOMEM
+#include <linux/types.h>                                    // for __be32
+#include <math.h>                                           // for ceil, log2
+#include <stddef.h>                                         // for NULL, size_t, offsetof
+#include <stdint.h>                                         // for uint8_t, uint64_t, uint32_t
+#include <stdio.h>                                          // for fprintf, stderr, printf
+#include <stdlib.h>                                         // for free, calloc, malloc, posix...
+#include <unistd.h>                                         // for _SC_PAGESIZE
+#include <string.h>                                         // for memset, memcpy, strcmp, strstr
+#include <sys/types.h>                                      // for off_t
+#include <algorithm>                                        // for for_each, remove_if, max
+#include <cctype>                                           // for tolower, isspace
+#include <mutex>                                            // for lock_guard, mutex
+#include <new>                                              // for nothrow
+#include <string>                                           // for basic_string, string, opera...
+#include <vector>                                           // for vector
+#include "non_abi/device/transport/nvshmem_common_ibgda.h"  // for nvshmemi_ibgda_device_state_t
+#include "non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp"
 #include "internal/host_transport/cudawrap.h"            // for CUPFN, nvshmemi_cuda_fn_table
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_options_s, nvshmem...
-#include "non_abi/nvshmemi_error_macros.h"               // for NVSHMEMX_ERROR_INTERNAL
-#include "non_abi/nvshmem_build_options.h"               // IWYU pragma: keep
-#include "non_abi/nvshmemi_build_metadata.h"
+#include "non_abi/c/nvshmemi_error_macros.h"             // for NVSHMEMX_ERROR_INTERNAL
+#include "non_abi/c/nvshmem_build_options.h"             // IWYU pragma: keep
+#include "non_abi/c/nvshmemi_build_metadata.h"
 #include "infiniband/mlx5dv.h"  // for DEVX_SET, DEVX_ST_SZ_BYTES
 #include "infiniband/verbs.h"   // for ibv_ah_attr, ibv_port_attr
 #include "mlx5_ifc.h"           // for mlx5_ifc_qpc_bits, mlx5_ifc...

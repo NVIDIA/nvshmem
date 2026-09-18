@@ -10,14 +10,14 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "device_host/nvshmem_api_constants.h"
-#include "device_host/nvshmem_api_macros.h"
-#include "device_host/nvshmem_types.h"
-#include "device_host/nvshmem_version.h"
-#include "host/nvshmemx_coll_api.h"
-#include "host/nvshmem_macros.h"
-#include "device_host/nvshmemx_status.h"
-#include "host/nvshmem_api.h"
+#include "c_api/nvshmem_api_constants.h"
+#include "c_api/nvshmem_api_macros.h"
+#include "c_api/nvshmem_types.h"
+#include "c_api/nvshmem_version.h"
+#include "c_api/nvshmemx_coll_api.h"
+#include "c_api/nvshmem_macros.h"
+#include "c_api/nvshmemx_status.h"
+#include "c_api/nvshmem_api.h"
 
 #ifdef __cplusplus
 extern "C" {

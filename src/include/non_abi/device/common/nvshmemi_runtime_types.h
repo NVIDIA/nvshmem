@@ -6,7 +6,7 @@
 #ifndef NVSHMEMI_RUNTIME_TYPES_H
 #define NVSHMEMI_RUNTIME_TYPES_H
 
-#include "device_host/nvshmem_types.h"
+#include "c_api/nvshmem_types.h"
 
 /*
  * NVSHMEMI_TMA_BARRIER_REGION_BYTES - Static carve at the base of every

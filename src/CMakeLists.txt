@@ -986,38 +986,36 @@ target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # End nvshmem-info definitions.
 
 # Start header configuration and export
-configure_file(include/device_host/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/device_host/nvshmem_version.h @ONLY)
-configure_file(include/non_abi/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmemi_build_metadata.h @ONLY)
-configure_file(include/non_abi/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmem_build_options.h)
+configure_file(include/c_api/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/c_api/nvshmem_version.h @ONLY)
+configure_file(include/non_abi/c/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmemi_build_metadata.h @ONLY)
+configure_file(include/non_abi/c/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmem_build_options.h)
 
 set(INC_EXPORTS
     ${INC_EXPORTS}
-    device_host/nvshmemx_uniqueid.h
-    device_host/nvshmem_api_constants.h
-    device_host/nvshmem_version.h
-    device_host/nvshmemx_status.h
-    device_host/nvshmem_proxy_channel.h
-    device_host/nvshmem_types.h
-    device_host/nvshmem_api_macros.h
-    non_abi/device_host/nvshmemi_runtime_types.h
-    device_host_transport/nvshmem_common_transport.h
-    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
-    non_abi/device/common/nvshmemi_common_device.cuh
-    non_abi/device/common/nvshmemi_type_traits.cuh
-    non_abi/device/common/nvshmemi_region_device.cuh
-    non_abi/device/common/nvshmemi_region_state.cuh
-    non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
-    non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh
+    c_api/nvshmem_api.h
+    c_api/nvshmem_api_constants.h
+    c_api/nvshmem_api_macros.h
+    c_api/nvshmem_coll_api.h
+    c_api/nvshmem_macros.h
+    c_api/nvshmem_types.h
+    c_api/nvshmem_version.h
+    c_api/nvshmemx_api.h
+    c_api/nvshmemx_coll_api.h
+    c_api/nvshmemx_collective_launch_apis.h
+    c_api/nvshmemx_status.h
+    c_api/nvshmemx_uniqueid.h
+    cpp_api/nvshmem_tensor.hpp
+    cpp_api/nvshmemx_tile_api.hpp
     device/nvshmem_coll_defines.cuh
     device/nvshmem_defines.h
     device/nvshmem_device_macros.h
-    device/logical_endpoint_device.cuh
-    device/nvshmemx_collective_launch_apis.h
     device/nvshmemx_coll_defines.cuh
-    non_abi/nvshmemi_region_types.h
     device/nvshmemx_defines.h
-    device/tile/nvshmemx_tile_api.hpp
     device/tile/nvshmemx_tile_api_defines.cuh
+    non_abi/c/nvshmem_build_options.h
+    non_abi/c/nvshmemi_build_metadata.h
+    non_abi/c/nvshmemi_error_macros.h
+    non_abi/c/nvshmemi_region_constants.h
     non_abi/device/coll/alltoall.cuh
     non_abi/device/coll/barrier.cuh
     non_abi/device/coll/broadcast.cuh
@@ -1026,38 +1024,41 @@ set(INC_EXPORTS
     non_abi/device/coll/reduce.cuh
     non_abi/device/coll/reducescatter.cuh
     non_abi/device/coll/utils.cuh
-    non_abi/device/wait/nvshmemi_wait_until_apis.cuh
-    non_abi/device/pt-to-pt/ibgda_device.cuh
-    non_abi/device/pt-to-pt/gdaki_device.cuh
+    non_abi/device/common/logical_endpoint_device.cuh
+    non_abi/device/common/logical_endpoint_types.h
+    non_abi/device/common/nvshmem_common.cuh
+    non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
+    non_abi/device/common/nvshmemi_cccl_compat.h
+    non_abi/device/common/nvshmemi_common_device.cuh
+    non_abi/device/common/nvshmemi_extern_constant.h
+    non_abi/device/common/nvshmemi_path_predicates.cuh
+    non_abi/device/common/nvshmemi_region_device.cuh
+    non_abi/device/common/nvshmemi_region_state.cuh
+    non_abi/device/common/nvshmemi_region_types.h
+    non_abi/device/common/nvshmemi_runtime_types.h
+    non_abi/device/common/nvshmemi_tile_utils.cuh
+    non_abi/device/common/nvshmemi_type_traits.cuh
     non_abi/device/pt-to-pt/counted_device.cuh
+    non_abi/device/pt-to-pt/gdaki_device.cuh
+    non_abi/device/pt-to-pt/ibgda_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh
+    non_abi/device/pt-to-pt/tile.cuh
     non_abi/device/pt-to-pt/tma_device.cuh
     non_abi/device/pt-to-pt/utils_device.h
-    non_abi/device/pt-to-pt/tile.cuh
-    non_abi/device/common/nvshmemi_tile_utils.cuh
-    non_abi/device/common/nvshmemi_path_predicates.cuh
-    device_host/nvshmem_common.cuh
-    device_host/nvshmemi_extern_constant.h
-    device_host/logical_endpoint_types.h
-    device_host/nvshmem_tensor.h
-    device_host_transport/nvshmem_common_ibgda.h
-    device_host_transport/nvshmem_common_gpunetio.h
-    device_host_transport/transport_constants.h
     non_abi/device/team/nvshmemi_team_defines.cuh
-    host/nvshmem_api.h
-    host/nvshmem_coll_api.h
-    host/nvshmem_macros.h
-    host/nvshmemx_api.h
-    host/nvshmemx_coll_api.h
-    non_abi/nvshmemi_cccl_compat.h
-    non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemi_error_macros.h
-    non_abi/nvshmem_build_options.h
-    non_abi/nvshmemi_build_metadata.h
+    non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh
+    non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp
+    non_abi/device/transport/nvshmem_common_gpunetio.h
+    non_abi/device/transport/nvshmem_common_ibgda.h
+    non_abi/device/transport/nvshmem_common_transport.h
+    non_abi/device/transport/nvshmem_proxy_channel.h
+    non_abi/device/transport/transport_constants.h
+    non_abi/device/wait/nvshmemi_wait_until_apis.cuh
     nvshmem.h
     nvshmem_host.h
     nvshmemx.h
 )
+
 
 foreach(INC ${INC_EXPORTS})
   configure_file(include/${INC} ${CMAKE_CURRENT_BINARY_DIR}/include/${INC} COPYONLY)
@@ -1095,14 +1096,14 @@ foreach(SHARE ${BOOTSTRAP_EXPORTS})
 endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 
 set(BOOTSTRAP_INC_EXPORTS
-    device_host/nvshmemx_uniqueid.h
-    device_host/nvshmem_version.h
-    device_host/nvshmemx_status.h
     bootstrap_host_transport/env_defs_internal.h
+    c_api/nvshmem_version.h
+    c_api/nvshmemx_status.h
+    c_api/nvshmemx_uniqueid.h
     internal/bootstrap_host/nvshmemi_bootstrap.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
-    non_abi/nvshmemi_build_metadata.h
-    non_abi/nvshmemi_error_macros.h
+    non_abi/c/nvshmemi_build_metadata.h
+    non_abi/c/nvshmemi_error_macros.h
 )
 
 foreach(SHARE ${BOOTSTRAP_INC_EXPORTS})
@@ -1133,25 +1134,28 @@ configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
 
 set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
-    device_host/nvshmem_api_constants.h
-    device_host/nvshmem_version.h
-    device_host/nvshmemx_status.h
-    device_host_transport/nvshmem_common_ibgda.h
-    device_host_transport/nvshmem_common_gpunetio.h
-    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
-    device_host_transport/nvshmem_common_transport.h
-    device_host_transport/transport_constants.h
+    c_api/nvshmem_api_constants.h
+    c_api/nvshmem_types.h
+    c_api/nvshmem_version.h
+    c_api/nvshmemx_status.h
+    c_api/nvshmemx_uniqueid.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
     internal/host/scope_guard.h
     internal/host_transport/cudawrap.h
     internal/host_transport/nvshmemi_transport_defines.h
     internal/host_transport/region.hpp
     internal/host_transport/transport.h
-    non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemi_region_types.h
-    non_abi/nvshmemi_build_metadata.h
-    non_abi/nvshmemi_error_macros.h
-    non_abi/nvshmem_build_options.h
+    non_abi/c/nvshmem_build_options.h
+    non_abi/c/nvshmemi_build_metadata.h
+    non_abi/c/nvshmemi_error_macros.h
+    non_abi/c/nvshmemi_region_constants.h
+    non_abi/device/common/nvshmemi_extern_constant.h
+    non_abi/device/common/nvshmemi_region_types.h
+    non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp
+    non_abi/device/transport/nvshmem_common_gpunetio.h
+    non_abi/device/transport/nvshmem_common_ibgda.h
+    non_abi/device/transport/nvshmem_common_transport.h
+    non_abi/device/transport/transport_constants.h
 )
 
 foreach(SHARE ${TRANSPORT_INC_EXPORTS})
@@ -1435,9 +1439,9 @@ set(CPACK_SOURCE_IGNORE_FILES
 /bind.sh;\
 /testcommon.py;\
 /examples/examples_install/;\
-/include/non_abi/nvshmem_build_options.h$;\
-/include/device_host/nvshmem_version.h$;\
-/include/non_abi/nvshmemi_build_metadata.h$;\
+/include/c_api/nvshmem_version.h$;\
+/include/non_abi/c/nvshmem_build_options.h$;\
+/include/non_abi/c/nvshmemi_build_metadata.h$;\
 /nvshmem4py/cmake/addCybind.cmake;\
 /nvshmem4py/cmake/addNumbast.cmake;\
 /nvshmem4py/cmake/addNumbastMlir.cmake;\

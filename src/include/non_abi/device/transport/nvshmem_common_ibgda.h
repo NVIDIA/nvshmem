@@ -346,7 +346,7 @@ static_assert(sizeof(nvshmemi_ibgda_device_state_v2) == 8384,
 
 typedef nvshmemi_ibgda_device_state_v2 nvshmemi_ibgda_device_state_t;
 
-#include "device_host/nvshmemi_extern_constant.h"
+#include "non_abi/device/common/nvshmemi_extern_constant.h"
 
 #ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_ibgda_device_state_t nvshmemi_ibgda_device_state_d;

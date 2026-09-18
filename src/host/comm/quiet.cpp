@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "host/nvshmem_api.h"   // IWYU pragma: keep
-#include "host/nvshmemx_api.h"  // IWYU pragma: keep
+#include "c_api/nvshmem_api.h"   // IWYU pragma: keep
+#include "c_api/nvshmemx_api.h"  // IWYU pragma: keep
 #include <cuda_runtime.h>
 #include <driver_types.h>
 
@@ -12,7 +12,7 @@
 #include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/nvshmem_nvtx.hpp"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/host_transport/transport.h"
 #include "internal/host/util.h"
 

@@ -6,7 +6,7 @@
 #ifndef _NVSHMEM_H_
 #define _NVSHMEM_H_
 
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 /* NVRTC only compiles device code. Leave out host headers */
 #if !defined __CUDACC_RTC__ && !defined __clang_llvm_bitcode_lib__ && \
     !defined __NVSHMEM_NUMBA_SUPPORT__ && !defined NVSHMEM_BUILD_LTOIR_LIBRARY

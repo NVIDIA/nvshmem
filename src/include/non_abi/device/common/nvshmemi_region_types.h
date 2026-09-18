@@ -14,9 +14,9 @@
 #include <cuda/std/cstdint>
 #endif
 
-#include "device_host/nvshmem_types.h"
-#include "device_host_transport/transport_constants.h"
-#include "non_abi/nvshmemi_region_constants.h"
+#include "c_api/nvshmem_types.h"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/c/nvshmemi_region_constants.h"
 
 static_assert(NVSHMEMI_REGION_HINT_BATCH_RMA == NVSHMEMX_REGION_HINT_BATCH_RMA,
               "Public and internal batch RMA hint values must match.");

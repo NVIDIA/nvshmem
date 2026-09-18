@@ -23,7 +23,7 @@
 #include <mutex>
 #include <set>
 
-#include "host/nvshmemx_api.h"
+#include "c_api/nvshmemx_api.h"
 #include "internal/host/nvmlwrap.h"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmem_internal.h"
@@ -31,18 +31,18 @@
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "internal/host/scope_guard.h"
 #include "internal/host_transport/region.hpp"
-#include "non_abi/nvshmemi_region_types.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/nvshmemi_bootstrap_library.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host/logical_endpoint_types.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/common/logical_endpoint_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-#include "device_host_transport/nvshmem_common_ibgda.h"
+#include "non_abi/device/transport/nvshmem_common_ibgda.h"
 #endif
 
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
-#include "device_host_transport/nvshmem_common_gpunetio.h"
+#include "non_abi/device/transport/nvshmem_common_gpunetio.h"
 #endif
 
 #include <stdlib.h>

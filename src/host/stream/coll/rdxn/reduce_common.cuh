@@ -12,8 +12,8 @@
 
 #include "internal/host/util.h"
 #include "non_abi/device/coll/reduce.cuh"
-#include "host/nvshmem_api.h"
-#include "device_host/nvshmem_common.cuh"
+#include "c_api/nvshmem_api.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
 
 template <typename TYPE, rdxn_ops_t OP>
 __global__ void rdxn_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,

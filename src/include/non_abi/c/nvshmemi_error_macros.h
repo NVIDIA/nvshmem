@@ -19,7 +19,7 @@
 #define NVSHMEMI_ERROR_STRERROR(status) ""
 #endif
 
-#include "device_host/nvshmemx_status.h"
+#include "c_api/nvshmemx_status.h"
 
 /* The !! idiom is used to convert non-boolean types to booleans.
  * Doing so in this case allows us to ensure that __builtin_expect

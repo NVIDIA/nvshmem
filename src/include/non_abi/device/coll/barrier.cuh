@@ -6,7 +6,7 @@
 #define BARRIER_DEVICE_CUH
 #include <cuda_runtime.h>
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
@@ -16,7 +16,7 @@
 #include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
 #endif
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
-#include "device_host/nvshmem_tensor.h"
+#include "cpp_api/nvshmem_tensor.hpp"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "utils.cuh"

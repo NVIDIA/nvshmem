@@ -10,6 +10,6 @@
 
 #ifndef NVSHMEM_HOST_H
 #define NVSHMEM_HOST_H
-#include "host/nvshmem_api.h"
-#include "host/nvshmemx_api.h"
+#include "c_api/nvshmem_api.h"
+#include "c_api/nvshmemx_api.h"
 #endif

@@ -15,11 +15,12 @@
 #include "non_abi/device/common/nvshmemi_type_traits.cuh"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/wait/nvshmemi_wait_until_apis.cuh"
-#include "non_abi/nvshmemi_region_constants.h"
-#include "non_abi/nvshmemi_region_types.h"
-/* this file does not directly use the definitions from device_host/nvshmem_proxy_channel.h */
+#include "non_abi/c/nvshmemi_region_constants.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
+/* this file does not directly use the definitions from
+ * non_abi/device/transport/nvshmem_proxy_channel.h */
 /* But the way the requests are filled in directly represents those structures. */
-#include "device_host/nvshmem_proxy_channel.h"  // IWYU pragma: keep
+#include "non_abi/device/transport/nvshmem_proxy_channel.h"  // IWYU pragma: keep
 
 /* Map float types to same-sized unsigned integer for CAS-based emulation. */
 template <typename T>

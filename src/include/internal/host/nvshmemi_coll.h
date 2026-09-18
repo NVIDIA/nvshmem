@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "host/nvshmem_macros.h"
-#include "non_abi/device_host/nvshmemi_runtime_types.h"
+#include "c_api/nvshmem_macros.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
 
 #ifndef NVSHMEMI_COLL_H
 #define NVSHMEMI_COLL_H

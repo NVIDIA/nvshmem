@@ -10,8 +10,8 @@
 #include "nvshmemx.h"
 #include "test_teams.h"
 #include "coll_common.h"
-#include "device_host/nvshmem_common.cuh"
-#include "device_host/nvshmem_tensor.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "cpp_api/nvshmem_tensor.hpp"
 #include "reduce_common.h"
 #include "cuda/std/tuple"
 

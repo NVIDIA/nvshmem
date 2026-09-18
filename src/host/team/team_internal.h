@@ -8,7 +8,7 @@
 
 #include <stddef.h>
 #include <cuda_runtime.h>
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 
 #if !defined __CUDACC_RTC__
 #include <limits.h>

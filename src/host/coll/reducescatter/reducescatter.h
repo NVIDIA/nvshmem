@@ -9,10 +9,10 @@
 #include <stddef.h>
 
 #include "cpu_coll.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "internal/host/nvshmem_internal.h"
-#include "non_abi/device_host/nvshmemi_runtime_types.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
 #include "internal/host/util.h"
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"

@@ -6,7 +6,7 @@
 #ifndef __logical_endpoint_device_cuh__
 #define __logical_endpoint_device_cuh__
 
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #ifdef __CUDA_ARCH__
 
@@ -55,7 +55,7 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int) { 
 
 #else
 
-#include "device_host/logical_endpoint_types.h"
+#include "non_abi/device/common/logical_endpoint_types.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 inline constexpr int NVSHMEMI_SMEM_BUF_SIZE = 512;  // 16*32 - 16B per thread, 1 buf per warp

@@ -9,11 +9,11 @@
 #ifdef __CUDA_ARCH__
 
 #include <cuda_runtime.h>
-#include "device_host_transport/transport_constants.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "device/nvshmem_device_macros.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device_host/nvshmem_common.cuh"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #define TIMEOUT_NCYCLES 1e10
 

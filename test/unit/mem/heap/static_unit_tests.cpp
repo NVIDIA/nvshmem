@@ -20,7 +20,7 @@
 #include "cuda.h"
 #include "cuda_runtime.h"
 #include "cuda_runtime_api.h"
-#include "host/nvshmem_coll_api.h"
+#include "c_api/nvshmem_coll_api.h"
 #include "internal/host/nvshmemi_nvls_rsc.hpp"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/transport.h"

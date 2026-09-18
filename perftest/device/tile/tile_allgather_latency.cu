@@ -5,8 +5,8 @@
 
 #include "utils.h"
 #include "tile_coll_test.h"
-#include "device_host/nvshmem_common.cuh"
-#include "device_host/nvshmem_tensor.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "cpp_api/nvshmem_tensor.hpp"
 #define LARGEST_DT int64_t
 
 #define VLEN 4

@@ -6,10 +6,10 @@
 #ifndef _NVSHMEMI_REGION_DEVICE_CUH_
 #define _NVSHMEMI_REGION_DEVICE_CUH_
 
-#include "device_host/nvshmem_types.h"
+#include "c_api/nvshmem_types.h"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 
 #ifdef __CUDA_ARCH__
 

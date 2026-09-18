@@ -12,7 +12,7 @@
 #else
 #include <cuda/std/type_traits>
 #endif
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "device/nvshmem_device_macros.h"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs. transfer_device.cuh internally short-circuits to an empty stub header in
@@ -26,7 +26,7 @@
 #include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
-#include "device/logical_endpoint_device.cuh"
+#include "non_abi/device/common/logical_endpoint_device.cuh"
 
 #ifdef __CUDA_ARCH__
 

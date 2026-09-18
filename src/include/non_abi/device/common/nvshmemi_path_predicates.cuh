@@ -7,9 +7,9 @@
 #define _NVSHMEMI_PATH_PREDICATES_CUH_
 
 #include <cuda_runtime.h>
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "device/nvshmem_device_macros.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 
 #ifdef __CUDA_ARCH__
 

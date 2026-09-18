@@ -28,10 +28,10 @@
 
 // IWYU pragma: no_include <bits/stdint-uintn.h>
 
-#include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemi_error_macros.h"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/transport_constants.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
 #include "internal/host_transport/region.hpp"

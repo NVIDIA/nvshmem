@@ -9,7 +9,7 @@
 #include "coll_test.h"
 #include "test_teams.h"
 #include "coll_common.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "fcollect_common.h"
 
 #define DO_FCOLLECT_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                          \

@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#include "device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp"
+#include "non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp"
 
 #ifdef __CUDA_ARCH__
 

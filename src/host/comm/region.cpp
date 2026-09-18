@@ -5,16 +5,16 @@
 
 #include <stdint.h>
 
-#include "host/nvshmemx_api.h"
+#include "c_api/nvshmemx_api.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host_transport/transport.h"
-#include "non_abi/nvshmemi_region_constants.h"
-#include "non_abi/nvshmemi_region_types.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_region_constants.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 
 namespace {
 class nvshmemi_region_host_state {

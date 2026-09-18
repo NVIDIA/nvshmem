@@ -5,7 +5,7 @@
 #ifndef _NVSHMEM_COMMON_DEVICE_DEFINES_CUH_
 #define _NVSHMEM_COMMON_DEVICE_DEFINES_CUH_
 #include <cuda_runtime.h>
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 
 #if defined(__CUDACC_RTC__) && defined(__NVSHMEM_NUMBA_SUPPORT__)
 // NVRTC + Numba: Numba does not device-link against libnvshmem_device, so
@@ -14,7 +14,7 @@
 // via cuModuleGetGlobal + cuMemcpyHtoD on the single NVRTC-compiled module.
 #define EXTERN_CONSTANT __constant__
 #endif
-#include "device_host/nvshmemi_extern_constant.h"
+#include "non_abi/device/common/nvshmemi_extern_constant.h"
 
 #ifdef EXTERN_CONSTANT
 EXTERN_CONSTANT nvshmemi_device_host_state_t nvshmemi_device_state_d;

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#ifndef _NVSHMEM_TENSOR_H_
-#define _NVSHMEM_TENSOR_H_
+#ifndef NVSHMEM_CPP_NVSHMEM_TENSOR_HPP
+#define NVSHMEM_CPP_NVSHMEM_TENSOR_HPP
 
 #if !defined __CUDACC_RTC__
 #include <limits.h>
@@ -14,7 +14,7 @@
 
 #include <cuda_runtime.h>
 
-#include "non_abi/nvshmemi_cccl_compat.h"
+#include "non_abi/device/common/nvshmemi_cccl_compat.h"
 
 template <int v>
 struct ConstInt : cuda::std::integral_constant<int, v> {

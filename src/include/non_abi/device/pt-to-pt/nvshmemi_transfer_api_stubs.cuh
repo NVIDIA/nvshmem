@@ -14,8 +14,8 @@
 #include <cuda_runtime.h>
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device/nvshmem_device_macros.h"
-#include "device_host_transport/transport_constants.h"
-#include "non_abi/nvshmemi_region_types.h"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
 
 #ifndef _NVSHMEMI_TRANSFER_H_
 #define _NVSHMEMI_TRANSFER_H_

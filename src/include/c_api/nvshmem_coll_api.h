@@ -5,9 +5,9 @@
 
 #ifndef _NVSHMEM_COLL_API_H_
 #define _NVSHMEM_COLL_API_H_
-#include "device_host/nvshmem_types.h"
-#include "device_host/nvshmem_api_macros.h"
-#include "host/nvshmem_macros.h"
+#include "c_api/nvshmem_types.h"
+#include "c_api/nvshmem_api_macros.h"
+#include "c_api/nvshmem_macros.h"
 
 #ifdef __cplusplus
 extern "C" {

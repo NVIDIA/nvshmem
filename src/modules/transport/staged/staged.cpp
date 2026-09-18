@@ -24,12 +24,12 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/transport_constants.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "staged_config.h"
 #include "transport_common.h"
 #include "transport_ib_common.h"

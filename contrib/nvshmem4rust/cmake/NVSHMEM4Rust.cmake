@@ -49,19 +49,19 @@ function(generateRustBindings)
     set(NVSHMEM_HOST_LIB_DIR "" CACHE PATH
         "Directory containing libnvshmem_host for the CUDA-Oxide tests")
     set(NVSHMEM_BINDING_HEADERS
-        "${NVSHMEM_INCLUDE_DIR}/nvshmem_host.h"
-        "${NVSHMEM_INCLUDE_DIR}/host/nvshmem_api.h"
-        "${NVSHMEM_INCLUDE_DIR}/host/nvshmem_coll_api.h"
-        "${NVSHMEM_INCLUDE_DIR}/host/nvshmemx_api.h"
-        "${NVSHMEM_INCLUDE_DIR}/host/nvshmemx_coll_api.h")
+        "${NVSHMEM_INCLUDE_DIR}/c_api/nvshmem_api.h"
+        "${NVSHMEM_INCLUDE_DIR}/c_api/nvshmem_coll_api.h"
+        "${NVSHMEM_INCLUDE_DIR}/c_api/nvshmemx_api.h"
+        "${NVSHMEM_INCLUDE_DIR}/c_api/nvshmemx_coll_api.h"
+        "${NVSHMEM_INCLUDE_DIR}/nvshmem_host.h")
     if(NOT GENERATERUST_HOST_ONLY)
         list(APPEND NVSHMEM_BINDING_HEADERS
-            "${NVSHMEM_INCLUDE_DIR}/nvshmem.h"
-            "${NVSHMEM_INCLUDE_DIR}/nvshmemx.h"
             "${NVSHMEM_INCLUDE_DIR}/device/nvshmem_coll_defines.cuh"
             "${NVSHMEM_INCLUDE_DIR}/device/nvshmem_defines.h"
             "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_coll_defines.cuh"
-            "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_defines.h")
+            "${NVSHMEM_INCLUDE_DIR}/device/nvshmemx_defines.h"
+            "${NVSHMEM_INCLUDE_DIR}/nvshmem.h"
+            "${NVSHMEM_INCLUDE_DIR}/nvshmemx.h")
     endif()
     foreach(NVSHMEM_BINDING_HEADER IN LISTS NVSHMEM_BINDING_HEADERS)
         if(NOT EXISTS "${NVSHMEM_BINDING_HEADER}")

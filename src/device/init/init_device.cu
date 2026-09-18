@@ -16,21 +16,21 @@
 #include "nvshmem.h"
 #endif
 
-#include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemi_build_metadata.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/c/nvshmemi_build_metadata.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/device/nvshmemi_device.h"
 #include "internal/common/error_codes_internal.h"
 #include "non_abi/device/pt-to-pt/proxy_device.cuh"
-#include "device_host/nvshmem_common.cuh"
-#include "non_abi/device_host/nvshmemi_runtime_types.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-#include "device_host_transport/nvshmem_common_ibgda.h"
+#include "non_abi/device/transport/nvshmem_common_ibgda.h"
 #endif
 
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
-#include "device_host_transport/nvshmem_common_gpunetio.h"
+#include "non_abi/device/transport/nvshmem_common_gpunetio.h"
 #endif
 
 #if defined(__clang_llvm_bitcode_lib__)

@@ -21,9 +21,9 @@
 #include "transport_common.h"
 #include "transport_ib_common.h"  // for nvshmemt_ib_common_mem_handle
 #include "transport_mlx5_common.h"
-#include "device_host_transport/transport_constants.h"
-#include "device_host_transport/nvshmem_common_gpunetio.h"
-#include "device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/device/transport/nvshmem_common_gpunetio.h"
+#include "non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp"
 #include "gpunetio/doca_gpunetio_host.h"
 
 #define DOCA_CHECK(call)                                                \

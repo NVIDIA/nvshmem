@@ -8,7 +8,7 @@
 #include "coll_test.h"
 #include "test_teams.h"
 #include "coll_common.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "alltoall_common.h"
 #include <inttypes.h>
 

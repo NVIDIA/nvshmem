@@ -14,8 +14,8 @@
 #endif
 
 #include "device/nvshmem_device_macros.h"
-#include "device_host/nvshmem_common.cuh"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "non_abi/device/common/nvshmemi_type_traits.cuh"
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
     defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)

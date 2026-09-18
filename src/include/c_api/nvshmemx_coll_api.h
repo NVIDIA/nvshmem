@@ -6,9 +6,9 @@
 #ifndef _NVSHMEMX_COLL_API_H_
 #define _NVSHMEMX_COLL_API_H_
 #include <cuda_runtime.h>
-#include "device_host/nvshmem_api_macros.h"
-#include "device_host/nvshmem_types.h"
-#include "host/nvshmem_macros.h"
+#include "c_api/nvshmem_api_macros.h"
+#include "c_api/nvshmem_types.h"
+#include "c_api/nvshmem_macros.h"
 
 #ifdef __cplusplus
 extern "C" {

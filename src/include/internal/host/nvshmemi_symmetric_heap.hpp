@@ -22,8 +22,8 @@
 #include "internal/host/util.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/cudawrap.h"
-#include "non_abi/nvshmemi_error_macros.h"
-#include "device_host/logical_endpoint_types.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
+#include "non_abi/device/common/logical_endpoint_types.h"
 
 // Forward declarations
 class nvshmemi_mem_p2p_transport;

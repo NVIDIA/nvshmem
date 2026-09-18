@@ -4,32 +4,32 @@
  */
 
 #include "ibdevx.h"
-#include <assert.h>                                          // for assert
-#include <cuda.h>                                            // for CUDA_SUCCESS, CU_DEVICE...
-#include <cuda_runtime.h>                                    // for cudaGetLastError
-#include <endian.h>                                          // for htobe32, htobe64, htobe16
-#include <errno.h>                                           // for ENOMEM
-#include <netinet/in.h>                                      // for ntohl
-#include <pthread.h>                                         // for pthread_mutex_destroy
-#include <stdint.h>                                          // for uint32_t, uint64_t, uin...
-#include <stdio.h>                                           // for NULL, printf, size_t
-#include <stdlib.h>                                          // for free, calloc, malloc
-#include <string.h>                                          // for memset, memcpy, strcmp
-#include <unistd.h>                                          // for sysconf, _SC_PAGESIZE
-#include <array>                                             // for array
-#include <cmath>                                             // for log2
-#include <map>                                               // for map, _Rb_tree_iterator
-#include <memory>                                            // for make_unique, unique_ptr
-#include <string>                                            // for string
-#include <utility>                                           // for pair, make_pair
-#include <vector>                                            // for vector
-#include "device_host_transport/nvshmem_common_transport.h"  // for NVSHMEMI_OP_P, NVSHMEMI...
-#include "device_host_transport/transport_constants.h"
+#include <assert.h>                                             // for assert
+#include <cuda.h>                                               // for CUDA_SUCCESS, CU_DEVICE...
+#include <cuda_runtime.h>                                       // for cudaGetLastError
+#include <endian.h>                                             // for htobe32, htobe64, htobe16
+#include <errno.h>                                              // for ENOMEM
+#include <netinet/in.h>                                         // for ntohl
+#include <pthread.h>                                            // for pthread_mutex_destroy
+#include <stdint.h>                                             // for uint32_t, uint64_t, uin...
+#include <stdio.h>                                              // for NULL, printf, size_t
+#include <stdlib.h>                                             // for free, calloc, malloc
+#include <string.h>                                             // for memset, memcpy, strcmp
+#include <unistd.h>                                             // for sysconf, _SC_PAGESIZE
+#include <array>                                                // for array
+#include <cmath>                                                // for log2
+#include <map>                                                  // for map, _Rb_tree_iterator
+#include <memory>                                               // for make_unique, unique_ptr
+#include <string>                                               // for string
+#include <utility>                                              // for pair, make_pair
+#include <vector>                                               // for vector
+#include "non_abi/device/transport/nvshmem_common_transport.h"  // for NVSHMEMI_OP_P, NVSHMEMI...
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/host_transport/cudawrap.h"            // for CUPFN, nvshmemi_cuda_fn...
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_options_s, nvs...
-#include "non_abi/nvshmemi_error_macros.h"               // for NVSHMEMX_ERROR_INTERNAL
-#include "non_abi/nvshmem_build_options.h"               // for NVSHMEM_USE_MLX5DV
-#include "non_abi/nvshmemi_build_metadata.h"
+#include "non_abi/c/nvshmemi_error_macros.h"             // for NVSHMEMX_ERROR_INTERNAL
+#include "non_abi/c/nvshmem_build_options.h"             // for NVSHMEM_USE_MLX5DV
+#include "non_abi/c/nvshmemi_build_metadata.h"
 #include "infiniband/mlx5dv.h"  // for DEVX_SET, mlx5_wqe_ctrl...
 #include "infiniband/verbs.h"   // for ibv_port_attr, ibv_ah_attr
 #include "mlx5_ifc.h"           // for mlx5_ifc_qpc_bits, mlx5...

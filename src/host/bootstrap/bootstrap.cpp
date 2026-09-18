@@ -9,15 +9,15 @@
 #include <string>
 #include <unordered_map>
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "non_abi/device_host/nvshmemi_runtime_types.h"
-#include "host/nvshmemx_api.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
+#include "c_api/nvshmemx_api.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_bootstrap_library.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/util.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 
 #define LEGACY_BOOTSTRAP_MODULE_MPI "nvshmem_bootstrap_mpi.so"
 #define LEGACY_BOOTSTRAP_MODULE_PMI "nvshmem_bootstrap_pmi.so"

@@ -7,7 +7,7 @@
 #define _NVSHMEM_MACROS_H_
 
 #include <cuda_runtime.h>
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #ifdef __CUDA_ARCH__
 #ifdef NVSHMEMI_HOST_ONLY

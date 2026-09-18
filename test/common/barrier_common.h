@@ -7,7 +7,7 @@
 #define NVSHMEMTEST_BARRIER_COMMON_H
 
 #include <cuda_runtime.h>
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "utils.h"
 
 __device__ unsigned long long int errs_d;

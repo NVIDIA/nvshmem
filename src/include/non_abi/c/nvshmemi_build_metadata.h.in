@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Note - For packaging reasons, do not move this file from src/include/non_abi */
+/* Note - For packaging reasons, do not move this file from src/include/non_abi/c */
 
 #ifndef NVSHMEMI_BUILD_METADATA_H
 #define NVSHMEMI_BUILD_METADATA_H
 
-#include "device_host/nvshmem_version.h"
+#include "c_api/nvshmem_version.h"
 
 // clang-format off
 

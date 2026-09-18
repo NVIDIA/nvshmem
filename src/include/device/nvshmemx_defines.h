@@ -8,11 +8,11 @@
 
 #include <cuda_runtime.h>
 #include "device/nvshmem_device_macros.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/pt-to-pt/counted_device.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device/nvshmemx_collective_launch_apis.h"
+#include "c_api/nvshmemx_collective_launch_apis.h"
 
 #if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {

@@ -6,7 +6,7 @@
 #ifndef _DEBUG_H_
 #define _DEBUG_H_
 
-#include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>

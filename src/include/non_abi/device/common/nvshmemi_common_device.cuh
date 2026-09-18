@@ -17,10 +17,10 @@
 #include <cuda/std/cstddef>
 #include <cuda/std/type_traits>
 #endif
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host/nvshmem_common.cuh"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/transport_constants.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
@@ -37,7 +37,7 @@
 #include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/common/nvshmemi_region_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
-#include "device/logical_endpoint_device.cuh"
+#include "non_abi/device/common/logical_endpoint_device.cuh"
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
 
 #define _LL_MAX_UNROLL 4

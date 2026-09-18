@@ -15,11 +15,11 @@
 #include "infiniband/mlx5dv.h"
 
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device_host_transport/nvshmem_common_ibgda.h"
-#include "device_host_transport/transport_constants.h"
+#include "non_abi/device/transport/nvshmem_common_ibgda.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "utils_device.h"
 
 #include <algorithm>

@@ -7,8 +7,8 @@
 #define NVSHMEMI_TEAM_H
 
 #define N_PSYNCS_PER_TEAM 1
-#include "device_host_transport/transport_constants.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
 
 extern nvshmemi_team_t *nvshmemi_team_world;
 extern nvshmemi_team_t *nvshmemi_team_shared;

@@ -35,7 +35,7 @@
 #endif
 #include "nvshmem.h"
 #include "nvshmemx.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "cuda_fp16.h"
 #include "cuda_bf16.h"
 

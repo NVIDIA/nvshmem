@@ -6,7 +6,7 @@
 #ifndef _NVSHMEM_DEVICE_MACROS_H_
 #define _NVSHMEM_DEVICE_MACROS_H_
 
-#include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep
 
 #ifndef NVSHMEMI_NOINLINE
 #if defined(__clang_llvm_bitcode_lib__)

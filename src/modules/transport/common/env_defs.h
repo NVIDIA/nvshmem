@@ -21,8 +21,8 @@
  */
 
 // for NVSHMEM_IBGDA_SUPPORT
-#include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
-#include "non_abi/nvshmemi_region_constants.h"
+#include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/c/nvshmemi_region_constants.h"
 
 #ifndef NVSHMEM_ENV_DEFS_INTERNAL
 #include "bootstrap_host_transport/env_defs_internal.h"  // for NVSHMEMI_ENV_DEF

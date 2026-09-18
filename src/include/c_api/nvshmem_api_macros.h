@@ -20,7 +20,7 @@
 #endif
 #include "cuda_bf16.h"
 #include "cuda_fp16.h"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #if !defined(__cplusplus)
 typedef __nv_bfloat16_raw __nv_bfloat16;

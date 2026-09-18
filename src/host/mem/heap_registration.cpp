@@ -25,8 +25,8 @@
 #include "internal/host_transport/cudawrap.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 
 namespace {
 

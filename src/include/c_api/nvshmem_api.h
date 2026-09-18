@@ -13,12 +13,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "device_host/nvshmem_api_macros.h"
-#include "device_host/nvshmem_types.h"
-#include "device_host/nvshmem_api_constants.h"
-#include "host/nvshmem_macros.h"
-#include "host/nvshmem_coll_api.h"
-#include "device_host/nvshmem_version.h"
+#include "c_api/nvshmem_api_macros.h"
+#include "c_api/nvshmem_types.h"
+#include "c_api/nvshmem_api_constants.h"
+#include "c_api/nvshmem_macros.h"
+#include "c_api/nvshmem_coll_api.h"
+#include "c_api/nvshmem_version.h"
 
 extern long nvshmem_error;
 
@@ -507,5 +507,5 @@ void nvshmem_team_destroy(nvshmem_team_t team);
 }
 #endif
 
-#include "host/nvshmem_coll_api.h"
+#include "c_api/nvshmem_coll_api.h"
 #endif

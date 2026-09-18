@@ -23,11 +23,11 @@
 #endif
 #include "cuda_fp16.h"
 #include "cuda_bf16.h"
-#include "device_host/nvshmem_api_macros.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "non_abi/device_host/nvshmemi_runtime_types.h"
-#include "device_host_transport/transport_constants.h"
+#include "c_api/nvshmem_api_macros.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
+#include "non_abi/device/transport/transport_constants.h"
 
 #if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
 extern "C" {
