@@ -15,15 +15,12 @@
 #include <infiniband/verbs.h>
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
-#include <deque>
 #include <exception>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <shared_mutex>
 #include <thread>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -46,7 +43,7 @@
 namespace nvshmemi {
 
 staged_qp_t::staged_qp_t(struct ibv_context* context, struct ibv_pd* pd, void* server_bounce)
-    : context_(context), pd_(pd), server_bounce_(server_bounce), ctrl_recv_bufs_(STAGED_RQ_DEPTH) {}
+    : context_(context), pd_(pd), server_bounce_(server_bounce) {}
 
 staged_qp_t::~staged_qp_t() {
     if (qp_) {
@@ -161,33 +158,22 @@ staged_worker_state_t::staged_worker_state_t(staged_operation_state_t& operation
                                              staged_response_state_t& responses)
     : operations_(operations), responses_(responses) {}
 
-void staged_worker_state_t::reset() {
-    stop_requested_.store(false, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(start_mutex_);
-        start_reports_ = 0;
-        start_status_ = 0;
-    }
-}
-
 void staged_worker_state_t::fail(int status) {
-    {
-        std::scoped_lock lock(operations_.mutex, responses_.mutex);
-        if (operations_.async_status == 0) {
-            operations_.async_status = status;
-        }
-        stop_requested_.store(true, std::memory_order_relaxed);
+    if (status == 0) {
+        return;
     }
-    responses_.cv.notify_all();
-    operations_.ready_cv.notify_all();
-    operations_.done_cv.notify_all();
+    int expected = 0;
+    first_error_.compare_exchange_strong(expected, status, std::memory_order_relaxed);
+    status = first_error_.load(std::memory_order_relaxed);
+    stop_requested_.store(true, std::memory_order_relaxed);
+    operations_.fail(status);
+    responses_.fail(status);
 }
 
 void staged_worker_state_t::request_stop() {
     stop_requested_.store(true, std::memory_order_relaxed);
-    responses_.cv.notify_all();
-    operations_.ready_cv.notify_all();
-    operations_.done_cv.notify_all();
+    operations_.stop();
+    responses_.stop();
 }
 
 staged_worker_thread_t::~staged_worker_thread_t() {
@@ -207,22 +193,10 @@ staged_worker_threads_t::~staged_worker_threads_t() {
     server_thread_.join();
 }
 
-void staged_worker_state_t::report_start(int status) {
-    {
-        std::lock_guard<std::mutex> lock(start_mutex_);
-        if (status != 0 && start_status_ == 0) {
-            start_status_ = status;
-        }
-        ++start_reports_;
-    }
-    start_cv_.notify_all();
-}
-
-int staged_worker_state_t::wait_for_start(unsigned int expected_reports) {
-    std::unique_lock<std::mutex> lock(start_mutex_);
-    start_cv_.wait(lock, [&] { return start_status_ != 0 || start_reports_ == expected_reports; });
-    return start_status_;
-}
+transport_staged_state_t::transport_staged_state_t()
+    : operations(NVSHMEMX_ERROR_INTERNAL),
+      responses(NVSHMEMX_ERROR_INTERNAL),
+      workers(operations, responses) {}
 
 namespace {
 
@@ -484,11 +458,8 @@ static void staged_stop_workers(transport_staged_state_t* s) {
     if (!s) {
         return;
     }
+    s->workers.request_stop();
     s->worker_threads.reset();
-}
-
-static void staged_report_worker_start(transport_staged_state_t* s, int status) {
-    s->workers.report_start(status);
 }
 
 class staged_worker_cuda_scope_t {

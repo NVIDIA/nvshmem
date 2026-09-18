@@ -10,13 +10,10 @@
 #include <stdint.h>
 #include <array>
 #include <atomic>
-#include <condition_variable>
-#include <deque>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -27,6 +24,7 @@
 
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "internal/host_transport/transport.h"
+#include "staged_control.h"
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
@@ -36,6 +34,8 @@ namespace nvshmemi {
 
 /* Staged transport resource limits. */
 inline constexpr int STAGED_MAX_PIPELINE_DEPTH = 16;
+/* Pending API operations, independent of the active PUT's wire pipeline depth. */
+inline constexpr size_t STAGED_OPERATION_CAPACITY = 128;
 inline constexpr int STAGED_CQ_DEPTH = 256;
 inline constexpr int STAGED_SQ_DEPTH = 128;
 inline constexpr int STAGED_RQ_DEPTH = 128;
@@ -94,8 +94,6 @@ struct staged_client_op_t {
 
     int pe;
     std::variant<staged_rma_op_t, staged_amo_op_t> operation;
-    uint64_t seq = 0;
-    int status = 0;
 };
 
 /* ── endpoint handle exchanged through bootstrap ────────────────── */
@@ -141,20 +139,11 @@ class staged_qp_t {
     struct ibv_cq* send_cq_ = nullptr;
     struct ibv_cq* recv_cq_ = nullptr;
     void* server_bounce_;
-    std::vector<staged_ctrl_msg_t> ctrl_recv_bufs_;
+    std::array<staged_ctrl_msg_t, STAGED_RQ_DEPTH> ctrl_recv_bufs_{};
     struct ibv_mr* ctrl_recv_mr_ = nullptr;
     staged_ep_handle_t remote_ep_{};
     std::mutex send_mutex_;
 };
-
-/* Generic memory-handle payload. Staged does not RDMA to the GPU heap.
- * local_info is process-local bookkeeping only: remote copies of this handle
- * must never dereference it. */
-struct staged_mem_handle_t {
-    void* local_info;
-};
-static_assert(sizeof(staged_mem_handle_t) <= NVSHMEM_MEM_HANDLE_SIZE,
-              "staged_mem_handle_t must fit in nvshmem_mem_handle_t");
 
 /* Local cache entry for an installed GPU CPU mapping. */
 struct staged_mem_handle_info_t {
@@ -269,27 +258,12 @@ struct staged_cuda_state_t {
     staged_cuda_state_t& operator=(staged_cuda_state_t&&) = delete;
 };
 
-/* Client-operation queue and completion accounting. */
-struct staged_operation_state_t {
-    std::mutex mutex;
-    std::condition_variable ready_cv;
-    std::condition_variable done_cv;
-    std::deque<std::shared_ptr<staged_client_op_t>> op_queue;
-    uint64_t submitted_ops = 0;
-    uint64_t completed_ops = 0;
-    int async_status = 0;
-    std::mutex amo_mutex;
-};
+using staged_operation_state_t =
+    staged_operation_queue_t<staged_client_op_t, STAGED_OPERATION_CAPACITY>;
+using staged_response_state_t =
+    staged_response_table_t<staged_response_t, STAGED_MAX_PIPELINE_DEPTH>;
 
-/* Request/response matching for GET and fetching AMO operations. */
-struct staged_response_state_t {
-    std::mutex mutex;
-    std::condition_variable cv;
-    std::unordered_map<uint64_t, staged_response_t> responses;
-    std::atomic<uint64_t> next_request_id{1};
-};
-
-/* Coordinates worker startup, shutdown, and failure propagation. */
+/* Coordinates one worker group's shutdown and failure propagation. */
 class staged_worker_state_t {
    public:
     staged_worker_state_t(staged_operation_state_t& operations, staged_response_state_t& responses);
@@ -299,21 +273,15 @@ class staged_worker_state_t {
     staged_worker_state_t(staged_worker_state_t&&) = delete;
     staged_worker_state_t& operator=(staged_worker_state_t&&) = delete;
 
-    void reset();
     void fail(int status);
     void request_stop();
     bool stopping() const { return stop_requested_.load(std::memory_order_relaxed); }
-    void report_start(int status);
-    int wait_for_start(unsigned int expected_reports);
 
    private:
     staged_operation_state_t& operations_;
     staged_response_state_t& responses_;
     std::atomic<bool> stop_requested_{false};
-    std::mutex start_mutex_;
-    std::condition_variable start_cv_;
-    unsigned int start_reports_ = 0;
-    int start_status_ = 0;
+    std::atomic<int> first_error_{0};
 };
 
 /* Owns one worker thread and guarantees stop-before-join on every destruction path. */
@@ -345,11 +313,14 @@ class staged_worker_threads_t {
     template <typename ServerFunction, typename ClientFunction>
     staged_worker_threads_t(staged_worker_state_t& state, ServerFunction&& server_function,
                             ClientFunction&& client_function)
-        : state_(reset(state)),
-          server_thread_(state_, std::forward<ServerFunction>(server_function)),
-          client_thread_(state_, std::forward<ClientFunction>(client_function)) {}
+        : state_(state),
+          server_thread_(state_, [this, function = std::forward<ServerFunction>(
+                                            server_function)]() mutable { function(startup_); }),
+          client_thread_(state_, [this, function = std::forward<ClientFunction>(
+                                            client_function)]() mutable { function(startup_); }) {}
 
     ~staged_worker_threads_t();
+    int wait_for_start() { return startup_.wait(); }
 
     staged_worker_threads_t(const staged_worker_threads_t&) = delete;
     staged_worker_threads_t& operator=(const staged_worker_threads_t&) = delete;
@@ -357,18 +328,16 @@ class staged_worker_threads_t {
     staged_worker_threads_t& operator=(staged_worker_threads_t&&) = delete;
 
    private:
-    static staged_worker_state_t& reset(staged_worker_state_t& state) {
-        state.reset();
-        return state;
-    }
-
     staged_worker_state_t& state_;
+    /* Constructed before, and destroyed after, both worker owners. */
+    staged_startup_latch_t startup_{2};
     staged_worker_thread_t server_thread_;
     staged_worker_thread_t client_thread_;
 };
 
 /* Registered GPU mappings and memory-handle lifetime tracking. */
 struct staged_memory_state_t {
+    std::mutex amo_mutex;
     std::mutex gpu_cpu_mapping_mutex;
     std::shared_mutex mem_handle_mutex;
     std::unordered_set<staged_mem_handle_info_t*> mem_handle_infos;
@@ -392,7 +361,7 @@ struct transport_staged_state_t {
     staged_memory_state_t memory;
     std::unique_ptr<staged_worker_threads_t> worker_threads;
 
-    transport_staged_state_t() : workers(operations, responses) {}
+    transport_staged_state_t();
 
     transport_staged_state_t(const transport_staged_state_t&) = delete;
     transport_staged_state_t& operator=(const transport_staged_state_t&) = delete;
