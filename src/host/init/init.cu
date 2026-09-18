@@ -825,6 +825,10 @@ int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->custreams[i]), status, out);
         CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cuevents[i]), status, out);
     }
+    CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->my_stream), status, out);
+    free(state->custreams);
+    free(state->cuevents);
+    free(state->active_internal_streams);
 out:
     return status;
 }
