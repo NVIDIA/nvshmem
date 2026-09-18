@@ -1793,16 +1793,17 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
     }
 
     /* ── Launch workers ── */
-    s->workers.reset();
     int worker_start_status = 0;
     try {
-        s->workers.start([t] { staged_server_loop(t); }, [t] { staged_client_loop(t); });
+        s->worker_threads = std::make_unique<staged_worker_threads_t>(
+            s->workers, [t](staged_startup_latch_t& startup) { staged_server_loop(t, startup); },
+            [t](staged_startup_latch_t& startup) { staged_client_loop(t, startup); });
     } catch (const std::exception& err) {
         NVSHMEMI_ERROR_PRINT("[STAGED PE%d] failed to start worker thread: %s", me, err.what());
         worker_start_status = NVSHMEMX_ERROR_INTERNAL;
     }
     if (!worker_start_status) {
-        worker_start_status = s->workers.wait_for_start(2);
+        worker_start_status = s->worker_threads->wait_for_start();
     }
     if (worker_start_status) {
         staged_stop_workers(s);
@@ -1825,17 +1826,32 @@ static int staged_release_gpu_cpu_mapping(transport_staged_state_t* s,
     return nvshmemt_gpu_cpu_unmap(&s->memory.gpu_cpu_mapping_state, &info.cpu_mapping);
 }
 #endif
+static_assert(sizeof(staged_mem_handle_info_t*) <= NVSHMEM_MEM_HANDLE_SIZE,
+              "staged memory-handle metadata pointer must fit in the opaque handle");
+
+static staged_mem_handle_info_t* staged_load_mem_handle_info(
+    const nvshmem_mem_handle_t* mem_handle) {
+    if (!mem_handle) {
+        return nullptr;
+    }
+    staged_mem_handle_info_t* info = nullptr;
+    memcpy(&info, mem_handle, sizeof(info));
+    return info;
+}
+
+static void staged_store_mem_handle_info(nvshmem_mem_handle_t* mem_handle,
+                                         staged_mem_handle_info_t* info) {
+    memcpy(mem_handle, &info, sizeof(info));
+}
 
 static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void* buf,
                                           size_t length, nvshmem_transport_t t,
                                           bool /* local_only */) {
-    staged_mem_handle_t* handle = reinterpret_cast<staged_mem_handle_t*>(mem_handle);
-
-    if (!handle) {
+    if (!mem_handle) {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
-    memset(handle, 0, sizeof(*mem_handle));
+    memset(mem_handle, 0, sizeof(*mem_handle));
 
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
@@ -1883,12 +1899,12 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    handle->local_info = handle_info.release();
+    staged_mem_handle_info_t* stored_info = handle_info.get();
     {
         std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        s->memory.mem_handle_infos.insert(
-            static_cast<staged_mem_handle_info_t*>(handle->local_info));
+        s->memory.mem_handle_infos.insert(stored_info);
     }
+    staged_store_mem_handle_info(mem_handle, handle_info.release());
     return 0;
 #else
     (void)buf;
@@ -1900,15 +1916,13 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
 
 static int nvshmemt_staged_release_mem_handle(nvshmem_mem_handle_t* mem_handle,
                                               nvshmem_transport_t t) {
-    staged_mem_handle_t* handle = reinterpret_cast<staged_mem_handle_t*>(mem_handle);
-    if (!handle || !handle->local_info) {
+    staged_mem_handle_info_t* handle_info = staged_load_mem_handle_info(mem_handle);
+    if (!handle_info) {
         return 0;
     }
 
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
-    staged_mem_handle_info_t* handle_info =
-        static_cast<staged_mem_handle_info_t*>(handle->local_info);
     bool retrying_retired_cleanup = false;
     {
         std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
@@ -1936,10 +1950,10 @@ static int nvshmemt_staged_release_mem_handle(nvshmem_mem_handle_t* mem_handle,
         s->memory.retired_mem_handle_infos.erase(handle_info);
     }
     delete handle_info;
-    handle->local_info = nullptr;
+    staged_store_mem_handle_info(mem_handle, nullptr);
 #else
     (void)t;
-    handle->local_info = nullptr;
+    staged_store_mem_handle_info(mem_handle, nullptr);
 #endif
     return 0;
 }
@@ -1955,10 +1969,8 @@ static int nvshmemt_staged_rma(nvshmem_transport_t tcurr, int pe, rma_verb_t ver
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    auto op =
-        std::make_shared<staged_client_op_t>(pe, staged_rma_op_t{verb, *remote, *local, bytesdesc});
-
-    return staged_submit_client_op(s, op, !verb.is_nbi);
+    return staged_submit_client_op(
+        s, staged_client_op_t(pe, staged_rma_op_t{verb, *remote, *local, bytesdesc}), !verb.is_nbi);
 }
 
 static int nvshmemt_staged_fence(nvshmem_transport_t, int, int, int) { return 0; }
@@ -1980,9 +1992,8 @@ static int nvshmemt_staged_amo(nvshmem_transport_t tcurr, int pe, void*, amo_ver
 
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(tcurr->state);
 
-    auto op = std::make_shared<staged_client_op_t>(pe, staged_amo_op_t{verb, *target, bytesdesc});
-
-    return staged_submit_client_op(s, op, true);
+    return staged_submit_client_op(
+        s, staged_client_op_t(pe, staged_amo_op_t{verb, *target, bytesdesc}), true);
 }
 
 /* ═══  finalize  ═════════════════════════════════════════════════ */
@@ -1995,7 +2006,7 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
 
     staged_quiet_all(s);
 
-    s->workers.stop();
+    staged_stop_workers(s);
 
     std::unordered_set<staged_mem_handle_info_t*> mem_handle_infos;
     {
