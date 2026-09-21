@@ -390,7 +390,9 @@ int nvshmemi_proxy_init(nvshmemi_state_t *state, int proxy_level) {
 
     CUDA_RUNTIME_CHECK(
         cudaMallocHost((void **)&proxy_state->global_exit_request_state, sizeof(int), 0));
+    *proxy_state->global_exit_request_state = PROXY_GLOBAL_EXIT_NOT_REQUESTED;
     CUDA_RUNTIME_CHECK(cudaMallocHost((void **)&proxy_state->global_exit_code, sizeof(int), 0));
+    *proxy_state->global_exit_code = 0;
     CUDA_RUNTIME_CHECK(cudaMallocHost((void **)&proxy_state->nvshmemi_timeout,
                                       sizeof(nvshmemi_timeout_t), 0)); /* GPU writes, CPU reads */
     (*proxy_state->nvshmemi_timeout) = NVSHMEMI_TIMEOUT_INITIALIZER;
