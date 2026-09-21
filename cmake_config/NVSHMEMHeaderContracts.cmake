@@ -9,8 +9,9 @@ function(_nvshmem_make_header_probes
   foreach(header IN LISTS ARGN)
     file(RELATIVE_PATH relative_header "${include_root}" "${header}")
     string(MAKE_C_IDENTIFIER "${relative_header}" header_identifier)
+    string(SHA256 header_hash "${relative_header}")
     set(probe_source
-        "${CMAKE_CURRENT_BINARY_DIR}/header_contracts/${target_prefix}/${language}/${header_identifier}.${extension}")
+        "${CMAKE_CURRENT_BINARY_DIR}/header_contracts/${target_prefix}/${language}/${header_identifier}_${header_hash}.${extension}")
     file(GENERATE OUTPUT "${probe_source}" CONTENT "${preamble}#include <${relative_header}>\n")
     list(APPEND probe_sources "${probe_source}")
   endforeach()
@@ -119,6 +120,9 @@ function(nvshmem_add_header_contract_targets target_prefix include_root)
   add_library(${target_prefix}_cxx_header_contract OBJECT EXCLUDE_FROM_ALL ${cxx_probe_sources})
   target_compile_features(${target_prefix}_cxx_header_contract PRIVATE cxx_std_17)
   target_include_directories(${target_prefix}_cxx_header_contract PRIVATE "${include_root}")
+  if(NVSHMEM_GPUNETIO_SUPPORT)
+    target_include_directories(${target_prefix}_cxx_header_contract PRIVATE "${GPUNETIO_INCLUDE}")
+  endif()
   target_link_libraries(${target_prefix}_cxx_header_contract PRIVATE CUDA::cudart)
   if(TARGET CCCL::CCCL)
     target_link_libraries(${target_prefix}_cxx_header_contract PRIVATE CCCL::CCCL)
@@ -135,19 +139,10 @@ function(nvshmem_add_header_contract_targets target_prefix include_root)
     target_link_libraries(${target_prefix}_cuda_header_contract PRIVATE CCCL::CCCL)
   endif()
 
-  if(NVSHMEM_DEVEL)
-    add_custom_target(
-      ${target_prefix}_header_contracts ALL
-      DEPENDS
-        ${target_prefix}_c_header_contract
-        ${target_prefix}_cxx_header_contract
-        ${target_prefix}_cuda_header_contract)
-  else()
-    add_custom_target(
-      ${target_prefix}_header_contracts
-      DEPENDS
-        ${target_prefix}_c_header_contract
-        ${target_prefix}_cxx_header_contract
-        ${target_prefix}_cuda_header_contract)
-  endif()
+  add_custom_target(
+    ${target_prefix}_header_contracts
+    DEPENDS
+      ${target_prefix}_c_header_contract
+      ${target_prefix}_cxx_header_contract
+      ${target_prefix}_cuda_header_contract)
 endfunction()
