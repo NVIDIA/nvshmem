@@ -85,6 +85,7 @@ static size_t nvshmemi_get_device_state_symbol_size() {
 static void nvshmemi_init_debug(void);
 static void nvshmemi_init_msg(void);
 int set_job_connectivity(nvshmemi_state_t *);
+int nvshmemi_setup_stream_priorities(nvshmemi_state_t *state);
 
 struct nvshmemi_cuda_fn_table *nvshmemi_cuda_syms;
 nvshmemi_state_t *nvshmemi_state;
@@ -703,7 +704,6 @@ out:
 int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL) {
     int cuda_device_id = INIT_ARGS_SCALAR_INVALID;
     CUdevice cudevice;
-    int leastPriority, greatestPriority;
     int status = NVSHMEMX_SUCCESS;
 
     CUCHECK(nvshmemi_cuda_syms, cuInit(0));
@@ -795,9 +795,11 @@ int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr =
                 break;
             }
         }
-        CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-        CUDA_RUNTIME_CHECK(cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking,
-                                                        greatestPriority));
+        // `state->my_stream` is created here and nowhere else, so this is the one owner of the
+        // handle; the priority query and the creation live in the helper rather than inline.
+        status = nvshmemi_setup_stream_priorities(state);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "nvshmem setup stream priorities failed \n");
         INFO(NVSHMEM_INIT, "[%d] Created stream %p for device %d", state->mype, state->my_stream,
              state->device_id);
     }
@@ -1306,10 +1308,6 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
                                 transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Invalid context pointer passed to nvshmemid_hostlib_init_attr.\n");
-
-    status = nvshmemi_setup_stream_priorities(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem setup stream priorities failed \n");
 
     status = nvshmemi_coll_common_cpu_init();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cpu collective setup failed \n");
