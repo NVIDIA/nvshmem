@@ -215,7 +215,8 @@ endif()
 #                  that nvcc -dlink can consume
 #   - CUDA 12.8-12.x: fatbinary --image3=kind=nvvm creates fatbins but
 #                  nvcc -dlink cannot extract from them (unresolved symbols).
-#                  Fall back to a single sm_90 .ltoir file.
+#                  Use per-arch .ltoir files directly and keep a single-arch
+#                  copy at the legacy .ltoir.fatbin entry point.
 #
 if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   # nvcc --ltoir requires CUDA 12.8 or later
@@ -224,22 +225,14 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "Build the nvshmem_device LTOIR library and tests" FORCE)
   else()
 
-  if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13)
-    # CUDA 13+: build multi-arch LTOIR fatbin from all target architectures
-    set(LTOIR_LIB_ARCHS ${DEVICE_LIB_ARCHS})
-  else()
-    # CUDA 12.8-12.x: single-arch sm_90 only. Multi-arch fatbins created with
-    # fatbinary --image3=kind=nvvm cannot be consumed by nvcc -dlink on CUDA 12
-    # (unresolved symbols). Hardcoded to sm_90 to match pre-multi-arch behavior.
-    set(LTOIR_LIB_ARCHS "sm_90")
-    message(STATUS "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}: "
-            "LTOIR fatbin extraction requires CUDA 13+. Building single-arch sm_90 LTOIR.")
-  endif()
+  # Per-arch compilation is supported by every toolkit that supports --ltoir.
+  # Only multi-arch fatbin consumption requires CUDA 13 or later.
+  set(LTOIR_LIB_ARCHS ${DEVICE_LIB_ARCHS})
 
   if(NOT LTOIR_LIB_ARCHS)
     message(WARNING "No architectures for LTOIR library. Disabling LTOIR build.")
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "" FORCE)
-  endif()
+  else()
 
   set(LTOIR_CXX_STD "c++17")
 
@@ -287,11 +280,22 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
       COMMAND_EXPAND_LISTS
     )
   else()
-    # CUDA 12.x: copy the single-arch .ltoir as the "fatbin" (no actual bundling)
+    # CUDA 12.x: retain the legacy single-arch entry point (no actual bundling).
+    # Prefer sm_90 for compatibility when requested, otherwise use the first
+    # configured architecture so builds without sm_90 also have a valid input.
+    if("sm_90" IN_LIST LTOIR_LIB_ARCHS)
+      set(LTOIR_COMPAT_ARCH "sm_90")
+    else()
+      list(GET LTOIR_LIB_ARCHS 0 LTOIR_COMPAT_ARCH)
+    endif()
+    message(STATUS "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}: "
+            "Building per-arch LTOIR for ${LTOIR_LIB_ARCHS}. "
+            "The legacy .ltoir.fatbin entry point contains ${LTOIR_COMPAT_ARCH} only; "
+            "use the per-arch .ltoir files for other architectures.")
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
       COMMAND ${CMAKE_COMMAND} -E copy
-              ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_sm_90.ltoir
+              ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${LTOIR_COMPAT_ARCH}.ltoir
               ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
       DEPENDS ${LTOIR_ARCH_FILES}
     )
@@ -321,6 +325,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir
             DESTINATION lib/)
   endforeach()
+  endif()
   endif()
   endif()
 ## End ltoir library configurations
