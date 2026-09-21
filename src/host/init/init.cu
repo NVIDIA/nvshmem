@@ -700,10 +700,20 @@ out:
     return status;
 }
 
+int nvshmemi_setup_stream_priorities(nvshmemi_state_t *state) {
+    int status = 0;
+    int leastPriority, greatestPriority;
+
+    CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
+    CUDA_RUNTIME_CHECK(
+        cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking, greatestPriority));
+
+    return status;
+}
+
 int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL) {
     int cuda_device_id = INIT_ARGS_SCALAR_INVALID;
     CUdevice cudevice;
-    int leastPriority, greatestPriority;
     int status = NVSHMEMX_SUCCESS;
 
     CUCHECK(nvshmemi_cuda_syms, cuInit(0));
@@ -795,9 +805,9 @@ int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr =
                 break;
             }
         }
-        CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-        CUDA_RUNTIME_CHECK(cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking,
-                                                        greatestPriority));
+        status = nvshmemi_setup_stream_priorities(state);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "nvshmem setup stream priorities failed \n");
         INFO(NVSHMEM_INIT, "[%d] Created stream %p for device %d", state->mype, state->my_stream,
              state->device_id);
     }
