@@ -152,7 +152,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
     int registration_slot = nvshmemi_tma_find_smem_registration();
     if (registration_slot >= 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-        nvshmemi_handle_release_owned();
+        nvshmemi_handle_release_all();
         __syncthreads();
 #endif
         if (nvshmemi_tma_block_is_elected()) {
