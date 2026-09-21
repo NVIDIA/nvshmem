@@ -188,9 +188,6 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    # Each PE puts its own src into (my_pe + 1), so the value that lands in
-    # buf_dst comes from the PE whose successor is us -- not from our own
-    # successor. The two coincide only when there are exactly 2 PEs.
     predecessor = (nvshmem.core.my_pe() - 1 + nvshmem.core.n_pes()) % nvshmem.core.n_pes()
     _assert_torch_tensor(buf_dst, predecessor + 1)
 
