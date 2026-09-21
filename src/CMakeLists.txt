@@ -225,8 +225,6 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "Build the nvshmem_device LTOIR library and tests" FORCE)
   else()
 
-  # Per-arch compilation is supported by every toolkit that supports --ltoir.
-  # Only multi-arch fatbin consumption requires CUDA 13 or later.
   set(LTOIR_LIB_ARCHS ${DEVICE_LIB_ARCHS})
 
   if(NOT LTOIR_LIB_ARCHS)
@@ -281,13 +279,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     )
   else()
     # CUDA 12.x: retain the legacy single-arch entry point (no actual bundling).
-    # Prefer sm_90 for compatibility when requested, otherwise use the first
-    # configured architecture so builds without sm_90 also have a valid input.
-    if("sm_90" IN_LIST LTOIR_LIB_ARCHS)
-      set(LTOIR_COMPAT_ARCH "sm_90")
-    else()
-      list(GET LTOIR_LIB_ARCHS 0 LTOIR_COMPAT_ARCH)
-    endif()
+    list(GET LTOIR_LIB_ARCHS 0 LTOIR_COMPAT_ARCH)
     message(STATUS "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}: "
             "Building per-arch LTOIR for ${LTOIR_LIB_ARCHS}. "
             "The legacy .ltoir.fatbin entry point contains ${LTOIR_COMPAT_ARCH} only; "

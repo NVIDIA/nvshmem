@@ -63,8 +63,7 @@ class DeviceLibLanguage(enum.Enum):
     On CUDA 13+ that file is a multi-arch fatbin created with
     ``fatbinary --image3=kind=nvvm``. On CUDA 12.8-12.x the install layout keeps
     the same ``.ltoir.fatbin`` suffix for consistency, but the file is a renamed
-    single-arch LTOIR image: ``sm_90`` if configured, otherwise the first
-    configured architecture. It is not a multi-arch fatbin.
+    single-arch LTOIR image for the first configured architecture.
     Consumers that require per-arch LTOIR on CUDA 12 should use the installed
     ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
     """
@@ -532,8 +531,8 @@ def find_device_bitcode_library(
             ``DeviceLibLanguage.LTOIR`` returns the installed
             ``libnvshmem_device.ltoir.fatbin`` entry point. On CUDA 13+ this is
             a multi-arch fatbin; on CUDA 12.8-12.x the file keeps that suffix for
-            layout consistency but is a renamed single-arch LTOIR image:
-            ``sm_90`` if configured, otherwise the first configured architecture.
+            layout consistency but is a renamed single-arch LTOIR image for the
+            first configured architecture.
             CUDA 12 consumers that need per-arch LTOIR should use the installed
             ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
             ``DeviceLibLanguage.STATIC`` returns the ``.a`` static archive
