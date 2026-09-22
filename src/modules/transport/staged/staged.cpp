@@ -2015,7 +2015,7 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
     transport->state = nullptr;
     transport_staged_state_t* s = state.get();
 
-    staged_quiet_all(s);
+    int final_status = staged_quiet_all(s);
 
     staged_stop_workers(s);
 
@@ -2029,6 +2029,9 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
         int status = staged_release_gpu_cpu_mapping(s, *info);
         if (status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping final cleanup failed status=%d", status);
+            if (final_status == 0) {
+                final_status = NVSHMEMX_ERROR_INTERNAL;
+            }
         }
 #endif
     }
@@ -2036,7 +2039,12 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
     nvshmemt_gpu_cpu_mapping_fini(&s->memory.gpu_cpu_mapping_state);
 #endif
 
-    return 0;
+    int rdma_status = s->rdma.close();
+    if (final_status == 0 && rdma_status != 0) {
+        final_status = rdma_status;
+    }
+
+    return final_status;
 }
 
 static int nvshmemt_staged_show_info(nvshmem_transport_t, int) { return 0; }
