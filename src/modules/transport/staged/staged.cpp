@@ -18,10 +18,8 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <shared_mutex>
 #include <thread>
-#include <unordered_set>
 #include <vector>
 
 #include <cuda.h>
@@ -718,7 +716,8 @@ static staged_mem_handle_info_t* staged_mem_handle_info_for_ptr(transport_staged
 
     const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
     auto it = std::find_if(s->memory.mem_handle_infos.begin(), s->memory.mem_handle_infos.end(),
-                           [addr, bytes](const staged_mem_handle_info_t* info) {
+                           [addr, bytes](const auto& entry) {
+                               const auto& info = entry.second;
                                if (!info || !info->ptr) {
                                    return false;
                                }
@@ -729,7 +728,7 @@ static staged_mem_handle_info_t* staged_mem_handle_info_for_ptr(transport_staged
                                const size_t offset = static_cast<size_t>(addr - begin);
                                return offset <= info->size && bytes <= info->size - offset;
                            });
-    return it == s->memory.mem_handle_infos.end() ? nullptr : *it;
+    return it == s->memory.mem_handle_infos.end() ? nullptr : it->second.get();
 }
 
 #endif
