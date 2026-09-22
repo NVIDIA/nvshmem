@@ -695,15 +695,28 @@ static size_t staged_slot_offset(transport_staged_state_t* s, int slot) {
     return static_cast<size_t>(slot) * s->bounce_bytes;
 }
 
-static bool staged_pointer_needs_cuda_copy(const void* ptr) {
+static int staged_pointer_needs_cuda_copy(const void* ptr, bool* needs_cuda_copy) {
+    if (!needs_cuda_copy) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    *needs_cuda_copy = false;
+
     cudaPointerAttributes attrs{};
-    cudaError_t err = cudaPointerGetAttributes(&attrs, ptr);
-    if (err != cudaSuccess) {
+    cudaError_t error = cudaPointerGetAttributes(&attrs, ptr);
+    if (error == cudaErrorInvalidValue) {
+        /* Unregistered host memory is not known to the CUDA runtime. */
         (void)cudaGetLastError();
-        return false;
+        return 0;
+    }
+    if (error != cudaSuccess) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] cudaPointerGetAttributes(%p) failed: %s", ptr,
+                             cudaGetErrorString(error));
+        (void)cudaGetLastError();
+        return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    return attrs.type == cudaMemoryTypeDevice || attrs.type == cudaMemoryTypeManaged;
+    *needs_cuda_copy = attrs.type == cudaMemoryTypeDevice || attrs.type == cudaMemoryTypeManaged;
+    return 0;
 }
 
 #ifdef NVSHMEM_USE_GDRCOPY
@@ -747,7 +760,12 @@ static int staged_copy_host_device(nvshmem_transport_t transport, void* dst, con
     }
 
     const void* gpu_ptr = direction == staged_copy_direction_t::DEVICE_TO_HOST ? src : dst;
-    if (!staged_pointer_needs_cuda_copy(gpu_ptr)) {
+    bool needs_cuda_copy = false;
+    int status = staged_pointer_needs_cuda_copy(gpu_ptr, &needs_cuda_copy);
+    if (status != 0) {
+        return status;
+    }
+    if (!needs_cuda_copy) {
         memcpy(dst, src, bytes);
         return 0;
     }
