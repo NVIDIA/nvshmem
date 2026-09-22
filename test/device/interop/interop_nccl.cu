@@ -10,11 +10,12 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 
-#include <cuda.h>
 #include <cuda_runtime.h>
 
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
+#include <strings.h>
 #include <unistd.h>
 
 #define THREADS_PER_BLOCK 128
@@ -72,14 +73,9 @@ static void init_nvshmem_and_select_device() {
     nvshmem_barrier_all();
 }
 
-static bool is_vmm_backed(void *ptr) {
-    CUmemGenericAllocationHandle allocation_handle;
-    CUresult retain_status = cuMemRetainAllocationHandle(&allocation_handle, ptr);
-    if (retain_status == CUDA_SUCCESS) {
-        cuMemRelease(allocation_handle);
-    }
-
-    return retain_status == CUDA_SUCCESS;
+static bool vmm_heap_requested() {
+    const char *heap_kind = std::getenv("NVSHMEM_HEAP_KIND");
+    return heap_kind == nullptr || strcasecmp(heap_kind, "SYSMEM") != 0;
 }
 
 static void log_status(int mype, int npes, const char *fmt, ...) {
@@ -271,10 +267,9 @@ int main() {
         status = -1;
         goto out;
     }
-    if (!is_vmm_backed(scratch)) {
+    if (!vmm_heap_requested()) {
         if (mype == 0) {
-            std::fprintf(stderr,
-                         "interop_nccl requires CUDA VMM-backed NVSHMEM symmetric allocations\n");
+            std::fprintf(stderr, "interop_nccl requires a VMM-backed device heap\n");
         }
         status = -1;
         goto out;
