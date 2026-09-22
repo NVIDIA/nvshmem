@@ -899,30 +899,25 @@ static int staged_compute_amo_value(T old_value, const staged_ctrl_msg_t& msg, T
 }
 
 template <typename T>
-static int staged_apply_amo_t(nvshmem_transport_t transport, T* target,
+static int staged_apply_amo_t(nvshmem_transport_t transport, void* target,
                               const staged_ctrl_msg_t& msg, uint64_t* old_value_out,
-                              cudaStream_t stream, void* host_scratch) {
+                              cudaStream_t stream) {
     static_assert(sizeof(T) <= 8, "staged AMO only supports up to 8-byte elements");
 
     T old_value{};
     T new_value{};
-    int status = 0;
-
-    T* scratch = static_cast<T*>(host_scratch);
-    status = staged_copy_to_host(transport, scratch, target, sizeof(*scratch), stream,
-                                 "AMO load target");
+    int status = staged_copy_to_host(transport, &old_value, target, sizeof(old_value), stream,
+                                     "AMO load target");
     if (status) {
         return status;
     }
-    old_value = *scratch;
 
     status = staged_compute_amo_value(old_value, msg, &new_value);
     if (status) {
         return status;
     }
 
-    *scratch = new_value;
-    status = staged_copy_from_host(transport, target, scratch, sizeof(*scratch), stream,
+    status = staged_copy_from_host(transport, target, &new_value, sizeof(new_value), stream,
                                    "AMO store target");
     if (status) {
         return status;
@@ -933,17 +928,14 @@ static int staged_apply_amo_t(nvshmem_transport_t transport, T* target,
 }
 
 static int staged_apply_amo(nvshmem_transport_t transport, void* target,
-                            const staged_ctrl_msg_t& msg, uint64_t* old_value, cudaStream_t stream,
-                            void* host_scratch) {
+                            const staged_ctrl_msg_t& msg, uint64_t* old_value,
+                            cudaStream_t stream) {
     if (msg.bytes == sizeof(uint16_t)) {
-        return staged_apply_amo_t(transport, reinterpret_cast<uint16_t*>(target), msg, old_value,
-                                  stream, host_scratch);
+        return staged_apply_amo_t<uint16_t>(transport, target, msg, old_value, stream);
     } else if (msg.bytes == sizeof(uint32_t)) {
-        return staged_apply_amo_t(transport, reinterpret_cast<uint32_t*>(target), msg, old_value,
-                                  stream, host_scratch);
+        return staged_apply_amo_t<uint32_t>(transport, target, msg, old_value, stream);
     } else if (msg.bytes == sizeof(uint64_t)) {
-        return staged_apply_amo_t(transport, reinterpret_cast<uint64_t*>(target), msg, old_value,
-                                  stream, host_scratch);
+        return staged_apply_amo_t<uint64_t>(transport, target, msg, old_value, stream);
     }
 
     NVSHMEMI_ERROR_PRINT("[STAGED] AMO size %lu not implemented yet",
@@ -1080,8 +1072,8 @@ static void staged_server_loop(nvshmem_transport_t transport, staged_startup_lat
                 int status = 0;
                 {
                     std::lock_guard<std::mutex> lk(s->memory.amo_mutex);
-                    status = staged_apply_amo(transport, target, msg, &old_value,
-                                              s->cuda.server_stream, qp.server_bounce());
+                    status =
+                        staged_apply_amo(transport, target, msg, &old_value, s->cuda.server_stream);
                 }
 
                 staged_ctrl_msg_t resp{};
