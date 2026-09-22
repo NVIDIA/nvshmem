@@ -638,6 +638,11 @@ set(NVSHMEM_HOST_SOURCES
     host/util/shared_memory.cpp
 )
 
+if(NVSHMEM_DEBUG)
+  list(REMOVE_ITEM NVSHMEM_HOST_SOURCES host/team/team_internal_cuda.cu)
+  list(APPEND NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT host/team/team_internal_cuda.cu)
+endif()
+
 target_include_directories(
   nvshmem_host
   PRIVATE include
