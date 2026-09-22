@@ -14,7 +14,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -153,6 +153,9 @@ struct staged_mem_handle_info_t {
     nvshmemt_gpu_cpu_mapping cpu_mapping{};
 #endif
 };
+
+using staged_mem_handle_registry_t =
+    std::unordered_map<staged_mem_handle_info_t*, std::unique_ptr<staged_mem_handle_info_t>>;
 
 /* Owns verbs resources separately from the internal QP collection. */
 class staged_rdma_state_t {
@@ -340,8 +343,7 @@ struct staged_memory_state_t {
     std::mutex amo_mutex;
     std::mutex gpu_cpu_mapping_mutex;
     std::shared_mutex mem_handle_mutex;
-    std::unordered_set<staged_mem_handle_info_t*> mem_handle_infos;
-    std::unordered_set<staged_mem_handle_info_t*> retired_mem_handle_infos;
+    staged_mem_handle_registry_t mem_handle_infos;
 #ifdef NVSHMEM_USE_GDRCOPY
     nvshmemt_gpu_cpu_mapping_state gpu_cpu_mapping_state{};
 #endif
