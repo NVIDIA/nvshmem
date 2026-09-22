@@ -1181,7 +1181,11 @@ static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t&
     int depth = std::max(1, s->pipeline_depth);
     uint64_t total_chunks = (total + slot_bytes - 1) / slot_bytes;
 
-    const bool src_needs_cuda_copy = staged_pointer_needs_cuda_copy(src);
+    bool src_needs_cuda_copy = false;
+    int pointer_status = staged_pointer_needs_cuda_copy(src, &src_needs_cuda_copy);
+    if (pointer_status != 0) {
+        return pointer_status;
+    }
     const bool cuda_copy =
         src_needs_cuda_copy && s->cuda.copy_policy == staged_copy_policy_t::STREAM;
     std::array<staged_response_state_t::ticket, STAGED_MAX_PIPELINE_DEPTH> response_tickets{};
