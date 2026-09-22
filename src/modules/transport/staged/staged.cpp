@@ -1585,8 +1585,7 @@ static int staged_quiet_all(transport_staged_state_t* s) {
 
 static int nvshmemt_staged_can_reach_peer(int* access, nvshmem_transport_pe_info_t*,
                                           nvshmem_transport_t) {
-    *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ |
-              NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS;
+    *access = NVSHMEM_TRANSPORT_CAP_CPU_WRITE | NVSHMEM_TRANSPORT_CAP_CPU_READ;
     return 0;
 }
 
