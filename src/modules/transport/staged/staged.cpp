@@ -1608,9 +1608,13 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
     }
 
     struct ibv_port_attr port_attr{};
-    if (!local_status && ibv_query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr) != 0) {
+    int verbs_status = 0;
+    if (!local_status) {
+        verbs_status = ibv_query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr);
+    }
+    if (verbs_status != 0) {
         NVSHMEMI_ERROR_PRINT("[STAGED PE%d] ibv_query_port failed for port %d: %s", me,
-                             s->rdma.ib_port(), strerror(errno));
+                             s->rdma.ib_port(), strerror(verbs_status));
         local_status = NVSHMEMX_ERROR_INTERNAL;
     }
     if (!local_status) {
@@ -1757,11 +1761,13 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
             rtr_attr.ah_attr.is_global = 0;
         }
 
-        if (ibv_modify_qp(qp.qp(), &rtr_attr,
+        int verbs_status =
+            ibv_modify_qp(qp.qp(), &rtr_attr,
                           IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-                              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
+                              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
+        if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTR failed for PE%d: %s", me, qp_slot,
-                                 pe, strerror(errno));
+                                 pe, strerror(verbs_status));
             qp_connect_status = NVSHMEMX_ERROR_INTERNAL;
             continue;
         }
@@ -1774,11 +1780,13 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
         rts_attr.retry_cnt = static_cast<uint8_t>(s->options.IB_RETRY_CNT);
         rts_attr.rnr_retry = 7;
         rts_attr.max_rd_atomic = 1;
-        if (ibv_modify_qp(qp.qp(), &rts_attr,
+        verbs_status =
+            ibv_modify_qp(qp.qp(), &rts_attr,
                           IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-                              IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC)) {
+                              IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
+        if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTS failed for PE%d: %s", me, qp_slot,
-                                 pe, strerror(errno));
+                                 pe, strerror(verbs_status));
             qp_connect_status = NVSHMEMX_ERROR_INTERNAL;
             continue;
         }
@@ -1854,8 +1862,15 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
 
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
-    if (s->cuda.copy_policy != staged_copy_policy_t::GDRCOPY ||
-        !staged_pointer_needs_cuda_copy(buf)) {
+    if (s->cuda.copy_policy != staged_copy_policy_t::GDRCOPY) {
+        return 0;
+    }
+    bool needs_cuda_copy = false;
+    int status = staged_pointer_needs_cuda_copy(buf, &needs_cuda_copy);
+    if (status != 0) {
+        return status;
+    }
+    if (!needs_cuda_copy) {
         return 0;
     }
 
