@@ -1727,6 +1727,8 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (nvshmemi_device_state.unicast_le_ids_) {
             CUDA_RUNTIME_CHECK(cudaFree(nvshmemi_device_state.unicast_le_ids_));
+            nvshmemi_device_state.unicast_le_ids_ = NULL;
+            unicast_le_ids_dptr = NULL;
         }
 #endif
 
@@ -2115,7 +2117,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
         cudaMalloc(&heap_base_actual_array_dptr, (state->npes) * sizeof(void *)), status, out);
 
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    /* maintain 8 bytes per PE for unicast LE id <valid-4bytes|leId-4bytes> */
+    /* Maintain 8 bytes per PE for unicast LE id <valid-4bytes|leId-4bytes> */
     CUDA_RUNTIME_CHECK_GOTO(cudaMalloc(&unicast_le_ids_dptr, (state->npes) * sizeof(uint64_t)),
                             status, out);
 #endif
@@ -2147,7 +2149,6 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
                                                 sizeof(uint64_t) * state->npes, state->my_stream),
                                 status, out);
     }
-
 #endif
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);
@@ -2344,6 +2345,8 @@ out:
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (unicast_le_ids_dptr) {
             CUDA_RUNTIME_CHECK(cudaFree(unicast_le_ids_dptr));
+            unicast_le_ids_dptr = NULL;
+            nvshmemi_device_state.unicast_le_ids_ = NULL;
         }
 #endif
         if (nvshmemi_device_state.tma_smem_bases) {

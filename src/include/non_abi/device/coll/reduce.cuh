@@ -1626,13 +1626,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_reduce_mcast_threa
         // multicast-put completion independently so puts can remain globally
         // outstanding while the next pull-reduce is in progress.
         if (myIdx % warpSize == 0) {
-            pullred_bar->prepare_handle(warp_idx_in_block);
+            pullred_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         }
         if constexpr (!ONESHOT) {
             put_bar = nvshmemi_handle_barrier_slot(tma_smem_base,
                                                    warp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
             if (myIdx % warpSize == 0) {
-                put_bar->prepare_handle(warp_idx_in_block);
+                put_bar->prepare_handle(warp_idx_in_block,
+                                        warp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
             }
         }
 
@@ -2125,7 +2126,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_local_reduce_mcast
 
         // Only lane 0 prepares the shared per-warp barrier.
         if (myIdx % warpSize == 0) {
-            handle_bar->prepare_handle(warp_idx_in_block);
+            handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         }
         __syncwarp();
 

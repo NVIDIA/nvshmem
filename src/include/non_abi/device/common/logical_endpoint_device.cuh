@@ -68,10 +68,21 @@ __device__ __forceinline__ bool nvshmemi_ld_and_check_valid_le_id(int pe) {
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     const long long unsigned* le_ids =
         reinterpret_cast<const long long unsigned*>(nvshmemi_device_state_d.unicast_le_ids_);
-    return IS_VALID_LE_ID((uint64_t)__ldg(le_ids + pe));
+    return le_ids != nullptr && IS_VALID_LE_ID((uint64_t)__ldg(le_ids + pe));
 #else
     return false;
 #endif
+}
+
+/* The host keeps this array accessible for compatibility with older device
+ * code, even when logical endpoints are unavailable. The local endpoint is
+ * reserved whenever unicast LE setup succeeds, so its valid bit is the
+ * availability signal; remote entries may be invalid independently. */
+__device__ __forceinline__ bool nvshmemi_unicast_le_available() {
+    const long long unsigned* le_ids =
+        reinterpret_cast<const long long unsigned*>(nvshmemi_device_state_d.unicast_le_ids_);
+    return le_ids != nullptr &&
+           IS_VALID_LE_ID((uint64_t)__ldg(le_ids + nvshmemi_device_state_d.mype));
 }
 
 __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int pe) {
@@ -386,9 +397,20 @@ struct mbarrier_primary_wait_raw_result {
     bool report;
 };
 
+struct alignas(16) handle_tracking_state_t {
+    uint32_t initialized_slots;
+    uint32_t pending_slots;
+    uint64_t reserved;
+};
+
+static_assert(sizeof(handle_tracking_state_t) == NVSHMEMI_HANDLE_TRACKING_STATE_BYTES,
+              "handle tracking state must occupy its reserved SMEM slot");
+
 // to be allocated in shared memory
 struct alignas(16) handle_barrier_t {
     __mbarrier_t bar;
+    static constexpr uint8_t HANDLE_INITIALIZED = 1U << 0;
+    static constexpr uint8_t HANDLE_PENDING_PUBLISHED = 1U << 1;
 
     /*
      * A handle barrier occupies a 16-byte reserved SMEM slot while the
@@ -404,11 +426,36 @@ struct alignas(16) handle_barrier_t {
     uint32_t pending_handle_bytes;
     uint16_t pending_handle_owner;
     uint8_t pending_handle_active;
+    uint8_t pending_handle_slot;
 
     inline __device__ void reset_pending_handle_state() {
         pending_handle_bytes = 0;
         pending_handle_owner = 0;
         pending_handle_active = 0;
+        pending_handle_slot = 0;
+    }
+
+    inline __device__ handle_tracking_state_t* handle_tracking_state() {
+        assert(pending_handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS);
+        return reinterpret_cast<handle_tracking_state_t*>(
+            reinterpret_cast<char*>(this) +
+            (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS - pending_handle_slot) * sizeof(handle_barrier_t));
+    }
+
+    inline __device__ void mark_handle_slot_initialized() {
+        atomicOr(&handle_tracking_state()->initialized_slots, 1U << pending_handle_slot);
+    }
+
+    inline __device__ void clear_handle_slot_initialized() {
+        atomicAnd(&handle_tracking_state()->initialized_slots, ~(1U << pending_handle_slot));
+    }
+
+    inline __device__ void mark_handle_slot_pending() {
+        atomicOr(&handle_tracking_state()->pending_slots, 1U << pending_handle_slot);
+    }
+
+    inline __device__ void clear_handle_slot_pending() {
+        atomicAnd(&handle_tracking_state()->pending_slots, ~(1U << pending_handle_slot));
     }
 
     inline __device__ void init_raw(int arvCnt) {
@@ -424,10 +471,23 @@ struct alignas(16) handle_barrier_t {
         return ((size_bytes + (CFT_HANDLE_TX_SIZE - 1)) / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
     }
 
-    inline __device__ bool has_pending_handle() const { return pending_handle_active != 0; }
+    inline __device__ bool has_pending_handle() const {
+        return (pending_handle_active & HANDLE_INITIALIZED) != 0;
+    }
+
+    inline __device__ bool has_published_pending_handle() const {
+        return (pending_handle_active & HANDLE_PENDING_PUBLISHED) != 0;
+    }
 
     inline __device__ bool pending_handle_is_owned_by(uint32_t owner) const {
         return has_pending_handle() && pending_handle_owner == owner;
+    }
+
+    inline __device__ void publish_pending_handle() {
+        if (pending_handle_bytes != 0 && !has_published_pending_handle()) {
+            pending_handle_active |= HANDLE_PENDING_PUBLISHED;
+            mark_handle_slot_pending();
+        }
     }
 
     /* Complete the current handle operation batch. Keeping the barrier valid advances it
@@ -441,10 +501,15 @@ struct alignas(16) handle_barrier_t {
             uint64_t state = arrive_relaxed(pending_handle_bytes);
             wait_primary(state);
             pending_handle_bytes = 0;
+            if (has_published_pending_handle()) {
+                clear_handle_slot_pending();
+                pending_handle_active &= ~HANDLE_PENDING_PUBLISHED;
+            }
         }
 
         if (invalidate) {
             inval_raw();
+            clear_handle_slot_initialized();
             reset_pending_handle_state();
         }
     }
@@ -452,7 +517,8 @@ struct alignas(16) handle_barrier_t {
     /* Reuse a live handle barrier when the same threadgroup issues another
      * operation. A different owner implies a slot collision with another handle
      * path, which is resolved by completing the old batch first. */
-    inline __device__ void prepare_handle(uint32_t owner) {
+    inline __device__ void prepare_handle(uint32_t owner, uint32_t slot) {
+        assert(slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS);
         if (has_pending_handle() && pending_handle_owner != owner) {
             drain_pending_handle(true);
         }
@@ -461,7 +527,9 @@ struct alignas(16) handle_barrier_t {
             init_raw(1);
             pending_handle_bytes = 0;
             pending_handle_owner = static_cast<uint16_t>(owner);
-            pending_handle_active = 1;
+            pending_handle_slot = static_cast<uint8_t>(slot);
+            pending_handle_active = HANDLE_INITIALIZED;
+            mark_handle_slot_initialized();
         }
     }
 
@@ -600,6 +668,12 @@ struct alignas(16) handle_barrier_t {
     }
 
     inline __device__ void inval() {
+        if (has_pending_handle()) {
+            if (has_published_pending_handle()) {
+                clear_handle_slot_pending();
+            }
+            clear_handle_slot_initialized();
+        }
         inval_raw();
         reset_pending_handle_state();
     }
