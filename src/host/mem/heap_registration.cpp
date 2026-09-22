@@ -606,7 +606,8 @@ void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
         /* User-provided mmap allocations use address-keyed sparse entries. */
         size_t addr_idx =
             ((char *)buf - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
-        for (size_t idx = 0; idx < size / granularity; idx++) {
+        const size_t index_count = (size + granularity - 1) / granularity;
+        for (size_t idx = 0; idx < index_count; idx++) {
             mmap_reg.set_index(addr_idx + idx, handle_idx, (char *)buf, size);
         }
     } else {
@@ -674,7 +675,8 @@ int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t siz
             remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
         bool local_handle_set_released = false;
 
-        for (size_t idx = 0; idx < register_size / granularity; ++idx) {
+        const size_t index_count = (register_size + granularity - 1) / granularity;
+        for (size_t idx = 0; idx < index_count; ++idx) {
             addr_idx =
                 ((char *)curr_ptr - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
             addr_idx += idx;

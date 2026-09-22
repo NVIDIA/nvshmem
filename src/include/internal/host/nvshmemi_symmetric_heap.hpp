@@ -244,6 +244,8 @@ class nvshmemi_symmetric_heap {
     // needed for selectively unbinding them on unmap
     std::unordered_map<void *, size_t> idx_in_mmap_mc_handles_;
     std::unordered_map<void *, size_t> mmap_handle_idx_in_cumem_handles_;
+    // Track the mapped physical range separately from the rounded mspace/VA allocation.
+    std::unordered_map<void *, size_t> mmap_physical_sizes_;
     // track alias virtual addresses for mmaped user buffers
     // map heap addr -> user buffer addr
     std::unordered_map<void *, void *> alias_va_map_;
@@ -310,8 +312,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
      * while memory allocated using nvshmem_malloc is referred to as internal
      * allocation in the code
      */
-    void *mmap_mem(void *ptr, size_t size, void *pref_addr, int flags);
+    void *mmap_mem(void *ptr, size_t physical_size, size_t va_size, void *pref_addr, int flags);
     int unmap_mem(void *ptr, size_t size);
+    size_t get_mmap_physical_size(void *ptr) const;
 
     /* Functions for logical endpoints */
     int reserve_unicast_endpoint(size_t size, bool counted_operations);
@@ -361,7 +364,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
         return;
     }
 
-    int check_user_buffer_for_mmap(void *ptr, size_t &size, unsigned int *ptr_mem_type);
+    int check_user_buffer_for_mmap(void *ptr, size_t size, unsigned int *ptr_mem_type);
     int converge_unicast_endpoint_status(int local_status);
     int bind_unicast_endpoint_memory(CUmemGenericAllocationHandle mem_handle, off_t heap_offset,
                                      off_t mem_offset, size_t size);

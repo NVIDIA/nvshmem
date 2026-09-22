@@ -658,7 +658,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::reserve_unicast_endpoint(size_t 
                           "mem granularity: %zu is not a multiple of bind alignment: %lu. Please "
                           "adjust the NVSHMEM_CUMEM_GRANULARITY\n",
                           mem_granularity_, le_bind_alignment_);
-    le_granularity_ = mem_granularity_;
+    le_granularity_ = le_bind_alignment_;
 
     status = (size % le_granularity_ != 0);
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
@@ -1026,7 +1026,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::cleanup_symmetric_heap() {
 
     // cleanup mapped buffers
     while (iter != get_mmapped_buf()->end()) {
-        status = unmap_mem(iter->first, iter->second);
+        status = unmap_mem(iter->first, get_mmap_physical_size(iter->first));
         NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, teardown_hooks,
                               "cleanup unmapped buffers failed \n");
         // the unmap_mem() erases entries from get_mmapped_buf, so resetting the iter
@@ -1221,6 +1221,8 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     int status = 0;
     int le_query_status = 0;
+    uint64_t bind_alignment = 0;
+    uint64_t max_size = 0;
     if (!le_multicast_enabled_) {
         team->mc_leid_with_flag = 0;
         return 0;
@@ -1233,6 +1235,16 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_setup_multicast_endpoint(
     le_multicast_properties.size = mem_size;
     le_multicast_properties.multicast.numDevices = team->size;
     le_multicast_properties.ipcHandleTypes = LE_IPC_HANDLE_TYPE;
+    status = CUPFN(nvshmemi_cuda_syms, cuLogicalEndpointGetLimits(&bind_alignment, &max_size,
+                                                                  &le_multicast_properties));
+    NVSHMEMI_NE_ERROR_RET(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                          "cuLogicalEndpointGetLimits for multicast failed\n");
+    status = bind_alignment == 0 || mem_size % bind_alignment != 0 || mem_size > max_size;
+    NVSHMEMI_NZ_ERROR_RET(
+        status, NVSHMEMX_ERROR_INVALID_VALUE,
+        "multicast logical endpoint size %lu is invalid for bind alignment %lu and maximum size "
+        "%lu\n",
+        mem_size, bind_alignment, max_size);
 
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
     // Prune for duplicate teams that inherit the rsc, but own the resource
@@ -1348,6 +1360,13 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_bind_multicast_endpoint(
     nvshmemi_team_t *team, CUmemGenericAllocationHandle mem_handle, off_t le_offset,
     off_t handle_offset, size_t size) {
     int status = 0;
+    uint64_t bind_alignment = 0;
+    uint64_t max_size = 0;
+    CUlogicalEndpointProp le_properties{};
+    le_properties.type = CU_LOGICAL_ENDPOINT_TYPE_MULTICAST;
+    le_properties.size = heap_size_;
+    le_properties.multicast.numDevices = team->size;
+    le_properties.ipcHandleTypes = LE_IPC_HANDLE_TYPE;
     nvls::nvshmemi_nvls_rsc *nvls_obj = reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(team->nvls_rsc);
     // Prune for duplicate teams that inherit the rsc, but own the resource
     if (!nvls_obj->is_owner(team)) {
@@ -1358,6 +1377,21 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::nvls_bind_multicast_endpoint(
     if (!IS_VALID_LE_ID(team->mc_leid_with_flag)) {
         return 0;
     }
+    status = CUPFN(nvshmemi_cuda_syms,
+                   cuLogicalEndpointGetLimits(&bind_alignment, &max_size, &le_properties));
+    NVSHMEMI_NE_ERROR_RET(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
+                          "cuLogicalEndpointGetLimits for multicast failed\n");
+    status = heap_size_ > max_size;
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
+                          "multicast logical endpoint heap size %zu exceeds maximum %lu\n",
+                          heap_size_, max_size);
+    status = bind_alignment == 0 || le_offset % bind_alignment != 0 ||
+             handle_offset % bind_alignment != 0 || size % bind_alignment != 0;
+    NVSHMEMI_NZ_ERROR_RET(
+        status, NVSHMEMX_ERROR_INVALID_VALUE,
+        "multicast logical endpoint binding is not aligned to %lu: endpoint offset %ld, handle "
+        "offset %ld, size %zu\n",
+        bind_alignment, le_offset, handle_offset, size);
 
     status = CUPFN(nvshmemi_cuda_syms,
                    cuLogicalEndpointBindMem(PARSE_LE_ID(team->mc_leid_with_flag),
@@ -1621,8 +1655,9 @@ out:
     return ptr;
 }
 
-void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t size,
-                                                           void *pref_addr, int flags) {
+void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t physical_size,
+                                                           size_t va_size, void *pref_addr,
+                                                           int flags) {
     void *ptr = NULL;
     int status = 0;
 
@@ -1639,15 +1674,21 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     unsigned int ptr_mem_type;
     unsigned long long access_flags;
     bool is_egm = false;
+    bool preferred_addr_usable = false;
     size_t pref_off = 0;
     size_t adjusted_max_handle_len =
         mem_granularity_ * (NVSHMEMI_MAX_HANDLE_LENGTH / mem_granularity_);
-    off_t mmap_offset =
-        0; /* CUDA doesn't support non-zero mem_offset of a UC mem handle, so force to 0 */
+    // CUDA does not expose the source mapping's physical offset. The API therefore requires a
+    // mapping backed from allocation offset zero.
+    off_t mmap_offset = 0;
     set_cuda_mem_prop((void *)&prop, get_mem_handle_type());
 
-    status = check_user_buffer_for_mmap(buf_ptr, size, &ptr_mem_type);
+    status = check_user_buffer_for_mmap(buf_ptr, physical_size, &ptr_mem_type);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "mmap user buffer check failed\n");
+    status = va_size < physical_size || va_size % mem_granularity_;
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                          "invalid VA size %zu for physical size %zu and heap granularity %zu\n",
+                          va_size, physical_size, mem_granularity_);
 
     // Get Access attributes from user buffer
     // Memory type can be device (VMM) or host (for EGM)
@@ -1681,8 +1722,8 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     INFO(NVSHMEM_MEM, "type: %s Setting access permissions for mmap buffer: %llu",
          typeid(decltype(this)).name(), access_flags);
 
-    INFO(NVSHMEM_MEM, "type: %s mmaping user buffer of size %zu bytes",
-         typeid(decltype(this)).name(), size);
+    INFO(NVSHMEM_MEM, "type: %s mmaping user buffer physical size %zu VA size %zu bytes",
+         typeid(decltype(this)).name(), physical_size, va_size);
 
     assert(mem_granularity_ <= NVSHMEMI_MAX_HANDLE_LENGTH);
 
@@ -1697,9 +1738,18 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     if (pref_addr != NULL) {
         if ((pref_addr >= heap_base_) && (pref_addr < ((char *)heap_base_ + heap_size_))) {
             pref_off = (char *)pref_addr - (char *)heap_base_;
-            INFO(NVSHMEM_MEM, "type: %s mmap with preferred addr: %p",
-                 typeid(decltype(this)).name(), pref_addr);
-            ptr = mmap_mspace_->allocate_at_preferred_addr(((char *)heap_base_ + pref_off), size);
+            preferred_addr_usable = pref_off % mem_granularity_ == 0;
+            if (preferred_addr_usable) {
+                INFO(NVSHMEM_MEM, "type: %s mmap with preferred addr: %p",
+                     typeid(decltype(this)).name(), pref_addr);
+                ptr = mmap_mspace_->allocate_at_preferred_addr(((char *)heap_base_ + pref_off),
+                                                               va_size);
+            } else {
+                INFO(NVSHMEM_MEM,
+                     "Preferred mmap address %p is not aligned to heap granularity %zu; "
+                     "using another address",
+                     pref_addr, mem_granularity_);
+            }
         } else {
             WARN("Preferred mmap address %p not within heap range: %p : %p", pref_addr, heap_base_,
                  (char *)heap_base_ + heap_size_);
@@ -1714,9 +1764,9 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
                               (char *)heap_base_ + pref_off);
 
         INFO(NVSHMEM_MEM, "Found hole at preferred offset buf start: %p  off: %lu for %zu bytes",
-             buf_start, pref_off, size);
-    } else if ((pref_addr) && (pref_off > physical_internal_heap_size_) &&
-               ((pref_off + size) <= (heap_size_ - get_mmap_allocated_range()))) {
+             buf_start, pref_off, va_size);
+    } else if (preferred_addr_usable && (pref_off > physical_internal_heap_size_) &&
+               ((pref_off + va_size) <= (heap_size_ - get_mmap_allocated_range()))) {
         // check if pref_off is between internal alloc (physical_internal_heap_size_) and
         // start of mmaped region (mmap_base_ - get_mmap_allocated_range())
         buf_start = (char *)heap_base_ + pref_off;
@@ -1724,39 +1774,40 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
         INFO(NVSHMEM_MEM,
              "Found preferred offset buf start: %p  off: %lu for %zu bytes by extending mmap "
              "allocated range",
-             buf_start, pref_off, size);
+             buf_start, pref_off, va_size);
 
     } else {
         if (pref_addr != NULL) {
             INFO(NVSHMEM_MEM, "Could not register user buffer at preferred address: %p", pref_addr);
         }
         // check if there is a mmap_mspace free chunk to accomodate the request
-        ptr = mmap_mspace_->allocate(size);
+        ptr = mmap_mspace_->allocate(va_size);
         if (ptr != NULL) {
             buf_start = (char *)ptr;
             INFO(NVSHMEM_MEM, "Found hole in mmap_mspace buf start: %p for %zu bytes", buf_start,
-                 size);
+                 va_size);
         } else {
             // check to ensure external alloc (mmap) doesn't cross over to internal alloc
             // (nvshmem_malloc) Not enough space for mapping user buffer
-            status =
-                ((physical_internal_heap_size_ + get_mmap_allocated_range() + size) >= heap_size_);
+            status = ((physical_internal_heap_size_ + get_mmap_allocated_range() + va_size) >=
+                      heap_size_);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "Not enough space for mmaping buffer %p size %zu\n", buf_ptr,
-                                  size);
-            buf_start = (char *)mmap_base_ - get_mmap_allocated_range() - size;
+                                  va_size);
+            buf_start = (char *)mmap_base_ - get_mmap_allocated_range() - va_size;
             ptr = (void *)buf_start;
             INFO(NVSHMEM_MEM, "Need to extend mmap space. start ptr: %p for %zu bytes", buf_start,
-                 size);
+                 va_size);
         }
     }
+    mmap_physical_sizes_[ptr] = physical_size;
 
     // Tracking mmaped user buffer alias, needed for ibv_reg_mr_iova(), gdr_pin_buffer()
     // workarounds. See nvbug: 5072809 for more details on this. Must be done in steps of
     // adjusted_max_handle_len
     curr_ptr = ptr;
     curr_buf_ptr = buf_ptr;
-    remaining_size = size;
+    remaining_size = physical_size;
     do {
         status = alias_va_map_.count((char *)curr_ptr);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Addr: %p already tracked\n",
@@ -1788,20 +1839,20 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     // Track these handles, so that when new teams are created, we can bind them
     // last entry in tuple indicates that this is a user buffer handle
     // During cleanup, these handles SHOULD NOT be released
-    cumem_handles_.push_back(
-        std::make_tuple(userAllocHandle, heap_offset /*mc_offset*/, mmap_offset, size, false));
+    cumem_handles_.push_back(std::make_tuple(userAllocHandle, heap_offset /*mc_offset*/,
+                                             mmap_offset, physical_size, false));
     mmap_handle_idx_in_cumem_handles_[ptr] = cumem_handles_.size() - 1;
 
-    status = CUPFN(nvshmemi_cuda_syms,
-                   cuMemMap((CUdeviceptr)buf_start, size, mmap_offset, userAllocHandle, 0));
+    status = CUPFN(nvshmemi_cuda_syms, cuMemMap((CUdeviceptr)buf_start, physical_size, mmap_offset,
+                                                userAllocHandle, 0));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                              "cuMemMap user buffer failed \n");
     if (is_egm) {
-        status =
-            CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size, &access[0], 2));
+        status = CUPFN(nvshmemi_cuda_syms,
+                       cuMemSetAccess((CUdeviceptr)buf_start, physical_size, &access[0], 2));
     } else {
-        status =
-            CUPFN(nvshmemi_cuda_syms, cuMemSetAccess((CUdeviceptr)buf_start, size, &access[0], 1));
+        status = CUPFN(nvshmemi_cuda_syms,
+                       cuMemSetAccess((CUdeviceptr)buf_start, physical_size, &access[0], 1));
     }
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                              "cuMemSetAccess failed \n");
@@ -1812,19 +1863,20 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
         NVSHMEMI_NZ_ERROR_JMP(
             status, NVSHMEMX_ERROR_INTERNAL, out,
             "Logical endpoint binding of EGM buffers for user buffer is not currently supported\n");
-        status = bind_unicast_endpoint_memory(userAllocHandle, heap_offset, mmap_offset, size);
+        status =
+            bind_unicast_endpoint_memory(userAllocHandle, heap_offset, mmap_offset, physical_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "cuLogicalEndpointBindMem failed at offset: %lu for size: %zu\n",
-                              heap_offset, size);
+                              heap_offset, physical_size);
         INFO(NVSHMEM_INIT, "cuLogicalEndpointBindMem done at offset: %lu for size: %zu\n",
-             heap_offset, size);
+             heap_offset, physical_size);
     }
 #endif
 
     /* A buffer below the allocated mmap range requires extending mmap_mspace. */
     if (buf_start < (char *)mmap_base_ - get_mmap_allocated_range()) {
         void *mmap_alloc;
-        char *buf_end = buf_start + size;
+        char *buf_end = buf_start + va_size;
         char *mmap_base_offset = (char *)mmap_base_ - get_mmap_allocated_range();
         size_t pref_mmap_void_size = 0;
 
@@ -1835,10 +1887,10 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
         if (buf_end < mmap_base_offset) {
             pref_mmap_void_size = mmap_base_offset - buf_end;
         }
-        mmap_mspace_->add_new_chunk(buf_start, size);
+        mmap_mspace_->add_new_chunk(buf_start, va_size);
 
         /* add_new_chunk() must preserve this chunk and return its exact address on allocation. */
-        mmap_alloc = mmap_mspace_->allocate_at_preferred_addr(buf_start, size);
+        mmap_alloc = mmap_mspace_->allocate_at_preferred_addr(buf_start, va_size);
         status = (mmap_alloc == NULL);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "mmap mspace alloc failed\n");
         status = (mmap_alloc != buf_start);
@@ -1848,14 +1900,14 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
             /* Add the gap between buf_end and the previous mmap range as a free chunk. */
             INFO(NVSHMEM_MEM,
                  "[%d] %p %lu adding free chunk for void due to preferred mmap at %p, %lu\n",
-                 cfg_.mype, buf_start, size, buf_end, pref_mmap_void_size);
+                 cfg_.mype, buf_start, va_size, buf_end, pref_mmap_void_size);
             mmap_mspace_->add_new_chunk(buf_end, pref_mmap_void_size);
         }
     }
 
     for (auto &obs : observers_) {
         status = obs->on_chunk_mapped((nvshmem_mem_handle_t *)&userAllocHandle,
-                                      (off_t)(heap_offset), mmap_offset, size);
+                                      (off_t)(heap_offset), mmap_offset, physical_size);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, observer_done,
                               "on_chunk_mapped failed\n");
     }
@@ -1866,9 +1918,9 @@ observer_done:
                           "heap observer chunk map failed on at least one PE\n");
 
     assert(heap_registration_ != nullptr);
-    status = heap_registration_->register_vmm_chunk(userAllocHandle, (off_t)(heap_offset), size,
-                                                    nvshmemi_allocation_kind::EXTERNAL,
-                                                    get_mmap_allocated_range());
+    status = heap_registration_->register_vmm_chunk(
+        userAllocHandle, (off_t)(heap_offset), physical_size, nvshmemi_allocation_kind::EXTERNAL,
+        get_mmap_allocated_range());
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_vmm_chunk failed\n");
 
     status = nvshmemi_boot_handle.barrier(
@@ -1885,13 +1937,8 @@ out:
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size) {
     int status = 0;
-    // if size is not a multiple of heap granularity, we round up the size, so
-    // doing the same here else size check will fail
-    if (size % mem_granularity_) {
-        size = ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_;
-    }
-    INFO(NVSHMEM_MEM, "type: %s unmap_mem ptr: %p size: %zu\n", typeid(decltype(this)).name(), ptr,
-         size);
+    auto physical_size_it = mmap_physical_sizes_.find(ptr);
+    const size_t va_size = ((size + mem_granularity_ - 1) / mem_granularity_) * mem_granularity_;
     size_t adjusted_max_handle_len =
         mem_granularity_ * (NVSHMEMI_MAX_HANDLE_LENGTH / mem_granularity_);
     off_t heap_offset = (char *)ptr - (char *)heap_base_;
@@ -1900,12 +1947,17 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
     size_t remaining_size = size;
     size_t register_size = 0;
 
+    status = physical_size_it == mmap_physical_sizes_.end() || physical_size_it->second != size;
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out, "Address,size not mmapped\n");
+    INFO(NVSHMEM_MEM, "type: %s unmap_mem ptr: %p size: %zu\n", typeid(decltype(this)).name(), ptr,
+         size);
+
     // check if ptr is already mmaped
-    status = (size > get_mmap_allocated_range()) || (size == 0);
+    status = (va_size > get_mmap_allocated_range()) || (size == 0);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out, "invalid size\n");
     status = ((ptr > mmap_base_) || (ptr < ((char *)mmap_base_ - get_mmap_allocated_range())));
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out, "Invalid Address\n");
-    status = (mmap_mspace_->checkInuse(ptr, size) == false);
+    status = (mmap_mspace_->checkInuse(ptr, va_size) == false);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out, "Address,size not mmapped\n");
 
     // unbind memory from logical endpoint
@@ -1970,6 +2022,7 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::unmap_mem(void *ptr, size_t size
         mmap_handle_idx_in_cumem_handles_.erase(ptr);
     }
 
+    mmap_physical_sizes_.erase(physical_size_it);
     mmap_mspace_->deallocate(ptr);
 
     /* Sync the mmap range after deallocation. */
@@ -2126,11 +2179,13 @@ static nvshmemx_status check_vmm_buffer_device(
 }
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
-    void *ptr, size_t &size, unsigned int *ptr_mem_type) {
+    void *ptr, size_t size, unsigned int *ptr_mem_type) {
     int status = 0;
     int cuMemRelease_status = 0;
     unsigned int ptrAttr;
     size_t userAllocGran;
+    size_t user_mapping_size = 0;
+    CUdeviceptr user_mapping_base = 0;
     CUmemAllocationProp userAllocProp;
     CUmemGenericAllocationHandle userAllocHandle;
 
@@ -2140,13 +2195,6 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     status = is_symmetric(size);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_SYMMETRY, return_out,
                           "symmetry check for size failed\n");
-
-    status = size % mem_granularity_;
-    NVSHMEMI_NZ_ERROR_JMP(
-        status, NVSHMEMX_ERROR_INVALID_VALUE, return_out,
-        "user buffer %p size %zu is not a multiple of heap granularity %zu. Please adjust the user "
-        "buffer size or update NVSHMEM_CUMEM_GRANULARITY",
-        ptr, size, mem_granularity_);
 
     // check if buffer (ptr) is allocated from cuMemCreate
     status = CUPFN(nvshmemi_cuda_syms, cuMemRetainAllocationHandle(&userAllocHandle, ptr));
@@ -2163,6 +2211,22 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                              "Failed to get pointer attribute of user buffer\n");
     *ptr_mem_type = ptrAttr;
+    status = CUPFN(nvshmemi_cuda_syms, cuPointerGetAttribute((void *)&user_mapping_base,
+                                                             CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+                                                             reinterpret_cast<CUdeviceptr>(ptr)));
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE,
+                             out, "Failed to get mapping base of user buffer %p\n", ptr);
+    status = CUPFN(nvshmemi_cuda_syms, cuPointerGetAttribute((void *)&user_mapping_size,
+                                                             CU_POINTER_ATTRIBUTE_RANGE_SIZE,
+                                                             reinterpret_cast<CUdeviceptr>(ptr)));
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INVALID_VALUE,
+                             out, "Failed to get mapping size of user buffer %p\n", ptr);
+    status = reinterpret_cast<CUdeviceptr>(ptr) != user_mapping_base || size > user_mapping_size;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        "user buffer must start at its CUDA mapping base and fit within that mapping: ptr %p, "
+        "mapping base %p, requested size %zu, mapping size %zu\n",
+        ptr, reinterpret_cast<void *>(user_mapping_base), size, user_mapping_size);
 
     // Memory type can be device (VMM) or host (for EGM)
     status = !((ptrAttr == CU_MEMORYTYPE_DEVICE) || (ptrAttr == CU_MEMORYTYPE_HOST));
@@ -2205,12 +2269,22 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::check_user_buffer_for_mmap(
         goto out;
     }
 
-    // Get allocation granularity
-    status = CUPFN(nvshmemi_cuda_syms,
-                   cuMemGetAllocationGranularity(&userAllocGran, &userAllocProp,
-                                                 CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
+    // cuMemMap requires size to be a multiple of the allocation's minimum granularity.
+    status =
+        CUPFN(nvshmemi_cuda_syms, cuMemGetAllocationGranularity(&userAllocGran, &userAllocProp,
+                                                                CU_MEM_ALLOC_GRANULARITY_MINIMUM));
     NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
                              "Failed to get allocation granularity of user buffer %p\n", ptr);
+    status = size % userAllocGran;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        "user buffer %p size %zu is not a multiple of CUDA allocation granularity %zu\n", ptr, size,
+        userAllocGran);
+    status = le_unicast_enabled_ && (size % le_granularity_ != 0);
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        "user buffer %p size %zu is not a multiple of logical endpoint bind alignment %zu\n", ptr,
+        size, le_granularity_);
 
 out:
     cuMemRelease_status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(userAllocHandle));
@@ -2230,6 +2304,11 @@ size_t nvshmemi_symmetric_heap_vidmem_dynamic_vmm::get_mmap_allocated_range() co
         range = (char *)mmap_base_ - (char *)startInusePtr;
     }
     return range;
+}
+
+size_t nvshmemi_symmetric_heap_vidmem_dynamic_vmm::get_mmap_physical_size(void *ptr) const {
+    const auto it = mmap_physical_sizes_.find(ptr);
+    return it == mmap_physical_sizes_.end() ? 0 : it->second;
 }
 
 bool nvshmemi_symmetric_heap_vidmem_dynamic_vmm::is_egm(void *addr) {
@@ -2442,7 +2521,11 @@ void *nvshmemx_buffer_register_symmetric(void *buf_ptr, size_t size, int flags) 
         NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
         return ptr;
     }
-    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, NULL, flags);
+
+    const size_t mem_granularity = nvshmemi_state->vmm_heap->get_mem_granularity();
+    const size_t va_size = ((size + mem_granularity - 1) / mem_granularity) * mem_granularity;
+
+    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, va_size, NULL, flags);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
         return ptr;
     }
@@ -2468,7 +2551,9 @@ void *nvshmemx_buffer_register_symmetric_at_preferred_address(void *buf_ptr, siz
         NVSHMEMI_ERROR_PRINT("Buffer registration requires dynamic VMM heap");
         return ptr;
     }
-    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, preferred_addr, flags);
+    const size_t mem_granularity = nvshmemi_state->vmm_heap->get_mem_granularity();
+    const size_t va_size = ((size + mem_granularity - 1) / mem_granularity) * mem_granularity;
+    ptr = nvshmemi_state->vmm_heap->mmap_mem(buf_ptr, size, va_size, preferred_addr, flags);
     if (NVSHMEMI_IS_NO_ACTION_BY_PTR(ptr)) {
         return ptr;
     }
