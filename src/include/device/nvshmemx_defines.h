@@ -113,9 +113,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
             deferred_get_state[1] = 0;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
-            for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
-                nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
+            if (nvshmemi_unicast_le_available()) {
+                for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
+                    nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
+                }
             }
+            handle_tracking_state_t *tracking = nvshmemi_handle_tracking_state(smem_base);
+            tracking->initialized_slots = 0;
+            tracking->pending_slots = 0;
+            tracking->reserved = 0;
             /* Publish the registration only after its deferred-completion
              * metadata has been initialized. */
             __threadfence_block();
@@ -146,7 +152,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
     int registration_slot = nvshmemi_tma_find_smem_registration();
     if (registration_slot >= 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-        nvshmemi_handle_quiet_owned();
+        nvshmemi_handle_release_owned();
         __syncthreads();
 #endif
         if (nvshmemi_tma_block_is_elected()) {

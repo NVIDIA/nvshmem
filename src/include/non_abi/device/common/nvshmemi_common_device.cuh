@@ -5,6 +5,7 @@
 #ifndef _NVSHMEM_COMMON_DEVICE_CUH_
 #define _NVSHMEM_COMMON_DEVICE_CUH_
 
+#include <cuda/atomic>
 #include <cuda_runtime.h>
 #include <cuda/std/array>
 #include <cuda/std/limits>
@@ -662,9 +663,22 @@ __device__ __forceinline__ handle_barrier_t *nvshmemi_handle_barrier_slot(int sl
     return nvshmemi_handle_barrier_slot(base, slot);
 }
 
+__device__ __forceinline__ handle_tracking_state_t *nvshmemi_handle_tracking_state(
+    uintptr_t smem_base) {
+    return reinterpret_cast<handle_tracking_state_t *>(
+        nvshmemi_tma_barrier_region(smem_base) + (uintptr_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES +
+        (uintptr_t)NVSHMEMI_HANDLE_BARRIER_BYTES);
+}
+
+__device__ __forceinline__ uint32_t nvshmemi_load_handle_slots(uint32_t &slots) {
+    return cuda::atomic_ref<uint32_t, cuda::thread_scope_block>(slots).load(
+        cuda::memory_order_acquire);
+}
+
 __device__ __forceinline__ char *nvshmemi_counted_state_region(uintptr_t smem_base) {
     return nvshmemi_tma_barrier_region(smem_base) + (uintptr_t)NVSHMEMI_TMA_BARRIER_REGION_BYTES +
-           (uintptr_t)NVSHMEMI_HANDLE_BARRIER_BYTES;
+           (uintptr_t)NVSHMEMI_HANDLE_BARRIER_BYTES +
+           (uintptr_t)NVSHMEMI_HANDLE_TRACKING_STATE_BYTES;
 }
 
 __device__ __forceinline__ char *nvshmemi_counted_state_slot(uintptr_t smem_base, int slot) {
@@ -675,14 +689,16 @@ __device__ __forceinline__ char *nvshmemi_counted_state_slot(uintptr_t smem_base
 }
 
 __device__ __forceinline__ void nvshmemi_drain_handle_slot_if_owned(uintptr_t smem_base,
-                                                                    uint32_t slot, uint32_t owner) {
-    if (slot >= NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS) {
+                                                                    uint32_t selected_slots,
+                                                                    uint32_t slot, uint32_t owner,
+                                                                    bool invalidate) {
+    if (slot >= NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS || (selected_slots & (1U << slot)) == 0) {
         return;
     }
 
     handle_barrier_t *barrier = nvshmemi_handle_barrier_slot(smem_base, (int)slot);
     if (barrier->pending_handle_is_owned_by(owner)) {
-        barrier->drain_pending_handle(true);
+        barrier->drain_pending_handle(invalidate);
     }
 }
 
@@ -691,24 +707,36 @@ __device__ __forceinline__ void nvshmemi_drain_handle_slot_if_owned(uintptr_t sm
  * threads have synchronized, so that caller must not restrict the drain to
  * its own physical warp. */
 __device__ __forceinline__ void nvshmemi_handle_quiet_all() {
+    if (!nvshmemi_unicast_le_available()) {
+        return;
+    }
+
     const auto registration = nvshmemi_tma_get_smem_registration();
     if (!registration.is_valid()) {
         return;
     }
 
     uintptr_t smem_base = registration.base;
-    for (uint32_t slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
+    handle_tracking_state_t *tracking = nvshmemi_handle_tracking_state(smem_base);
+    uint32_t pending_slots = nvshmemi_load_handle_slots(tracking->pending_slots);
+    while (pending_slots != 0) {
+        uint32_t slot = static_cast<uint32_t>(__ffs(static_cast<int>(pending_slots)) - 1);
         handle_barrier_t *barrier = nvshmemi_handle_barrier_slot(smem_base, (int)slot);
         if (barrier->has_pending_handle()) {
-            barrier->drain_pending_handle(true);
+            barrier->drain_pending_handle(false);
         }
+        pending_slots &= pending_slots - 1;
     }
 }
 
 /* Complete deferred handle operations issued by the calling logical threadgroup.
  * Owners are physical warp leaders: warp scope uses its physical warp,
  * warpgroup scope uses its first physical warp, and block scope uses warp 0. */
-__device__ __forceinline__ void nvshmemi_handle_quiet_owned() {
+__device__ __forceinline__ void nvshmemi_handle_complete_owned(bool invalidate) {
+    if (!nvshmemi_unicast_le_available()) {
+        return;
+    }
+
     const auto registration = nvshmemi_tma_get_smem_registration();
     if (!registration.is_valid()) {
         return;
@@ -721,13 +749,20 @@ __device__ __forceinline__ void nvshmemi_handle_quiet_owned() {
     uint32_t warp_idx_in_block = tid / warpSize;
 
     uintptr_t smem_base = registration.base;
+    handle_tracking_state_t *tracking = nvshmemi_handle_tracking_state(smem_base);
+    uint32_t selected_slots = nvshmemi_load_handle_slots(invalidate ? tracking->initialized_slots
+                                                                    : tracking->pending_slots);
+    if (selected_slots == 0) {
+        return;
+    }
 
     /* Warp and block threadgroups have compact threadgroup indices that match
      * their physical owner-warp mapping.  Block scope is owned by physical
      * warp 0, and its two handle barriers occupy slots 0 and 1. */
     uint32_t warp_slot_base = warp_idx_in_block * TMA_COPY_NUM_STAGES;
     for (uint32_t i = 0; i < TMA_COPY_NUM_STAGES; i++) {
-        nvshmemi_drain_handle_slot_if_owned(smem_base, warp_slot_base + i, warp_idx_in_block);
+        nvshmemi_drain_handle_slot_if_owned(smem_base, selected_slots, warp_slot_base + i,
+                                            warp_idx_in_block, invalidate);
     }
 
     /* Warpgroup paths allocate two compact handle slots per warpgroup instead
@@ -742,11 +777,20 @@ __device__ __forceinline__ void nvshmemi_handle_quiet_owned() {
         // Warpgroup 0 shares slots 0 and 1 with the physical-warp mapping above.
         if (warpgroup_slot_base != warp_slot_base) {
             for (uint32_t i = 0; i < TMA_COPY_NUM_STAGES; i++) {
-                nvshmemi_drain_handle_slot_if_owned(smem_base, warpgroup_slot_base + i,
-                                                    warp_idx_in_block);
+                nvshmemi_drain_handle_slot_if_owned(smem_base, selected_slots,
+                                                    warpgroup_slot_base + i, warp_idx_in_block,
+                                                    invalidate);
             }
         }
     }
+}
+
+__device__ __forceinline__ void nvshmemi_handle_quiet_owned() {
+    nvshmemi_handle_complete_owned(false);
+}
+
+__device__ __forceinline__ void nvshmemi_handle_release_owned() {
+    nvshmemi_handle_complete_owned(true);
 }
 
 template <threadgroup_t SCOPE>
@@ -2322,8 +2366,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
             nvshmemi_tma_mbarrier_init(done_bar[0]);
             nvshmemi_tma_mbarrier_init(done_bar[1]);
         }
-        handle_bar[0]->prepare_handle(warp_idx_in_block);
-        handle_bar[1]->prepare_handle(warp_idx_in_block);
+        handle_bar[0]->prepare_handle(warp_idx_in_block, handle_slot_base);
+        handle_bar[1]->prepare_handle(warp_idx_in_block, handle_slot_base + 1);
         // Ensure mbarriers init visibility to async proxy
         fence_async_proxy();
     }
@@ -2392,6 +2436,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
             for (uint32_t buf_idx = 0; buf_idx < TMA_COPY_NUM_STAGES; buf_idx++) {
                 handle_bar[buf_idx]->drain_pending_handle(true);
+            }
+        } else {
+            for (uint32_t buf_idx = 0; buf_idx < TMA_COPY_NUM_STAGES; buf_idx++) {
+                handle_bar[buf_idx]->publish_pending_handle();
             }
         }
         if (!is_src_shared) {
@@ -2471,7 +2519,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
         __mbarrier_t *tma_bar_ptr = reinterpret_cast<__mbarrier_t *>(
             nvshmemi_tma_barrier_slot(smem_base, warp_idx_in_block));
 
-        handle_bar->prepare_handle(warp_idx_in_block);
+        handle_bar->prepare_handle(warp_idx_in_block, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
         // Ensure mbarriers init visibility to async proxy
         fence_async_proxy();
         if (!is_src_shared) {
@@ -2516,6 +2564,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
 
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
             handle_bar->drain_pending_handle(true);
+        } else {
+            handle_bar->publish_pending_handle();
         }
         if (!is_src_shared) {
             __mbarrier_inval(tma_bar_ptr);
@@ -2610,7 +2660,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
 
         handle_bar =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
-        handle_bar->prepare_handle(warp_idx_in_block);
+        handle_bar->prepare_handle(warp_idx_in_block, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
         // Ensure mbarriers init visibility to async proxy
         fence_async_proxy();
 
@@ -2622,6 +2672,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
         handle_bar->fabric_wait_sync_reads();
         if (is_blocking || cft_handle_kind != le_fabric_handle_kind::Unicast) {
             handle_bar->drain_pending_handle(true);
+        } else {
+            handle_bar->publish_pending_handle();
         }
     }
 }
@@ -2704,7 +2756,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
      * and retain pending completions from this owner in the same batch.
      */
     if (lane_idx == leader_lane) {
-        handle_bar->prepare_handle(warp_idx_in_block);
+        handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         handle_bar->ensure_handle_tx_capacity(completion_bytes);
     }
     __syncwarp(mask);
@@ -2782,8 +2834,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
         handle_bar[1] =
             nvshmemi_handle_barrier_slot(smem_base, thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
 
-        handle_bar[0]->prepare_handle(warp_idx_in_block);
-        handle_bar[1]->prepare_handle(warp_idx_in_block);
+        handle_bar[0]->prepare_handle(warp_idx_in_block,
+                                      thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES);
+        handle_bar[1]->prepare_handle(warp_idx_in_block,
+                                      thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
         // Ensure mbarriers init visibility to async proxy
         fence_async_proxy();
 
@@ -2916,8 +2970,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
         nvshmemi_tma_mbarrier_init(ready_bar[1]);
         nvshmemi_tma_mbarrier_init(done_bar[0]);
         nvshmemi_tma_mbarrier_init(done_bar[1]);
-        handle_bar[0]->prepare_handle(warp_idx_in_block);
-        handle_bar[1]->prepare_handle(warp_idx_in_block);
+        handle_bar[0]->prepare_handle(warp_idx_in_block, handle_slot_base);
+        handle_bar[1]->prepare_handle(warp_idx_in_block, handle_slot_base + 1);
         // Ensure mbarriers init visibility to async proxy
         fence_async_proxy();
     }
@@ -3160,7 +3214,7 @@ nvshmemi_handle_atomic_once(const nvshmemi_tma_smem_registration_t &registration
          * may still be reading. The atomic itself is blocking, so retaining the
          * earlier batch provides no benefit here. */
         handle_bar->drain_pending_handle(true);
-        handle_bar->prepare_handle(warp_idx_in_block);
+        handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         handle_bar->ensure_handle_tx_capacity(active_threads * CFT_HANDLE_TX_SIZE);
     }
     __syncwarp(active_mask);

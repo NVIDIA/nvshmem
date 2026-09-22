@@ -26,6 +26,9 @@
 #define NVSHMEMI_TMA_MAX_CONCURRENT_GRIDS 4
 #define NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS 32
 #define NVSHMEMI_HANDLE_BARRIER_BYTES (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS * 16)
+/* CTA-local bitmap of live handle barriers. Keep a full aligned slot so the
+ * following counted-operation state remains 16-byte aligned. */
+#define NVSHMEMI_HANDLE_TRACKING_STATE_BYTES 16
 /* Keep counted-operation state separate from the generic TMA and handle
  * barrier pools so independently in-flight operations cannot alias it. */
 #define NVSHMEMI_COUNTED_STATE_SLOT_BYTES 16
@@ -40,7 +43,7 @@
 
 #define NVSHMEMI_SMEM_DATA_REGION_OFFSET                                 \
     (NVSHMEMI_TMA_BARRIER_REGION_BYTES + NVSHMEMI_HANDLE_BARRIER_BYTES + \
-     NVSHMEMI_COUNTED_STATE_BYTES)
+     NVSHMEMI_HANDLE_TRACKING_STATE_BYTES + NVSHMEMI_COUNTED_STATE_BYTES)
 
 #define REDUCE_PADDING 32
 #define TIMEOUT_PADDING 16
