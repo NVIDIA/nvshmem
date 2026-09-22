@@ -699,6 +699,25 @@ check_source_compiles(C
 
 set(ACTIVE_TRANSPORTS)
 
+# Compile the staged foundation without exposing an incomplete transport plugin. CUDA Green
+# Context declarations are available starting in CUDA 12.6, and a verbs-enabled transport ensures
+# this target does not add an InfiniBand-header dependency to otherwise dependency-light builds.
+if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.6 AND
+   (NVSHMEM_IBRC_SUPPORT OR NVSHMEM_IBDEVX_SUPPORT OR NVSHMEM_IBGDA_SUPPORT OR
+    NVSHMEM_GPUNETIO_SUPPORT))
+  add_library(nvshmem_staged_foundation_compile OBJECT
+              modules/transport/staged/staged.cpp)
+  nvshmem_library_set_base_config(nvshmem_staged_foundation_compile)
+  target_include_directories(nvshmem_staged_foundation_compile
+                             PRIVATE include
+                                     modules/transport/common)
+  target_link_libraries(nvshmem_staged_foundation_compile
+                        PRIVATE CUDA::cudart_static CUDA::cuda_driver ibverbs)
+  # The staged stack intentionally has no entry point until its activation commit.
+  target_compile_options(nvshmem_staged_foundation_compile
+                         PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-function>)
+endif()
+
 if(NVSHMEM_UCX_SUPPORT)
   add_library(
     nvshmem_transport_ucx SHARED
