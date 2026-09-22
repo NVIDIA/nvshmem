@@ -627,7 +627,6 @@ set(NVSHMEM_HOST_SOURCES
     host/mem/mem_transport.cpp
     host/team/team.cu
     host/team/team_internal.cpp
-    host/team/team_internal_cuda.cu
     host/team/team_internal_nvls.cpp
     host/topo/topo.cpp
     host/util/debug.cpp
@@ -636,6 +635,12 @@ set(NVSHMEM_HOST_SOURCES
     host/util/sockets.cpp
     host/util/shared_memory.cpp
 )
+
+if(NVSHMEM_DEBUG)
+  list(APPEND NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT host/team/team_internal_cuda.cu)
+else()
+  list(APPEND NVSHMEM_HOST_SOURCES host/team/team_internal_cuda.cu)
+endif()
 
 target_include_directories(
   nvshmem_host
