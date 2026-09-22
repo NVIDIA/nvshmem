@@ -1842,13 +1842,13 @@ static staged_mem_handle_info_t* staged_load_mem_handle_info(
         return nullptr;
     }
     staged_mem_handle_info_t* info = nullptr;
-    memcpy(&info, mem_handle, sizeof(info));
+    memcpy(&info, mem_handle->reserved, sizeof(info));
     return info;
 }
 
 static void staged_store_mem_handle_info(nvshmem_mem_handle_t* mem_handle,
                                          staged_mem_handle_info_t* info) {
-    memcpy(mem_handle, &info, sizeof(info));
+    memcpy(mem_handle->reserved, &info, sizeof(info));
 }
 
 static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void* buf,
@@ -1858,7 +1858,7 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
 
-    memset(mem_handle, 0, sizeof(*mem_handle));
+    memset(mem_handle->reserved, 0, sizeof(mem_handle->reserved));
 
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
@@ -2024,8 +2024,8 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
         std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
         mem_handle_infos.swap(s->memory.mem_handle_infos);
     }
-    for (const auto& [_, info] : mem_handle_infos) {
 #ifdef NVSHMEM_USE_GDRCOPY
+    for (const auto& [_, info] : mem_handle_infos) {
         int status = staged_release_gpu_cpu_mapping(s, *info);
         if (status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping final cleanup failed status=%d", status);
@@ -2033,9 +2033,7 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
                 final_status = NVSHMEMX_ERROR_INTERNAL;
             }
         }
-#endif
     }
-#ifdef NVSHMEM_USE_GDRCOPY
     nvshmemt_gpu_cpu_mapping_fini(&s->memory.gpu_cpu_mapping_state);
 #endif
 
