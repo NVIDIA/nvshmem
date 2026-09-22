@@ -1887,24 +1887,36 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
      * (alias), keep buf (VA2) as the lookup key. See nvbug 5072809 / IBRC.
      */
     void* alias_va_ptr = nullptr;
-    if (t->alias_va_map != nullptr && t->alias_va_map->count(buf)) {
-        alias_va_ptr = t->alias_va_map->operator[](buf);
+    if (t->alias_va_map != nullptr) {
+        auto alias_it = t->alias_va_map->find(buf);
+        if (alias_it != t->alias_va_map->end()) {
+            alias_va_ptr = alias_it->second;
+        }
     }
 
     auto handle_info = std::make_unique<staged_mem_handle_info_t>();
     handle_info->ptr = buf;
     handle_info->size = length;
     void* mapping_buf = alias_va_ptr ? alias_va_ptr : buf;
+    staged_mem_handle_info_t* stored_info = handle_info.get();
+    std::unique_lock<std::shared_mutex> handle_lock(s->memory.mem_handle_mutex);
+    auto [handle_it, inserted] =
+        s->memory.mem_handle_infos.emplace(stored_info, std::move(handle_info));
+    if (!inserted) {
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
     int mapping_status = 0;
     {
         /* Application code can register buffers concurrently. Serialize all GPU CPU mapping
          * operations with worker copies and teardown. */
         std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-        mapping_status =
-            nvshmemt_gpu_cpu_map(&s->memory.gpu_cpu_mapping_state, mapping_buf, length,
-                                 NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE, &handle_info->cpu_mapping);
+        mapping_status = nvshmemt_gpu_cpu_map(&s->memory.gpu_cpu_mapping_state, mapping_buf, length,
+                                              NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE,
+                                              &handle_it->second->cpu_mapping);
     }
     if (mapping_status != 0) {
+        s->memory.mem_handle_infos.erase(handle_it);
         NVSHMEMI_ERROR_PRINT(
             "[STAGED] CPU-mapping policy (%s) failed for %p len=%zu status=%d; "
             "memory registration failed",
@@ -1912,13 +1924,7 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
             length, mapping_status);
         return NVSHMEMX_ERROR_INTERNAL;
     }
-
-    staged_mem_handle_info_t* stored_info = handle_info.get();
-    {
-        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        s->memory.mem_handle_infos.insert(stored_info);
-    }
-    staged_store_mem_handle_info(mem_handle, handle_info.release());
+    staged_store_mem_handle_info(mem_handle, stored_info);
     return 0;
 #else
     (void)buf;
@@ -1937,33 +1943,21 @@ static int nvshmemt_staged_release_mem_handle(nvshmem_mem_handle_t* mem_handle,
 
 #ifdef NVSHMEM_USE_GDRCOPY
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
-    bool retrying_retired_cleanup = false;
     {
         std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        auto it = s->memory.mem_handle_infos.find(handle_info);
-        if (it != s->memory.mem_handle_infos.end()) {
-            s->memory.mem_handle_infos.erase(it);
-        } else {
-            auto retired_it = s->memory.retired_mem_handle_infos.find(handle_info);
-            if (retired_it == s->memory.retired_mem_handle_infos.end()) {
-                return 0;
-            }
-            retrying_retired_cleanup = true;
+        auto handle_it = s->memory.mem_handle_infos.find(handle_info);
+        if (handle_it == s->memory.mem_handle_infos.end()) {
+            staged_store_mem_handle_info(mem_handle, nullptr);
+            return 0;
         }
-    }
 
-    int status = staged_release_gpu_cpu_mapping(s, *handle_info);
-    if (status) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping cleanup failed status=%d", status);
-        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        s->memory.retired_mem_handle_infos.insert(handle_info);
-        return NVSHMEMX_ERROR_INTERNAL;
+        int status = staged_release_gpu_cpu_mapping(s, *handle_it->second);
+        if (status != 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping cleanup failed status=%d", status);
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        s->memory.mem_handle_infos.erase(handle_it);
     }
-    if (retrying_retired_cleanup) {
-        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        s->memory.retired_mem_handle_infos.erase(handle_info);
-    }
-    delete handle_info;
     staged_store_mem_handle_info(mem_handle, nullptr);
 #else
     (void)t;
@@ -2013,38 +2007,35 @@ static int nvshmemt_staged_amo(nvshmem_transport_t tcurr, int pe, void*, amo_ver
 /* ═══  finalize  ═════════════════════════════════════════════════ */
 
 static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
-    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(transport->state);
-    if (!s) {
+    std::unique_ptr<transport_staged_state_t> state(
+        static_cast<transport_staged_state_t*>(transport->state));
+    if (!state) {
         return 0;
     }
+    transport->state = nullptr;
+    transport_staged_state_t* s = state.get();
 
     staged_quiet_all(s);
 
     staged_stop_workers(s);
 
-    std::unordered_set<staged_mem_handle_info_t*> mem_handle_infos;
+    staged_mem_handle_registry_t mem_handle_infos;
     {
         std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
         mem_handle_infos.swap(s->memory.mem_handle_infos);
-        mem_handle_infos.insert(s->memory.retired_mem_handle_infos.begin(),
-                                s->memory.retired_mem_handle_infos.end());
-        s->memory.retired_mem_handle_infos.clear();
     }
-    for (auto* info : mem_handle_infos) {
+    for (const auto& [_, info] : mem_handle_infos) {
 #ifdef NVSHMEM_USE_GDRCOPY
         int status = staged_release_gpu_cpu_mapping(s, *info);
-        if (status) {
+        if (status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping final cleanup failed status=%d", status);
         }
 #endif
-        delete info;
     }
 #ifdef NVSHMEM_USE_GDRCOPY
     nvshmemt_gpu_cpu_mapping_fini(&s->memory.gpu_cpu_mapping_state);
 #endif
 
-    delete s;
-    transport->state = nullptr;
     return 0;
 }
 
