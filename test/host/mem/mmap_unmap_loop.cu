@@ -516,6 +516,12 @@ int main(int argc, char **argv) {
         prop.requestedHandleTypes =
             (CUmemAllocationHandleType)(CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
     }
+    status = check_cuda_driver(
+        cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM),
+        "cuMemGetAllocationGranularity");
+    if (status) {
+        return status;
+    }
 
     size_t reclaim_test_size = ((_max_size - 1) / granularity + 1) * granularity;
     status = test_physical_allocation_reclaimed(prop, reclaim_test_size, _repeat, mype);
@@ -529,9 +535,14 @@ int main(int argc, char **argv) {
         DEBUG_PRINT("creating and mmapping %d buffers ", iter);
     }
     for (unsigned int i = 0; i < iter; i++) {
-        seed = i;
-        lsize = rand_r(&seed) % (_max_size - _min_size + 1) + _min_size;
-        lsize = ((lsize - 1) / granularity + 1) * granularity;
+        if (i == 0) {
+            // Exercise a physical mapping smaller than the NVSHMEM heap granularity.
+            lsize = granularity;
+        } else {
+            seed = i;
+            lsize = rand_r(&seed) % (_max_size - _min_size + 1) + _min_size;
+            lsize = ((lsize - 1) / granularity + 1) * granularity;
+        }
 
         UserBuffer &buffer = buffers[i];
         status = buffer.allocate(lsize, prop);
