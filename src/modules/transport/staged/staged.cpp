@@ -1439,7 +1439,7 @@ static int staged_execute_amo(nvshmem_transport_t transport, staged_client_op_t&
         {
             std::lock_guard<std::mutex> lk(s->memory.amo_mutex);
             status = staged_apply_amo(transport, amo.target.remote_memdesc.ptr, local_msg,
-                                      &old_value, s->cuda.client_stream, s->rdma.client_bounce());
+                                      &old_value, s->cuda.client_stream);
         }
         if (status) {
             return status;
