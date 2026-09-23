@@ -45,35 +45,111 @@ namespace nvshmemi {
 staged_qp_t::staged_qp_t(struct ibv_context* context, struct ibv_pd* pd, void* server_bounce)
     : context_(context), pd_(pd), server_bounce_(server_bounce) {}
 
-staged_qp_t::~staged_qp_t() {
+staged_qp_t::~staged_qp_t() { close(); }
+
+int staged_qp_t::close() noexcept {
+    int status = 0;
     if (qp_) {
-        ibv_destroy_qp(qp_);
+        int verbs_status = ibv_destroy_qp(qp_);
+        if (verbs_status != 0) {
+            /* A live QP may still reference its CQs and control receive MR. */
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_qp failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        qp_ = nullptr;
     }
     if (send_cq_) {
-        ibv_destroy_cq(send_cq_);
+        int verbs_status = ibv_destroy_cq(send_cq_);
+        if (verbs_status != 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_cq(send) failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            status = NVSHMEMX_ERROR_INTERNAL;
+        } else {
+            send_cq_ = nullptr;
+        }
     }
     if (recv_cq_) {
-        ibv_destroy_cq(recv_cq_);
+        int verbs_status = ibv_destroy_cq(recv_cq_);
+        if (verbs_status != 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_cq(recv) failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            status = NVSHMEMX_ERROR_INTERNAL;
+        } else {
+            recv_cq_ = nullptr;
+        }
     }
     if (ctrl_recv_mr_) {
-        ibv_dereg_mr(ctrl_recv_mr_);
+        int verbs_status = ibv_dereg_mr(ctrl_recv_mr_);
+        if (verbs_status != 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dereg_mr(control) failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            status = NVSHMEMX_ERROR_INTERNAL;
+        } else {
+            ctrl_recv_mr_ = nullptr;
+        }
     }
+    return status;
 }
 
-staged_rdma_state_t::~staged_rdma_state_t() {
+staged_rdma_state_t::~staged_rdma_state_t() { close(); }
+
+int staged_rdma_state_t::close() noexcept {
+    int status = 0;
+    for (const auto& qp : qps_.qps) {
+        int qp_status = qp->close();
+        if (status == 0 && qp_status != 0) {
+            status = qp_status;
+        }
+    }
+    if (status != 0) {
+        /* A surviving QP may still reference the bounce MR, PD, and device context. */
+        return status;
+    }
     qps_.qps.clear();
+
     if (ib_.bounce_mr) {
-        ibv_dereg_mr(ib_.bounce_mr);
+        int verbs_status = ibv_dereg_mr(ib_.bounce_mr);
+        if (verbs_status != 0) {
+            /* A registered MR still references its allocation and PD. */
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dereg_mr(bounce) failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        ib_.bounce_mr = nullptr;
     }
     if (ib_.bounce_region) {
-        cudaFreeHost(ib_.bounce_region);
+        cudaError_t cuda_status = cudaFreeHost(ib_.bounce_region);
+        if (cuda_status != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaFreeHost(bounce) failed during cleanup: %s",
+                                 cudaGetErrorString(cuda_status));
+            status = NVSHMEMX_ERROR_INTERNAL;
+        } else {
+            ib_.bounce_region = nullptr;
+            ib_.client_bounce = nullptr;
+            ib_.bounce_region_size = 0;
+        }
     }
     if (ib_.protection_domain) {
-        ibv_dealloc_pd(ib_.protection_domain);
+        int verbs_status = ibv_dealloc_pd(ib_.protection_domain);
+        if (verbs_status != 0) {
+            /* The device context must outlive a PD that could not be released. */
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dealloc_pd failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            return status == 0 ? NVSHMEMX_ERROR_INTERNAL : status;
+        }
+        ib_.protection_domain = nullptr;
     }
     if (ib_.context) {
-        ibv_close_device(ib_.context);
+        int verbs_status = ibv_close_device(ib_.context);
+        if (verbs_status != 0) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_close_device failed during cleanup: %s",
+                                 nvshmemt_strerror_from_status(verbs_status));
+            return status == 0 ? NVSHMEMX_ERROR_INTERNAL : status;
+        }
+        ib_.context = nullptr;
     }
+    return status;
 }
 
 staged_cuda_state_t::~staged_cuda_state_t() {

@@ -138,8 +138,7 @@ class staged_operation_queue_t {
             return cancellation_status_;
         }
         done_cv_.wait(lock, [&] {
-            return stopped_ || !matches_locked(token) ||
-                   slots_[token.index].state == slot_state::DONE;
+            return !matches_locked(token) || slots_[token.index].state == slot_state::DONE;
         });
         if (!matches_locked(token) || !slots_[token.index].waiter) {
             return cancellation_status_;
@@ -158,7 +157,7 @@ class staged_operation_queue_t {
     int quiet() {
         std::unique_lock<std::mutex> lock(mutex_);
         const std::uint64_t target = submitted_;
-        done_cv_.wait(lock, [&] { return stopped_ || completed_ >= target; });
+        done_cv_.wait(lock, [&] { return completed_ >= target; });
         return status_locked();
     }
 

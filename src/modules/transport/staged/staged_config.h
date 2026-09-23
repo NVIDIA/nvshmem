@@ -118,6 +118,7 @@ class staged_qp_t {
 
     int initialize(int ib_port, uint16_t pkey_index, size_t index);
     int post_receive(size_t index);
+    int close() noexcept;
 
     struct ibv_qp* qp() const { return qp_; }
     struct ibv_cq* recv_cq() const { return recv_cq_; }
@@ -167,6 +168,8 @@ class staged_rdma_state_t {
     staged_rdma_state_t& operator=(const staged_rdma_state_t&) = delete;
     staged_rdma_state_t(staged_rdma_state_t&&) = delete;
     staged_rdma_state_t& operator=(staged_rdma_state_t&&) = delete;
+
+    int close() noexcept;
 
     struct ibv_context* context() const { return ib_.context; }
     void set_context(struct ibv_context* context) { ib_.context = context; }
