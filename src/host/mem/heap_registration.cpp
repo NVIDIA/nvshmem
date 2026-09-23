@@ -91,7 +91,13 @@ int nvshmemi_heap_registration::setup() {
     return NVSHMEMX_ERROR_INTERNAL;
 }
 
-/* Close imported POSIX FDs retained in P2P handle sets. */
+/* Safety net for any imported/exported POSIX fds not already closed on the
+ * map_p2p_chunk()/map_p2p_memory() paths.
+ *
+ * Slots closed there are marked -1 (see the comments at those call sites), and an
+ * all-zero slot is an unset handle rather than fd 0 -- closing either would hit a
+ * recycled or reserved descriptor belonging to something else entirely, so only fds
+ * greater than 2 are actually live exports/imports worth closing here. */
 nvshmemi_heap_registration::~nvshmemi_heap_registration() {
     if (effective_handle_type_ != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
         return;
@@ -105,7 +111,10 @@ nvshmemi_heap_registration::~nvshmemi_heap_registration() {
             }
 
             for (size_t k = 0; k < table_->num_p2p_handle_sets(); k++) {
-                close(load_posix_fd(table_->get_p2p_mem_handle(k, i, j)));
+                int fd = load_posix_fd(table_->get_p2p_mem_handle(k, i, j));
+                if (fd > 2) {
+                    close(fd);
+                }
             }
         }
     }
@@ -196,6 +205,40 @@ int nvshmemi_heap_registration::map_p2p_chunk(nvshmem_mem_handle_t *handle, void
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "exchange_p2p_memory_handle failed\n");
 
+    /* Close the shareable fds this PE exported above.
+     *
+     * exchange_p2p_memory_handle() ends with a bootstrap barrier, so by this point every
+     * peer has received (and dup'ed into its own process) the fd it needs. This PE never
+     * imports its own memory -- map_p2p_range() below skips mype_ -- so the fd has no
+     * remaining consumer here.
+     *
+     * Keeping it open would pin the allocation: an open shareable fd is a driver-level
+     * reference that keeps the memory importable, so cuMemRelease() in the unregister path
+     * could never bring the allocation to zero references and the VRAM was not reclaimed on
+     * unregister. Previously these fds were only closed in the registration object's
+     * destructor, i.e. at finalize, which is why a register/unregister loop leaked one
+     * buffer per round while a register-once workload looked fine.
+     *
+     * Slots are set to -1 so the destructor's safety net does not close them a second time
+     * after the OS has recycled the number. */
+    if (effective_handle_type_ == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+        for (int i = 0; i < transports_.num_transports(); i++) {
+            if (!transports_.active_has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) {
+                continue;
+            }
+            int fd = load_posix_fd(local_handles[i]);
+            /* Never close 0/1/2: a zero slot is an unset handle, not an export fd, and
+             * closing stdin/stdout/stderr would let CUDA's next export reuse them. */
+            if (fd > 2) {
+                INFO(NVSHMEM_MEM, "closing exported fd=%d (buf: %p size: %zu transport: %d)\n",
+                     fd, buf, size, i);
+                close(fd);
+                store_posix_fd(&local_handles[i], -1);
+                store_posix_fd(&gathered[mype_ * transports_.num_transports() + i], -1);
+            }
+        }
+    }
+
     /* Map handles for all mapping-capable transports. */
     status = map_p2p_range(buf, size, gathered);
     status = nvshmemi_bootstrap_aggregate_status(status, npes_);
@@ -268,6 +311,24 @@ int nvshmemi_heap_registration::map_p2p_memory(int pe_id, nvshmem_mem_handle_t *
                           cuMemImportFromShareableHandle(
                               &peer_handle, reinterpret_cast<void *>(static_cast<uintptr_t>(fd)),
                               effective_handle_type_));
+                /* Close the imported POSIX fd as soon as the import succeeds.
+                 *
+                 * An open shareable fd is itself a reference on the peer's physical
+                 * allocation: the driver must keep that memory importable while the fd
+                 * lives. Holding it means the peer's cuMemRelease() can never drop the
+                 * allocation to zero references, so the peer's VRAM is not reclaimed on
+                 * unregister. The mapping created by cuMemMap() below does not depend on
+                 * the fd, so this is the standard CUDA VMM sequence.
+                 *
+                 * Mark the slot -1 so the destructor's safety-net loop does not close it
+                 * twice (fd numbers get recycled by the OS, so a stale double close would
+                 * hit an unrelated fd). */
+                if (status == CUDA_SUCCESS && fd > 2) {
+                    INFO(NVSHMEM_MEM, "closing imported fd=%d (peer buf: %p size: %zu)\n", fd,
+                         buf, size);
+                    close(fd);
+                    store_posix_fd(in_handle, -1);
+                }
             } else {
                 status = CUPFN(
                     nvshmemi_cuda_syms,
