@@ -4639,6 +4639,12 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
         //                      "ibv_close_device failed \n");
     }
 
+    if (ibgda_state->my_stream) {
+        status = cudaStreamDestroy(ibgda_state->my_stream);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cudaStreamDestroy failed \n");
+        ibgda_state->my_stream = nullptr;
+    }
+
 #ifdef NVSHMEM_USE_GDRCOPY
     if (use_gpu_cpu_mapping) {
         nvshmemt_gpu_cpu_mapping_fini(&gpu_cpu_mapping_state);
