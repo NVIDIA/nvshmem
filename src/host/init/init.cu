@@ -809,6 +809,12 @@ int nvshmemi_setup_stream_priorities(nvshmemi_state_t *state) {
     int status = 0;
     int leastPriority, greatestPriority;
 
+    if (state->my_stream) {
+        CUDA_RUNTIME_CHECK(cudaStreamSynchronize(state->my_stream));
+        CUDA_RUNTIME_CHECK(cudaStreamDestroy(state->my_stream));
+        state->my_stream = nullptr;
+    }
+
     CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
     CUDA_RUNTIME_CHECK(
         cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking, greatestPriority));
@@ -824,6 +830,11 @@ int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
     for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->custreams[i]), status, out);
         CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cuevents[i]), status, out);
+    }
+
+    if (state->my_stream) {
+        CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->my_stream), status, out);
+        state->my_stream = nullptr;
     }
 out:
     return status;

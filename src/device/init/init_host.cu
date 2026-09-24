@@ -182,6 +182,9 @@ void nvshmemi_finalize() {
     int status;
     void *dev_state_ptr, *transport_dev_state_ptr = NULL;
 
+    nvshmemi_teardown_collective_launch();
+    nvshmemi_device_only_state.is_initialized = false;
+
     status = cudaGetSymbolAddress(&dev_state_ptr, nvshmemi_device_state_d);
     if (status) {
         NVSHMEMI_ERROR_PRINT("Unable to properly unregister device state.\n");
