@@ -66,12 +66,11 @@ class nvshmemi_heap_registration {
    public:
     nvshmemi_heap_registration(nvshmemi_handle_table *table,
                                nvshmemi_heap_registration_config cfg) noexcept;
-    ~nvshmemi_heap_registration();
 
     int setup();
     int teardown();
     /** Register a VMM chunk; allocation kind distinguishes internal and user-provided memory. */
-    int register_vmm_chunk(nvshmem_mem_handle_t *handle, off_t mc_offset, size_t size,
+    int register_vmm_chunk(CUmemGenericAllocationHandle handle, off_t mc_offset, size_t size,
                            nvshmemi_allocation_kind alloc_kind,
                            std::optional<size_t> mmap_allocated_range);
     /**
@@ -87,27 +86,25 @@ class nvshmemi_heap_registration {
     nvshmemi_mem_remote_transport &remote_transport();
     nvshmemi_mem_p2p_transport &p2p_transport();
 
-    /** Export, exchange, and map a buffer for P2P transports. */
-    int map_p2p_chunk(nvshmem_mem_handle_t *handle, void *buf, size_t size);
-    /** Map a buffer range into each reachable PE address space. */
-    int map_p2p_range(void *buf, size_t size, std::vector<nvshmem_mem_handle_t> &gathered_handles);
-    /** Import and map one peer memory handle into its target address space. */
-    int map_p2p_memory(int pe_id, nvshmem_mem_handle_t *in_handle, void *buf, size_t size);
-    /** Export a buffer range to a transport memory handle. */
-    int export_p2p_memory(nvshmem_mem_handle_t *out, void *buf, size_t size,
-                          nvshmem_mem_handle_t *vmm_handle);
-    /** Establish pairwise memory handles for processes connected over P2P. */
-    int exchange_p2p_memory_handle(nvshmem_mem_handle_t *local_handle,
-                                   nvshmem_mem_handle_t *recv_handles);
+    int map_dynamic_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf, size_t size);
+    int map_posix_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf, size_t size);
+    int map_fabric_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf, size_t size);
+    int map_static_vidmem_p2p_chunk(void *buf);
+    int map_static_sysmem_p2p_chunk();
+    int map_fabric_p2p_memory(int pe_id, CUmemFabricHandle handle, void *buf, size_t size);
+    int map_imported_p2p_memory(int pe_id, CUmemGenericAllocationHandle handle, void *buf,
+                                size_t size);
+    int map_static_vidmem_p2p_memory(int pe_id, const cudaIpcMemHandle_t &handle);
+    int map_static_sysmem_p2p_memory(int pe_id);
     /** Register a buffer range for non-mapping transports and gather its handles. */
-    int register_remote_chunk(nvshmem_mem_handle_t *handle, void *buf, size_t size,
-                              nvshmemi_allocation_kind alloc_kind);
+    int register_remote_chunk(void *buf, size_t size, nvshmemi_allocation_kind alloc_kind);
     /** Update address-to-handle lookup after registration. */
     void update_handle_index(void *buf, size_t size, nvshmemi_allocation_kind alloc_kind);
     /** Plan peer virtual addresses and initialize the PE-to-process map. */
     int plan_vmm_peer_bases();
     /** Register the statically allocated heap for P2P and remote transports. */
     int register_static_heap();
+    bool has_p2p_mapping() const;
     bool is_node_local_pe(int pe_id) const;
     int node_local_index(int pe_id) const;
 

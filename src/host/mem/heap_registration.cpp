@@ -8,8 +8,8 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <cstring>
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
@@ -30,17 +30,158 @@
 
 namespace {
 
-int load_posix_fd(const nvshmem_mem_handle_t &handle) noexcept {
-    static_assert(sizeof(int) <= sizeof(handle));
-    int fd;
-    std::memcpy(&fd, &handle, sizeof(fd));
-    return fd;
+class UniqueFd {
+   public:
+    UniqueFd() noexcept = default;
+    explicit UniqueFd(int fd) noexcept : fd_{fd} { assert(fd >= 0); }
+    ~UniqueFd() { reset(); }
+
+    UniqueFd(const UniqueFd &) = delete;
+    UniqueFd &operator=(const UniqueFd &) = delete;
+
+    UniqueFd(UniqueFd &&other) noexcept : fd_{std::exchange(other.fd_, std::nullopt)} {}
+
+    UniqueFd &operator=(UniqueFd &&other) noexcept {
+        if (this != &other) {
+            reset();
+            fd_ = std::exchange(other.fd_, std::nullopt);
+        }
+        return *this;
+    }
+
+    int get() const noexcept {
+        assert(fd_.has_value());
+        return *fd_;
+    }
+
+   private:
+    void reset() noexcept {
+        if (fd_) {
+            close(*fd_);
+            fd_.reset();
+        }
+    }
+
+    std::optional<int> fd_;
+};
+
+class UniqueCudaAllocationHandle {
+   public:
+    explicit UniqueCudaAllocationHandle(CUmemGenericAllocationHandle handle) noexcept
+        : handle_{handle} {}
+    ~UniqueCudaAllocationHandle() { (void)reset(); }
+
+    UniqueCudaAllocationHandle(const UniqueCudaAllocationHandle &) = delete;
+    UniqueCudaAllocationHandle &operator=(const UniqueCudaAllocationHandle &) = delete;
+
+    UniqueCudaAllocationHandle(UniqueCudaAllocationHandle &&other) noexcept
+        : handle_{std::exchange(other.handle_, std::nullopt)} {}
+
+    UniqueCudaAllocationHandle &operator=(UniqueCudaAllocationHandle &&other) noexcept {
+        if (this != &other) {
+            UniqueCudaAllocationHandle moved{std::move(other)};
+            swap(moved);
+        }
+        return *this;
+    }
+
+    CUmemGenericAllocationHandle get() const noexcept {
+        assert(handle_.has_value());
+        return *handle_;
+    }
+
+    CUresult reset() noexcept {
+        if (!handle_) {
+            return CUDA_SUCCESS;
+        }
+        CUresult status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(*handle_));
+        if (status == CUDA_SUCCESS) {
+            handle_.reset();
+        }
+        return status;
+    }
+
+   private:
+    void swap(UniqueCudaAllocationHandle &other) noexcept { handle_.swap(other.handle_); }
+
+    std::optional<CUmemGenericAllocationHandle> handle_;
+};
+
+template <typename MapPeer>
+int map_p2p_peers(int mype, int npes, nvshmemi_transport_view &transports,
+                  std::vector<void *> &peer_heap_bases, MapPeer &&map_peer) {
+    for (int pe = (mype + 1) % npes; pe != mype; pe = (pe + 1) % npes) {
+        for (int transport = 0; transport < transports.num_transports(); transport++) {
+            if (!transports.active_between_has_cap(mype, pe, npes, transport,
+                                                   NVSHMEM_TRANSPORT_CAP_MAP)) {
+                continue;
+            }
+
+            int status = map_peer(pe);
+            if (status == NVSHMEMX_SUCCESS) {
+                break;
+            }
+            if (status != NVSHMEMX_ERROR_INVALID_VALUE) {
+                return status;
+            }
+
+            transports.clear_cap(transport, pe,
+                                 NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST |
+                                     NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD |
+                                     NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS);
+            peer_heap_bases[pe] = nullptr;
+        }
+    }
+    return NVSHMEMX_SUCCESS;
 }
 
-void store_posix_fd(nvshmem_mem_handle_t *handle, int fd) noexcept {
-    assert(handle != nullptr);
-    static_assert(sizeof(fd) <= sizeof(*handle));
-    std::memcpy(handle, &fd, sizeof(fd));
+int exchange_posix_fds(const UniqueFd &local_fd, const std::map<pid_t, int> &p2p_processes,
+                       std::map<int, UniqueFd> *peer_fds) {
+    int status = NVSHMEMX_SUCCESS;
+    ipcHandle *send_socket = nullptr;
+    std::map<pid_t, ipcHandle *> receive_sockets;
+    const pid_t pid = getpid();
+
+    NVSHMEMI_IPC_CHECK(ipcOpenSocket(send_socket, pid, pid));
+    for (const auto &entry : p2p_processes) {
+        const pid_t peer_pid = entry.first;
+        if (peer_pid == pid) {
+            continue;
+        }
+        ipcHandle *socket = nullptr;
+        NVSHMEMI_IPC_CHECK(ipcOpenSocket(socket, peer_pid, pid));
+        receive_sockets.emplace(peer_pid, socket);
+    }
+
+    status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, close_sockets,
+                          "bootstrap barrier failed before FD exchange\n");
+
+    for (const auto &entry : p2p_processes) {
+        const pid_t peer_pid = entry.first;
+        if (peer_pid == pid) {
+            continue;
+        }
+        NVSHMEMI_IPC_CHECK(ipcSendFd(send_socket, local_fd.get(), pid, peer_pid));
+    }
+
+    for (const auto &[peer_pid, pe] : p2p_processes) {
+        if (peer_pid == pid) {
+            continue;
+        }
+        int received_fd{-1};
+        NVSHMEMI_IPC_CHECK(ipcRecvFd(receive_sockets.at(peer_pid), &received_fd));
+        peer_fds->emplace(pe, UniqueFd{received_fd});
+    }
+
+    status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+
+close_sockets:
+    NVSHMEMI_IPC_CHECK(ipcCloseSocket(send_socket));
+    for (const auto &entry : receive_sockets) {
+        NVSHMEMI_IPC_CHECK(ipcCloseSocket(entry.second));
+    }
+    return status;
 }
 
 int consume_cuda_runtime_error_for_failed_ipc(cudaError_t api_status, const char *api_name) {
@@ -89,26 +230,6 @@ int nvshmemi_heap_registration::setup() {
     }
 
     return NVSHMEMX_ERROR_INTERNAL;
-}
-
-/* Close imported POSIX FDs retained in P2P handle sets. */
-nvshmemi_heap_registration::~nvshmemi_heap_registration() {
-    if (effective_handle_type_ != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-        return;
-    }
-
-    for (int i = 0; i < npes_; i++) {
-        for (int j = 0; j < transports_.num_transports(); j++) {
-            bool is_p2p_transport = transports_.active_has_cap(j, i, NVSHMEM_TRANSPORT_CAP_MAP);
-            if (!is_p2p_transport) {
-                continue;
-            }
-
-            for (size_t k = 0; k < table_->num_p2p_handle_sets(); k++) {
-                close(load_posix_fd(table_->get_p2p_mem_handle(k, i, j)));
-            }
-        }
-    }
 }
 
 int nvshmemi_heap_registration::teardown() {
@@ -163,315 +284,236 @@ int nvshmemi_heap_registration::node_local_index(int pe_id) const {
     return local_index;
 }
 
-int nvshmemi_heap_registration::map_p2p_chunk(nvshmem_mem_handle_t *handle, void *buf,
-                                              size_t size) {
-    int status = NVSHMEMX_SUCCESS;
-    std::vector<nvshmem_mem_handle_t> local_handles(transports_.num_transports());
-    std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
-
-    /* Iterate over P2P transports. */
-    for (int i = 0; i < transports_.num_transports(); i++) {
-        if (!transports_.active_has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) {
-            continue;
-        }
-        status = export_p2p_memory(&local_handles[i], buf, size, handle);
-        if (status != NVSHMEMX_SUCCESS) {
-            break;
+bool nvshmemi_heap_registration::has_p2p_mapping() const {
+    for (int pe = 0; pe < npes_; pe++) {
+        for (int transport = 0; transport < transports_.num_transports(); transport++) {
+            if (transports_.active_has_cap(transport, pe, NVSHMEM_TRANSPORT_CAP_MAP)) {
+                return true;
+            }
         }
     }
-    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "export_memory failed for p2p on at least one PE\n");
-
-    /* Allgather memory handles for all PEs. */
-    status = nvshmemi_boot_handle.allgather(
-        (void *)local_handles.data(), (void *)gathered.data(),
-        sizeof(nvshmem_mem_handle_t) * transports_.num_transports(), &nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "allgather of p2p mem handles failed\n");
-
-    /* Exchange send/receive memory handles for P2P-connected PEs. */
-    status = exchange_p2p_memory_handle(&local_handles[0], gathered.data());
-    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "exchange_p2p_memory_handle failed\n");
-
-    /* Map handles for all mapping-capable transports. */
-    status = map_p2p_range(buf, size, gathered);
-    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "map_p2p_range failed on at least one PE\n");
-
-    table_->push_p2p_mem_handles(std::move(gathered));
-
-out:
-    return status;
+    return false;
 }
 
-int nvshmemi_heap_registration::map_p2p_range(void *buf, size_t size,
-                                              std::vector<nvshmem_mem_handle_t> &gathered_handles) {
-    nvshmemi_mem_p2p_transport &p2ptran = p2p_transport();
-    int status = NVSHMEMX_SUCCESS;
-    int i = (mype_ + 1) % npes_;
-    while (i != mype_) {
-        for (int j = 0; j < transports_.num_transports(); j++) {
-            if (!transports_.active_between_has_cap(mype_, i, npes_, j,
-                                                    NVSHMEM_TRANSPORT_CAP_MAP)) {
-                continue;
-            }
-            INFO(NVSHMEM_MEM, "Mapping Buf: %p Size: %zu PE ID: %d, P2P Transport Idx: %d\n", buf,
-                 size, i, j);
-            nvshmem_mem_handle_t *in_handle =
-                &gathered_handles[i * transports_.num_transports() + j];
-            status = map_p2p_memory(i, in_handle, buf, size);
-            if (status) {
-                if (status != NVSHMEMX_ERROR_INVALID_VALUE) {
-                    return status;
-                }
-                /* Map failed: remove all map-related capabilities. */
-                transports_.clear_cap(j, i,
-                                      NVSHMEM_TRANSPORT_CAP_MAP | NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST |
-                                          NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD |
-                                          NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS);
-                status = NVSHMEMX_SUCCESS;
-                peer_heap_base_p2p_[i] = nullptr;
-                continue;
-            }
-
-            p2ptran.print_mem_handle(in_handle, mype_);
-            INFO(NVSHMEM_INIT, "[%d] cuIpcOpenMemHandle tobuf %p", mype_, peer_heap_base_p2p_[i]);
-            break;
-        }
-
-        i = (i + 1) % npes_;
-    }
-
-    return status;
-}
-
-int nvshmemi_heap_registration::map_p2p_memory(int pe_id, nvshmem_mem_handle_t *in_handle,
-                                               void *buf, size_t size) {
-    switch (policy_) {
-        case nvshmemi_heap_registration_policy::DYNAMIC_VMM: {
-            CUdevice gpu_device_id;
-            int status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT("cuCtxGetDevice failed\n");
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-
-            CUmemGenericAllocationHandle peer_handle;
-            if (effective_handle_type_ == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-                const int fd = load_posix_fd(*in_handle);
-                status =
-                    CUPFN(nvshmemi_cuda_syms,
-                          cuMemImportFromShareableHandle(
-                              &peer_handle, reinterpret_cast<void *>(static_cast<uintptr_t>(fd)),
-                              effective_handle_type_));
-            } else {
-                status = CUPFN(
-                    nvshmemi_cuda_syms,
-                    cuMemImportFromShareableHandle(
-                        &peer_handle, reinterpret_cast<void *>(in_handle), effective_handle_type_));
-            }
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT(
-                    "cuMemImportFromShareableHandle failed state->device_id : %d \n",
-                    gpu_device_id);
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-
-            void *buf_map = reinterpret_cast<void *>(
-                static_cast<char *>(buf) - static_cast<char *>(geometry_.heap_base) +
-                static_cast<char *>(peer_heap_base_p2p_[pe_id]));
-            INFO(NVSHMEM_MEM,
-                 "calling cuMemMap on buf: %p size: %zu heap_base: %p "
-                 "peer_heap_base_p2p[%d]: %p\n",
-                 buf, size, geometry_.heap_base, pe_id, peer_heap_base_p2p_[pe_id]);
-
-            const auto buf_map_device_ptr =
-                static_cast<CUdeviceptr>(reinterpret_cast<uintptr_t>(buf_map));
-            status =
-                CUPFN(nvshmemi_cuda_syms, cuMemMap(buf_map_device_ptr, size, 0, peer_handle, 0));
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT("cuMemMap failed to map %zu bytes handle at address: %p\n",
-                                     size, buf_map);
-                (void)CUPFN(nvshmemi_cuda_syms, cuMemRelease(peer_handle));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-
-            CUmemAccessDesc access = {};
-            access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-            access.location.id = gpu_device_id;
-            access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-
-            status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(peer_handle));
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT("cuMemRelease failed \n");
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-
-            status =
-                CUPFN(nvshmemi_cuda_syms, cuMemSetAccess(buf_map_device_ptr, size, &access, 1));
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT("cuMemSetAccess failed \n");
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-            return NVSHMEMX_SUCCESS;
-        }
-        case nvshmemi_heap_registration_policy::STATIC_VIDMEM_FULL_HEAP: {
-            auto *ipc_handle = reinterpret_cast<cudaIpcMemHandle_t *>(in_handle);
-            const cudaError_t cuda_status = cudaIpcOpenMemHandle(
-                &peer_heap_base_p2p_[pe_id], *ipc_handle, cudaIpcMemLazyEnablePeerAccess);
-            if (cuda_status != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("cudaIpcOpenMemHandle failed with error %d (%s) \n",
-                                     cuda_status, cudaGetErrorString(cuda_status));
-                int status =
-                    consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcOpenMemHandle");
-                if (status != NVSHMEMX_SUCCESS) {
-                    return status;
-                }
-                return NVSHMEMX_ERROR_INVALID_VALUE;
-            }
-            return NVSHMEMX_SUCCESS;
-        }
-        case nvshmemi_heap_registration_policy::STATIC_SYSMEM_FULL_HEAP:
-            if (!is_node_local_pe(pe_id)) {
-                return NVSHMEMX_ERROR_INVALID_VALUE;
-            }
-            peer_heap_base_p2p_[mype_] = geometry_.heap_base;
-            peer_heap_base_p2p_[pe_id] = static_cast<char *>(geometry_.global_heap_base) +
-                                         node_local_index(pe_id) * geometry_.logical_heap_size;
-            return NVSHMEMX_SUCCESS;
-    }
-
-    return NVSHMEMX_ERROR_INTERNAL;
-}
-
-int nvshmemi_heap_registration::exchange_p2p_memory_handle(nvshmem_mem_handle_t *local_handle,
-                                                           nvshmem_mem_handle_t *recv_handles) {
-    /* POSIX handles are exchanged for intra-node GPU communication. */
-    if (policy_ != nvshmemi_heap_registration_policy::DYNAMIC_VMM ||
-        effective_handle_type_ != CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+int nvshmemi_heap_registration::map_dynamic_p2p_chunk(CUmemGenericAllocationHandle handle,
+                                                      void *buf, size_t size) {
+    if (!has_p2p_mapping()) {
         return NVSHMEMX_SUCCESS;
     }
 
-    int status = NVSHMEMX_SUCCESS;
-    ipcHandle *myIpcHandle = nullptr;
-    std::map<pid_t, ipcHandle *> recvIpcHandles;
-    pid_t pid = getpid();
-    const auto p2p_processes = p2p_transport().get_proc_map();
+    switch (effective_handle_type_) {
+        case CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR:
+            return map_posix_p2p_chunk(handle, buf, size);
+        case CU_MEM_HANDLE_TYPE_FABRIC:
+            return map_fabric_p2p_chunk(handle, buf, size);
+        default:
+            NVSHMEMI_ERROR_PRINT("Unsupported P2P VMM handle type: %d\n", effective_handle_type_);
+            return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+}
 
-    NVSHMEMI_IPC_CHECK(ipcOpenSocket(myIpcHandle, pid, pid));
-    /**
-     * myIpcHandle PE0: /tmp/socket-100-100
-     * myIpcHandle PE1: /tmp/socket-101-101
-     *
-     * recvIpcHandle PE0: /tmp/socket-101-100
-     * recvIpcHandle PE1: /tmp/socket-100-101
-     *
-     * sendFd PE0: myIpcHandle from 100 to 101
-     * sendFd PE1: myIpcHandle from 101 to 100
-     */
+int nvshmemi_heap_registration::map_posix_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf,
+                                                    size_t size) {
+    int raw_fd{-1};
+    int status = CUPFN(
+        nvshmemi_cuda_syms,
+        cuMemExportToShareableHandle(&raw_fd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+    UniqueFd local_fd{};
+    if (status != CUDA_SUCCESS) {
+        status = NVSHMEMX_ERROR_INTERNAL;
+    } else {
+        local_fd = UniqueFd{raw_fd};
+    }
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("POSIX FD export failed on at least one PE\n");
+        return status;
+    }
 
-    /* Open all sockets. */
-    for (const auto &entry : p2p_processes) {
-        pid_t sending_process = entry.first;
-        if (pid == sending_process) {
-            continue;
+    std::map<int, UniqueFd> peer_fds;
+    status = exchange_posix_fds(local_fd, p2p_transport().get_proc_map(), &peer_fds);
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("POSIX FD exchange failed on at least one PE\n");
+        return status;
+    }
+
+    status = map_p2p_peers(mype_, npes_, transports_, peer_heap_base_p2p_, [&](int pe) -> int {
+        auto it = peer_fds.find(pe);
+        if (it == peer_fds.end()) {
+            NVSHMEMI_ERROR_PRINT("Missing POSIX FD for PE %d\n", pe);
+            return NVSHMEMX_ERROR_INTERNAL;
         }
+        UniqueFd fd{std::move(it->second)};
+        peer_fds.erase(it);
 
-        ipcHandle *recvIpcHandle = nullptr;
-        NVSHMEMI_IPC_CHECK(ipcOpenSocket(recvIpcHandle, sending_process, pid));
-        recvIpcHandles[sending_process] = recvIpcHandle;
-    }
-
-    /* Wait for all processes to open their sockets. */
-    status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, close_sockets,
-                          "bootstrap barrier failed before FD exchange\n");
-
-    /* Send all FDs. */
-    for (const auto &entry : p2p_processes) {
-        pid_t receiving_process = entry.first;
-        if (pid == receiving_process) {
-            continue;
+        CUmemGenericAllocationHandle peer_handle{};
+        int import_status =
+            CUPFN(nvshmemi_cuda_syms,
+                  cuMemImportFromShareableHandle(
+                      &peer_handle, reinterpret_cast<void *>(static_cast<uintptr_t>(fd.get())),
+                      CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+        if (import_status != CUDA_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT("cuMemImportFromShareableHandle failed for PE %d\n", pe);
+            return NVSHMEMX_ERROR_INTERNAL;
         }
-
-        NVSHMEMI_IPC_CHECK(
-            ipcSendFd(myIpcHandle, load_posix_fd(*local_handle), pid, receiving_process));
-    }
-
-    /* Receive all FDs. */
-    for (const auto &[sending_process, pe] : p2p_processes) {
-        if (pid == sending_process) {
-            continue;
-        }
-
-        int received_fd;
-        NVSHMEMI_IPC_CHECK(ipcRecvFd(recvIpcHandles[sending_process], &received_fd));
-        store_posix_fd(&recv_handles[pe * transports_.num_transports()], received_fd);
-    }
-
-    status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
-close_sockets:
-    /* Close all sockets after the exchange or an early barrier failure. */
-    NVSHMEMI_IPC_CHECK(ipcCloseSocket(myIpcHandle));
-    for (const auto &entry : recvIpcHandles) {
-        NVSHMEMI_IPC_CHECK(ipcCloseSocket(entry.second));
-    }
-
+        return map_imported_p2p_memory(pe, peer_handle, buf, size);
+    });
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
     return status;
 }
 
-int nvshmemi_heap_registration::export_p2p_memory(nvshmem_mem_handle_t *out, void *buf, size_t size,
-                                                  nvshmem_mem_handle_t *vmm_handle) {
-    switch (policy_) {
-        case nvshmemi_heap_registration_policy::DYNAMIC_VMM: {
-            if (vmm_handle == nullptr) {
-                NVSHMEMI_ERROR_PRINT("cuMemExportToShareableHandle requires a VMM handle\n");
-                return NVSHMEMX_ERROR_INVALID_VALUE;
-            }
-
-            CUmemGenericAllocationHandle *handle_in =
-                reinterpret_cast<CUmemGenericAllocationHandle *>(vmm_handle);
-            INFO(NVSHMEM_MEM, "calling cuMemExportToShareableHandle on handle: %p", handle_in);
-            const int status = CUPFN(
-                nvshmemi_cuda_syms,
-                cuMemExportToShareableHandle((void *)out, *handle_in, effective_handle_type_, 0));
-            if (status != CUDA_SUCCESS) {
-                NVSHMEMI_ERROR_PRINT("cuMemExportToShareableHandle failed \n");
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-            return NVSHMEMX_SUCCESS;
-        }
-        case nvshmemi_heap_registration_policy::STATIC_VIDMEM_FULL_HEAP: {
-            auto *ipc_handle = reinterpret_cast<cudaIpcMemHandle_t *>(out);
-            assert(sizeof(cudaIpcMemHandle_t) <= NVSHMEM_MEM_HANDLE_SIZE);
-            INFO(NVSHMEM_MEM, "calling cuIpcGetMemHandle on buf: %p size: %zu", buf, size);
-            const cudaError_t cuda_status = cudaIpcGetMemHandle(ipc_handle, buf);
-            if (cuda_status != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("cudaIpcGetMemHandle failed with error %d (%s)\n", cuda_status,
-                                     cudaGetErrorString(cuda_status));
-                int status =
-                    consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcGetMemHandle");
-                if (status != NVSHMEMX_SUCCESS) {
-                    return status;
-                }
-                return NVSHMEMX_ERROR_INVALID_VALUE;
-            }
-            return NVSHMEMX_SUCCESS;
-        }
-        case nvshmemi_heap_registration_policy::STATIC_SYSMEM_FULL_HEAP:
-            /* No-op for sysmem: the entire heap is mapped to local PEs at allocation time. */
-            return NVSHMEMX_SUCCESS;
+int nvshmemi_heap_registration::map_fabric_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf,
+                                                     size_t size) {
+    CUmemFabricHandle local_handle = {};
+    int status =
+        CUPFN(nvshmemi_cuda_syms,
+              cuMemExportToShareableHandle(&local_handle, handle, CU_MEM_HANDLE_TYPE_FABRIC, 0));
+    if (status != CUDA_SUCCESS) {
+        status = NVSHMEMX_ERROR_INTERNAL;
+    }
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("CUDA Fabric handle export failed on at least one PE\n");
+        return status;
     }
 
-    return NVSHMEMX_ERROR_INTERNAL;
+    std::vector<CUmemFabricHandle> peer_handles(npes_);
+    status = nvshmemi_boot_handle.allgather(&local_handle, peer_handles.data(),
+                                            sizeof(local_handle), &nvshmemi_boot_handle);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("CUDA Fabric handle allgather failed\n");
+        return status;
+    }
+
+    status = map_p2p_peers(mype_, npes_, transports_, peer_heap_base_p2p_, [&](int pe) {
+        return map_fabric_p2p_memory(pe, peer_handles[pe], buf, size);
+    });
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    return status;
 }
 
-int nvshmemi_heap_registration::register_remote_chunk(nvshmem_mem_handle_t * /* handle */,
-                                                      void *buf, size_t size,
+int nvshmemi_heap_registration::map_static_vidmem_p2p_chunk(void *buf) {
+    if (!has_p2p_mapping()) {
+        return NVSHMEMX_SUCCESS;
+    }
+
+    cudaIpcMemHandle_t local_handle = {};
+    const cudaError_t cuda_status = cudaIpcGetMemHandle(&local_handle, buf);
+    int status = NVSHMEMX_SUCCESS;
+    if (cuda_status != cudaSuccess) {
+        NVSHMEMI_ERROR_PRINT("cudaIpcGetMemHandle failed with error %d (%s)\n", cuda_status,
+                             cudaGetErrorString(cuda_status));
+        status = consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcGetMemHandle");
+        if (status == NVSHMEMX_SUCCESS) {
+            status = NVSHMEMX_ERROR_INVALID_VALUE;
+        }
+    }
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
+    }
+
+    std::vector<cudaIpcMemHandle_t> peer_handles(npes_);
+    status = nvshmemi_boot_handle.allgather(&local_handle, peer_handles.data(),
+                                            sizeof(local_handle), &nvshmemi_boot_handle);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
+    }
+
+    status = map_p2p_peers(mype_, npes_, transports_, peer_heap_base_p2p_, [&](int pe) {
+        return map_static_vidmem_p2p_memory(pe, peer_handles[pe]);
+    });
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    return status;
+}
+
+int nvshmemi_heap_registration::map_static_sysmem_p2p_chunk() {
+    peer_heap_base_p2p_[mype_] = geometry_.heap_base;
+    int status = map_p2p_peers(mype_, npes_, transports_, peer_heap_base_p2p_,
+                               [&](int pe) { return map_static_sysmem_p2p_memory(pe); });
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    return status;
+}
+
+int nvshmemi_heap_registration::map_fabric_p2p_memory(int pe_id, CUmemFabricHandle handle,
+                                                      void *buf, size_t size) {
+    CUmemGenericAllocationHandle peer_handle{};
+    int status = CUPFN(nvshmemi_cuda_syms, cuMemImportFromShareableHandle(
+                                               &peer_handle, &handle, CU_MEM_HANDLE_TYPE_FABRIC));
+    if (status != CUDA_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("cuMemImportFromShareableHandle failed for PE %d\n", pe_id);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    return map_imported_p2p_memory(pe_id, peer_handle, buf, size);
+}
+
+int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
+                                                        CUmemGenericAllocationHandle handle,
+                                                        void *buf, size_t size) {
+    UniqueCudaAllocationHandle imported_handle{handle};
+    CUdevice gpu_device_id{};
+    int status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
+    if (status != CUDA_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("cuCtxGetDevice failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    void *buf_map = reinterpret_cast<void *>(static_cast<char *>(buf) -
+                                             static_cast<char *>(geometry_.heap_base) +
+                                             static_cast<char *>(peer_heap_base_p2p_[pe_id]));
+    const auto buf_map_device_ptr = static_cast<CUdeviceptr>(reinterpret_cast<uintptr_t>(buf_map));
+    status =
+        CUPFN(nvshmemi_cuda_syms, cuMemMap(buf_map_device_ptr, size, 0, imported_handle.get(), 0));
+    if (status != CUDA_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("cuMemMap failed to map %zu bytes at %p\n", size, buf_map);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    status = imported_handle.reset();
+    if (status != CUDA_SUCCESS) {
+        (void)CUPFN(nvshmemi_cuda_syms, cuMemUnmap(buf_map_device_ptr, size));
+        NVSHMEMI_ERROR_PRINT("cuMemRelease failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    CUmemAccessDesc access = {};
+    access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    access.location.id = gpu_device_id;
+    access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess(buf_map_device_ptr, size, &access, 1));
+    if (status != CUDA_SUCCESS) {
+        (void)CUPFN(nvshmemi_cuda_syms, cuMemUnmap(buf_map_device_ptr, size));
+        NVSHMEMI_ERROR_PRINT("cuMemSetAccess failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemi_heap_registration::map_static_vidmem_p2p_memory(int pe_id,
+                                                             const cudaIpcMemHandle_t &handle) {
+    const cudaError_t cuda_status =
+        cudaIpcOpenMemHandle(&peer_heap_base_p2p_[pe_id], handle, cudaIpcMemLazyEnablePeerAccess);
+    if (cuda_status == cudaSuccess) {
+        return NVSHMEMX_SUCCESS;
+    }
+
+    NVSHMEMI_ERROR_PRINT("cudaIpcOpenMemHandle failed with error %d (%s)\n", cuda_status,
+                         cudaGetErrorString(cuda_status));
+    int status = consume_cuda_runtime_error_for_failed_ipc(cuda_status, "cudaIpcOpenMemHandle");
+    return status == NVSHMEMX_SUCCESS ? NVSHMEMX_ERROR_INVALID_VALUE : status;
+}
+
+int nvshmemi_heap_registration::map_static_sysmem_p2p_memory(int pe_id) {
+    if (!is_node_local_pe(pe_id)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    peer_heap_base_p2p_[pe_id] = static_cast<char *>(geometry_.global_heap_base) +
+                                 node_local_index(pe_id) * geometry_.logical_heap_size;
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
                                                       nvshmemi_allocation_kind alloc_kind) {
     int status = NVSHMEMX_SUCCESS;
     bool local_handles_owned = true;
@@ -579,8 +621,9 @@ void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
     }
 }
 
-int nvshmemi_heap_registration::register_vmm_chunk(nvshmem_mem_handle_t *handle, off_t mc_offset,
-                                                   size_t size, nvshmemi_allocation_kind alloc_kind,
+int nvshmemi_heap_registration::register_vmm_chunk(CUmemGenericAllocationHandle handle,
+                                                   off_t mc_offset, size_t size,
+                                                   nvshmemi_allocation_kind alloc_kind,
                                                    std::optional<size_t> mmap_allocated_range) {
     int status = NVSHMEMX_SUCCESS;
     void *buf = (char *)geometry_.heap_base + mc_offset;
@@ -590,14 +633,14 @@ int nvshmemi_heap_registration::register_vmm_chunk(nvshmem_mem_handle_t *handle,
     size_t remaining = size;
 
     /* Register the entire range in one operation for P2P. */
-    status = map_p2p_chunk(handle, buf, size);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "map_p2p_chunk failed\n");
+    status = map_dynamic_p2p_chunk(handle, buf, size);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "map_dynamic_p2p_chunk failed\n");
 
     /* Remote transports limit each registration to NVSHMEMI_MAX_HANDLE_LENGTH. */
     do {
         size_t reg_size = remaining > adjusted_max_handle_len ? adjusted_max_handle_len : remaining;
         assert(reg_size < NVSHMEMI_DMA_BUF_MAX_LENGTH);
-        status = register_remote_chunk(handle, buf_start, reg_size, alloc_kind);
+        status = register_remote_chunk(buf_start, reg_size, alloc_kind);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "register_remote_chunk failed\n");
         remaining -= reg_size;
@@ -716,12 +759,15 @@ int nvshmemi_heap_registration::register_static_heap() {
 
     assert(buf != nullptr);
 
-    /* Register the entire heap in one operation for P2P. */
-    status = map_p2p_chunk(nullptr, buf, size);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "map_p2p_chunk on heap static \n");
+    if (policy_ == nvshmemi_heap_registration_policy::STATIC_VIDMEM_FULL_HEAP) {
+        status = map_static_vidmem_p2p_chunk(buf);
+    } else {
+        status = map_static_sysmem_p2p_chunk();
+    }
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "static heap P2P mapping failed\n");
 
     if (nvshmemi_device_state.enable_rail_opt == 1) {
-        status = register_remote_chunk(nullptr, buf, size, nvshmemi_allocation_kind::INTERNAL);
+        status = register_remote_chunk(buf, size, nvshmemi_allocation_kind::INTERNAL);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "register_remote_chunk on heap static \n");
     } else {
@@ -731,7 +777,7 @@ int nvshmemi_heap_registration::register_static_heap() {
             registration_size =
                 remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
             assert(registration_size < NVSHMEMI_DMA_BUF_MAX_LENGTH);
-            status = register_remote_chunk(nullptr, buf_start, registration_size,
+            status = register_remote_chunk(buf_start, registration_size,
                                            nvshmemi_allocation_kind::INTERNAL);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "register_remote_chunk on heap static \n");

@@ -121,7 +121,3 @@ size_t nvshmemi_handle_table::get_addr_offset(void *addr) {
     assert(addr_value >= entry_start && addr_value - entry_start < entry.size);
     return static_cast<size_t>(addr_value - entry_start);
 }
-
-void nvshmemi_handle_table::push_p2p_mem_handles(std::vector<nvshmem_mem_handle_t> handles) {
-    p2p_mem_handles_.push_back(std::move(handles));
-}

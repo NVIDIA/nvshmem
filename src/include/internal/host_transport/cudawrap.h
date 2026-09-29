@@ -13,6 +13,10 @@
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED 128
 #define CU_MEM_HANDLE_TYPE_FABRIC (CUmemAllocationHandleType)0x8
 #define CU_CTX_SYNC_MEMOPS 0x80
+typedef struct CUmemFabricHandle_st {
+    unsigned char data[CU_IPC_HANDLE_SIZE];
+} CUmemFabricHandle_v1;
+typedef CUmemFabricHandle_v1 CUmemFabricHandle;
 #endif
 
 #if CUDART_VERSION < 12020

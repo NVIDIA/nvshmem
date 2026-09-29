@@ -1526,8 +1526,7 @@ observer_done:
 
     assert(heap_registration_ != nullptr);
     status = heap_registration_->register_vmm_chunk(
-        (nvshmem_mem_handle_t *)&cumem_handle, (off_t)(heap_offset), size,
-        nvshmemi_allocation_kind::INTERNAL, std::nullopt);
+        cumem_handle, (off_t)(heap_offset), size, nvshmemi_allocation_kind::INTERNAL, std::nullopt);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_vmm_chunk failed\n");
 
     cumem_handles_.push_back(
@@ -1867,9 +1866,9 @@ observer_done:
                           "heap observer chunk map failed on at least one PE\n");
 
     assert(heap_registration_ != nullptr);
-    status = heap_registration_->register_vmm_chunk(
-        (nvshmem_mem_handle_t *)&userAllocHandle, (off_t)(heap_offset), size,
-        nvshmemi_allocation_kind::EXTERNAL, get_mmap_allocated_range());
+    status = heap_registration_->register_vmm_chunk(userAllocHandle, (off_t)(heap_offset), size,
+                                                    nvshmemi_allocation_kind::EXTERNAL,
+                                                    get_mmap_allocated_range());
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_vmm_chunk failed\n");
 
     status = nvshmemi_boot_handle.barrier(

@@ -85,16 +85,6 @@ class nvshmemi_handle_table {
     nvshmemi_dense_mem_handle_registry &internal_reg() { return internal_; }
     nvshmemi_sparse_mem_handle_registry &mmap_reg() { return mmap_; }
 
-    void push_p2p_mem_handles(std::vector<nvshmem_mem_handle_t> handles);
-    const nvshmem_mem_handle_t &get_p2p_mem_handle(size_t set_idx, int pe,
-                                                   int transport_idx) const {
-        assert(set_idx < p2p_mem_handles_.size());
-        size_t sub_idx = static_cast<size_t>(pe) * num_transports_ + transport_idx;
-        assert(sub_idx < p2p_mem_handles_[set_idx].size());
-        return p2p_mem_handles_[set_idx][sub_idx];
-    }
-    size_t num_p2p_handle_sets() const { return p2p_mem_handles_.size(); }
-
    private:
     /* Heap geometry */
     void *heap_base_;
@@ -111,9 +101,6 @@ class nvshmemi_handle_table {
     nvshmemi_dense_mem_handle_registry internal_;
     /* mmap allocations are indexed by address. */
     nvshmemi_sparse_mem_handle_registry mmap_;
-
-    /* P2P handles */
-    std::vector<std::vector<nvshmem_mem_handle_t>> p2p_mem_handles_;
 };
 
 #endif /* NVSHMEMI_HANDLE_TABLE_HPP */
