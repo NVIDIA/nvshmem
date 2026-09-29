@@ -1183,6 +1183,7 @@ set(TRANSPORT_EXPORTS
     libfabric/libfabric.h
     staged/staged.cpp
     staged/staged_config.h
+    staged/staged_control.h
     ucx/ucx.cpp
     ucx/ucx.h
 )
