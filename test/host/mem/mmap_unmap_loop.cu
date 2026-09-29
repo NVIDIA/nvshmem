@@ -252,6 +252,9 @@ class UserBuffer {
     }
 
     int register_symmetric() { return symmetric_mapping_.register_symmetric(ptr_, size_); }
+    int register_symmetric_at_preferred(void *preferred_addr) {
+        return symmetric_mapping_.register_at_preferred(ptr_, size_, preferred_addr);
+    }
     int unregister_symmetric() { return symmetric_mapping_.unregister(); }
 
     void *user_ptr() const { return ptr_; }
@@ -287,6 +290,98 @@ class UserBuffer {
     bool mapped_ = false;
     SymmetricMapping symmetric_mapping_;
 };
+
+int test_physical_allocation_reclaimed(const CUmemAllocationProp &prop, size_t size,
+                                       unsigned int iterations, int mype) {
+    size_t free_before{0};
+    size_t free_after{0};
+    size_t total{0};
+    void *preferred_addr{nullptr};
+
+    auto run_iteration = [&]() -> int {
+        {
+            UserBuffer buffer{};
+            int status{buffer.allocate(size, prop)};
+            if (status) {
+                return status;
+            }
+
+            if (preferred_addr == nullptr) {
+                status = buffer.register_symmetric();
+            } else {
+                status = buffer.register_symmetric_at_preferred(preferred_addr);
+            }
+            if (status) {
+                ERROR_PRINT("symmetric registration failed during reclaim test \n");
+                return status;
+            }
+
+            if (preferred_addr == nullptr) {
+                preferred_addr = buffer.mapped_ptr();
+            } else if (buffer.mapped_ptr() != preferred_addr) {
+                ERROR_PRINT("preferred symmetric address changed from %p to %p \n", preferred_addr,
+                            buffer.mapped_ptr());
+                return -1;
+            }
+
+            status = buffer.unregister_symmetric();
+            if (status) {
+                ERROR_PRINT("symmetric unregistration failed during reclaim test \n");
+                return status;
+            }
+        }
+
+        return 0;
+    };
+
+    int status{run_iteration()};
+    if (status) {
+        return status;
+    }
+
+    nvshmem_barrier_all();
+    status = check_cuda_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    if (status) {
+        return status;
+    }
+    status = check_cuda_runtime(cudaMemGetInfo(&free_before, &total), "cudaMemGetInfo");
+    if (status) {
+        return status;
+    }
+
+    for (unsigned int i{0}; i < iterations; ++i) {
+        status = run_iteration();
+        if (status) {
+            return status;
+        }
+
+        nvshmem_barrier_all();
+        status = check_cuda_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        if (status) {
+            return status;
+        }
+        status = check_cuda_runtime(cudaMemGetInfo(&free_after, &total), "cudaMemGetInfo");
+        if (status) {
+            return status;
+        }
+
+        size_t unreclaimed{free_before > free_after ? free_before - free_after : 0};
+        printf(
+            "PE %d reclaim iteration %u: baseline free=%zu MiB, current free=%zu MiB, "
+            "unreclaimed=%zu MiB\n",
+            mype, i + 1, free_before / (1024 * 1024), free_after / (1024 * 1024),
+            unreclaimed / (1024 * 1024));
+        fflush(stdout);
+
+        if (free_after < free_before) {
+            ERROR_PRINT("%zu MiB remains allocated after reclaim iteration %u\n",
+                        unreclaimed / (1024 * 1024), i + 1);
+            return -1;
+        }
+    }
+
+    return 0;
+}
 
 int check_collective_errors(uint64_t *errs) {
     int status =
@@ -420,6 +515,12 @@ int main(int argc, char **argv) {
     } else if (_mem_handle_type == MEM_TYPE_POSIX_FD) {
         prop.requestedHandleTypes =
             (CUmemAllocationHandleType)(CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
+    }
+
+    size_t reclaim_test_size = ((_max_size - 1) / granularity + 1) * granularity;
+    status = test_physical_allocation_reclaimed(prop, reclaim_test_size, _repeat, mype);
+    if (status) {
+        return status;
     }
 
     std::vector<UserBuffer> buffers(iter);
