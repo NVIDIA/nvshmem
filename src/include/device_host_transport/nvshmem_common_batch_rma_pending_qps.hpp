@@ -1,8 +1,0 @@
-/*
- * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
- */
-#pragma once
-
-/* Compatibility forwarding header. */
-#include "non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp"

@@ -1059,42 +1059,6 @@ set(INC_EXPORTS
     nvshmemx.h
 )
 
-# Keep the former source and installed include paths working for one release.
-# In-tree code uses only the canonical language-contract directories above.
-set(NVSHMEM_COMPAT_HEADERS
-    device/logical_endpoint_device.cuh
-    device/nvshmemx_collective_launch_apis.h
-    device/tile/nvshmemx_tile_api.hpp
-    device_host/logical_endpoint_types.h
-    device_host/nvshmem_api_constants.h
-    device_host/nvshmem_api_macros.h
-    device_host/nvshmem_common.cuh
-    device_host/nvshmem_proxy_channel.h
-    device_host/nvshmem_tensor.h
-    device_host/nvshmem_types.h
-    device_host/nvshmem_version.h
-    device_host/nvshmemi_extern_constant.h
-    device_host/nvshmemx_status.h
-    device_host/nvshmemx_uniqueid.h
-    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
-    device_host_transport/nvshmem_common_gpunetio.h
-    device_host_transport/nvshmem_common_ibgda.h
-    device_host_transport/nvshmem_common_transport.h
-    device_host_transport/transport_constants.h
-    host/nvshmem_api.h
-    host/nvshmem_coll_api.h
-    host/nvshmem_macros.h
-    host/nvshmemx_api.h
-    host/nvshmemx_coll_api.h
-    non_abi/device_host/nvshmemi_runtime_types.h
-    non_abi/nvshmem_build_options.h
-    non_abi/nvshmemi_build_metadata.h
-    non_abi/nvshmemi_cccl_compat.h
-    non_abi/nvshmemi_error_macros.h
-    non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemi_region_types.h
-)
-list(APPEND INC_EXPORTS ${NVSHMEM_COMPAT_HEADERS})
 
 foreach(INC ${INC_EXPORTS})
   configure_file(include/${INC} ${CMAKE_CURRENT_BINARY_DIR}/include/${INC} COPYONLY)

@@ -18,37 +18,6 @@ function(_nvshmem_make_header_probes
   set(${output_variable} "${probe_sources}" PARENT_SCOPE)
 endfunction()
 
-function(_nvshmem_find_forwarding_headers c_output cxx_output cuda_output include_root)
-  file(GLOB_RECURSE header_candidates LIST_DIRECTORIES false CONFIGURE_DEPENDS
-       "${include_root}/*.cuh"
-       "${include_root}/*.h"
-       "${include_root}/*.hpp")
-
-  set(c_forwarding_headers)
-  set(cxx_forwarding_headers)
-  set(cuda_forwarding_headers)
-  foreach(header IN LISTS header_candidates)
-    file(READ "${header}" header_contents)
-    if(NOT header_contents MATCHES "Compatibility forwarding header")
-      continue()
-    endif()
-
-    if(header_contents MATCHES "#include.*(c_api|non_abi/c)/")
-      list(APPEND c_forwarding_headers "${header}")
-    elseif(header_contents MATCHES "#include.*cpp_api/")
-      list(APPEND cxx_forwarding_headers "${header}")
-    elseif(header_contents MATCHES "#include.*(device|non_abi/device)/")
-      list(APPEND cuda_forwarding_headers "${header}")
-    else()
-      message(FATAL_ERROR "Cannot determine the language contract for forwarding header ${header}")
-    endif()
-  endforeach()
-
-  set(${c_output} "${c_forwarding_headers}" PARENT_SCOPE)
-  set(${cxx_output} "${cxx_forwarding_headers}" PARENT_SCOPE)
-  set(${cuda_output} "${cuda_forwarding_headers}" PARENT_SCOPE)
-endfunction()
-
 function(nvshmem_add_header_contract_targets target_prefix include_root)
   file(GLOB_RECURSE internal_c_headers LIST_DIRECTORIES false CONFIGURE_DEPENDS
        "${include_root}/non_abi/c/*.h")
@@ -70,27 +39,16 @@ function(nvshmem_add_header_contract_targets target_prefix include_root)
     message(FATAL_ERROR "Header contract directories are incomplete under ${include_root}")
   endif()
 
-  _nvshmem_find_forwarding_headers(
-    c_forwarding_headers cxx_forwarding_headers cuda_forwarding_headers "${include_root}")
-
-  list(REMOVE_ITEM public_device_headers
-       ${c_forwarding_headers}
-       ${cxx_forwarding_headers}
-       ${cuda_forwarding_headers})
-
   set(c_headers
-      ${c_forwarding_headers}
       ${internal_c_headers}
       ${public_c_headers}
       "${include_root}/nvshmem_host.h")
   set(cxx_headers
       ${c_headers}
-      ${cxx_forwarding_headers}
       ${public_cpp_headers}
       "${include_root}/nvshmem.h"
       "${include_root}/nvshmemx.h")
   set(cuda_headers
-      ${cuda_forwarding_headers}
       ${internal_device_headers}
       ${public_device_headers})
 
