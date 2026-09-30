@@ -12,6 +12,7 @@
 #include <cuda_runtime.h>
 #include <getopt.h>
 #include "utils.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
 
 #define MAX_ITERS 10
 #define MAX_SKIP 10
@@ -24,7 +25,7 @@
  */
 #define CFT_ATOMIC_HANDLE_SLOTS_PER_WARP 2
 #define MAX_CFT_ATOMIC_THREADS \
-    ((NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / CFT_ATOMIC_HANDLE_SLOTS_PER_WARP) * NVSHMEMI_WARP_SIZE)
+    ((NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / CFT_ATOMIC_HANDLE_SLOTS_PER_WARP) * kWarpSize)
 
 #define DEFINE_ATOMIC_BW_CALL_KERNEL(AMO)                                                \
     void test_atomic_##AMO##_bw_cubin(int num_blocks, int num_tpb, void **arglist,       \
