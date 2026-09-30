@@ -22,6 +22,14 @@
 #include "device/nvshmemx_defines.h"
 #include "device/nvshmemx_coll_defines.cuh"
 #include "device/tile/nvshmemx_tile_api_defines.cuh"
+#if defined(NVSHMEMX_ENABLE_TRANSPORT_POLICY)
+#if !NVSHMEMX_TRANSPORT_POLICY_AVAILABLE
+#error \
+    "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
+#else
+#include "non_abi/device/transport_specific/types.cuh"
+#endif
+#endif
 #endif
 
 #endif

@@ -43,6 +43,41 @@ nvshmem_add_test(tma_smem_concurrent.cu)
 if(NVSHMEM_CFT_HANDLES_SUPPORT)
     nvshmem_add_test(putmem_signal_counted.cu)
 endif()
+
+if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
+    if(SubBuild)
+        set(_transport_specific_package_include "${CMAKE_BINARY_DIR}/src/include")
+    else()
+        set(_transport_specific_package_include "${NVSHMEM_PREFIX}/include")
+    endif()
+
+    # The contract recompiles its fixtures only when an input changes, so it can
+    # run in every build without slowing incremental builds.
+    set(_transport_specific_contract_stamp
+        "${CMAKE_CURRENT_BINARY_DIR}/transport_specific_compile_contract.stamp")
+    file(GLOB _transport_specific_preview_headers CONFIGURE_DEPENDS
+         "${_transport_specific_package_include}/non_abi/device/transport_specific/*.cuh")
+    add_custom_command(
+        OUTPUT "${_transport_specific_contract_stamp}"
+        COMMAND ${CMAKE_COMMAND}
+            "-DCUDA_COMPILER=${CMAKE_CUDA_COMPILER}"
+            "-DCUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}"
+            "-DPACKAGE_INCLUDE_DIR=${_transport_specific_package_include}"
+            "-DTEST_COMMON_INCLUDE_DIR=${NVSHMEM_TEST_TLD}/common"
+            "-DCONTRACT_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cu"
+            "-DCONTRACT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/transport_specific_compile_contract"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cmake
+        COMMAND ${CMAKE_COMMAND} -E touch "${_transport_specific_contract_stamp}"
+        DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cmake
+            ${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cu
+            ${_transport_specific_preview_headers}
+            "${_transport_specific_package_include}/nvshmemx.h"
+        COMMENT "Checking transport-specific preview compile contracts"
+        VERBATIM)
+    add_custom_target(device_transport_specific_compile_contract ALL
+        DEPENDS "${_transport_specific_contract_stamp}")
+endif()
 nvshmem_add_test(wait.cu)
 
 if(NVSHMEM_BUILD_BITCODE_LIBRARY)
