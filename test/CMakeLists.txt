@@ -133,19 +133,8 @@ foreach(ARCH ${CMAKE_CUDA_ARCHITECTURES})
 endforeach()
 mark_as_advanced(NVCC_GENCODE CMAKE_CUDA_ARCHITECTURES_UNDEFINED CUDA_ARCHITECTURES_UNDEFINED)
 
-if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  set(NVSHMEM_CLANG_ARCH "sm_90")
-  set(NVSHMEM_PTX_ARCH "ptx82")
-else()
-  set(NVSHMEM_CLANG_ARCH "sm_90")
-  set(NVSHMEM_PTX_ARCH "ptx86")
-endif()
-
-if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
-  list(GET CMAKE_CUDA_ARCHITECTURES 0 NVSHMEM_CLANG_ARCH)
-  string(REGEX REPLACE "-(real|virtual)$" "" NVSHMEM_CLANG_ARCH "${NVSHMEM_CLANG_ARCH}")
-  set(NVSHMEM_CLANG_ARCH "sm_${NVSHMEM_CLANG_ARCH}")
-endif()
+include(NVSHMEMDeviceCubin)
+nvshmem_set_cubin_architectures()
 
 if (NOT SubBuild)
   configure_file(${NVSHMEM_TEST_TLD}/../src/include/non_abi/device/pt-to-pt/transfer_device.cuh.in
@@ -220,27 +209,23 @@ macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
   set(CUBIN_NAME "${NAME_}_ltoir.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_TEST_TLD}/common" "-I${NVSHMEM_TEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include")
   if (NOT SubBuild)
-    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
-    # Note: The -DNVSHMEM_HOSTLIB_ONLY macro name is a misnomer: it's used in the testing framework so the unmangled symbols will appear in the LTOIR cubin (just adds "extern c" to all the tests).
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND cuda::nvcc -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
-                              ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                      COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
-                      COMMAND rm ${NAME_}.ltoir
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_test_helper ${LTOIR_LIB_PATH})
+    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_LTOIR_ARCH}.ltoir)
+    set(LTOIR_EXTRA_DEPENDS nvshmem_test_helper ${LTOIR_LIB_PATH})
   else()
-    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND cuda::nvcc -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
-                              ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                      COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
-                      COMMAND rm ${NAME_}.ltoir
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
+    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_LTOIR_ARCH}.ltoir)
+    set(LTOIR_EXTRA_DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
   endif()
 
-  add_custom_target(${NAME_}_ltoir_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
+  nvshmem_add_ltoir_cubin(
+    TARGET ${NAME_}_ltoir_cubin
+    SOURCE ${DIR_}
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+    ARCHITECTURE ${NVSHMEM_LTOIR_ARCH}
+    CXX_STANDARD ${TEST_CXX_ARG}
+    LIBRARY ${LTOIR_LIB_PATH}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    INCLUDE_OPTIONS ${INCLUDE_DIRECTORIES}
+    DEPENDS ${LTOIR_EXTRA_DEPENDS})
 
   install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
