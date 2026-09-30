@@ -8,6 +8,26 @@
 
 set -euo pipefail
 
+if [ -n "${EVLOG_DIR:-}" ]; then
+    if ! source "$EVLOG_DIR/evlog.sh"; then
+        echo "ERROR: failed to source $EVLOG_DIR/evlog.sh" >&2
+        exit 1
+    fi
+    evlog_exec_start nvshmem4py_test
+fi
+
+# Combines evlog exec_done (below) with per-branch scratch cleanup (added by
+# the traps further down) -- bash keeps only the last EXIT trap, so both
+# concerns have to live in one function rather than separate `trap` calls.
+cleanup_and_log_exec_done() {
+    local _exit=$?
+    if [ -n "${test_workdir:-}" ]; then
+        rm -rf -- "$test_workdir"
+    fi
+    if [ -n "${EVLOG_DIR:-}" ]; then evlog_exec_done nvshmem4py_test "$_exit"; fi
+}
+trap cleanup_and_log_exec_done EXIT
+
 if [ "$#" -ne 2 ]; then
     echo "Usage: $0 CI_PROJECT_DIR TEST_SUITE" >&2
     exit 2
@@ -34,7 +54,6 @@ fi
 if [ "${NVSHMEM4PY_LOCAL_SCRATCH:-0}" = "1" ]; then
     scratch_base="${SLURM_TMPDIR:-/tmp}"
     test_workdir="$(mktemp -d "${scratch_base%/}/nvshmem4py-${SLURM_JOB_ID:-job}-XXXXXX")"
-    trap 'rm -rf -- "$test_workdir"' EXIT
     package_dir="$test_workdir/nvshmem_pkg"
     local_wheel_dir="$test_workdir/wheels"
     export VENV_DIR="$test_workdir/venv"
