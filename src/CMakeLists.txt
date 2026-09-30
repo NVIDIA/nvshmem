@@ -996,6 +996,7 @@ target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # Start header configuration and export
 configure_file(include/c_api/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/c_api/nvshmem_version.h @ONLY)
 configure_file(include/non_abi/c/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmemi_build_metadata.h @ONLY)
+set(NVSHMEMX_TRANSPORT_POLICY_AVAILABLE ${NVSHMEM_ENABLE_TRANSPORT_POLICY})
 configure_file(include/non_abi/c/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmem_build_options.h)
 
 set(INC_EXPORTS
@@ -1067,6 +1068,21 @@ set(INC_EXPORTS
     nvshmemx.h
 )
 
+
+# The preview header is part of a default-on package build, but applications
+# still have to define NVSHMEMX_ENABLE_TRANSPORT_POLICY themselves.
+set(NVSHMEM_TRANSPORT_POLICY_HEADERS
+    non_abi/device/transport_specific/types.cuh)
+if (NVSHMEM_ENABLE_TRANSPORT_POLICY)
+  list(APPEND INC_EXPORTS ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/non_abi/device/transport_specific")
+else()
+  # A reconfigure from ON to OFF must not leave preview headers in the staged
+  # include tree, which is installed wholesale below.
+  foreach(_preview_header ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
+    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/include/${_preview_header}")
+  endforeach()
+endif()
 
 foreach(INC ${INC_EXPORTS})
   configure_file(include/${INC} ${CMAKE_CURRENT_BINARY_DIR}/include/${INC} COPYONLY)
