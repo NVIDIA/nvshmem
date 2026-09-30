@@ -366,7 +366,7 @@ int nvshmemi_symmetric_heap::is_symmetric(T value) {
                           "allgather in symmetry check failed \n");
 
     for (const auto &t : scratch) {
-        status = (t == value);
+        status = (t != value);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_SYMMETRY, out, "symmetry check failed \n");
     }
 
