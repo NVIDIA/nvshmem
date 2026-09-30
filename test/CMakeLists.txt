@@ -133,7 +133,7 @@ foreach(ARCH ${CMAKE_CUDA_ARCHITECTURES})
 endforeach()
 mark_as_advanced(NVCC_GENCODE CMAKE_CUDA_ARCHITECTURES_UNDEFINED CUDA_ARCHITECTURES_UNDEFINED)
 
-include(NVSHMEMDeviceCubin)
+include(NVSHMEMLTOIRLibrary)
 nvshmem_set_cubin_architectures()
 
 if (NOT SubBuild)
@@ -216,7 +216,7 @@ macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
     set(LTOIR_EXTRA_DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
   endif()
 
-  nvshmem_add_ltoir_cubin(
+  nvshmem_add_ltoir_library(
     TARGET ${NAME_}_ltoir_cubin
     SOURCE ${DIR_}
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}

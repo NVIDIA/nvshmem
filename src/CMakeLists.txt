@@ -1339,7 +1339,7 @@ install(
     ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCUDAArchitectures.cmake
     ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCUDATools.cmake
     ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCxxStandard.cmake
-    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMDeviceCubin.cmake
+    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMLTOIRLibrary.cmake
   DESTINATION lib/cmake/nvshmem/modules
 )
 

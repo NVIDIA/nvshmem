@@ -7,8 +7,10 @@ function(nvshmem_set_cubin_architectures)
   set(clang_arch "sm_90")
   if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
     set(ptx_arch "ptx82")
-  else()
+  elseif(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13)
     set(ptx_arch "ptx86")
+  else()
+    message(FATAL_ERROR "Unsupported CUDA Toolkit version ${CUDAToolkit_VERSION}")
   endif()
 
   # LTOIR must use an architecture produced by NVCC; keep the Clang fallback for CUDA 12.
@@ -27,7 +29,7 @@ function(nvshmem_set_cubin_architectures)
   set(NVSHMEM_PTX_ARCH "${ptx_arch}" PARENT_SCOPE)
 endfunction()
 
-function(nvshmem_add_ltoir_cubin)
+function(nvshmem_add_ltoir_library)
   set(one_value_arguments
       ARCHITECTURE
       CXX_STANDARD
@@ -41,7 +43,7 @@ function(nvshmem_add_ltoir_cubin)
 
   foreach(required_argument IN LISTS one_value_arguments)
     if(NOT LTOIR_${required_argument})
-      message(FATAL_ERROR "nvshmem_add_ltoir_cubin requires ${required_argument}")
+      message(FATAL_ERROR "nvshmem_add_ltoir_library requires ${required_argument}")
     endif()
   endforeach()
 
