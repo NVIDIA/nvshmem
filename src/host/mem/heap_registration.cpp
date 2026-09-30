@@ -22,6 +22,8 @@
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/sockets.h"
 #include "internal/host/util.h"
+#include "internal/host/unique_cuda_handle.hpp"
+#include "internal/host/unique_cuda_mapping.hpp"
 #include "internal/host_transport/cudawrap.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
@@ -63,48 +65,6 @@ class UniqueFd {
     }
 
     std::optional<int> fd_;
-};
-
-class UniqueCudaAllocationHandle {
-   public:
-    explicit UniqueCudaAllocationHandle(CUmemGenericAllocationHandle handle) noexcept
-        : handle_{handle} {}
-    ~UniqueCudaAllocationHandle() { (void)reset(); }
-
-    UniqueCudaAllocationHandle(const UniqueCudaAllocationHandle &) = delete;
-    UniqueCudaAllocationHandle &operator=(const UniqueCudaAllocationHandle &) = delete;
-
-    UniqueCudaAllocationHandle(UniqueCudaAllocationHandle &&other) noexcept
-        : handle_{std::exchange(other.handle_, std::nullopt)} {}
-
-    UniqueCudaAllocationHandle &operator=(UniqueCudaAllocationHandle &&other) noexcept {
-        if (this != &other) {
-            UniqueCudaAllocationHandle moved{std::move(other)};
-            swap(moved);
-        }
-        return *this;
-    }
-
-    CUmemGenericAllocationHandle get() const noexcept {
-        assert(handle_.has_value());
-        return *handle_;
-    }
-
-    CUresult reset() noexcept {
-        if (!handle_) {
-            return CUDA_SUCCESS;
-        }
-        CUresult status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(*handle_));
-        if (status == CUDA_SUCCESS) {
-            handle_.reset();
-        }
-        return status;
-    }
-
-   private:
-    void swap(UniqueCudaAllocationHandle &other) noexcept { handle_.swap(other.handle_); }
-
-    std::optional<CUmemGenericAllocationHandle> handle_;
 };
 
 template <typename MapPeer>
@@ -169,7 +129,7 @@ int exchange_posix_fds(const UniqueFd &local_fd, const std::map<pid_t, int> &p2p
         if (peer_pid == pid) {
             continue;
         }
-        int received_fd{-1};
+        int received_fd = -1;
         NVSHMEMI_IPC_CHECK(ipcRecvFd(receive_sockets.at(peer_pid), &received_fd));
         peer_fds->emplace(pe, UniqueFd{received_fd});
     }
@@ -314,7 +274,7 @@ int nvshmemi_heap_registration::map_dynamic_p2p_chunk(CUmemGenericAllocationHand
 
 int nvshmemi_heap_registration::map_posix_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf,
                                                     size_t size) {
-    int raw_fd{-1};
+    int raw_fd = -1;
     int status = CUPFN(
         nvshmemi_cuda_syms,
         cuMemExportToShareableHandle(&raw_fd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
@@ -347,7 +307,7 @@ int nvshmemi_heap_registration::map_posix_p2p_chunk(CUmemGenericAllocationHandle
         UniqueFd fd{std::move(it->second)};
         peer_fds.erase(it);
 
-        CUmemGenericAllocationHandle peer_handle{};
+        CUmemGenericAllocationHandle peer_handle = 0;
         int import_status =
             CUPFN(nvshmemi_cuda_syms,
                   cuMemImportFromShareableHandle(
@@ -438,7 +398,7 @@ int nvshmemi_heap_registration::map_static_sysmem_p2p_chunk() {
 
 int nvshmemi_heap_registration::map_fabric_p2p_memory(int pe_id, CUmemFabricHandle handle,
                                                       void *buf, size_t size) {
-    CUmemGenericAllocationHandle peer_handle{};
+    CUmemGenericAllocationHandle peer_handle = 0;
     int status = CUPFN(nvshmemi_cuda_syms, cuMemImportFromShareableHandle(
                                                &peer_handle, &handle, CU_MEM_HANDLE_TYPE_FABRIC));
     if (status != CUDA_SUCCESS) {
@@ -451,8 +411,8 @@ int nvshmemi_heap_registration::map_fabric_p2p_memory(int pe_id, CUmemFabricHand
 int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
                                                         CUmemGenericAllocationHandle handle,
                                                         void *buf, size_t size) {
-    UniqueCudaAllocationHandle imported_handle{handle};
-    CUdevice gpu_device_id{};
+    nvshmemi::UniqueCudaAllocationHandle imported_handle{handle};
+    CUdevice gpu_device_id = 0;
     int status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
     if (status != CUDA_SUCCESS) {
         NVSHMEMI_ERROR_PRINT("cuCtxGetDevice failed\n");
@@ -469,10 +429,10 @@ int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
         NVSHMEMI_ERROR_PRINT("cuMemMap failed to map %zu bytes at %p\n", size, buf_map);
         return NVSHMEMX_ERROR_INTERNAL;
     }
+    nvshmemi::UniqueCudaMapping mapping{buf_map, size};
 
     status = imported_handle.reset();
     if (status != CUDA_SUCCESS) {
-        (void)CUPFN(nvshmemi_cuda_syms, cuMemUnmap(buf_map_device_ptr, size));
         NVSHMEMI_ERROR_PRINT("cuMemRelease failed\n");
         return NVSHMEMX_ERROR_INTERNAL;
     }
@@ -483,10 +443,10 @@ int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess(buf_map_device_ptr, size, &access, 1));
     if (status != CUDA_SUCCESS) {
-        (void)CUPFN(nvshmemi_cuda_syms, cuMemUnmap(buf_map_device_ptr, size));
         NVSHMEMI_ERROR_PRINT("cuMemSetAccess failed\n");
         return NVSHMEMX_ERROR_INTERNAL;
     }
+    mapping.release();
     return NVSHMEMX_SUCCESS;
 }
 

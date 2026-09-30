@@ -192,6 +192,9 @@ class nvshmemi_symmetric_heap {
     template <typename T>
     int is_symmetric(T value);
 
+    /** Resolve the local GPU or its host NUMA socket without collective communication. */
+    int get_buffer_location(bool on_gpu, int &location_id) const;
+
     /*
      * Multicast expects memory buffers to be on different devices (GPU or CPU), which may
      * not be true in case of MPG and EGM buffers on same CPU socket. This function detects
@@ -364,7 +367,15 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
         return;
     }
 
-    int check_user_buffer_for_mmap(void *ptr, size_t size, unsigned int *ptr_mem_type);
+    struct MmapAccess;
+    class PendingMmapRegistration;
+    int validate_user_buffer_for_mmap(void *ptr, size_t size, unsigned int &ptr_mem_type);
+    int check_user_buffer_for_mmap(void *ptr, size_t size, unsigned int &ptr_mem_type);
+    int get_mmap_access(void *buffer, unsigned int memory_type, int flags, MmapAccess &access);
+    int extend_mmap_space(void *address, size_t size);
+    int notify_mmap_observers(CUmemGenericAllocationHandle handle, off_t heap_offset, size_t size);
+    int publish_mmap_registration(CUmemGenericAllocationHandle handle, void *address,
+                                  size_t physical_size, size_t va_size);
     int converge_unicast_endpoint_status(int local_status);
     int bind_unicast_endpoint_memory(CUmemGenericAllocationHandle mem_handle, off_t heap_offset,
                                      off_t mem_offset, size_t size);
