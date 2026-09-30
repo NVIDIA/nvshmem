@@ -8,6 +8,7 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <utility>
@@ -65,6 +66,30 @@ class UniqueFd {
     }
 
     std::optional<int> fd_;
+};
+
+/* Local handles own transport registrations until the gathered table takes ownership. */
+class PendingRemoteHandles {
+   public:
+    PendingRemoteHandles(nvshmemi_mem_remote_transport &remote, nvshmemi_transport_view &transports)
+        : remote_(remote), transports_(transports), handles_(transports.num_transports()) {}
+    ~PendingRemoteHandles() {
+        if (owned_ &&
+            remote_.release_mem_handles(handles_.data(), transports_) != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_WARN_PRINT("release mem handles failed after registration failure\n");
+        }
+    }
+    PendingRemoteHandles(const PendingRemoteHandles &) = delete;
+    PendingRemoteHandles &operator=(const PendingRemoteHandles &) = delete;
+
+    nvshmem_mem_handle_t *data() { return handles_.data(); }
+    void release() { owned_ = false; }
+
+   private:
+    nvshmemi_mem_remote_transport &remote_;
+    nvshmemi_transport_view &transports_;
+    std::vector<nvshmem_mem_handle_t> handles_;
+    bool owned_ = true;
 };
 
 template <typename MapPeer>
@@ -194,7 +219,7 @@ int nvshmemi_heap_registration::setup() {
 
 int nvshmemi_heap_registration::teardown() {
     nvshmemi_mem_remote_transport &remote_tran = remote_transport();
-    auto &internal_reg = table_->internal_reg();
+    nvshmemi_dense_mem_handle_registry &internal_reg = table_->internal_reg();
     int first_status = NVSHMEMX_SUCCESS;
 
     for (size_t j = 0; j < internal_reg.num_handle_sets(); j++) {
@@ -473,16 +498,12 @@ int nvshmemi_heap_registration::map_static_sysmem_p2p_memory(int pe_id) {
     return NVSHMEMX_SUCCESS;
 }
 
-int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
-                                                      nvshmemi_allocation_kind alloc_kind) {
-    int status = NVSHMEMX_SUCCESS;
-    bool local_handles_owned = true;
+int nvshmemi_heap_registration::register_local_remote_handles(nvshmem_mem_handle_t *handles,
+                                                              void *buf, size_t size) {
     nvshmemi_mem_remote_transport &remotetran = remote_transport();
-    std::vector<nvshmem_mem_handle_t> local_handles(transports_.num_transports());
-    std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
+    int status = NVSHMEMX_SUCCESS;
     void *remote_buf = buf;
     size_t remote_size = size;
-    size_t handle_idx{0};
 
     // Rail opt: static sysmem registers the entire heap range once for reuse.
     if (policy_ == nvshmemi_heap_registration_policy::STATIC_SYSMEM_FULL_HEAP &&
@@ -496,17 +517,37 @@ int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
         if (!transports_.is_active(i) || transports_.has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) {
             continue;
         }
-        status = remotetran.register_mem_handle(local_handles.data(), i, remote_buf, remote_size,
-                                                transports_);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_mem_handle failed\n");
+        status = remotetran.register_mem_handle(handles, i, remote_buf, remote_size, transports_);
+        if (status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT("register_mem_handle failed for transport %d\n", i);
+            return status;
+        }
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
+                                                      nvshmemi_allocation_kind alloc_kind) {
+    int status = NVSHMEMX_SUCCESS;
+    nvshmemi_mem_remote_transport &remotetran = remote_transport();
+    PendingRemoteHandles local_handles{remotetran, transports_};
+    std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
+    status = register_local_remote_handles(local_handles.data(), buf, size);
+
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
     }
 
     /* Allgather memory handles for all PEs. */
     status = nvshmemi_boot_handle.allgather(
-        (void *)local_handles.data(), (void *)gathered.data(),
+        local_handles.data(), gathered.data(),
         sizeof(nvshmem_mem_handle_t) * transports_.num_transports(), &nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "allgather of mem handles failed\n");
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("allgather of mem handles failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
     /* Complete transport setup before publishing handles and their lookup index. */
     if (alloc_kind == nvshmemi_allocation_kind::INTERNAL &&
@@ -514,44 +555,37 @@ int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
         if (!gather_mem_handles_done_) {
             status = remotetran.gather_mem_handles(transports_, gathered.data(), 0,
                                                    geometry_.logical_heap_size * npes_node_);
-            if (status == NVSHMEMX_SUCCESS) {
-                gather_mem_handles_done_ = true;
-            }
         }
     } else {
         status = remotetran.gather_mem_handles(transports_, gathered.data(),
                                                ((char *)buf - (char *)geometry_.heap_base), size);
     }
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gather_mem_handles failed\n");
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("gather_mem_handles failed\n");
+        return status;
+    }
+    if (alloc_kind == nvshmemi_allocation_kind::INTERNAL &&
+        nvshmemi_device_state.enable_rail_opt == 1) {
+        gather_mem_handles_done_ = true;
+    }
 
     /* Store gathered handles in the allocation-specific registry. */
-    handle_idx = alloc_kind == nvshmemi_allocation_kind::EXTERNAL
-                     ? table_->mmap_reg().push_mem_handles(std::move(gathered))
-                     : table_->internal_reg().push_mem_handles(std::move(gathered));
+    const size_t handle_idx = alloc_kind == nvshmemi_allocation_kind::EXTERNAL
+                                  ? table_->mmap_reg().push_mem_handles(std::move(gathered))
+                                  : table_->internal_reg().push_mem_handles(std::move(gathered));
 
     /* Update lookup state with the retrieved memory handles. */
     update_handle_index(buf, size, alloc_kind, handle_idx);
-    local_handles_owned = false;
-
-out:
-    if (local_handles_owned) {
-        const int cleanup_status =
-            remotetran.release_mem_handles(local_handles.data(), transports_);
-        if (cleanup_status != NVSHMEMX_SUCCESS) {
-            NVSHMEMI_WARN_PRINT("release mem handles failed after registration failure\n");
-            if (status == NVSHMEMX_SUCCESS) {
-                status = cleanup_status;
-            }
-        }
-    }
-    return status;
+    local_handles.release();
+    return NVSHMEMX_SUCCESS;
 }
 
 void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
                                                      nvshmemi_allocation_kind alloc_kind,
                                                      size_t handle_idx) {
-    auto &internal_reg = table_->internal_reg();
-    auto &mmap_reg = table_->mmap_reg();
+    nvshmemi_dense_mem_handle_registry &internal_reg = table_->internal_reg();
+    nvshmemi_sparse_mem_handle_registry &mmap_reg = table_->mmap_reg();
     size_t granularity = geometry_.mem_granularity;
 
     /* Rail-optimized internal memory reuses one index for the full heap. */

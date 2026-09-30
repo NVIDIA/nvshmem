@@ -96,6 +96,8 @@ class nvshmemi_heap_registration {
                                 size_t size);
     int map_static_vidmem_p2p_memory(int pe_id, const cudaIpcMemHandle_t &handle);
     int map_static_sysmem_p2p_memory(int pe_id);
+    /** Acquire local transport registrations without collective communication. */
+    int register_local_remote_handles(nvshmem_mem_handle_t *handles, void *buf, size_t size);
     /** Register a buffer range for non-mapping transports and gather its handles. */
     int register_remote_chunk(void *buf, size_t size, nvshmemi_allocation_kind alloc_kind);
     /** Update address-to-handle lookup after registration. */
