@@ -650,64 +650,58 @@ out:
 }
 
 int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t size) {
-    int status = NVSHMEMX_SUCCESS;
-    nvshmemi_mem_remote_transport &remote_tran = remote_transport();
-    size_t granularity = geometry_.mem_granularity;
-    size_t adjusted_max_handle_len = granularity * (NVSHMEMI_MAX_HANDLE_LENGTH / granularity);
-    void *ptr = (char *)geometry_.heap_base + mc_offset;
-    void *curr_ptr = ptr;
-    size_t remaining_size = size;
-    size_t addr_idx;
-    size_t register_size = 0;
-    size_t handle_idx = 0;
+    const size_t granularity = geometry_.mem_granularity;
+    const size_t max_chunk_size = granularity * (NVSHMEMI_MAX_HANDLE_LENGTH / granularity);
+    if (max_chunk_size == 0 || mc_offset < 0 || size == 0 ||
+        static_cast<size_t>(mc_offset) % granularity != 0 ||
+        static_cast<size_t>(mc_offset) > geometry_.logical_heap_size ||
+        size > geometry_.logical_heap_size - static_cast<size_t>(mc_offset)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    char *current = static_cast<char *>(geometry_.heap_base) + mc_offset;
+    nvshmemi_sparse_mem_handle_registry &mmap_reg = table_->mmap_reg();
+    size_t remaining = size;
+    while (remaining != 0) {
+        const size_t chunk_size = std::min(remaining, max_chunk_size);
+        const size_t first_index =
+            static_cast<size_t>(current - static_cast<char *>(geometry_.heap_base)) >>
+            geometry_.log2_mem_granularity;
+        const size_t granules = (chunk_size + granularity - 1) / granularity;
+        std::optional<size_t> handle_idx{};
+        size_t indexed_granules = 0;
 
-    auto &mmap_reg = table_->mmap_reg();
-
-    /* Process the same chunks used for remote registration. */
-    do {
-        register_size =
-            remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
-        bool local_handle_set_released = false;
-
-        const size_t index_count = (register_size + granularity - 1) / granularity;
-        for (size_t idx = 0; idx < index_count; ++idx) {
-            addr_idx =
-                ((char *)curr_ptr - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
-            addr_idx += idx;
-
-            /* A failed registration may not have published this chunk's sparse index. */
-            if (!mmap_reg.has_index(addr_idx)) {
+        for (size_t i = 0; i < granules; ++i) {
+            if (!mmap_reg.has_index(first_index + i)) {
                 continue;
             }
-
-            const auto &entry = mmap_reg.get_index(addr_idx);
-            status = ((entry.start_addr != curr_ptr) || (entry.size != register_size));
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "address indexing error\n");
-
-            handle_idx = entry.handle_idx;
-            /* Release each handle set once per registered chunk. */
-            if (!local_handle_set_released) {
-                nvshmem_mem_handle_t *my_handles = mmap_reg.get_mem_handle(handle_idx, mype_, 0);
-                status = remote_tran.release_mem_handles(my_handles, transports_);
-                NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "release mem handles failed for mmaped buffer \n");
-                local_handle_set_released = true;
+            const nvshmemi_mem_handle_index_entry &entry = mmap_reg.get_index(first_index + i);
+            if (entry.start_addr != current || entry.size != chunk_size ||
+                (handle_idx && *handle_idx != entry.handle_idx)) {
+                NVSHMEMI_ERROR_PRINT("inconsistent mmap handle index\n");
+                return NVSHMEMX_ERROR_INTERNAL;
             }
-            /* Clear index entries to prevent stale lookups if the buffer is remapped. */
-            mmap_reg.clear_index(addr_idx);
+            handle_idx = entry.handle_idx;
+            ++indexed_granules;
         }
-
-        if (local_handle_set_released) {
-            mmap_reg.erase_mem_handles(handle_idx);
+        if (handle_idx) {
+            if (indexed_granules != granules) {
+                NVSHMEMI_ERROR_PRINT("incomplete mmap handle index\n");
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+            nvshmem_mem_handle_t *handles = mmap_reg.get_mem_handle(*handle_idx, mype_, 0);
+            const int status = remote_transport().release_mem_handles(handles, transports_);
+            if (status != NVSHMEMX_SUCCESS) {
+                return status;
+            }
+            for (size_t i = 0; i < granules; ++i) {
+                mmap_reg.clear_index(first_index + i);
+            }
+            mmap_reg.erase_mem_handles(*handle_idx);
         }
-
-        assert(remaining_size >= register_size);
-        remaining_size -= register_size;
-        curr_ptr = (char *)curr_ptr + register_size;
-    } while (remaining_size);
-
-out:
-    return status;
+        remaining -= chunk_size;
+        current += chunk_size;
+    }
+    return NVSHMEMX_SUCCESS;
 }
 
 int nvshmemi_heap_registration::plan_vmm_peer_bases() {
