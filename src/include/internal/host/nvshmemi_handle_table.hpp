@@ -24,13 +24,15 @@ class nvshmemi_mem_handle_registry_base {
     explicit nvshmemi_mem_handle_registry_base(int num_transports);
     virtual ~nvshmemi_mem_handle_registry_base() = default;
 
-    void push_mem_handles(std::vector<nvshmem_mem_handle_t> handles);
+    size_t push_mem_handles(std::vector<nvshmem_mem_handle_t> handles);
+    void erase_mem_handles(size_t handle_idx);
     nvshmem_mem_handle_t *get_mem_handle(size_t handle_idx, int pe, int transport_idx);
     size_t num_handle_sets() const { return mem_handles_.size(); }
 
    protected:
     int num_transports_;
     std::vector<std::vector<nvshmem_mem_handle_t>> mem_handles_;
+    std::vector<size_t> free_handle_indices_;
 };
 
 /** Dense address-granule index for internal heap allocations. */

@@ -12,17 +12,35 @@
 nvshmemi_mem_handle_registry_base::nvshmemi_mem_handle_registry_base(int num_transports)
     : num_transports_(num_transports) {}
 
-void nvshmemi_mem_handle_registry_base::push_mem_handles(
+size_t nvshmemi_mem_handle_registry_base::push_mem_handles(
     std::vector<nvshmem_mem_handle_t> handles) {
-    mem_handles_.push_back(std::move(handles));
+    if (free_handle_indices_.empty()) {
+        mem_handles_.emplace_back(std::move(handles));
+        return mem_handles_.size() - 1;
+    }
+
+    size_t handle_idx{free_handle_indices_.back()};
+    free_handle_indices_.pop_back();
+    assert(mem_handles_[handle_idx].empty());
+    mem_handles_[handle_idx] = std::move(handles);
+    return handle_idx;
+}
+
+void nvshmemi_mem_handle_registry_base::erase_mem_handles(size_t handle_idx) {
+    assert(handle_idx < mem_handles_.size());
+    assert(!mem_handles_[handle_idx].empty());
+    std::vector<nvshmem_mem_handle_t>{}.swap(mem_handles_[handle_idx]);
+    free_handle_indices_.push_back(handle_idx);
 }
 
 nvshmem_mem_handle_t *nvshmemi_mem_handle_registry_base::get_mem_handle(size_t handle_idx, int pe,
                                                                         int transport_idx) {
     assert(handle_idx < mem_handles_.size());
+    auto &handles = mem_handles_[handle_idx];
+    assert(!handles.empty());
     size_t sub_idx = static_cast<size_t>(pe) * num_transports_ + transport_idx;
-    assert(sub_idx < mem_handles_[handle_idx].size());
-    return &mem_handles_[handle_idx][sub_idx];
+    assert(sub_idx < handles.size());
+    return &handles[sub_idx];
 }
 
 void nvshmemi_dense_mem_handle_registry::append_index(size_t count, size_t handle_idx,

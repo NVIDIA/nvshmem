@@ -522,6 +522,7 @@ int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
     std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
     void *remote_buf = buf;
     size_t remote_size = size;
+    size_t handle_idx{0};
 
     // Rail opt: static sysmem registers the entire heap range once for reuse.
     if (policy_ == nvshmemi_heap_registration_policy::STATIC_SYSMEM_FULL_HEAP &&
@@ -564,14 +565,12 @@ int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gather_mem_handles failed\n");
 
     /* Store gathered handles in the allocation-specific registry. */
-    if (alloc_kind == nvshmemi_allocation_kind::EXTERNAL) {
-        table_->mmap_reg().push_mem_handles(std::move(gathered));
-    } else {
-        table_->internal_reg().push_mem_handles(std::move(gathered));
-    }
+    handle_idx = alloc_kind == nvshmemi_allocation_kind::EXTERNAL
+                     ? table_->mmap_reg().push_mem_handles(std::move(gathered))
+                     : table_->internal_reg().push_mem_handles(std::move(gathered));
 
     /* Update lookup state with the retrieved memory handles. */
-    update_handle_index(buf, size, alloc_kind);
+    update_handle_index(buf, size, alloc_kind, handle_idx);
     local_handles_owned = false;
 
 out:
@@ -589,7 +588,8 @@ out:
 }
 
 void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
-                                                     nvshmemi_allocation_kind alloc_kind) {
+                                                     nvshmemi_allocation_kind alloc_kind,
+                                                     size_t handle_idx) {
     auto &internal_reg = table_->internal_reg();
     auto &mmap_reg = table_->mmap_reg();
     size_t granularity = geometry_.mem_granularity;
@@ -599,8 +599,7 @@ void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
         alloc_kind == nvshmemi_allocation_kind::INTERNAL) {
         if (table_->empty_handle_cache()) {
             uint64_t full_heap_size = geometry_.logical_heap_size * npes_node_;
-            internal_reg.append_index(full_heap_size / granularity,
-                                      internal_reg.num_handle_sets() - 1,
+            internal_reg.append_index(full_heap_size / granularity, handle_idx,
                                       (char *)geometry_.global_heap_base, full_heap_size);
         }
     } else if (alloc_kind == nvshmemi_allocation_kind::EXTERNAL) {
@@ -608,12 +607,11 @@ void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
         size_t addr_idx =
             ((char *)buf - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
         for (size_t idx = 0; idx < size / granularity; idx++) {
-            mmap_reg.set_index(addr_idx + idx, mmap_reg.num_handle_sets() - 1, (char *)buf, size);
+            mmap_reg.set_index(addr_idx + idx, handle_idx, (char *)buf, size);
         }
     } else {
         /* Internal allocations append dense entries in heap order. */
-        internal_reg.append_index(size / granularity, internal_reg.num_handle_sets() - 1,
-                                  (char *)buf, size);
+        internal_reg.append_index(size / granularity, handle_idx, (char *)buf, size);
     }
 
     if (table_->empty_handle_cache()) {
@@ -701,6 +699,10 @@ int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t siz
             }
             /* Clear index entries to prevent stale lookups if the buffer is remapped. */
             mmap_reg.clear_index(addr_idx);
+        }
+
+        if (local_handle_set_released) {
+            mmap_reg.erase_mem_handles(handle_idx);
         }
 
         assert(remaining_size >= register_size);

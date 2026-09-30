@@ -99,7 +99,8 @@ class nvshmemi_heap_registration {
     /** Register a buffer range for non-mapping transports and gather its handles. */
     int register_remote_chunk(void *buf, size_t size, nvshmemi_allocation_kind alloc_kind);
     /** Update address-to-handle lookup after registration. */
-    void update_handle_index(void *buf, size_t size, nvshmemi_allocation_kind alloc_kind);
+    void update_handle_index(void *buf, size_t size, nvshmemi_allocation_kind alloc_kind,
+                             size_t handle_idx);
     /** Plan peer virtual addresses and initialize the PE-to-process map. */
     int plan_vmm_peer_bases();
     /** Register the statically allocated heap for P2P and remote transports. */
