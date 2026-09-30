@@ -108,8 +108,7 @@ function(nvshmem_add_header_contract_targets target_prefix include_root)
   _nvshmem_make_header_probes(
     cuda_interface_probe_sources "${target_prefix}" cuda cu "${include_root}" "" ${cxx_headers})
   _nvshmem_make_header_probes(
-    cuda_device_probe_sources "${target_prefix}" cuda cu "${include_root}"
-    "#include <nvshmem.h>\n" ${cuda_headers})
+    cuda_device_probe_sources "${target_prefix}" cuda cu "${include_root}" "" ${cuda_headers})
   set(cuda_probe_sources ${cuda_interface_probe_sources} ${cuda_device_probe_sources})
 
   add_library(${target_prefix}_c_header_contract OBJECT EXCLUDE_FROM_ALL ${c_probe_sources})
