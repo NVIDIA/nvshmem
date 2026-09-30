@@ -80,7 +80,7 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(DEFN_NVSHMEM_TYPENAME_BROADCAST)
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_fcollectmem(
     nvshmem_team_t team, void *dest, const void *source, size_t nelems) {
     nvshmemi_fcollect_threadgroup<char, nvshmemi_threadgroup_thread>(
-        team, (char *)dest, (const char *)source, nelems * nvshmem_team_my_pe(team), nelems);
+        team, (char *)dest, (const char *)source, nelems * nvshmemi_team_my_pe(team), nelems);
     return 0;
 }
 
@@ -89,7 +89,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmem_fcolle
     nvshmem_##TYPENAME##_fcollect(nvshmem_team_t team, TYPE *dest, const TYPE *source, \
                                   size_t nelems) {                                     \
         nvshmemi_fcollect_threadgroup<TYPE, nvshmemi_threadgroup_thread>(              \
-            team, dest, source, nelems * nvshmem_team_my_pe(team), nelems);            \
+            team, dest, source, nelems * nvshmemi_team_my_pe(team), nelems);           \
         return 0;                                                                      \
     }
 
@@ -125,7 +125,7 @@ DEFN_NVSHMEM_REDUCE();
     nvshmem_##TYPENAME##_##OP##_reducescatter(nvshmem_team_t team, TYPE *dest, const TYPE *source, \
                                               size_t nreduce) {                                    \
         nvshmemi_reducescatter_threadgroup<TYPE, RDXN_OPS_##OP, nvshmemi_threadgroup_thread>(      \
-            team, dest, source, nreduce * nvshmem_team_my_pe(team), nreduce);                      \
+            team, dest, source, nreduce * nvshmemi_team_my_pe(team), nreduce);                     \
         return 0;                                                                                  \
     }
 

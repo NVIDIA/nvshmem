@@ -14,6 +14,7 @@
 #endif
 #include "infiniband/mlx5dv.h"
 
+#include "device/nvshmem_device_macros.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/transport/nvshmem_common_ibgda.h"
 #include "non_abi/device/transport/transport_constants.h"

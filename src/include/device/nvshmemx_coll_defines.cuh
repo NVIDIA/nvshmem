@@ -123,21 +123,21 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(DEFN_NVSHMEMX_TYPENAME_BROADCAS
     nvshmem##SC_PREFIX##_##TYPENAME##_fcollect##SC_SUFFIX(nvshmem_team_t team, TYPE *dest,     \
                                                           const TYPE *source, size_t nelems) { \
         nvshmemi_fcollect_threadgroup<TYPE, nvshmemi_threadgroup_##SC>(                        \
-            team, dest, source, nelems * nvshmem_team_my_pe(team), nelems);                    \
+            team, dest, source, nelems * nvshmemi_team_my_pe(team), nelems);                   \
         return 0;                                                                              \
     }
 
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmemx_fcollectmem_warp(
     nvshmem_team_t team, void *dest, const void *source, size_t nelems) {
     nvshmemi_fcollect_threadgroup<char, nvshmemi_threadgroup_warp>(
-        team, (char *)dest, (const char *)source, nelems * nvshmem_team_my_pe(team), nelems);
+        team, (char *)dest, (const char *)source, nelems * nvshmemi_team_my_pe(team), nelems);
     return 0;
 }
 
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_INLINE int nvshmemx_fcollectmem_block(
     nvshmem_team_t team, void *dest, const void *source, size_t nelems) {
     nvshmemi_fcollect_threadgroup<char, nvshmemi_threadgroup_block>(
-        team, (char *)dest, (const char *)source, nelems * nvshmem_team_my_pe(team), nelems);
+        team, (char *)dest, (const char *)source, nelems * nvshmemi_team_my_pe(team), nelems);
     return 0;
 }
 
@@ -184,7 +184,7 @@ DEFN_NVSHMEM_REDUCE_THREADGROUP(block, _block, x);
     nvshmem##SC_PREFIX##_##TYPENAME##_##OP##_reducescatter##SC_SUFFIX(                          \
         nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {                  \
         nvshmemi_reducescatter_threadgroup<TYPE, RDXN_OPS_##OP, nvshmemi_threadgroup_##SC>(     \
-            team, dest, source, nreduce * nvshmem_team_my_pe(team), nreduce);                   \
+            team, dest, source, nreduce * nvshmemi_team_my_pe(team), nreduce);                  \
         return 0;                                                                               \
     }
 

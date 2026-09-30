@@ -7,12 +7,11 @@
 #define __logical_endpoint_device_cuh__
 
 #include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 #ifdef __CUDA_ARCH__
 
 #if defined(__CUDACC_RTC__)
-
-#include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 typedef unsigned int CUlogicalEndpointId;
 
@@ -56,7 +55,6 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int) { 
 #else
 
 #include "non_abi/device/common/logical_endpoint_types.h"
-#include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 inline constexpr int NVSHMEMI_SMEM_BUF_SIZE = 512;  // 16*32 - 16B per thread, 1 buf per warp
 /* Thread-scope handle operations share this per-thread staging layout. Atomics
@@ -88,7 +86,7 @@ __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int pe)
 
 __device__ bool nvshmemi_tma_smem_registered();
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-__device__ __forceinline__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers);
+__device__ size_t nvshmemi_smem_data_buf_size(size_t num_buffers);
 __device__ constexpr bool nvshmemi_tma_is_16b_aligned(size_t value);
 
 template <threadgroup_t SCOPE>

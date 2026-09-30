@@ -231,8 +231,6 @@ typedef enum {
     NVSHMEMX_TMA_POLICY_MAX = INT_MAX
 } nvshmemx_tma_policy_t;
 
-typedef struct nvshmemi_region_slot nvshmemi_region_slot_t;
-
 typedef struct {
     int version;
     int step1_sendto;
@@ -478,7 +476,7 @@ typedef struct {
     size_t *tma_smem_size;     /* Per-registration shared memory sizes */
     void *unicast_le_ids_;     /* LE IDs of PEs */
     bool counted_operations_available;
-    nvshmemi_region_slot_t *region_slots;
+    struct nvshmemi_region_slot *region_slots;
     uint32_t *region_active_count;
     uint32_t region_slots_len;
     uint32_t region_slot_probe_limit;

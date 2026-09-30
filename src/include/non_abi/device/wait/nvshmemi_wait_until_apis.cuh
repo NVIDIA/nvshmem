@@ -6,14 +6,14 @@
 #ifndef _NVSHMEM_WAIT_UNTIL_APIS_CUH_
 #define _NVSHMEM_WAIT_UNTIL_APIS_CUH_
 
-#ifdef __CUDA_ARCH__
-
 #include <cuda_runtime.h>
 #include "non_abi/device/transport/transport_constants.h"
 #include "device/nvshmem_device_macros.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/c/nvshmem_build_options.h"
+
+#ifdef __CUDA_ARCH__
 
 #define TIMEOUT_NCYCLES 1e10
 

@@ -111,6 +111,7 @@ static_assert(NVSHMEMI_REGION_SLOT_FREE == 0,
               "CUDA zero-initialization must produce free region slots.");
 
 /* Keep lookup-hot fields in the first 32 bytes and isolate each slot in a 64-byte extent. */
+typedef struct nvshmemi_region_slot nvshmemi_region_slot_t;
 struct alignas(NVSHMEMI_REGION_SLOT_BYTES) nvshmemi_region_slot {
     /* Active states encode the slot generation above the low phase bits. */
     unsigned long long state;

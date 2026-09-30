@@ -10,6 +10,7 @@
 #include "non_abi/c/nvshmem_build_options.h"
 #include "device/nvshmem_device_macros.h"
 #include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 #ifdef __CUDA_ARCH__
 
