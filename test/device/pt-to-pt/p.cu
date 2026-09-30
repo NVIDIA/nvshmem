@@ -113,7 +113,7 @@ __device__ void rma_inline_wrapper(unsigned long long int *src, unsigned long lo
     CU_CHECK(cuLaunchKernel(test_ring_##TYPENAME##_cubin, 1, 1, 1, THREADS, 1, 1, 0, cstrm,        \
                             args_ring_##TYPENAME, NULL));
 
-#if defined(NVSHMEM_HOSTLIB_ONLY)
+#if defined(NVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY)
 extern "C" {
 
 #define DEFINE_Group(TYPENAME, TYPE)                                                           \

@@ -15,7 +15,10 @@
 #include "cpp_api/nvshmemx_tile_api.hpp"
 #include "c_api/nvshmemx_collective_launch_apis.h"
 #endif
-#if !defined NVSHMEM_HOSTLIB_ONLY
+/* Our bitcode/LTOIR test and perftest builds skip these implementation headers
+ * and link the precompiled device library instead.
+ */
+#if !defined NVSHMEM_DEVICE_DECLARATIONS_ONLY
 #include "device/nvshmemx_defines.h"
 #include "device/nvshmemx_coll_defines.cuh"
 #include "device/tile/nvshmemx_tile_api_defines.cuh"

@@ -27,7 +27,7 @@ enum op { ATOMIC_ADD_FLOAT = 0, ATOMIC_FETCH_ADD_FLOAT };
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_add_##OP##_cubin, 1, 1, 1, 1, 1, 1,             \
                             _dynamic_smem_size, 0, args_##TYPENAME##_add_##OP, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 /* Each PE adds value to remote. In the fetch case, we compare old against expected*npes.
@@ -77,7 +77,7 @@ TEST_NVSHMEM_ATOMIC_ADD_KERNEL(ATOMIC_FETCH_ADD_FLOAT, float, float)
 TEST_NVSHMEM_ATOMIC_ADD_KERNEL(ATOMIC_ADD_FLOAT, double, double)
 TEST_NVSHMEM_ATOMIC_ADD_KERNEL(ATOMIC_FETCH_ADD_FLOAT, double, double)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

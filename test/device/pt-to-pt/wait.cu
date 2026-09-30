@@ -16,7 +16,7 @@
     init_test_case_kernel(&test_wait_cubin, NVSHMEMI_TEST_STRINGIFY(perform_signal_wait)); \
     CU_CHECK(cuLaunchKernel(test_wait_cubin, 1, 1, 1, THREADS, 1, 1, 0, 0, args_wait, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -59,7 +59,7 @@ __global__ void perform_signal_wait(uint64_t *sig_addr, int mype, int npes, int 
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

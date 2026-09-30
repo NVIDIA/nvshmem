@@ -12,8 +12,10 @@
     !defined __NVSHMEM_NUMBA_SUPPORT__ && !defined NVSHMEM_BUILD_LTOIR_LIBRARY
 #include "nvshmem_host.h"
 #endif
-/* NVSHMEM4PY hostlib can't parse device headers */
-#if !defined NVSHMEM_HOSTLIB_ONLY
+/* Our bitcode/LTOIR test and perftest builds skip these implementation headers
+ * and link the precompiled device library instead.
+ */
+#if !defined NVSHMEM_DEVICE_DECLARATIONS_ONLY
 #include "device/nvshmem_defines.h"
 #include "device/nvshmem_coll_defines.cuh"
 #include "device/nvshmemx_defines.h"

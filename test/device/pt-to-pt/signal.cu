@@ -92,7 +92,7 @@ __global__ void ring(T *src, T *dest, int len, int nextpe, size_t dynamic_smem_s
     if (!tid) nvshmem_quiet();                         \
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 
-#if defined(NVSHMEM_HOSTLIB_ONLY)
+#if defined(NVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY)
 extern "C" {
 
 __global__ void alltoall_uint64(uint64_t *src, uint64_t *dest, size_t len, int mype, int npes,

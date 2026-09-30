@@ -26,7 +26,7 @@ using namespace std;
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_rdxn##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1, \
                             _dynamic_smem_size, cstrm, args_##TYPENAME##_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -57,7 +57,7 @@ NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DECL_TYPENAME_OP_REDUCE, b
 
 NVSHMEMTEST_REPT_FOR_BITWISE_REDUCE_TYPES_WITH_SCOPE2(DEFN_TYPENAME_OP_REDUCE, block, _block, x,
                                                       xor)
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

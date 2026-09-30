@@ -50,10 +50,12 @@ function(nvshmem_add_ltoir_library)
   get_filename_component(source_name "${LTOIR_SOURCE}" NAME_WE)
   set(intermediate "${source_name}.ltoir")
 
+  # Internal test/perftest kernels use API declarations and link the precompiled LTOIR device library.
   add_custom_command(
     OUTPUT "${LTOIR_OUTPUT}"
     COMMAND cuda::nvcc -std=${LTOIR_CXX_STANDARD} -x cu -arch=${LTOIR_ARCHITECTURE} -dlto
-            --ltoir ${LTOIR_INCLUDE_OPTIONS} -DNVSHMEM_HOSTLIB_ONLY "${LTOIR_SOURCE}" -o
+            --ltoir ${LTOIR_INCLUDE_OPTIONS} -DNVSHMEM_DEVICE_DECLARATIONS_ONLY
+            -DNVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY "${LTOIR_SOURCE}" -o
             "${intermediate}"
     COMMAND cuda::nvcc -arch=${LTOIR_ARCHITECTURE} -dlto -dlink -o "${LTOIR_OUTPUT}"
             "${intermediate}" "${LTOIR_LIBRARY}"

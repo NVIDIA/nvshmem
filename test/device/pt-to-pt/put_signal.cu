@@ -35,7 +35,7 @@ __device__ int errors_d;
     CU_CHECK(cuLaunchKernel(test_##FUNC##_cubin_##SC_SUFFIX, 1, 1, 1, num_threads, 1, 1, 0, 0, \
                             args_##FUNC##_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -165,7 +165,7 @@ DEFINE_SIGNAL_PUT_SIZE(int64_t, put64, thread, , )
 DEFINE_SIGNAL_PUT_SIZE(char, putmem, block, _block, x)
 #undef DEFINE_SIGNAL_PUT_SIZE
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

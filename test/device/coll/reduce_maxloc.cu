@@ -50,7 +50,7 @@ __device__ void validate_double2_maxloc_reduce_data_block(nvshmem_team_t team, d
     __syncthreads();
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -73,7 +73,7 @@ __global__ void test_double2_maxloc_reduce_kernel_block(nvshmem_team_t team, dou
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

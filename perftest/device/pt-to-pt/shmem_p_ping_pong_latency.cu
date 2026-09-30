@@ -13,7 +13,7 @@
 #define CUMODULE_NAME "shmem_p_ping_pong_latency.cubin"
 #define UNROLL 8
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -64,7 +64,7 @@ __global__ void ping_pong(int *data_d, uint64_t *flag_d, int len, int pe, int it
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

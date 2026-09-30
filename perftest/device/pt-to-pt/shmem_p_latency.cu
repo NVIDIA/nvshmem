@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include "utils.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -34,7 +34,7 @@ __global__ void p_latency(int *data_d, int len, int pe, int iter) {
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

@@ -20,7 +20,7 @@
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_broadcast##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, \
                             1, _dynamic_smem_size, cstrm, args_##TYPENAME##_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -51,7 +51,7 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DECL_TEST_BROADCAST_KERNEL)
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_AND_SCOPES2(DEFN_TEST_BROADCAST_KERNEL)
 #undef DEFN_TEST_BROADCAST_KERNEL
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

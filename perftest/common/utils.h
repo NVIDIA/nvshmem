@@ -34,7 +34,11 @@
 
 constexpr size_t kWarpSize = 32;
 
-#if defined(NVSHMEM_HOSTLIB_ONLY)
+/* Our bitcode/LTOIR perftest builds omit the inline TMA shared-memory helpers
+ * nvshmemx_ask_smem(), nvshmemx_give_smem(), and nvshmemx_release_smem().
+ * Preserve their existing zero-SMEM sizes and skipped registration/release calls.
+ */
+#if defined(NVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY)
 #define NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED ((size_t)0)
 #else
 #define NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED ((size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED))
@@ -157,7 +161,7 @@ using namespace std;
         }                                                                                      \
     } while (0)
 
-#if defined(NVSHMEM_HOSTLIB_ONLY)
+#if defined(NVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY)
 #define NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size) \
     do {                                          \
         (void)(dynamic_smem_size);                \

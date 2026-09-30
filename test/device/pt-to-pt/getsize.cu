@@ -133,7 +133,7 @@ __global__ void ring(T *src, T *dest, size_t len, int prevpe) {
 
 #define RING_TEMP() rma_get_wrapper(src, dest, len, prevpe);
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -159,7 +159,7 @@ __global__ void ring_int(int *src, int *dest, int len, int prevpe) { RING_TEMP()
     }
 DEFINE_Group(warp) DEFINE_Group(block)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

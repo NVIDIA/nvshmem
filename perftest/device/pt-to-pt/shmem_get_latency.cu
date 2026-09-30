@@ -30,7 +30,7 @@ __device__ __forceinline__ void latency_threadgroup_iteration_sync(int tid) {
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -73,7 +73,7 @@ LATENCY_THREADGROUP(warp, latency_kern_warp_no_iteration_barrier, false)
 LATENCY_THREADGROUP(block, latency_kern_block, true)
 LATENCY_THREADGROUP(block, latency_kern_block_no_iteration_barrier, false)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

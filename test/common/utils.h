@@ -78,7 +78,11 @@
 #define MEM_GRANULARITY 536870912  // 512MB
 
 #define SMEM_SIZE_DISABLE 0
-#if defined(NVSHMEM_HOSTLIB_ONLY)
+/* Our bitcode/LTOIR test builds omit the inline TMA shared-memory helpers
+ * nvshmemx_ask_smem(), nvshmemx_give_smem(), and nvshmemx_release_smem().
+ * Preserve their existing zero-SMEM sizes and skipped registration/release calls.
+ */
+#if defined(NVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY)
 #define SMEM_SIZE_RECOMMENDED ((size_t)0)
 #define SMEM_SIZE_MINIMUM ((size_t)0)
 #define SMEM_SIZE_BARRIERS_ONLY ((size_t)0)
@@ -259,7 +263,7 @@ void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);
         }                                                                                      \
     } while (0)
 
-#if defined(NVSHMEM_HOSTLIB_ONLY)
+#if defined(NVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY)
 #define NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size) \
     do {                                          \
         (void)(dynamic_smem_size);                \

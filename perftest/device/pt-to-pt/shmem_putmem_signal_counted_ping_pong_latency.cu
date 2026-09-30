@@ -19,7 +19,7 @@ static constexpr size_t kCountedCounterAlignment = 256;
 static constexpr unsigned char kPayloadByte = 0x5a;
 static constexpr unsigned char kDestinationSentinel = 0xa5;
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -75,7 +75,7 @@ void test_ping_pong(void **arglist, cudaStream_t stream) {
     CUDA_CHECK(cudaGetLastError());
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

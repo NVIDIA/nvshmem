@@ -32,7 +32,7 @@
     CU_CHECK(cuLaunchKernel(test_allmem_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1,  \
                             _dynamic_smem_size, cstrm, args_allmem_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -109,7 +109,7 @@ DEFN_ALLTOALLMEM_TEST_KERNEL(warp, _warp, x)
 DEFN_ALLTOALLMEM_TEST_KERNEL(block, _block, x)
 #undef DEFN_ALLTOALLMEM_TEST_KERNEL
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

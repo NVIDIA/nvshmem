@@ -9,7 +9,7 @@
 #include "coll_test.h"
 #define LARGEST_DT int64_t
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -82,7 +82,7 @@ CALL_RDXN_OPS_ALL_TG(int64, int64_t)
 
 CALL_RDXN_SUM_ALL_TG(float, float)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

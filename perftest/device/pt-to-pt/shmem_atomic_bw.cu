@@ -7,7 +7,7 @@
 
 #include "atomic_bw_common.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -31,7 +31,7 @@ DEFINE_ATOMIC_BW_FN_ONE_ARG(set, i + 1);
 
 DEFINE_ATOMIC_BW_FN_TWO_ARG(compare_swap, i, i + 1);
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

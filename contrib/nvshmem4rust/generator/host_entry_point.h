@@ -3,5 +3,4 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define NVSHMEM_HOSTLIB_ONLY
 #include <nvshmem_host.h>

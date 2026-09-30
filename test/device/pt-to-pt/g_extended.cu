@@ -31,7 +31,7 @@ struct neighbors {
     CU_CHECK(cuLaunchKernel(test_lap_cubin, nx / block_size.x, ny / block_size.y,        \
                             nz / block_size.z, 32, 8, 1, 0, stream, args_lap, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -72,7 +72,7 @@ __global__ void lap(float const *f_in, int stride_y, int stride_z, int nx, int n
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

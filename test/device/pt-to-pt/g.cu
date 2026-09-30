@@ -90,7 +90,7 @@ __global__ void ring(T *src, T *dest, int len, int prevpe) {
         rma_inline_wrapper(src + j, dest + j, len, prevpe); \
     }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -109,7 +109,7 @@ __global__ void alltoall_double(double *src, double *dest, size_t len, int mype,
 }
 __global__ void ring_double(double *src, double *dest, int len, int prevpe) { RING_TEMP(); }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

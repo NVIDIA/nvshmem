@@ -7,7 +7,7 @@
 #include "coll_test.h"
 #define DATATYPE int64_t
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -54,7 +54,7 @@ CALL_FCOLLECT(int64, int64_t, x, _warp, warpSize, 4096);
 CALL_FCOLLECT(int32, int32_t, x, _block, INT_MAX, INT_MAX);
 CALL_FCOLLECT(int64, int64_t, x, _block, INT_MAX, INT_MAX);
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 
