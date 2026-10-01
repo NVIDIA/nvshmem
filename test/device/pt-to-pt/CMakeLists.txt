@@ -85,6 +85,8 @@ if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
         VERBATIM)
     add_custom_target(device_transport_specific_compile_contract ALL
         DEPENDS "${_transport_specific_contract_stamp}")
+    nvshmem_add_test(transport_specific_compile.cu)
+    nvshmem_add_test(transport_specific_p2p.cu)
 endif()
 nvshmem_add_test(wait.cu)
 

@@ -1072,7 +1072,11 @@ set(INC_EXPORTS
 # The preview header is part of a default-on package build, but applications
 # still have to define NVSHMEMX_ENABLE_TRANSPORT_POLICY themselves.
 set(NVSHMEM_TRANSPORT_POLICY_HEADERS
-    non_abi/device/transport_specific/types.cuh)
+    non_abi/device/transport_specific/types.cuh
+    non_abi/device/transport_specific/traits.cuh
+    non_abi/device/transport_specific/pointer_sm.cuh
+    non_abi/device/transport_specific/automatic.cuh
+    non_abi/device/transport_specific/api.cuh)
 if (NVSHMEM_ENABLE_TRANSPORT_POLICY)
   list(APPEND INC_EXPORTS ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/non_abi/device/transport_specific")

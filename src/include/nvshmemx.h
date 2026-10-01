@@ -28,6 +28,10 @@
     "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
 #else
 #include "non_abi/device/transport_specific/types.cuh"
+#include "non_abi/device/transport_specific/traits.cuh"
+#include "non_abi/device/transport_specific/pointer_sm.cuh"
+#include "non_abi/device/transport_specific/automatic.cuh"
+#include "non_abi/device/transport_specific/api.cuh"
 #endif
 #endif
 #endif

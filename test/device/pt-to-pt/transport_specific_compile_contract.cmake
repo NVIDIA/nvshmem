@@ -4,7 +4,8 @@
 # Compile-only contracts for the transport-specific preview. These run as a
 # build step instead of ordinary executables: the positive fixture must
 # compile, and each negative fixture must fail during CUDA compilation with its
-# expected diagnostic, before linking or requiring a GPU.
+# expected diagnostic, before linking or requiring a GPU. A final PTX check
+# confirms which local memory-space spellings classify with __isShared.
 
 foreach(_required_var CUDA_COMPILER CUDA_GENCODE PACKAGE_INCLUDE_DIR TEST_COMMON_INCLUDE_DIR
                       CONTRACT_SOURCE CONTRACT_BINARY_DIR)
@@ -74,7 +75,7 @@ expect_compile_success(legal -DCONTRACT_CASE_legal)
 # Without the source opt-in nvshmemx.h, and nvshmem_host.h even with it, must
 # leave every transport-policy name undeclared.
 set(_names_absent
-    "namespace \"nvshmemx\" has no member|name followed by \"::\" must be a class or namespace name")
+    "namespace \"nvshmemx\" has no member|name followed by \"::\" must be a class or namespace name|nvshmemx_put\" is undefined")
 expect_compile_failure(optin_required "${_names_absent}" -DCONTRACT_CASE_optin_required)
 expect_compile_failure(host_header_only "${_names_absent}" -DCONTRACT_CASE_host_header_only)
 
@@ -83,3 +84,68 @@ expect_compile_failure(
   package_unavailable
   "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
   -DCONTRACT_CASE_package_unavailable)
+
+# Pointer / SM and Auto / Auto are the only supported pairs; every other pair
+# is rejected with one diagnostic.
+expect_compile_failure(
+  invalid_pair
+  "unsupported addressing/transport-policy pair for transport-specific preview"
+  -DCONTRACT_CASE_invalid_pair)
+expect_compile_failure(
+  remote_put_tag
+  "transport-specific put destination must be remote symmetric global memory"
+  -DCONTRACT_CASE_remote_put_tag)
+expect_compile_failure(
+  remote_get_tag
+  "transport-specific get source must be remote symmetric global memory"
+  -DCONTRACT_CASE_remote_get_tag)
+expect_compile_failure(
+  source_category_tag
+  "no instance of function template \"nvshmemx_put\" matches"
+  -DCONTRACT_CASE_source_category_tag)
+expect_compile_failure(
+  destination_category_tag
+  "no instance of function template \"nvshmemx_get\" matches"
+  -DCONTRACT_CASE_destination_category_tag)
+
+# Element types are exactly the stable typed RMA types, cv-unqualified.
+set(_element_type "transport-specific RMA element type must be a standard NVSHMEM RMA type")
+expect_compile_failure(unsupported_type "${_element_type}" -DCONTRACT_CASE_unsupported_type)
+expect_compile_failure(cv_qualified_type "${_element_type}" -DCONTRACT_CASE_cv_qualified_type)
+
+# __isShared lowers to the PTX shared-window test. Explicit shared and global
+# local operands must compile without it, while the generic spelling must
+# still classify.
+function(compile_ptx name)
+  set(_ptx "${CONTRACT_BINARY_DIR}/${name}.ptx")
+  file(REMOVE "${_ptx}")
+  execute_process(
+    COMMAND ${_compiler_command} ${ARGN} -std=c++17 -rdc=true -arch=sm_90 -ptx
+            "${CONTRACT_SOURCE}" -o "${_ptx}"
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _stdout
+    ERROR_VARIABLE _stderr)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR
+            "transport-specific compile contract '${name}' failed to compile:\n${_stdout}\n${_stderr}")
+  endif()
+  file(STRINGS "${_ptx}" _shared_tests REGEX "isspacep\\.shared")
+  list(LENGTH _shared_tests _count)
+  set(${name}_shared_tests ${_count} PARENT_SCOPE)
+endfunction()
+
+foreach(_space shared global generic)
+  compile_ptx(memory_space_${_space} -DCONTRACT_CASE_memory_space_ptx -DLOCAL_SPACE=${_space})
+  set(_count ${memory_space_${_space}_shared_tests})
+  if(_space STREQUAL "generic")
+    if(_count EQUAL 0)
+      message(FATAL_ERROR
+              "transport-specific compile contract 'memory_space_generic' has no __isShared "
+              "classification; the PTX check can no longer observe it")
+    endif()
+  elseif(NOT _count EQUAL 0)
+    message(FATAL_ERROR
+            "transport-specific compile contract 'memory_space_${_space}': explicit ${_space} "
+            "instantiations contain ${_count} isspacep.shared (__isShared) instructions")
+  endif()
+endforeach()
