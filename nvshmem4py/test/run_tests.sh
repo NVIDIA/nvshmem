@@ -804,6 +804,7 @@ run_nvls_tests() {
 #   - AMO tests: device-initiated atomics require NVLink (not supported on PCIe systems like L40S)
 #   - Ring allreduce: proxy timeout on L40S CICD nodes (TBD)
 #   - Teams test: needs 8 GPUs (IPP6 CICD nodes only have 2)
+#   - CuTe DSL TMA RMA test: TMA requires SM 90+ (IPP6 CICD nodes are L40S)
 echo "================================================"
 echo "NVLS / NVSwitch tests"
 echo "================================================"
@@ -849,6 +850,14 @@ pushd "$TEST_DIR/device/cute/" || exit 1
 $NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL Memory test"
+    EXIT_CODE=$((EXIT_CODE + 1))
+fi
+
+# CuTe DSL TMA-backed RMA test (TMA requires SM 90+). NVSHMEM reads the TMA
+# policy once per process, so it gets its own launch with the policy enabled.
+$NVLS_MPI_RUN -x NVSHMEM_TMA_POLICY=ENABLE -np $NP -- pytest --init-type mpi --with-mpi test_device_rma_tma.py -v -s
+if [ $? -ne 0 ]; then
+    echo "Test failed: CuTe DSL TMA RMA test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 popd || exit 1

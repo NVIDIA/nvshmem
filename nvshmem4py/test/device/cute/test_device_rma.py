@@ -426,6 +426,100 @@ def test_g(dtype, nvshmem_init_fini):
     nvshmem.core.free_tensor(var)
 
 
+_SCOPE_WARPS = 2
+_SCOPE_CHUNK = 128  # elements handled per warp for warp-scoped calls
+_SCOPE_NELEMS = _SCOPE_WARPS * _SCOPE_CHUNK
+_SCOPE_OPS = ["put", "put_nbi", "get", "get_nbi", "put_signal", "put_signal_nbi"]
+_SCOPES = ["", "_warp", "_block"]
+_SCOPE_DTYPES = ["int8", "float32"]
+
+
+def _make_scope_rma_kernel(op, scope):
+    """Build a launcher that issues ``op`` at ``scope`` from a 2-warp CTA.
+
+    Thread scope issues one call from thread 0, warp scope issues one call per
+    warp on that warp's slice, and block scope issues one call from the whole CTA.
+    """
+    rma = getattr(nvshmem_cute, f"{op}{scope}")
+    is_signal = op.startswith("put_signal")
+    is_nbi = op.endswith("_nbi")
+
+    @cute.jit
+    def issue(dst, src, signal_var, signal_op, pe):
+        if cutlass.const_expr(is_signal):
+            rma(dst, src, signal_var, cutlass.Uint64(1), signal_op, pe)
+        else:
+            rma(dst, src, pe)
+
+    @cute.kernel
+    def scope_rma(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_op: Int32, pe: Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        if cutlass.const_expr(scope == "_warp"):
+            warp = cute.arch.make_warp_uniform(cute.arch.warp_idx())
+            issue(cute.local_tile(dst, (_SCOPE_CHUNK, ), (warp, )), cute.local_tile(src, (_SCOPE_CHUNK, ), (warp, )),
+                  signal_var, signal_op, pe)
+        elif cutlass.const_expr(scope == "_block"):
+            issue(dst, src, signal_var, signal_op, pe)
+        else:
+            if tidx == 0:
+                issue(dst, src, signal_var, signal_op, pe)
+        if cutlass.const_expr(is_nbi):
+            nvshmem_cute.quiet()
+
+    @cute.jit
+    def scope_rma_launcher(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_op: Int32, pe: Int32):
+        scope_rma(dst, src, signal_var, signal_op, pe).launch(
+            grid=[1, 1, 1],
+            block=[_SCOPE_WARPS * 32, 1, 1],
+        )
+
+    return scope_rma_launcher
+
+
+@pytest.mark.mpi
+@pytest.mark.parametrize("dtype", _SCOPE_DTYPES)
+@pytest.mark.parametrize("scope", _SCOPES, ids=["thread", "warp", "block"])
+@pytest.mark.parametrize("op", _SCOPE_OPS)
+def test_rma_scopes(nvshmem_init_fini, op, scope, dtype):
+    """Validate thread-, warp-, and block-scoped RMA wrappers end to end."""
+    stream = _nvshmem_stream()
+    dev = Device()
+    my_pe = nvshmem.core.my_pe()
+    n_pes = nvshmem.core.n_pes()
+    peer = (my_pe + 1) % n_pes
+    previous_pe = (my_pe - 1) % n_pes
+
+    src = _make_torch_tensor((_SCOPE_NELEMS, ), dtype, my_pe + 1)
+    dst = _make_torch_tensor((_SCOPE_NELEMS, ), dtype, 0)
+    signal_var = _make_torch_tensor((1, ), "int64", 0)
+    src_cute = _cute_from_torch(src)
+    dst_cute = _cute_from_torch(dst)
+    signal_cute = _cute_from_torch(signal_var)
+
+    signal_op = nvshmem.core.SignalOp.SIGNAL_ADD
+
+    compiled = _compile_kernel(_make_scope_rma_kernel(op, scope), dst_cute, src_cute, signal_cute, 0, 0)
+    compiled(dst_cute, src_cute, signal_cute, signal_op, peer)
+
+    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+
+    if op.startswith("get"):
+        # get pulls the peer's source into the local destination.
+        _assert_torch_tensor(dst, peer + 1)
+    else:
+        # put writes into the next PE, so the local destination holds the previous PE's source.
+        _assert_torch_tensor(dst, previous_pe + 1)
+    if op.startswith("put_signal"):
+        expected_signals = _SCOPE_WARPS if scope == "_warp" else 1
+        assert int(signal_var.item()) == expected_signals
+
+    nvshmem.core.free_tensor(src)
+    nvshmem.core.free_tensor(dst)
+    nvshmem.core.free_tensor(signal_var)
+
+
 @pytest.mark.mpi
 def test_tma_shared_memory_management(nvshmem_init_fini):
     """Compile and execute CuTe tensor wrappers for TMA shared memory."""
