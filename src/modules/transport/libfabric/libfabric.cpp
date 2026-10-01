@@ -3675,12 +3675,22 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     int status = 0;
     std::unique_ptr<nvshmemt_libfabric_state_t> libfabric_state_owner;
 
+    const uint32_t fabric_version = fi_version();
+    if (fabric_version < FI_VERSION(NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER)) {
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "NVSHMEM libfabric transport requires libfabric %d.%d or later; loaded %d.%d. "
+            "Update the libfabric runtime library path.\n",
+            NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER, FI_MAJOR(fabric_version),
+            FI_MINOR(fabric_version));
+    }
+
     if (NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version) != NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION) {
-        NVSHMEMI_ERROR_PRINT(
-            "NVSHMEM provided an incompatible version of the transport interface. "
-            "This transport supports transport API major version %d. Host has %d",
-            NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION, NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version));
-        return NVSHMEMX_ERROR_INVALID_VALUE;
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM provided an incompatible version of the transport interface. "
+                           "This transport supports transport API major version %d. Host has %d",
+                           NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION,
+                           NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version));
     }
 
     transport = (nvshmem_transport_t)calloc(1, sizeof(*transport));
