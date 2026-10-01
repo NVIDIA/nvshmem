@@ -285,18 +285,68 @@ static staged_qp_t& staged_get_qp(transport_staged_state_t* s, int qp_slot, int 
     return s->rdma.qp(qp_slot, pe);
 }
 
-static int staged_query_usable_gid(transport_staged_state_t* s, struct ibv_context* ctx, int port,
-                                   const struct ibv_port_attr* port_attr, int* gid_index,
-                                   union ibv_gid* gid) {
-    int status = ib_get_gid_index(&ftable, ctx, static_cast<uint8_t>(port), port_attr, gid_index,
-                                  s->log_level, &s->options);
-    if (status != NVSHMEMX_SUCCESS) {
-        return status;
-    }
-    if (ftable.query_gid(ctx, port, *gid_index, gid) != 0) {
+/* Staged uses a single NIC port: the first one the shared IB enumeration accepts, which honors
+ * NVSHMEM_HCA_LIST and picks a usable GID. Devices it opened but staged does not use are released.
+ */
+static int staged_open_hca(transport_staged_state_t* s) {
+    int num_devices = 0;
+    std::unique_ptr<struct ibv_device*, decltype(ftable.free_device_list)> dev_list(
+        ftable.get_device_list(&num_devices), ftable.free_device_list);
+    if (!dev_list || num_devices == 0) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] no IB devices found");
         return NVSHMEMX_ERROR_INTERNAL;
     }
-    return NVSHMEMX_SUCCESS;
+
+    std::vector<nvshmemt_ib_common_device> devices(static_cast<size_t>(num_devices));
+    std::array<int, MAX_NUM_PES_PER_NODE> dev_ids{};
+    std::array<int, MAX_NUM_PES_PER_NODE> port_ids{};
+    nvshmemt_ib_common_state ib{};
+    ib.devices = devices.data();
+    ib.dev_ids = dev_ids.data();
+    ib.port_ids = port_ids.data();
+    ib.n_raw_devices = num_devices;
+    ib.options = &s->options;
+    ib.log_level = s->log_level;
+
+    nvshmemt_ib_hca_filter filter{};
+    int status = nvshmemt_ib_common_parse_hca_filter(filter, ib);
+    if (status == 0) {
+        status = nvshmemt_ib_common_enumerate_devices(&ftable, ib, sizeof(devices[0]), filter,
+                                                      dev_list.get(), num_devices);
+    }
+    if (status != 0) {
+        return status;
+    }
+    nvshmemt_ib_common_warn_missing_hcas(filter);
+
+    const int dev_id = ib.dev_ids[0];
+    const int port = ib.port_ids[0];
+    for (int i = 0; i < num_devices; ++i) {
+        if (i == dev_id) {
+            continue;
+        }
+        if (devices[i].pd) {
+            ftable.dealloc_pd(devices[i].pd);
+        }
+        if (devices[i].context) {
+            ftable.close_device(devices[i].context);
+        }
+    }
+
+    const nvshmemt_ib_common_device& device = devices[dev_id];
+    const char* name = ftable.get_device_name(device.dev);
+    if (filter.user_selection && !filter.exclude_list && ib.n_dev_ids > 1) {
+        NVSHMEMI_WARN_PRINT("[STAGED] NVSHMEM_HCA_LIST matches %d ports; staged uses only %s:%d",
+                            ib.n_dev_ids, name, port);
+    }
+    INFO(s->log_level, "[STAGED] using device '%s' port %d", name, port);
+
+    s->rdma.set_context(device.context);
+    s->rdma.set_protection_domain(device.pd);
+    s->rdma.set_ib_port(port);
+    s->rdma.set_local_gid_index(static_cast<uint8_t>(device.gid_info[port - 1].local_gid_index));
+    s->rdma.set_local_gid(device.gid_info[port - 1].local_gid);
+    return 0;
 }
 
 static int staged_init_green_context(transport_staged_state_t* s) {
@@ -1928,16 +1978,7 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
 
     transport_staged_state_t* state = new transport_staged_state_t();
     state->cuda.syms = cuda_syms;
-    char selected_dev_name[64] = {};
-    nvshmemt_hca_info hca_list[STAGED_MAX_HCA_LIST] = {};
-    const char* hca_env = nullptr;
-    bool hca_list_requested = false;
-    bool hca_list_provided = false;
-    bool hca_list_is_exclude = false;
-    int hca_list_count = 0;
-    int num_devices = 0;
     int fork_init_status = 0;
-    struct ibv_device** dev_list = nullptr;
 
     auto& options = state->options;
     int status = nvshmemi_env_options_init(&options);
@@ -2004,54 +2045,13 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
          state->rdma.bounce_in_vidmem() ? "VIDMEM" : "SYSMEM");
 
     /* ── Open IB device ── */
-    hca_env = options.HCA_LIST;
-    hca_list_requested = options.HCA_LIST_provided && hca_env[0];
-    hca_list_provided = options.ENABLE_NIC_PE_MAPPING && hca_list_requested;
-    hca_list_is_exclude = hca_list_provided && hca_env[0] == '^';
-
-    if (hca_list_requested && !options.ENABLE_NIC_PE_MAPPING) {
-        NVSHMEMI_WARN_PRINT(
-            "[STAGED] ignoring NVSHMEM_HCA_LIST because NVSHMEM_ENABLE_NIC_PE_MAPPING=0; "
-            "using the first active filtered port");
-    }
     if (options.ENABLE_NIC_PE_MAPPING && options.HCA_PE_MAPPING_provided &&
-        options.HCA_PE_MAPPING[0]) {
-        if (hca_list_provided) {
-            NVSHMEMI_WARN_PRINT(
-                "[STAGED] ignoring NVSHMEM_HCA_PE_MAPPING because NVSHMEM_HCA_LIST is set");
-        } else {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] NVSHMEM_HCA_PE_MAPPING is not supported; select the single staged "
-                "HCA/port with NVSHMEM_HCA_LIST");
-            status = NVSHMEMX_ERROR_INVALID_VALUE;
-            goto out;
-        }
-    }
-
-    if (hca_list_provided) {
-        hca_list_count =
-            nvshmemt_parse_hca_list(hca_env, hca_list, STAGED_MAX_HCA_LIST, state->log_level);
-        if (hca_list_count <= 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_HCA_LIST='%s' did not contain a usable HCA",
-                                 hca_env);
-            status = NVSHMEMX_ERROR_INVALID_VALUE;
-            goto out;
-        }
-
-        if (!hca_list_is_exclude) {
-            snprintf(selected_dev_name, sizeof(selected_dev_name), "%s", hca_list[0].name);
-            if (hca_list[0].port == 0) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_HCA_LIST='%s' has invalid port 0", hca_env);
-                status = NVSHMEMX_ERROR_INVALID_VALUE;
-                goto out;
-            }
-            if (hca_list_count > 1) {
-                NVSHMEMI_WARN_PRINT(
-                    "[STAGED] NVSHMEM_HCA_LIST has %d entries; staged currently uses only the "
-                    "first (%s:%d)",
-                    hca_list_count, selected_dev_name, hca_list[0].port);
-            }
-        }
+        options.HCA_PE_MAPPING[0] && !(options.HCA_LIST_provided && options.HCA_LIST[0])) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] NVSHMEM_HCA_PE_MAPPING is not supported; select the single staged "
+            "HCA/port with NVSHMEM_HCA_LIST");
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
     }
 
     fork_init_status = ftable.fork_init();
@@ -2060,120 +2060,15 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
                             fork_init_status);
     }
 
-    dev_list = ftable.get_device_list(&num_devices);
-    if (!dev_list || num_devices == 0) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] no IB devices found");
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
-
-    for (int i = 0; i < num_devices && !state->rdma.context(); ++i) {
-        const char* name = ftable.get_device_name(dev_list[i]);
-        if (!name || !nvshmemt_check_hca_prefix(&options, name) ||
-            (!hca_list_is_exclude && selected_dev_name[0] &&
-             strcmp(name, selected_dev_name) != 0)) {
-            continue;
-        }
-
-        struct ibv_context* ctx = ftable.open_device(dev_list[i]);
-        if (!ctx) {
-            continue;
-        }
-
-        struct ibv_device_attr device_attr{};
-        if (ftable.query_device(ctx, &device_attr) != 0 || device_attr.phys_port_cnt == 0) {
-            ftable.close_device(ctx);
-            continue;
-        }
-
-        const int requested_port =
-            (!hca_list_is_exclude && selected_dev_name[0]) ? hca_list[0].port : -1;
-        for (int port = 1; port <= device_attr.phys_port_cnt; ++port) {
-            if (requested_port > 0 && port != requested_port) {
-                continue;
-            }
-            if (hca_list_is_exclude) {
-                bool excluded = false;
-                for (int hca = 0; hca < hca_list_count; ++hca) {
-                    const nvshmemt_hca_info& entry = hca_list[hca];
-                    if (strcmp(entry.name, name) == 0 && (entry.port == -1 || entry.port == port)) {
-                        excluded = true;
-                        break;
-                    }
-                }
-                if (excluded) {
-                    continue;
-                }
-            }
-
-            struct ibv_port_attr candidate_port_attr{};
-            if (ftable.query_port(ctx, port, &candidate_port_attr) != 0 ||
-                candidate_port_attr.state != IBV_PORT_ACTIVE ||
-                (candidate_port_attr.link_layer != IBV_LINK_LAYER_INFINIBAND &&
-                 candidate_port_attr.link_layer != IBV_LINK_LAYER_ETHERNET)) {
-                continue;
-            }
-
-            int gid_index = -1;
-            union ibv_gid gid{};
-            int gid_status =
-                staged_query_usable_gid(state, ctx, port, &candidate_port_attr, &gid_index, &gid);
-            if (gid_status != NVSHMEMX_SUCCESS) {
-                if (hca_list_provided && !hca_list_is_exclude) {
-                    NVSHMEMI_ERROR_PRINT("[STAGED] selected HCA '%s' port %d has no usable GID",
-                                         name, port);
-                    ftable.close_device(ctx);
-                    status = gid_status == NVSHMEMX_ERROR_INVALID_VALUE
-                                 ? NVSHMEMX_ERROR_INVALID_VALUE
-                                 : NVSHMEMX_ERROR_INTERNAL;
-                    goto out;
-                }
-                INFO(state->log_level,
-                     "[STAGED] skipping HCA '%s' port %d because no usable GID was found", name,
-                     port);
-                continue;
-            }
-
-            state->rdma.set_context(ctx);
-            state->rdma.set_ib_port(port);
-            state->rdma.set_local_gid_index(static_cast<uint8_t>(gid_index));
-            state->rdma.set_local_gid(gid);
-            snprintf(selected_dev_name, sizeof(selected_dev_name), "%s", name);
-            break;
-        }
-        if (!state->rdma.context()) {
-            ftable.close_device(ctx);
-        }
-    }
-    ftable.free_device_list(dev_list);
-    dev_list = nullptr;
-
-    if (!state->rdma.context()) {
-        if (hca_list_provided) {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] NVSHMEM_HCA_LIST='%s' did not match an active HCA/port with a usable GID",
-                hca_env);
-        } else {
-            NVSHMEMI_ERROR_PRINT("[STAGED] no usable HCA found");
-        }
-        status = hca_list_provided ? NVSHMEMX_ERROR_INVALID_VALUE : NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
-    INFO(state->log_level, "[STAGED] using device '%s' port %d", selected_dev_name,
-         state->rdma.ib_port());
-
-    /* ── PD ── */
-    state->rdma.set_protection_domain(ftable.alloc_pd(state->rdma.context()));
-    if (!state->rdma.protection_domain()) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] ibv_alloc_pd failed");
-        status = NVSHMEMX_ERROR_INTERNAL;
+    status = staged_open_hca(state);
+    if (status) {
         goto out;
     }
 
     INFO(state->log_level,
-         "[STAGED] device=%s port=%d slot=%zu pipeline_depth=%d; one RC QP per PE will be "
-         "allocated during endpoint connection",
-         selected_dev_name, state->rdma.ib_port(), state->bounce_bytes, state->pipeline_depth);
+         "[STAGED] slot=%zu pipeline_depth=%d; one RC QP per PE will be allocated during "
+         "endpoint connection",
+         state->bounce_bytes, state->pipeline_depth);
 
     transport->state = state;
     transport->host_ops.can_reach_peer = nvshmemt_staged_can_reach_peer;
@@ -2203,9 +2098,6 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
 
 out:
     staged_gdrcopy_fini(state);
-    if (dev_list) {
-        ftable.free_device_list(dev_list);
-    }
     delete state;
     nvshmemt_ibv_ftable_fini(&ibv_handle);
     free(transport);

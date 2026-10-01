@@ -42,7 +42,6 @@ inline constexpr int STAGED_CQ_DEPTH = 256;
 inline constexpr int STAGED_SQ_DEPTH = 128;
 inline constexpr int STAGED_RQ_DEPTH = 128;
 inline constexpr int STAGED_GRH_HOP_LIMIT = 255;
-inline constexpr int STAGED_MAX_HCA_LIST = 16;
 inline constexpr size_t STAGED_MAX_BOUNCE_BYTES = UINT32_MAX;
 inline constexpr size_t STAGED_VIDMEM_ALIGNMENT = size_t{1} << 21;
 
