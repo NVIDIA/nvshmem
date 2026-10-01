@@ -23,12 +23,14 @@ def _resolve_ptr(arg):
 
 
 @dsl_user_op
-def _smem_ptr_as_generic(smem_ptr, *, loc=None, ip=None):
-    """Widen a shared-memory pointer into a generic 16B-aligned ``Int8`` pointer.
+def _smem_ptr_as_generic(smem_ptr, dtype=None, assumed_align=None, *, loc=None, ip=None):
+    """Widen a shared-memory pointer into a generic pointer.
 
-    A CuTe shared pointer is a 32-bit shared-window offset, while the native
-    ``void *`` parameter is a 64-bit generic address, so the pointer needs an
+    A CuTe shared pointer is a 32-bit shared-window offset, while native
+    pointer parameters are 64-bit generic addresses, so the pointer needs an
     address-space cast (``cvta.shared.u64``) before it crosses the FFI boundary.
+    The result keeps the element type and alignment of ``smem_ptr`` unless
+    ``dtype`` or ``assumed_align`` override them.
     """
     shared = llvm.inttoptr(
         llvm.PointerType.get(int(AddressSpace.smem)),
@@ -38,7 +40,12 @@ def _smem_ptr_as_generic(smem_ptr, *, loc=None, ip=None):
     )
     generic = llvm.addrspacecast(llvm.PointerType.get(int(AddressSpace.generic)), shared, loc=loc, ip=ip)
     address = llvm.ptrtoint(T.i64(), generic, loc=loc, ip=ip)
-    return cute.make_ptr(cutlass.Int8, address, AddressSpace.generic, assumed_align=16, loc=loc, ip=ip)
+    return cute.make_ptr(dtype or smem_ptr.dtype,
+                         address,
+                         AddressSpace.generic,
+                         assumed_align=assumed_align or smem_ptr.alignment,
+                         loc=loc,
+                         ip=ip)
 
 
 @cute.jit
@@ -64,8 +71,8 @@ def give_smem(smem: cute.Tensor):
     must register an equally sized allocation. Pair every call with
     :func:`release_smem` before the kernel returns.
     """
-    # The generated binding uses an Int8 pointer for C ``void*``.
-    smem_ptr = _smem_ptr_as_generic(_resolve_ptr(smem))
+    # The generated binding uses a 16B-aligned Int8 pointer for C ``void*``.
+    smem_ptr = _smem_ptr_as_generic(_resolve_ptr(smem), cutlass.Int8, 16)
     size = cute.size_in_bytes(smem.element_type, smem.layout)
     return bindings.give_smem(smem_ptr, cute_cast(size, cutlass.Uint64))
 
