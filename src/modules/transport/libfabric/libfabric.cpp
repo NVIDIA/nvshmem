@@ -50,13 +50,6 @@
 #include "transport_gdr_common.h"
 #endif
 
-/* Note - this is required to not break on Slingshot systems
- * where we compile with libfabric < 1.15.
- */
-#ifndef FI_OPT_CUDA_API_PERMITTED
-#define FI_OPT_CUDA_API_PERMITTED 10
-#endif
-
 #define NVSHMEM_STAGED_AMO_WIREDATA_SIZE \
     sizeof(nvshmemt_libfabric_gdr_op_ctx_t) - sizeof(struct fi_context2) - sizeof(fi_addr_t)
 
@@ -2778,8 +2771,8 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     nvshmemt_libfabric_mem_handle_t *fabric_handle = nullptr;
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
     cudaPointerAttributes attr = {};
-    struct fi_mr_attr mr_attr;
-    struct iovec mr_iovec;
+    struct fi_mr_attr mr_attr = {};
+    struct iovec mr_iovec = {};
     int status;
     bool is_host = true;
     void *curr_ptr;
@@ -2817,9 +2810,6 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         is_host = false;
     }
 
-    memset(&mr_attr, 0, sizeof(struct fi_mr_attr));
-    memset(&mr_iovec, 0, sizeof(struct iovec));
-
     mr_iovec.iov_base = buf;
     mr_iovec.iov_len = length;
     mr_attr.mr_iov = &mr_iovec;
@@ -2838,36 +2828,23 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     }
 
     for (size_t i = 0; i < libfabric_state->domains.size(); i++) {
-        if (libfabric_state->prov_infos[i]->domain_attr->mr_mode & FI_MR_ENDPOINT) {
-            status =
-                fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &fabric_handle->hdls[i].mr);
-            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                            "Error registering memory region.\n");
-            registered_domains = i + 1;
+        auto &hdl = fabric_handle->hdls[i];
+        status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &hdl.mr);
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Error registering memory region.\n");
+        registered_domains = i + 1;
 
-            status =
-                fi_mr_bind(fabric_handle->hdls[i].mr, &libfabric_state->eps[i]->endpoint->fid, 0);
+        if (libfabric_state->prov_infos[i]->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+            status = fi_mr_bind(hdl.mr, &libfabric_state->eps[i]->endpoint->fid, 0);
             NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                             "Error binding MR to EP %zu.\n", i);
 
-            status = fi_mr_enable(fabric_handle->hdls[i].mr);
+            status = fi_mr_enable(hdl.mr);
             NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                             "Error enabling MR.\n");
-
-            fabric_handle->hdls[i].key = fi_mr_key(fabric_handle->hdls[i].mr);
-            fabric_handle->hdls[i].local_desc = fi_mr_desc(fabric_handle->hdls[i].mr);
-        } else {
-            struct fid_mr *mr;
-
-            status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &mr);
-            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                            "Error registering memory region.\n");
-
-            fabric_handle->hdls[i].mr = mr;
-            registered_domains = i + 1;
-            fabric_handle->hdls[i].key = fi_mr_key(mr);
-            fabric_handle->hdls[i].local_desc = fi_mr_desc(mr);
         }
+        hdl.key = fi_mr_key(hdl.mr);
+        hdl.local_desc = fi_mr_desc(hdl.mr);
     }
 
     if (!local_only && libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
@@ -3266,16 +3243,14 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Unable to allocate endpoint.\n");
 
-        /* FI_OPT_CUDA_API_PERMITTED was introduced in libfabric 1.18.0 */
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
             bool prohibit_cuda_api = false;
             status = fi_setopt(&state->eps[i]->endpoint->fid, FI_OPT_ENDPOINT,
                                FI_OPT_CUDA_API_PERMITTED, &prohibit_cuda_api, sizeof(bool));
             if (status == -FI_ENOPROTOOPT) {
                 NVSHMEMI_WARN_PRINT(
-                    "fi_setopt of FI_OPT_CUDA_API_PERMITTED returned as "
-                    "not implemented.\n Not setting. This is expected for libfabric "
-                    "versions < 1.18.\n");
+                    "EFA provider does not implement FI_OPT_CUDA_API_PERMITTED; "
+                    "leaving the provider default.\n");
             } else if (status) {
                 NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                                 "Unable to set endpoint CUDA API status.\n");
