@@ -1321,6 +1321,8 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
     LOAD_SYM(*ibv_handle, "ibv_destroy_cq", ftable->destroy_cq);
     LOAD_SYM(*ibv_handle, "ibv_destroy_srq", ftable->destroy_srq);
     LOAD_SYM(*ibv_handle, "ibv_destroy_ah", ftable->destroy_ah);
+    LOAD_SYM(*ibv_handle, "ibv_free_device_list", ftable->free_device_list);
+    LOAD_SYM(*ibv_handle, "ibv_wc_status_str", ftable->wc_status_str);
 
     return 0;
 }

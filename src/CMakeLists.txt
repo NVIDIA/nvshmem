@@ -913,7 +913,7 @@ if(NVSHMEM_STAGED_SUPPORT)
                              PRIVATE include
                              modules/transport/common
   )
-  target_link_libraries(nvshmem_transport_staged PRIVATE CUDA::cudart_static CUDA::cuda_driver ibverbs)
+  target_link_libraries(nvshmem_transport_staged PRIVATE CUDA::cudart_static CUDA::cuda_driver)
   if(NVSHMEM_USE_GDRCOPY)
     target_sources(nvshmem_transport_staged PRIVATE
                    modules/transport/common/transport_gdr_common.cpp

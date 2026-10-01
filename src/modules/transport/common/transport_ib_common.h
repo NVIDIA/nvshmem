@@ -196,6 +196,8 @@ struct nvshmemt_ibv_function_table {
     int (*destroy_cq)(struct ibv_cq *cq);
     int (*destroy_srq)(struct ibv_srq *srq);
     int (*destroy_ah)(struct ibv_ah *ah);
+    void (*free_device_list)(struct ibv_device **list);
+    const char *(*wc_status_str)(enum ibv_wc_status status);
 };
 
 struct nvshmemt_mlx5dv_function_table {

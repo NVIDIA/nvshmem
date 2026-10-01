@@ -49,7 +49,7 @@ staged_qp_t::~staged_qp_t() { close(); }
 int staged_qp_t::close() noexcept {
     int status = 0;
     if (qp_) {
-        int verbs_status = ibv_destroy_qp(qp_);
+        int verbs_status = ftable.destroy_qp(qp_);
         if (verbs_status != 0) {
             /* A live QP may still reference its CQs and control receive MR. */
             NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_qp failed during cleanup: %s",
@@ -59,9 +59,9 @@ int staged_qp_t::close() noexcept {
         qp_ = nullptr;
     }
     if (send_cq_) {
-        int verbs_status = ibv_destroy_cq(send_cq_);
+        int verbs_status = ftable.destroy_cq(send_cq_);
         if (verbs_status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_cq(send) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] ftable.destroy_cq(send) failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -69,9 +69,9 @@ int staged_qp_t::close() noexcept {
         }
     }
     if (recv_cq_) {
-        int verbs_status = ibv_destroy_cq(recv_cq_);
+        int verbs_status = ftable.destroy_cq(recv_cq_);
         if (verbs_status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_cq(recv) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] ftable.destroy_cq(recv) failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -79,9 +79,9 @@ int staged_qp_t::close() noexcept {
         }
     }
     if (ctrl_recv_mr_) {
-        int verbs_status = ibv_dereg_mr(ctrl_recv_mr_);
+        int verbs_status = ftable.dereg_mr(ctrl_recv_mr_);
         if (verbs_status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dereg_mr(control) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] ftable.dereg_mr(control) failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -132,7 +132,7 @@ int staged_rdma_state_t::close() noexcept {
         }
     }
     if (ib_.protection_domain) {
-        int verbs_status = ibv_dealloc_pd(ib_.protection_domain);
+        int verbs_status = ftable.dealloc_pd(ib_.protection_domain);
         if (verbs_status != 0) {
             /* The device context must outlive a PD that could not be released. */
             NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dealloc_pd failed during cleanup: %s",
@@ -142,7 +142,7 @@ int staged_rdma_state_t::close() noexcept {
         ib_.protection_domain = nullptr;
     }
     if (ib_.context) {
-        int verbs_status = ibv_close_device(ib_.context);
+        int verbs_status = ftable.close_device(ib_.context);
         if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED] ibv_close_device failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
@@ -172,16 +172,16 @@ staged_cuda_state_t::~staged_cuda_state_t() {
 
 int staged_qp_t::initialize(int ib_port, uint16_t pkey_index, size_t index) {
     ctrl_recv_mr_ =
-        ibv_reg_mr(pd_, ctrl_recv_bufs_.data(), ctrl_recv_bufs_.size() * sizeof(staged_ctrl_msg_t),
-                   IBV_ACCESS_LOCAL_WRITE);
+        ftable.reg_mr(pd_, ctrl_recv_bufs_.data(),
+                      ctrl_recv_bufs_.size() * sizeof(staged_ctrl_msg_t), IBV_ACCESS_LOCAL_WRITE);
     if (!ctrl_recv_mr_) {
         NVSHMEMI_ERROR_PRINT("[STAGED] failed to register control receive buffers for QP %zu: %s",
                              index, strerror(errno));
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    send_cq_ = ibv_create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
-    recv_cq_ = ibv_create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
+    send_cq_ = ftable.create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
+    recv_cq_ = ftable.create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
     if (!send_cq_ || !recv_cq_) {
         NVSHMEMI_ERROR_PRINT("[STAGED] failed to create CQs for QP %zu", index);
         return NVSHMEMX_ERROR_INTERNAL;
@@ -196,7 +196,7 @@ int staged_qp_t::initialize(int ib_port, uint16_t pkey_index, size_t index) {
     qp_attr.cap.max_send_sge = 1;
     qp_attr.cap.max_recv_sge = 1;
     qp_attr.cap.max_inline_data = 128;
-    qp_ = ibv_create_qp(pd_, &qp_attr);
+    qp_ = ftable.create_qp(pd_, &qp_attr);
     if (!qp_) {
         NVSHMEMI_ERROR_PRINT("[STAGED] failed to create QP %zu: %s", index, strerror(errno));
         return NVSHMEMX_ERROR_INTERNAL;
@@ -208,7 +208,7 @@ int staged_qp_t::initialize(int ib_port, uint16_t pkey_index, size_t index) {
     attr.pkey_index = pkey_index;
     attr.qp_access_flags =
         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_LOCAL_WRITE;
-    int status = ibv_modify_qp(
+    int status = ftable.modify_qp(
         qp_, &attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
     if (status) {
         NVSHMEMI_ERROR_PRINT("[STAGED] QP %zu INIT failed: %s", index, strerror(status));
@@ -293,7 +293,7 @@ static int staged_query_usable_gid(transport_staged_state_t* s, struct ibv_conte
     if (status != NVSHMEMX_SUCCESS) {
         return status;
     }
-    if (ibv_query_gid(ctx, port, *gid_index, gid) != 0) {
+    if (ftable.query_gid(ctx, port, *gid_index, gid) != 0) {
         return NVSHMEMX_ERROR_INTERNAL;
     }
     return NVSHMEMX_SUCCESS;
@@ -702,7 +702,7 @@ static int send_ctrl(transport_staged_state_t* s, staged_qp_t& qp, const staged_
         }
         if (wc.status != IBV_WC_SUCCESS) {
             NVSHMEMI_ERROR_PRINT("[STAGED] control message send failed: %s",
-                                 ibv_wc_status_str(wc.status));
+                                 ftable.wc_status_str(wc.status));
             staged_fail_control(s);
             return NVSHMEMX_ERROR_INTERNAL;
         }
@@ -742,7 +742,7 @@ static int post_rdma_write_wait(transport_staged_state_t* s, staged_qp_t& qp, vo
             return NVSHMEMX_ERROR_INTERNAL;
         }
         if (wc.status != IBV_WC_SUCCESS) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] RDMA Write failed: %s", ibv_wc_status_str(wc.status));
+            NVSHMEMI_ERROR_PRINT("[STAGED] RDMA Write failed: %s", ftable.wc_status_str(wc.status));
             return NVSHMEMX_ERROR_INTERNAL;
         }
         return 0;
@@ -987,7 +987,7 @@ static void staged_server_loop(nvshmem_transport_t transport, staged_startup_lat
 
             if (wc.status != IBV_WC_SUCCESS) {
                 NVSHMEMI_ERROR_PRINT("[STAGED server] control receive failed: %s",
-                                     ibv_wc_status_str(wc.status));
+                                     ftable.wc_status_str(wc.status));
                 staged_fail_control(s);
                 return;
             }
@@ -1546,7 +1546,7 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
     struct ibv_port_attr port_attr{};
     int verbs_status = 0;
     if (!local_status) {
-        verbs_status = ibv_query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr);
+        verbs_status = ftable.query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr);
     }
     if (verbs_status != 0) {
         NVSHMEMI_ERROR_PRINT("[STAGED PE%d] ibv_query_port failed for port %d: %s", me,
@@ -1698,9 +1698,9 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
         }
 
         int verbs_status =
-            ibv_modify_qp(qp.qp(), &rtr_attr,
-                          IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-                              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
+            ftable.modify_qp(qp.qp(), &rtr_attr,
+                             IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+                                 IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
         if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTR failed for PE%d: %s", me, qp_slot,
                                  pe, strerror(verbs_status));
@@ -1717,9 +1717,9 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
         rts_attr.rnr_retry = 7;
         rts_attr.max_rd_atomic = 1;
         verbs_status =
-            ibv_modify_qp(qp.qp(), &rts_attr,
-                          IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-                              IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
+            ftable.modify_qp(qp.qp(), &rts_attr,
+                             IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                                 IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
         if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTS failed for PE%d: %s", me, qp_slot,
                                  pe, strerror(verbs_status));
@@ -2054,13 +2054,13 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
         }
     }
 
-    fork_init_status = ibv_fork_init();
+    fork_init_status = ftable.fork_init();
     if (fork_init_status != 0) {
         NVSHMEMI_WARN_PRINT("[STAGED] ibv_fork_init returned %d; continuing without fork safety",
                             fork_init_status);
     }
 
-    dev_list = ibv_get_device_list(&num_devices);
+    dev_list = ftable.get_device_list(&num_devices);
     if (!dev_list || num_devices == 0) {
         NVSHMEMI_ERROR_PRINT("[STAGED] no IB devices found");
         status = NVSHMEMX_ERROR_INTERNAL;
@@ -2068,21 +2068,21 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
     }
 
     for (int i = 0; i < num_devices && !state->rdma.context(); ++i) {
-        const char* name = ibv_get_device_name(dev_list[i]);
+        const char* name = ftable.get_device_name(dev_list[i]);
         if (!name || !nvshmemt_check_hca_prefix(&options, name) ||
             (!hca_list_is_exclude && selected_dev_name[0] &&
              strcmp(name, selected_dev_name) != 0)) {
             continue;
         }
 
-        struct ibv_context* ctx = ibv_open_device(dev_list[i]);
+        struct ibv_context* ctx = ftable.open_device(dev_list[i]);
         if (!ctx) {
             continue;
         }
 
         struct ibv_device_attr device_attr{};
-        if (ibv_query_device(ctx, &device_attr) != 0 || device_attr.phys_port_cnt == 0) {
-            ibv_close_device(ctx);
+        if (ftable.query_device(ctx, &device_attr) != 0 || device_attr.phys_port_cnt == 0) {
+            ftable.close_device(ctx);
             continue;
         }
 
@@ -2107,7 +2107,7 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
             }
 
             struct ibv_port_attr candidate_port_attr{};
-            if (ibv_query_port(ctx, port, &candidate_port_attr) != 0 ||
+            if (ftable.query_port(ctx, port, &candidate_port_attr) != 0 ||
                 candidate_port_attr.state != IBV_PORT_ACTIVE ||
                 (candidate_port_attr.link_layer != IBV_LINK_LAYER_INFINIBAND &&
                  candidate_port_attr.link_layer != IBV_LINK_LAYER_ETHERNET)) {
@@ -2122,7 +2122,7 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
                 if (hca_list_provided && !hca_list_is_exclude) {
                     NVSHMEMI_ERROR_PRINT("[STAGED] selected HCA '%s' port %d has no usable GID",
                                          name, port);
-                    ibv_close_device(ctx);
+                    ftable.close_device(ctx);
                     status = gid_status == NVSHMEMX_ERROR_INVALID_VALUE
                                  ? NVSHMEMX_ERROR_INVALID_VALUE
                                  : NVSHMEMX_ERROR_INTERNAL;
@@ -2142,10 +2142,10 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
             break;
         }
         if (!state->rdma.context()) {
-            ibv_close_device(ctx);
+            ftable.close_device(ctx);
         }
     }
-    ibv_free_device_list(dev_list);
+    ftable.free_device_list(dev_list);
     dev_list = nullptr;
 
     if (!state->rdma.context()) {
@@ -2163,7 +2163,7 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
          state->rdma.ib_port());
 
     /* ── PD ── */
-    state->rdma.set_protection_domain(ibv_alloc_pd(state->rdma.context()));
+    state->rdma.set_protection_domain(ftable.alloc_pd(state->rdma.context()));
     if (!state->rdma.protection_domain()) {
         NVSHMEMI_ERROR_PRINT("[STAGED] ibv_alloc_pd failed");
         status = NVSHMEMX_ERROR_INTERNAL;
@@ -2204,7 +2204,7 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_tab
 out:
     staged_gdrcopy_fini(state);
     if (dev_list) {
-        ibv_free_device_list(dev_list);
+        ftable.free_device_list(dev_list);
     }
     delete state;
     nvshmemt_ibv_ftable_fini(&ibv_handle);
