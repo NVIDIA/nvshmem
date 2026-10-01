@@ -179,6 +179,9 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(test_put_launcher, dst_cute, src_cute, 0)
 
     peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    # All PEs must finish initializing their destination before a peer writes it.
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
     compiled(dst_cute, src_cute, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
@@ -197,11 +200,11 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
 def test_get_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     dev = Device()
-    buf_src = _make_torch_tensor((4, 4), dtype, 0)
-    buf_dst = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_src = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_dst = _make_torch_tensor((4, 4), dtype, 0)
 
-    dst_cute = _cute_from_torch(buf_src)
-    src_cute = _cute_from_torch(buf_dst)
+    dst_cute = _cute_from_torch(buf_dst)
+    src_cute = _cute_from_torch(buf_src)
 
     @cute.kernel
     def test_get(dst: cute.Tensor, src: cute.Tensor, pe: Int32):
@@ -217,13 +220,17 @@ def test_get_on_tensor(nvshmem_init_fini, dtype):
         )
 
     compiled = _compile_kernel(test_get_launcher, dst_cute, src_cute, 0)
-    compiled(dst_cute, src_cute, nvshmem.core.my_pe())
+    # Read the same predecessor whose value the ring put delivers locally.
+    peer = (nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(dst_cute, src_cute, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
+    _assert_torch_tensor(buf_dst, peer + 1)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -260,13 +267,18 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
         )
 
     compiled = _compile_kernel(test_put_signal_launcher, dst_cute, src_cute, signal_cute, 0, 0, 0)
-    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
+    expected = ((nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()) + 1
+    _assert_torch_tensor(buf_dst, expected)
+    _assert_torch_tensor(signal_var, signal_val)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -305,14 +317,18 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
         )
 
     compiled = _compile_kernel(test_put_signal_with_wait_launcher, dst_cute, src_cute, signal_cute, 0, 0, 0)
-    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    if nvshmem.core.my_pe() == 1:
-        _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
+    expected = ((nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()) + 1
+    _assert_torch_tensor(buf_dst, expected)
+    _assert_torch_tensor(signal_var, signal_val)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -344,11 +360,16 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
         )
 
     compiled = _compile_kernel(test_signal_op_signal_wait_launcher, signal_cute, 0, 0, 0)
-    compiled(signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(signal_cute, signal_val, signal_op, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
+
+    _assert_torch_tensor(signal_var, signal_val)
 
     nvshmem.core.free_tensor(signal_var)
 
