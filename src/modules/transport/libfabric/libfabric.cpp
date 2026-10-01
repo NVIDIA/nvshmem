@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <algorithm>
 #include <mutex>
 #include <new>
@@ -2765,6 +2766,63 @@ out:
     return status;
 }
 
+static bool nvshmemt_libfabric_export_dmabuf(nvshmemt_libfabric_state_t *state, void *buf,
+                                             size_t length, CUdevice device,
+                                             struct fi_mr_dmabuf *dmabuf) {
+    if (!state->table->pfn_cuDeviceGetAttribute ||
+        !state->table->pfn_cuMemGetHandleForAddressRange) {
+        INFO(state->log_level,
+             "CUDA DMA-BUF entry points unavailable; using ordinary registration.");
+        return false;
+    }
+
+    int supported = 0;
+    CUresult cuda_status =
+        CUPFN(state->table,
+              cuDeviceGetAttribute(&supported, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+    if (cuda_status != CUDA_SUCCESS || !supported) {
+        INFO(state->log_level,
+             "CUDA DMA-BUF unavailable on device %d (status %d); using ordinary registration.",
+             device, cuda_status);
+        return false;
+    }
+
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const uintptr_t address = reinterpret_cast<uintptr_t>(buf);
+    if (page_size <= 0 || length == 0 || length > UINTPTR_MAX - address) {
+        INFO(state->log_level, "Invalid DMA-BUF export range; using ordinary registration.");
+        return false;
+    }
+    const size_t page = static_cast<size_t>(page_size);
+    const size_t offset = address % page;
+    const uintptr_t base = address - offset;
+    if (length > SIZE_MAX - offset || length + offset > SIZE_MAX - (page - 1)) {
+        INFO(state->log_level, "DMA-BUF export size overflow; using ordinary registration.");
+        return false;
+    }
+    const size_t export_length = ((length + offset + page - 1) / page) * page;
+    if (export_length > UINTPTR_MAX - base) {
+        INFO(state->log_level, "DMA-BUF export address overflow; using ordinary registration.");
+        return false;
+    }
+
+    int fd = -1;
+    cuda_status = CUPFN(state->table, cuMemGetHandleForAddressRange(
+                                          &fd, static_cast<CUdeviceptr>(base), export_length,
+                                          CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0));
+    if (cuda_status != CUDA_SUCCESS) {
+        INFO(state->log_level,
+             "CUDA DMA-BUF export failed (status %d); using ordinary registration.", cuda_status);
+        return false;
+    }
+
+    dmabuf->fd = fd;
+    dmabuf->base_addr = reinterpret_cast<void *>(base);
+    dmabuf->offset = offset;
+    dmabuf->len = length;
+    return true;
+}
+
 static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf,
                                              size_t length, nvshmem_transport_t t,
                                              bool local_only) {
@@ -2773,6 +2831,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     cudaPointerAttributes attr = {};
     struct fi_mr_attr mr_attr = {};
     struct iovec mr_iovec = {};
+    struct fi_mr_dmabuf mr_dmabuf = {};
     int status;
     bool is_host = true;
     void *curr_ptr;
@@ -2780,6 +2839,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     CUdevice gpu_device_id;
     nvshmemt_libfabric_memhandle_info_t *handle_info = NULL;
     size_t registered_domains = 0;
+    mr_dmabuf.fd = -1;
 
     // for now, error out if mmap is used with libfabric
     // TODO : Add workaround for mmap with libfabric
@@ -2827,9 +2887,30 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         mr_attr.iface = FI_HMEM_SYSTEM;
     }
 
+    if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA &&
+        attr.type == cudaMemoryTypeDevice && options.LIBFABRIC_ENABLE_DMABUF) {
+        nvshmemt_libfabric_export_dmabuf(libfabric_state, buf, length, gpu_device_id, &mr_dmabuf);
+    }
+
     for (size_t i = 0; i < libfabric_state->domains.size(); i++) {
         auto &hdl = fabric_handle->hdls[i];
-        status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &hdl.mr);
+        struct fi_mr_attr domain_attr = mr_attr;
+        uint64_t flags = 0;
+        if (mr_dmabuf.fd >= 0) {
+            domain_attr.dmabuf = &mr_dmabuf;
+            flags = FI_MR_DMABUF;
+        }
+        status = fi_mr_regattr(libfabric_state->domains[i], &domain_attr, flags, &hdl.mr);
+        if (status && flags) {
+            INFO(libfabric_state->log_level,
+                 "DMA-BUF registration failed for domain %zu: %d (%s); retrying ordinary "
+                 "registration.",
+                 i, status, fi_strerror(-status));
+            status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &hdl.mr);
+        } else if (!status && flags) {
+            INFO(libfabric_state->log_level,
+                 "Registered %p, length %zu using DMA-BUF for domain %zu.", buf, length, i);
+        }
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Error registering memory region.\n");
         registered_domains = i + 1;
@@ -2926,6 +3007,9 @@ out:
                 *fabric_handle = {};
             }
         }
+    }
+    if (mr_dmabuf.fd >= 0 && close(mr_dmabuf.fd) != 0) {
+        NVSHMEMI_WARN_PRINT("Unable to close libfabric DMA-BUF fd: %s\n", strerror(errno));
     }
     return status;
 }

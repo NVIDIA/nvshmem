@@ -150,6 +150,9 @@ NVSHMEMI_ENV_DEF(UCX_ZCOPY_THRESH, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
 
 NVSHMEMI_ENV_DEF(LIBFABRIC_PROVIDER, string, "cxi", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set the feature set provider for the libfabric transport: cxi, efa, verbs")
+NVSHMEMI_ENV_DEF(LIBFABRIC_ENABLE_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Enable CUDA DMA-BUF memory registration with the EFA libfabric provider. "
+                 "By default, use ordinary CUDA memory registration.")
 NVSHMEMI_ENV_DEF(LIBFABRIC_MAX_NIC_PER_PE, int, 16, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set the maximum number of NICs per PE for use in the libfabric provider.")
 
