@@ -40,7 +40,9 @@ int main(int argc, char **argv) {
     const int mype = nvshmem_my_pe();
     const int npes = nvshmem_n_pes();
     if (npes < 2) {
-        ERROR_EXIT("This test requires at least two PEs.\n");
+        printf("[PE %d] SKIP: device subrange test requires at least 2 PEs\n", mype);
+        finalize_wrapper();
+        return EXIT_SUCCESS;
     }
     const long page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) {
