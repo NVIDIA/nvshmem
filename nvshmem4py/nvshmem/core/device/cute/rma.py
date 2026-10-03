@@ -7,13 +7,21 @@ import cutlass
 from cutlass import cute
 from cutlass.base_dsl.ast_helpers import const_expr
 from cutlass.base_dsl.typing import cast as cute_cast
+from cutlass.cute.typing import AddressSpace
+
+from nvshmem.core.device.cute.direct import _smem_ptr_as_generic
 
 __all__ = ["p", "g", "put", "get", "put_nbi", "get_nbi", "put_block", "get_block", "put_nbi_block", "get_nbi_block", "put_warp", "get_warp", "put_nbi_warp", "get_nbi_warp", "put_signal_block", "put_signal", "put_signal_nbi", "put_signal_warp", "put_signal_nbi_block", "put_signal_nbi_warp"]
 
 
 @cute.jit
 def _resolve_ptr(arg):
-    return arg.iterator
+    ptr = arg.iterator
+    # Shared-memory operands (e.g. TMA puts from smem or gets into smem) must
+    # reach NVSHMEM as generic addresses.
+    if const_expr(ptr.memspace == AddressSpace.smem):
+        ptr = _smem_ptr_as_generic(ptr)
+    return ptr
 
 
 @cute.jit
@@ -48,7 +56,7 @@ def put_block(dst, src, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``pe`` (``int``): Target PE to copy to.
 
     Note:
@@ -111,7 +119,7 @@ def put_nbi_block(dst, src, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``pe`` (``int``): Target PE to copy to.
 
     Note:
@@ -177,7 +185,7 @@ def put_warp(dst, src, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``pe`` (``int``): Target PE to copy to.
 
     Note:
@@ -240,7 +248,7 @@ def put_nbi_warp(dst, src, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``pe`` (``int``): Target PE to copy to.
 
     Note:
@@ -306,7 +314,7 @@ def put(dst, src, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``pe`` (``int``): Target PE to copy to.
 
     Note:
@@ -369,7 +377,7 @@ def put_nbi(dst, src, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``pe`` (``int``): Target PE to copy to.
 
     Note:
@@ -436,7 +444,7 @@ def get_block(dst, src, pe):
     This is a CTA-level operation. All threads in the CTA must call this function with the same arguments.
 
     Args:
-        - ``dst``: CuTe tensor view pointing to the local destination on this PE.
+        - ``dst``: CuTe tensor view pointing to the local destination on this PE, in global or shared memory.
         - ``src``: CuTe tensor view pointing to the symmetric source on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
         - ``pe`` (``int``): Source PE to copy from.
@@ -499,7 +507,7 @@ def get_nbi_block(dst, src, pe):
     This is a CTA-level operation. All threads in the CTA must call this function with the same arguments.
 
     Args:
-        - ``dst``: CuTe tensor view pointing to the local destination on this PE.
+        - ``dst``: CuTe tensor view pointing to the local destination on this PE, in global or shared memory.
         - ``src``: CuTe tensor view pointing to the symmetric source on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
         - ``pe`` (``int``): Source PE to copy from.
@@ -565,7 +573,7 @@ def get_warp(dst, src, pe):
     This is a warp-level operation. All threads in the warp must call this function with the same arguments.
 
     Args:
-        - ``dst``: CuTe tensor view pointing to the local destination on this PE.
+        - ``dst``: CuTe tensor view pointing to the local destination on this PE, in global or shared memory.
         - ``src``: CuTe tensor view pointing to the symmetric source on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
         - ``pe`` (``int``): Source PE to copy from.
@@ -628,7 +636,7 @@ def get_nbi_warp(dst, src, pe):
     This is a warp-level operation. All threads in the warp must call this function with the same arguments.
 
     Args:
-        - ``dst``: CuTe tensor view pointing to the local destination on this PE.
+        - ``dst``: CuTe tensor view pointing to the local destination on this PE, in global or shared memory.
         - ``src``: CuTe tensor view pointing to the symmetric source on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
         - ``pe`` (``int``): Source PE to copy from.
@@ -694,7 +702,7 @@ def get(dst, src, pe):
     This is a thread-level operation.
 
     Args:
-        - ``dst``: CuTe tensor view pointing to the local destination on this PE.
+        - ``dst``: CuTe tensor view pointing to the local destination on this PE, in global or shared memory.
         - ``src``: CuTe tensor view pointing to the symmetric source on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
         - ``pe`` (``int``): Source PE to copy from.
@@ -757,7 +765,7 @@ def get_nbi(dst, src, pe):
     This is a thread-level operation.
 
     Args:
-        - ``dst``: CuTe tensor view pointing to the local destination on this PE.
+        - ``dst``: CuTe tensor view pointing to the local destination on this PE, in global or shared memory.
         - ``src``: CuTe tensor view pointing to the symmetric source on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor accessible by all PEs.
         - ``pe`` (``int``): Source PE to copy from.
@@ -831,7 +839,7 @@ def put_signal_block(dst, src, signal_var, signal_val, signal_op, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``signal_var``: CuTe tensor view pointing to a symmetric signal variable (dtype ``uint64``)
           on PE ``pe``. Must be a 1-element NVSHMEM-allocated tensor.
         - ``signal_val`` (``int``): Value used to update the signal variable. Cast to ``uint64``.
@@ -905,7 +913,7 @@ def put_signal_nbi_block(dst, src, signal_var, signal_val, signal_op, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``signal_var``: CuTe tensor view pointing to a symmetric signal variable (dtype ``uint64``)
           on PE ``pe``. Must be a 1-element NVSHMEM-allocated tensor.
         - ``signal_val`` (``int``): Value used to update the signal variable. Cast to ``uint64``.
@@ -982,7 +990,7 @@ def put_signal_warp(dst, src, signal_var, signal_val, signal_op, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``signal_var``: CuTe tensor view pointing to a symmetric signal variable (dtype ``uint64``)
           on PE ``pe``. Must be a 1-element NVSHMEM-allocated tensor.
         - ``signal_val`` (``int``): Value used to update the signal variable. Cast to ``uint64``.
@@ -1056,7 +1064,7 @@ def put_signal_nbi_warp(dst, src, signal_var, signal_val, signal_op, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``signal_var``: CuTe tensor view pointing to a symmetric signal variable (dtype ``uint64``)
           on PE ``pe``. Must be a 1-element NVSHMEM-allocated tensor.
         - ``signal_val`` (``int``): Value used to update the signal variable. Cast to ``uint64``.
@@ -1133,7 +1141,7 @@ def put_signal(dst, src, signal_var, signal_val, signal_op, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``signal_var``: CuTe tensor view pointing to a symmetric signal variable (dtype ``uint64``)
           on PE ``pe``. Must be a 1-element NVSHMEM-allocated tensor.
         - ``signal_val`` (``int``): Value used to update the signal variable. Cast to ``uint64``.
@@ -1207,7 +1215,7 @@ def put_signal_nbi(dst, src, signal_var, signal_val, signal_op, pe):
     Args:
         - ``dst``: CuTe tensor view pointing to the symmetric destination on PE ``pe``.
           Must be a symmetric (NVSHMEM-allocated) tensor.
-        - ``src``: CuTe tensor view pointing to the local source data on this PE.
+        - ``src``: CuTe tensor view pointing to the local source data on this PE, in global or shared memory.
         - ``signal_var``: CuTe tensor view pointing to a symmetric signal variable (dtype ``uint64``)
           on PE ``pe``. Must be a 1-element NVSHMEM-allocated tensor.
         - ``signal_val`` (``int``): Value used to update the signal variable. Cast to ``uint64``.
