@@ -32,4 +32,9 @@ void call_nvshmemi_signal_wait_until_on_stream_kernel(volatile uint64_t *sig_add
 
 void call_nvshmemi_signal_op_kernel(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                     cudaStream_t cstrm);
+
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+void call_nvshmemi_cft_signal_add_kernel(uint64_t *sig_addr, uint64_t signal, int pe,
+                                         cudaStream_t cstrm);
+#endif
 #endif
