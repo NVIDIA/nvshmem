@@ -12,7 +12,6 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -25,10 +24,13 @@
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "internal/host_transport/transport.h"
 #include "staged_control.h"
+#include "transport_ib_common.h"
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
 #endif
+
+struct nvshmemi_cuda_fn_table;
 
 namespace nvshmemi {
 
@@ -42,6 +44,7 @@ inline constexpr int STAGED_RQ_DEPTH = 128;
 inline constexpr int STAGED_GRH_HOP_LIMIT = 255;
 inline constexpr int STAGED_MAX_HCA_LIST = 16;
 inline constexpr size_t STAGED_MAX_BOUNCE_BYTES = UINT32_MAX;
+inline constexpr size_t STAGED_VIDMEM_ALIGNMENT = size_t{1} << 21;
 
 enum class staged_copy_policy_t { STREAM, GDRCOPY };
 
@@ -177,16 +180,23 @@ class staged_rdma_state_t {
     void set_protection_domain(struct ibv_pd* protection_domain) {
         ib_.protection_domain = protection_domain;
     }
-    struct ibv_mr* bounce_mr() const { return ib_.bounce_mr; }
+    struct ibv_mr* bounce_mr() const { return ib_.bounce_handle.mr; }
     void* client_bounce() const { return ib_.client_bounce; }
     void* bounce_region() const { return ib_.bounce_region; }
     size_t bounce_region_size() const { return ib_.bounce_region_size; }
+    bool bounce_in_vidmem() const { return ib_.bounce_in_vidmem; }
+    void set_bounce_in_vidmem(bool vidmem) { ib_.bounce_in_vidmem = vidmem; }
+    bool bounce_contains(const void* ptr) const {
+        const char* p = static_cast<const char*>(ptr);
+        const char* begin = static_cast<const char*>(ib_.bounce_region);
+        return p >= begin && p < begin + ib_.bounce_region_size;
+    }
     void set_bounce_storage(void* region, size_t size, void* client_bounce,
-                            struct ibv_mr* memory_region) {
+                            const nvshmemt_ib_common_mem_handle& handle) {
         ib_.bounce_region = region;
         ib_.bounce_region_size = size;
         ib_.client_bounce = client_bounce;
-        ib_.bounce_mr = memory_region;
+        ib_.bounce_handle = handle;
     }
 
     int ib_port() const { return ib_.port; }
@@ -223,7 +233,6 @@ class staged_rdma_state_t {
     struct ib_resources_t {
         struct ibv_context* context = nullptr;
         struct ibv_pd* protection_domain = nullptr;
-        struct ibv_mr* bounce_mr = nullptr;
         int port = 0;
         uint8_t local_gid_index = 0;
         uint16_t local_lid = 0;
@@ -232,6 +241,8 @@ class staged_rdma_state_t {
         void* client_bounce = nullptr;
         void* bounce_region = nullptr;
         size_t bounce_region_size = 0;
+        nvshmemt_ib_common_mem_handle bounce_handle{};
+        bool bounce_in_vidmem = false;
     };
 
     struct qp_resources_t {
@@ -248,7 +259,9 @@ class staged_rdma_state_t {
 /* CUDA resources used by the local staging path. */
 struct staged_cuda_state_t {
     int device = -1;
+    struct nvshmemi_cuda_fn_table* syms = nullptr;
     staged_copy_policy_t copy_policy = staged_copy_policy_t::STREAM;
+    bool flush_gdr_writes = false;
     CUgreenCtx green_ctx = nullptr;
     cudaStream_t client_stream = nullptr;
     cudaStream_t server_stream = nullptr;
@@ -344,8 +357,8 @@ class staged_worker_threads_t {
 /* Registered GPU mappings and memory-handle lifetime tracking. */
 struct staged_memory_state_t {
     std::mutex amo_mutex;
+    /* Guards mem_handle_infos and every GPU CPU mapping operation, including copies. */
     std::mutex gpu_cpu_mapping_mutex;
-    std::shared_mutex mem_handle_mutex;
     staged_mem_handle_registry_t mem_handle_infos;
 #ifdef NVSHMEM_USE_GDRCOPY
     nvshmemt_gpu_cpu_mapping_state gpu_cpu_mapping_state{};

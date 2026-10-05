@@ -904,6 +904,7 @@ if(NVSHMEM_STAGED_SUPPORT)
   nvshmem_library_set_base_config(nvshmem_transport_staged)
   target_sources(nvshmem_transport_staged PRIVATE
                  modules/transport/staged/staged.cpp
+                 modules/transport/staged/staged_gdrcopy.cpp
                  modules/transport/common/transport_common.cpp
                  modules/transport/common/transport_ib_common.cpp
   )
@@ -1193,6 +1194,8 @@ set(TRANSPORT_EXPORTS
     staged/staged.cpp
     staged/staged_config.h
     staged/staged_control.h
+    staged/staged_gdrcopy.cpp
+    staged/staged_gdrcopy.h
     ucx/ucx.cpp
     ucx/ucx.h
 )

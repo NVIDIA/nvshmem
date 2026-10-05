@@ -58,6 +58,8 @@ NVSHMEMI_ENV_DEF(GDRCOPY_USE_INTERNAL_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRAN
                  "Use the internal CUDA DMA-BUF CPU-mapping backend instead of libgdrapi")
 NVSHMEMI_ENV_DEF(STAGED_COPY_POLICY, string, "STREAM", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Select the staged transport local copy policy: STREAM or GDRCOPY")
+NVSHMEMI_ENV_DEF(STAGED_BOUNCE_LOCATION, string, "SYSMEM", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Select the staged transport bounce-buffer location: SYSMEM or VIDMEM")
 NVSHMEMI_ENV_DEF(STAGED_BOUNCE_SIZE, size, (size_t)(16 * 1024 * 1024), NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Size of each staged transport bounce-buffer slot (1 byte to 4 GiB - 1 byte)")
 NVSHMEMI_ENV_DEF(STAGED_PIPELINE_DEPTH, int, 4, NVSHMEMI_ENV_CAT_TRANSPORT,
