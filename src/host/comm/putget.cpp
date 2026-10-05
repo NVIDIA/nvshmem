@@ -202,6 +202,13 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
     if (verb.is_nbi) {
         nvshmemi_state->active_internal_streams[stream_idx] = 1;
         nvshmemi_state->used_internal_streams = 1;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+        /*
+         * Keep mapped-P2P activity distinct from CFT activity: P2P fence still synchronizes these
+         * streams, while a CFT-only stream uses the deferred per-PE event dependency.
+         */
+        nvshmemi_state->p2p_active_internal_streams[stream_idx] = true;
+#endif
     }
 
     void *const mapped_ptr =

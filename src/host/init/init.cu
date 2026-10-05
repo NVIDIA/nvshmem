@@ -820,14 +820,34 @@ int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
     int status = 0;
     free(state->selected_transport_for_rma);
     free(state->selected_transport_for_amo);
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    if (state->cft_scalar_staging) {
+        CUDA_RUNTIME_CHECK_GOTO(cudaFree(state->cft_scalar_staging), status, out);
+        state->cft_scalar_staging = nullptr;
+    }
+#endif
     for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->custreams[i]), status, out);
         CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cuevents[i]), status, out);
     }
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    for (int pe = 0; pe < state->npes; pe++) {
+        if (state->cft_fence_events && state->cft_fence_events[pe]) {
+            CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cft_fence_events[pe]), status, out);
+        }
+    }
+#endif
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->my_stream), status, out);
     free(state->custreams);
     free(state->cuevents);
     free(state->active_internal_streams);
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    free(state->cft_fence_events);
+    free(state->cft_active_pes);
+    free(state->cft_fence_pending);
+    free(state->cft_active_internal_streams);
+    free(state->p2p_active_internal_streams);
+#endif
 out:
     return status;
 }
@@ -892,6 +912,27 @@ static int nvshmemi_setup_cuda_handles(nvshmemi_state_t *state) {
         (cudaEvent_t *)malloc(nvshmemi_options.MAX_PEER_STREAMS * sizeof(cudaEvent_t));
     state->active_internal_streams =
         (bool *)calloc(nvshmemi_options.MAX_PEER_STREAMS, sizeof(bool));
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    state->cft_fence_events = (cudaEvent_t *)calloc(state->npes, sizeof(cudaEvent_t));
+    state->cft_active_pes = (bool *)calloc(state->npes, sizeof(bool));
+    state->cft_fence_pending = (bool *)calloc(state->npes, sizeof(bool));
+    state->cft_active_internal_streams =
+        (bool *)calloc(nvshmemi_options.MAX_PEER_STREAMS, sizeof(bool));
+    state->p2p_active_internal_streams =
+        (bool *)calloc(nvshmemi_options.MAX_PEER_STREAMS, sizeof(bool));
+    NVSHMEMI_NULL_ERROR_JMP(state->cft_fence_events, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate CFT fence events\n");
+    NVSHMEMI_NULL_ERROR_JMP(state->cft_active_pes, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate CFT active PE state\n");
+    NVSHMEMI_NULL_ERROR_JMP(state->cft_fence_pending, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate CFT fence state\n");
+    NVSHMEMI_NULL_ERROR_JMP(state->cft_active_internal_streams, status,
+                            NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate CFT internal stream state\n");
+    NVSHMEMI_NULL_ERROR_JMP(state->p2p_active_internal_streams, status,
+                            NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
+                            "Unable to allocate P2P internal stream state\n");
+#endif
     int leastPriority, greatestPriority;
     CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
     for (int i = 0; i < nvshmemi_options.MAX_PEER_STREAMS; i++) {
@@ -901,6 +942,17 @@ static int nvshmemi_setup_cuda_handles(nvshmemi_state_t *state) {
         CUDA_RUNTIME_CHECK_GOTO(
             cudaEventCreateWithFlags(&state->cuevents[i], cudaEventDisableTiming), status, out);
     }
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    for (int pe = 0; pe < state->npes; pe++) {
+        CUDA_RUNTIME_CHECK_GOTO(
+            cudaEventCreateWithFlags(&state->cft_fence_events[pe], cudaEventDisableTiming), status,
+            out);
+    }
+    CUDA_RUNTIME_CHECK_GOTO(
+        cudaMalloc(reinterpret_cast<void **>(&state->cft_scalar_staging),
+                   nvshmemi_options.MAX_PEER_STREAMS * sizeof(*state->cft_scalar_staging)),
+        status, out);
+#endif
 out:
     return status;
 }

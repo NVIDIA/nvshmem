@@ -86,6 +86,12 @@ void nvshmemx_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp, uint64_t 
 void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                   cudaStream_t cstrm) {
     int status = 0;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    /* If this PE has a pending CFT fence dependency, make cstrm wait on the event that
+     * nvshmem_fence() recorded on the PE's internal stream before issuing the signal. */
+    status = nvshmemi_order_after_cft_fence(pe, false, true, cstrm);
+    NVSHMEMI_NZ_EXIT(status, "failed to order signal operation after CFT fence\n");
+#endif
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET &&
         nvshmemi_state->heap_obj->get_local_pe_bases()[pe] != NULL) {
         void *peer_addr = nvshmemi_translate_mapped_ptr(
