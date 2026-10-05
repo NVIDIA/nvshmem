@@ -16,7 +16,6 @@
 #include <mutex>               // for std::lock_guard
 #include <algorithm>           // for max
 #include <array>
-#include <cstdlib>
 #include <iosfwd>                                                          // for std
 #include <map>                                                             // for map
 #include <memory>                                                          // for alloc...
@@ -1677,6 +1676,7 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration {
     PendingMmapRegistration &operator=(const PendingMmapRegistration &) = delete;
 
     int prepare(void *buffer, void *preferred_address, const MmapAccess &access);
+    int rollback();
     CUmemGenericAllocationHandle commit();
     void *address() const { return address_; }
     off_t heap_offset() const {
@@ -1703,31 +1703,47 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration {
 };
 
 nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration::~PendingMmapRegistration() {
+    // The coordinator checks rollback errors explicitly; this is only a cleanup fallback.
+    rollback();
+}
+
+int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration::rollback() {
     if (committed_) {
-        return;
+        return NVSHMEMX_SUCCESS;
     }
-    bool failed = false;
 #ifdef NVSHMEM_CFT_HANDLES_SUPPORT
     if (endpoint_bound_) {
-        failed =
-            heap_.unbind_unicast_endpoint_memory(heap_offset(), physical_size_) != NVSHMEMX_SUCCESS;
+        const int status = heap_.unbind_unicast_endpoint_memory(heap_offset(), physical_size_);
+        if (status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT("PE %d: cannot unbind pending mmap endpoint (status %d)\n",
+                                 heap_.cfg_.mype, status);
+            return status;
+        }
+        endpoint_bound_ = false;
     }
 #endif
     const CUresult unmap_status = mapping_.reset();
+    if (unmap_status != CUDA_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("PE %d: cannot unmap pending mmap buffer (CUDA status %d)\n",
+                             heap_.cfg_.mype, unmap_status);
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
     const CUresult release_status = handle_.reset();
-    if (failed || unmap_status != CUDA_SUCCESS || release_status != CUDA_SUCCESS) {
-        NVSHMEMI_ERROR_PRINT("cannot roll back local mmap resources safely\n");
-        nvshmem_global_exit(NVSHMEMX_ERROR_INTERNAL);
-        // Bootstraps without a global exit handler can return; skip unsafe exit-time cleanup.
-        std::_Exit(NVSHMEMX_ERROR_INTERNAL);
+    if (release_status != CUDA_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("PE %d: cannot release pending mmap handle (CUDA status %d)\n",
+                             heap_.cfg_.mype, release_status);
+        return NVSHMEMX_ERROR_INTERNAL;
     }
     for (void *alias : aliases_) {
         heap_.alias_va_map_.erase(alias);
         heap_.egm_map_.erase(alias);
     }
+    aliases_.clear();
     if (reserved_allocation_ != nullptr) {
         heap_.mmap_mspace_->deallocate(reserved_allocation_);
+        reserved_allocation_ = nullptr;
     }
+    return NVSHMEMX_SUCCESS;
 }
 
 int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration::reserve_address(
@@ -1990,7 +2006,16 @@ void *nvshmemi_symmetric_heap_vidmem_dynamic_vmm::mmap_mem(void *buf_ptr, size_t
     status = pending.prepare(buf_ptr, pref_addr, access);
     status = nvshmemi_bootstrap_aggregate_status(status, cfg_.npes);
     if (status != NVSHMEMX_SUCCESS) {
-        return nullptr;  // Each PE rolls back its own pending resources.
+        const int rollback_status =
+            nvshmemi_bootstrap_aggregate_status(pending.rollback(), cfg_.npes);
+        if (rollback_status != NVSHMEMX_SUCCESS) {
+            // A failed rollback leaves resources owned and the address unavailable for reuse.
+            // All PEs agree on this fatal error before asking the bootstrap to stop the job.
+            nvshmem_global_exit(rollback_status);
+            // Some bootstraps do not provide global_exit, or their handler can return.
+            NVSHMEMI_ERROR_EXIT("mmap rollback failed; cannot continue safely\n");
+        }
+        return nullptr;
     }
     const CUmemGenericAllocationHandle handle = pending.commit();
     status = publish_mmap_registration(handle, pending.address(), physical_size, va_size);
