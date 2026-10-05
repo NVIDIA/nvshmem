@@ -11,6 +11,7 @@
 #include "nvshmem.h"
 #include "nvshmemx.h"
 
+#include "non_abi/device/common/logical_endpoint_types.h"
 #include "utils.h"
 #include <unistd.h>
 
@@ -72,7 +73,8 @@
             }                                                                                      \
         }                                                                                          \
         if (errs > 0) {                                                                            \
-            ERROR_PRINT("[%d][%d] " #apiname " errors %d nelems %zu\n", mype, pe, errs, nelems);   \
+            ERROR_PRINT("[%d][%d] " #apiname " errors %d nelems %zu\n", mype, pe, errs,            \
+                        static_cast<size_t>(nelems));                                              \
             status = -1;                                                                           \
         }                                                                                          \
         /*}*/                                                                                      \
@@ -372,53 +374,85 @@
         VALIDATE_BYTES_PUT(1, bytes, nvshmem_putmem_nbi_on_stream)                         \
     }
 
-#define TEST_SHMEMX_TYPE_PUT_SIGNAL_ON_STREAM(type, TYPE, nelems, niter)                         \
-    for (size_t elems = 1; elems <= nelems; elems *= 2) {                                        \
-        /*init host test buff and use that to init shmem buff to be pushed to*/                  \
-        INIT_SHMEM_TEST_BUFF(elems * sizeof(TYPE))                                               \
-        /*init host ref buff and use that to init dev ref buff*/                                 \
-        INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, elems)                                                  \
-        nvshmem_barrier_all();                                                                   \
-        /*issue shmem put's*/                                                                    \
-        for (pe = 0; pe < npes; pe++) {                                                          \
-            nvshmemx_##type##_put_signal_on_stream(((TYPE *)buffer + elems * mype),              \
-                                                   (TYPE *)devRefBuffer, elems, &sig_addr[mype], \
-                                                   1, NVSHMEM_SIGNAL_SET, pe, cstrm[pe]);        \
-        }                                                                                        \
-        for (pe = 0; pe < npes; pe++) {                                                          \
-            nvshmemx_signal_wait_until_on_stream(&sig_addr[pe], NVSHMEM_CMP_EQ, 1, cstrm[pe]);   \
-            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                        \
-        }                                                                                        \
-        /*copy shmem test buff to host test buff and validate*/                                  \
-        VALIDATE_PUT(TYPE, elems, nvshmemx_##type##_put_signal_on_stream)                        \
-        if (use_egm) {                                                                           \
-            memset(sig_addr, 0, sizeof(uint64_t) * npes);                                        \
-        } else {                                                                                 \
-            CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t) * npes));                        \
-        }                                                                                        \
-        nvshmem_barrier_all();                                                                   \
-    }                                                                                            \
-    /* Now test with NVSHMEM_SIGNAL_ADD */                                                       \
-    for (size_t elems = 1; elems <= nelems; elems *= 2) {                                        \
-        /*init host test buff and use that to init shmem buff to be pushed to*/                  \
-        INIT_SHMEM_TEST_BUFF(elems * sizeof(TYPE))                                               \
-        /*init host ref buff and use that to init dev ref buff*/                                 \
-        INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, elems)                                                  \
-        nvshmem_barrier_all();                                                                   \
-        /*issue shmem put's*/                                                                    \
-        for (pe = 0; pe < npes; pe++) {                                                          \
-            nvshmemx_##type##_put_signal_on_stream(((TYPE *)buffer + elems * mype),              \
-                                                   (TYPE *)devRefBuffer, elems, &sig_addr[mype], \
-                                                   1, NVSHMEM_SIGNAL_ADD, pe, cstrm[pe]);        \
-        }                                                                                        \
-        for (pe = 0; pe < npes; pe++) {                                                          \
-            nvshmemx_signal_wait_until_on_stream(&sig_addr[pe], NVSHMEM_CMP_EQ, 1, cstrm[pe]);   \
-            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                        \
-        }                                                                                        \
-        /*copy shmem test buff to host test buff and validate*/                                  \
-        VALIDATE_PUT(TYPE, elems, nvshmemx_##type##_put_signal_on_stream)                        \
-        CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t) * npes));                            \
-        nvshmem_barrier_all();                                                                   \
+#define TEST_SHMEMX_TYPE_PUT_SIGNAL_ON_STREAM(type, TYPE, nelems, niter)                           \
+    for (size_t elems = 1; elems <= nelems; elems *= 2) {                                          \
+        /*init host test buff and use that to init shmem buff to be pushed to*/                    \
+        INIT_SHMEM_TEST_BUFF(elems * sizeof(TYPE))                                                 \
+        /*init host ref buff and use that to init dev ref buff*/                                   \
+        INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, elems)                                                    \
+        nvshmem_barrier_all();                                                                     \
+        /*issue shmem put's*/                                                                      \
+        for (pe = 0; pe < npes; pe++) {                                                            \
+            nvshmemx_##type##_put_signal_on_stream(                                                \
+                ((TYPE *)buffer + elems * mype), (TYPE *)devRefBuffer, elems,                      \
+                &sig_addr[mype * signal_stride], 1, NVSHMEM_SIGNAL_SET, pe, cstrm[pe]);            \
+        }                                                                                          \
+        for (pe = 0; pe < npes; pe++) {                                                            \
+            nvshmemx_signal_wait_until_on_stream(&sig_addr[pe * signal_stride], NVSHMEM_CMP_EQ, 1, \
+                                                 cstrm[pe]);                                       \
+            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                          \
+        }                                                                                          \
+        /*copy shmem test buff to host test buff and validate*/                                    \
+        VALIDATE_PUT(TYPE, elems, nvshmemx_##type##_put_signal_on_stream)                          \
+        if (use_egm) {                                                                             \
+            memset(sig_addr, 0, sizeof(uint64_t) * signal_count);                                  \
+        } else {                                                                                   \
+            CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t) * signal_count));                  \
+        }                                                                                          \
+        nvshmem_barrier_all();                                                                     \
+    }                                                                                              \
+    /* Now test with NVSHMEM_SIGNAL_ADD */                                                         \
+    for (size_t elems = 1; elems <= nelems; elems *= 2) {                                          \
+        /*init host test buff and use that to init shmem buff to be pushed to*/                    \
+        INIT_SHMEM_TEST_BUFF(elems * sizeof(TYPE))                                                 \
+        /*init host ref buff and use that to init dev ref buff*/                                   \
+        INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, elems)                                                    \
+        nvshmem_barrier_all();                                                                     \
+        /*issue shmem put's*/                                                                      \
+        for (pe = 0; pe < npes; pe++) {                                                            \
+            nvshmemx_##type##_put_signal_on_stream(                                                \
+                ((TYPE *)buffer + elems * mype), (TYPE *)devRefBuffer, elems,                      \
+                &sig_addr[mype * signal_stride], 1, NVSHMEM_SIGNAL_ADD, pe, cstrm[pe]);            \
+        }                                                                                          \
+        for (pe = 0; pe < npes; pe++) {                                                            \
+            nvshmemx_signal_wait_until_on_stream(&sig_addr[pe * signal_stride], NVSHMEM_CMP_EQ, 1, \
+                                                 cstrm[pe]);                                       \
+            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                          \
+        }                                                                                          \
+        /*copy shmem test buff to host test buff and validate*/                                    \
+        VALIDATE_PUT(TYPE, elems, nvshmemx_##type##_put_signal_on_stream)                          \
+        CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t) * signal_count));                      \
+        nvshmem_barrier_all();                                                                     \
+    }
+
+#define TEST_SHMEMX_TYPE_PUT_NBI_FENCE_SIGNAL_ON_STREAM(type, TYPE)                                \
+    {                                                                                              \
+        /* A signal issued after fence must not overtake the preceding NBI payload. */             \
+        INIT_SHMEM_TEST_BUFF(sizeof(TYPE))                                                         \
+        INIT_DEV_REF_BUFF_FOR_PUSH(TYPE, 1)                                                        \
+        if (use_egm) {                                                                             \
+            memset(sig_addr, 0, sizeof(uint64_t) * signal_count);                                  \
+        } else {                                                                                   \
+            CUDA_CHECK(cudaMemset(sig_addr, 0, sizeof(uint64_t) * signal_count));                  \
+        }                                                                                          \
+        nvshmem_barrier_all();                                                                     \
+        for (pe = 0; pe < npes; pe++) {                                                            \
+            nvshmemx_##type##_put_nbi_on_stream((TYPE *)buffer + mype, (TYPE *)devRefBuffer, 1,    \
+                                                pe, cstrm[pe]);                                    \
+            nvshmem_fence();                                                                       \
+            /* Stay on the internal CFT stream once before transitioning to the signal stream. */  \
+            nvshmemx_##type##_put_nbi_on_stream((TYPE *)buffer + mype, (TYPE *)devRefBuffer, 1,    \
+                                                pe, cstrm[pe]);                                    \
+            nvshmemx_signal_op_on_stream(&sig_addr[mype * signal_stride], 1, NVSHMEM_SIGNAL_SET,   \
+                                         pe, cstrm[pe]);                                           \
+        }                                                                                          \
+        for (pe = 0; pe < npes; pe++) {                                                            \
+            nvshmemx_signal_wait_until_on_stream(&sig_addr[pe * signal_stride], NVSHMEM_CMP_EQ, 1, \
+                                                 cstrm[pe]);                                       \
+            CUDA_CHECK(cudaStreamSynchronize(cstrm[pe]));                                          \
+        }                                                                                          \
+        VALIDATE_PUT(TYPE, 1, nvshmem_fence)                                                       \
+        nvshmem_barrier_all();                                                                     \
     }
 
 #define MIN_BYTES_PER_WORD 1
@@ -442,6 +476,12 @@ int main(int argc, char *argv[]) {
     int errs = 0;
     cudaStream_t *cstrm;
     uint64_t *sig_addr;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    constexpr size_t signal_stride = CFT_HANDLE_TX_SIZE / sizeof(uint64_t);
+#else
+    constexpr size_t signal_stride = 1;
+#endif
+    size_t signal_count;
     bool asymmetric_local_buffer = false;
     bool register_local_buffer = false;
     if (sizeof(int) > MIN_BYTES_PER_WORD) {
@@ -479,6 +519,7 @@ int main(int argc, char *argv[]) {
 
     mype = nvshmem_my_pe();
     npes = nvshmem_n_pes();
+    signal_count = static_cast<size_t>(npes) * signal_stride;
     DEBUG_PRINT("SHMEM: [%d of %d] hello shmem world! \n", mype, npes);
 
     cstrm = (cudaStream_t *)malloc(npes * sizeof(cudaStream_t));
@@ -541,10 +582,10 @@ int main(int argc, char *argv[]) {
         }
     }
     if (use_mmap) {
-        sig_addr = (uint64_t *)allocate_mmap_buffer(npes * sizeof(uint64_t), _mem_handle_type,
-                                                    use_egm, true);
+        sig_addr = (uint64_t *)allocate_mmap_buffer(signal_count * sizeof(uint64_t),
+                                                    _mem_handle_type, use_egm, true);
     } else {
-        sig_addr = (uint64_t *)nvshmem_calloc(npes, sizeof(uint64_t));
+        sig_addr = (uint64_t *)nvshmem_calloc(signal_count, sizeof(uint64_t));
     }
     nvshmem_barrier_all();
 
@@ -626,6 +667,8 @@ int main(int argc, char *argv[]) {
     if (npes < 64) {
         TEST_SHMEMX_TYPE_PUT_SIGNAL_ON_STREAM(char, char, nelems, niter)
     }
+
+    TEST_SHMEMX_TYPE_PUT_NBI_FENCE_SIGNAL_ON_STREAM(longlong, long long)
 
     free(hostRefBuffer);
     free(hostTestBuffer);
