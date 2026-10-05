@@ -10,6 +10,9 @@
 #include "nvshmem.h"
 #include "nvshmemx.h"
 
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+#include "internal/host/nvshmemi_cft.h"
+#endif
 #include "utils.h"
 #include <unistd.h>
 
@@ -128,6 +131,8 @@ int main(int argc, char **argv) {
     size_t nelems = nelemsAny;
     char *buffer = NULL, *devRefBuffer = NULL, *hostTestBuffer = NULL, *hostRefBuffer = NULL;
     int errs = 0;
+    bool local_cft_p_on_stream_supported;
+    bool cft_p_on_stream_supported;
     cudaStream_t *cstrm;
     read_args(argc, argv);
     if (sizeof(int) > MIN_BYTES_PER_WORD) {
@@ -207,6 +212,46 @@ int main(int argc, char **argv) {
     TEST_SHMEM_TYPE_P(int, int, niter)
     TEST_SHMEM_TYPE_P(long, long, niter)
     TEST_SHMEM_TYPE_P(longlong, long long, niter)
+
+    local_cft_p_on_stream_supported = npes > 1;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    for (pe = 0; pe < npes && local_cft_p_on_stream_supported; pe++) {
+        if (pe != mype) {
+            local_cft_p_on_stream_supported = nvshmemid_is_cft_p_on_stream_supported(pe);
+        }
+    }
+#else
+    local_cft_p_on_stream_supported = false;
+#endif
+
+    /* Share each PE's result so every PE either enters or skips the barrier-containing tests. */
+    for (pe = 0; pe < npes; pe++) {
+        nvshmem_int_p(reinterpret_cast<int *>(buffer) + mype,
+                      static_cast<int>(local_cft_p_on_stream_supported), pe);
+    }
+    nvshmem_barrier_all();
+    CUDA_CHECK(cudaMemcpyAsync(hostTestBuffer, buffer, npes * sizeof(int), cudaMemcpyDeviceToHost,
+                               cstrm[mype]));
+    CUDA_CHECK(cudaStreamSynchronize(cstrm[mype]));
+
+    cft_p_on_stream_supported = true;
+    for (pe = 0; pe < npes; pe++) {
+        cft_p_on_stream_supported &= reinterpret_cast<int *>(hostTestBuffer)[pe] != 0;
+    }
+
+    if (cft_p_on_stream_supported) {
+        TEST_SHMEMX_TYPE_P_ON_STREAM(float, float, niter)
+        TEST_SHMEMX_TYPE_P_ON_STREAM(double, double, niter)
+        if (npes < 64) {
+            TEST_SHMEMX_TYPE_P_ON_STREAM(char, char, niter)
+        }
+        TEST_SHMEMX_TYPE_P_ON_STREAM(short, short, niter)
+        TEST_SHMEMX_TYPE_P_ON_STREAM(int, int, niter)
+        TEST_SHMEMX_TYPE_P_ON_STREAM(long, long, niter)
+        TEST_SHMEMX_TYPE_P_ON_STREAM(longlong, long long, niter)
+    } else if (mype == 0) {
+        printf("SKIP: p_on_stream tests require runtime CFT eligibility on every PE\n");
+    }
 
     free(hostRefBuffer);
     free(hostTestBuffer);

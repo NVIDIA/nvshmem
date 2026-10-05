@@ -18,7 +18,8 @@
 #include "non_abi/c/nvshmemi_error_macros.h"                    // for NVSHMEMI_ERROR_...
 #include "non_abi/device/transport/nvshmem_common_transport.h"  // for NVSHMEMI_OP_PUT
 #include "internal/host/debug.h"                                // for INFO, NVSHMEM_P2P
-#include "internal/host/nvshmem_internal.h"                     // for NVSHMEMI_CHECK_...
+#include "internal/host/nvshmemi_cft.h"
+#include "internal/host/nvshmem_internal.h"  // for NVSHMEMI_CHECK_...
 #include "internal/host/nvshmemi_rma_translation.hpp"
 #include "internal/host/nvshmem_nvtx.hpp"             // for nvtx_cond_range
 #include "internal/host/nvshmemi_symmetric_heap.hpp"  // for nvshmemi_symmet...
@@ -104,6 +105,18 @@ static int nvshmemi_cft_copy(cudaStream_t stream, CUlogicalEndpointId le_id, voi
 
 out:
     return status;
+}
+
+bool nvshmemid_is_cft_p_on_stream_supported(int pe) {
+    if (!nvshmemi_state || pe < 0 || pe >= nvshmemi_state->npes || pe == nvshmemi_state->mype ||
+        !nvshmemi_state->heap_obj) {
+        return false;
+    }
+
+    const uint64_t le_id_with_flag = nvshmemi_state->heap_obj->get_unicast_le_id(pe);
+    return IS_VALID_LE_ID(le_id_with_flag) && nvshmemi_state->cft_scalar_staging &&
+           CUPFN(nvshmemi_cuda_syms, cuFabricCpyBatchAsync) &&
+           CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64);
 }
 
 static int nvshmemi_cft_staged_copy(cudaStream_t stream, CUlogicalEndpointId le_id, void *staging,
