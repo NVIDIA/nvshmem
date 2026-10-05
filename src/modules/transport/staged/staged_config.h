@@ -158,7 +158,7 @@ struct staged_mem_handle_info_t {
 };
 
 using staged_mem_handle_registry_t =
-    std::unordered_map<staged_mem_handle_info_t*, std::unique_ptr<staged_mem_handle_info_t>>;
+    std::unordered_map<staged_mem_handle_info_t*, std::shared_ptr<staged_mem_handle_info_t>>;
 
 /* Owns verbs resources separately from the internal QP collection. */
 class staged_rdma_state_t {
@@ -265,7 +265,6 @@ struct staged_cuda_state_t {
     cudaStream_t client_stream = nullptr;
     cudaStream_t server_stream = nullptr;
     std::array<cudaEvent_t, STAGED_MAX_PIPELINE_DEPTH> client_events{};
-    std::mutex copy_mutex;
 
     ~staged_cuda_state_t();
 
@@ -356,7 +355,9 @@ class staged_worker_threads_t {
 /* Registered GPU mappings and memory-handle lifetime tracking. */
 struct staged_memory_state_t {
     std::mutex amo_mutex;
-    /* Guards mem_handle_infos and every GPU CPU mapping operation, including copies. */
+    /* Guards mem_handle_infos. Copies hold it only to look up a mapping and take a reference. */
+    std::mutex mem_handle_mutex;
+    /* Serializes mapping backend calls (map, unmap, fini); copies do not take it. */
     std::mutex gpu_cpu_mapping_mutex;
     staged_mem_handle_registry_t mem_handle_infos;
 #ifdef NVSHMEM_USE_GDRCOPY

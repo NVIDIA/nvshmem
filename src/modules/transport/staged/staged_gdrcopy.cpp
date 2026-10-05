@@ -7,8 +7,10 @@
 
 #include <stdint.h>
 #include <algorithm>
+#include <atomic>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "non_abi/c/nvshmemi_error_macros.h"
 #include "transport_common.h"
@@ -41,9 +43,15 @@ int staged_gdrcopy_init(transport_staged_state_t* s, struct nvshmemi_cuda_fn_tab
 }
 
 int staged_gdrcopy_fini(transport_staged_state_t* s) {
+    staged_mem_handle_registry_t mem_handle_infos;
+    {
+        std::lock_guard<std::mutex> lk(s->memory.mem_handle_mutex);
+        mem_handle_infos.swap(s->memory.mem_handle_infos);
+    }
+
     std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
     int status = 0;
-    for (const auto& [_, info] : s->memory.mem_handle_infos) {
+    for (const auto& [_, info] : mem_handle_infos) {
         int unmap_status =
             nvshmemt_gpu_cpu_unmap(&s->memory.gpu_cpu_mapping_state, &info->cpu_mapping);
         if (unmap_status != 0) {
@@ -52,20 +60,22 @@ int staged_gdrcopy_fini(transport_staged_state_t* s) {
             status = NVSHMEMX_ERROR_INTERNAL;
         }
     }
-    s->memory.mem_handle_infos.clear();
     nvshmemt_gpu_cpu_mapping_fini(&s->memory.gpu_cpu_mapping_state);
     return status;
 }
 
 int staged_gdrcopy_map(transport_staged_state_t* s, void* buf, size_t length, void* mapping_buf,
                        staged_mem_handle_info_t** info_out) {
-    auto info = std::make_unique<staged_mem_handle_info_t>();
+    auto info = std::make_shared<staged_mem_handle_info_t>();
     info->ptr = buf;
     info->size = length;
 
-    std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-    int status = nvshmemt_gpu_cpu_map(&s->memory.gpu_cpu_mapping_state, mapping_buf, length,
+    int status = 0;
+    {
+        std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
+        status = nvshmemt_gpu_cpu_map(&s->memory.gpu_cpu_mapping_state, mapping_buf, length,
                                       NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE, &info->cpu_mapping);
+    }
     if (status != 0) {
         NVSHMEMI_ERROR_PRINT(
             "[STAGED] CPU-mapping policy (%s) failed for %p len=%zu status=%d; "
@@ -74,33 +84,55 @@ int staged_gdrcopy_map(transport_staged_state_t* s, void* buf, size_t length, vo
             length, status);
         return NVSHMEMX_ERROR_INTERNAL;
     }
+
     staged_mem_handle_info_t* stored_info = info.get();
-    s->memory.mem_handle_infos.emplace(stored_info, std::move(info));
+    {
+        std::lock_guard<std::mutex> lk(s->memory.mem_handle_mutex);
+        s->memory.mem_handle_infos.emplace(stored_info, std::move(info));
+    }
     if (info_out) {
         *info_out = stored_info;
     }
     return 0;
 }
 
-int staged_gdrcopy_unmap(transport_staged_state_t* s, staged_mem_handle_info_t* info) {
-    std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-    auto it = s->memory.mem_handle_infos.find(info);
-    if (it == s->memory.mem_handle_infos.end()) {
-        return 0;
+int staged_gdrcopy_unmap(transport_staged_state_t* s, staged_mem_handle_info_t* key) {
+    std::shared_ptr<staged_mem_handle_info_t> info;
+    {
+        std::lock_guard<std::mutex> lk(s->memory.mem_handle_mutex);
+        auto it = s->memory.mem_handle_infos.find(key);
+        if (it == s->memory.mem_handle_infos.end()) {
+            return 0;
+        }
+        info = std::move(it->second);
+        s->memory.mem_handle_infos.erase(it);
     }
 
-    int status = nvshmemt_gpu_cpu_unmap(&s->memory.gpu_cpu_mapping_state, &it->second->cpu_mapping);
+    /* No new copy can find the mapping now; wait for copies that still hold a reference.
+     * use_count() is a relaxed load, so the fence orders their mapping accesses before unmap. */
+    while (info.use_count() > 1) {
+        std::this_thread::yield();
+    }
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    int status = 0;
+    {
+        std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
+        status = nvshmemt_gpu_cpu_unmap(&s->memory.gpu_cpu_mapping_state, &info->cpu_mapping);
+    }
     if (status != 0) {
         NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping cleanup failed status=%d", status);
+        std::lock_guard<std::mutex> lk(s->memory.mem_handle_mutex);
+        s->memory.mem_handle_infos.emplace(key, std::move(info));
         return NVSHMEMX_ERROR_INTERNAL;
     }
-    s->memory.mem_handle_infos.erase(it);
     return 0;
 }
 
-/* Caller holds gpu_cpu_mapping_mutex for the lifetime of the returned pointer. */
-static staged_mem_handle_info_t* staged_gdrcopy_find(transport_staged_state_t* s, const void* ptr,
-                                                     size_t bytes) {
+/* Caller holds mem_handle_mutex. */
+static std::shared_ptr<staged_mem_handle_info_t> staged_gdrcopy_find(transport_staged_state_t* s,
+                                                                     const void* ptr,
+                                                                     size_t bytes) {
     if (!ptr) {
         return nullptr;
     }
@@ -119,28 +151,33 @@ static staged_mem_handle_info_t* staged_gdrcopy_find(transport_staged_state_t* s
                                const size_t offset = static_cast<size_t>(addr - begin);
                                return offset <= info->size && bytes <= info->size - offset;
                            });
-    return it == s->memory.mem_handle_infos.end() ? nullptr : it->second.get();
+    return it == s->memory.mem_handle_infos.end() ? nullptr : it->second;
 }
 
-/* CPU address of mapped GPU memory, or nullptr. Caller holds gpu_cpu_mapping_mutex. */
-static void* staged_gdrcopy_cpu_address(transport_staged_state_t* s, const void* gpu_ptr,
-                                        size_t bytes, staged_mem_handle_info_t** info_out) {
-    auto* info = staged_gdrcopy_find(s, gpu_ptr, bytes);
+/* CPU address of gpu_ptr through its mapping, or nullptr if it is not mapped. */
+static void* staged_gdrcopy_cpu_address(const staged_mem_handle_info_t* info, const void* gpu_ptr) {
     if (!info || !info->cpu_mapping.mapped || !info->cpu_mapping.cpu_ptr) {
         return nullptr;
     }
-    *info_out = info;
     return static_cast<char*>(info->cpu_mapping.cpu_ptr) +
            (static_cast<const char*>(gpu_ptr) - static_cast<char*>(info->ptr));
 }
 
 int staged_gdrcopy_copy(transport_staged_state_t* s, void* dst, bool dst_on_gpu, const void* src,
                         bool src_on_gpu, size_t bytes, const char* label) {
-    std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-    staged_mem_handle_info_t* dst_info = nullptr;
-    staged_mem_handle_info_t* src_info = nullptr;
-    void* dst_cpu = dst_on_gpu ? staged_gdrcopy_cpu_address(s, dst, bytes, &dst_info) : dst;
-    const void* src_cpu = src_on_gpu ? staged_gdrcopy_cpu_address(s, src, bytes, &src_info) : src;
+    std::shared_ptr<staged_mem_handle_info_t> dst_info;
+    std::shared_ptr<staged_mem_handle_info_t> src_info;
+    {
+        std::lock_guard<std::mutex> lk(s->memory.mem_handle_mutex);
+        if (dst_on_gpu) {
+            dst_info = staged_gdrcopy_find(s, dst, bytes);
+        }
+        if (src_on_gpu) {
+            src_info = staged_gdrcopy_find(s, src, bytes);
+        }
+    }
+    void* dst_cpu = dst_on_gpu ? staged_gdrcopy_cpu_address(dst_info.get(), dst) : dst;
+    const void* src_cpu = src_on_gpu ? staged_gdrcopy_cpu_address(src_info.get(), src) : src;
     if (!dst_cpu || !src_cpu) {
         NVSHMEMI_ERROR_PRINT("[STAGED] %s requires a GPU CPU mapping for %p (bytes=%zu)", label,
                              dst_cpu ? src : dst, bytes);

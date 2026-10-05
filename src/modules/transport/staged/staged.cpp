@@ -417,7 +417,6 @@ static int staged_init_green_context(transport_staged_state_t* s) {
 
 static int staged_cuda_copy_sync(transport_staged_state_t* s, void* dst, const void* src,
                                  size_t bytes, cudaStream_t stream, const char* label) {
-    std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
     cudaError_t err = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, stream);
     if (err != cudaSuccess) {
         NVSHMEMI_ERROR_PRINT("[STAGED] %s cudaMemcpyAsync failed: %s", label,
@@ -1200,21 +1199,17 @@ static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t&
                                "PUT D2H");
         }
 
-        {
-            std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
-            cudaError_t cerr = cudaMemcpyAsync(bounce, src + offset, chunk, cudaMemcpyDefault,
-                                               s->cuda.client_stream);
-            if (cerr != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] cudaMemcpyAsync D2H failed: %s",
-                                     cudaGetErrorString(cerr));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-            cerr = cudaEventRecord(s->cuda.client_events[slot], s->cuda.client_stream);
-            if (cerr != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventRecord failed: %s",
-                                     cudaGetErrorString(cerr));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
+        cudaError_t cerr =
+            cudaMemcpyAsync(bounce, src + offset, chunk, cudaMemcpyDefault, s->cuda.client_stream);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaMemcpyAsync D2H failed: %s",
+                                 cudaGetErrorString(cerr));
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
+        cerr = cudaEventRecord(s->cuda.client_events[slot], s->cuda.client_stream);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventRecord failed: %s", cudaGetErrorString(cerr));
+            return NVSHMEMX_ERROR_INTERNAL;
         }
         return 0;
     };
@@ -1224,14 +1219,11 @@ static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t&
         if (!cuda_copy) {
             return 0;
         }
-        {
-            std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
-            cudaError_t cerr = cudaEventSynchronize(s->cuda.client_events[slot]);
-            if (cerr != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventSynchronize failed: %s",
-                                     cudaGetErrorString(cerr));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
+        cudaError_t cerr = cudaEventSynchronize(s->cuda.client_events[slot]);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventSynchronize failed: %s",
+                                 cudaGetErrorString(cerr));
+            return NVSHMEMX_ERROR_INTERNAL;
         }
         return 0;
     };
