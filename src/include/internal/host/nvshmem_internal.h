@@ -123,6 +123,10 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state);
 int nvshmemi_setup_mops_kernels(nvshmemi_state_t *state);
 void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                   cudaStream_t cstrm);
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+int nvshmemi_order_after_cft_fence(int pe, bool next_on_internal_stream, bool has_next_stream,
+                                   cudaStream_t next_stream);
+#endif
 __device__ void nvshmemi_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 extern "C" {
