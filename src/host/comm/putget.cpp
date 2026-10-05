@@ -3,13 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <cuda_runtime.h>                                       // for cudaMemcpyAsync
-#include <driver_types.h>                                       // for cudaStream_t
-#include <stddef.h>                                             // for NULL, size_t
-#include <stdint.h>                                             // for uint64_t
-#include <stdlib.h>                                             // for exit
-#include "non_abi/device/common/nvshmemi_runtime_types.h"       // for nvshmemi_device...
-#include "non_abi/device/common/nvshmem_common.cuh"             // for NVSHMEMI_REPT_F...
+#include <cuda_runtime.h>  // for cudaMemcpyAsync
+#include <driver_types.h>  // for cudaStream_t
+#include <stddef.h>        // for NULL, size_t
+#include <stdint.h>        // for uint64_t
+#include <stdlib.h>        // for exit
+#include <cstring>
+#include <vector>
+#include "non_abi/device/common/nvshmemi_runtime_types.h"  // for nvshmemi_device...
+#include "non_abi/device/common/nvshmem_common.cuh"        // for NVSHMEMI_REPT_F...
+#include "non_abi/device/common/logical_endpoint_types.h"
 #include "c_api/nvshmem_api.h"                                  // for nvshmem_char_put
 #include "c_api/nvshmemx_api.h"                                 // for nvshmemx_char_g...
 #include "non_abi/c/nvshmemi_error_macros.h"                    // for NVSHMEMI_ERROR_...
@@ -21,7 +24,8 @@
 #include "internal/host/nvshmemi_symmetric_heap.hpp"  // for nvshmemi_symmet...
 #include "internal/host/nvshmemi_types.h"             // for nvshmemi_state
 #include "internal/host/util.h"                       // for CUDA_RUNTIME_CH...
-#include "internal/host_transport/transport.h"        // for rma_bytesdesc_t
+#include "internal/host/cuda_interface_sync.h"
+#include "internal/host_transport/transport.h"  // for rma_bytesdesc_t
 #include "internal/host/nvshmemi_region.h"
 
 #define NOT_A_CUDA_STREAM ((cudaStream_t)0)
@@ -45,6 +49,227 @@ enum {
 };
 
 int nvshmemi_proxy_rma_launcher(void *args[], cudaStream_t cstrm, bool is_nbi, bool is_signal);
+
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+static int nvshmemi_cft_copy(cudaStream_t stream, CUlogicalEndpointId le_id, void *local,
+                             size_t remote_base_offset, rma_bytesdesc_t bytesdesc, bool is_put) {
+    constexpr size_t max_batch_ops = 1024;
+    int status = NVSHMEMX_SUCCESS;
+    if (bytesdesc.nelems == 0) {
+        return status;
+    }
+
+    const bool is_contig = bytesdesc.srcstride == 1 && bytesdesc.deststride == 1;
+    const size_t num_ops = is_contig ? 1 : bytesdesc.nelems;
+    const size_t op_list_size = num_ops < max_batch_ops ? num_ops : max_batch_ops;
+    std::vector<CUDA_FABRIC_COPY_BATCH_OP> op_list(op_list_size);
+    size_t submitted_ops = 0;
+
+    do {
+        const size_t remaining_ops = num_ops - submitted_ops;
+        const size_t batch_size = remaining_ops < max_batch_ops ? remaining_ops : max_batch_ops;
+
+        for (size_t i = 0; i < batch_size; i++) {
+            const size_t op_idx = submitted_ops + i;
+            const size_t local_offset =
+                is_contig ? 0 : op_idx * bytesdesc.srcstride * bytesdesc.elembytes;
+            const size_t remote_offset =
+                is_contig ? 0 : op_idx * bytesdesc.deststride * bytesdesc.elembytes;
+            CUfabricCpyOperand pointer_operand = {};
+            CUfabricCpyOperand endpoint_operand = {};
+
+            pointer_operand.type = CU_FABRIC_COPY_OPERAND_TYPE_POINTER;
+            pointer_operand.op.ptr.ptr = static_cast<CUdeviceptr>(
+                reinterpret_cast<uintptr_t>(static_cast<char *>(local) + local_offset));
+            endpoint_operand.type = CU_FABRIC_COPY_OPERAND_TYPE_LOGICAL_ENDPOINT;
+            endpoint_operand.op.le.id = le_id;
+            endpoint_operand.op.le.offset = remote_base_offset + remote_offset;
+
+            op_list[i].src = is_put ? pointer_operand : endpoint_operand;
+            op_list[i].dst = is_put ? endpoint_operand : pointer_operand;
+            op_list[i].size =
+                is_contig ? bytesdesc.nelems * bytesdesc.elembytes : bytesdesc.elembytes;
+            op_list[i].flags = 0;
+        }
+
+        status = CUPFN(nvshmemi_cuda_syms, cuFabricCpyBatchAsync)(
+            batch_size, op_list.data(), 0, reinterpret_cast<CUstream>(stream));
+        if (status == CUDA_ERROR_NOT_SUPPORTED && submitted_ops == 0) {
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+        NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_INTERNAL, out,
+                                 "cuFabricCpyBatchAsync() failed\n");
+        submitted_ops += batch_size;
+    } while (submitted_ops < num_ops);
+
+out:
+    return status;
+}
+
+static int nvshmemi_cft_staged_copy(cudaStream_t stream, CUlogicalEndpointId le_id, void *staging,
+                                    uint64_t value, size_t remote_base_offset,
+                                    rma_bytesdesc_t bytesdesc) {
+    int status = CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64)(
+        reinterpret_cast<CUstream>(stream),
+        static_cast<CUdeviceptr>(reinterpret_cast<uintptr_t>(staging)), value,
+        CU_STREAM_WRITE_VALUE_DEFAULT);
+    NVSHMEMI_CU_NZ_ERROR_JMP(nvshmemi_cuda_syms, status, NVSHMEMX_ERROR_INTERNAL, out,
+                             "staging CFT value failed\n");
+
+    status = nvshmemi_cft_copy(stream, le_id, staging, remote_base_offset, bytesdesc, true);
+
+out:
+    return status;
+}
+
+static int nvshmemi_cft_rma(cudaStream_t custrm /* internal stream */, cudaEvent_t cuev,
+                            rma_verb_t verb, void *local, void *remote, rma_bytesdesc_t bytesdesc,
+                            uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
+    int status = NVSHMEMX_SUCCESS;
+    const uint64_t le_id_with_flag = nvshmemi_state->heap_obj->get_unicast_le_id(pe);
+    const bool is_stream_p = verb.is_stream && verb.desc == NVSHMEMI_OP_P;
+    const bool is_stream_g = verb.is_stream && verb.desc == NVSHMEMI_OP_G;
+    const bool is_stream_scalar = is_stream_p || is_stream_g;
+    const bool is_put_signal = verb.desc == NVSHMEMI_OP_PUT_SIGNAL;
+    const bool is_signal_set = is_put_signal && sig_op == NVSHMEMI_AMO_SIGNAL_SET;
+    const bool is_signal_add = is_put_signal && sig_op == NVSHMEMI_AMO_SIGNAL_ADD;
+    const bool is_stream_signal = is_put_signal && verb.is_stream;
+    const bool is_supported_scalar_size =
+        bytesdesc.elembytes == sizeof(uint8_t) || bytesdesc.elembytes == sizeof(uint16_t) ||
+        bytesdesc.elembytes == sizeof(uint32_t) || bytesdesc.elembytes == sizeof(uint64_t);
+    const int distance = (pe - nvshmemi_state->mype + nvshmemi_state->npes) % nvshmemi_state->npes;
+    const int stream_idx = distance % nvshmemi_options.MAX_PEER_STREAMS;
+    void *application_local = local;
+
+    if (!CUPFN(nvshmemi_cuda_syms, cuFabricCpyBatchAsync) || !IS_VALID_LE_ID(le_id_with_flag)) {
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+    if (is_stream_scalar && (!nvshmemi_state->cft_scalar_staging || !is_supported_scalar_size)) {
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+    if (is_stream_p && !CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64)) {
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+    size_t signal_remote_offset = 0;
+    if (is_put_signal) {
+        if (sig_addr == nullptr || (!is_signal_set && !is_signal_add)) {
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+        signal_remote_offset = reinterpret_cast<uintptr_t>(sig_addr) -
+                               reinterpret_cast<uintptr_t>(nvshmemi_device_state.heap_base);
+        if (is_signal_set && (!nvshmemi_state->cft_scalar_staging ||
+                              !CUPFN(nvshmemi_cuda_syms, cuStreamWriteValue64))) {
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+        /* Reject an ineligible CFT atomic before submitting the payload so another route can safely
+         * handle the complete operation. */
+        if (is_signal_add &&
+            !nvshmemi_is_le_atomic_implemented_on_host(
+                le_id_with_flag, nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE,
+                nvshmemi_device_state.heap_base, sig_addr)) {
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+    }
+
+    cudaStream_t stream_for_op =
+        ((!verb.is_stream) || verb.is_nbi || is_stream_scalar || is_stream_signal) ? custrm
+                                                                                   : verb.cstrm;
+    const bool is_put = verb.desc == NVSHMEMI_OP_P || verb.desc == NVSHMEMI_OP_PUT ||
+                        verb.desc == NVSHMEMI_OP_PUT_SIGNAL;
+    const size_t remote_base_offset =
+        static_cast<char *>(remote) - static_cast<char *>(nvshmemi_device_state.heap_base);
+    const CUlogicalEndpointId le_id =
+        static_cast<CUlogicalEndpointId>(PARSE_LE_ID(le_id_with_flag));
+
+    status = nvshmemi_order_after_cft_fence(pe, stream_for_op == custrm, true, stream_for_op);
+    if (status != NVSHMEMX_SUCCESS) {
+        goto out;
+    }
+
+    /*
+     * On-stream NBI operations and scalar p/g_on_stream execute on NVSHMEM's internal stream rather
+     * than directly on the user-provided stream. Scalar operations have one persistent staging slot
+     * per internal stream; using that stream serializes staging and CFT copies so different user
+     * streams cannot overwrite the slot concurrently. Record the user's stream and make the
+     * internal stream wait so the CFT operation cannot start before work previously enqueued by the
+     * application. The event establishes user stream -> internal stream ordering without blocking
+     * the host; scalar g_on_stream synchronizes separately below before returning its value.
+     */
+    if ((verb.is_nbi || is_stream_scalar || is_stream_signal) && verb.is_stream) {
+        CUDA_RUNTIME_CHECK_GOTO(cudaEventRecord(cuev, verb.cstrm), status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaStreamWaitEvent(custrm, cuev, 0), status, out);
+    }
+    if (is_stream_scalar) {
+        local = nvshmemi_state->cft_scalar_staging + stream_idx;
+    }
+    if (is_stream_p) {
+        uint64_t value = 0;
+        std::memcpy(&value, application_local, bytesdesc.elembytes);
+        status = nvshmemi_cft_staged_copy(stream_for_op, le_id, local, value, remote_base_offset,
+                                          bytesdesc);
+    } else {
+        status =
+            nvshmemi_cft_copy(stream_for_op, le_id, local, remote_base_offset, bytesdesc, is_put);
+    }
+    if (status != NVSHMEMX_SUCCESS) {
+        goto out;
+    }
+
+    if (is_put_signal) {
+        /* Complete the CFT payload put before issuing the signal update. This synchronization is
+         * required so the remote PE cannot observe the signal before the corresponding payload has
+         * been delivered. */
+        CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(stream_for_op), status, out);
+        if (is_signal_set) {
+            const rma_bytesdesc_t signal_bytesdesc = {1, static_cast<int>(sizeof(signal)), 1, 1};
+            uint64_t *signal_staging = nvshmemi_state->cft_scalar_staging + stream_idx;
+            status = nvshmemi_cft_staged_copy(stream_for_op, le_id, signal_staging, signal,
+                                              signal_remote_offset, signal_bytesdesc);
+            if (status != NVSHMEMX_SUCCESS) {
+                goto out;
+            }
+        } else {
+            call_nvshmemi_cft_signal_add_kernel(sig_addr, signal, pe, stream_for_op);
+        }
+    }
+
+    if (is_stream_g) {
+        /* g_on_stream returns a scalar by value, so copy out of persistent staging and wait while
+         * its stack destination is still alive. This can also complete earlier work on custrm. */
+        CUDA_RUNTIME_CHECK_GOTO(cudaMemcpyAsync(application_local, local, bytesdesc.elembytes,
+                                                cudaMemcpyDeviceToHost, custrm),
+                                status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(custrm), status, out);
+    }
+
+    /*
+     * Scalar p_on_stream must also order subsequent application work after the internally staged
+     * CFT copy. Record completion on the internal stream and make the user stream wait, forming the
+     * reverse internal stream -> user stream dependency. NBI operations do not add this reverse
+     * dependency; their completion is handled by quiet/fence.
+     */
+    if (is_stream_p || is_stream_signal) {
+        CUDA_RUNTIME_CHECK_GOTO(cudaEventRecord(cuev, custrm), status, out);
+        CUDA_RUNTIME_CHECK_GOTO(cudaStreamWaitEvent(verb.cstrm, cuev, 0), status, out);
+    }
+
+    if (verb.is_nbi || is_stream_p || is_stream_signal) {
+        nvshmemi_state->active_internal_streams[stream_idx] = 1;
+        nvshmemi_state->used_internal_streams = 1;
+        /*
+         * The PE flag lets fence create a destination-specific dependency. The stream flag remains
+         * live until host quiet, even if quiet-on-stream clears the generic activity bookkeeping.
+         */
+        nvshmemi_state->cft_active_pes[pe] = true;
+        nvshmemi_state->cft_active_internal_streams[stream_idx] = true;
+    } else if (!verb.is_stream) {
+        CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(custrm), status, out);
+    }
+
+out:
+    return status;
+}
+#endif
 
 static int nvshmemi_p2p_rma_optimized(cudaStream_t custrm /* internal stream */, cudaEvent_t cuev,
                                       rma_verb_t verb, rma_memdesc_t *dest, rma_memdesc_t *src,
@@ -247,9 +472,46 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
     rma_verb_t verb = {desc, is_nbi, is_stream, cstrm};
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, 1, 1};
     int status = 0;
+    const bool has_mapped_peer = nvshmemi_state->heap_obj->get_local_pe_bases()[pe] != nullptr;
 
-    /* Mapper Peer */
-    if (nvshmemi_state->heap_obj->get_local_pe_bases()[pe]) {
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+#if defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+    constexpr bool prioritize_cft = true;
+#else
+    constexpr bool prioritize_cft = false;
+#endif
+    /* Logical endpoints do not support self access. Always use the local mapped pointer route. */
+    if (pe == nvshmemi_state->mype) {
+        status = nvshmemi_prepare_and_post_mapped_rma(verb, nelems, elembytes, sig_addr, signal,
+                                                      lptr, rptr, lstride, rstride, sig_op, pe);
+        goto out;
+    }
+    if (!has_mapped_peer || prioritize_cft) {
+        const int distance =
+            (pe - nvshmemi_state->mype + nvshmemi_state->npes) % nvshmemi_state->npes;
+        const int stream_idx = distance % nvshmemi_options.MAX_PEER_STREAMS;
+        cudaStream_t custrm = nvshmemi_state->custreams[stream_idx];
+        cudaEvent_t cuev = nvshmemi_state->cuevents[stream_idx];
+        rma_bytesdesc_t cft_bytesdesc = {nelems, static_cast<int>(elembytes), lstride, rstride};
+
+        status = nvshmemi_cft_rma(custrm, cuev, verb, lptr, rptr, cft_bytesdesc, sig_addr, signal,
+                                  sig_op, pe);
+        if (status != NVSHMEMX_ERROR_NOT_SUPPORTED) {
+            goto out;
+        }
+        status = NVSHMEMX_SUCCESS;
+    }
+#endif
+
+    /* Use the mapped pointer immediately unless CFT was prioritized; otherwise it is the
+     * fallback. */
+    if (has_mapped_peer) {
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+        status = nvshmemi_order_after_cft_fence(pe, !verb.is_stream || verb.is_nbi,
+                                                verb.is_stream && !verb.is_nbi, verb.cstrm);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "failed to order mapped RMA after CFT fence\n");
+#endif
         status = nvshmemi_prepare_and_post_mapped_rma(verb, nelems, elembytes, sig_addr, signal,
                                                       lptr, rptr, lstride, rstride, sig_op, pe);
         goto out;
@@ -266,6 +528,11 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
 
     /* off stream */
     if (!verb.is_stream) {
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+        status = nvshmemi_order_after_cft_fence(pe, false, false, NOT_A_CUDA_STREAM);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "failed to order transport RMA after CFT fence\n");
+#endif
         const auto remote_target = nvshmemi_translate_unmapped_ptr(
             rptr, pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
         const auto transport_pe = remote_target.transport_pe;
@@ -308,6 +575,11 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
     }
 
     /* on stream */
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    status = nvshmemi_order_after_cft_fence(pe, false, true, verb.cstrm);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                          "failed to order proxy RMA after CFT fence\n");
+#endif
     if (verb.desc == NVSHMEMI_OP_PUT_SIGNAL) {
         verb.desc = NVSHMEMI_OP_PUT;
         void *args[] = {&rptr, &lptr, &bytesdesc, &sig_addr, &signal, &sig_op, &pe, &verb.desc};
