@@ -1123,42 +1123,28 @@ out:
  */
 static_assert(NVSHMEMI_GPUNETIO_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_GPUNETIO_MIN_QP_DEPTH >= 64) failed");
-template <typename T>
+template <typename T, bool can_coalesce_warp, bool can_combine_data>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_p_impl(
-    void *rptr, const T value, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    const T value, nvshmemi_gpunetio_device_qp_t *qp, uint64_t raddr, __be32 rkey) {
+    static_assert(!can_combine_data || can_coalesce_warp, "data combination requires a full warp");
+    // For can_combine_data: A one-WQEBB inline RDMA write has 28 bytes available.
+    // Pack as many contiguous scalar puts as fit in each WQE.
+    constexpr int values_per_wqe =
+        DOCA_GPUNETIO_VERBS_MAX_INLINE_SIZE / static_cast<int>(sizeof(T));
+    static_assert(!can_combine_data || values_per_wqe > 0,
+                  "type does not fit in a one-WQEBB inline payload");
+
     int my_tid;
     int tg_size;
-    nvshmemi_gpunetio_device_qp_t *qp;
-    __be32 rkey;
-    uint64_t raddr;
-    size_t rchunk_size;
-
-    unsigned int amask = __activemask();
-#ifndef __clang_llvm_bitcode_lib__
-    bool can_coalesce_warp = gdaki_can_coalesce_warp_pe(amask, proxy_pe);
-#else
-    bool can_coalesce_warp = false;
-#endif
-
-    if (can_coalesce_warp) {
+    if constexpr (can_coalesce_warp) {
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
-        if (my_tid == 0) {
-            qp = gdaki_get_qp(proxy_pe, qp_index);
-        }
-        qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
     } else {
-        qp = gdaki_get_qp(proxy_pe, qp_index);
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
         tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
     }
-    gdaki_get_raddr_rkey((uint64_t)rptr, dst_pe, proxy_pe, &raddr, &rkey, &rchunk_size,
-                         qp->dev_idx);
 
-    assert(rchunk_size >= sizeof(T));
-
-    int num_wqes = tg_size;
+    int num_wqes = can_combine_data ? (tg_size + values_per_wqe - 1) / values_per_wqe : tg_size;
     uint64_t base_wqe_idx;
 
     if (my_tid == 0) {
@@ -1170,23 +1156,56 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma
         gdaki_wait_for_slot_availability(qp, base_wqe_idx + num_wqes);
     }
 
-    if (can_coalesce_warp) {
+    if constexpr (can_coalesce_warp) {
         base_wqe_idx = __shfl_sync(GDAKI_FULL_WARP, base_wqe_idx, 0);
     }
 
-    enum doca_gpu_dev_verbs_wqe_ctrl_flags fm_ce_se =
-        (my_tid == tg_size - 1) ? DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_UPDATE
-                                : DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_ERROR_UPDATE;
+    int my_wqe_offset = can_combine_data ? my_tid / values_per_wqe : my_tid;
 
-    uint64_t my_wqe_idx = base_wqe_idx + my_tid;
+    enum doca_gpu_dev_verbs_wqe_ctrl_flags fm_ce_se =
+        (my_wqe_offset == num_wqes - 1) ? DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_UPDATE
+                                        : DOCA_GPUNETIO_IB_MLX5_WQE_CTRL_CQ_ERROR_UPDATE;
+
+    uint64_t my_wqe_idx = base_wqe_idx + my_wqe_offset;
 
     struct doca_gpu_dev_verbs_wqe *wqe_ptr;
     wqe_ptr = doca_gpu_dev_verbs_get_wqe_ptr(&(qp->qp), my_wqe_idx);
 
-    doca_gpu_dev_verbs_wqe_prepare_write_inl(&(qp->qp), wqe_ptr, my_wqe_idx, fm_ce_se, raddr, rkey,
-                                             (uint64_t)&value, sizeof(T));
+    if constexpr (can_combine_data) {
+        int my_value_offset = my_tid % values_per_wqe;
+        int num_values_in_my_wqe = min(values_per_wqe, tg_size - (my_wqe_offset * values_per_wqe));
+        struct doca_gpunetio_ib_mlx5_wqe_inl_data_seg *data_seg_ptr =
+            (struct doca_gpunetio_ib_mlx5_wqe_inl_data_seg
+                 *)((uintptr_t)wqe_ptr + sizeof(struct doca_gpunetio_ib_mlx5_wqe_ctrl_seg) +
+                    sizeof(struct doca_gpunetio_ib_mlx5_wqe_raddr_seg));
+        uint32_t bytes = num_values_in_my_wqe * sizeof(T);
 
-    if (can_coalesce_warp) {
+        if (my_value_offset == 0) {
+            doca_gpu_dev_verbs_prepare_inl_rdma_write_wqe_header(&(qp->qp), wqe_ptr, my_wqe_idx,
+                                                                 fm_ce_se, raddr, rkey, bytes);
+            data_seg_ptr->byte_count =
+                doca_gpu_dev_verbs_bswap32(bytes | DOCA_GPUNETIO_IB_MLX5_INLINE_SEG);
+        }
+
+        uintptr_t wqe_data_addr =
+            (uintptr_t)data_seg_ptr + sizeof(*data_seg_ptr) + my_value_offset * sizeof(T);
+        if (sizeof(T) <= sizeof(uint32_t)) {
+            *((T *)wqe_data_addr) = value;
+        } else {
+            // Inline data starts at a 4-byte-aligned address.  Split 8-byte values
+            // into two aligned stores.
+            assert(sizeof(T) == sizeof(uint64_t));
+            uint32_t *wqe_data_ptr = (uint32_t *)wqe_data_addr;
+            const uint32_t *value_ptr = (const uint32_t *)&value;
+            wqe_data_ptr[0] = value_ptr[0];
+            wqe_data_ptr[1] = value_ptr[1];
+        }
+    } else {
+        doca_gpu_dev_verbs_wqe_prepare_write_inl(&(qp->qp), wqe_ptr, my_wqe_idx, fm_ce_se, raddr,
+                                                 rkey, (uint64_t)&value, sizeof(T));
+    }
+
+    if constexpr (can_coalesce_warp) {
         gdaki_warp_sync();
     }
 
@@ -1199,7 +1218,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma
         gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
     }
 
-    if (can_coalesce_warp) {
+    if constexpr (can_coalesce_warp) {
         gdaki_warp_sync();
     }
 }
@@ -1208,7 +1227,43 @@ template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_rma_p(
     void *rptr, const T value, int dst_pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     int proxy_pe = gdaki_get_proxy_pe(dst_pe);
-    nvshmemi_gdaki_rma_p_impl<T>(rptr, value, dst_pe, proxy_pe, qp_index);
+    nvshmemi_gpunetio_device_qp_t *qp;
+    __be32 rkey;
+    uint64_t raddr;
+    size_t rchunk_size;
+
+#ifndef __clang_llvm_bitcode_lib__
+    unsigned int amask = __activemask();
+    if (gdaki_can_coalesce_warp_pe(amask, proxy_pe)) {
+        int my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
+        if (my_tid == 0) {
+            qp = gdaki_get_qp(proxy_pe, qp_index);
+        }
+        qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
+
+        gdaki_get_raddr_rkey((uint64_t)rptr, dst_pe, proxy_pe, &raddr, &rkey, &rchunk_size,
+                             qp->dev_idx);
+        assert(rchunk_size >= sizeof(T));
+
+        int pred_contiguous;
+        int pred_rkey;
+        __match_all_sync(GDAKI_FULL_WARP, raddr - (my_tid * sizeof(T)), &pred_contiguous);
+        __match_all_sync(GDAKI_FULL_WARP, rkey, &pred_rkey);
+        bool can_combine_data = pred_contiguous && pred_rkey;
+        if (can_combine_data) {
+            nvshmemi_gdaki_rma_p_impl<T, true, true>(value, qp, raddr, rkey);
+        } else {
+            nvshmemi_gdaki_rma_p_impl<T, true, false>(value, qp, raddr, rkey);
+        }
+    } else
+#endif
+    {
+        qp = gdaki_get_qp(proxy_pe, qp_index);
+        gdaki_get_raddr_rkey((uint64_t)rptr, dst_pe, proxy_pe, &raddr, &rkey, &rchunk_size,
+                             qp->dev_idx);
+        assert(rchunk_size >= sizeof(T));
+        nvshmemi_gdaki_rma_p_impl<T, false, false>(value, qp, raddr, rkey);
+    }
 }
 
 /**
