@@ -515,7 +515,7 @@ int ibgda_dci_progress(nvshmem_transport_t t) {
                 ep = device->dci.eps[i];
 
                 dbrec = (__be32 *)((uintptr_t)ep->qp_ctrl.dbr_mobject->aligned.cpu_ptr +
-                                   ep->qp_ctrl.dbr_offset * sizeof(__be32));
+                                   ep->qp_ctrl.dbr_offset + sizeof(__be32));
                 bf = (__be64 *)ep->uar_mobject->aligned.cpu_ptr;
 
                 memset((void *)&ctrl_seg, 0, sizeof(ctrl_seg));
@@ -579,7 +579,7 @@ int ibgda_rc_progress(nvshmem_transport_t t) {
             }
             if (*prod_idx_cache < *prod_idx_snapshot) {
                 dbrec = (__be32 *)((uintptr_t)ep->qp_ctrl.dbr_mobject->aligned.cpu_ptr +
-                                   ep->qp_ctrl.dbr_offset * sizeof(__be32));
+                                   ep->qp_ctrl.dbr_offset + sizeof(__be32));
                 bf = (__be64 *)ep->uar_mobject->aligned.cpu_ptr;
 
                 memset((void *)&ctrl_seg, 0, sizeof(ctrl_seg));
