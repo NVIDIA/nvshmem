@@ -6,7 +6,7 @@
 # compile, and each negative fixture must fail during CUDA compilation with its
 # expected diagnostic, before linking or requiring a GPU.
 
-foreach(_required_var CUDA_COMPILER PACKAGE_INCLUDE_DIR TEST_COMMON_INCLUDE_DIR
+foreach(_required_var CUDA_COMPILER CUDA_GENCODE PACKAGE_INCLUDE_DIR TEST_COMMON_INCLUDE_DIR
                       CONTRACT_SOURCE CONTRACT_BINARY_DIR)
   if(NOT DEFINED ${_required_var})
     message(FATAL_ERROR "transport-specific compile contract: ${_required_var} is required")
@@ -28,9 +28,14 @@ endif()
 list(APPEND _compiler_command
      "-I${PACKAGE_INCLUDE_DIR}"
      "-I${TEST_COMMON_INCLUDE_DIR}")
+foreach(_include_dir IN LISTS CONTRACT_INCLUDE_DIRS)
+  list(APPEND _compiler_command "-I${_include_dir}")
+endforeach()
 
 function(compile_fixture name result_var output_var)
-  set(_command ${_compiler_command} ${ARGN})
+  # Match the test build's architectures instead of nvcc's toolkit-dependent
+  # default, which can be older than the device headers support.
+  set(_command ${_compiler_command} ${CUDA_GENCODE} ${ARGN})
 
   set(_object "${CONTRACT_BINARY_DIR}/${name}.o")
   file(REMOVE "${_object}")
