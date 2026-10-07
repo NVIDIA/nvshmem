@@ -620,6 +620,16 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI)
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP)
 #undef NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP
 
+/*
+ * Block-collective variants of nvshmem_quiet() and nvshmem_fence(). All threads
+ * in the block must call the same operation. The block synchronizes before one
+ * thread performs the operation and again before any thread returns. Quiet
+ * completes preceding operations; fence orders preceding and subsequent puts
+ * to the same PE without guaranteeing completion.
+ */
+__device__ void nvshmemx_quiet_block(void);
+__device__ void nvshmemx_fence_block(void);
+
 // Quiet/Fence with qp
 __device__ void nvshmemx_qp_quiet(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
 __device__ void nvshmemx_qp_quiet_warp(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);
