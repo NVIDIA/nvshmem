@@ -835,6 +835,12 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_flush_block(v
     nvshmemi_flush<NVSHMEMI_THREADGROUP_BLOCK>();
 }
 
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_warp(void) {
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_quiet<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+}
+
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_block(void) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     /* TMA bulk groups must be drained by the threads that issued them. */
@@ -844,6 +850,12 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_block(v
         nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
     }
     nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_fence_warp(void) {
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_fence<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
 }
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_fence_block(void) {
