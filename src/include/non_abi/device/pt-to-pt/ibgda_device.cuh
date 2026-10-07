@@ -2734,8 +2734,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_rma_p(
         size_t rchunk_size;
         ibgda_get_raddr_rkey((uint64_t)rptr, dst_pe, proxy_pe, &raddr, &rkey, &rchunk_size, 0);
         my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
-        __match_all_sync(IBGDA_FULL_WARP, (uintptr_t)(rptr) - (my_tid * sizeof(T)),
-                         &pred_contiguous);
+        __match_all_sync(IBGDA_FULL_WARP, raddr - (my_tid * sizeof(T)), &pred_contiguous);
         __match_all_sync(IBGDA_FULL_WARP, rkey, &pred_rkey);
         can_combine_data = (pred_contiguous && pred_rkey && state->support_half_av_seg);
         if (can_combine_data) {
