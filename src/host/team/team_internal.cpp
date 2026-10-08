@@ -1090,13 +1090,19 @@ static bool validate_peer_pe_lists(const std::vector<int> &peer_pe_list,
     return true;
 }
 
-// Initialize NVSHMEM_TEAM_SHARED or NVSHMEM_TEAM_MC_SHARED
-static int init_team_shared(bool is_mc_shared) {
+enum class nvshmemi_predefined_team_domain {
+    UNICAST_POINTER,
+    MULTICAST_POINTER,
+};
+
+// Initialize a predefined team from its connectivity domain.
+static int init_team_shared(nvshmemi_predefined_team_domain domain) {
     /* Collect list of p2p connected PEs */
     std::vector<int> peer_pe_list;
     nvshmemi_team_t *team_peer_shared_ptr = nullptr;
     peer_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
 
+    const bool is_mc_shared = domain == nvshmemi_predefined_team_domain::MULTICAST_POINTER;
     int my_idx_in_peer_list = 0;
     bool use_mc_domain = is_mc_shared && (nvshmemi_state->p2p_transport->has_cuda_clique_info() ||
                                           nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID);
@@ -1724,7 +1730,7 @@ int nvshmemi_team_init(void) {
     }
 
     // Initialize NVSHMEM_TEAM_SHARED
-    status = init_team_shared(false);
+    status = init_team_shared(nvshmemi_predefined_team_domain::UNICAST_POINTER);
     if (status) {
         return status;
     }
@@ -1733,7 +1739,7 @@ int nvshmemi_team_init(void) {
     // discovery and no override, preserve the existing alias to NVSHMEM_TEAM_SHARED.
     status = (nvshmemi_state->p2p_transport->has_cuda_clique_info() ||
               nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID)
-                 ? init_team_shared(true)
+                 ? init_team_shared(nvshmemi_predefined_team_domain::MULTICAST_POINTER)
                  : init_team_mc_shared_alias();
     if (status) {
         return status;
