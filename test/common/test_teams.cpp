@@ -175,6 +175,16 @@ void init_test_teams() {
     set_team_mappings(teams[ctr], "NVSHMEM_TEAM_MC_SHARED");
     ctr++;
 
+    /* CFT shared teams exist in every build. Without logical-endpoint connectivity,
+     * they fall back to valid single-PE self teams. */
+    teams[ctr] = NVSHMEM_TEAM_CFT_SHARED;
+    set_team_mappings(teams[ctr], "NVSHMEM_TEAM_CFT_SHARED");
+    ctr++;
+
+    teams[ctr] = NVSHMEM_TEAM_CFT_MC_SHARED;
+    set_team_mappings(teams[ctr], "NVSHMEM_TEAM_CFT_MC_SHARED");
+    ctr++;
+
     teams[ctr] = NVSHMEMX_TEAM_NODE;
     set_team_mappings(teams[ctr], "NVSHMEMX_TEAM_NODE");
     ctr++;
@@ -269,6 +279,8 @@ void finalize_test_teams() {
         if (map_team_to_string[teams[i]] != "NVSHMEM_TEAM_WORLD" &&
             map_team_to_string[teams[i]] != "NVSHMEM_TEAM_SHARED" &&
             map_team_to_string[teams[i]] != "NVSHMEM_TEAM_MC_SHARED" &&
+            map_team_to_string[teams[i]] != "NVSHMEM_TEAM_CFT_SHARED" &&
+            map_team_to_string[teams[i]] != "NVSHMEM_TEAM_CFT_MC_SHARED" &&
             map_team_to_string[teams[i]] != "NVSHMEMX_TEAM_NODE") {
             nvshmem_team_destroy(teams[i]);
         }
