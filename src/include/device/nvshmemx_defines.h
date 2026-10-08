@@ -842,11 +842,14 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_warp(vo
 }
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_block(void) {
-    int myIdx = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     /* TMA bulk groups must be drained by the threads that issued them. */
     nvshmemi_tma_drain_if_registered();
     nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
-    if (!myIdx) {
+#if __CUDA_ARCH__ >= 900
+    if (nvshmemi_tma_block_is_elected()) {
+#else
+    if (nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() == 0) {
+#endif
         nvshmemi_quiet<NVSHMEMI_THREADGROUP_THREAD>();
     }
     nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
@@ -859,11 +862,14 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_fence_warp(vo
 }
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_fence_block(void) {
-    int myIdx = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     /* TMA bulk groups must be drained by the threads that issued them. */
     nvshmemi_tma_drain_if_registered();
     nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
-    if (!myIdx) {
+#if __CUDA_ARCH__ >= 900
+    if (nvshmemi_tma_block_is_elected()) {
+#else
+    if (nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() == 0) {
+#endif
         nvshmemi_fence<NVSHMEMI_THREADGROUP_THREAD>();
     }
     nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
