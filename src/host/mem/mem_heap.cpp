@@ -2595,6 +2595,9 @@ void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr) {
     }
     uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
     if (ptr >= nvshmemi_device_state.heap_base && offset < nvshmemi_device_state.heap_size) {
+        if (nvshmemi_team_pool[team]->nvls_rsc_base_ptr == nullptr) {
+            return NULL;
+        }
         nvls::nvshmemi_nvls_rsc *nvls =
             reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(nvshmemi_team_pool[team]->nvls_rsc);
         if (nvls == NULL) {

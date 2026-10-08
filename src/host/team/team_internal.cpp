@@ -758,12 +758,12 @@ void nvshmemi_team_set_p2p_connectivity(nvshmemi_team_t *teami) {
 }
 
 void nvshmemi_team_set_nvls_connectivity(nvshmemi_team_t *teami) {
-    teami->are_gpus_nvls_ptr_connected =
-        nvshmemi_team_is_subset(teami, nvshmemi_team_mc_shared);
+    teami->are_gpus_nvls_ptr_connected = nvshmemi_team_is_subset(teami, nvshmemi_team_mc_shared);
 }
 
 bool nvshmemi_team_support_nvls(nvshmemi_team_t *team) {
-    return ((team->are_gpus_nvls_ptr_connected) && (team->nvls_rsc != nullptr));
+    return (team->nvls_rsc != nullptr) &&
+           (team->nvls_rsc_base_ptr != nullptr || team->supports_mc_endpoint);
 }
 
 bool nvshmemi_team_is_owner_nvls(nvshmemi_team_t *team) {
@@ -774,8 +774,18 @@ bool nvshmemi_team_is_owner_nvls(nvshmemi_team_t *team) {
 }
 
 static bool nvshmemi_team_is_nvls_capable(nvshmemi_team_t *team) {
-    return (team->are_gpus_nvls_ptr_connected && team->size >= 2 &&
+    const bool supports_mc_ptr = team->are_gpus_nvls_ptr_connected;
+    const bool supports_mc_le = team->supports_mc_endpoint && nvshmemi_state->vmm_heap != nullptr &&
+                                nvshmemi_state->vmm_heap->is_multicast_endpoint_enabled();
+    return ((supports_mc_ptr || supports_mc_le) && team->size >= 2 &&
             nvshmemi_state->is_platform_nvls);
+}
+
+static bool nvshmemi_team_can_share_nvls_resource(nvshmemi_team_t *team,
+                                                  nvshmemi_team_t *existing_team) {
+    return nvshmemi_team_is_identical(team, existing_team) &&
+           team->are_gpus_nvls_ptr_connected == existing_team->are_gpus_nvls_ptr_connected &&
+           team->supports_mc_endpoint == existing_team->supports_mc_endpoint;
 }
 
 nvshmemi_team_t *nvshmemi_team_get_same_existing_nvls_team(nvshmemi_team_t *team) {
@@ -783,7 +793,7 @@ nvshmemi_team_t *nvshmemi_team_get_same_existing_nvls_team(nvshmemi_team_t *team
         return nullptr;
     }
     for (int i = 0; i < team->team_idx; ++i) {
-        if (nvshmemi_team_is_identical(team, nvshmemi_team_pool[i])) {
+        if (nvshmemi_team_can_share_nvls_resource(team, nvshmemi_team_pool[i])) {
             if (nvshmemi_team_support_nvls(nvshmemi_team_pool[i])) {
                 return nvshmemi_team_pool[i];
             }
@@ -802,13 +812,17 @@ static void nvshmemi_team_destroy_nvls(nvshmemi_team_t *team) {
     nvshmemi_nvls_rsc *nvls_obj = nullptr;
     nvls_obj = reinterpret_cast<nvshmemi_nvls_rsc *>(team->nvls_rsc);
     if (nvls_obj->get_refcount() == 0) { /* Last reference */
-        nvshmemi_state->nvls_obs->nvls_unmap_heap_memory_by_team(team);
+        if (team->nvls_rsc_base_ptr != nullptr) {
+            nvshmemi_state->nvls_obs->nvls_unmap_heap_memory_by_team(team);
+        }
         nvshmemi_state->nvls_obs->nvls_unbind_heap_memory_by_team(team);
         nvshmemi_state->vmm_heap->nvls_destroy_multicast_endpoint_by_team(team);
         nvls_obj->free_group_mem();
         nvls_obj->release_owner();
         delete nvls_obj;
-        cudaFree(team->nvls_rsc_base_ptr);
+        if (team->nvls_rsc_base_ptr != nullptr) {
+            cudaFree(team->nvls_rsc_base_ptr);
+        }
         team->nvls_rsc = nullptr;
         INFO(NVSHMEM_TEAM, "NVLS Resource Destroyed for Team ID %d\n", team->team_idx);
     } else {
@@ -857,10 +871,12 @@ static int nvshmemi_team_create_nvls(nvshmemi_team_t *team) {
                           "Reserve multicast group mapping failed for pe %d\n", team->my_pe);
 
     nvls_obj->assign_owner(team);
-    CUDA_RUNTIME_CHECK(cudaMalloc((void **)&team->nvls_rsc_base_ptr, sizeof(void *)));
     mc_heap_base = (uint64_t)(nvls_obj->get_mc_base());
-    CUDA_RUNTIME_CHECK(
-        cudaMemcpy(team->nvls_rsc_base_ptr, &mc_heap_base, sizeof(void *), cudaMemcpyHostToDevice));
+    if (team->are_gpus_nvls_ptr_connected) {
+        CUDA_RUNTIME_CHECK(cudaMalloc((void **)&team->nvls_rsc_base_ptr, sizeof(void *)));
+        CUDA_RUNTIME_CHECK(cudaMemcpy(team->nvls_rsc_base_ptr, &mc_heap_base, sizeof(void *),
+                                      cudaMemcpyHostToDevice));
+    }
 
     /* Make a MC handle as large as reserved heap size (VA range) */
     status = nvshmemi_state->nvls_obs->nvls_create_heap_memory_by_team(team);
@@ -874,10 +890,12 @@ static int nvshmemi_team_create_nvls(nvshmemi_team_t *team) {
                           "Setup multicast endpoints for heap failed for pe %d team ID %d\n",
                           team->my_pe, team->team_idx);
 
-    status = nvshmemi_state->nvls_obs->nvls_map_heap_memory_by_team(team);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
-                          "Mapping multicast groups for UC heap failed for pe %d team ID %d\n",
-                          team->my_pe, team->team_idx);
+    if (team->are_gpus_nvls_ptr_connected) {
+        status = nvshmemi_state->nvls_obs->nvls_map_heap_memory_by_team(team);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, cleanup,
+                              "Mapping multicast groups for UC heap failed for pe %d team ID %d\n",
+                              team->my_pe, team->team_idx);
+    }
 
     INFO(NVSHMEM_TEAM, "NVLS Resource Created for Team ID %d MC VA Base: %llx\n", team->team_idx,
          mc_heap_base);
@@ -919,7 +937,7 @@ static int nvshmemi_team_setup_nvls(nvshmemi_team_t *team) {
         team->nvls_rsc_base_ptr = identical_team->nvls_rsc_base_ptr;
         team->mc_leid_with_flag = identical_team->mc_leid_with_flag;
         assert(team->nvls_rsc != nullptr);
-        assert(team->nvls_rsc_base_ptr != nullptr);
+        assert(!team->are_gpus_nvls_ptr_connected || team->nvls_rsc_base_ptr != nullptr);
         nvshmemi_nvls_rsc *nvls = reinterpret_cast<nvshmemi_nvls_rsc *>(team->nvls_rsc);
         nvls->add_refcount();
         INFO(NVSHMEM_TEAM, "Successful NVLS resource sharing for new team ID: %d (parent ID: %d)\n",
@@ -1238,6 +1256,8 @@ static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
     team_peer_shared_ptr->bcast_sync_offset = 0;
     team_peer_shared_ptr->fcollect_count = 0;
     team_peer_shared_ptr->p2p_sync_on_stream_count = 0;
+    team_peer_shared_ptr->supports_mc_endpoint =
+        domain == nvshmemi_predefined_team_shared_domain::MULTICAST_LOGICAL_ENDPOINT;
 
     nvshmemi_team_populate_pe_mappings_from_constant_stride(team_peer_shared_ptr);
     nvshmemi_team_set_p2p_connectivity(team_peer_shared_ptr);
@@ -1702,8 +1722,8 @@ static int finalize_team_init() {
         if (i == NVSHMEM_TEAM_MC_SHARED_INDEX && nvshmemi_team_mc_shared_is_alias()) {
             continue;
         }
-        if (nvshmemi_team_pool[i] != NULL &&
-            nvshmemi_team_pool[i]->are_gpus_nvls_ptr_connected) {
+        if (nvshmemi_team_pool[i] != NULL && (nvshmemi_team_pool[i]->are_gpus_nvls_ptr_connected ||
+                                              nvshmemi_team_pool[i]->supports_mc_endpoint)) {
             int status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
             if (status != 0) {
                 NVSHMEMI_ERROR_PRINT("NVLS resource setup failed for team ID: %d\n",
