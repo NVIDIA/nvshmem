@@ -8,8 +8,39 @@
 #include "nvshmemx.h"
 #include "utils.h"
 
-/* This test verifies that NVSHMEM_TEAM_SHARED is initialized correctly by checking the equivalence
- * of the P2P accessibility using nvshmem_ptr and nvshmem_team_translate_pe. */
+static bool validate_team(nvshmem_team_t team, const char *name, int mype, int npes) {
+    const int team_npes = nvshmem_team_n_pes(team);
+    const int team_mype = nvshmem_team_my_pe(team);
+    int translated_npes = 0;
+    bool mismatch = false;
+
+    for (int pe = 0; pe < npes; pe++) {
+        const int team_pe = nvshmem_team_translate_pe(NVSHMEM_TEAM_WORLD, pe, team);
+        if (team_pe == -1) {
+            continue;
+        }
+
+        translated_npes++;
+        if (team_pe < 0 || team_pe >= team_npes ||
+            nvshmem_team_translate_pe(team, team_pe, NVSHMEM_TEAM_WORLD) != pe) {
+            fprintf(stderr, "%s has an invalid translation for world PE %d\n", name, pe);
+            mismatch = true;
+        }
+    }
+
+    const int translated_mype = nvshmem_team_translate_pe(NVSHMEM_TEAM_WORLD, mype, team);
+    if (translated_npes != team_npes || translated_mype != team_mype) {
+        fprintf(stderr,
+                "%s membership mismatch on PE %d "
+                "(translated size: %d, team size: %d, translated PE: %d, team PE: %d)\n",
+                name, mype, translated_npes, team_npes, translated_mype, team_mype);
+        mismatch = true;
+    }
+
+    return mismatch;
+}
+
+/* Verify that the predefined pointer and logical-endpoint teams have consistent membership. */
 
 int main(int argc, char **argv) {
     init_wrapper(&argc, &argv);
@@ -20,26 +51,37 @@ int main(int argc, char **argv) {
     // dummy pointer to query PTR accessibility
     int *ptr = (int *)nvshmem_malloc(sizeof(int));
 
-    // Check for equivalence P2P accessibility using nvshmem_ptr and nvshmem_team_translate_pe
-    bool p2p_accessible_mismatch = false;
+    bool membership_mismatch = false;
     for (int pe = 0; pe < npes; pe++) {
-        bool p2p_accessible_ptr = nvshmem_ptr(ptr, pe) != nullptr;
-        bool p2p_accessible_translate_pe =
+        const bool shared_accessible = nvshmem_ptr(ptr, pe) != nullptr;
+        const bool shared_member =
             nvshmem_team_translate_pe(NVSHMEM_TEAM_WORLD, pe, NVSHMEM_TEAM_SHARED) != -1;
 
-        if (p2p_accessible_ptr != p2p_accessible_translate_pe) {
+        if (shared_accessible != shared_member) {
             fprintf(stderr,
-                    "P2P accessibility mismatch detected between PE %d and PE %d (ptr: %d, "
-                    "translate_pe: %d)\n",
-                    mype, pe, p2p_accessible_ptr, p2p_accessible_translate_pe);
-            p2p_accessible_mismatch = true;
+                    "NVSHMEM_TEAM_SHARED mismatch between PE %d and PE %d "
+                    "(accessible: %d, member: %d)\n",
+                    mype, pe, shared_accessible, shared_member);
+            membership_mismatch = true;
         }
+    }
+
+    membership_mismatch |=
+        validate_team(NVSHMEM_TEAM_MC_SHARED, "NVSHMEM_TEAM_MC_SHARED", mype, npes);
+    membership_mismatch |=
+        validate_team(NVSHMEM_TEAM_CFT_SHARED, "NVSHMEM_TEAM_CFT_SHARED", mype, npes);
+    membership_mismatch |=
+        validate_team(NVSHMEM_TEAM_CFT_MC_SHARED, "NVSHMEM_TEAM_CFT_MC_SHARED", mype, npes);
+
+    if (nvshmemx_mc_ptr(NVSHMEM_TEAM_CFT_MC_SHARED, ptr) != nullptr) {
+        fprintf(stderr, "NVSHMEM_TEAM_CFT_MC_SHARED unexpectedly exposes a multicast pointer\n");
+        membership_mismatch = true;
     }
 
     nvshmem_free(ptr);
 
-    if (p2p_accessible_mismatch) {
-        fprintf(stderr, "P2P accessibility mismatches detected\n");
+    if (membership_mismatch) {
+        fprintf(stderr, "Predefined team membership mismatches detected\n");
         finalize_wrapper();
         return 1;
     }
