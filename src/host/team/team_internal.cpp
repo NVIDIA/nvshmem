@@ -80,6 +80,8 @@ static long N_PSYNC_BYTES = 32; /* N_PSYNC_BYTES * CHAR_NBIT == max_teams suppor
 nvshmemi_team_t *nvshmemi_team_world = nullptr;
 nvshmemi_team_t *nvshmemi_team_shared = nullptr;
 nvshmemi_team_t *nvshmemi_team_mc_shared = nullptr;
+nvshmemi_team_t *nvshmemi_team_cft_shared = nullptr;
+nvshmemi_team_t *nvshmemi_team_cft_mc_shared = nullptr;
 nvshmemi_team_t *nvshmemi_team_node = nullptr;
 nvshmemi_team_t *nvshmemi_team_same_mype_node = nullptr;
 nvshmemi_team_t *nvshmemi_team_same_gpu = nullptr;
@@ -88,6 +90,8 @@ nvshmemi_team_t *nvshmemi_team_gpu_leaders = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_world = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_shared = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_mc_shared = nullptr;
+nvshmemi_team_t *nvshmemi_device_team_cft_shared = nullptr;
+nvshmemi_team_t *nvshmemi_device_team_cft_mc_shared = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_node = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_same_mype_node = nullptr;
 nvshmemi_team_t *nvshmemi_device_team_same_gpu = nullptr;
@@ -295,6 +299,10 @@ static void nvshmemi_team_update_device(void) {
     } else {
         copy_team_to_device(nvshmemi_team_mc_shared, nvshmemi_device_team_mc_shared);
     }
+
+    copy_team_to_device(nvshmemi_team_cft_shared, nvshmemi_device_team_cft_shared);
+
+    copy_team_to_device(nvshmemi_team_cft_mc_shared, nvshmemi_device_team_cft_mc_shared);
 
     copy_team_to_device(nvshmemi_team_node, nvshmemi_device_team_node);
 
@@ -1090,29 +1098,39 @@ static bool validate_peer_pe_lists(const std::vector<int> &peer_pe_list,
     return true;
 }
 
-enum class nvshmemi_predefined_team_domain {
+enum class nvshmemi_predefined_team_shared_domain {
     UNICAST_POINTER,
     MULTICAST_POINTER,
+    UNICAST_LOGICAL_ENDPOINT,
+    MULTICAST_LOGICAL_ENDPOINT,
 };
 
 // Initialize a predefined team from its connectivity domain.
-static int init_team_shared(nvshmemi_predefined_team_domain domain) {
+static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
     /* Collect list of p2p connected PEs */
     std::vector<int> peer_pe_list;
     nvshmemi_team_t *team_peer_shared_ptr = nullptr;
     peer_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
 
-    const bool is_mc_shared = domain == nvshmemi_predefined_team_domain::MULTICAST_POINTER;
     int my_idx_in_peer_list = 0;
-    bool use_mc_domain = is_mc_shared && (nvshmemi_state->p2p_transport->has_cuda_clique_info() ||
-                                          nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID);
     for (int i = 0; i < nvshmemi_team_world->size; i++) {
         bool is_peer_connected = false;
-        if (use_mc_domain) {
-            assert(nvshmemi_state->p2p_transport != nullptr);
-            is_peer_connected = nvshmemi_state->p2p_transport->is_mc_ptr_connected_pe(i);
-        } else {
-            is_peer_connected = nvshmemi_state->heap_obj->get_local_pe_bases()[i] != nullptr;
+        switch (domain) {
+            case nvshmemi_predefined_team_shared_domain::UNICAST_POINTER:
+                is_peer_connected = nvshmemi_state->heap_obj->get_local_pe_bases()[i] != nullptr;
+                break;
+            case nvshmemi_predefined_team_shared_domain::MULTICAST_POINTER:
+                assert(nvshmemi_state->p2p_transport != nullptr);
+                is_peer_connected = nvshmemi_state->p2p_transport->is_mc_ptr_connected_pe(i);
+                break;
+            case nvshmemi_predefined_team_shared_domain::UNICAST_LOGICAL_ENDPOINT:
+                assert(nvshmemi_state->p2p_transport != nullptr);
+                is_peer_connected = nvshmemi_state->p2p_transport->is_uc_le_connected_pe(i);
+                break;
+            case nvshmemi_predefined_team_shared_domain::MULTICAST_LOGICAL_ENDPOINT:
+                assert(nvshmemi_state->p2p_transport != nullptr);
+                is_peer_connected = nvshmemi_state->p2p_transport->is_mc_le_connected_pe(i);
+                break;
         }
 
         if (is_peer_connected) {
@@ -1128,26 +1146,46 @@ static int init_team_shared(nvshmemi_predefined_team_domain domain) {
     for (const auto &pe : peer_pe_list) {
         ss << pe << " ";
     }
-    if (is_mc_shared) {
-        INFO(NVSHMEM_INIT, "MC connected list: %s", ss.str().c_str());
-        /* allocate the team */
-        if (nvshmemi_team_allocate_team(&nvshmemi_team_mc_shared, &nvshmemi_device_team_mc_shared,
-                                        n_peer_pes) != NVSHMEMX_SUCCESS) {
-            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
-        }
-        team_peer_shared_ptr = nvshmemi_team_mc_shared;
-    } else {
-        INFO(NVSHMEM_INIT, "P2P connected list: %s", ss.str().c_str());
-        /* allocate the team */
-        if (nvshmemi_team_allocate_team(&nvshmemi_team_shared, &nvshmemi_device_team_shared,
-                                        n_peer_pes) != NVSHMEMX_SUCCESS) {
-            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
-        }
-        team_peer_shared_ptr = nvshmemi_team_shared;
+    const char *team_name = nullptr;
+    nvshmemi_team_t **host_team = nullptr;
+    nvshmemi_team_t **device_team = nullptr;
+    int team_idx = NVSHMEM_TEAM_INVALID;
+    switch (domain) {
+        case nvshmemi_predefined_team_shared_domain::UNICAST_POINTER:
+            team_name = "NVSHMEM_TEAM_SHARED";
+            host_team = &nvshmemi_team_shared;
+            device_team = &nvshmemi_device_team_shared;
+            team_idx = NVSHMEM_TEAM_SHARED_INDEX;
+            break;
+        case nvshmemi_predefined_team_shared_domain::MULTICAST_POINTER:
+            team_name = "NVSHMEM_TEAM_MC_SHARED";
+            host_team = &nvshmemi_team_mc_shared;
+            device_team = &nvshmemi_device_team_mc_shared;
+            team_idx = NVSHMEM_TEAM_MC_SHARED_INDEX;
+            break;
+        case nvshmemi_predefined_team_shared_domain::UNICAST_LOGICAL_ENDPOINT:
+            team_name = "NVSHMEM_TEAM_CFT_SHARED";
+            host_team = &nvshmemi_team_cft_shared;
+            device_team = &nvshmemi_device_team_cft_shared;
+            team_idx = NVSHMEM_TEAM_CFT_SHARED_INDEX;
+            break;
+        case nvshmemi_predefined_team_shared_domain::MULTICAST_LOGICAL_ENDPOINT:
+            team_name = "NVSHMEM_TEAM_CFT_MC_SHARED";
+            host_team = &nvshmemi_team_cft_mc_shared;
+            device_team = &nvshmemi_device_team_cft_mc_shared;
+            team_idx = NVSHMEM_TEAM_CFT_MC_SHARED_INDEX;
+            break;
     }
 
-    team_peer_shared_ptr->team_idx =
-        is_mc_shared ? NVSHMEM_TEAM_MC_SHARED_INDEX : NVSHMEM_TEAM_SHARED_INDEX;
+    INFO(NVSHMEM_INIT, "%s connected list: %s", team_name, ss.str().c_str());
+    const int allocated_team_npes = std::max(n_peer_pes, 1);
+    if (nvshmemi_team_allocate_team(host_team, device_team, allocated_team_npes) !=
+        NVSHMEMX_SUCCESS) {
+        return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+    }
+    team_peer_shared_ptr = *host_team;
+
+    team_peer_shared_ptr->team_idx = team_idx;
     nvshmemi_team_init_dups(team_peer_shared_ptr, team_peer_shared_ptr->team_idx);
 
     /* Exchange n_peer_pes for all PEs */
@@ -1162,26 +1200,24 @@ static int init_team_shared(nvshmemi_predefined_team_domain domain) {
 
     /* Gather peer lists of all PEs */
     std::vector<int> peer_pe_list_all(max_num_peer_pes * nvshmemi_team_world->size);
-    nvshmemi_boot_handle.allgather(peer_pe_list.data(), peer_pe_list_all.data(),
-                                   sizeof(int) * max_num_peer_pes, &nvshmemi_boot_handle);
+    if (max_num_peer_pes > 0) {
+        nvshmemi_boot_handle.allgather(peer_pe_list.data(), peer_pe_list_all.data(),
+                                       sizeof(int) * max_num_peer_pes, &nvshmemi_boot_handle);
+    }
 
     /* Shrink back local list to original size */
     peer_pe_list.resize(n_peer_pes);
 
     if (n_peer_pes > 0 && validate_peer_pe_lists(peer_pe_list, n_peer_pes_all, peer_pe_list_all,
                                                  n_peer_pes, max_num_peer_pes)) {
-        /* Initialize NVSHMEM_TEAM_SHARED/NVSHMEM_TEAM_MC_SHARED from peer list */
+        /* Initialize the predefined team from its peer list. */
         team_peer_shared_ptr->my_pe = my_idx_in_peer_list;
         team_peer_shared_ptr->start = peer_pe_list[0];
         team_peer_shared_ptr->stride = n_peer_pes > 1 ? (peer_pe_list[1] - peer_pe_list[0]) : 1;
         team_peer_shared_ptr->size = n_peer_pes;
         team_peer_shared_ptr->is_team_same_mype_node = false;
     } else {
-        if (is_mc_shared) {
-            INFO(NVSHMEM_INIT, "Setting NVSHMEM_TEAM_MC_SHARED to self");
-        } else {
-            INFO(NVSHMEM_INIT, "Setting NVSHMEM_TEAM_SHARED to self");
-        }
+        INFO(NVSHMEM_INIT, "Setting %s to self", team_name);
         /* Fall back to single-PE team */
         team_peer_shared_ptr->my_pe = 0;
         team_peer_shared_ptr->start = nvshmemi_state->mype;
@@ -1200,21 +1236,19 @@ static int init_team_shared(nvshmemi_predefined_team_domain domain) {
     team_peer_shared_ptr->bcast_sync_offset = 0;
     team_peer_shared_ptr->fcollect_count = 0;
     team_peer_shared_ptr->p2p_sync_on_stream_count = 0;
-    team_peer_shared_ptr->are_gpus_p2p_connected = 1;
 
     nvshmemi_team_populate_pe_mappings_from_constant_stride(team_peer_shared_ptr);
+    nvshmemi_team_set_p2p_connectivity(team_peer_shared_ptr);
     nvshmemi_recexchalgo_get_neighbors(team_peer_shared_ptr);
 
-    if (is_mc_shared) {
-        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_MC_SHARED: start=%d, stride=%d, size=%d",
-             team_peer_shared_ptr->start, team_peer_shared_ptr->stride, team_peer_shared_ptr->size);
+    INFO(NVSHMEM_INIT, "%s: start=%d, stride=%d, size=%d", team_name, team_peer_shared_ptr->start,
+         team_peer_shared_ptr->stride, team_peer_shared_ptr->size);
+    if (domain == nvshmemi_predefined_team_shared_domain::MULTICAST_POINTER) {
         team_peer_shared_ptr->are_gpus_nvls_connected = 1;
         nvshmemi_team_set_nvls_connectivity(nvshmemi_team_world);
         nvshmemi_team_set_nvls_connectivity(nvshmemi_team_shared);
         team_peer_shared_ptr->are_gpus_nvls_connected = 1;
-    } else {
-        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SHARED: start=%d, stride=%d, size=%d",
-             team_peer_shared_ptr->start, team_peer_shared_ptr->stride, team_peer_shared_ptr->size);
+    } else if (domain == nvshmemi_predefined_team_shared_domain::UNICAST_POINTER) {
         nvshmemi_team_set_p2p_connectivity(nvshmemi_team_world);
     }
 
@@ -1540,6 +1574,8 @@ static int init_team_pool_and_psync() {
     nvshmemi_team_pool[NVSHMEM_TEAM_WORLD_INDEX] = nvshmemi_team_world;
     nvshmemi_team_pool[NVSHMEM_TEAM_SHARED_INDEX] = nvshmemi_team_shared;
     nvshmemi_team_pool[NVSHMEM_TEAM_MC_SHARED_INDEX] = nvshmemi_team_mc_shared;
+    nvshmemi_team_pool[NVSHMEM_TEAM_CFT_SHARED_INDEX] = nvshmemi_team_cft_shared;
+    nvshmemi_team_pool[NVSHMEM_TEAM_CFT_MC_SHARED_INDEX] = nvshmemi_team_cft_mc_shared;
     nvshmemi_team_pool[NVSHMEM_TEAM_NODE_INDEX] = nvshmemi_team_node;
     nvshmemi_team_pool[NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX] = nvshmemi_team_same_mype_node;
     nvshmemi_team_pool[NVSHMEM_TEAM_SAME_GPU_INDEX] = nvshmemi_team_same_gpu;
@@ -1603,6 +1639,8 @@ static int init_team_pool_and_psync() {
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_WORLD_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_SHARED_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_MC_SHARED_INDEX);
+    nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_CFT_SHARED_INDEX);
+    nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_CFT_MC_SHARED_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_NODE_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX);
     nvshmemi_bit_clear(psync_pool_avail, N_PSYNC_BYTES, NVSHMEM_TEAM_SAME_GPU_INDEX);
@@ -1642,6 +1680,8 @@ static int finalize_team_init() {
         if (!nvshmemi_team_mc_shared_is_alias()) {
             nvshmemi_team_init_nccl_comm(nvshmemi_team_mc_shared);
         }
+        nvshmemi_team_init_nccl_comm(nvshmemi_team_cft_shared);
+        nvshmemi_team_init_nccl_comm(nvshmemi_team_cft_mc_shared);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_node);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_same_mype_node);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_same_gpu);
@@ -1711,6 +1751,8 @@ static int finalize_team_init() {
     if (!nvshmemi_team_mc_shared_is_alias()) {
         nvshmemi_duplicate_team(NVSHMEM_TEAM_MC_SHARED_INDEX, nvshmemi_team_mc_shared);
     }
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_CFT_SHARED_INDEX, nvshmemi_team_cft_shared);
+    nvshmemi_duplicate_team(NVSHMEM_TEAM_CFT_MC_SHARED_INDEX, nvshmemi_team_cft_mc_shared);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_NODE_INDEX, nvshmemi_team_node);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX, nvshmemi_team_same_mype_node);
     nvshmemi_duplicate_team(NVSHMEM_TEAM_SAME_GPU_INDEX, nvshmemi_team_same_gpu);
@@ -1730,7 +1772,7 @@ int nvshmemi_team_init(void) {
     }
 
     // Initialize NVSHMEM_TEAM_SHARED
-    status = init_team_shared(nvshmemi_predefined_team_domain::UNICAST_POINTER);
+    status = init_team_shared(nvshmemi_predefined_team_shared_domain::UNICAST_POINTER);
     if (status) {
         return status;
     }
@@ -1739,8 +1781,19 @@ int nvshmemi_team_init(void) {
     // discovery and no override, preserve the existing alias to NVSHMEM_TEAM_SHARED.
     status = (nvshmemi_state->p2p_transport->has_cuda_clique_info() ||
               nvshmemi_options.MNNVL_OVERRIDE_MC_CLIQUE_ID)
-                 ? init_team_shared(nvshmemi_predefined_team_domain::MULTICAST_POINTER)
+                 ? init_team_shared(nvshmemi_predefined_team_shared_domain::MULTICAST_POINTER)
                  : init_team_mc_shared_alias();
+    if (status) {
+        return status;
+    }
+
+    // Initialize logical-endpoint connectivity teams independently from pointer connectivity.
+    status = init_team_shared(nvshmemi_predefined_team_shared_domain::UNICAST_LOGICAL_ENDPOINT);
+    if (status) {
+        return status;
+    }
+
+    status = init_team_shared(nvshmemi_predefined_team_shared_domain::MULTICAST_LOGICAL_ENDPOINT);
     if (status) {
         return status;
     }
@@ -1833,6 +1886,8 @@ int nvshmemi_team_finalize(void) {
         cudaFree(nvshmemi_device_team_mc_shared);
     }
     cudaFree(nvshmemi_device_team_shared);
+    cudaFree(nvshmemi_device_team_cft_shared);
+    cudaFree(nvshmemi_device_team_cft_mc_shared);
     cudaFree(nvshmemi_device_team_node);
     cudaFree(nvshmemi_device_team_same_mype_node);
     cudaFree(nvshmemi_device_team_same_gpu);
