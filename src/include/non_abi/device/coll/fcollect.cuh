@@ -149,7 +149,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_allpush_ll
              ii += groupSize) {
             next_pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
             if (NODE_SAFE) {
-                if (nvshmemi_ptr(pWrk, next_pe) == NULL) {
+                if (teami_node == NULL || nvshmemi_ptr(pWrk, next_pe) == NULL) {
                     nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(
                         pWrk + pack_offset, pWrk + pack_offset, psync_remote_write_elements,
                         next_pe);
