@@ -152,6 +152,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
     int registration_slot = nvshmemi_tma_find_smem_registration();
     if (registration_slot >= 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+        // All issuers must finish before thread 0 snapshots and drains the slots.
+        __syncthreads();
         nvshmemi_handle_release_all();
         __syncthreads();
 #endif

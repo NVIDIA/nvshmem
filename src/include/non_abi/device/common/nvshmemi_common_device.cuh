@@ -697,7 +697,7 @@ __device__ __forceinline__ void nvshmemi_drain_handle_slot_if_owned(uintptr_t sm
     }
 
     handle_barrier_t *barrier = nvshmemi_handle_barrier_slot(smem_base, (int)slot);
-    if (barrier->pending_handle_is_owned_by(owner)) {
+    if (barrier->pending_handle_owner == owner) {
         barrier->drain_pending_handle(INVALIDATE);
     }
 }
@@ -751,30 +751,13 @@ __device__ __forceinline__ void nvshmemi_handle_complete_owned() {
     }
 
     uint32_t tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
-    uint32_t owner;
-    uint32_t slot_base;
-    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        if (tid != 0) {
-            return;
-        }
-        owner = 0;
-        slot_base = 0;
-    } else if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARP) {
-        if ((tid % warpSize) != 0) {
-            return;
-        }
-        owner = tid / warpSize;
-        slot_base = owner * TMA_COPY_NUM_STAGES;
-    } else {
-        const uint32_t warps_per_warpgroup =
-            nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARPGROUP>() / warpSize;
-        const uint32_t threads_per_warpgroup = warps_per_warpgroup * warpSize;
-        if ((tid % threads_per_warpgroup) != 0) {
-            return;
-        }
-        owner = tid / warpSize;
-        slot_base = (tid / threads_per_warpgroup) * TMA_COPY_NUM_STAGES;
+    // Every participating physical warp leader completes its own work, even
+    // when the preceding operation used another threadgroup scope.
+    if ((tid % warpSize) != 0) {
+        return;
     }
+    uint32_t owner = tid / warpSize;
+    uint32_t slot_base = owner * TMA_COPY_NUM_STAGES;
 
     const auto registration = nvshmemi_tma_get_smem_registration();
     if (!registration.is_valid()) {
@@ -797,6 +780,19 @@ __device__ __forceinline__ void nvshmemi_handle_complete_owned() {
     for (uint32_t i = 0; i < TMA_COPY_NUM_STAGES; i++) {
         nvshmemi_drain_handle_slot_if_owned<INVALIDATE>(smem_base, selected_slots, slot_base + i,
                                                         owner);
+    }
+
+    const uint32_t warps_per_warpgroup =
+        nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARPGROUP>() / warpSize;
+    if ((owner % warps_per_warpgroup) == 0) {
+        const uint32_t compact_slot_base = (owner / warps_per_warpgroup) * TMA_COPY_NUM_STAGES;
+        if (compact_slot_base != slot_base) {
+#pragma unroll
+            for (uint32_t i = 0; i < TMA_COPY_NUM_STAGES; ++i) {
+                nvshmemi_drain_handle_slot_if_owned<INVALIDATE>(smem_base, selected_slots,
+                                                                compact_slot_base + i, owner);
+            }
+        }
     }
 }
 
@@ -833,8 +829,16 @@ template <threadgroup_t SCOPE>
 __device__ __forceinline__ void nvshmemi_handle_quiet() {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
         nvshmemi_handle_quiet_all();
+    } else if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
+        nvshmemi_threadgroup_sync<SCOPE>();
+        if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
+            nvshmemi_handle_quiet_all();
+        }
+        nvshmemi_threadgroup_sync<SCOPE>();
     } else {
+        nvshmemi_threadgroup_sync<SCOPE>();
         nvshmemi_handle_quiet_owned<SCOPE>();
+        nvshmemi_threadgroup_sync<SCOPE>();
     }
 }
 #endif
