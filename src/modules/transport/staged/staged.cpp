@@ -415,7 +415,7 @@ static int staged_init_green_context(transport_staged_state_t* s) {
     return 0;
 }
 
-static int staged_cuda_copy_sync(transport_staged_state_t* s, void* dst, const void* src,
+static int staged_cuda_copy_sync(transport_staged_state_t* /* s */, void* dst, const void* src,
                                  size_t bytes, cudaStream_t stream, const char* label) {
     cudaError_t err = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, stream);
     if (err != cudaSuccess) {
