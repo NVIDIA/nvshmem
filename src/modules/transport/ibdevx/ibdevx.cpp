@@ -68,7 +68,6 @@ static inline int get_ibdevx_srq_depth(nvshmemt_ib_common_state_t state) {
 #error Unknown cache line size
 #endif
 
-#define MAX_NUM_PORTS 4
 #define MAX_NUM_PES_PER_NODE 32
 #define BAR_READ_BUFSIZE (sizeof(uint64_t))
 

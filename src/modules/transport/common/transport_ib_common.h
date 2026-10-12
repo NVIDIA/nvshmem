@@ -65,8 +65,10 @@ struct nvshmemt_ib_common_ep {
     int selected_dev_slot;
 };
 
+/* Verbs port numbers and ibv_device_attr::phys_port_cnt are uint8_t. Keep
+ * storage for every valid one-based port number, including virtual ports. */
 #ifndef MAX_NUM_PORTS
-#define MAX_NUM_PORTS 4
+#define MAX_NUM_PORTS UINT8_MAX
 #endif
 
 struct nvshmemt_ib_gid_info {
