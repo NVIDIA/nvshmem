@@ -123,7 +123,9 @@ NVSHMEMI_ENV_DEF(HCA_LIST, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
 
 NVSHMEMI_ENV_DEF(HCA_PE_MAPPING, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies mapping of HCAs to PEs as a comma-separated list. Each entry "
-                 "in the comma separated list is of the form ``hca_name:port:count``.  For "
+                 "in the comma separated list is of the form ``hca_name:port:count``. "
+                 "Entries are expanded in the order listed, with each matching HCA/port "
+                 "repeated ``count`` times. For "
                  "example, ``mlx5_0:1:2,mlx5_0:2:2`` indicates that PE0, PE1 are mapped to "
                  "port 1 of mlx5_0, and PE2, PE3 are mapped to port 2 of mlx5_0. "
                  "``NVSHMEM_ENABLE_NIC_PE_MAPPING`` must be set to 1 for this variable to be "
