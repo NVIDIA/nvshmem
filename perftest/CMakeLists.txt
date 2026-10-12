@@ -220,7 +220,7 @@ function(nvshmem_add_cubin_perftest_prefix SOURCE PREFIX)
 
   # Internal perftest kernels use API declarations and link the precompiled bitcode device library.
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                  COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                  COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${_NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                           --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_DEVICE_DECLARATIONS_ONLY
                           -DNVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY ${DIR_} -o ${NAME_}.bc.unoptimized
                   COMMAND llvm::llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
