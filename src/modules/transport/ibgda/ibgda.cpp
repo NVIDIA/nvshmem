@@ -5,6 +5,7 @@
 
 #include <assert.h>  // for assert
 #include <atomic>
+#include <chrono>
 #include <cuda.h>                                           // for CUDA_SUCCESS, CUdevice, CUd...
 #include <cuda_runtime.h>                                   // for cudaFree, cudaMalloc, cudaM...
 #include <driver_types.h>                                   // for cudaSuccess, cudaMemcpyHost...
@@ -42,6 +43,7 @@
 #include "transport_common.h"                   // for nvshmemt_ibv_function_table
 #include "transport_ib_common.h"                // for nvshmemt_ib_common_mem_handle
 #include "transport_mlx5_common.h"              // for nvshmemt_ib_common_check_ni...
+#include "ibgda_qcounter.hpp"
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
 #endif
@@ -224,6 +226,11 @@ struct ibgda_ep {
     struct ibv_ah *ah;
 
     uint32_t user_index;
+    const struct ibgda_device *diagnostics_device;
+    int diagnostics_peer;
+    uint32_t diagnostics_remote_qpn;
+    bool diagnostics_counter_accepted;
+    bool diagnostics_counter_verified;
 };
 
 struct ibgda_mem_handle {
@@ -285,6 +292,7 @@ struct ibgda_device {
     bool support_half_av_seg;
     ibgda_nic_handler_t nic_handler;
     bool data_direct;
+    nvshmemt_ibgda_qcounter::resource *diagnostics_counter;
 };
 
 struct nvshmemt_ibgda_device_state_cache {
@@ -322,7 +330,216 @@ typedef struct {
     int last_num_rcs;
     int last_num_cqs;
     std::mutex rc_endpoint_lock;
+    int diagnostics_pe;
+    uint64_t diagnostics_generation;
+    char diagnostics_node[128];
+    char diagnostics_gpu_uuid[48];
+    char diagnostics_gpu_bdf[32];
+    std::atomic<bool> diagnostics_periodic_active{false};
 } nvshmemt_ibgda_state_t;
+
+static void ibgda_diagnostics_identity(nvshmem_transport_t transport) {
+    auto *state = static_cast<nvshmemt_ibgda_state_t *>(transport->state);
+    if (!state->common.options->IBGDA_QP_DIAGNOSTICS) return;
+    static std::atomic<uint64_t> generation{0};
+    state->diagnostics_pe = transport->my_pe;
+    state->diagnostics_generation = ++generation;
+    gethostname(state->diagnostics_node, sizeof(state->diagnostics_node) - 1);
+    int device = 0;
+    cudaDeviceProp properties;
+    if (cudaGetDevice(&device) == cudaSuccess && cudaGetDeviceProperties(&properties, device) == cudaSuccess) {
+        const auto *u = reinterpret_cast<const unsigned char *>(properties.uuid.bytes);
+        snprintf(state->diagnostics_gpu_uuid, sizeof(state->diagnostics_gpu_uuid),
+                 "GPU-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                 u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9],
+                 u[10], u[11], u[12], u[13], u[14], u[15]);
+        cudaDeviceGetPCIBusId(state->diagnostics_gpu_bdf, sizeof(state->diagnostics_gpu_bdf), device);
+    }
+    if (state->common.options->IBGDA_QP_COUNTER_INTERVAL_MS < 0) {
+        NVSHMEMI_WARN_PRINT("Negative IBGDA_QP_COUNTER_INTERVAL_MS: using final snapshots only.\n");
+        state->common.options->IBGDA_QP_COUNTER_INTERVAL_MS = 0;
+    }
+}
+
+static uint64_t ibgda_diagnostics_time() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static void *ibgda_counter_create(void *context, const void *in, size_t ni, void *out, size_t no) {
+    return mlx5dv_devx_obj_create(static_cast<ibv_context *>(context), in, ni, out, no);
+}
+static int ibgda_counter_query(void *object, const void *in, size_t ni, void *out, size_t no) {
+    return mlx5dv_devx_obj_query(static_cast<mlx5dv_devx_obj *>(object), in, ni, out, no);
+}
+static int ibgda_counter_destroy(void *object) {
+    return mlx5dv_devx_obj_destroy(static_cast<mlx5dv_devx_obj *>(object));
+}
+
+static void ibgda_diagnostics_prefix(nvshmemt_ibgda_state_t *state, const char *event) {
+    // Keep a complete JSON record together when the CPU progress thread samples.
+    flockfile(stderr);
+    fprintf(stderr, "NVSHMEM_IBGDA_DIAG {\"event\":\"%s\",\"pe\":%d,\"pid\":%ld,"
+                    "\"generation\":%llu,\"node\":\"%s\",\"gpu_uuid\":\"%s\",\"gpu_bdf\":\"%s\",",
+            event, state->diagnostics_pe, static_cast<long>(getpid()),
+            static_cast<unsigned long long>(state->diagnostics_generation),
+            state->diagnostics_node, state->diagnostics_gpu_uuid, state->diagnostics_gpu_bdf);
+}
+
+static void ibgda_diagnostics_counter_init(nvshmemt_ibgda_state_t *state, ibgda_device *device) {
+    if (!state->common.options->IBGDA_QP_DIAGNOSTICS || device->diagnostics_counter) return;
+    uint8_t in[DEVX_ST_SZ_BYTES(query_hca_cap_in)] = {};
+    uint8_t out[DEVX_ST_SZ_BYTES(query_hca_cap_out)] = {};
+    DEVX_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
+    DEVX_SET(query_hca_cap_in, in, op_mod,
+             MLX5_SET_HCA_CAP_OP_MOD_GENERAL_DEVICE | (MLX5_CAP_GENERAL << 1) | HCA_CAP_OPMOD_GET_CUR);
+    errno = 0;
+    int rc = mlx5dv_devx_general_cmd(device->common_device.context, in, sizeof(in), out, sizeof(out));
+    int saved_errno = rc ? errno : 0;
+    void *cap = DEVX_ADDR_OF(query_hca_cap_out, out, capability.cmd_hca_cap);
+    nvshmemt_ibgda_qcounter::capabilities capabilities = {};
+    if (!rc && !out[0]) {
+        capabilities.max_qp_cnt = DEVX_GET(cmd_hca_cap, cap, max_qp_cnt);
+        capabilities.out_of_sequence = DEVX_GET(cmd_hca_cap, cap, out_of_seq_cnt);
+        capabilities.retransmission = DEVX_GET(cmd_hca_cap, cap, retransmission_q_counters);
+    }
+    device->diagnostics_counter = new (std::nothrow) nvshmemt_ibgda_qcounter::resource(
+        true, capabilities, device->common_device.context,
+        {ibgda_counter_create, ibgda_counter_query, ibgda_counter_destroy});
+    ibgda_diagnostics_prefix(state, "COUNTER_AVAILABILITY");
+    auto *counter = device->diagnostics_counter;
+    fprintf(stderr, "\"device\":\"%s\",\"scope\":\"PROCESS_DEVICE_OWNED_RC_QPS\","
+                    "\"status\":\"%s\",\"max_qp_cnt\":%u,\"cap_query_rc\":%d,\"cap_query_errno\":%d,"
+                    "\"allocation_errno\":%d,\"allocation_fw_status\":%u,\"allocation_syndrome\":%u,"
+                    "\"counter_values\":null}\n", device->common_device.dev->name,
+            counter ? nvshmemt_ibgda_qcounter::state_name(counter->availability()) : "HOST_ALLOCATION_FAILED",
+            capabilities.max_qp_cnt, rc, saved_errno, counter ? counter->error() : ENOMEM,
+            counter ? counter->firmware_status() : 0, counter ? counter->syndrome() : 0);
+    funlockfile(stderr);
+}
+
+static void ibgda_diagnostics_qp(nvshmemt_ibgda_state_t *state, const ibgda_ep *ep,
+                                const char *event, int operation_rc = 0) {
+    if (!state->common.options->IBGDA_QP_DIAGNOSTICS || !ep->diagnostics_device) return;
+    ibgda_diagnostics_prefix(state, event);
+    auto *counter = ep->diagnostics_device->diagnostics_counter;
+    fprintf(stderr, "\"device\":\"%s\",\"port\":%d,\"qp_type\":\"%s\",\"local_qpn\":%u,"
+                    "\"remote_qpn\":%u,\"remote_pe\":%d,\"peer_scope\":\"%s\",\"cq\":%u,"
+                    "\"qp_index\":%u,\"sq_wqebb_capacity\":%zu,\"operation_rc\":%d,"
+                    "\"counter_association\":\"%s\",\"counter_set_id\":",
+            ep->diagnostics_device->common_device.dev->name, ep->portid,
+            ibgda_qp_type_name(ep->qp_type), ep->qpn, ep->diagnostics_remote_qpn,
+            ep->diagnostics_peer, ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC ? "RC_PE"
+                : (ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCI ? "AMBIGUOUS_SHARED_DCI" : "INBOUND_DCT"),
+            ep->send_cq ? ep->send_cq->cqn : 0, ep->user_index, ep->sq_cnt, operation_rc,
+            ep->diagnostics_counter_verified ? "VERIFIED_OWNED_COUNTER"
+                : (ep->diagnostics_counter_accepted ? "ACCEPTED_NOT_VERIFIED" : "NOT_ATTACHED"));
+    if (counter && ep->diagnostics_counter_accepted) fprintf(stderr, "%u", counter->id());
+    else fprintf(stderr, "null");
+    fprintf(stderr, ",\"counter_values\":null}\n");
+    funlockfile(stderr);
+}
+
+static bool ibgda_diagnostics_qpc(ibgda_ep *ep, unsigned *counter_id, unsigned *qp_state) {
+    uint8_t in[DEVX_ST_SZ_BYTES(query_qp_in)] = {};
+    uint8_t out[DEVX_ST_SZ_BYTES(query_qp_out)] = {};
+    DEVX_SET(query_qp_in, in, opcode, MLX5_CMD_OP_QUERY_QP);
+    DEVX_SET(query_qp_in, in, qpn, ep->qpn);
+    if (mlx5dv_devx_obj_query(ep->devx_qp, in, sizeof(in), out, sizeof(out)) || out[0]) return false;
+    void *qpc = DEVX_ADDR_OF(query_qp_out, out, qpc);
+    *counter_id = DEVX_GET(qpc, qpc, counter_set_id);
+    *qp_state = DEVX_GET(qpc, qpc, state);
+    return true;
+}
+
+static void ibgda_diagnostics_snapshot(nvshmemt_ibgda_state_t *state, ibgda_device *device,
+                                      uint64_t interval_ns = 0) {
+    auto *counter = device->diagnostics_counter;
+    if (!counter || !counter->id()) return;
+    auto snapshot = counter->query(ibgda_diagnostics_time(), interval_ns);
+    if (!strcmp(snapshot.status, "RATE_LIMITED")) return;
+    static const char *names[] = {"rx_write_requests", "rx_read_requests", "rx_atomic_requests",
+        "rx_dct_connect", "out_of_buffer", "out_of_sequence", "duplicate_request",
+        "rnr_nak_retry_err", "packet_seq_err", "implied_nak_seq_err", "local_ack_timeout_err"};
+    ibgda_diagnostics_prefix(state, "COUNTER_SNAPSHOT");
+    fprintf(stderr, "\"device\":\"%s\",\"scope\":\"PROCESS_DEVICE_OWNED_RC_QPS\","
+                    "\"counter_set_id\":%u,\"status\":\"%s\",\"sampled_ns\":%llu,"
+                    "\"errno\":%d,\"firmware_status\":%u,\"syndrome\":%u,\"width_bits\":32,"
+                    "\"clear\":false,\"accepted_qps\":%u,\"verified_qps\":%u,\"counter_values\":",
+            device->common_device.dev->name, counter->id(), snapshot.status,
+            static_cast<unsigned long long>(snapshot.sampled_ns), snapshot.error,
+            snapshot.firmware_status, snapshot.syndrome,
+            counter->attached_count(), counter->verified_count());
+    if (!snapshot.valid) fprintf(stderr, "null");
+    else {
+        fprintf(stderr, "{");
+        for (size_t i = 0; i < snapshot.values.size(); ++i) {
+            fprintf(stderr, "%s\"%s\":", i ? "," : "", names[i]);
+            if (snapshot.supported[i]) fprintf(stderr, "%u", snapshot.values[i]);
+            else fprintf(stderr, "null");
+        }
+        fprintf(stderr, "}");
+    }
+    fprintf(stderr, "}\n");
+    funlockfile(stderr);
+}
+
+static void ibgda_diagnostics_counter_close(nvshmemt_ibgda_state_t *state, ibgda_device *device) {
+    auto *counter = device->diagnostics_counter;
+    if (!counter) return;
+    unsigned attached = counter->attached_count();
+    bool closed = counter->close();
+    ibgda_diagnostics_prefix(state, "COUNTER_RELEASE");
+    fprintf(stderr, "\"device\":\"%s\",\"status\":\"%s\",\"attached_qps\":%u,"
+                    "\"errno\":%d,\"counter_values\":null}\n",
+            device->common_device.dev->name,
+            attached ? "UNRESOLVED_QP_LIFETIME" : nvshmemt_ibgda_qcounter::state_name(counter->availability()),
+            attached, counter->error());
+    funlockfile(stderr);
+    if (!closed) NVSHMEMI_WARN_PRINT("IBGDA diagnostic counter release was not verified.\n");
+    // The context is closed next. Never retry an opaque provider object after failure.
+    delete counter;
+    device->diagnostics_counter = nullptr;
+}
+
+static void ibgda_diagnostics_software(nvshmem_transport_t transport) {
+    auto *state = static_cast<nvshmemt_ibgda_state_t *>(transport->state);
+    auto *device_state = static_cast<nvshmemi_ibgda_device_state_t *>(transport->type_specific_shared_state);
+    if (!device_state) return;
+    // These two DCI counts already sum all initialized devices.
+    const int counts[] = {static_cast<int>(device_state->num_shared_dcis + device_state->num_exclusive_dcis),
+                          state->last_num_rcs};
+    nvshmemi_ibgda_device_qp_t *arrays[] = {device_state->globalmem.dcis, device_state->globalmem.rcs};
+    for (int kind = 0; kind < 2; ++kind) {
+        if (!arrays[kind] || counts[kind] <= 0) continue;
+        std::vector<nvshmemi_ibgda_device_qp_t> qps(counts[kind]);
+        if (cudaMemcpy(qps.data(), arrays[kind], qps.size() * sizeof(qps[0]), cudaMemcpyDeviceToHost) != cudaSuccess) {
+            ibgda_diagnostics_prefix(state, "QP_SOFTWARE_UNAVAILABLE");
+            fprintf(stderr, "\"values\":null}\n");
+            funlockfile(stderr);
+            continue;
+        }
+        for (const auto &qp : qps) {
+            if (!qp.qpn || qp.qpn == NVSHMEMI_IBGDA_USCALAR_INVALID) continue;
+            if (qp.dev_idx >= static_cast<unsigned>(state->n_devs_selected)) continue;
+            auto *device = static_cast<ibgda_device *>(state->common.devices) + state->selected_dev_ids[qp.dev_idx];
+            uint64_t published = 0;
+            bool valid = qp.tx_wq.prod_idx && cudaMemcpy(&published, qp.tx_wq.prod_idx,
+                                      sizeof(published), cudaMemcpyDeviceToHost) == cudaSuccess;
+            ibgda_diagnostics_prefix(state, "QP_SOFTWARE_SNAPSHOT");
+            fprintf(stderr, "\"device\":\"%s\",\"qp_type\":\"%s\",\"local_qpn\":%u,\"device_slot\":%u,"
+                            "\"unit\":\"WQEBB\",\"reserved\":%llu,\"ready\":%llu,"
+                            "\"inline_producer\":%llu,\"polled_consumer\":%llu,\"published_producer\":",
+                    device->common_device.dev->name, ibgda_qp_type_name(qp.qp_type), qp.qpn, qp.dev_idx,
+                    (unsigned long long)qp.mvars.tx_wq.resv_head, (unsigned long long)qp.mvars.tx_wq.ready_head,
+                    (unsigned long long)qp.mvars.tx_wq.prod_idx, (unsigned long long)qp.mvars.tx_wq.cons_idx);
+            if (valid) fprintf(stderr, "%llu", (unsigned long long)published);
+            else fprintf(stderr, "null");
+            fprintf(stderr, "}\n");
+            funlockfile(stderr);
+        }
+    }
+}
 
 struct ibgda_device_local_only_mhandle_cache {
     nvshmemi_ibgda_device_local_only_mhandle_t mhandle;
@@ -605,6 +822,16 @@ int nvshmemt_ibgda_progress(nvshmem_transport_t t) {
         return status;
     }
     status = ibgda_rc_progress(t);
+    auto *state = static_cast<nvshmemt_ibgda_state_t *>(t->state);
+    if (state->common.options->IBGDA_QP_DIAGNOSTICS && state->diagnostics_periodic_active.load() &&
+        state->common.options->IBGDA_QP_COUNTER_INTERVAL_MS > 0) {
+        std::lock_guard<std::mutex> lock(state->rc_endpoint_lock);
+        for (int i = 0; i < state->n_devs_selected; ++i) {
+            auto *device = static_cast<ibgda_device *>(state->common.devices) + state->selected_dev_ids[i];
+            ibgda_diagnostics_snapshot(state, device,
+                uint64_t(state->common.options->IBGDA_QP_COUNTER_INTERVAL_MS) * 1000000);
+        }
+    }
     return status;
 }
 
@@ -1596,9 +1823,10 @@ static void ibgda_get_device_cq(nvshmemi_ibgda_device_cq_t *dev_cq, const struct
 }
 
 static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
-                             const struct ibgda_device *device, int portid) {
+                             struct ibgda_device *device, int portid) {
     int status = 0;
     int rst2init_errno = 0;
+    unsigned requested_counter = 0;
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(rst2init_qp_in)] = {
         0,
@@ -1648,10 +1876,31 @@ static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     }
 
     DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
-    DEVX_SET(qpc, qpc, counter_set_id, 0x0);  // Not connected to a counter set
+    if (ibgda_state->common.options->IBGDA_QP_DIAGNOSTICS &&
+        ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC) {
+        ibgda_diagnostics_counter_init(ibgda_state, device);
+        if (device->diagnostics_counter) requested_counter = device->diagnostics_counter->id();
+    }
+    DEVX_SET(qpc, qpc, counter_set_id, requested_counter);
 
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
     rst2init_errno = errno;
+    if (requested_counter && (status || DEVX_GET(rst2init_qp_out, cmd_out, status))) {
+        ibgda_diagnostics_qp(ibgda_state, ep, "COUNTER_ASSOCIATION_FAILED", status ? status : EIO);
+        unsigned observed_counter = 0, observed_state = 0;
+        // A diagnostic must not prevent baseline initialization. Retry without
+        // association only after reading our own QP back in RESET (state 0).
+        if (ibgda_diagnostics_qpc(ep, &observed_counter, &observed_state) && observed_state == 0) {
+            DEVX_SET(qpc, qpc, counter_set_id, 0);
+            memset(cmd_out, 0, sizeof(cmd_out));
+            status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
+            rst2init_errno = errno;
+            requested_counter = 0;
+            ibgda_diagnostics_qp(ibgda_state, ep, "BASELINE_INIT_RETRY", status);
+        } else if (!status) {
+            status = NVSHMEMX_ERROR_INTERNAL;
+        }
+    }
     NVSHMEMI_NZ_ERROR_JMP(
         status, NVSHMEMX_ERROR_INTERNAL, out,
         "IBGDA QP modify RESET->INIT failed: type %s device %s port %d link_layer %s "
@@ -1662,6 +1911,16 @@ static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
         DEVX_GET(rst2init_qp_out, cmd_out, syndrome));
 
     ep->portid = portid;
+    if (requested_counter) {
+        unsigned observed_counter = 0, observed_state = 0;
+        ep->diagnostics_counter_accepted = true;
+        ep->diagnostics_counter_verified = ibgda_diagnostics_qpc(ep, &observed_counter, &observed_state) &&
+                                           observed_counter == requested_counter;
+        device->diagnostics_counter->attached(ep->diagnostics_counter_verified);
+        if (ep->diagnostics_counter_verified && !ibgda_state->connect_endpoints_first_call)
+            ibgda_state->diagnostics_periodic_active.store(true);
+        ibgda_diagnostics_qp(ibgda_state, ep, "COUNTER_ASSOCIATION");
+    }
 
 out:
     return status;
@@ -2451,6 +2710,9 @@ static int ibgda_create_qp(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep 
     ep->qp_type = qp_type;
 
     ep->user_index = qp_idx;
+    ep->diagnostics_device = device;
+    ep->diagnostics_peer = -1;
+    ibgda_diagnostics_qp(ibgda_state, ep, "QP_CREATED");
 
     *ep_ptr = ep;
 
@@ -2834,6 +3096,9 @@ static int ibgda_create_dct(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep
     ep->ib_qp = ib_qp;
     ep->qpn = ib_qp->qp_num;
     ep->portid = portid;
+    ep->diagnostics_device = device;
+    ep->diagnostics_peer = -1;
+    ibgda_diagnostics_qp(ibgda_state, ep, "QP_READY");
 
     *ep_ptr = ep;
 
@@ -3169,6 +3434,7 @@ static int ibgda_setup_dci_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
         status = ibgda_qp_rtr2rts(ibgda_state, device->dci.eps[i], device);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "ibgda_qp_rtr2rts failed on DCI #%d.", i);
+        ibgda_diagnostics_qp(ibgda_state, device->dci.eps[i], "QP_READY");
     }
     /* create and assign DCIs end */
 
@@ -3456,6 +3722,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
                                      global_mapped_i, NVSHMEMI_IBGDA_DEVICE_QP_TYPE_RC);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_create_rc failed on RC #%d.", global_mapped_i);
+            device->rc.eps[mapped_i]->diagnostics_peer = dst_pe;
 
             status = ibgda_get_rc_handle(&local_rc_handles[local_mapped_i],
                                          device->rc.eps[mapped_i], device);
@@ -3481,6 +3748,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
                   device->rc.eps[ep_index]->user_index, device->rc.eps[ep_index]->qpn);
             TRACE(ibgda_state->common.log_level, "local QPN: %d, remote handle QPN: %d",
                   device->rc.eps[ep_index]->qpn, peer_ep_handles[peer_handle_index].qpn);
+            device->rc.eps[ep_index]->diagnostics_remote_qpn = peer_ep_handles[peer_handle_index].qpn;
             status = ibgda_qp_rst2init(ibgda_state, device->rc.eps[ep_index], device, portid);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_qp_rst2init failed on RC #%d.", ep_index);
@@ -3493,6 +3761,7 @@ static int ibgda_setup_rc_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
             status = ibgda_qp_rtr2rts(ibgda_state, device->rc.eps[ep_index], device);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "ibgda_qp_rtr2rts failed on RC #%d.", ep_index);
+            ibgda_diagnostics_qp(ibgda_state, device->rc.eps[ep_index], "QP_READY");
         }
     }
     /* create and assign RCs end */
@@ -3836,7 +4105,7 @@ static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_s
 
     if (ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCT) {
         if (ep->ib_qp) {
-            int status = ftable.destroy_qp(ep->ib_qp);
+            status = ftable.destroy_qp(ep->ib_qp);
             if (status) {
                 NVSHMEMI_ERROR_PRINT("ibv_destroy_qp failed.\n");
             }
@@ -3847,13 +4116,21 @@ static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_s
         }
 
         if (ep->devx_qp) {
-            mlx5dv_devx_obj_destroy(ep->devx_qp);
+            status = mlx5dv_devx_obj_destroy(ep->devx_qp);
+            if (!status && ep->diagnostics_counter_accepted) {
+                auto *counter = ep->diagnostics_device->diagnostics_counter;
+                if (!counter || !counter->qp_destroyed(ep->diagnostics_counter_verified)) {
+                    NVSHMEMI_WARN_PRINT("IBGDA diagnostic QP attachment count was inconsistent.\n");
+                }
+            }
         }
 
         if (ep->uar_mobject) {
             ibgda_unmap_and_free_qp_uar(ep->uar_mobject);
         }
     }
+
+    ibgda_diagnostics_qp(ibgda_state, ep, "QP_DESTROYED", status);
 
     if (ep->send_cq) {
         ibgda_destroy_cq(ep->send_cq);
@@ -3869,7 +4146,7 @@ static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_s
 
     free(ep);
 
-    return status;
+    return ibgda_state->common.options->IBGDA_QP_DIAGNOSTICS ? status : 0;
 }
 
 static void ibgda_get_device_qp_mvars(nvshmemi_ibgda_device_qp_management_t *dev_mvars) {
@@ -4435,6 +4712,7 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     if (!ibgda_state->connect_endpoints_first_call) {
         return ibgda_connect_rc_only(ibgda_state, t, out_qp_indices, num_qps);
     }
+    ibgda_diagnostics_identity(t);
 
     assert(ibgda_device_state_h != 0);
     memset(ibgda_device_state_h, 0, sizeof(*ibgda_device_state_h));
@@ -4510,6 +4788,15 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
         return status;
     }
 
+    if (ibgda_state->common.options->IBGDA_QP_DIAGNOSTICS) {
+        for (int i = 0; i < ibgda_state->n_devs_selected; ++i) {
+            auto *device = static_cast<ibgda_device *>(ibgda_state->common.devices) + ibgda_state->selected_dev_ids[i];
+            ibgda_diagnostics_snapshot(ibgda_state, device);
+            if (device->diagnostics_counter && device->diagnostics_counter->verified_count())
+                ibgda_state->diagnostics_periodic_active.store(true);
+        }
+    }
+
     // Mark that first call is complete
     ibgda_state->connect_endpoints_first_call = false;
 
@@ -4533,6 +4820,14 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     }
 
     device_finalized.resize(ibgda_state->common.n_raw_devices, false);
+
+    if (ibgda_state->common.options->IBGDA_QP_DIAGNOSTICS) {
+        ibgda_diagnostics_software(transport);
+        for (int i = 0; i < ibgda_state->n_devs_selected; ++i) {
+            auto *device = static_cast<ibgda_device *>(ibgda_state->common.devices) + ibgda_state->selected_dev_ids[i];
+            ibgda_diagnostics_snapshot(ibgda_state, device);
+        }
+    }
 
     ibgda_device_lkeys.clear();
     ibgda_device_rkeys.clear();
@@ -4611,6 +4906,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
         device_finalized[dev_id] = true;
 
         device = (struct ibgda_device *)ibgda_state->common.devices + dev_id;
+        ibgda_diagnostics_counter_close(ibgda_state, device);
         if (device->common_device.pd) {
             status = ftable.dealloc_pd(device->common_device.pd);
             // NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed

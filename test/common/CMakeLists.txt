@@ -1,3 +1,6 @@
+add_executable(host_ibgda_qcounter_lifecycle ibgda_qcounter_test.cpp)
+target_compile_features(host_ibgda_qcounter_lifecycle PRIVATE cxx_std_17)
+
 add_library(nvshmem_test_helper STATIC data_check.cpp ring_alltoall.cpp
                                        test_teams.cpp utils.cu perf_utils.cu
                                        test-simple-pmi/test_simple_pmi.cpp test-simple-pmi/test_simple_pmiutil.cpp)

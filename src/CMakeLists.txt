@@ -1187,6 +1187,8 @@ set(TRANSPORT_EXPORTS
     ibdevx/ibdevx.h
     gpunetio/gpunetio.cpp
     ibgda/ibgda.cpp
+    ibgda/ibgda_qcounter.hpp
+    ibgda/README.diagnostics.md
     ibrc/ibrc.cpp
     libfabric/libfabric.cpp
     libfabric/libfabric.h

@@ -48,6 +48,12 @@ NVSHMEMI_ENV_DEF(DEBUG, string, "", NVSHMEMI_ENV_CAT_OPENSHMEM,
 NVSHMEMI_ENV_DEF(DEBUG_SUBSYS, string, "", NVSHMEMI_ENV_CAT_HIDDEN,
                  "Comma separated list of debugging message sources. Prefix with '^' to exclude.\n"
                  "Values: INIT, COLL, P2P, PROXY, TRANSPORT, MEM, BOOTSTRAP, TOPO, UTIL, ALL")
+NVSHMEMI_ENV_DEF(IBGDA_QP_DIAGNOSTICS, bool, false, NVSHMEMI_ENV_CAT_HIDDEN,
+                 "Log owned IBGDA QP/CQ identities and final software queue indices; "
+                 "best-effort allocation and readback of an owned device counter for RC QPs")
+NVSHMEMI_ENV_DEF(IBGDA_QP_COUNTER_INTERVAL_MS, int, 1000, NVSHMEMI_ENV_CAT_HIDDEN,
+                 "Minimum milliseconds between owned RC counter queries from CPU progress. "
+                 "Zero selects initialization/finalization snapshots only")
 /** Transport **/
 
 NVSHMEMI_ENV_DEF(DISABLE_IB_NATIVE_ATOMICS, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
