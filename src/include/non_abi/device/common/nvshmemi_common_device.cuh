@@ -338,8 +338,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_memcpy_threadgroup(
 #if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
         uint32_t *__restrict__ dst_p = (uint32_t *)dst;
         const uint32_t *__restrict__ src_p = (const uint32_t *)src;
+        /* Generic, not st.global: a get may copy into a shared-memory destination. */
         for (size_t i = myIdx * 4; i < nelems * 4; i += groupSize * 4) {
-            asm volatile("st.volatile.global.v4.u32 [%0], {%1,%2,%3,%4};" ::"l"((dst_p + i)),
+            asm volatile("st.volatile.v4.u32 [%0], {%1,%2,%3,%4};" ::"l"((dst_p + i)),
                          "r"(*(src_p + i)), "r"(*(src_p + i + 1)), "r"(*(src_p + i + 2)),
                          "r"(*(src_p + i + 3)));
         }
