@@ -231,10 +231,11 @@ NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_GDAKI, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set to enable GPU-initiated communication transport via GPUNetIO.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies the processor used for ringing NIC's DB. "
-                 "Choices are: auto, gpu, cpu.\n\n"
+                 "Choices are: auto, gpu, cpu, cpu_free_flow.\n\n"
                  "- auto: use GPU SMs and fallback to CPU if it is not supported (default).\n"
                  "- gpu: use GPU SMs, regular DB.\n"
-                 "- cpu: use CPU.")
+                 "- cpu: use CPU.\n"
+                 "- cpu_free_flow: use CPU with independently published GPU WQE readiness.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_GPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of GPU-data-path RC QPs per peer PE in the GPUNetIO transport "
                  "(default 2, or 8 with directNIC). Only takes effect when "
