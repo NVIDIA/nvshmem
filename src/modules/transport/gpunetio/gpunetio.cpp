@@ -504,6 +504,8 @@ static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *ou
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB;
     } else if (req == "cpu") {
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+    } else if (req == "cpu_free_flow") {
+        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW;
     } else {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
@@ -511,7 +513,25 @@ static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *ou
 }
 
 static bool gpunetio_qp_requires_cpu_proxy(doca_gpu_verbs_qp_hl *qp) {
-    return qp->qp_gverbs->qp_cpu->nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+    return (qp->qp_gverbs->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) !=
+           0;
+}
+
+static const char *gpunetio_nic_handler_name(doca_gpu_dev_verbs_nic_handler handler) {
+    switch (handler) {
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO:
+            return "auto";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
+            return "gpu";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR:
+            return "gpu_no_dbr";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY:
+            return "cpu";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW:
+            return "cpu_free_flow";
+        default:
+            return "unknown";
+    }
 }
 
 // gpunetio_internal_buffer implementation
@@ -596,6 +616,9 @@ std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> gpunetio_ep::make(
     ep->internal_buf = std::move(ibuf);
 
     TRACE(gpunetio_state->log_level, "Created QP: qp_idx=%d, qpn=%d", qp_idx, ep->qpn);
+    INFO(gpunetio_state->log_level, "GPUNetIO %s QP %u resolved NIC handler: %s",
+         kind == gpunetio_qp_kind::GPU ? "GPU" : "CPU", ep->qpn,
+         gpunetio_nic_handler_name(ep->qp->qp_gverbs->qp_cpu->nic_handler));
 
     if (ep->requires_cpu_proxy()) {
         gpunetio_activate_progress_function(t);
@@ -702,7 +725,7 @@ int gpunetio_ep::progress() {
         }
         return NVSHMEMX_SUCCESS;
     } else {
-        // GPU-kind EPs with CPU_PROXY: use doca_gpu_verbs_cpu_proxy_progress.
+        // Both CPU proxy handlers progress GPU-kind endpoints through GPUNetIO.
         int status = doca_gpu_verbs_cpu_proxy_progress(qp->qp_gverbs, nullptr);
         if (status) {
             NVSHMEMI_WARN_PRINT("doca_gpu_verbs_cpu_proxy_progress failed for ep %p \n",
