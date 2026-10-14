@@ -129,9 +129,9 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE(DECL_NVSHMEMX_TYPENAME_BROADCAST
 #undef DECL_NVSHMEMX_TYPENAME_BROADCAST_SCOPE
 
 __device__ int nvshmemx_broadcastmem_warp(nvshmem_team_t team, void *dest, const void *src,
-                                          size_t nelem);
+                                          size_t nelem, int PE_root);
 __device__ int nvshmemx_broadcastmem_block(nvshmem_team_t team, void *dest, const void *src,
-                                           size_t nelem);
+                                           size_t nelem, int PE_root);
 
 // fcollect collectives
 #define DECL_NVSHMEMX_TYPENAME_FCOLLECT_SCOPE(SCOPE, TYPENAME, TYPE)                       \
