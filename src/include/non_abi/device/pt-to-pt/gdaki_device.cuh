@@ -1821,15 +1821,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
             }
         }
     } else {
-        if (gdaki_use_address_stable_amo(pe, qp_index)) {
-            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
-                                                    reinterpret_cast<uintptr_t>(lptr), bytes, pe,
-                                                    pe, qp_index, qp, nullptr);
-        } else {
-            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
-                                                    reinterpret_cast<uintptr_t>(lptr), bytes, pe,
-                                                    pe, NVSHMEMX_QP_DEFAULT, nullptr, nullptr);
-        }
+        gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
+                                                reinterpret_cast<uintptr_t>(lptr), bytes, pe, pe,
+                                                qp_index, qp, nullptr);
 
         num_wqes = num_atomic_wqes_per_cmd + (need_additional_wqe ? 1 : 0);
 

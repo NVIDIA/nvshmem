@@ -3395,14 +3395,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
             }
         }
     } else {
-        if (ibgda_use_address_stable_amo(pe, qp_index)) {
-            ibgda_rma_thread<NVSHMEMI_OP_PUT, true, support_half_av_seg>(
-                (uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe, qp_index, qp,
-                is_qp_shared_among_ctas);
-        } else {
-            ibgda_rma_thread<NVSHMEMI_OP_PUT, true, support_half_av_seg>(
-                (uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe);
-        }
+        ibgda_rma_thread<NVSHMEMI_OP_PUT, true, support_half_av_seg>(
+            (uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe, qp_index, qp, is_qp_shared_among_ctas);
 
         num_wqes = num_atomic_wqes_per_cmd + (need_additional_wqe ? 1 : 0);
 
