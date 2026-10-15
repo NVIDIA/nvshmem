@@ -470,6 +470,7 @@ gdaki_submit_ready(nvshmemi_gpunetio_device_qp_t *qp) {
     return ready_idx;
 }
 
+template <doca_gpu_dev_verbs_nic_handler NIC_HANDLER = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 gdaki_quiet(nvshmemi_gpunetio_device_qp_t *qp) {
     uint64_t prod_idx =
@@ -683,6 +684,7 @@ __device__ static __forceinline__ void nvshmemi_gdaki_batch_rma_mark_qp_pending(
     nvshmemi_batch_rma_mark_qp_pending(pending_qps, qp_count, qp_index);
 }
 
+template <doca_gpu_dev_verbs_nic_handler NIC_HANDLER = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>
 __device__ static __forceinline__ void gdaki_submit_db(nvshmemi_gpunetio_device_qp_t *qp,
                                                        uint64_t base_wqe_idx, uint32_t num_wqes,
                                                        const nvshmemi_region_info_t *region_info) {
@@ -704,21 +706,23 @@ __device__ static __forceinline__ void gdaki_submit_db(nvshmemi_gpunetio_device_
     bool do_post_send = batch_limit_reached || (!defer_submission && no_concurrent_submissions);
 
     if (do_post_send) {
-        doca_gpu_dev_verbs_submit(&(qp->qp), new_wqe_idx,
-                                  DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_CPU_PROXY_UPDATE_PI);
+        doca_gpu_dev_verbs_submit<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU,
+                                  DOCA_GPUNETIO_VERBS_SYNC_SCOPE_GPU, NIC_HANDLER>(
+            &(qp->qp), new_wqe_idx, DOCA_GPUNETIO_VERBS_GPU_CODE_OPT_CPU_PROXY_UPDATE_PI);
     } else if (defer_submission) {
         nvshmemi_gdaki_batch_rma_mark_qp_pending(state, qp, region_info);
     }
 }
 
-template <nvshmemi_region_operation_t REGION_OPERATION>
+template <nvshmemi_region_operation_t REGION_OPERATION,
+          doca_gpu_dev_verbs_nic_handler NIC_HANDLER = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>
 __device__ static __forceinline__ void gdaki_submit_nbi_db(
     nvshmemi_gpunetio_device_qp_t *qp, uint64_t base_wqe_idx, uint32_t num_wqes,
     const nvshmemi_region_info_t *region_info) {
     if constexpr (REGION_OPERATION != NVSHMEMI_REGION_OPERATION_NONE) {
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes, region_info);
+        gdaki_submit_db<NIC_HANDLER>(qp, base_wqe_idx, num_wqes, region_info);
     } else {
-        gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
+        gdaki_submit_db<NIC_HANDLER>(qp, base_wqe_idx, num_wqes, nullptr);
     }
 }
 
@@ -745,39 +749,19 @@ gdaki_cst(nvshmemi_gpunetio_device_qp_t *qp) {
     return gdaki_quiet(qp);
 }
 
-template <nvshmemi_op_t channel_op, bool nbi,
+template <nvshmemi_op_t channel_op, bool nbi, doca_gpu_dev_verbs_nic_handler NIC_HANDLER,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
-__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread_impl(
     uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index, nvshmemi_gpunetio_device_qp_t *selected_qp,
+    nvshmemi_gpunetio_device_qp_t *qp, nvshmemi_gpunetio_device_qp_t *selected_qp,
     const nvshmemi_region_info_t *region_info) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
-    unsigned int amask = __activemask();
-    bool can_coalesce_warp = selected_qp == nullptr && gdaki_can_coalesce_warp_pe(amask, proxy_pe);
+    unsigned int amask;
+    bool can_coalesce_warp;
     int my_tid;
     int tg_size;
-
     const bool need_cst = (channel_op == NVSHMEMI_OP_GET) && !state->may_skip_cst;
     const bool need_immediate_cst = !nbi && need_cst;
-
-    nvshmemi_gpunetio_device_qp_t *qp;
-
-    if (selected_qp != nullptr) {
-        qp = selected_qp;
-        my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
-        tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
-    } else if (can_coalesce_warp) {
-        my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
-        tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>();
-        if (my_tid == 0) {
-            qp = gdaki_get_qp(proxy_pe, qp_index);
-        }
-        qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
-    } else {
-        qp = gdaki_get_qp(proxy_pe, qp_index);
-        my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_THREAD>();
-        tg_size = nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_THREAD>();
-    }
 
     const bool need_additional_wqe = need_immediate_cst;
     int num_wqes_per_cmd = 1;  // RC only 1 WQE
@@ -890,15 +874,15 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
                 __threadfence_system();
             }
 
-            doca_gpu_dev_verbs_mark_wqes_ready<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU,
-                                               DOCA_GPUNETIO_VERBS_QP_SQ,
-                                               DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS,
-                                               DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
-                &(qp->qp), base_wqe_idx, my_wqe_idx);
+            doca_gpu_dev_verbs_mark_wqes_ready<
+                DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU, DOCA_GPUNETIO_VERBS_QP_SQ,
+                DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS, NIC_HANDLER>(&(qp->qp), base_wqe_idx,
+                                                                        my_wqe_idx);
             if constexpr (nbi) {
-                gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
+                gdaki_submit_nbi_db<REGION_OPERATION, NIC_HANDLER>(qp, base_wqe_idx, num_wqes,
+                                                                   region_info);
             } else {
-                gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
+                gdaki_submit_db<NIC_HANDLER>(qp, base_wqe_idx, num_wqes, nullptr);
             }
         }
 
@@ -913,7 +897,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
                 if (do_coalesce_quiet && my_tid == tg_size - 1) {
                     // CST, if required, has already been enqueued. We simply need to
                     // do gdaki_quiet here.
-                    gdaki_quiet(qp);
+                    gdaki_quiet<NIC_HANDLER>(qp);
                 }
                 did_quiet |= do_coalesce_quiet;
             }
@@ -924,17 +908,61 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
     if (!nbi && !did_quiet) {
         // CST, if required, has already been enqueued. We simply need to
         // do gdaki_quiet here.
-        gdaki_quiet(qp);
+        gdaki_quiet<NIC_HANDLER>(qp);
+    }
+}
+
+template <nvshmemi_op_t channel_op, bool nbi,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
+    uint64_t rptr, uint64_t lptr, size_t remaining_size, int dst_pe, int proxy_pe,
+    nvshmemx_qp_handle_t qp_index, nvshmemi_gpunetio_device_qp_t *selected_qp,
+    const nvshmemi_region_info_t *region_info) {
+    unsigned int amask = __activemask();
+    bool can_coalesce_warp = selected_qp == nullptr && gdaki_can_coalesce_warp_pe(amask, proxy_pe);
+    nvshmemi_gpunetio_device_qp_t *qp;
+    if (selected_qp != nullptr) {
+        qp = selected_qp;
+    } else if (can_coalesce_warp) {
+        int my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
+        if (my_tid == 0) {
+            qp = gdaki_get_qp(proxy_pe, qp_index);
+        }
+        qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
+    } else {
+        qp = gdaki_get_qp(proxy_pe, qp_index);
+    }
+
+    switch (qp->qp.nic_handler) {
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
+            gdaki_rma_thread_impl<channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB,
+                                  REGION_OPERATION>(rptr, lptr, remaining_size, dst_pe, proxy_pe,
+                                                    qp, selected_qp, region_info);
+            break;
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR:
+            gdaki_rma_thread_impl<channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR,
+                                  REGION_OPERATION>(rptr, lptr, remaining_size, dst_pe, proxy_pe,
+                                                    qp, selected_qp, region_info);
+            break;
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY:
+            gdaki_rma_thread_impl<channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY,
+                                  REGION_OPERATION>(rptr, lptr, remaining_size, dst_pe, proxy_pe,
+                                                    qp, selected_qp, region_info);
+            break;
+        default:
+            // A QP must contain a resolved handler, never AUTO.
+            assert(0 && "Unsupported GDAKI NIC handler");
     }
 }
 
 static_assert(NVSHMEMI_GPUNETIO_MIN_QP_DEPTH >= 64,
               "static_assert(NVSHMEMI_GPUNETIO_MIN_QP_DEPTH >= 64) failed");
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi,
+          doca_gpu_dev_verbs_nic_handler NIC_HANDLER,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
-__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_impl(
     uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
-    nvshmemx_qp_handle_t qp_index, const nvshmemi_region_info_t *region_info) {
+    nvshmemi_gpunetio_device_qp_t *qp, const nvshmemi_region_info_t *region_info) {
     assert(SCOPE == NVSHMEMI_THREADGROUP_WARP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
     // Use only warp 0
     int my_tid = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -944,8 +972,6 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     const bool need_cst = (channel_op == NVSHMEMI_OP_GET) && !state->may_skip_cst;
     const bool need_immediate_cst = !nbi && need_cst;
     bool need_additional_wqe;
-
-    nvshmemi_gpunetio_device_qp_t *qp;
 
     int num_wqes;
     int num_wqes_per_cmd;
@@ -979,21 +1005,6 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     struct doca_gpu_dev_verbs_wqe *wqe_ptr;
     enum doca_gpu_dev_verbs_wqe_ctrl_flags fm_ce_se;
 
-    if (unlikely(remaining_size == 0)) {
-        goto out;
-    }
-
-    // Not warp 0, wait at the exit.
-    if (my_tid >= tg_size) {
-        goto out;
-    }
-    my_tid = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_WARP>();
-
-    if (my_tid == 0) {
-        qp = gdaki_get_qp(proxy_pe, qp_index);
-    }
-    qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
-
     need_additional_wqe = need_immediate_cst;
     num_wqes_per_cmd = 1;
 
@@ -1020,11 +1031,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
     // Too many chunks. Use gdaki_rma_thread to handle it instead.
     if (unlikely(chunk_idx > tg_size)) {
         if (my_tid == 0) {
-            gdaki_rma_thread<channel_op, nbi, REGION_OPERATION>(
-                req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp_index, nullptr, region_info);
+            gdaki_rma_thread_impl<channel_op, nbi, NIC_HANDLER, REGION_OPERATION>(
+                req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp, nullptr, region_info);
         }
 
-        goto out;
+        return;
     }
 
     num_wqes = num_wqes_per_cmd * chunk_idx + (need_additional_wqe ? 1 : 0);
@@ -1098,23 +1109,60 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
             __threadfence_system();
         }
 
-        doca_gpu_dev_verbs_mark_wqes_ready<
-            DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU, DOCA_GPUNETIO_VERBS_QP_SQ,
-            DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
+        doca_gpu_dev_verbs_mark_wqes_ready<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU,
+                                           DOCA_GPUNETIO_VERBS_QP_SQ,
+                                           DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS, NIC_HANDLER>(
             &(qp->qp), base_wqe_idx, my_wqe_idx);
         if constexpr (nbi) {
-            gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
+            gdaki_submit_nbi_db<REGION_OPERATION, NIC_HANDLER>(qp, base_wqe_idx, num_wqes,
+                                                               region_info);
         } else {
-            gdaki_submit_db(qp, base_wqe_idx, num_wqes, nullptr);
+            gdaki_submit_db<NIC_HANDLER>(qp, base_wqe_idx, num_wqes, nullptr);
         }
         if (!nbi) {
             // CST, if required, has already been enqueued. We simply need to
             // do gdaki_quiet here.
-            gdaki_quiet(qp);
+            gdaki_quiet<NIC_HANDLER>(qp);
         }
     }
+}
 
-out:
+template <threadgroup_t SCOPE, nvshmemi_op_t channel_op, bool nbi,
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
+    uint64_t req_rptr, uint64_t req_lptr, size_t bytes, int dst_pe, int proxy_pe,
+    nvshmemx_qp_handle_t qp_index, const nvshmemi_region_info_t *region_info) {
+    assert(SCOPE == NVSHMEMI_THREADGROUP_WARP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK);
+    int my_tid = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    if (bytes != 0 && my_tid < nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARP>()) {
+        nvshmemi_gpunetio_device_qp_t *qp;
+        if (my_tid == 0) {
+            qp = gdaki_get_qp(proxy_pe, qp_index);
+        }
+        qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
+        // Resolve once per selected QP, outside the transfer loop.
+        switch (qp->qp.nic_handler) {
+            case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
+                gdaki_rma_impl<SCOPE, channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB,
+                               REGION_OPERATION>(req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp,
+                                                 region_info);
+                break;
+            case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR:
+                gdaki_rma_impl<SCOPE, channel_op, nbi,
+                               DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR, REGION_OPERATION>(
+                    req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp, region_info);
+                break;
+            case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY:
+                gdaki_rma_impl<SCOPE, channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY,
+                               REGION_OPERATION>(req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp,
+                                                 region_info);
+                break;
+            default:
+                // A QP must contain a resolved handler, never AUTO.
+                assert(0 && "Unsupported GDAKI NIC handler");
+        }
+    }
+    // All participating threads meet here, including the non-posting block warps.
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
