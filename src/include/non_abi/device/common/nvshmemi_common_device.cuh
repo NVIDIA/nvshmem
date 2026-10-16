@@ -2368,6 +2368,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_put_wrapper_thread(
     size_t byte_offset_dst, handle_barrier_t *handle_bar, uint32_t copy_bytes) {
     if ((myIdx % warpSize) == 0) {
         handle_bar->ensure_handle_tx_capacity(copy_bytes);
+        /* Register the expected transaction count before issuing the PUT.
+         * Otherwise complete_tx may reach the mbarrier before expect_tx is
+         * added, leaving the deferred quiet wait stuck in the wrong count. */
+        handle_bar->add_expected_handle_tx(copy_bytes);
         fabric_try_put_async<cft_handle_kind>(dst_handle.id(),
                                               dst_handle.offset() + byte_offset_dst, smem_buf,
                                               copy_bytes, handle_bar);
@@ -2886,6 +2890,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
         nvshmemi_cft_thread_mutex_lock(smem_base);
         handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         handle_bar->ensure_handle_tx_capacity(completion_bytes);
+        handle_bar->add_expected_handle_tx(completion_bytes);
     }
     __syncwarp(mask);
 
@@ -3426,6 +3431,7 @@ nvshmemi_handle_atomic_once(const nvshmemi_tma_smem_registration_t &registration
         handle_bar->drain_pending_handle(true);
         handle_bar->prepare_handle(warp_idx_in_block, warp_idx_in_block * TMA_COPY_NUM_STAGES);
         handle_bar->ensure_handle_tx_capacity(active_threads * CFT_HANDLE_TX_SIZE);
+        handle_bar->add_expected_handle_tx(active_threads * CFT_HANDLE_TX_SIZE);
     }
     __syncwarp(active_mask);
 
