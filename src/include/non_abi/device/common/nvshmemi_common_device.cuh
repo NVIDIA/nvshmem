@@ -2580,6 +2580,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
             __mbarrier_inval(reinterpret_cast<__mbarrier_t *>(done_bar[1]));
         }
     }
+
+    /* The producer and consumer run on different warps.  Ensure the consumer
+     * has published its pending handle state before any thread returns and a
+     * subsequent NBI PUT reuses these shared barriers. */
+    nvshmemi_threadgroup_sync<SCOPE>();
 }
 
 template <threadgroup_t SCOPE>
