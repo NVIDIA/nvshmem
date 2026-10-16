@@ -116,7 +116,7 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
         {TEAM_SCALAR_INVALID},                          /* team_dups */                \
         NULL,                                           /* pe_mapping */               \
         TEAM_ULSCALAR_INVALID,                          /* p2p_sync_on_stream_count */ \
-        false,                                          /* are_gpus_nvls_connected */  \
+        false,                                      /* are_gpus_nvls_ptr_connected */ \
         false,                                          /* has_cft_routed_peer */      \
         TEAM_ULSCALAR_DEFAULT,                          /* mc_leid_with_flag */        \
     }
@@ -282,7 +282,7 @@ typedef struct {
     nvshmem_team_t team_dups[NVSHMEMI_TEAM_DUP_COUNT];
     int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
     uint64_t p2p_sync_on_stream_count;
-    bool are_gpus_nvls_connected;
+    bool are_gpus_nvls_ptr_connected;
     bool has_cft_routed_peer;
     uint64_t mc_leid_with_flag; /* Logical endpoint ID with valid flag for multicast */
 } nvshmemi_team_v4;
