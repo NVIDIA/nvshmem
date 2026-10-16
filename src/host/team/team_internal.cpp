@@ -758,11 +758,12 @@ void nvshmemi_team_set_p2p_connectivity(nvshmemi_team_t *teami) {
 }
 
 void nvshmemi_team_set_nvls_connectivity(nvshmemi_team_t *teami) {
-    teami->are_gpus_nvls_connected = nvshmemi_team_is_subset(teami, nvshmemi_team_mc_shared);
+    teami->are_gpus_nvls_ptr_connected =
+        nvshmemi_team_is_subset(teami, nvshmemi_team_mc_shared);
 }
 
 bool nvshmemi_team_support_nvls(nvshmemi_team_t *team) {
-    return ((team->are_gpus_nvls_connected) && (team->nvls_rsc != nullptr));
+    return ((team->are_gpus_nvls_ptr_connected) && (team->nvls_rsc != nullptr));
 }
 
 bool nvshmemi_team_is_owner_nvls(nvshmemi_team_t *team) {
@@ -773,7 +774,8 @@ bool nvshmemi_team_is_owner_nvls(nvshmemi_team_t *team) {
 }
 
 static bool nvshmemi_team_is_nvls_capable(nvshmemi_team_t *team) {
-    return (team->are_gpus_nvls_connected && team->size >= 2 && nvshmemi_state->is_platform_nvls);
+    return (team->are_gpus_nvls_ptr_connected && team->size >= 2 &&
+            nvshmemi_state->is_platform_nvls);
 }
 
 nvshmemi_team_t *nvshmemi_team_get_same_existing_nvls_team(nvshmemi_team_t *team) {
@@ -1244,10 +1246,10 @@ static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
     INFO(NVSHMEM_INIT, "%s: start=%d, stride=%d, size=%d", team_name, team_peer_shared_ptr->start,
          team_peer_shared_ptr->stride, team_peer_shared_ptr->size);
     if (domain == nvshmemi_predefined_team_shared_domain::MULTICAST_POINTER) {
-        team_peer_shared_ptr->are_gpus_nvls_connected = 1;
+        team_peer_shared_ptr->are_gpus_nvls_ptr_connected = 1;
         nvshmemi_team_set_nvls_connectivity(nvshmemi_team_world);
         nvshmemi_team_set_nvls_connectivity(nvshmemi_team_shared);
-        team_peer_shared_ptr->are_gpus_nvls_connected = 1;
+        team_peer_shared_ptr->are_gpus_nvls_ptr_connected = 1;
     } else if (domain == nvshmemi_predefined_team_shared_domain::UNICAST_POINTER) {
         nvshmemi_team_set_p2p_connectivity(nvshmemi_team_world);
     }
@@ -1259,7 +1261,7 @@ static int init_team_mc_shared_alias(void) {
     nvshmemi_team_mc_shared = nvshmemi_team_shared;
     nvshmemi_device_team_mc_shared = nvshmemi_device_team_shared;
 
-    nvshmemi_team_shared->are_gpus_nvls_connected = 1;
+    nvshmemi_team_shared->are_gpus_nvls_ptr_connected = 1;
     nvshmemi_team_set_nvls_connectivity(nvshmemi_team_world);
     nvshmemi_team_set_nvls_connectivity(nvshmemi_team_shared);
 
@@ -1700,7 +1702,8 @@ static int finalize_team_init() {
         if (i == NVSHMEM_TEAM_MC_SHARED_INDEX && nvshmemi_team_mc_shared_is_alias()) {
             continue;
         }
-        if (nvshmemi_team_pool[i] != NULL && nvshmemi_team_pool[i]->are_gpus_nvls_connected) {
+        if (nvshmemi_team_pool[i] != NULL &&
+            nvshmemi_team_pool[i]->are_gpus_nvls_ptr_connected) {
             int status = nvshmemi_team_setup_nvls(nvshmemi_team_pool[i]);
             if (status != 0) {
                 NVSHMEMI_ERROR_PRINT("NVLS resource setup failed for team ID: %d\n",
