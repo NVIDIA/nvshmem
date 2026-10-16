@@ -476,6 +476,7 @@ struct alignas(16) handle_barrier_t {
     __mbarrier_t bar;
     static constexpr uint8_t HANDLE_INITIALIZED = 1U << 0;
     static constexpr uint8_t HANDLE_PENDING_PUBLISHED = 1U << 1;
+    static constexpr uint8_t HANDLE_TX_EXPECTED = 1U << 2;
 
     /*
      * A handle barrier occupies a 16-byte reserved SMEM slot while the
@@ -563,13 +564,15 @@ struct alignas(16) handle_barrier_t {
         }
 
         if (pending_handle_bytes != 0) {
-            uint64_t state = arrive_relaxed(pending_handle_bytes);
+            uint64_t state =
+                has_expected_handle_tx() ? arrive_relaxed() : arrive_relaxed(pending_handle_bytes);
             wait_primary(state);
             pending_handle_bytes = 0;
             if (has_published_pending_handle()) {
                 clear_handle_slot_pending();
                 pending_handle_active &= ~HANDLE_PENDING_PUBLISHED;
             }
+            pending_handle_active &= ~HANDLE_TX_EXPECTED;
         }
 
         if (invalidate) {
@@ -601,15 +604,31 @@ struct alignas(16) handle_barrier_t {
     inline __device__ void ensure_handle_tx_capacity(uint32_t size_bytes) {
         uint32_t completion_bytes = handle_completion_bytes(size_bytes);
         if (pending_handle_bytes != 0 &&
-            pending_handle_bytes + completion_bytes >= TMA_PUT_MAX_BATCH_SIZE) {
+            (!has_expected_handle_tx() ||
+             pending_handle_bytes + completion_bytes >= TMA_PUT_MAX_BATCH_SIZE)) {
             drain_pending_handle(false);
         }
     }
 
     inline __device__ void ensure_handle_get_tx_capacity(uint32_t size_bytes) {
         if (pending_handle_bytes != 0 &&
-            pending_handle_bytes + size_bytes >= TMA_GET_MAX_BATCH_SIZE) {
+            (has_expected_handle_tx() ||
+             pending_handle_bytes + size_bytes >= TMA_GET_MAX_BATCH_SIZE)) {
             drain_pending_handle(false);
+        }
+    }
+
+    inline __device__ bool has_expected_handle_tx() const {
+        return (pending_handle_active & HANDLE_TX_EXPECTED) != 0;
+    }
+
+    /* Establish the fabric completion count before issuing the operation.
+     * Deferring this until quiet allows complete_tx to race ahead of expect_tx. */
+    inline __device__ void add_expected_handle_tx(uint32_t size_bytes) {
+        uint32_t completion_bytes = handle_completion_bytes(size_bytes);
+        if (completion_bytes != 0) {
+            barrier_expect_tx(&bar, completion_bytes / CFT_HANDLE_TX_SIZE);
+            pending_handle_active |= HANDLE_TX_EXPECTED;
         }
     }
 
@@ -637,6 +656,17 @@ struct alignas(16) handle_barrier_t {
     }
 
     // track completion in complete_tx::16B
+    inline __device__ uint64_t arrive_relaxed() {
+        uint64_t state;
+        const unsigned long long smem_addr = static_cast<unsigned long long>(
+            __cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
+        asm volatile("mbarrier.arrive.relaxed.cta.shared::cta.b64 %0, [%1];"
+                     : "=l"(state)
+                     : "l"(smem_addr)
+                     : "memory");
+        return state;
+    }
+
     inline __device__ uint64_t arrive_relaxed(uint32_t size_bytes) {
         uint64_t state;
         uint32_t adjusted_size =
