@@ -784,7 +784,7 @@ __device__ __forceinline__ void nvshmemi_handle_complete_owned() {
 
     const uint32_t warps_per_warpgroup =
         nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_WARPGROUP>() / warpSize;
-    if ((owner % warps_per_warpgroup) == 0) {
+    if (warps_per_warpgroup != 0 && (owner % warps_per_warpgroup) == 0) {
         const uint32_t compact_slot_base = (owner / warps_per_warpgroup) * TMA_COPY_NUM_STAGES;
         if (compact_slot_base != slot_base) {
 #pragma unroll
@@ -829,13 +829,11 @@ template <threadgroup_t SCOPE>
 __device__ __forceinline__ void nvshmemi_handle_quiet() {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
         nvshmemi_handle_quiet_all();
-    } else if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        nvshmemi_threadgroup_sync<SCOPE>();
-        if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
-            nvshmemi_handle_quiet_all();
-        }
-        nvshmemi_threadgroup_sync<SCOPE>();
     } else {
+        // Publish every issuer's pending state before physical warp leaders
+        // drain their owned slots in parallel. The trailing synchronization
+        // prevents any participant from reusing the slots before all leaders
+        // have completed.
         nvshmemi_threadgroup_sync<SCOPE>();
         nvshmemi_handle_quiet_owned<SCOPE>();
         nvshmemi_threadgroup_sync<SCOPE>();
