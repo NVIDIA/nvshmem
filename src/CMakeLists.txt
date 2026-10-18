@@ -1130,6 +1130,7 @@ endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 
 set(BOOTSTRAP_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
+    bootstrap_host_transport/nvshmemi_plugin_log.h
     c_api/nvshmem_version.h
     c_api/nvshmemx_status.h
     c_api/nvshmemx_uniqueid.h
@@ -1167,6 +1168,7 @@ configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
 
 set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
+    bootstrap_host_transport/nvshmemi_plugin_log.h
     c_api/nvshmem_api_constants.h
     c_api/nvshmem_types.h
     c_api/nvshmem_version.h

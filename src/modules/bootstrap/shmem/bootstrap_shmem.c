@@ -46,21 +46,21 @@ struct nvshmemi_options_s env_attr;
             char *desc_wrapped;                                                                    \
             case BOOTSTRAP_OPTIONS_STYLE_INFO:                                                     \
                 desc_wrapped = bootstrap_util_wrap_string(SHORT_DESC, 80, "\t", 1);                \
-                printf("  NVSHMEM_%-20s " BOOTPRI_##KIND " (type: %s, default: " BOOTPRI_##KIND    \
-                       ")\n\t%s\n",                                                                \
-                       #NAME, NVSHFMT_##KIND(env_attr.NAME), #KIND, NVSHFMT_##KIND(DEFAULT),       \
-                       desc_wrapped);                                                              \
+                BOOTSTRAP_RAW_PRINT("  NVSHMEM_%-20s " BOOTPRI_##KIND                              \
+                                    " (type: %s, default: " BOOTPRI_##KIND ")\n\t%s\n",            \
+                                    #NAME, NVSHFMT_##KIND(env_attr.NAME), #KIND,                   \
+                                    NVSHFMT_##KIND(DEFAULT), desc_wrapped);                        \
                 free(desc_wrapped);                                                                \
                 break;                                                                             \
             case BOOTSTRAP_OPTIONS_STYLE_RST:                                                      \
                 desc_wrapped = bootstrap_util_wrap_string(SHORT_DESC, 80, NULL, 0);                \
-                printf(".. c:var:: NVSHMEM_%s\n", #NAME);                                          \
-                printf("\n");                                                                      \
-                printf("| *Type: %s*\n", #KIND);                                                   \
-                printf("| *Default: " BOOTPRI_##KIND "*\n", NVSHFMT_##KIND(DEFAULT));              \
-                printf("\n");                                                                      \
-                printf("%s\n", desc_wrapped);                                                      \
-                printf("\n");                                                                      \
+                BOOTSTRAP_RAW_PRINT(".. c:var:: NVSHMEM_%s\n", #NAME);                             \
+                BOOTSTRAP_RAW_PRINT("\n");                                                         \
+                BOOTSTRAP_RAW_PRINT("| *Type: %s*\n", #KIND);                                      \
+                BOOTSTRAP_RAW_PRINT("| *Default: " BOOTPRI_##KIND "*\n", NVSHFMT_##KIND(DEFAULT)); \
+                BOOTSTRAP_RAW_PRINT("\n");                                                         \
+                BOOTSTRAP_RAW_PRINT("%s\n", desc_wrapped);                                         \
+                BOOTSTRAP_RAW_PRINT("\n");                                                         \
                 free(desc_wrapped);                                                                \
                 break;                                                                             \
             default:                                                                               \
@@ -76,7 +76,7 @@ static int bootstrap_shmem_showinfo(struct bootstrap_handle *handle, int style) 
                                 NVSHMEMI_ENV_CAT_BOOTSTRAP, style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    BOOTSTRAP_RAW_PRINT("\n");
     return 0;
 }
 
@@ -245,10 +245,11 @@ static void fallback_to_legacy(struct bootstrap_handle *handle, int rc) {
 
     if (!use_legacy_collectives) {
         use_legacy_collectives = 1;
-        fprintf(stderr,
-                "NVSHMEM: WARNING: OpenSHMEM teams-based collective failed at runtime. "
-                "Falling back to deprecated active-set collectives. This can happen with "
-                "OpenMPI oshmem which defines teams symbols but does not implement them.\n");
+        nvshmemi_plugin_fprintf(
+            stderr,
+            "NVSHMEM: WARNING: OpenSHMEM teams-based collective failed at runtime. "
+            "Falling back to deprecated active-set collectives. This can happen with "
+            "OpenMPI oshmem which defines teams symbols but does not implement them.\n");
         handle->allgather = bootstrap_shmem_allgather_legacy;
         handle->alltoall = bootstrap_shmem_alltoall_legacy;
         handle->barrier = bootstrap_shmem_barrier_legacy;
@@ -445,9 +446,10 @@ int nvshmemi_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle,
     if (bootstrap_shmem_mode == BOOTSTRAP_SHMEM_MODE_LEGACY) {
         use_legacy_collectives = 1;
         if (handle->pg_rank == 0) {
-            fprintf(stderr,
-                    "NVSHMEM: WARNING: Using deprecated OpenSHMEM active-set collectives for "
-                    "bootstrap because NVSHMEM_BOOTSTRAP_SHMEM_MODE=legacy.\n");
+            nvshmemi_plugin_fprintf(
+                stderr,
+                "NVSHMEM: WARNING: Using deprecated OpenSHMEM active-set collectives for "
+                "bootstrap because NVSHMEM_BOOTSTRAP_SHMEM_MODE=legacy.\n");
         }
         handle->allgather = bootstrap_shmem_allgather_legacy;
         handle->alltoall = bootstrap_shmem_alltoall_legacy;
@@ -477,9 +479,10 @@ int nvshmemi_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle,
         goto out;
     }
     if (handle->pg_rank == 0) {
-        fprintf(stderr,
-                "NVSHMEM: WARNING: Using deprecated OpenSHMEM active-set collectives for "
-                "bootstrap. Upgrade to OpenSHMEM >= 1.5 for teams-based bootstrap support.\n");
+        nvshmemi_plugin_fprintf(
+            stderr,
+            "NVSHMEM: WARNING: Using deprecated OpenSHMEM active-set collectives for "
+            "bootstrap. Upgrade to OpenSHMEM >= 1.5 for teams-based bootstrap support.\n");
     }
     handle->allgather = bootstrap_shmem_allgather_legacy;
     handle->alltoall = bootstrap_shmem_alltoall_legacy;

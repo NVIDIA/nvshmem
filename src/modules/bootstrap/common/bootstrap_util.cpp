@@ -99,14 +99,14 @@ char *bootstrap_util_wrap_string(const char *str, const size_t wraplen, const ch
 void bootstrap_util_print_header(int style, const char *h) {
     switch (style) {
         case BOOTSTRAP_OPTIONS_STYLE_INFO:
-            printf("%s:\n", h);
+            BOOTSTRAP_RAW_PRINT("%s:\n", h);
             break;
         case BOOTSTRAP_OPTIONS_STYLE_RST:
-            printf("%s\n", h);
+            BOOTSTRAP_RAW_PRINT("%s\n", h);
             for (const char *c = h; *c != '\0'; c++) {
-                putchar('~');
+                BOOTSTRAP_RAW_PRINT("~");
             }
-            printf("\n\n");
+            BOOTSTRAP_RAW_PRINT("\n\n");
             break;
         default:
             assert(0);
