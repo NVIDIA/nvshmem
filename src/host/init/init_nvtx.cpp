@@ -90,9 +90,9 @@ void nvshmem_nvtx_init() {
     }
 }
 
-void nvshmem_nvtx_print_options() {
+void nvshmem_nvtx_print_options(FILE *output) {
     for (int i = 0; i < num_options; ++i) {
-        printf("\t  %-20s: %s\n", options[i].name, options[i].desc);
+        fprintf(output, "\t  %-20s: %s\n", options[i].name, options[i].desc);
     }
 }
 
