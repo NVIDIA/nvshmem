@@ -48,7 +48,6 @@ void nvshmem_debug_warn(const char *fmt, ...);
 int nvshmem_debug_file_active(void);
 }
 
-#undef NVSHMEMI_WARN_PRINT
 #define NVSHMEMI_WARN_PRINT(...) nvshmem_debug_warn(__VA_ARGS__)
 
 #define WARN(...) nvshmem_debug_log(NVSHMEM_LOG_WARN, NVSHMEM_ALL, __FILE__, __LINE__, __VA_ARGS__)

@@ -8,8 +8,8 @@
 
 #include <cstddef>
 #include <utility>
+#include "internal/host/debug.h"
 #include "internal/host_transport/cudawrap.h"
-#include "non_abi/c/nvshmemi_error_macros.h"
 
 extern nvshmemi_cuda_fn_table *nvshmemi_cuda_syms;
 

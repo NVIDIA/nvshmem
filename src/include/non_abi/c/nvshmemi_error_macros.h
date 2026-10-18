@@ -41,13 +41,6 @@
         NVSHMEMI_ERROR_FPRINTF(stderr, "\n");                                           \
     } while (0)
 
-#define NVSHMEMI_WARN_PRINT(...)                     \
-    do {                                             \
-        NVSHMEMI_ERROR_FPRINTF(stdout, "WARN: ");    \
-        NVSHMEMI_ERROR_FPRINTF(stdout, __VA_ARGS__); \
-        NVSHMEMI_ERROR_FPRINTF(stdout, "\n");        \
-    } while (0)
-
 #define NVSHMEMI_ERROR_JMP(status, err, label, ...)                                                \
     do {                                                                                           \
         NVSHMEMI_ERROR_FPRINTF(stderr, "%s:%d: error status: %d (%s) ", __FILE__, __LINE__, (err), \
