@@ -1701,6 +1701,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
         nvshmemi_handle_p((void *)sig_addr, signal, pe);
 #endif
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && pe == nvshmemi_device_state_d.mype) {
+        atomicAdd_system((unsigned long long *)sig_addr, signal);
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && !nvshmemi_is_cft_forced() &&
                nvshmemi_use_ldst_path() && nvshmemi_peer_reachable(peer_base_addr) &&
                (!can_use_atomic_handle || !nvshmemi_cft_preempts_pointer_path(pe))) {
@@ -3705,6 +3707,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE constexpr bool nvshmemi_handle_atomic_i
 template <typename T, nvshmemi_amo_t Amo>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_can_use_handle_atomic(T *target, int pe) {
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    /* Self-target atomics require no transport and logical endpoints do not
+     * support loopback atomics. Let the caller select its local atomic path
+     * without treating that path as an unsupported forced-CFT fallback. */
+    if (pe == nvshmemi_device_state_d.mype) {
+        return false;
+    }
     if constexpr (!nvshmemi_handle_atomic_is_supported<T, Amo>()) {
 #if defined(NVSHMEM_FORCE_CFT)
         nvshmemi_cft_force_unsupported();

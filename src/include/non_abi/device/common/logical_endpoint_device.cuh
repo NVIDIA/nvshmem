@@ -247,6 +247,11 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe) {
 
 __device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int pe, const void* le_addr) {
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    /* Logical endpoints do not support loopback atomics. Self-target operations
+     * stay on the local load/store atomic path. */
+    if (pe == nvshmemi_device_state_d.mype) {
+        return false;
+    }
     const size_t thread_idx =
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
