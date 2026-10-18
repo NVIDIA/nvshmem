@@ -52,25 +52,17 @@ static inline size_t nvshmemi_get_tma_cft_smem_size(size_t requested_size) {
 #define unlikely(x) (__builtin_expect(!!(x), 0))
 #endif
 
-#define NVSHMEMI_DEBUG_PRINT(...)                           \
-    do {                                                    \
-        if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {     \
-            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__); \
-            fprintf(stderr, __VA_ARGS__);                   \
-            fprintf(stderr, "\n");                          \
-        }                                                   \
-    } while (0)
+#define NVSHMEMI_DEBUG_PRINT(...) \
+    nvshmem_debug_log(NVSHMEM_LOG_TRACE, NVSHMEM_UTIL, __FILE__, __LINE__, __VA_ARGS__)
 
-#define NZ_DEBUG_JMP(status, err, label, ...)                                               \
-    do {                                                                                    \
-        if (unlikely(status != 0)) {                                                        \
-            if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {                                 \
-                fprintf(stderr, "%s:%d: non-zero status: %d ", __FILE__, __LINE__, status); \
-                fprintf(stderr, __VA_ARGS__);                                               \
-            }                                                                               \
-            status = err;                                                                   \
-            goto label;                                                                     \
-        }                                                                                   \
+#define NZ_DEBUG_JMP(status, err, label, ...)                                      \
+    do {                                                                           \
+        if (unlikely(status != 0)) {                                               \
+            nvshmem_debug_log(NVSHMEM_LOG_TRACE, NVSHMEM_UTIL, __FILE__, __LINE__, \
+                              "non-zero status: %d " __VA_ARGS__, status);         \
+            status = err;                                                          \
+            goto label;                                                            \
+        }                                                                          \
     } while (0)
 
 #define CUDA_DRIVER_CHECK(cmd)                    \

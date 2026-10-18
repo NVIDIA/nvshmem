@@ -10,10 +10,12 @@
 #ifndef _NVSHMEM_NVTX_HPP_
 #define _NVSHMEM_NVTX_HPP_
 
+#include <cstdio>
+
 #ifndef NVTX_DISABLE
 
 extern int nvshmem_nvtx_options;
-extern void nvshmem_nvtx_print_options();
+extern void nvshmem_nvtx_print_options(FILE* output);
 
 typedef enum nvtxOpt {
     INIT_OPT = (1 << 0),

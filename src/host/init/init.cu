@@ -100,7 +100,7 @@ int nvshmemi_cuda_driver_version;
 const char *p_err_str;
 int nvshmem_debug_level;
 uint64_t nvshmem_debug_mask = NVSHMEM_INIT;  // Default debug sub-system mask is INIT
-pthread_mutex_t nvshmem_debug_output_lock;
+pthread_mutex_t nvshmem_debug_output_lock = PTHREAD_MUTEX_INITIALIZER;
 bool nvshmemi_is_limited_mpg_run = 0;
 static uint64_t num_initialized_device_states = 0;
 static bool nvshmemi_is_device_state_ready;
@@ -1577,6 +1577,7 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
 
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
         nvshmemi_options_init();
+        nvshmemi_init_debug();
         if (nvshmemi_options.DEBUG_ATTACH_DELAY_provided) {
             printf("application set to sleep for %d seconds after debug init. PID: %d\n",
                    nvshmemi_options.DEBUG_ATTACH_DELAY, getpid());
@@ -1588,8 +1589,6 @@ int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int boots
     NVTX_FUNC_RANGE_IN_GROUP(INIT);
 
     if (!nvshmemi_device_state.nvshmemi_is_nvshmem_bootstrapped) {
-        nvshmemi_init_debug();
-
         if (nvshmemi_options.DEBUG_ATTACH_DELAY) {
             INFO(NVSHMEM_INIT,
                  "sleeping for %d seconds. Now would be a good time to attach a debugger\n",
@@ -1873,42 +1872,49 @@ static void nvshmemi_init_debug() {
      */
     const char *nvshmem_debug_filename = nvshmemi_options.DEBUG_FILE;
     if (nvshmem_debug_level > NVSHMEM_LOG_VERSION && nvshmemi_options.DEBUG_FILE_provided) {
-        int c = 0;
         char debugFn[PATH_MAX + 1] = "";
-        char *dfn = debugFn;
-        while (nvshmem_debug_filename[c] != '\0' && c < PATH_MAX) {
-            if (nvshmem_debug_filename[c++] != '%') {
-                *dfn++ = nvshmem_debug_filename[c - 1];
+        size_t input_pos = 0;
+        size_t output_pos = 0;
+        while (nvshmem_debug_filename[input_pos] != '\0' && output_pos < PATH_MAX) {
+            if (nvshmem_debug_filename[input_pos] != '%') {
+                debugFn[output_pos++] = nvshmem_debug_filename[input_pos++];
                 continue;
             }
-            switch (nvshmem_debug_filename[c++]) {
+            input_pos++;
+            switch (nvshmem_debug_filename[input_pos]) {
                 case '%':  // Double %
-                    *dfn++ = '%';
+                    debugFn[output_pos++] = '%';
+                    input_pos++;
                     break;
                 case 'h':  // %h = hostname
                     char hostname[1024];
                     nvshmemu_gethostname(hostname, 1024);
-                    dfn += snprintf(dfn, PATH_MAX, "%s", hostname);
+                    output_pos += snprintf(debugFn + output_pos, sizeof(debugFn) - output_pos, "%s",
+                                           hostname);
+                    input_pos++;
                     break;
                 case 'p':  // %p = pid
-                    dfn += snprintf(dfn, PATH_MAX, "%d", getpid());
+                    output_pos += snprintf(debugFn + output_pos, sizeof(debugFn) - output_pos, "%d",
+                                           getpid());
+                    input_pos++;
                     break;
                 default:  // Echo everything we don't understand
-                    *dfn++ = '%';
-                    *dfn++ = nvshmem_debug_filename[c - 1];
+                    debugFn[output_pos++] = '%';
+                    if (nvshmem_debug_filename[input_pos] != '\0' && output_pos < PATH_MAX) {
+                        debugFn[output_pos++] = nvshmem_debug_filename[input_pos++];
+                    }
                     break;
             }
         }
-        *dfn = '\0';
+        debugFn[PATH_MAX] = '\0';
         if (debugFn[0] != '\0') {
             FILE *file = fopen(debugFn, "w");
             if (file != NULL) {
-                INFO(NVSHMEM_ALL, "DEBUG file is '%s'", debugFn);
                 nvshmem_debug_file = file;
+                INFO(NVSHMEM_ALL, "DEBUG file is '%s'", debugFn);
             }
         }
     }
-    pthread_mutex_init(&nvshmem_debug_output_lock, NULL);
 
 #ifdef NVSHMEM_TRACE
     nvshmem_epoch = std::chrono::high_resolution_clock::now();
@@ -1932,30 +1938,30 @@ static void nvshmemi_init_msg(void) {
             int runtimeVersion, driverVersion;
             cudaError_t err;
 
-            printf("NVSHMEM configuration:\n");
+            nvshmem_debug_printf("NVSHMEM configuration:\n");
 
-            printf("  %-28s %d\n", "CUDA API", CUDA_VERSION);
+            nvshmem_debug_printf("  %-28s %d\n", "CUDA API", CUDA_VERSION);
 
             err = cudaRuntimeGetVersion(&runtimeVersion);
             if (err != cudaSuccess) {
                 runtimeVersion = -1;
             }
-            printf("  %-28s %d\n", "CUDA Runtime", runtimeVersion);
+            nvshmem_debug_printf("  %-28s %d\n", "CUDA Runtime", runtimeVersion);
 
             err = cudaDriverGetVersion(&driverVersion);
             if (err != cudaSuccess) {
                 driverVersion = -1;
             }
-            printf("  %-28s %d\n", "CUDA Driver", driverVersion);
+            nvshmem_debug_printf("  %-28s %d\n", "CUDA Driver", driverVersion);
 
-            printf("  %-28s %s %s\n", "Build Timestamp", __DATE__, __TIME__);
+            nvshmem_debug_printf("  %-28s %s %s\n", "Build Timestamp", __DATE__, __TIME__);
 
             char *build_vars = nvshmemu_wrap(NVSHMEM_BUILD_VARS, NVSHMEMI_WRAPLEN, "\t", 0);
-            printf("  %-28s\n\t%s\n", "Build Variables",
-                   build_vars ? build_vars : "Error wrapping build vars");
+            nvshmem_debug_printf("  %-28s\n\t%s\n", "Build Variables",
+                                 build_vars ? build_vars : "Error wrapping build vars");
             free(build_vars);
 
-            printf("\n");
+            nvshmem_debug_printf("\n");
         }
 
         if (nvshmemi_options.INFO) {
