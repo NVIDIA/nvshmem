@@ -101,7 +101,7 @@ nvshmem_add_default_off_option(NVSHMEM_USE_NCCL "Enable compilation of NVSHMEM N
 nvshmem_add_default_off_option(NVSHMEM_ENABLE_ALL_DEVICE_INLINING "Inline all device library code")
 nvshmem_add_default_off_option(NVSHMEM_GPU_COLL_USE_LDST "Enables Load/Store in NVSHMEM collective operations")
 nvshmem_add_default_off_option(NVSHMEM_TIMEOUT_DEVICE_POLLING "Enable timeouts for NVSHMEM device-side polling functions (e.g. wait_until)")
-nvshmem_add_default_off_option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable NVSHMEM Logical Endpoint support")
+nvshmem_add_default_on_option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable NVSHMEM Logical Endpoint support")
 nvshmem_add_default_off_option(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT "Prioritize logical endpoint over pointer based P2P for CFT handles")
 
 message( "\n__BUILD__\n")
