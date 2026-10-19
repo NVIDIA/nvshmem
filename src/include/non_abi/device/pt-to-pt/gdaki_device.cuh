@@ -88,6 +88,17 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE
     return &nvshmemi_gpunetio_device_state_d;
 }
 
+__device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE doca_gpu_dev_verbs_nic_handler
+gdaki_get_nic_handler(nvshmemi_gpunetio_device_qp_t *qp) {
+    uint32_t handler = gdaki_get_state()->cached_nic_handler;
+    // If handler is per QP, access the NIC handler from the QP
+    if (handler == NVSHMEMI_GPUNETIO_NIC_HANDLER_PER_QP) {
+        return qp->qp.nic_handler;
+    }
+    // Otherwise, use the cached handler
+    return static_cast<doca_gpu_dev_verbs_nic_handler>(handler);
+}
+
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint32_t gdaki_get_smid() {
     uint32_t smid;
     asm("mov.u32  %0, %%smid;" : "=r"(smid));
@@ -498,6 +509,7 @@ gdaki_quiet(nvshmemi_gpunetio_device_qp_t *qp) {
     return prod_idx;
 }
 
+template <doca_gpu_dev_verbs_nic_handler NIC_HANDLER = DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE uint64_t
 gdaki_quiet_with_cst(nvshmemi_gpunetio_device_qp_t *qp, bool enforce_cst) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
@@ -508,14 +520,14 @@ gdaki_quiet_with_cst(nvshmemi_gpunetio_device_qp_t *qp, bool enforce_cst) {
     uint64_t get_tail;
 
     if (state->may_skip_cst) {
-        ticket = gdaki_quiet(qp);
+        ticket = gdaki_quiet<NIC_HANDLER>(qp);
     } else {
         // We want to read get_head before calling gdaki_quiet. Thus, ticket =
         // gdaki_quiet(qp) cannot be combined.
         get_head =
             doca_gpu_dev_verbs_atomic_read<uint64_t, DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
                 &mvars->tx_wq.get_head);
-        ticket = gdaki_quiet(qp);
+        ticket = gdaki_quiet<NIC_HANDLER>(qp);
         get_tail =
             doca_gpu_dev_verbs_atomic_read<uint64_t, DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU>(
                 &mvars->tx_wq.get_tail);
@@ -933,7 +945,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
         qp = gdaki_get_qp(proxy_pe, qp_index);
     }
 
-    switch (qp->qp.nic_handler) {
+    switch (gdaki_get_nic_handler(qp)) {
         case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
             gdaki_rma_thread_impl<channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB,
                                   REGION_OPERATION>(rptr, lptr, remaining_size, dst_pe, proxy_pe,
@@ -1140,8 +1152,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
             qp = gdaki_get_qp(proxy_pe, qp_index);
         }
         qp = (nvshmemi_gpunetio_device_qp_t *)__shfl_sync(GDAKI_FULL_WARP, (uintptr_t)qp, 0);
-        // Resolve once per selected QP, outside the transfer loop.
-        switch (qp->qp.nic_handler) {
+        // Resolve once outside the transfer loop, loading the QP only for mixed handlers.
+        switch (gdaki_get_nic_handler(qp)) {
             case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
                 gdaki_rma_impl<SCOPE, channel_op, nbi, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB,
                                REGION_OPERATION>(req_rptr, req_lptr, bytes, dst_pe, proxy_pe, qp,
@@ -2176,8 +2188,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_batch_rma_submit_pe
     nvshmemi_batch_rma_submit_pending_qps(pending_qps, qp_count, submit_qp);
 }
 
-template <threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_quiet(
+template <threadgroup_t SCOPE, doca_gpu_dev_verbs_nic_handler NIC_HANDLER>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_quiet_impl(
     bool enforce_cst, int pe_hint, nvshmemx_qp_handle_t *qp_handle, int num_qps) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     nvshmemi_gpunetio_device_qp_t *qp;
@@ -2227,7 +2239,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_quiet(
                 qp = &state->globalmem.qps[qp_handle[qp_idx] + pe_idx];
             }
 
-            gdaki_quiet_with_cst(qp, enforce_cst);
+            gdaki_quiet_with_cst<NIC_HANDLER>(qp, enforce_cst);
         }
     }
 
@@ -2235,7 +2247,32 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_quiet(
     if (index_in_scope == 0 &&
         (pe_hint == NVSHMEMX_PE_ANY || pe_hint == nvshmemi_device_state_d.mype)) {
         qp = &state->globalmem.qps[nvshmemi_device_state_d.mype];
-        gdaki_quiet_with_cst(qp, enforce_cst);
+        gdaki_quiet_with_cst<NIC_HANDLER>(qp, enforce_cst);
+    }
+}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_quiet(
+    bool enforce_cst, int pe_hint, nvshmemx_qp_handle_t *qp_handle, int num_qps) {
+    // Select the completion counter before walking QPs when handlers are uniform.
+    switch (gdaki_get_state()->cached_nic_handler) {
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR:
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY:
+            nvshmemi_gdaki_qp_quiet_impl<SCOPE, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
+                enforce_cst, pe_hint, qp_handle, num_qps);
+            break;
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW:
+            nvshmemi_gdaki_qp_quiet_impl<SCOPE,
+                                         DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW>(
+                enforce_cst, pe_hint, qp_handle, num_qps);
+            break;
+        case NVSHMEMI_GPUNETIO_NIC_HANDLER_PER_QP:
+            nvshmemi_gdaki_qp_quiet_impl<SCOPE, DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO>(
+                enforce_cst, pe_hint, qp_handle, num_qps);
+            break;
+        default:
+            assert(0 && "Unsupported GDAKI NIC handler cache");
     }
 }
 

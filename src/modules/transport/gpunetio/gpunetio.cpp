@@ -1794,6 +1794,8 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
         qp_d_temp = nullptr;
     }
 
+    uint32_t cached_nic_handler = NVSHMEMI_GPUNETIO_USCALAR_INVALID;
+
     // Populate QP host array with data from all devices and all eps
     for (size_t i = 0; i < selected_dev_ids.size(); ++i) {
         int dev_idx = selected_dev_ids[i];
@@ -1815,6 +1817,16 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
                 // Copy to the right index in the qp_h array holding *all* QPs for all devices
                 int global_ep_index = device->gpu_qp_handle_bases[j] + dst_pe;
                 assert(global_ep_index < num_rc_handles);
+
+                // Check if NIC handlers of all QPs agree, if yes, we can use the cached handler,
+                // otherwise, use the per-QP dispatch handler.
+                auto handler =
+                    device->rc_eps_gpu[device_ep_index]->qp->qp_gverbs->qp_cpu->nic_handler;
+                if (cached_nic_handler == NVSHMEMI_GPUNETIO_USCALAR_INVALID) {
+                    cached_nic_handler = static_cast<uint32_t>(handler);
+                } else if (cached_nic_handler != static_cast<uint32_t>(handler)) {
+                    cached_nic_handler = NVSHMEMI_GPUNETIO_NIC_HANDLER_PER_QP;
+                }
 
                 if (global_ep_index < last_num_rcs) {
                     continue;
@@ -1862,6 +1874,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream), NVSHMEMX_ERROR_OUT_OF_MEMORY);
 
     gpunetio_device_state_h->globalmem.qps = qp_d;
+    gpunetio_device_state_h->cached_nic_handler = cached_nic_handler;
     gpunetio_device_state_h->may_skip_cst = skip_cst;
     gpunetio_device_state_h->use_address_stable_amo = use_address_stable_amo;
     gpunetio_device_state_h->num_devices_initialized = n_devs_selected;
