@@ -14,6 +14,7 @@ set(GPUNETIO_SOURCES
     ${DOCA_HOME}/src/doca_gpunetio_high_level.cpp
     ${DOCA_HOME}/src/doca_gpunetio_log.cpp
     ${DOCA_HOME}/src/doca_gpunetio_sdk_wrapper.cpp
+    ${DOCA_HOME}/src/doca_gpunetio_signal_map.cpp
     ${DOCA_HOME}/src/doca_verbs_cq.cpp
     ${DOCA_HOME}/src/doca_verbs_cq_sdk_wrapper.cpp
     ${DOCA_HOME}/src/doca_verbs_dev.cpp
@@ -28,6 +29,7 @@ set(GPUNETIO_SOURCES
     ${DOCA_HOME}/src/doca_verbs_uar_sdk_wrapper.cpp
     ${DOCA_HOME}/src/doca_verbs_umem.cpp
     ${DOCA_HOME}/src/doca_verbs_umem_sdk_wrapper.cpp
+    ${DOCA_HOME}/src/doca_verbs_utils.cpp
 )
 
 add_library(doca_gpunetio OBJECT ${GPUNETIO_SOURCES})

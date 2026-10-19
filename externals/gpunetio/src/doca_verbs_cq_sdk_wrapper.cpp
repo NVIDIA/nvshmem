@@ -65,7 +65,8 @@ typedef doca_error_t (*doca_verbs_cq_attr_set_cq_overrun_t)(void *cq_attr,
                                                             enum doca_verbs_cq_overrun overrun);
 typedef doca_error_t (*doca_verbs_cq_attr_set_cq_collapsed_t)(void *cq_attr, uint8_t cc);
 typedef doca_error_t (*doca_verbs_cq_attr_set_comp_channel_t)(void *cq_attr, void *comp_channel);
-typedef doca_error_t (*doca_verbs_cq_attr_set_st_t)(void *cq_attr, enum doca_verbs_cq_state cq_state);
+typedef doca_error_t (*doca_verbs_cq_attr_set_st_t)(void *cq_attr,
+                                                    enum doca_verbs_cq_state cq_state);
 typedef doca_error_t (*doca_verbs_cq_create_t)(void *verbs_ctx, void *cq_attr, void **verbs_cq);
 typedef doca_error_t (*doca_verbs_cq_destroy_t)(void *verbs_cq);
 typedef void (*doca_verbs_cq_get_wq_t)(void *verbs_cq, void **cq_buf, uint32_t *cq_num_entries,
@@ -74,12 +75,14 @@ typedef void (*doca_verbs_cq_get_dbr_addr_t)(void *verbs_cq, uint64_t **uar_db_r
                                              uint32_t **ci_dbr, uint32_t **arm_dbr);
 typedef uint32_t (*doca_verbs_cq_get_cqn_t)(const void *verbs_cq);
 typedef doca_error_t (*doca_verbs_cq_set_cq_context_t)(void *verbs_cq, void *cq_context);
-typedef doca_error_t (*doca_verbs_comp_channel_create_t)(void *verbs_context, void **verbs_comp_channel);
+typedef doca_error_t (*doca_verbs_comp_channel_create_t)(void *verbs_context,
+                                                         void **verbs_comp_channel);
 typedef doca_error_t (*doca_verbs_comp_channel_destroy_t)(void *verbs_comp_channel);
 typedef int (*doca_verbs_comp_channel_get_handle_t)(void *verbs_comp_channel);
 typedef void (*doca_verbs_ack_cq_events_t)(void *verbs_cq, unsigned int nevents);
 
-typedef doca_error_t (*doca_verbs_get_cq_event_t)(void *verbs_comp_channel, void **verbs_cq, void **cq_context);
+typedef doca_error_t (*doca_verbs_get_cq_event_t)(void *verbs_comp_channel, void **verbs_cq,
+                                                  void **cq_context);
 
 typedef doca_error_t (*doca_rdma_bridge_get_dev_pd_t)(void *dev, struct ibv_pd **pd);
 
@@ -130,37 +133,63 @@ static void *get_verbs_sdk_symbol(const char *symbol_name) {
 }
 
 static void doca_verbs_sdk_wrapper_init(int *ret) {
+    const char *doca_sdk_lib_path = getenv(DOCA_SDK_LIB_PATH_ENV_VAR);
+    char libcommon_versioned_path[doca_sdk_path_length];
     char libcommon_path[doca_sdk_path_length];
+    char libverbs_versioned_path[doca_sdk_path_length];
     char libverbs_path[doca_sdk_path_length];
+#if DOCA_VERBS_CQ_SDK_WRAPPER_ENABLE_DEBUG == 1
+    void *sdk_log;
+    doca_error_t doca_err = DOCA_SUCCESS;
+    ;
+#endif
 
+    memset(libcommon_versioned_path, '\0', doca_sdk_path_length);
     memset(libcommon_path, '\0', doca_sdk_path_length);
+    memset(libverbs_versioned_path, '\0', doca_sdk_path_length);
     memset(libverbs_path, '\0', doca_sdk_path_length);
 
-    if (getenv(DOCA_SDK_LIB_PATH_ENV_VAR) == NULL)
+    if (doca_sdk_lib_path == NULL) {
+        snprintf(libcommon_versioned_path, doca_sdk_path_length, "%s", "libdoca_common.so.2");
         snprintf(libcommon_path, doca_sdk_path_length, "%s", "libdoca_common.so");
-    else
-        snprintf(libcommon_path, doca_sdk_path_length, "%s/%s", getenv(DOCA_SDK_LIB_PATH_ENV_VAR),
+    } else {
+        snprintf(libcommon_versioned_path, doca_sdk_path_length, "%s/%s", doca_sdk_lib_path,
+                 "libdoca_common.so.2");
+        snprintf(libcommon_path, doca_sdk_path_length, "%s/%s", doca_sdk_lib_path,
                  "libdoca_common.so");
+    }
 
-    if (getenv(DOCA_SDK_LIB_PATH_ENV_VAR) == NULL)
+    if (doca_sdk_lib_path == NULL) {
+        snprintf(libverbs_versioned_path, doca_sdk_path_length, "%s", "libdoca_verbs.so.2");
         snprintf(libverbs_path, doca_sdk_path_length, "%s", "libdoca_verbs.so");
-    else
-        snprintf(libverbs_path, doca_sdk_path_length, "%s/%s", getenv(DOCA_SDK_LIB_PATH_ENV_VAR),
+    } else {
+        snprintf(libverbs_versioned_path, doca_sdk_path_length, "%s/%s", doca_sdk_lib_path,
+                 "libdoca_verbs.so.2");
+        snprintf(libverbs_path, doca_sdk_path_length, "%s/%s", doca_sdk_lib_path,
                  "libdoca_verbs.so");
+    }
 
-    common_handle = dlopen(libcommon_path, RTLD_NOW | RTLD_GLOBAL);
+    common_handle = dlopen(libcommon_versioned_path, RTLD_NOW | RTLD_GLOBAL);
+    if (!common_handle) common_handle = dlopen(libcommon_path, RTLD_NOW | RTLD_GLOBAL);
     if (!common_handle) {
-        DOCA_LOG(LOG_ERR, "Failed to find libdoca_common.so library %s (DOCA_SDK_LIB_PATH=%s)",
-                 libcommon_path, getenv(DOCA_SDK_LIB_PATH_ENV_VAR));
+        DOCA_LOG(LOG_ERR,
+                 "Failed to load DOCA SDK library; tried %s then %s "
+                 "(DOCA_SDK_LIB_PATH=%s)",
+                 libcommon_versioned_path, libcommon_path,
+                 doca_sdk_lib_path == NULL ? "(unset)" : doca_sdk_lib_path);
 
         *ret = -1;
         goto exit_error;
     }
 
-    verbs_handle = dlopen(libverbs_path, RTLD_NOW | RTLD_LOCAL);
+    verbs_handle = dlopen(libverbs_versioned_path, RTLD_NOW | RTLD_LOCAL);
+    if (!verbs_handle) verbs_handle = dlopen(libverbs_path, RTLD_NOW | RTLD_LOCAL);
     if (!verbs_handle) {
-        DOCA_LOG(LOG_ERR, "Failed to find libdoca_verbs.so library %s (DOCA_SDK_LIB_PATH=%s)",
-                 libverbs_path, getenv(DOCA_SDK_LIB_PATH_ENV_VAR));
+        DOCA_LOG(LOG_ERR,
+                 "Failed to load DOCA SDK library; tried %s then %s "
+                 "(DOCA_SDK_LIB_PATH=%s)",
+                 libverbs_versioned_path, libverbs_path,
+                 doca_sdk_lib_path == NULL ? "(unset)" : doca_sdk_lib_path);
 
         *ret = -1;
         goto exit_error;
@@ -196,8 +225,7 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
         (doca_verbs_cq_attr_set_comp_channel_t)get_verbs_sdk_symbol(
             "doca_verbs_cq_attr_set_comp_channel");
     p_doca_verbs_cq_attr_set_st =
-        (doca_verbs_cq_attr_set_st_t)get_verbs_sdk_symbol(
-            "doca_verbs_cq_attr_set_st");
+        (doca_verbs_cq_attr_set_st_t)get_verbs_sdk_symbol("doca_verbs_cq_attr_set_st");
     p_doca_verbs_cq_create = (doca_verbs_cq_create_t)get_verbs_sdk_symbol("doca_verbs_cq_create");
     p_doca_verbs_cq_destroy =
         (doca_verbs_cq_destroy_t)get_verbs_sdk_symbol("doca_verbs_cq_destroy");
@@ -213,7 +241,8 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
     p_doca_verbs_comp_channel_destroy =
         (doca_verbs_comp_channel_destroy_t)get_verbs_sdk_symbol("doca_verbs_comp_channel_destroy");
     p_doca_verbs_comp_channel_get_handle =
-        (doca_verbs_comp_channel_get_handle_t)get_verbs_sdk_symbol("doca_verbs_comp_channel_get_handle");
+        (doca_verbs_comp_channel_get_handle_t)get_verbs_sdk_symbol(
+            "doca_verbs_comp_channel_get_handle");
     p_doca_verbs_get_cq_event =
         (doca_verbs_get_cq_event_t)get_verbs_sdk_symbol("doca_verbs_get_cq_event");
     p_doca_verbs_ack_cq_events =
@@ -236,12 +265,11 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
         !p_doca_verbs_cq_attr_set_cq_size || !p_doca_verbs_cq_attr_set_cq_context ||
         !p_doca_verbs_cq_attr_set_external_datapath_en || !p_doca_verbs_cq_attr_set_external_umem ||
         !p_doca_verbs_cq_attr_set_external_uar || !p_doca_verbs_cq_attr_set_cq_overrun ||
-        !p_doca_verbs_cq_attr_set_comp_channel ||
-        !p_doca_verbs_cq_create || !p_doca_verbs_cq_destroy || !p_doca_verbs_cq_get_wq ||
-        !p_doca_verbs_cq_get_dbr_addr || !p_doca_verbs_cq_get_cqn ||
-        !p_doca_verbs_comp_channel_create || !p_doca_verbs_comp_channel_destroy ||
-        !p_doca_verbs_comp_channel_get_handle || !p_doca_verbs_get_cq_event ||
-        !p_doca_verbs_ack_cq_events) {
+        !p_doca_verbs_cq_attr_set_comp_channel || !p_doca_verbs_cq_create ||
+        !p_doca_verbs_cq_destroy || !p_doca_verbs_cq_get_wq || !p_doca_verbs_cq_get_dbr_addr ||
+        !p_doca_verbs_cq_get_cqn || !p_doca_verbs_comp_channel_create ||
+        !p_doca_verbs_comp_channel_destroy || !p_doca_verbs_comp_channel_get_handle ||
+        !p_doca_verbs_get_cq_event || !p_doca_verbs_ack_cq_events) {
         DOCA_LOG(LOG_ERR, "Failed to get all required DOCA Verbs Dev SDK symbols\n");
         dlclose(verbs_handle);
         verbs_handle = nullptr;
@@ -253,6 +281,15 @@ static void doca_verbs_sdk_wrapper_init(int *ret) {
     if (!p_doca_log_backend_create_with_file_sdk) {
         DOCA_LOG(LOG_ERR,
                  "Failed to get doca_log_backend_create_with_file_sdk DOCA Verbs Dev SDK symbol\n");
+        dlclose(verbs_handle);
+        verbs_handle = nullptr;
+        *ret = -1;
+        goto exit_error;
+    }
+
+    doca_err = p_doca_log_backend_create_with_file_sdk(stderr, &sdk_log);
+    if (doca_err != DOCA_SUCCESS) {
+        DOCA_LOG(LOG_ERR, "DOCA SDK function in %s returned error %d", __func__, doca_err);
         dlclose(verbs_handle);
         verbs_handle = nullptr;
         *ret = -1;
@@ -293,10 +330,6 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_create(void **verbs_cq_a
     doca_error_t doca_err = DOCA_SUCCESS;
     const char *val = getenv(DOCA_SDK_LIB_PATH_ENV_VAR);
 
-#if DOCA_VERBS_CQ_SDK_WRAPPER_ENABLE_DEBUG == 1
-    void *sdk_log;
-#endif
-
     if (get_sdk_wrapper_env_var() > 0) {
         if (init_verbs_sdk_wrapper() != 0) {
             DOCA_LOG(LOG_WARNING,
@@ -305,14 +338,6 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_create(void **verbs_cq_a
                      val);
             return DOCA_SDK_WRAPPER_NOT_FOUND;
         }
-
-#if DOCA_VERBS_CQ_SDK_WRAPPER_ENABLE_DEBUG == 1
-        doca_err = p_doca_log_backend_create_with_file_sdk(stderr, &sdk_log);
-        if (doca_err != DOCA_SUCCESS) {
-            DOCA_LOG(LOG_ERR, "DOCA SDK function in %s returned error %d", __func__, doca_err);
-            return DOCA_SDK_WRAPPER_API_ERROR;
-        }
-#endif
 
         doca_err = p_doca_verbs_cq_attr_create(verbs_cq_attr);
         if (doca_err == DOCA_SUCCESS) {
@@ -511,7 +536,8 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_cq_collapsed(void *c
         return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 }
 
-doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_comp_channel(void *cq_attr, void *compch) {
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_comp_channel(void *cq_attr,
+                                                                         void *compch) {
     doca_error_t doca_err;
 
     if (get_sdk_wrapper_env_var() > 0) {
@@ -530,16 +556,14 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_comp_channel(void *c
         return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 }
 
-doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_st(void *cq_attr, enum doca_verbs_cq_state cq_state)
-{
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_attr_set_st(void *cq_attr,
+                                                               enum doca_verbs_cq_state cq_state) {
     doca_error_t doca_err;
 
     if (get_sdk_wrapper_env_var() > 0) {
-        if (init_verbs_sdk_wrapper() != 0)
-            return DOCA_SDK_WRAPPER_NOT_FOUND;
+        if (init_verbs_sdk_wrapper() != 0) return DOCA_SDK_WRAPPER_NOT_FOUND;
 
-        if (!p_doca_verbs_cq_attr_set_st)
-            return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
+        if (!p_doca_verbs_cq_attr_set_st) return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 
         doca_err = p_doca_verbs_cq_attr_set_st(cq_attr, cq_state);
         if (doca_err == DOCA_SUCCESS)
@@ -678,7 +702,8 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_cq_set_cq_context(void *cq, void
         return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 }
 
-doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_comp_channel_create(void *sdk_context, void **compch) {
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_comp_channel_create(void *sdk_context,
+                                                                    void **compch) {
     doca_error_t doca_err;
     int fd;
     int fd_flags = 0;
@@ -688,13 +713,14 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_comp_channel_create(void *sdk_co
         if (init_verbs_sdk_wrapper() != 0) return DOCA_SDK_WRAPPER_NOT_FOUND;
 
         /*
-         * If symbol p_doca_verbs_cq_set_cq_context is not present, it means the DOCA SDK version is < 3.5.
-         * This implies there is the lack of GPUNetIO open source required symbol so the SDK version of this feature
-         * can't be used.
+         * If symbol p_doca_verbs_cq_set_cq_context is not present, it means the DOCA SDK version is
+         * < 3.5. This implies there is the lack of GPUNetIO open source required symbol so the SDK
+         * version of this feature can't be used.
          */
         if (p_doca_verbs_cq_set_cq_context == nullptr) {
             DOCA_LOG(LOG_ERR,
-                     "DOCA SDK symbol p_doca_verbs_cq_set_cq_context not found at %s. Can't use SDK version for doca_verbs_comp_channel_create.",
+                     "DOCA SDK symbol p_doca_verbs_cq_set_cq_context not found at %s. Can't use "
+                     "SDK version for doca_verbs_comp_channel_create.",
                      __func__);
             return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
         }
@@ -743,8 +769,7 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_comp_channel_destroy(void *compc
         return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 }
 
-doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_get_cq_event(void *compch, void **cq_context)
-{
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_get_cq_event(void *compch, void **cq_context) {
     doca_error_t doca_err;
     void *verbs_cq;
 
@@ -752,8 +777,7 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_get_cq_event(void *compch, void 
         if (init_verbs_sdk_wrapper() != 0) return DOCA_SDK_WRAPPER_NOT_FOUND;
 
         doca_err = p_doca_verbs_get_cq_event(compch, &verbs_cq, cq_context);
-        if (doca_err == DOCA_SUCCESS)
-            return DOCA_SDK_WRAPPER_SUCCESS;
+        if (doca_err == DOCA_SUCCESS) return DOCA_SDK_WRAPPER_SUCCESS;
         if (doca_err == DOCA_ERROR_AGAIN)
             return DOCA_SDK_WRAPPER_ERROR_AGAIN;
         else {
@@ -764,8 +788,8 @@ doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_get_cq_event(void *compch, void 
         return DOCA_SDK_WRAPPER_NOT_SUPPORTED;
 }
 
-doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_ack_cq_events(void *verbs_cq, unsigned int nevents)
-{
+doca_sdk_wrapper_error_t doca_verbs_sdk_wrapper_ack_cq_events(void *verbs_cq,
+                                                              unsigned int nevents) {
     if (get_sdk_wrapper_env_var() > 0) {
         if (init_verbs_sdk_wrapper() != 0) return DOCA_SDK_WRAPPER_NOT_FOUND;
 

@@ -228,7 +228,7 @@ struct doca_verbs_umem_open;
 /**
  * Opaque structure representing a DOCA Verbs UMEM handler open and SDK.
  */
-typedef struct {
+typedef struct doca_verbs_umem {
     enum doca_verbs_lib_type type;
     union {
         void *sdk;
@@ -462,6 +462,11 @@ enum doca_verbs_qp_send_dbr_mode {
  * @brief CC group (congestion control) attribute (experimental SDK).
  */
 #define DOCA_VERBS_QP_ATTR_CC_GROUP (1 << 18)
+
+/**
+ * @brief LAG TX port affinity attribute.
+ */
+#define DOCA_VERBS_QP_ATTR_LAG_TX_PORT_AFFINITY (1 << 19)
 
 /**
  * @brief Specifies the length of a GID (Global ID) in bytes.
@@ -898,7 +903,7 @@ doca_error_t doca_verbs_qp_init_attr_get_emulate_no_dbr_ext(
 /**
  * @brief Set ordering semantic attribute for verbs_qp_init_attr
  * @note Not setting ordering semantic doesn't guarantee ordering semantic didn't change (setting
- * ECE may change it) Supported only by SDK mode.
+ * ECE may change it).
  *
  * @param [in] verbs_qp_init_attr
  * Pointer to verbs_qp_init_attr instance.
@@ -909,15 +914,15 @@ doca_error_t doca_verbs_qp_init_attr_get_emulate_no_dbr_ext(
  * DOCA_SUCCESS - in case of success.
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
- * - DOCA_ERROR_NOT_SUPPORTED - if qp_init_attr is called in open mode.
+ * - DOCA_ERROR_NOT_SUPPORTED - if the DOCA SDK version doesn't support this setter.
  */
+
 doca_error_t doca_verbs_qp_init_attr_set_ordering_semantic(
     doca_verbs_qp_init_attr_t *verbs_qp_init_attr,
     enum doca_verbs_qp_ordering_semantic ordering_semantic);
 
 /**
  * @brief Get ordering semantic attribute from verbs_qp_init_attr
- * Supported only by SDK mode.
  *
  * @param [in] verbs_qp_init_attr
  * Pointer to verbs_qp_init_attr instance.
@@ -928,10 +933,10 @@ doca_error_t doca_verbs_qp_init_attr_set_ordering_semantic(
  * DOCA_SUCCESS - in case of success.
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
- * - DOCA_ERROR_NOT_SUPPORTED - if qp_init_attr is called in open mode.
+ * - DOCA_ERROR_NOT_SUPPORTED - if the DOCA SDK version doesn't support this getter.
  */
 doca_error_t doca_verbs_qp_init_attr_get_ordering_semantic(
-    doca_verbs_qp_init_attr_t *verbs_qp_init_attr,
+    const doca_verbs_qp_init_attr_t *qp_init_attr,
     enum doca_verbs_qp_ordering_semantic *ordering_semantic);
 
 /**
@@ -1304,6 +1309,24 @@ doca_error_t doca_verbs_qp_attr_set_cc_group(doca_verbs_qp_attr_t *verbs_qp_attr
  */
 doca_error_t doca_verbs_qp_attr_set_counter_set_id(doca_verbs_qp_attr_t *qp_attr,
                                                    uint32_t counter_set_id);
+
+/**
+ * @brief Set lag_tx_port_affinity attribute for verbs_qp_attr
+ *
+ * Note that this attribute is not supported in the SDK mode.
+ *
+ * @param [in] verbs_qp_attr
+ * Pointer to verbs_qp_attr instance.
+ * @param [in] lag_tx_port_affinity
+ * lag_tx_port_affinity attribute.
+ *
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure:
+ * - DOCA_ERROR_INVALID_VALUE - received invalid input.
+ */
+doca_error_t doca_verbs_qp_attr_set_lag_tx_port_affinity(doca_verbs_qp_attr_t *qp_attr,
+                                                         uint8_t lag_tx_port_affinity);
 
 /**
  * @brief Create a DOCA Verbs AH instance.
@@ -1858,24 +1881,25 @@ doca_error_t doca_verbs_cq_attr_set_cq_collapsed(doca_verbs_cq_attr_t *cq_attr, 
  * @param [in] cq_attr
  * Pointer to doca_verbs_cq_attr instance.
  * @param [in] comp_channel
- * Pointer to completion channel to bind the CQ to. comp_channel may be null in case the application regrets setting a
- * completion channel.
+ * Pointer to completion channel to bind the CQ to. comp_channel may be null in case the application
+ * regrets setting a completion channel.
  *
  * @return
  * DOCA_SUCCESS - in case of success.
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
-doca_error_t doca_verbs_cq_attr_set_comp_channel(doca_verbs_cq_attr_t *cq_attr, doca_verbs_comp_channel_t *comp_channel);
+doca_error_t doca_verbs_cq_attr_set_comp_channel(doca_verbs_cq_attr_t *cq_attr,
+                                                 doca_verbs_comp_channel_t *comp_channel);
 
 /**
  * @brief CQ doorbell create state
  */
 enum doca_verbs_cq_state {
-	DOCA_VERBS_CQ_ST_NO_ACTION,
-	DOCA_VERBS_CQ_ST_SOLICITED_NOTIFICATION_REQUEST_ARMED,
-	DOCA_VERBS_CQ_ST_NOTIFICATION_REQUEST_ARMED,
-	DOCA_VERBS_CQ_ST_FIRED,
+    DOCA_VERBS_CQ_ST_NO_ACTION,
+    DOCA_VERBS_CQ_ST_SOLICITED_NOTIFICATION_REQUEST_ARMED,
+    DOCA_VERBS_CQ_ST_NOTIFICATION_REQUEST_ARMED,
+    DOCA_VERBS_CQ_ST_FIRED,
 };
 
 /**
@@ -1891,7 +1915,8 @@ enum doca_verbs_cq_state {
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
-doca_error_t doca_verbs_cq_attr_set_st(doca_verbs_cq_attr_t *cq_attr, enum doca_verbs_cq_state cq_state);
+doca_error_t doca_verbs_cq_attr_set_st(doca_verbs_cq_attr_t *cq_attr,
+                                       enum doca_verbs_cq_state cq_state);
 
 /**
  * @brief Create a DOCA Verbs Completion Queue instance.
@@ -1954,7 +1979,7 @@ doca_error_t doca_verbs_cq_get_wq(doca_verbs_cq_t *verbs_cq, void **cq_buf,
  * Pointer to the arm doorbell record
  */
 doca_error_t doca_verbs_cq_get_dbr_db_addr(doca_verbs_cq_t *verbs_cq, uint64_t **uar_db_reg,
-                                        uint32_t **ci_dbr, uint32_t **arm_dbr);
+                                           uint32_t **ci_dbr, uint32_t **arm_dbr);
 
 /**
  * @brief Get the CQ number of a DOCA Verbs CQ instance.
@@ -1970,8 +1995,8 @@ doca_error_t doca_verbs_cq_get_dbr_db_addr(doca_verbs_cq_t *verbs_cq, uint64_t *
 doca_error_t doca_verbs_cq_get_cq_num(const doca_verbs_cq_t *verbs_cq, uint32_t *cqn);
 
 /**
- * @brief Set cq_context attribute for verbs_cq. This function allows to set cq_context if the desired user data is not
- * available at CQ creation time.
+ * @brief Set cq_context attribute for verbs_cq. This function allows to set cq_context if the
+ * desired user data is not available at CQ creation time.
  *
  * @param [in] verbs_cq
  * Pointer to verbs_cq instance.
@@ -1999,7 +2024,8 @@ doca_error_t doca_verbs_cq_set_cq_context(doca_verbs_cq_t *verbs_cq, void *cq_co
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  * - DOCA_ERROR_NO_MEMORY - failed to allocate resources.
  */
-doca_error_t doca_verbs_comp_channel_create(const doca_dev_t *net_dev, doca_verbs_comp_channel_t **verbs_comp_channel);
+doca_error_t doca_verbs_comp_channel_create(const doca_dev_t *net_dev,
+                                            doca_verbs_comp_channel_t **verbs_comp_channel);
 
 /**
  * @brief Destroy a DOCA Verbs Completion Channel instance.
@@ -2027,7 +2053,8 @@ doca_error_t doca_verbs_comp_channel_destroy(doca_verbs_comp_channel_t *verbs_co
  * doca_error code - in case of failure:
  * - DOCA_ERROR_INVALID_VALUE - received invalid input.
  */
-doca_error_t doca_verbs_get_cq_comp_channel_event(doca_verbs_comp_channel_t *verbs_comp_channel, void **cq_context);
+doca_error_t doca_verbs_get_cq_comp_channel_event(doca_verbs_comp_channel_t *verbs_comp_channel,
+                                                  void **cq_context);
 
 /**
  * Acknowledge completion events
@@ -2525,6 +2552,54 @@ uint8_t doca_verbs_device_attr_get_max_qp_init_rd_atom(
     const struct doca_verbs_device_attr *verbs_device_attr);
 
 /**
+ * @brief Get the LAG TX port affinity capability flag of the device.
+ *
+ * @param [in] verbs_device_attr
+ * Pointer to doca_verbs_device_attr instance.
+ *
+ * @return
+ * The LAG TX port affinity capability flag.
+ */
+uint8_t doca_verbs_device_attr_get_is_lag_tx_port_affinity_supported(
+    const struct doca_verbs_device_attr *verbs_device_attr);
+
+/**
+ * @brief Get the number of LAG ports supported by the device.
+ *
+ * @param [in] verbs_device_attr
+ * Pointer to doca_verbs_device_attr instance.
+ *
+ * @return
+ * The number of supported LAG ports.
+ */
+uint8_t doca_verbs_device_attr_get_num_lag_ports(
+    const struct doca_verbs_device_attr *verbs_device_attr);
+
+/**
+ * @brief Get the INIT2 LAG TX port affinity capability flag of the device.
+ *
+ * @param [in] verbs_device_attr
+ * Pointer to doca_verbs_device_attr instance.
+ *
+ * @return
+ * The INIT2 LAG TX port affinity capability flag.
+ */
+uint8_t doca_verbs_device_attr_get_is_init2_lag_tx_port_affinity_supported(
+    const struct doca_verbs_device_attr *verbs_device_attr);
+
+/**
+ * @brief Get the RTS2RTS LAG TX port affinity capability flag of the device.
+ *
+ * @param [in] verbs_device_attr
+ * Pointer to doca_verbs_device_attr instance.
+ *
+ * @return
+ * The RTS2RTS LAG TX port affinity capability flag.
+ */
+uint8_t doca_verbs_device_attr_get_is_rts2rts_lag_tx_port_affinity_supported(
+    const struct doca_verbs_device_attr *verbs_device_attr);
+
+/**
  * @brief Create an instance of DOCA Verbs UMEM.
  *
  * @param [in] net_dev
@@ -2686,6 +2761,22 @@ doca_error_t doca_verbs_uar_reg_addr_get(const doca_verbs_uar_t *uar_obj, void *
  */
 doca_error_t doca_verbs_uar_dbr_less_addr_get(const doca_verbs_uar_t *uar_obj,
                                               void **dbr_less_addr);
+
+/**
+ * @brief This method retrieves the system traffic class of a given port on a given device.
+ *
+ * @param [in] net_dev
+ * Pointer to DOCA dev instance.
+ * @param [in] port_num
+ * The port number to query.
+ * @param [out] global_traffic_class
+ * The global traffic class of the given port.
+ * @return
+ * DOCA_SUCCESS - in case of success.
+ * doca_error code - in case of failure
+ */
+doca_error_t doca_verbs_query_global_traffic_class(doca_dev_t *net_dev, uint16_t port_num,
+                                                   uint8_t *global_traffic_class);
 
 #ifdef __cplusplus
 }
