@@ -92,6 +92,17 @@ esac
 # Defaults for optional environment variables
 ########################################
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
+# Toolkit target directory: x86_64-linux, sbsa-linux (Arm servers) or aarch64-linux (Jetson).
+CUDA_TARGET_DIR="${CUDA_TARGET_DIR:-}"
+if [ -z "$CUDA_TARGET_DIR" ]; then
+    case "$(uname -m)" in
+        aarch64) for t in sbsa-linux aarch64-linux; do
+                     if [ -d "$CUDA_HOME/targets/$t" ]; then CUDA_TARGET_DIR="$t"; break; fi
+                 done
+                 CUDA_TARGET_DIR="${CUDA_TARGET_DIR:-sbsa-linux}" ;;
+        *) CUDA_TARGET_DIR="$(uname -m)-linux" ;;
+    esac
+fi
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 if [ -d "$CUDA_HOME/bin" ]; then
     export PATH="$CUDA_HOME/bin:$PATH"
@@ -255,6 +266,13 @@ TORCH_CUDA_FLAVOR="${TORCH_CUDA_FLAVOR:-cu${CUDA_MAJOR}${CUDA_MINOR}}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/${TORCH_CUDA_FLAVOR}}"
 TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
 pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
+# If $TORCH_SPEC is missing from $TORCH_INDEX_URL, pip falls back to PyPI, whose
+# aarch64 torch wheels are CPU-only. Fail here instead of in every torch-based test.
+if ! python3 -c "import sys, torch; sys.exit(0 if torch.version.cuda else 1)"; then
+    echo "ERROR: $TORCH_SPEC was installed without CUDA support (no match on $TORCH_INDEX_URL?)."
+    echo "Set TORCH_SPEC and/or TORCH_INDEX_URL to a CUDA build of PyTorch for this platform."
+    exit 1
+fi
 pip install "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
 pip install pytest pytest-mpi
 CUTLASS_DSL_SPEC="nvidia-cutlass-dsl>=4.8.0,<5.0"
@@ -390,7 +408,7 @@ if [ -d "$SITE_NVIDIA_DIR" ] && [ -d "$CUDA_HOME" ]; then
         done < <(find "$SITE_NVIDIA_DIR" -path "*/nvvm/libdevice/libdevice.10.bc" 2>/dev/null | sort)
     fi
 
-    TK_INCLUDE="$TK/targets/x86_64-linux/include"
+    TK_INCLUDE="$TK/targets/$CUDA_TARGET_DIR/include"
     if [ -d "$TK_INCLUDE" ]; then
         for target_include in \
             "$SITE_NVIDIA_DIR/cuda_runtime/include" \
@@ -433,7 +451,7 @@ echo "================================================"
 ########################################
 export NVSHMEM_HOME
 export RDMA_CORE_HOME="${RDMA_CORE_HOME:-/usr}"
-export NUMBA_CUDA_INCLUDE_PATH="${NUMBA_CUDA_INCLUDE_PATH:-$CUDA_HOME/targets/x86_64-linux/include}"
+export NUMBA_CUDA_INCLUDE_PATH="${NUMBA_CUDA_INCLUDE_PATH:-$CUDA_HOME/targets/$CUDA_TARGET_DIR/include}"
 export LD_LIBRARY_PATH="$NVSHMEM_LIB_DIR:${SITE_CUDA_LIB_DIRS:+$SITE_CUDA_LIB_DIRS:}$LD_LIBRARY_PATH"
 # Save the base LD_LIBRARY_PATH without pip CUDA libs for NVLS tests
 # that use NCCL (pip CUDA libs cause ABI conflicts with system NCCL).
