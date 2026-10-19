@@ -30,7 +30,7 @@
 #define TRANSPORT_LOG_ABORT 4
 #define TRANSPORT_LOG_TRACE 5
 
-#if defined(NVSHMEM_x86_64)
+#if defined(NVSHMEM_X86_64)
 #define MEM_BARRIER() asm volatile("mfence" ::: "memory")
 #define STORE_BARRIER() asm volatile("sfence" ::: "memory")
 #define LOAD_BARRIER() asm volatile("lfence" ::: "memory")
