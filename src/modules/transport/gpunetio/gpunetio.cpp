@@ -591,6 +591,10 @@ std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> gpunetio_ep::make(
         NVSHMEMI_ERROR_PRINT("doca_gpu_verbs_create_qp_hl failed.\n");
         return {nullptr, NVSHMEMX_ERROR_INTERNAL};
     }
+    if (ep->qp->qp_gverbs->qp_cpu->nic_handler ==
+        DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW) {
+        ep->qp->qp_gverbs->free_flow_ring_db_threshold = gpunetio_state->num_requests_in_batch;
+    }
 
     ep->device_ = device;
     ep->portid = portid_in;
@@ -1131,6 +1135,10 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
         status = doca_gpu_verbs_create_qp_hl(&qp_init_attr, &qp_local_backup);
         NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
                               "doca_gpu_verbs_create_qp_hl failed for %s backup.", kind_str);
+        if (qp_local_backup->qp_gverbs->qp_cpu->nic_handler ==
+            DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW) {
+            qp_local_backup->qp_gverbs->free_flow_ring_db_threshold = state_->num_requests_in_batch;
+        }
         if (gpunetio_qp_requires_cpu_proxy(qp_local_backup)) {
             gpunetio_activate_progress_function(t);
         }
