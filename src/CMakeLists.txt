@@ -1073,6 +1073,7 @@ set(NVSHMEM_TRANSPORT_POLICY_HEADERS
     non_abi/device/transport_specific/types.cuh
     non_abi/device/transport_specific/traits.cuh
     non_abi/device/transport_specific/pointer_sm.cuh
+    non_abi/device/transport_specific/pointer_tma.cuh
     non_abi/device/transport_specific/automatic.cuh
     non_abi/device/transport_specific/api.cuh)
 if (NVSHMEM_ENABLE_TRANSPORT_POLICY)

@@ -42,9 +42,10 @@ using nvshmemx::threadgroup;
 
 /* ---- Routes ------------------------------------------------------------ */
 
-/* Canonical internal routes. Later stages add pointer_tma_route,
- * cft_ce_route, and network_route. */
+/* Canonical internal routes. Later stages add cft_ce_route and
+ * network_route. */
 struct pointer_sm_route {};
+struct pointer_tma_route {};
 struct automatic_route {};
 
 /* Maps a public addressing/transport-policy pair to its route. There is no
@@ -55,6 +56,11 @@ struct route_compatibility;
 template <>
 struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::SM> {
     using route = pointer_sm_route;
+};
+
+template <>
+struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::TMA> {
+    using route = pointer_tma_route;
 };
 
 template <>
@@ -219,11 +225,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_ptr(const void *ptr) {
     }
 }
 
-/* A route's view of the local operand, whichever direction spelled it: `kind`
- * is its compile-time category and is_shared() classifies it. */
+/* A route's view of the local operand: `kind` is its compile-time category,
+ * `is_source` tells a put source from a get destination, and is_shared()
+ * classifies it. */
 template <nvshmemx::memory_space::source Space>
 struct source_local {
     static constexpr local_space kind = to_local_space(Space);
+    static constexpr bool is_source = true;
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared(const void *ptr) {
         return is_shared_ptr<kind>(ptr);
     }
@@ -232,6 +240,7 @@ struct source_local {
 template <nvshmemx::memory_space::dest Space>
 struct dest_local {
     static constexpr local_space kind = to_local_space(Space);
+    static constexpr bool is_source = false;
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared(const void *ptr) {
         return is_shared_ptr<kind>(ptr);
     }
@@ -314,6 +323,42 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_signal_arguments(const uint64
                        reinterpret_cast<uintptr_t>(sig_addr) % sizeof(*sig_addr) == 0 &&
                        heap_range_is_valid(sig_addr, sizeof(*sig_addr));
     return valid ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_INVALID_VALUE;
+}
+
+/* ---- Pointer addressing, shared by the Pointer routes ------------------- */
+
+/* The mapped peer address, or null. */
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *pointer_peer(const void *remote, int pe) {
+    return nvshmemi_ptr(remote, pe);
+}
+
+/* The direct P2P signal update: a volatile store for SET, a system-scope
+ * atomic for ADD. The opcode has already passed check_signal_arguments. */
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void pointer_issue_signal(void *peer, uint64_t signal,
+                                                                   int sig_op) {
+    if (sig_op == NVSHMEM_SIGNAL_SET) {
+        *reinterpret_cast<volatile uint64_t *>(peer) = signal;
+    } else {
+        atomicAdd_system(reinterpret_cast<unsigned long long *>(peer),
+                         static_cast<unsigned long long>(signal));
+    }
+}
+
+/* The Pointer-route signal preflight: valid arguments and a mapped peer word.
+ * ADD is a system-scope atomic on that peer, so it also needs native P2P
+ * atomics. */
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int pointer_preflight_signal(uint64_t *sig_addr,
+                                                                      int sig_op, int pe,
+                                                                      void *&peer) {
+    peer = nullptr;
+    const int status = check_signal_arguments(sig_addr, sig_op, pe);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
+    }
+    peer = pointer_peer(sig_addr, pe);
+    const bool supported = peer != nullptr && (sig_op == NVSHMEM_SIGNAL_SET ||
+                                               nvshmemi_device_state_d.mapped_peer_atomics);
+    return supported ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
 }
 
 /* The more severe of two preflight statuses, with the ordering agree() uses. */

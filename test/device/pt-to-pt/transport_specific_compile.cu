@@ -104,6 +104,37 @@ __global__ void compile_pointer_sm(void *remote, void *local, uint64_t *signal, 
     typed_all<A, P, kBlock, kGlobal>(remote, local, signal, pe);
 }
 
+/* Pointer / TMA: every API at block scope; below block scope only the put
+ * family from a shared or generic local source. */
+template <ts::threadgroup S, Source Local>
+__device__ void put_family(void *remote_ptr, void *local_ptr, uint64_t *signal, int pe) {
+    uint8_t *remote = static_cast<uint8_t *>(remote_ptr);
+    const uint8_t *local = static_cast<const uint8_t *>(local_ptr);
+    using A = ts::addressing::Pointer;
+    using P = ts::transport_policy::TMA;
+    (void)nvshmemx_put<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, pe);
+    (void)nvshmemx_put_nbi<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, pe);
+    (void)nvshmemx_put_signal<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, signal, 1,
+                                                                     NVSHMEM_SIGNAL_SET, pe);
+    (void)nvshmemx_put_signal_nbi<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, signal,
+                                                                         1, NVSHMEM_SIGNAL_ADD, pe);
+    (void)nvshmemx_signal_op<A, P, S>(signal, 1, NVSHMEM_SIGNAL_SET, pe);
+    (void)nvshmemx_quiet<A, P, S>();
+    (void)nvshmemx_flush<A, P, S>();
+    (void)nvshmemx_fence<A, P, S>();
+}
+
+__global__ void compile_pointer_tma(void *remote, void *local, uint64_t *signal, int pe) {
+    using A = ts::addressing::Pointer;
+    using P = ts::transport_policy::TMA;
+    scope_all<A, P, kBlock, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
+    typed_all<A, P, kBlock, kShared>(remote, local, signal, pe);
+    put_family<kThread, kShared>(remote, local, signal, pe);
+    put_family<kThread, kGeneric>(remote, local, signal, pe);
+    put_family<kWarp, kShared>(remote, local, signal, pe);
+    put_family<kWarp, kGeneric>(remote, local, signal, pe);
+}
+
 __global__ void compile_auto_auto(void *remote, void *local, uint64_t *signal, int pe) {
     using A = ts::addressing::Auto;
     using P = ts::transport_policy::Auto;
