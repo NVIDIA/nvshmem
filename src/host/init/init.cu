@@ -22,6 +22,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <vector>
 
 #include "c_api/nvshmemx_api.h"
 #include "internal/host/nvmlwrap.h"
@@ -84,6 +85,7 @@ static size_t nvshmemi_get_device_state_symbol_size() {
 
 static void nvshmemi_init_debug(void);
 static void nvshmemi_init_msg(void);
+static int nvshmemi_setup_proxy_level(nvshmemi_state_t *state);
 int set_job_connectivity(nvshmemi_state_t *);
 
 struct nvshmemi_cuda_fn_table *nvshmemi_cuda_syms;
@@ -1429,6 +1431,10 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
     nvshmemi_refresh_selected_transports(state);
     nvshmemi_warn_if_atomics_unavailable(state);
 
+    /* Agree on proxy level before device state setup. */
+    status = nvshmemi_setup_proxy_level(state);
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "proxy level setup failed \n");
+
     nvshmemi_coll_common_cpu_check_ll128_availability();
 
     status = nvshmemi_init_device_state(state);
@@ -1452,7 +1458,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
         }
     }
 
-    status = nvshmemi_proxy_init(state, nvshmemi_proxy_level(state));
+    status = nvshmemi_proxy_init(state, state->proxy_level);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "proxy initialization failed \n");
 
     nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
@@ -1705,7 +1711,7 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Teams cleanup failed \n");
 
         /*cleaning up proxy*/
-        if (nvshmemi_proxy_level(nvshmemi_state)) {
+        if (nvshmemi_state->proxy_level != NVSHMEMI_PROXY_NONE) {
             status = nvshmemi_proxy_finalize(nvshmemi_state);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "proxy cleanup failed \n");
         }
@@ -1963,26 +1969,44 @@ static void nvshmemi_init_msg(void) {
     }
 }
 
-int nvshmemi_proxy_level(nvshmemi_state_t *state) {
+static int nvshmemi_setup_proxy_level(nvshmemi_state_t *state) {
+    int requires_proxy = 0;
     for (int i = 0; i < state->num_initialized_transports; i++) {
         /* Slots are cleared when a transport fails to connect and is finalized. */
         if (!state->transports[i]) {
             continue;
         }
-        if (state->transports[i]->is_successfully_initialized) {
-            if (state->transports[i]->no_proxy) {
-                continue;
-            } else {
-                return NVSHMEMI_PROXY_FULL;
-            }
+        if (state->transports[i]->is_successfully_initialized && !state->transports[i]->no_proxy) {
+            requires_proxy = 1;
+            break;
         }
     }
 
-    if (nvshmemi_options.DISABLE_LOCAL_ONLY_PROXY) {
-        return NVSHMEMI_PROXY_NONE;
+    std::vector<int> peer_requires_proxy(state->npes);
+    int status = nvshmemi_boot_handle.allgather(&requires_proxy, peer_requires_proxy.data(),
+                                                sizeof(requires_proxy), &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                          "allgather of transport proxy requirements failed \n");
+
+    int proxy_pes = std::count(peer_requires_proxy.begin(), peer_requires_proxy.end(), 1);
+    if (proxy_pes > 0) {
+        /* Full proxy setup includes symmetric allocations and a bootstrap barrier,
+         * so every PE must participate even if its own transports need no proxy. */
+        state->proxy_level = NVSHMEMI_PROXY_FULL;
+        if (proxy_pes != state->npes && state->mype == 0) {
+            NVSHMEMI_WARN_PRINT(
+                "Transport proxy requirements differ across PEs (%d of %d require a proxy). "
+                "Enabling the full proxy on all PEs.",
+                proxy_pes, state->npes);
+        }
+    } else {
+        state->proxy_level = nvshmemi_options.DISABLE_LOCAL_ONLY_PROXY ? NVSHMEMI_PROXY_NONE
+                                                                       : NVSHMEMI_PROXY_MINIMAL;
     }
 
-    return NVSHMEMI_PROXY_MINIMAL;
+    INFO(NVSHMEM_INIT, "[%d] local transport proxy requirement: %d, resolved proxy level: %d",
+         state->mype, requires_proxy, state->proxy_level);
+    return NVSHMEMX_SUCCESS;
 }
 
 int set_job_connectivity(nvshmemi_state_t *state) {
@@ -2057,8 +2081,7 @@ int set_job_connectivity(nvshmemi_state_t *state) {
      * and cases where we have LDST + atomics over a remote transport elsewhere in the code.
      * This catches cases where the remote transport either does, or does not have a proxy.
      */
-    gpu_remote_atomics =
-        nvshmemi_proxy_level(state) == NVSHMEMI_PROXY_FULL ? true : gpu_remote_atomics;
+    gpu_remote_atomics = state->proxy_level == NVSHMEMI_PROXY_FULL ? true : gpu_remote_atomics;
     if (nvshmemi_job_connectivity == NVSHMEMI_JOB_GPU_LDST && gpu_remote_atomics) {
         nvshmemi_job_connectivity = NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS;
     }
@@ -2183,7 +2206,7 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);
 
-    nvshmemi_device_state.proxy = nvshmemi_proxy_level(state);
+    nvshmemi_device_state.proxy = state->proxy_level;
 
     if (nvshmemi_options.ASSERT_ATOMICS_SYNC) {
         nvshmemi_device_state.atomics_sync = 1;
