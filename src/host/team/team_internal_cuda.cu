@@ -165,10 +165,12 @@ __global__ void nvshmemi_team_mapping_kernel(
         nvshmemi_team_creation_psync->pe_info[nvshmemi_device_state_d.mype].pe_in_team;
     int nThreads = nvshmemi_threadgroup_size<SCOPE>();
     int myThread = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     unsigned char *peer_uniqueid_lane =
         reinterpret_cast<unsigned char *>(
             nvshmemi_tma_data_buffer(reinterpret_cast<uintptr_t>(nvshmemi_team_mapping_smem))) +
         myThread * CFT_HANDLE_TX_SIZE;
+#endif
 
     if (myThread == 0) {
         *num_peers_found = 1;
