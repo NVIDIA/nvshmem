@@ -53,6 +53,11 @@ struct route_backend<pointer_sm_route> {
         return pointer_preflight_signal(sig_addr, sig_op, pe, plan.peer);
     }
 
+    /* The copies are synchronous, so ordering needs no capability. */
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
+        return NVSHMEMX_SUCCESS;
+    }
+
     /* ---- Issue: called only after the whole group agreed on preflight,
      * which is also the pre-issue group barrier ---- */
 

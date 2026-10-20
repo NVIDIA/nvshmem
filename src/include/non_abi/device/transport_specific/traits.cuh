@@ -42,10 +42,10 @@ using nvshmemx::threadgroup;
 
 /* ---- Routes ------------------------------------------------------------ */
 
-/* Canonical internal routes. Later stages add cft_ce_route and
- * network_route. */
+/* Canonical internal routes. A later stage adds cft_ce_route. */
 struct pointer_sm_route {};
 struct pointer_tma_route {};
+struct network_route {};
 struct automatic_route {};
 
 /* Maps a public addressing/transport-policy pair to its route. There is no
@@ -61,6 +61,16 @@ struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_po
 template <>
 struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::TMA> {
     using route = pointer_tma_route;
+};
+
+template <>
+struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_policy::Network> {
+    using route = network_route;
+};
+
+template <>
+struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::Network> {
+    using route = network_route;
 };
 
 template <>

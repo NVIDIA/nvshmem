@@ -88,6 +88,7 @@ if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
     nvshmem_add_test(transport_specific_compile.cu)
     nvshmem_add_test(transport_specific_p2p.cu)
     nvshmem_add_test(transport_specific_tma.cu)
+    nvshmem_add_test(transport_specific_network.cu)
 endif()
 nvshmem_add_test(wait.cu)
 

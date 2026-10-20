@@ -15,6 +15,16 @@
 #define NVSHMEMX_TRANSPORT_POLICY_AVAILABLE 0
 #endif
 
+#if defined(CONTRACT_CASE_network_p2p_only)
+/* Emulate a P2P-only package (NVSHMEM_BUILD_P2P_ONLY=ON) the same way: the
+ * device headers then compile every nvshmemi_transfer_* call against inline
+ * stubs and never include the proxy or NIC device code. */
+#include "non_abi/c/nvshmem_build_options.h"
+#ifndef NVSHMEM_BUILD_P2P_ONLY
+#define NVSHMEM_BUILD_P2P_ONLY
+#endif
+#endif
+
 /* Every case except optin_required opts in. */
 #if !defined(CONTRACT_CASE_optin_required)
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
@@ -50,6 +60,9 @@ constexpr auto kBlock = nvshmemx::threadgroup::block;
 #if defined(CONTRACT_CASE_legal)
 /* Positive control: the harness flags are sufficient for a legal consumer. */
 __global__ void legal(uint8_t *destination, const uint8_t *source, uint64_t *signal, int pe) {
+    (void)nvshmemx_get_nbi<uint8_t, Auto, Network, nvshmemx::threadgroup::warp,
+                           space::source::global, space::dest::global>(destination, source, 16, pe);
+    (void)nvshmemx_flush<Auto, Network, nvshmemx::threadgroup::thread>();
     constexpr space::source kSource = space::source::generic;
     constexpr space::dest kDest = space::dest::global;
     (void)nvshmemx_put<uint8_t, Pointer, SM, kBlock, kSource, kDest>(destination, source, 16, pe);
@@ -61,6 +74,46 @@ __global__ void legal(uint8_t *destination, const uint8_t *source, uint64_t *sig
     (void)nvshmemx_signal_op<Pointer, SM, kBlock>(signal, 1, NVSHMEM_SIGNAL_ADD, pe);
     (void)nvshmemx_quiet<Pointer, SM, kBlock>();
     (void)nvshmemx_fence<Auto, AutoPolicy, kBlock>();
+}
+
+#elif defined(CONTRACT_CASE_network_p2p_only) || defined(CONTRACT_CASE_network_symbols)
+/* Every Auto / Network API at every scope. In the P2P-only emulation the
+ * object must reference no network transport symbol, so a P2P-only package
+ * links it; the route then returns NOT_SUPPORTED at run time. The same kernels
+ * built against the package as configured are the control: when that package
+ * links the transfer primitives from its device library, the object must
+ * reference them, which shows the symbol check can observe a dependency. */
+#if defined(CONTRACT_CASE_network_symbols) && !defined(NVSHMEM_BUILD_P2P_ONLY) && \
+    !defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING)
+__device__ int transport_specific_contract_expects_transfer_symbols;
+#endif
+
+template <nvshmemx::threadgroup Scope>
+__device__ int network_all(uint8_t *remote, uint8_t *local, uint64_t *signal, int pe) {
+    constexpr auto kLocal = space::source::global;
+    constexpr auto kLocalDest = space::dest::global;
+    int status = nvshmemx_put<uint8_t, Auto, Network, Scope, kLocal>(remote, local, 16, pe);
+    status |= nvshmemx_put_nbi<uint8_t, Auto, Network, Scope, kLocal>(remote, local, 16, pe);
+    status |= nvshmemx_get<uint8_t, Auto, Network, Scope, space::source::global, kLocalDest>(
+        local, remote, 16, pe);
+    status |= nvshmemx_get_nbi<uint8_t, Auto, Network, Scope, space::source::global, kLocalDest>(
+        local, remote, 16, pe);
+    status |= nvshmemx_put_signal<uint8_t, Auto, Network, Scope, kLocal>(remote, local, 16, signal,
+                                                                         1, NVSHMEM_SIGNAL_SET, pe);
+    status |= nvshmemx_put_signal_nbi<uint8_t, Auto, Network, Scope, kLocal>(
+        remote, local, 16, signal, 1, NVSHMEM_SIGNAL_ADD, pe);
+    status |= nvshmemx_signal_op<Auto, Network, Scope>(signal, 1, NVSHMEM_SIGNAL_ADD, pe);
+    status |= nvshmemx_quiet<Auto, Network, Scope>();
+    status |= nvshmemx_flush<Auto, Network, Scope>();
+    status |= nvshmemx_fence<Auto, Network, Scope>();
+    return status;
+}
+
+__global__ void network_symbols(uint8_t *remote, uint8_t *local, uint64_t *signal, int pe,
+                                int *status) {
+    *status = network_all<nvshmemx::threadgroup::thread>(remote, local, signal, pe) |
+              network_all<nvshmemx::threadgroup::warp>(remote, local, signal, pe) |
+              network_all<kBlock>(remote, local, signal, pe);
 }
 
 #elif defined(CONTRACT_CASE_invalid_pair)
@@ -126,10 +179,14 @@ __global__ void cv_qualified_type(const float *destination, const float *source,
  * Pointer / SM must never classify its local operand, so every RMA family and
  * scope of that route is instantiated. Pointer / TMA is instantiated for every
  * RMA family at block scope and, except from a global source, for the put
- * family below block scope, its only legal forms. The internal source_local / dest_local
- * classifiers, which later routes use to classify a generic operand, are instantiated as well: they
- * keep the generic build observable and must fold away for an explicit spelling. Auto / Auto
- * intentionally retains portable classification and is excluded. */
+ * family below block scope, its only legal forms. Auto / Network is
+ * instantiated for every RMA family and scope: its explicit shared spelling
+ * returns INVALID_VALUE without classification and its explicit global
+ * spelling is trusted. The internal source_local / dest_local classifiers,
+ * which later routes use to classify a generic operand, are instantiated as
+ * well: they keep the generic build observable and must fold away for an
+ * explicit spelling. Auto / Auto intentionally retains portable
+ * classification and is excluded. */
 #ifndef LOCAL_SPACE
 #error "LOCAL_SPACE must be shared, global, or generic"
 #endif
@@ -174,6 +231,7 @@ __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *sign
     uint8_t *local;
     asm("mov.b64 %0, %1;" : "=l"(local) : "l"(param));
     int result = route_rma<Pointer, SM, Scope>(remote, local, signal, bytes, pe);
+    result += route_rma<Auto, Network, Scope>(remote, local, signal, bytes, pe);
     if constexpr (Scope == nvshmemx::threadgroup::block) {
         result += route_rma<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
     } else if constexpr (kSource != space::source::global) {

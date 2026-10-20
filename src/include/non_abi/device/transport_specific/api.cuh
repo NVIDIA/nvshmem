@@ -7,6 +7,7 @@
 #define _NVSHMEMI_TRANSPORT_SPECIFIC_API_CUH_
 
 #include "non_abi/device/transport_specific/automatic.cuh"
+#include "non_abi/device/transport_specific/network.cuh"
 #include "non_abi/device/transport_specific/pointer_sm.cuh"
 #include "non_abi/device/transport_specific/pointer_tma.cuh"
 #include "non_abi/device/transport_specific/traits.cuh"
@@ -70,6 +71,9 @@ __device__ inline const char *trace_scope_name(threadgroup scope) {
     return scope == threadgroup::thread ? "thread" : scope == threadgroup::warp ? "warp" : "block";
 }
 #endif
+
+/* The trace's target PE for operations that have none, such as ordering. */
+inline constexpr int kNoTargetPe = -1;
 
 /* Returns a status that was decided before any work was issued. Debug builds
  * report it once per threadgroup; release builds compile this to a plain
@@ -181,12 +185,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int signal_op(uint64_t *sig_addr, uint6
     return Backend::template signal_op<Scope>(sig, signal, sig_op);
 }
 
-/* Ordering has no arguments to preflight. */
+/* Ordering has no arguments, only the route's capability to preflight. That
+ * capability is job-wide state, so it is group-uniform without an agreement,
+ * and a route that always has it folds the check away. */
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, trace_op Op>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int ordering() {
     using Route = route_for<Addressing, TransportPolicy>;
     using Backend = route_backend<Route>;
     validate_scope<Scope>();
+    const int status = Backend::preflight_ordering();
+    if (status != NVSHMEMX_SUCCESS) {
+        return not_issued<Route, Scope, Op>(status, kNoTargetPe);
+    }
     if constexpr (Op == trace_op::quiet) {
         return Backend::template quiet<Scope>();
     } else if constexpr (Op == trace_op::flush) {
