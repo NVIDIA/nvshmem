@@ -11,6 +11,7 @@
 #include <cuda_runtime.h>
 #include <tuple>
 #include <vector>
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/common/nvshmemi_runtime_types.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
@@ -64,6 +65,7 @@ typedef struct nvshmemi_state_dec {
     cudaStream_t my_stream;
     // proxy
     void *proxy;
+    nvshmemi_proxy_status proxy_level;
     cudaStream_t *custreams;
     cudaEvent_t *cuevents;
     bool *active_internal_streams;
