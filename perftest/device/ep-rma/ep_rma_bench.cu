@@ -265,15 +265,27 @@ int main(int argc, char **argv) {
     unsigned long long *recv_meta =
         (unsigned long long *)nvshmem_malloc((size_t)P * recv_cap * sizeof(unsigned long long));
     // Staging is never addressed by a peer: it is only ever read locally as the
-    // source of a put. Plain device allocations are both correct and simpler.
+    // source of a put, so it does not need to be symmetric. It does need to be
+    // registered with the remote transports: over IBRC an unregistered put
+    // source fails with a local protection error on the NIC (only the P2P path
+    // accepts arbitrary local pointers).
+    const size_t stage_bytes = (size_t)std::max(1, ncopy) * H * EB;
+    const size_t stage_meta_bytes = (size_t)std::max(1, ncopy) * sizeof(unsigned long long);
+    const size_t ret_stage_bytes = (size_t)P * T_ * H * sizeof(float);
     char *stage = nullptr;
     unsigned long long *stage_meta = nullptr;
-    CUDA_CHECK(cudaMalloc(&stage, (size_t)std::max(1, ncopy) * H * EB));
-    CUDA_CHECK(cudaMalloc(&stage_meta, (size_t)std::max(1, ncopy) * sizeof(unsigned long long)));
+    CUDA_CHECK(cudaMalloc(&stage, stage_bytes));
+    CUDA_CHECK(cudaMalloc(&stage_meta, stage_meta_bytes));
     float *ret_in = (float *)nvshmem_malloc((size_t)P * T_ * H * sizeof(float));
     float *ret_stage = nullptr, *combine_out = nullptr;
-    CUDA_CHECK(cudaMalloc(&ret_stage, (size_t)P * T_ * H * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&ret_stage, ret_stage_bytes));
     CUDA_CHECK(cudaMalloc(&combine_out, (size_t)T_ * H * sizeof(float)));
+    if (nvshmemx_buffer_register(stage, stage_bytes) != 0 ||
+        nvshmemx_buffer_register(stage_meta, stage_meta_bytes) != 0 ||
+        nvshmemx_buffer_register(ret_stage, ret_stage_bytes) != 0) {
+        std::fprintf(stderr, "rank %d: nvshmemx_buffer_register failed for a staging buffer\n", rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     if (!send_buf || !recv || !recv_meta || !ret_in) {
         std::fprintf(stderr, "rank %d: symmetric allocation failed\n", rank);
         MPI_Abort(MPI_COMM_WORLD, 3);
@@ -304,6 +316,11 @@ int main(int argc, char **argv) {
     CUDA_CHECK(cudaMalloc(&d_tok, sizeof(int) * std::max(1, ncopy)));
     CUDA_CHECK(cudaMalloc(&d_meta, sizeof(unsigned long long) * std::max(1, ncopy)));
     CUDA_CHECK(cudaMalloc(&d_meta_route, sizeof(unsigned long long) * std::max(1, ncopy)));
+    // v0 puts its per-copy metadata straight from d_meta_route, so it is a put source too.
+    if (nvshmemx_buffer_register(d_meta_route, sizeof(unsigned long long) * std::max(1, ncopy)) != 0) {
+        std::fprintf(stderr, "rank %d: nvshmemx_buffer_register failed for d_meta_route\n", rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     if (ncopy) {
         CUDA_CHECK(cudaMemcpy(d_meta_route, h_meta_route.data(),
                               sizeof(unsigned long long) * ncopy, cudaMemcpyHostToDevice));
@@ -604,6 +621,8 @@ int main(int argc, char **argv) {
         std::fflush(stdout);
     }
 
+    nvshmemx_buffer_unregister(stage); nvshmemx_buffer_unregister(stage_meta);
+    nvshmemx_buffer_unregister(ret_stage); nvshmemx_buffer_unregister(d_meta_route);
     nvshmem_free(send_buf); nvshmem_free(recv); nvshmem_free(recv_meta);
     nvshmem_free(ret_in); cudaFree(stage); cudaFree(stage_meta);
     cudaFree(ret_stage); cudaFree(combine_out); cudaFree(d_exp_counts); cudaFree(d_tok); cudaFree(d_meta);
