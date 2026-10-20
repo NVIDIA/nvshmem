@@ -1635,6 +1635,11 @@ void progress_transports(proxy_state_t *proxy_state) {
     for (int i = 0; i < state->num_initialized_transports; i++) {
         struct nvshmem_transport *tcurr = state->transports[i];
 
+        /* A transport that failed to connect may have been finalized. */
+        if (!tcurr) {
+            continue;
+        }
+
         if (!((proxy_state->transport_bitmap) & (1 << i)) &&
             (tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_IBGDA &&
              tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_GPUNETIO)) {
