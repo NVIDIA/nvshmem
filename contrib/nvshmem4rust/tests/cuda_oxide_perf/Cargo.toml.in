@@ -2,12 +2,13 @@
 name = "nvshmem_cuda_oxide_perf"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
 license = "Apache-2.0"
 
 [workspace]
 
 [dependencies]
-cuda-core = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-core" }
+cuda-core = "@NVSHMEM_CUDA_CORE_VERSION@"
 cuda-device = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-device" }
 cuda-host = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-host" }
 nvshmem = { path = "../nvshmem_host_runtime" }

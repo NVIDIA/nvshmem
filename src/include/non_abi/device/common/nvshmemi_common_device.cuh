@@ -17,10 +17,10 @@
 #include <cuda/std/cstddef>
 #include <cuda/std/type_traits>
 #endif
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host/nvshmem_common.cuh"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
@@ -37,7 +37,7 @@
 #include "non_abi/device/common/nvshmemi_path_predicates.cuh"
 #include "non_abi/device/common/nvshmemi_region_device.cuh"
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
-#include "device/logical_endpoint_device.cuh"
+#include "non_abi/device/common/logical_endpoint_device.cuh"
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
 
 #define _LL_MAX_UNROLL 4
@@ -1606,9 +1606,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
         }
 #endif
     } else {
-        nvshmemi_transfer_put_signal<SCOPE>((void *)dest, (void *)source, nelems * sizeof(T),
-                                            (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe,
-                                            is_nbi, qp_index);
+        if (is_nbi) {
+            nvshmemi_transfer_put_signal_nbi<SCOPE>((void *)dest, (void *)source,
+                                                    nelems * sizeof(T), (void *)sig_addr, signal,
+                                                    (nvshmemi_amo_t)sig_op, pe, qp_index);
+        } else {
+            nvshmemi_transfer_put_signal<SCOPE>((void *)dest, (void *)source, nelems * sizeof(T),
+                                                (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op,
+                                                pe, qp_index);
+        }
     }
 }
 
@@ -2006,7 +2012,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_mcast_recvLL(T *dest, con
     if (TYPE_IS_FLOAT(T)) {
         for (int i = myIdx; i < num_subelems; i += groupSize) {
             float data1, flag1;
-            volatile uint32_t flagu32;
+            uint32_t flagu32;
             do {
                 asm volatile("ld.volatile.global.v2.f32 {%0, %1}, [%2];"
                              : "=f"(data1), "=f"(flag1)

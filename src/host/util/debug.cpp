@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <cstdarg>
 #include <cstdio>
-#include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep for NVSHMEM_TRACE
+#include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep for NVSHMEM_TRACE
 #ifdef NVSHMEM_TRACE
 #include <chrono>
 #endif

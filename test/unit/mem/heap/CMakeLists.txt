@@ -1,5 +1,0 @@
-if(GTest_FOUND)
-nvshmem_add_gtest_unit_test_prefix(nvshmemi_symmetric_heap_unit_tests.cpp "heap_" "${NVSHMEM_TEST_TLD}/../src/host/mem/mem_heap.cpp")
-nvshmem_add_gtest_unit_test_prefix(static_unit_tests.cpp "heap_" "${NVSHMEM_TEST_TLD}/../src/host/mem/mem_heap.cpp")
-nvshmem_add_gtest_unit_test_prefix(dynamic_unit_tests.cpp "heap_" "${NVSHMEM_TEST_TLD}/../src/host/mem/mem_heap.cpp")
-endif()

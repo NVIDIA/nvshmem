@@ -3,24 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <cuda_runtime.h>                                    // for cudaMemcpyAsync
-#include <driver_types.h>                                    // for cudaStream_t
-#include <stddef.h>                                          // for NULL, size_t
-#include <stdint.h>                                          // for uint64_t
-#include <stdlib.h>                                          // for exit
-#include "device_host/nvshmem_types.h"                       // for nvshmemi_device...
-#include "device_host/nvshmem_common.cuh"                    // for NVSHMEMI_REPT_F...
-#include "host/nvshmem_api.h"                                // for nvshmem_char_put
-#include "host/nvshmemx_api.h"                               // for nvshmemx_char_g...
-#include "non_abi/nvshmemx_error.h"                          // for NVSHMEMI_ERROR_...
-#include "device_host_transport/nvshmem_common_transport.h"  // for NVSHMEMI_OP_PUT
-#include "internal/host/debug.h"                             // for INFO, NVSHMEM_P2P
-#include "internal/host/nvshmem_internal.h"                  // for NVSHMEMI_CHECK_...
-#include "internal/host/nvshmem_nvtx.hpp"                    // for nvtx_cond_range
-#include "internal/host/nvshmemi_symmetric_heap.hpp"         // for nvshmemi_symmet...
-#include "internal/host/nvshmemi_types.h"                    // for nvshmemi_state
-#include "internal/host/util.h"                              // for CUDA_RUNTIME_CH...
-#include "internal/host_transport/transport.h"               // for rma_bytesdesc_t
+#include <cuda_runtime.h>                                       // for cudaMemcpyAsync
+#include <driver_types.h>                                       // for cudaStream_t
+#include <stddef.h>                                             // for NULL, size_t
+#include <stdint.h>                                             // for uint64_t
+#include <stdlib.h>                                             // for exit
+#include "non_abi/device/common/nvshmemi_runtime_types.h"       // for nvshmemi_device...
+#include "non_abi/device/common/nvshmem_common.cuh"             // for NVSHMEMI_REPT_F...
+#include "c_api/nvshmem_api.h"                                  // for nvshmem_char_put
+#include "c_api/nvshmemx_api.h"                                 // for nvshmemx_char_g...
+#include "non_abi/c/nvshmemi_error_macros.h"                    // for NVSHMEMI_ERROR_...
+#include "non_abi/device/transport/nvshmem_common_transport.h"  // for NVSHMEMI_OP_PUT
+#include "internal/host/debug.h"                                // for INFO, NVSHMEM_P2P
+#include "internal/host/nvshmem_internal.h"                     // for NVSHMEMI_CHECK_...
+#include "internal/host/nvshmemi_rma_translation.hpp"
+#include "internal/host/nvshmem_nvtx.hpp"             // for nvtx_cond_range
+#include "internal/host/nvshmemi_symmetric_heap.hpp"  // for nvshmemi_symmet...
+#include "internal/host/nvshmemi_types.h"             // for nvshmemi_state
+#include "internal/host/util.h"                       // for CUDA_RUNTIME_CH...
+#include "internal/host_transport/transport.h"        // for rma_bytesdesc_t
 #include "internal/host/nvshmemi_region.h"
 
 #define NOT_A_CUDA_STREAM ((cudaStream_t)0)
@@ -195,7 +196,6 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
     const int stream_idx = distance % nvshmemi_options.MAX_PEER_STREAMS;
     cudaStream_t custrm = nvshmemi_state->custreams[stream_idx];
     cudaEvent_t cuev = nvshmemi_state->cuevents[stream_idx];
-    void *destptr_actual, *srcptr_actual;
     rma_memdesc_t dest, src;
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, lstride, rstride};
 
@@ -204,15 +204,16 @@ static inline int nvshmemi_prepare_and_post_mapped_rma(rma_verb_t verb, size_t n
         nvshmemi_state->used_internal_streams = 1;
     }
 
+    void *const mapped_ptr =
+        nvshmemi_translate_mapped_ptr(remote, pe, nvshmemi_state->heap_obj->get_local_pe_bases());
+
     if ((verb.desc == NVSHMEMI_OP_P) || (verb.desc == NVSHMEMI_OP_PUT) ||
         (verb.desc == NVSHMEMI_OP_PUT_SIGNAL)) {
-        NVSHMEMU_MAPPED_PTR_TRANSLATE(destptr_actual, remote, pe)
-        dest.ptr = (void *)destptr_actual;
+        dest.ptr = mapped_ptr;
         dest.offset = (char *)remote - (char *)(nvshmemi_device_state.heap_base);
         src.ptr = local;
     } else {
-        NVSHMEMU_MAPPED_PTR_TRANSLATE(srcptr_actual, remote, pe)
-        src.ptr = (void *)srcptr_actual;
+        src.ptr = mapped_ptr;
         src.offset = (char *)remote - (char *)(nvshmemi_device_state.heap_base);
         dest.ptr = local;
         bytesdesc.srcstride = rstride;
@@ -237,9 +238,7 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                                           uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                           cudaStream_t cstrm) {
     rma_verb_t verb = {desc, is_nbi, is_stream, cstrm};
-    int t = nvshmemi_state->selected_transport_for_rma[pe];
     rma_bytesdesc_t bytesdesc = {(size_t)nelems, (int)elembytes, 1, 1};
-    struct nvshmem_transport *tcurr = (t >= 0) ? nvshmemi_state->transports[t] : NULL;
     int status = 0;
 
     /* Mapper Peer */
@@ -258,24 +257,28 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
         goto out;
     }
 
-    /* IBGDA will not set the RMA transport because it doesn't work on host APIs.
-     * On stream will work though.
-     */
-    if (t < 0 && !verb.is_stream) {
-        NVSHMEMI_ERROR_EXIT("[%d] rma not supported on transport to pe: %d \n",
-                            nvshmemi_state->mype, pe);
-    }
-
     /* off stream */
     if (!verb.is_stream) {
+        const auto remote_target = nvshmemi_translate_unmapped_ptr(
+            rptr, pe, nvshmemi_state->heap_obj->get_remote_pe_bases());
+        const auto transport_pe = remote_target.transport_pe;
+        const int transport_id = nvshmemi_state->selected_transport_for_rma[transport_pe.value()];
+        /* IBGDA will not set the RMA transport because it doesn't work on host APIs. */
+        if (transport_id < 0) {
+            NVSHMEMI_ERROR_EXIT("[%d] rma not supported on transport to pe: %d \n",
+                                nvshmemi_state->mype, transport_pe.value());
+        }
+        struct nvshmem_transport *tcurr = nvshmemi_state->transports[transport_id];
+
         if (verb.desc == NVSHMEMI_OP_P) {
             rma_memdesc_t localdesc, remotedesc;
             localdesc.ptr = lptr;
             localdesc.handle = NULL;
-            NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(remotedesc.ptr, rptr, pe);
-            nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, pe, t);
-            status = tcurr->host_ops.rma(tcurr, pe, verb, &remotedesc, &localdesc, bytesdesc,
-                                         NVSHMEMX_QP_HOST);
+            remotedesc.ptr = remote_target.remote_ptr;
+            nvshmemi_get_remote_mem_handle(&remotedesc, NULL, rptr, transport_pe.value(),
+                                           transport_id);
+            status = tcurr->host_ops.rma(tcurr, transport_pe.value(), verb, &remotedesc, &localdesc,
+                                         bytesdesc, NVSHMEMX_QP_HOST);
             if (unlikely(status)) {
                 NVSHMEMI_ERROR_PRINT("aborting due to error in process_channel_dma\n");
                 exit(-1);
@@ -286,11 +289,12 @@ static void nvshmemi_prepare_and_post_rma(const char *apiname, nvshmemi_op_t des
                          0) &&
                 verb.is_nbi && (verb.desc == NVSHMEMI_OP_PUT || verb.desc == NVSHMEMI_OP_GET) &&
                 lstride == 1 && rstride == 1 && nvshmemi_region_host_prepare_rma_attrs(&attrs)) {
-                nvshmemi_process_multisend_rma_with_hints(
-                    tcurr, t, pe, verb, rptr, lptr, nelems * elembytes, NVSHMEMX_QP_HOST, &attrs);
+                nvshmemi_process_multisend_rma_with_hints(tcurr, transport_id, remote_target, verb,
+                                                          rptr, lptr, nelems * elembytes,
+                                                          NVSHMEMX_QP_HOST, &attrs);
             } else {
-                nvshmemi_process_multisend_rma(tcurr, t, pe, verb, rptr, lptr, nelems * elembytes,
-                                               NVSHMEMX_QP_HOST);
+                nvshmemi_process_multisend_rma(tcurr, transport_id, remote_target, verb, rptr, lptr,
+                                               nelems * elembytes, NVSHMEMX_QP_HOST);
             }
         }
         goto out;

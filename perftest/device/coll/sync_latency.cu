@@ -7,7 +7,7 @@
 
 #include "coll_test.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -53,7 +53,7 @@ SYNC_KERNEL(, , 1, _all_, _all, , );
 SYNC_KERNEL(x, _warp, warpSize, _all_, _all, , );
 SYNC_KERNEL(x, _block, INT_MAX, _all_, _all, , );
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

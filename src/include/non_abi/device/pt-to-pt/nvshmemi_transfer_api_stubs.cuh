@@ -14,8 +14,8 @@
 #include <cuda_runtime.h>
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "device/nvshmem_device_macros.h"
-#include "device_host_transport/nvshmem_constants.h"
-#include "non_abi/nvshmemi_region_types.h"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
 
 #ifndef _NVSHMEMI_TRANSFER_H_
 #define _NVSHMEMI_TRANSFER_H_
@@ -41,7 +41,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_rma(
 template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_put_signal(
     void* /*rptr*/, void* /*lptr*/, size_t /*bytes*/, void* /*sig_addr*/, uint64_t /*signal*/,
-    nvshmemi_amo_t /*sig_op*/, int /*pe*/, bool /*is_nbi*/,
+    nvshmemi_amo_t /*sig_op*/, int /*pe*/,
+    nvshmemx_qp_handle_t /*qp_index*/ = NVSHMEMX_QP_DEFAULT) {}
+
+template <threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_transfer_put_signal_nbi(
+    void* /*rptr*/, void* /*lptr*/, size_t /*bytes*/, void* /*sig_addr*/, uint64_t /*signal*/,
+    nvshmemi_amo_t /*sig_op*/, int /*pe*/,
     nvshmemx_qp_handle_t /*qp_index*/ = NVSHMEMX_QP_DEFAULT) {}
 
 template <threadgroup_t SCOPE, nvshmemi_op_t channel_op,

@@ -6,7 +6,6 @@ import pytest
 from utils import uid_init, mpi_init, get_local_rank_per_node
 from nvshmem.core import finalize, barrier, Teams
 from cuda.core import Device
-from test_device_rma import _finalize_kernels
 
 
 def pytest_addoption(parser):
@@ -31,5 +30,4 @@ def nvshmem_init_fini(request):
     dev.set_current()
     barrier(Teams.TEAM_WORLD, stream=dev.create_stream())
     dev.sync()
-    _finalize_kernels()
     finalize()

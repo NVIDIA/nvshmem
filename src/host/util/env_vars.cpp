@@ -19,7 +19,7 @@
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "internal/host/util.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "device_host/nvshmem_common.cuh"  // IWYU pragma: keep
+#include "non_abi/device/common/nvshmem_common.cuh"  // IWYU pragma: keep
 
 #define NVSHPRI_float "%0.2f"
 #define NVSHPRI_double "%0.2f"

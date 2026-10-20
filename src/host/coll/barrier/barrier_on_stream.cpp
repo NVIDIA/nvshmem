@@ -3,21 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <cuda_runtime.h>                    // for cudaEventRecord, cudaS...
-#include <driver_types.h>                    // for cudaStream_t, cudaEvent_t
-#include <atomic>                            // for atomic, __atomic_base
-#include "barrier.h"                         // for nvshmemi_call_barrier_...
-#include "device_host/nvshmem_common.cuh"    // for NVSHMEM_TEAM_WORLD
-#include "device_host/nvshmem_types.h"       // for nvshmem_team_t, nvshme...
-#include "host/nvshmem_api.h"                // for nvshmem_team_my_pe
-#include "host/nvshmemx_api.h"               // for nvshmemx_quiet_on_stream
-#include "host/nvshmemx_coll_api.h"          // for nvshmemx_barrier_all_o...
-#include "internal/host/debug.h"             // for TRACE
-#include "internal/host/nvshmem_internal.h"  // for nvshmemi_mps_shmdata
-#include "internal/host/nvshmemi_types.h"    // for nvshmemi_state
-#include "internal/host/nvshmem_nvtx.hpp"    // for nvtx_cond_range, COLL_OPT
-#include "internal/host/nvshmemi_team.h"     // for nvshmemi_team_same_gpu
-#include "internal/host/util.h"              // for nvshmemi_check_state_a...
+#include <cuda_runtime.h>                                  // for cudaEventRecord, cudaS...
+#include <driver_types.h>                                  // for cudaStream_t, cudaEvent_t
+#include <atomic>                                          // for atomic, __atomic_base
+#include "barrier.h"                                       // for nvshmemi_call_barrier_...
+#include "non_abi/device/common/nvshmem_common.cuh"        // for NVSHMEM_TEAM_WORLD
+#include "non_abi/device/common/nvshmemi_runtime_types.h"  // for nvshmem_team_t, nvshme...
+#include "c_api/nvshmem_api.h"                             // for nvshmem_team_my_pe
+#include "c_api/nvshmemx_api.h"                            // for nvshmemx_quiet_on_stream
+#include "c_api/nvshmemx_coll_api.h"                       // for nvshmemx_barrier_all_o...
+#include "internal/host/debug.h"                           // for TRACE
+#include "internal/host/nvshmem_internal.h"                // for nvshmemi_mps_shmdata
+#include "internal/host/nvshmemi_types.h"                  // for nvshmemi_state
+#include "internal/host/nvshmem_nvtx.hpp"                  // for nvtx_cond_range, COLL_OPT
+#include "internal/host/nvshmemi_team.h"                   // for nvshmemi_team_same_gpu
+#include "internal/host/util.h"                            // for nvshmemi_check_state_a...
 
 void nvshmemi_quiesce_internal_streams(cudaStream_t cstrm); /* implemented in quiet.cpp */
 
@@ -99,8 +99,8 @@ void nvshmemxi_sync_all_on_stream(cudaStream_t stream) {
     if (nvshmemi_is_limited_mpg_run) {
         // sync PEs on the same GPU
         nvshmemi_mps_sync_gpu_on_stream(stream);
-        if (nvshmem_team_my_pe(NVSHMEMI_TEAM_SAME_GPU) == 0) {
-            nvshmemxi_sync_on_stream(NVSHMEMI_TEAM_GPU_LEADERS, stream);
+        if (nvshmem_team_my_pe(NVSHMEM_TEAM_SAME_GPU_INDEX) == 0) {
+            nvshmemxi_sync_on_stream(NVSHMEM_TEAM_GPU_LEADERS_INDEX, stream);
         }
         nvshmemi_mps_sync_gpu_on_stream(stream);
     } else {

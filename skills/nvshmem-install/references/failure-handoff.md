@@ -9,5 +9,5 @@ Read this reference for planning, installation, or validation failures. Preserve
 | No installation method can be selected | Resolve authority, scope, compatibility, or mandatory-requirement gaps; otherwise offer a user-owned prefix, approved container, site module, or administrator handoff. |
 | An installation command fails | Stop, preserve its command and output, compare evidence with exact-version documentation, and request approval before a revised block. After three approved revised blocks fail, stop and provide escalation guidance with all evidence. |
 | Same-node passes but two-node fails | Preserve both outputs and selected configuration. Do not report remote transport as working; route to troubleshooting or official support guidance. |
-| `nvshmem-info` succeeds without visible output | Set `LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"` and run `"$PREFIX/bin/nvshmem-info" -n -b`. |
-| `nvshmem-info` cannot load `libnvshmem_host.so*` | Set `LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"` before `nvshmem-info`, smoke tests, and archive-installed applications. |
+| `nvshmem-info` succeeds without visible output | Set <code>LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"</code> and run `"$PREFIX/bin/nvshmem-info" -n -b`. |
+| `nvshmem-info` cannot load `libnvshmem_host.so*` | Set <code>LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"</code> before `nvshmem-info`, smoke tests, and archive-installed applications. |

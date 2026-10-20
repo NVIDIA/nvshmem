@@ -12,8 +12,6 @@
 #include <unistd.h>
 #include "utils.h"
 
-#define THREADS_PER_WARP 32
-
 template <bool USE_ITERATION_BARRIER>
 __device__ __forceinline__ void latency_thread_iteration_sync() {
     if constexpr (USE_ITERATION_BARRIER) {
@@ -32,7 +30,7 @@ __device__ __forceinline__ void latency_threadgroup_iteration_sync(int tid) {
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -75,7 +73,7 @@ LATENCY_THREADGROUP(warp, latency_kern_warp_no_iteration_barrier, false)
 LATENCY_THREADGROUP(block, latency_kern_block, true)
 LATENCY_THREADGROUP(block, latency_kern_block_no_iteration_barrier, false)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 
@@ -116,6 +114,9 @@ int main(int argc, char *argv[]) {
     int *data_d = NULL;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
     int iter = iters;
     int skip = warmup_iters;
     size_t dynamic_smem_size = 0;
@@ -220,11 +221,11 @@ int main(int argc, char *argv[]) {
             h_size_arr[i] = size;
             nelems = size / sizeof(int);
 
-            test_latency_warp(data_d, nelems, mype, skip, test_cubin_warp, THREADS_PER_WARP,
+            test_latency_warp(data_d, nelems, mype, skip, test_cubin_warp, kWarpSize,
                               dynamic_smem_size);
             for (size_t repetition = 0; repetition < repetitions; repetition++) {
                 cudaEventRecord(start);
-                test_latency_warp(data_d, nelems, mype, iter, test_cubin_warp, THREADS_PER_WARP,
+                test_latency_warp(data_d, nelems, mype, iter, test_cubin_warp, kWarpSize,
                                   dynamic_smem_size);
                 cudaEventRecord(stop);
                 CUDA_CHECK(cudaGetLastError());

@@ -205,6 +205,44 @@ __global__ void region_block_stop_only_kernel(int *source, int *recv, int *get_r
     nvshmem_quiet();
 }
 
+__global__ void region_blocking_put_signal_order_kernel(int *source, int *recv, uint64_t *signal,
+                                                        int *status, int mype, int npes) {
+    int tid = flat_thread_id();
+    int peer = (mype + 1) % npes;
+    int prev_pe = (mype - 1 + npes) % npes;
+    nvshmemx_region_attrs_t attrs = NVSHMEMX_REGION_ATTRS_INITIALIZER;
+    attrs.hints = NVSHMEMX_REGION_HINT_BATCH_RMA;
+    nvshmemx_region_handle_t region = 0;
+
+    int rc = nvshmemx_region_start_block(&region, &attrs);
+    if (rc != NVSHMEMX_SUCCESS) {
+        record_error(status, 60);
+    }
+
+    nvshmemx_putmem_nbi_block(recv, source, SCOPE_TEST_ELEMS * sizeof(int), peer);
+    nvshmemx_int_put_signal_block(recv + SCOPE_TEST_ELEMS, source + SCOPE_TEST_ELEMS, 1, signal, 1,
+                                  NVSHMEM_SIGNAL_SET, peer);
+
+    if (tid == 0) {
+        nvshmem_uint64_wait_until(signal, NVSHMEM_CMP_EQ, 1);
+    }
+    __syncthreads();
+
+    volatile int *ordered_recv = recv;
+    for (int i = tid; i <= SCOPE_TEST_ELEMS; i += flat_block_size()) {
+        int expected = prev_pe * PATTERN_SCALE + i;
+        if (ordered_recv[i] != expected) {
+            record_error(status, 61);
+        }
+    }
+
+    rc = nvshmemx_region_stop_block(region);
+    if (rc != NVSHMEMX_SUCCESS) {
+        record_error(status, 62);
+    }
+    nvshmem_quiet();
+}
+
 __global__ void region_lifecycle_race_kernel(int *status) {
     nvshmemx_region_attrs_t attrs = NVSHMEMX_REGION_ATTRS_INITIALIZER;
     attrs.hints = NVSHMEMX_REGION_HINT_BATCH_RMA;
@@ -279,9 +317,10 @@ int main(int argc, char **argv) {
     int *source = static_cast<int *>(nvshmem_malloc(sizeof(int) * TOTAL_ELEMS));
     int *recv = static_cast<int *>(nvshmem_malloc(sizeof(int) * TOTAL_ELEMS));
     int *get_recv = static_cast<int *>(nvshmem_malloc(sizeof(int) * TOTAL_ELEMS));
+    uint64_t *signal = static_cast<uint64_t *>(nvshmem_malloc(sizeof(uint64_t)));
     int *status_d = NULL;
     cudaStream_t streams[NUM_KERNELS] = {NULL, NULL};
-    if (source == NULL || recv == NULL || get_recv == NULL) {
+    if (source == NULL || recv == NULL || get_recv == NULL || signal == NULL) {
         printf("[PE %d] FAIL: nvshmem_malloc failed\n", mype);
         status = 1;
         goto out;
@@ -359,6 +398,18 @@ int main(int argc, char **argv) {
     status |= verify_recv_data("block recv", recv, prev_pe, SCOPE_TEST_ELEMS);
     status |= verify_recv_data("block get_recv", get_recv, next_pe, SCOPE_TEST_ELEMS);
 
+    CUDA_CHECK(cudaMemset(status_d, 0, sizeof(int)));
+    CUDA_CHECK(cudaMemset(recv, 0, sizeof(int) * (SCOPE_TEST_ELEMS + 1)));
+    CUDA_CHECK(cudaMemset(signal, 0, sizeof(uint64_t)));
+    nvshmem_barrier_all();
+    region_blocking_put_signal_order_kernel<<<1, THREADS_PER_BLOCK>>>(source, recv, signal,
+                                                                      status_d, mype, npes);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    nvshmem_barrier_all();
+    status |= check_device_status(status_d, "blocking put-signal region ordering");
+    status |= verify_recv_data("blocking put-signal recv", recv, prev_pe, SCOPE_TEST_ELEMS + 1);
+
     CUDA_CHECK(cudaStreamDestroy(streams[0]));
     CUDA_CHECK(cudaStreamDestroy(streams[1]));
 
@@ -374,6 +425,9 @@ out:
     }
     if (get_recv) {
         nvshmem_free(get_recv);
+    }
+    if (signal) {
+        nvshmem_free(signal);
     }
     finalize_wrapper();
 

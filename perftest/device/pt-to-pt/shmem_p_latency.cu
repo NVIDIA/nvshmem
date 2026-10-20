@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include "utils.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -34,7 +34,7 @@ __global__ void p_latency(int *data_d, int len, int pe, int iter) {
     }
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 
@@ -52,6 +52,9 @@ int main(int argc, char *argv[]) {
     int *data_d = NULL;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
 
     int iter = iters;
     int skip = warmup_iters;

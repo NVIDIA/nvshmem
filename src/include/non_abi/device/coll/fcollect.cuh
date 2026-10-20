@@ -14,12 +14,12 @@
 #endif
 
 #include <cuda_runtime.h>
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host/nvshmem_tensor.h"
-#include "device/logical_endpoint_device.cuh"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "cpp_api/nvshmem_tensor.hpp"
+#include "non_abi/device/common/logical_endpoint_device.cuh"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
@@ -384,11 +384,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
                                    ((sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0)) ||
                                     (is_half_prec && (nelems % 4 == 0) &&
                                      (nvshmemi_device_state_d.team_pool[team]->size % 2 == 0))));
-    /* DISABLE non NVLS LL for hybrid MNNVL configurations. */
-    valid_ll_configuration &=
-        (nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_WORLD_INDEX]->are_gpus_p2p_connected ||
-         nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_SHARED]->is_team_node ||
-         !nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_NODE_INDEX]->are_gpus_p2p_connected);
+    /* Disable non-NVLS LL unless every PE agreed that the job topology supports it. */
+    valid_ll_configuration &= nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_supported;
     /* This 2-level selection logic is implemented to reduce code duplication of calling leaf
      * functions on the device code */
     switch (fcollect_algo) {

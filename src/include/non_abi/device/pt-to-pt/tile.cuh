@@ -9,7 +9,7 @@
 #include <cuda_runtime.h>
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
-#include "device_host/nvshmem_tensor.h"
+#include "cpp_api/nvshmem_tensor.hpp"
 #include "non_abi/device/common/nvshmemi_tile_utils.cuh"
 
 #ifdef __CUDA_ARCH__

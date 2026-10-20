@@ -21,8 +21,8 @@
  */
 
 // for NVSHMEM_IBGDA_SUPPORT
-#include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
-#include "non_abi/nvshmemi_region_constants.h"
+#include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/c/nvshmemi_region_constants.h"
 
 #ifndef NVSHMEM_ENV_DEFS_INTERNAL
 #include "bootstrap_host_transport/env_defs_internal.h"  // for NVSHMEMI_ENV_DEF
@@ -56,6 +56,16 @@ NVSHMEMI_ENV_DEF(DISABLE_GDRCOPY, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable GDRCopy and CUDA DMA-BUF GPU CPU mappings in supported transports")
 NVSHMEMI_ENV_DEF(GDRCOPY_USE_INTERNAL_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Use the internal CUDA DMA-BUF CPU-mapping backend instead of libgdrapi")
+NVSHMEMI_ENV_DEF(STAGED_COPY_POLICY, string, "STREAM", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Select the staged transport local copy policy: STREAM or GDRCOPY")
+NVSHMEMI_ENV_DEF(STAGED_BOUNCE_LOCATION, string, "SYSMEM", NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Select the staged transport bounce-buffer location: SYSMEM or VIDMEM")
+NVSHMEMI_ENV_DEF(STAGED_BOUNCE_SIZE, size, (size_t)(16 * 1024 * 1024), NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Size of each staged transport bounce-buffer slot (1 byte to 4 GiB - 1 byte)")
+NVSHMEMI_ENV_DEF(STAGED_PIPELINE_DEPTH, int, 4, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Number of slots in each staged transport bounce-buffer ring (1-16)")
+NVSHMEMI_ENV_DEF(STAGED_GREEN_CTX_SMS, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Minimum positive SM count requested for staged STREAM Green contexts")
 NVSHMEMI_ENV_DEF(DISABLE_DATA_DIRECT, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Disable use of directNIC in IB Transport")
 NVSHMEMI_ENV_DEF(IB_DISABLE_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
@@ -142,6 +152,9 @@ NVSHMEMI_ENV_DEF(UCX_ZCOPY_THRESH, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
 
 NVSHMEMI_ENV_DEF(LIBFABRIC_PROVIDER, string, "cxi", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set the feature set provider for the libfabric transport: cxi, efa, verbs")
+NVSHMEMI_ENV_DEF(LIBFABRIC_ENABLE_DMABUF, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Enable CUDA DMA-BUF memory registration with the EFA libfabric provider. "
+                 "By default, use ordinary CUDA memory registration.")
 NVSHMEMI_ENV_DEF(LIBFABRIC_MAX_NIC_PER_PE, int, 16, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set the maximum number of NICs per PE for use in the libfabric provider.")
 
@@ -222,8 +235,9 @@ NVSHMEMI_ENV_DEF(GPUNETIO_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPOR
                  "- cpu: use CPU.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_GPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of GPU-data-path RC QPs per peer PE in the GPUNetIO transport "
-                 "(default 2). Only takes effect when NVSHMEM_GPUNETIO_ENABLE_GDAKI=1. "
-                 "Otherwise, the GPU data path is disabled and this value is ignored.")
+                 "(default 2, or 8 with directNIC). Only takes effect when "
+                 "NVSHMEM_GPUNETIO_ENABLE_GDAKI=1. Otherwise, the GPU data path is disabled "
+                 "and this value is ignored.")
 NVSHMEMI_ENV_DEF(GPUNETIO_RC_MAP_BY, string, "none", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies how GPU-data-path RC QPs are assigned. "
                  "Choices are: cta, sm, warp, none.\n\n"
@@ -234,8 +248,8 @@ NVSHMEMI_ENV_DEF(GPUNETIO_RC_MAP_BY, string, "none", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "across all default GPU-data-path RC QPs.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_CPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of CPU-data-path RC QPs per peer PE in the GPUNetIO transport "
-                 "(default 2). The CPU data path is always active and does not require GDAKI. "
-                 "This value must be > 0.")
+                 "(default 2, or 8 with directNIC). The CPU data path is always active "
+                 "and does not require GDAKI. This value must be > 0.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_REQUESTS_IN_BATCH, int, 32, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of requests to be batched before submitting to the NIC. "
                  "It will be rounded up to the nearest power of 2. "

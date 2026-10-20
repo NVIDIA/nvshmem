@@ -21,7 +21,7 @@ Produce a reproducible recommendation from the target node's actual GPU/NIC topo
 
 - Use an allocated target compute node with visible GPUs and RDMA devices; do not use login-node topology as evidence.
 - Make `nvidia-smi` and `/sys/class/infiniband` readable on that node. If `/sys` is unavailable, make `ibv_devinfo` available or provide equivalent per-port evidence.
-- Make `nvshmem-info` available on the target node, or supply the installed NVSHMEM version explicitly.
+- Provide the NVSHMEM installation prefix, make `nvshmem-info` available on the target node, or supply the installed NVSHMEM version explicitly.
 - Use the bundled read-only collector when possible. It requires no API keys, credentials, package installation, or writable filesystem access.
 
 ## Inputs
@@ -46,7 +46,7 @@ Resolve every required input before emitting exact exports. If values from diffe
 
 | Script | Use | Invocation |
 | --- | --- | --- |
-| `scripts/collect-nic-topology.sh` | Collect read-only NVSHMEM version, GPU PCI, GPU/NIC topology, and RDMA-port evidence. It emits all evidence to stdout and may exit nonzero after producing useful partial output. | Resolve the script from this skill directory and use `run_script` on the target compute node. If `run_script` is unavailable, run `bash scripts/collect-nic-topology.sh`. |
+| `scripts/collect-nic-topology.sh` | Collect read-only NVSHMEM version, GPU PCI, GPU/NIC topology, and RDMA-port evidence. It emits all evidence to stdout and may exit nonzero after producing useful partial output. | Resolve the script from this skill directory and invoke `run_script("scripts/collect-nic-topology.sh", "--prefix", "/absolute/nvshmem/prefix")` when the prefix is known, or omit `--prefix` to use environment/PATH discovery. |
 
 ## Read the Required References
 
@@ -65,7 +65,7 @@ Classify the release as:
 - 3.7 or earlier;
 - 3.8 or later.
 
-Do not assume `latest` or silently treat an unknown version as 3.8. If the version remains unknown, give only conditional guidance and request the installed version before emitting final exports.
+Do not assume `latest` or silently treat an unknown version as 3.8. If the version remains unknown, request the installed version before continuing.
 
 Determine the selected remote transport: IBRC, IBDevX, IBGDA, GPUNetIO, UCX, or libfabric. If automatic selection makes the transport ambiguous, ask for the relevant initialization log or the intended transport.
 
@@ -87,15 +87,21 @@ When a documentation check is performed, report the exact documentation edition 
 
 ### 3. Collect Topology Evidence
 
-When already running on the target compute node, tell the user that the skill is running a read-only collector, then run:
+When already running on the target compute node, tell the user that the skill is running a read-only collector. Before its first invocation in the current checkout, inspect the complete bundled [collector script](scripts/collect-nic-topology.sh). Run only that inspected file; if it is unavailable or incomplete, do not execute it. Then run:
 
-```bash
-bash scripts/collect-nic-topology.sh
+```text
+run_script("scripts/collect-nic-topology.sh")
 ```
 
-Resolve the bundled script path from `SKILL.md`. Use `run_script` when available; otherwise run the shell command above. The collector writes evidence only to stdout and may return a nonzero status with useful partial output. Do not use `run_script` or the shell fallback from a login node as topology evidence.
+When the NVSHMEM installation prefix is known, pass its absolute path explicitly:
 
-When not on the target node, ask the user to run that command there and paste the complete output. If the script is unavailable remotely, request all of:
+```text
+run_script("scripts/collect-nic-topology.sh", "--prefix", "/opt/nvshmem")
+```
+
+Replace the example path with the absolute prefix. Without `--prefix`, discovery uses `NVSHMEM_PREFIX`, then `nvshmem-info` on `PATH`. Prefix libraries are scoped to that query. Exit 2 indicates incomplete evidence.
+
+When not on the target node, ask the user for the collector's complete output from the target node. If the script is unavailable remotely, request all of:
 
 ```bash
 nvshmem-info -n
@@ -167,7 +173,7 @@ Treat its `Mapping` and `Exact Exports` sections as mandatory gates. Do not retu
 
 | Symptom | Response |
 | --- | --- |
-| The collector reports `status=partial`, missing GPUs, or no HCA ports. | Re-run it on an allocated target compute node with NVIDIA and RDMA device visibility. Paste the complete labeled output; a nonzero exit may still contain usable evidence. |
+| The collector reports `status=partial`, an unknown NVSHMEM version, missing GPUs, or no HCA ports. | Re-run it on an allocated target compute node with the intended NVSHMEM installation and NVIDIA/RDMA device visibility. Paste the complete labeled output; a nonzero exit may still contain usable evidence. |
 | No exact mapping can be produced. | Obtain the NVSHMEM version, resolved remote transport, local PE-to-GPU binding, and active-port evidence. Give only conditional guidance until all are available. |
 | Ports have mixed link layers or a requested port is inactive. | Exclude inactive ports and select one link-layer partition unless the user explicitly requests another supported fabric. |
 | NVSHMEM behavior is unclear for the selected version or transport. | Check the version/transport matrix first, then invoke `$nvshmem-docs` only if it remains insufficient or the user requires current official citations. |
@@ -189,3 +195,5 @@ Treat its `Mapping` and `Exact Exports` sections as mandatory gates. Do not retu
 - Do not emit legacy IBGDA multi-port controls as the primary 3.8-or-later control.
 - Do not generate provider-native UCX or libfabric settings; explain them without inventing values.
 - Do not overwrite user files or change the system while collecting evidence.
+
+<!-- ci trigger -->

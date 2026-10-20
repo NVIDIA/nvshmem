@@ -28,10 +28,10 @@
 
 // IWYU pragma: no_include <bits/stdint-uintn.h>
 
-#include "non_abi/nvshmem_build_options.h"
-#include "non_abi/nvshmemx_error.h"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
 #include "internal/host_transport/region.hpp"
@@ -53,7 +53,12 @@
 #endif
 
 #define NVSHMEMT_LIBFABRIC_MAJ_VER 1
-#define NVSHMEMT_LIBFABRIC_MIN_VER 15
+#define NVSHMEMT_LIBFABRIC_MIN_VER 20
+
+#if FI_VERSION(FI_MAJOR_VERSION, FI_MINOR_VERSION) < \
+    FI_VERSION(NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER)
+#error "NVSHMEM libfabric transport requires libfabric 1.20 or later. Update LIBFABRIC_HOME."
+#endif
 
 #define NVSHMEMT_LIBFABRIC_DOMAIN_LEN 32
 #define NVSHMEMT_LIBFABRIC_PROVIDER_LEN 32
@@ -302,6 +307,7 @@ typedef enum {
 typedef struct {
     struct fid_ep *endpoint;
     struct fid_cq *cq;
+    struct fid_cntr *counter;
     uint64_t submitted_ops;
     uint64_t completed_ops;
     int domain_index;

@@ -1,0 +1,101 @@
+/*
+ * Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef NVSHMEM_CPP_NVSHMEM_TENSOR_HPP
+#define NVSHMEM_CPP_NVSHMEM_TENSOR_HPP
+
+#if !defined __CUDACC_RTC__
+#include <limits.h>
+#else
+#include <cuda/std/climits>
+#endif
+
+#include <cuda_runtime.h>
+
+#include "non_abi/device/common/nvshmemi_cccl_compat.h"
+
+template <int v>
+struct ConstInt : cuda::std::integral_constant<int, v> {
+    __host__ __device__ constexpr operator int() const { return v; }
+};
+
+namespace nvshmemx {
+
+template <class... Shapes>
+using shape = cuda::std::tuple<Shapes...>;
+
+template <class... Strides>
+using stride = cuda::std::tuple<Strides...>;
+
+template <class... Ts>
+__host__ __device__ constexpr shape<Ts...> make_shape(Ts const&... t) {
+    return {t...};
+}
+
+template <class... Ts>
+__host__ __device__ constexpr stride<Ts...> make_stride(Ts const&... t) {
+    return {t...};
+}
+
+template <class Shape, class Stride>
+struct Layout : private cuda::std::tuple<Shape, Stride> {
+    __host__ __device__ constexpr Layout(Shape const& shape = {}, Stride const& stride = {})
+        : cuda::std::tuple<Shape, Stride>(shape, stride) {}
+
+    __host__ __device__ constexpr Shape shape() const {
+        return cuda::std::get<0>(static_cast<const cuda::std::tuple<Shape, Stride>&>(*this));
+    }
+
+    __host__ __device__ constexpr Stride stride() const {
+        return cuda::std::get<1>(static_cast<const cuda::std::tuple<Shape, Stride>&>(*this));
+    }
+};
+
+template <class Shape, class Stride>
+__host__ __device__ constexpr Layout<Shape, Stride> make_layout(Shape const& shape,
+                                                                Stride const& stride) {
+    return Layout<Shape, Stride>(shape, stride);
+}
+
+template <typename T, class Layout>
+struct Tensor {
+    using value_type = T;
+    using layout_type = Layout;
+    T* _data;
+    const Layout _layout;
+
+    __host__ __device__ constexpr Tensor(T* data, Layout layout) : _data(data), _layout(layout) {}
+    __host__ __device__ Tensor(Layout layout) : _data(NULL), _layout(layout) {}
+    __host__ __device__ constexpr Layout layout() const { return _layout; }
+
+    __host__ __device__ T* data() { return _data; }
+
+    __host__ __device__ constexpr decltype(_layout.stride()) const stride() const {
+        return _layout.stride();
+    }
+
+    __host__ __device__ constexpr decltype(_layout.shape()) const shape() const {
+        return _layout.shape();
+    }
+};
+
+typedef enum {
+    NVLS_ONE_SHOT_PUSH_NBI = 0,
+    NVLS_ONE_SHOT_PULL_NBI = 1,
+    NVLS_TWO_SHOT_PUSH_NBI = 2,
+    NVLS_TWO_SHOT_PULL_NBI = 3,
+    NVSHMEMX_TILE_COLL_ALGO_SENTINEL = INT_MAX
+} tile_coll_algo_t;
+
+typedef enum {
+    PEER_PUSH_NBI = 0,
+    PEER_PULL_NBI = 0,  // Both PULL/PUSH have same behavior
+    REMOTE_PUSH_NBI = 1,
+    REMOTE_PULL_NBI = 1,
+    NVSHMEMX_TILE_ALGO_SENTINEL = INT_MAX
+} tile_algo_t;
+
+}  // namespace nvshmemx
+#endif

@@ -20,17 +20,17 @@ Generating the bindings requires:
 - Python 3 with `venv` support
 - An NVSHMEM source checkout or installed NVSHMEM tree with public headers
 - A CUDA Toolkit installation
-- A [CUDA-Oxide](https://github.com/NVlabs/cuda-oxide) checkout for device
-  bindings and the generated runtime crate's `cuda-core` dependency
 - Network access to install Numbast and its Python dependencies from PyPI
 
 Building the generated runtime crate additionally requires:
 
-- Rust and Cargo with Edition 2024 support
+- Rust 1.89 or newer, with Cargo
 - A built NVSHMEM host library
 
-The optional tests also require the CUDA-Oxide `cargo-oxide` executable and an
-NVSHMEM device LTOIR file or LTOIR fat binary.
+The CUDA-Oxide device test targets, enabled with
+`NVSHMEM_BUILD_RUST_DEVICE_TESTS`, additionally require a
+[CUDA-Oxide](https://github.com/NVlabs/cuda-oxide) checkout, its `cargo-oxide`
+executable, and an NVSHMEM device LTOIR file or LTOIR fat binary.
 
 See [ThirdPartyNotices.txt](ThirdPartyNotices.txt) for dependency and license
 information.
@@ -44,7 +44,6 @@ CMake project:
 cmake -S contrib/nvshmem4rust -B build/nvshmem4rust \
   -DNVSHMEM_SOURCE_DIR="$PWD" \
   -DNVSHMEM_HOME="$PWD/install" \
-  -DNVSHMEM_CUDA_OXIDE_ROOT=/path/to/cuda-oxide \
   -DNVSHMEM_CUDA_HOME=/path/to/cuda
 
 cmake --build build/nvshmem4rust --target build_bindings_rust
@@ -52,6 +51,10 @@ cmake --build build/nvshmem4rust --target build_bindings_rust
 
 `NVSHMEM_HOME` supplies installed public headers. If NVSHMEM is not installed,
 omit it or set `NVSHMEM_INCLUDE_DIR="$PWD/src/include"` explicitly.
+The generated Cargo packages depend on `cuda-core` 0.3.1 by default; set
+`NVSHMEM_CUDA_CORE_VERSION` to select another compatible published version.
+Rust 1.89 is the minimum supported version for the default dependency; another
+`cuda-core` version may require a newer Rust toolchain.
 
 By default, generated files are written under
 `build/nvshmem4rust/generated/`:
@@ -65,9 +68,8 @@ Set `NVSHMEM_RUST_BINDINGS_OUTPUT_DIR` to override the output directory.
 
 ### Generate raw host bindings only
 
-For raw host FFI without the CUDA-Oxide device bindings or runtime crate, omit
-`NVSHMEM_CUDA_OXIDE_ROOT` and configure with
-`NVSHMEM_BUILD_RUST_HOST_ONLY=ON`:
+For raw host FFI without the CUDA-Oxide device bindings or runtime crate,
+configure with `NVSHMEM_BUILD_RUST_HOST_ONLY=ON`:
 
 ```bash
 cmake -S contrib/nvshmem4rust -B build/nvshmem4rust-host \
@@ -146,9 +148,10 @@ settings.
 
 - The generated API is intentionally low-level and does not yet follow Rust API
   stability or semantic-versioning guarantees.
-- CUDA-Oxide is experimental, and its local crate layout is part of the current
-  test integration. The generated runtime Cargo manifest is therefore a
-  build-tree artifact tied to the configured CUDA-Oxide checkout.
+- CUDA-Oxide is experimental. The CUDA-Oxide device test integration depends
+  on its current local crate layout, while the generated runtime crate uses
+  the published `cuda-core` version selected by
+  `NVSHMEM_CUDA_CORE_VERSION`.
 - Cross-version compatibility is not supported. The bindings, host library,
   and device LTOIR must be generated or built from the same NVSHMEM revision.
 

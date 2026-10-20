@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #ifndef _NVSHMEMX_H_
 #define _NVSHMEMX_H_
@@ -11,11 +11,14 @@
 /* NVRTC only compiles device code. Leave out host headers */
 #if !defined __CUDACC_RTC__ && !defined __clang_llvm_bitcode_lib__ && \
     !defined __NVSHMEM_NUMBA_SUPPORT__ && !defined NVSHMEM_BUILD_LTOIR_LIBRARY
-#include "host/nvshmemx_api.h"
-#include "device/tile/nvshmemx_tile_api.hpp"
-#include "device/nvshmemx_collective_launch_apis.h"
+#include "c_api/nvshmemx_api.h"
+#include "cpp_api/nvshmemx_tile_api.hpp"
+#include "c_api/nvshmemx_collective_launch_apis.h"
 #endif
-#if !defined NVSHMEM_HOSTLIB_ONLY
+/* Our bitcode/LTOIR test and perftest builds skip these implementation headers
+ * and link the precompiled device library instead.
+ */
+#if !defined NVSHMEM_DEVICE_DECLARATIONS_ONLY
 #include "device/nvshmemx_defines.h"
 #include "device/nvshmemx_coll_defines.cuh"
 #include "device/tile/nvshmemx_tile_api_defines.cuh"

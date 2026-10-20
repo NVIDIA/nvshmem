@@ -13,12 +13,13 @@
 #else
 #include <cuda/std/climits>
 #endif
+#include "device/nvshmem_device_macros.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device_host_transport/nvshmem_common_gpunetio.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/device/transport/nvshmem_common_gpunetio.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "utils_device.h"
 
 #ifdef NVSHMEM_GDAKI_DEBUG
@@ -889,7 +890,11 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread(
                 __threadfence_system();
             }
 
-            doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
+            doca_gpu_dev_verbs_mark_wqes_ready<DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU,
+                                               DOCA_GPUNETIO_VERBS_QP_SQ,
+                                               DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS,
+                                               DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
+                &(qp->qp), base_wqe_idx, my_wqe_idx);
             if constexpr (nbi) {
                 gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
             } else {
@@ -1093,7 +1098,10 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma(
             __threadfence_system();
         }
 
-        doca_gpu_dev_verbs_mark_wqes_ready(&(qp->qp), base_wqe_idx, my_wqe_idx);
+        doca_gpu_dev_verbs_mark_wqes_ready<
+            DOCA_GPUNETIO_VERBS_RESOURCE_SHARING_MODE_GPU, DOCA_GPUNETIO_VERBS_QP_SQ,
+            DOCA_GPUNETIO_VERBS_READY_MODE_ATOMIC_CAS, DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB>(
+            &(qp->qp), base_wqe_idx, my_wqe_idx);
         if constexpr (nbi) {
             gdaki_submit_nbi_db<REGION_OPERATION>(qp, base_wqe_idx, num_wqes, region_info);
         } else {
@@ -1813,15 +1821,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
             }
         }
     } else {
-        if (gdaki_use_address_stable_amo(pe, qp_index)) {
-            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
-                                                    reinterpret_cast<uintptr_t>(lptr), bytes, pe,
-                                                    pe, qp_index, qp, nullptr);
-        } else {
-            gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
-                                                    reinterpret_cast<uintptr_t>(lptr), bytes, pe,
-                                                    pe, NVSHMEMX_QP_DEFAULT, nullptr, nullptr);
-        }
+        gdaki_rma_thread<NVSHMEMI_OP_PUT, true>(reinterpret_cast<uintptr_t>(rptr),
+                                                reinterpret_cast<uintptr_t>(lptr), bytes, pe, pe,
+                                                qp_index, qp, nullptr);
 
         num_wqes = num_atomic_wqes_per_cmd + (need_additional_wqe ? 1 : 0);
 

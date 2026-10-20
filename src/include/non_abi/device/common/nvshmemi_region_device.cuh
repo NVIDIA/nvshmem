@@ -6,10 +6,18 @@
 #ifndef _NVSHMEMI_REGION_DEVICE_CUH_
 #define _NVSHMEMI_REGION_DEVICE_CUH_
 
-#include "device_host/nvshmem_types.h"
+#include "c_api/nvshmem_types.h"
+#include "device/nvshmem_device_macros.h"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
+#if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
+    defined(NVSHMEM_BUILD_LTOIR_LIBRARY) || defined(NVSHMEM_BUILD_P2P_ONLY)
+#include "non_abi/device/pt-to-pt/transfer_device.cuh"
+#else
+#include "non_abi/device/pt-to-pt/nvshmemi_transfer_api.cuh"
+#endif
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 
 #ifdef __CUDA_ARCH__
 

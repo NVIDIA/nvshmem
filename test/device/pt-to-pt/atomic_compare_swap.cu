@@ -38,7 +38,7 @@ enum op { ATOMIC_COMPARE_SWAP = 0 };
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_comp_##OP##_cubin, 1, 1, 1, 1, 1, 1,           \
                             _dynamic_smem_size, 0, args_##TYPENAME##_comp_##OP, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -80,7 +80,7 @@ extern "C" {
     }
 REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_COMPARE_SWAP_KERNEL, ATOMIC_COMPARE_SWAP)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

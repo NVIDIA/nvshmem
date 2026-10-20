@@ -12,7 +12,7 @@ set(NVSHMEM_TEST_TLD ${CMAKE_CURRENT_SOURCE_DIR})
 if (DEFINED ENV{NVSHMEM_TEST_INSTALL})
   set(NVSHMEM_TEST_INSTALL_PREFIX $ENV{NVSHMEM_TEST_INSTALL})
 else()
-  set(NVSHMEM_TEST_INSTALL_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/test_install")
+  set(NVSHMEM_TEST_INSTALL_PREFIX "test_install")
 endif()
 
 get_directory_property(SubBuild PARENT_DIRECTORY)
@@ -41,7 +41,7 @@ if(NOT SubBuild)
   endif()
 
   project(NVSHMEMTest VERSION 1.0.0
-          LANGUAGES CUDA CXX)
+          LANGUAGES C CUDA CXX)
 
   if (DEFINED ENV{NVSHMEM_PREFIX})
     set(NVSHMEM_PREFIX_DEFAULT $ENV{NVSHMEM_PREFIX})
@@ -133,19 +133,8 @@ foreach(ARCH ${CMAKE_CUDA_ARCHITECTURES})
 endforeach()
 mark_as_advanced(NVCC_GENCODE CMAKE_CUDA_ARCHITECTURES_UNDEFINED CUDA_ARCHITECTURES_UNDEFINED)
 
-if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  set(NVSHMEM_CLANG_ARCH "sm_90")
-  set(NVSHMEM_PTX_ARCH "ptx82")
-else()
-  set(NVSHMEM_CLANG_ARCH "sm_90")
-  set(NVSHMEM_PTX_ARCH "ptx86")
-endif()
-
-if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
-  list(GET CMAKE_CUDA_ARCHITECTURES 0 NVSHMEM_CLANG_ARCH)
-  string(REGEX REPLACE "-(real|virtual)$" "" NVSHMEM_CLANG_ARCH "${NVSHMEM_CLANG_ARCH}")
-  set(NVSHMEM_CLANG_ARCH "sm_${NVSHMEM_CLANG_ARCH}")
-endif()
+include(NVSHMEMLTOIRLibrary)
+nvshmem_set_cubin_architectures()
 
 if (NOT SubBuild)
   configure_file(${NVSHMEM_TEST_TLD}/../src/include/non_abi/device/pt-to-pt/transfer_device.cuh.in
@@ -153,6 +142,11 @@ if (NOT SubBuild)
 endif()
 
 add_subdirectory(common)
+
+if(NOT SubBuild)
+  include(${NVSHMEM_TEST_TLD}/../cmake_config/NVSHMEMHeaderContracts.cmake)
+  nvshmem_add_header_contract_targets(nvshmem_installed "${NVSHMEM_PREFIX}/include")
+endif()
 
 if(NOT DEFINED NVSHMEM_BUILD_BITCODE_CUBIN_TESTS)
   set(NVSHMEM_BUILD_BITCODE_CUBIN_TESTS ON)
@@ -215,27 +209,23 @@ macro(nvshmem_add_ltoir_cubin_test_prefix SOURCE PREFIX)
   set(CUBIN_NAME "${NAME_}_ltoir.cubin")
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_TEST_TLD}/common" "-I${NVSHMEM_TEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include")
   if (NOT SubBuild)
-    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
-    # Note: The -DNVSHMEM_HOSTLIB_ONLY macro name is a misnomer: it's used in the testing framework so the unmangled symbols will appear in the LTOIR cubin (just adds "extern c" to all the tests).
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND cuda::nvcc -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
-                              ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                      COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
-                      COMMAND rm ${NAME_}.ltoir
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_test_helper ${LTOIR_LIB_PATH})
+    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_LTOIR_ARCH}.ltoir)
+    set(LTOIR_EXTRA_DEPENDS nvshmem_test_helper ${LTOIR_LIB_PATH})
   else()
-    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                      COMMAND cuda::nvcc -std=${TEST_CXX_ARG} -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
-                              ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                      COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
-                      COMMAND rm ${NAME_}.ltoir
-                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                      DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
+    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_LTOIR_ARCH}.ltoir)
+    set(LTOIR_EXTRA_DEPENDS nvshmem_test_helper libnvshmem_device_ltoir)
   endif()
 
-  add_custom_target(${NAME_}_ltoir_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
+  nvshmem_add_ltoir_library(
+    TARGET ${NAME_}_ltoir_cubin
+    SOURCE ${DIR_}
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+    ARCHITECTURE ${NVSHMEM_LTOIR_ARCH}
+    CXX_STANDARD ${TEST_CXX_ARG}
+    LIBRARY ${LTOIR_LIB_PATH}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    INCLUDE_OPTIONS ${INCLUDE_DIRECTORIES}
+    DEPENDS ${LTOIR_EXTRA_DEPENDS})
 
   install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
@@ -287,9 +277,11 @@ function(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
     set(CUBIN_EXTRA_DEPENDS nvshmem_test_helper libnvshmem_device_bitcode)
   endif()
 
+  # Internal test kernels use API declarations and link the precompiled bitcode device library.
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                            --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
+	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${_NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                            --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_DEVICE_DECLARATIONS_ONLY
+                            -DNVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY ${DIR_} -o ${NAME_}.bc.unoptimized
                     COMMAND llvm::llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
                     COMMAND llvm::opt --passes='internalize,inline,mem2reg' ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
                     COMMAND llvm::llc -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
@@ -315,102 +307,6 @@ function(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
                         GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   endif()
 endfunction()
-
-macro(nvshmem_add_unit_test_prefix SOURCE PREFIX)
-  get_filename_component(NAME_ ${SOURCE} NAME_WE)
-  get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
-  string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
-  string(REPLACE ${SOURCE} "" DIR ${DIR})
-  set(NAME "${PREFIX}${NAME_}")
-  add_executable(${NAME} ${SOURCE})
-  set_target_properties(${NAME} PROPERTIES OUTPUT_NAME "${NAME_}" INSTALL_RPATH "$ORIGIN/../../../../lib" BUILD_WITH_INSTALL_RPATH TRUE)
-  # unit-test should never run on device
-  target_link_libraries(${NAME} nvshmem_unit_test_helper)
-
-  set_target_properties(${NAME} PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  CUDA_SEPARABLE_COMPILATION ON
-  )
-
-  target_compile_options(${NAME}
-  PRIVATE $<$<CONFIG:Debug>:-O0;-g;>
-  $<$<AND:$<BOOL:${NVSHMEM_VERBOSE}>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -v>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-O0;-g;-G>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${NVCC_THREADS}>>:-t4>
-  $<$<COMPILE_LANGUAGE:CUDA>:-Werror
-  all-warnings>
-  $<$<COMPILE_LANGUAGE:CXX>:-Werror
-  -Wall
-  -Wextra
-  -Wno-unused-variable
-  -Wno-unused-function
-  -Wno-unused-parameter
-  -Wno-missing-field-initializers>
-  )
-
-  install(TARGETS ${NAME} RUNTIME DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/${DIR}")
-  if (NVSHMEM_TEST_RELEASE_PREFIX)
-    install(TARGETS ${NAME} RUNTIME DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/${DIR}")
-  endif()
-endmacro()
-
-option(INSTALL_GTEST OFF)
-find_package(GTest)
-
-if(GTest_FOUND)
-include(FetchContent)
-
-FetchContent_Declare(
-googletest
-GIT_REPOSITORY https://github.com/google/googletest.git
-GIT_TAG "release-1.12.1"
-)
-
-FetchContent_MakeAvailable(googletest)
-
-
-macro(nvshmem_add_gtest_unit_test_prefix SOURCE PREFIX FILE)
-  get_filename_component(NAME_ ${SOURCE} NAME_WE)
-  get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
-  string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
-  string(REPLACE ${SOURCE} "" DIR_ ${DIR_})
-  string(REPLACE ${SOURCE} "" DIR ${DIR})
-  set(NAME "${PREFIX}${NAME_}")
-  if("${FILE}" STREQUAL "")
-    add_executable(${NAME} ${SOURCE})
-  else()
-    add_executable(${NAME} ${SOURCE} ${FILE})
-  endif()
-  target_include_directories(${NAME} PRIVATE ${DIR_})
-  target_link_libraries(${NAME} nvshmem_gtest_unit_test_helper)
-
-  set_target_properties(${NAME} PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  CUDA_SEPARABLE_COMPILATION ON
-  )
-
-  target_compile_options(${NAME} BEFORE
-  PRIVATE $<$<CONFIG:Debug>:-O0;-g;>
-  $<$<AND:$<BOOL:${NVSHMEM_VERBOSE}>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -v>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-O0;-g;-G>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${NVCC_THREADS}>>:-t4>
-  $<$<COMPILE_LANGUAGE:CUDA>:-Werror
-  all-warnings>
-  $<$<COMPILE_LANGUAGE:CXX>:-Werror
-  -Wall
-  -Wextra
-  -Wno-unused-variable
-  -Wno-unused-function
-  -Wno-unused-parameter
-  -fprofile-arcs -ftest-coverage
-  -Wno-missing-field-initializers
-  >
-  )
-  target_compile_options(${NAME} PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-vla-cxx-extension>)
-
-  install(TARGETS ${NAME} RUNTIME DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/${DIR}")
-endmacro()
-endif()
 
 set(FATBIN_DEFS_LIST)
 

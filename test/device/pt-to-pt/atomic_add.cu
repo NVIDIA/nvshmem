@@ -44,7 +44,7 @@ enum op {
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_add_##OP##_cubin, 1, 1, 1, 1, 1, 1,             \
                             _dynamic_smem_size, 0, args_##TYPENAME##_add_##OP, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 /* Each PE adds value to remote. In the fetch case, we compare old against (expected * npes) for
@@ -93,7 +93,7 @@ REPT_MACRO_FOR_SIGNED_TYPES(TEST_NVSHMEM_ATOMIC_ADD_KERNEL, ATOMIC_ADD_SIGNED)
 REPT_MACRO_FOR_UNSIGNED_TYPES(TEST_NVSHMEM_ATOMIC_ADD_KERNEL, ATOMIC_FETCH_ADD_UNSIGNED)
 REPT_MACRO_FOR_SIGNED_TYPES(TEST_NVSHMEM_ATOMIC_ADD_KERNEL, ATOMIC_FETCH_ADD_SIGNED)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

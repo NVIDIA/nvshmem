@@ -5,7 +5,7 @@
 
 #ifndef _CUDA_INTERFACE_SYNC_H_
 #define _CUDA_INTERFACE_SYNC_H_
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 
 #define DECL_CALL_NVSHMEMI_TYPENAME_WAIT_UNTIL_ON_STREAM_KERNEL(type, TYPE)               \
     void call_nvshmemi_##type##_wait_until_on_stream_kernel(volatile TYPE *ivar, int cmp, \

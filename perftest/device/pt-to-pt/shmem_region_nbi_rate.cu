@@ -279,8 +279,8 @@ int main(int argc, char **argv) {
         min_size == 0 || max_size == 0 ||
         region_ops > std::numeric_limits<size_t>::max() / max_size ||
         num_blocks > std::numeric_limits<size_t>::max() / (max_size * region_ops);
-    if (invalid_extent || step_factor < 2 || iters == 0 || num_blocks == 0 ||
-        threads_per_block == 0 || num_blocks > std::numeric_limits<unsigned int>::max() ||
+    if (invalid_extent || step_factor < 2 || iters == 0 ||
+        num_blocks > std::numeric_limits<unsigned int>::max() ||
         threads_per_block > std::numeric_limits<unsigned int>::max()) {
         std::fprintf(stderr,
                      "sizes, iterations, region operations, CTAs, and threads must be positive and "

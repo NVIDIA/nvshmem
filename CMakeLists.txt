@@ -176,6 +176,9 @@ write_basic_package_version_file(
 
 add_subdirectory(src)
 
+include(NVSHMEMHeaderContracts)
+nvshmem_add_header_contract_targets(nvshmem_source "${CMAKE_CURRENT_SOURCE_DIR}/src/include")
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # If Python3 version is lower than 3.9, we can't build nvshmem4py
 # Avoid breaking other stuff by turning off the python lib if this is the case

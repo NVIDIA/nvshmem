@@ -254,12 +254,11 @@ static bool configure_bw_mode(bw_fn_t *bw_fn, int *smem_size) {
 
 /* Count logical NVSHMEM get calls issued by the selected threadgroup scope. */
 static size_t get_messages_per_iteration(size_t blocks, size_t threads) {
-    constexpr size_t kWarpSize = 32;
     switch (threadgroup_scope.type) {
         case NVSHMEM_THREAD:
             return blocks * threads;
         case NVSHMEM_WARP:
-            return blocks * ((threads + kWarpSize - 1) / kWarpSize);
+            return blocks * (threads / kWarpSize);
         case NVSHMEM_BLOCK:
         case NVSHMEM_ALL_SCOPES:
             return blocks;
@@ -276,7 +275,21 @@ int main(int argc, char *argv[]) {
     double *d_msgrate_local = NULL, *d_msgrate_all = NULL;
     int exit_status = 1;
 
+    // Use valid block-scope defaults
+    min_size = 256;
+    num_blocks = 32;
+    threads_per_block = 256;
     read_args(argc, argv);
+    if (threadgroup_scope.type == NVSHMEM_WARP && threads_per_block % kWarpSize != 0) {
+        fprintf(stderr,
+                "shmem_get_bw: warp scope requires threads per CTA to be a multiple of %zu\n",
+                kWarpSize);
+        return EXIT_FAILURE;
+    }
+    if (!validate_message_size_range(sizeof(double),
+                                     get_messages_per_iteration(num_blocks, threads_per_block))) {
+        return EXIT_FAILURE;
+    }
     int max_blocks = num_blocks, max_threads = threads_per_block;
 
     int array_size, i;

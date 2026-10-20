@@ -9,10 +9,8 @@ interoperability with GPU libraries.
 - `device/`: CUDA kernel API tests.
 - `apps/`: Application and interoperability tests.
 - `common/`: Shared infrastructure and command-line handling.
-- `unit/`: Unit tests for internal components.
 
-Most tests exercise installed NVSHMEM interfaces; bootstrap and unit tests may use internal
-headers.
+Most tests exercise installed NVSHMEM interfaces; bootstrap tests may use internal headers.
 
 ## Building
 

@@ -14,10 +14,10 @@
 #include <cuda/std/climits>
 #endif
 
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "non_abi/nvshmemi_region_constants.h"
-#include "non_abi/nvshmemi_region_types.h"
+#include "non_abi/c/nvshmemi_region_constants.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
 
 #ifdef __CUDA_ARCH__
 

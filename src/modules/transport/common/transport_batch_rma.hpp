@@ -13,7 +13,7 @@
 
 #include "internal/host_transport/region.hpp"
 #include "internal/host_transport/transport.h"
-#include "non_abi/nvshmemi_region_constants.h"
+#include "non_abi/c/nvshmemi_region_constants.h"
 
 struct nvshmemt_batch_rma_entry {
     int pe;

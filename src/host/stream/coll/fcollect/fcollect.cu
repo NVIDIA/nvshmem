@@ -10,7 +10,7 @@
 #include <typeinfo>
 #include "internal/host/util.h"
 #include "non_abi/device/coll/fcollect.cuh"
-#include "host/nvshmem_api.h"
+#include "c_api/nvshmem_api.h"
 
 template <typename TYPE>
 __global__ void fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,

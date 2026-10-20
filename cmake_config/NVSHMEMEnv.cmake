@@ -47,6 +47,7 @@ if (NVSHMEM_BUILD_P2P_ONLY)
   set(NVSHMEM_GPUNETIO_SUPPORT OFF CACHE BOOL "" FORCE)
   set(NVSHMEM_IBDEVX_SUPPORT OFF CACHE BOOL "" FORCE)
   set(NVSHMEM_LIBFABRIC_SUPPORT OFF CACHE BOOL "" FORCE)
+  set(NVSHMEM_STAGED_SUPPORT OFF CACHE BOOL "" FORCE)
   set(NVSHMEM_UCX_SUPPORT OFF CACHE BOOL "" FORCE)
 endif()
 
@@ -91,6 +92,7 @@ nvshmem_add_default_off_option(NVSHMEM_GPUNETIO_SUPPORT "Enable compilation of t
 nvshmem_add_default_off_option(NVSHMEM_LIBFABRIC_SUPPORT "Enable compilation of the libfabric remote transport")
 nvshmem_add_default_off_option(NVSHMEM_UCX_SUPPORT "Enable compilation of the UCX remote transport")
 message("NVSHMEM_BUILD_P2P_ONLY: ${NVSHMEM_BUILD_P2P_ONLY}")
+nvshmem_add_default_off_option(NVSHMEM_STAGED_SUPPORT "Enable compilation of the staged RDMA remote transport")
 
 message( "\n__FUNCTIONALITY__\n")
 nvshmem_add_default_off_option(NVSHMEM_USE_DLMALLOC "Set dlmalloc as the NVSHMEM heap allocation method")

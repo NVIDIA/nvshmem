@@ -15,7 +15,8 @@ from nvshmem.core.nvshmem_types import *
 import nvshmem.core.utils as utils
 import nvshmem.core.memory as memory
 from nvshmem import __version__
-from nvshmem.core._internal_tracking import _mr_references, _cached_device, InternalInitStatus
+from nvshmem.core._internal_tracking import (_mr_references, _helper_library_references, _helper_module_references,
+                                             _cached_device, InternalInitStatus)
 
 from cuda.pathfinder import load_nvidia_dynamic_lib, find_nvidia_header_directory
 from cuda.core import Buffer, MemoryResource
@@ -63,7 +64,7 @@ class DeviceLibLanguage(enum.Enum):
     On CUDA 13+ that file is a multi-arch fatbin created with
     ``fatbinary --image3=kind=nvvm``. On CUDA 12.8-12.x the install layout keeps
     the same ``.ltoir.fatbin`` suffix for consistency, but the file is a renamed
-    single-arch ``sm_90`` LTOIR image rather than a true multi-arch fatbin.
+    single-arch LTOIR image for the first configured architecture.
     Consumers that require per-arch LTOIR on CUDA 12 should use the installed
     ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
     """
@@ -345,8 +346,9 @@ def finalize() -> None:
     """
     Finalize the NVSHMEM runtime.
 
-    This function wraps the NVSHMEM finalization routine. It should be called after all 
-    NVSHMEM operations are complete and before the application exits.
+    This function wraps the NVSHMEM finalization routine. It should be called after all
+    NVSHMEM operations are complete and before the application exits. CUDA objects owned
+    by NVSHMEM4Py helpers are finalized first.
 
     Typically, this is called once per process to clean up NVSHMEM resources.
 
@@ -357,6 +359,23 @@ def finalize() -> None:
         >>> nvshmem.core.finalize()
     """
     logger.debug("nvshmem_finalize() called")
+
+    finalize_error = None
+    for mod in reversed(list(_helper_module_references)):
+        try:
+            module_finalize(mod)
+        except Exception as error:
+            if finalize_error is None:
+                finalize_error = error
+    for lib in reversed(list(_helper_library_references)):
+        try:
+            library_finalize(lib)
+        except Exception as error:
+            if finalize_error is None:
+                finalize_error = error
+    if finalize_error is not None:
+        raise finalize_error
+
     memory._free_all_buffers()
 
     fini_status = bindings.hostlib_finalize()
@@ -410,11 +429,12 @@ def module_finalize(mod: NvshmemKernelObject) -> None:
         >>> nvshmem.core.module_finalize(mod)
     """
     # At init time, we stored the handle of the loaded module
-    if mod.finalize_handle is None:
+    if mod.handle is None:
         raise NvshmemInvalid("Module not initialized")
     status = bindings.cumodule_finalize(int(mod.handle))
     if status is not None and status != 0:
         raise NvshmemError("Failed to finalize CUmodule for NVSHMEM")
+    _helper_module_references.pop(mod, None)
 
 
 def library_init(lib: NvshmemKernelObject) -> None:
@@ -466,6 +486,7 @@ def library_finalize(lib: NvshmemKernelObject) -> None:
     status = bindings.culibrary_finalize(int(lib.handle))
     if status is not None and status != 0:
         raise NvshmemError("Failed to finalize CULibrary for NVSHMEM")
+    _helper_library_references.pop(lib, None)
 
 
 def _normalize_device_library_arch(arch: object) -> str:
@@ -531,7 +552,8 @@ def find_device_bitcode_library(
             ``DeviceLibLanguage.LTOIR`` returns the installed
             ``libnvshmem_device.ltoir.fatbin`` entry point. On CUDA 13+ this is
             a multi-arch fatbin; on CUDA 12.8-12.x the file keeps that suffix for
-            layout consistency but is a renamed single-arch ``sm_90`` LTOIR image.
+            layout consistency but is a renamed single-arch LTOIR image for the
+            first configured architecture.
             CUDA 12 consumers that need per-arch LTOIR should use the installed
             ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
             ``DeviceLibLanguage.STATIC`` returns the ``.a`` static archive

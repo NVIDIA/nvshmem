@@ -4,10 +4,10 @@
     {
       "id": "nvshmem-tune-performance-001",
       "prompt": "Use nvshmem-tune-performance to help me improve NVSHMEM performance. I do not have a concrete tuning question yet.",
-      "expected_output": "The agent presents a baseline-first path and a direct-optimization path with remote transport, NIC-to-PE mapping, and TMA choices, then waits for the user to choose without running anything.",
+      "expected_output": "The agent presents a baseline-characterization workflow and a targeted-optimization workflow covering remote transport, NIC-to-PE mapping, and TMA, then requires an explicit selection without running anything.",
       "assertions": [
         "The agent offers initial performance data collection as an optional first step rather than an automatic prerequisite",
-        "The agent lists remote transport selection, NIC-to-PE mapping, and TMA as the three direct optimization choices",
+        "The agent lists remote transport selection, NIC-to-PE mapping, and TMA as the three targeted optimization domains",
         "The agent does not invoke a specialist, run a collector, execute a benchmark, or choose an optimization without user input"
       ],
       "expected_skill": "nvshmem-tune-performance",

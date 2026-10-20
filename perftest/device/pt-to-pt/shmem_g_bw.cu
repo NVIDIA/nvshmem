@@ -165,6 +165,9 @@ int main(int argc, char *argv[]) {
     unsigned int *counter_d;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(datatype.size)) {
+        return EXIT_FAILURE;
+    }
     int max_blocks = num_blocks, max_threads = threads_per_block;
     int array_size, i;
     void **h_tables = NULL;

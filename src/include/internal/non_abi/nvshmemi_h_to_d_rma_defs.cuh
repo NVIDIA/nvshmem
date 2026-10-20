@@ -14,7 +14,7 @@
 
 #include <cuda_runtime.h>
 
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
@@ -73,8 +73,9 @@ __global__ void nvshmemi_proxy_rma_signal_entrypoint(void *rptr, void *lptr,
                                                      uint64_t signal, int sig_op, int pe,
                                                      const nvshmemi_op_t desc) {
 #ifdef __CUDA_ARCH__
-    nvshmemi_transfer_rma_nbi_translator((void *)rptr, (void *)lptr, bytesdesc, pe, desc);
-    nvshmemi_transfer_amo_nonfetch((void *)sig_addr, signal, pe, (nvshmemi_amo_t)sig_op);
+    nvshmemi_transfer_put_signal_nbi<NVSHMEMI_THREADGROUP_THREAD>(
+        (void *)rptr, (void *)lptr, (size_t)(bytesdesc.nelems * bytesdesc.elembytes),
+        (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe);
 #endif
 }
 
@@ -86,7 +87,7 @@ __global__ void nvshmemi_proxy_rma_signal_entrypoint_blocking(void *rptr, void *
 #ifdef __CUDA_ARCH__
     nvshmemi_transfer_put_signal<NVSHMEMI_THREADGROUP_THREAD>(
         (void *)rptr, (void *)lptr, (size_t)(bytesdesc.nelems * bytesdesc.elembytes),
-        (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe, false);
+        (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe);
     nvshmemi_transfer_quiet<NVSHMEMI_THREADGROUP_THREAD>(true);
 #endif
 }

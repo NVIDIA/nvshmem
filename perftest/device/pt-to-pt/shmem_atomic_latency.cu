@@ -7,7 +7,7 @@
 
 #include "atomic_one_sided_common.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -176,7 +176,7 @@ DEFINE_LAT_FETCH_TEST_FOR_AMO_TWO_ARG(int, int, compare_swap, i, i + 1);
 DEFINE_LAT_FETCH_TEST_FOR_AMO_TWO_ARG(long, long, compare_swap, i, i + 1);
 DEFINE_LAT_FETCH_TEST_FOR_AMO_TWO_ARG(size_t, size, compare_swap, i, i + 1);
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

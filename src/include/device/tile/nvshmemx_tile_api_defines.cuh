@@ -8,7 +8,7 @@
 
 #include <cuda_runtime.h>
 
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "device/nvshmem_coll_defines.cuh"
 #include "device/nvshmem_device_macros.h"
 #include "non_abi/device/pt-to-pt/tile.cuh"

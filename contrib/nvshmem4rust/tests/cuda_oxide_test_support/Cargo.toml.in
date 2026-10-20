@@ -2,10 +2,11 @@
 name = "nvshmem_cuda_oxide_test_support"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
 license = "Apache-2.0"
 
 [dependencies]
-cuda-core = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/cuda-core" }
+cuda-core = "@NVSHMEM_CUDA_CORE_VERSION@"
 libnvvm-sys = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/libnvvm-sys" }
 nvjitlink-sys = { path = "@NVSHMEM_CUDA_OXIDE_ROOT@/crates/nvjitlink-sys" }
 nvshmem = { path = "../nvshmem_host_runtime" }

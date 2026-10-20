@@ -23,7 +23,7 @@
 #include <mutex>
 #include <set>
 
-#include "host/nvshmemx_api.h"
+#include "c_api/nvshmemx_api.h"
 #include "internal/host/nvmlwrap.h"
 #include "internal/host/nvshmemi_team.h"
 #include "internal/host/nvshmem_internal.h"
@@ -31,18 +31,18 @@
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "internal/host/scope_guard.h"
 #include "internal/host_transport/region.hpp"
-#include "non_abi/nvshmemi_region_types.h"
+#include "non_abi/device/common/nvshmemi_region_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host/nvshmemi_bootstrap_library.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host/logical_endpoint_types.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/common/logical_endpoint_types.h"
 
 #ifdef NVSHMEM_IBGDA_SUPPORT
-#include "device_host_transport/nvshmem_common_ibgda.h"
+#include "non_abi/device/transport/nvshmem_common_ibgda.h"
 #endif
 
 #ifdef NVSHMEM_GPUNETIO_SUPPORT
-#include "device_host_transport/nvshmem_common_gpunetio.h"
+#include "non_abi/device/transport/nvshmem_common_gpunetio.h"
 #endif
 
 #include <stdlib.h>
@@ -700,10 +700,20 @@ out:
     return status;
 }
 
+int nvshmemi_setup_stream_priorities(nvshmemi_state_t *state) {
+    int status = 0;
+    int leastPriority, greatestPriority;
+
+    CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
+    CUDA_RUNTIME_CHECK(
+        cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking, greatestPriority));
+
+    return status;
+}
+
 int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL) {
     int cuda_device_id = INIT_ARGS_SCALAR_INVALID;
     CUdevice cudevice;
-    int leastPriority, greatestPriority;
     int status = NVSHMEMX_SUCCESS;
 
     CUCHECK(nvshmemi_cuda_syms, cuInit(0));
@@ -795,24 +805,13 @@ int nvshmemi_get_cucontext(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr =
                 break;
             }
         }
-        CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-        CUDA_RUNTIME_CHECK(cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking,
-                                                        greatestPriority));
+        status = nvshmemi_setup_stream_priorities(state);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "nvshmem setup stream priorities failed \n");
         INFO(NVSHMEM_INIT, "[%d] Created stream %p for device %d", state->mype, state->my_stream,
              state->device_id);
     }
 out:
-    return status;
-}
-
-int nvshmemi_setup_stream_priorities(nvshmemi_state_t *state) {
-    int status = 0;
-    int leastPriority, greatestPriority;
-
-    CUDA_RUNTIME_CHECK(cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-    CUDA_RUNTIME_CHECK(
-        cudaStreamCreateWithPriority(&state->my_stream, cudaStreamNonBlocking, greatestPriority));
-
     return status;
 }
 
@@ -825,6 +824,10 @@ int nvshmemi_teardown_handles(nvshmemi_state_t *state) {
         CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->custreams[i]), status, out);
         CUDA_RUNTIME_CHECK_GOTO(cudaEventDestroy(state->cuevents[i]), status, out);
     }
+    CUDA_RUNTIME_CHECK_GOTO(cudaStreamDestroy(state->my_stream), status, out);
+    free(state->custreams);
+    free(state->cuevents);
+    free(state->active_internal_streams);
 out:
     return status;
 }
@@ -1306,10 +1309,6 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
                                 transport_dev_state_ptr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
                           "Invalid context pointer passed to nvshmemid_hostlib_init_attr.\n");
-
-    status = nvshmemi_setup_stream_priorities(state);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "nvshmem setup stream priorities failed \n");
 
     status = nvshmemi_coll_common_cpu_init();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "cpu collective setup failed \n");
@@ -1882,6 +1881,10 @@ static void nvshmemi_init_msg(void) {
 
 int nvshmemi_proxy_level(nvshmemi_state_t *state) {
     for (int i = 0; i < state->num_initialized_transports; i++) {
+        /* Slots are cleared when a transport fails to connect and is finalized. */
+        if (!state->transports[i]) {
+            continue;
+        }
         if (state->transports[i]->is_successfully_initialized) {
             if (state->transports[i]->no_proxy) {
                 continue;

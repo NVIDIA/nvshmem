@@ -15,7 +15,7 @@
 #define MAX_MSG_SIZE 1 * 1024 * 1024
 #define UNROLL 8
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -58,7 +58,7 @@ void test_ping_pong(void **arglist, CUfunction kernel, cudaStream_t stream) {
     CUDA_CHECK(cudaGetLastError());
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 
@@ -69,6 +69,9 @@ int main(int argc, char *argv[]) {
     cudaStream_t stream;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
     int iter = iters;
     int skip = warmup_iters;
 

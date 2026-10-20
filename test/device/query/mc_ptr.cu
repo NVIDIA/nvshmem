@@ -38,8 +38,11 @@ __global__ void check_mc_ptr(void *v_h, void *v_d, void *arr_d, int narr) {
     int me = nvshmem_my_pe();
     for (int i = 0; i < narr; i++) {
         void *mc_ptr = nvshmemx_mc_ptr(arr[i], v_d);
-        if (mc_ptr == NULL) {
-            printf("[%d] Device expected non-NULL mc ptr for %p\n", me, v_d);
+        const int team_size = nvshmem_team_n_pes(arr[i]);
+        const bool expect_mc_ptr = team_size > 1;
+        if ((mc_ptr != NULL) != expect_mc_ptr) {
+            printf("[%d] Device expected %s mc ptr for %p in team %d (size %d)\n", me,
+                   expect_mc_ptr ? "non-NULL" : "NULL", v_d, arr[i], team_size);
             ++errors_d;
         } else {
             mc_teams_d++;
@@ -157,8 +160,11 @@ int main(int argc, char **argv) {
 
     for (int i = 0; i < team_count; i++) {
         void *mc_ptr = nvshmemx_mc_ptr(arr[i], v_d);
-        if (mc_ptr == NULL) {
-            printf("[%d] Host expected non-NULL mc ptr for %p\n", me, v_d);
+        const int team_size = nvshmem_team_n_pes(arr[i]);
+        const bool expect_mc_ptr = team_size > 1;
+        if ((mc_ptr != NULL) != expect_mc_ptr) {
+            printf("[%d] Host expected %s mc ptr for %p in team %d (size %d)\n", me,
+                   expect_mc_ptr ? "non-NULL" : "NULL", v_d, arr[i], team_size);
             ++errors;
         } else {
             mc_teams++;

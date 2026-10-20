@@ -33,11 +33,11 @@ not loadability. A compatible NIC proves neither plugin availability nor operati
 
 ### Version and Plugin Inventory
 
-- Resolve an exact version from `nvshmem-info -n`, installed headers, a package manifest, or an explicit user value.
+- Record the installed version from `nvshmem-info -n`, installed headers, a package manifest, or an explicit user value when readily available. Patch-level verification is required only for a decision that depends on a release-specific gate, known issue, setting change, or operation limitation.
 - Look for `nvshmem_transport_<name>.so*` in the selected prefix. Do not merge plugins from different prefixes or `LD_LIBRARY_PATH` entries.
 - Treat IBGDA specially: it is enabled with `NVSHMEM_IB_ENABLE_IBGDA=1`; it is not a value of `NVSHMEM_REMOTE_TRANSPORT`.
 - Treat GPUNetIO GDAKI specially: it requires both the GPUNetIO remote plugin and GPUNetIO-capable device code.
-- `NVSHMEM_REMOTE_TRANSPORT` accepts `ibrc`, `ucx`, `libfabric`, `ibdevx`, `gpunetio`, and `none`; verify the accepted values for the exact target release.
+- `NVSHMEM_REMOTE_TRANSPORT` accepts `ibrc`, `ibdevx`, `gpunetio`, `ucx`, `libfabric`, and `none`. Use these stable documented values unless there is evidence that the target release predates a candidate or changed the setting.
 
 ### Remote Path
 
@@ -47,9 +47,14 @@ not loadability. A compatible NIC proves neither plugin availability nor operati
 
 ### Operation Coverage
 
-- Verify required RMA, AMO, signal, synchronization, host, on-stream, custom-QP, and registered-buffer operations against the exact release.
+- Verify release-specific RMA, AMO, signal, synchronization, host, on-stream, custom-QP, and registered-buffer restrictions when the application actually requires them. Ordinary RMA selection does not need an exhaustive exact-release operation audit.
 - Do not generalize one successful put benchmark to atomics, gets, put-with-signal, host APIs, or user-registered buffers.
 - Collectives may route through NCCL, NVLS, multicast, P2P, or point-to-point algorithms. Analyze the actual remote point-to-point path rather than assigning collective performance to the selected plugin automatically.
+
+### GDRCopy Evidence
+
+- Treat a loaded `gdrdrv` kernel module or visible `/dev/gdrdrv` device as sufficient evidence that GDRCopy is present for transport selection.
+- `pkg-config` and loader-cache entries are optional supporting hints. Their absence does not disprove a custom GDRCopy installation and must not exclude IBRC or independently justify preferring IBDevX.
 
 ## Transport Matrix
 
@@ -144,7 +149,7 @@ export NVSHMEM_REMOTE_TRANSPORT=none
 - **Source-derived:** IBDevX is a CPU-access transport that directly creates/programs mlx5 objects through DevX/`mlx5dv`.
 - **Source-derived:** reviewed builds default IBDevX support off, so require plugin evidence.
 - **Source-derived:** its plugin does not use the common GDRCopy component in the reviewed build configuration.
-- **Inference:** a missing GDRCopy-dependent requirement may justify IBDevX only after exact operation coverage is verified.
+- **Inference:** confirmed absence of `gdrdrv` may justify considering IBDevX for a GDRCopy-dependent requirement, but missing `pkg-config` or loader-cache hints alone may not.
 - Never rank it above IBRC solely because it uses a lower-level interface.
 
 ### IBGDA
@@ -194,7 +199,7 @@ Before ranking, make a row for every required operation family:
 | Multi-NIC | Transport/version support and separate NIC-mapping workflow |
 | Collectives | Actual chosen algorithm/backend; do not assume point-to-point plugin controls it |
 
-If any mandatory row is unknown, mark the candidate conditional and withhold unconditional exports.
+If a mandatory application requirement is unknown, prefer a broadly supported fallback, emit its minimal selection configuration, and mark the specialized capability conditional. Withhold exports only when no candidate is known to satisfy a non-negotiable requirement.
 
 ## Source Basis
 
@@ -214,4 +219,4 @@ Development-source areas reviewed for architecture and configuration shape:
 - `src/modules/transport/common/env_defs.h`
 - transport plugin CMake definitions
 
-Source-derived claims must be rechecked when the installed version differs from the reviewed source.
+Recheck source-derived claims when the recommendation depends on a release-sensitive detail. A patch-version difference alone does not require live documentation lookup for an ordinary stable transport setting.

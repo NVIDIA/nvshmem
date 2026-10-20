@@ -11,8 +11,8 @@
 #include <stddef.h>
 #include <ucp/api/ucp_def.h>
 
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host_transport/nvshmem_common_transport.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"

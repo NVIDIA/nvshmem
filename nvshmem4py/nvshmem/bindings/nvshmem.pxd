@@ -31,16 +31,14 @@ ctypedef CUlibrary Library
 ###############################################################################
 
 ctypedef nvshmemx_signal_op_t _Signal_op
-ctypedef nvshmemx_tma_policy_t _Tma_policy
+ctypedef nvshmem_team_id_t _Team_id
 ctypedef nvshmemx_smem_amount_t _Smem_amount
 ctypedef nvshmemx_region_hint_t _Region_hint
 ctypedef nvshmemx_cmp_type_t _Cmp_type
 ctypedef nvshmemx_thread_support_t _Thread_support
-ctypedef nvshmemx_proxy_status_t _Proxy_status
 ctypedef nvshmemx_init_status_t _Init_status
 ctypedef nvshmemx_qp_handle_index_t _Qp_handle_index
 ctypedef nvshmem_pe_index_t _Pe_index
-ctypedef nvshmem_team_id_t _Team_id
 ctypedef nvshmemx_status _Status
 ctypedef flags _Flags
 

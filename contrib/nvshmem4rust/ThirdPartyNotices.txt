@@ -26,6 +26,11 @@ CUDA-Oxide
   License: Apache License 2.0
   Use: Compile and run the optional Rust CUDA tests.
 
+cuda-core
+  Source: https://crates.io/crates/cuda-core
+  License: Apache License 2.0
+  Use: Provide CUDA runtime and SIMT types for generated Rust packages.
+
 libloading
   Source: https://github.com/nagisa/rust_libloading
   License: ISC License

@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include "utils.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -35,7 +35,7 @@ __global__ void ping_pong(uint64_t *flag_d, int pe, int iter) {
     nvshmem_quiet();
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

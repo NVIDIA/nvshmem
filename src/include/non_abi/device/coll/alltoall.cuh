@@ -45,9 +45,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
         if (!peer_base_addr) {
             /* We are breaking rank with the rest of the group here so send the RMA with thread
              * scope. */
-            nvshmemi_transfer_put_signal<NVSHMEMI_THREADGROUP_THREAD>(
+            nvshmemi_transfer_put_signal_nbi<NVSHMEMI_THREADGROUP_THREAD>(
                 (void *)(dest + dst_offset), (void *)(source + src_offset), msgsize,
-                (void *)(psync + mype), 1ULL, NVSHMEMI_AMO_SIGNAL_ADD, next_rank, true);
+                (void *)(psync + mype), 1ULL, NVSHMEMI_AMO_SIGNAL_ADD, next_rank);
         } else if (msgsize <= NVSHMEMI_ALLTOALL_SMALL_MSGSIZE) {
             nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(dest + dst_offset, source + src_offset,
                                                              nelems, next_rank);

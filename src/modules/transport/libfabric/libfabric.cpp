@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <algorithm>
 #include <mutex>
 #include <new>
@@ -27,13 +28,13 @@
 
 #include "internal/host_transport/cudawrap.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "device_host_transport/nvshmem_common_transport.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
-#include "non_abi/nvshmemx_error.h"
-#include "non_abi/nvshmem_build_options.h"  // IWYU pragma: keep
-#include "non_abi/nvshmem_version.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/c/nvshmemi_build_metadata.h"
 #include "rdma/fabric.h"
 #include "rdma/fi_atomic.h"
 #include "rdma/fi_cm.h"
@@ -48,13 +49,6 @@
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
-#endif
-
-/* Note - this is required to not break on Slingshot systems
- * where we compile with libfabric < 1.15.
- */
-#ifndef FI_OPT_CUDA_API_PERMITTED
-#define FI_OPT_CUDA_API_PERMITTED 10
 #endif
 
 #define NVSHMEM_STAGED_AMO_WIREDATA_SIZE \
@@ -1758,6 +1752,31 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/,
         ep_end_idx = libfabric_state->eps.size();
     }
 
+    /* EFA consumes completion entries from its CQ because it needs the operation
+     * contexts stored in those entries. Other providers use a completion counter:
+     * their CQs are selectively completed and normally contain only error events. */
+    if (libfabric_state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+        for (int i = ep_start_idx; i < ep_end_idx; i++) {
+            const nvshmemt_libfabric_endpoint_t &ep = *libfabric_state->eps[i];
+            status =
+                fi_cntr_wait(ep.counter, ep.submitted_ops, NVSHMEMT_LIBFABRIC_QUIET_TIMEOUT_MS);
+            if (status) {
+                uint64_t completed_ops = fi_cntr_read(ep.counter);
+                uint64_t error_ops = fi_cntr_readerr(ep.counter);
+                /* fi_strerror accepts the positive form of libfabric error codes. */
+                NVSHMEMI_ERROR_PRINT("Error in quiet operation for endpoint %d (submitted=%" PRIu64
+                                     ", completed=%" PRIu64 ", errors=%" PRIu64
+                                     ", status=%d): %s.\n",
+                                     i, ep.submitted_ops, completed_ops, error_ops, status,
+                                     fi_strerror(status * -1));
+                /* Preserve the CQ's provider-specific error report when one is available. */
+                (void)nvshmemt_libfabric_progress(tcurr, qp_index);
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+        }
+        return NVSHMEMX_SUCCESS;
+    }
+
     for (;;) {
         /* host_ep_submit_guard is held across the whole iteration (including
          * the progress call below) so the underlying lock can be non-recursive:
@@ -2747,14 +2766,72 @@ out:
     return status;
 }
 
+static bool nvshmemt_libfabric_export_dmabuf(nvshmemt_libfabric_state_t *state, void *buf,
+                                             size_t length, CUdevice device,
+                                             struct fi_mr_dmabuf *dmabuf) {
+    if (!state->table->pfn_cuDeviceGetAttribute ||
+        !state->table->pfn_cuMemGetHandleForAddressRange) {
+        INFO(state->log_level,
+             "CUDA DMA-BUF entry points unavailable; using ordinary registration.");
+        return false;
+    }
+
+    int supported = 0;
+    CUresult cuda_status =
+        CUPFN(state->table,
+              cuDeviceGetAttribute(&supported, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+    if (cuda_status != CUDA_SUCCESS || !supported) {
+        INFO(state->log_level,
+             "CUDA DMA-BUF unavailable on device %d (status %d); using ordinary registration.",
+             device, cuda_status);
+        return false;
+    }
+
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const uintptr_t address = reinterpret_cast<uintptr_t>(buf);
+    if (page_size <= 0 || length == 0 || length > UINTPTR_MAX - address) {
+        INFO(state->log_level, "Invalid DMA-BUF export range; using ordinary registration.");
+        return false;
+    }
+    const size_t page = static_cast<size_t>(page_size);
+    const size_t offset = address % page;
+    const uintptr_t base = address - offset;
+    if (length > SIZE_MAX - offset || length + offset > SIZE_MAX - (page - 1)) {
+        INFO(state->log_level, "DMA-BUF export size overflow; using ordinary registration.");
+        return false;
+    }
+    const size_t export_length = ((length + offset + page - 1) / page) * page;
+    if (export_length > UINTPTR_MAX - base) {
+        INFO(state->log_level, "DMA-BUF export address overflow; using ordinary registration.");
+        return false;
+    }
+
+    int fd = -1;
+    cuda_status = CUPFN(state->table, cuMemGetHandleForAddressRange(
+                                          &fd, static_cast<CUdeviceptr>(base), export_length,
+                                          CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0));
+    if (cuda_status != CUDA_SUCCESS) {
+        INFO(state->log_level,
+             "CUDA DMA-BUF export failed (status %d); using ordinary registration.", cuda_status);
+        return false;
+    }
+
+    dmabuf->fd = fd;
+    dmabuf->base_addr = reinterpret_cast<void *>(base);
+    dmabuf->offset = offset;
+    dmabuf->len = length;
+    return true;
+}
+
 static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf,
                                              size_t length, nvshmem_transport_t t,
                                              bool local_only) {
     nvshmemt_libfabric_mem_handle_t *fabric_handle = nullptr;
     nvshmemt_libfabric_state_t *libfabric_state = get_libfabric_state(t);
     cudaPointerAttributes attr = {};
-    struct fi_mr_attr mr_attr;
-    struct iovec mr_iovec;
+    struct fi_mr_attr mr_attr = {};
+    struct iovec mr_iovec = {};
+    struct fi_mr_dmabuf mr_dmabuf = {};
     int status;
     bool is_host = true;
     void *curr_ptr;
@@ -2762,6 +2839,7 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
     CUdevice gpu_device_id;
     nvshmemt_libfabric_memhandle_info_t *handle_info = NULL;
     size_t registered_domains = 0;
+    mr_dmabuf.fd = -1;
 
     // for now, error out if mmap is used with libfabric
     // TODO : Add workaround for mmap with libfabric
@@ -2792,9 +2870,6 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         is_host = false;
     }
 
-    memset(&mr_attr, 0, sizeof(struct fi_mr_attr));
-    memset(&mr_iovec, 0, sizeof(struct iovec));
-
     mr_iovec.iov_base = buf;
     mr_iovec.iov_len = length;
     mr_attr.mr_iov = &mr_iovec;
@@ -2812,37 +2887,45 @@ static int nvshmemt_libfabric_get_mem_handle(nvshmem_mem_handle_t *mem_handle, v
         mr_attr.iface = FI_HMEM_SYSTEM;
     }
 
-    for (size_t i = 0; i < libfabric_state->domains.size(); i++) {
-        if (libfabric_state->prov_infos[i]->domain_attr->mr_mode & FI_MR_ENDPOINT) {
-            status =
-                fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &fabric_handle->hdls[i].mr);
-            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                            "Error registering memory region.\n");
-            registered_domains = i + 1;
+    if (libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA &&
+        attr.type == cudaMemoryTypeDevice && options.LIBFABRIC_ENABLE_DMABUF) {
+        nvshmemt_libfabric_export_dmabuf(libfabric_state, buf, length, gpu_device_id, &mr_dmabuf);
+    }
 
-            status =
-                fi_mr_bind(fabric_handle->hdls[i].mr, &libfabric_state->eps[i]->endpoint->fid, 0);
+    for (size_t i = 0; i < libfabric_state->domains.size(); i++) {
+        auto &hdl = fabric_handle->hdls[i];
+        struct fi_mr_attr domain_attr = mr_attr;
+        uint64_t flags = 0;
+        if (mr_dmabuf.fd >= 0) {
+            domain_attr.dmabuf = &mr_dmabuf;
+            flags = FI_MR_DMABUF;
+        }
+        status = fi_mr_regattr(libfabric_state->domains[i], &domain_attr, flags, &hdl.mr);
+        if (status && flags) {
+            INFO(libfabric_state->log_level,
+                 "DMA-BUF registration failed for domain %zu: %d (%s); retrying ordinary "
+                 "registration.",
+                 i, status, fi_strerror(-status));
+            status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &hdl.mr);
+        } else if (!status && flags) {
+            INFO(libfabric_state->log_level,
+                 "Registered %p, length %zu using DMA-BUF for domain %zu.", buf, length, i);
+        }
+        NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                        "Error registering memory region.\n");
+        registered_domains = i + 1;
+
+        if (libfabric_state->prov_infos[i]->domain_attr->mr_mode & FI_MR_ENDPOINT) {
+            status = fi_mr_bind(hdl.mr, &libfabric_state->eps[i]->endpoint->fid, 0);
             NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                             "Error binding MR to EP %zu.\n", i);
 
-            status = fi_mr_enable(fabric_handle->hdls[i].mr);
+            status = fi_mr_enable(hdl.mr);
             NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                             "Error enabling MR.\n");
-
-            fabric_handle->hdls[i].key = fi_mr_key(fabric_handle->hdls[i].mr);
-            fabric_handle->hdls[i].local_desc = fi_mr_desc(fabric_handle->hdls[i].mr);
-        } else {
-            struct fid_mr *mr;
-
-            status = fi_mr_regattr(libfabric_state->domains[i], &mr_attr, 0, &mr);
-            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                            "Error registering memory region.\n");
-
-            fabric_handle->hdls[i].mr = mr;
-            registered_domains = i + 1;
-            fabric_handle->hdls[i].key = fi_mr_key(mr);
-            fabric_handle->hdls[i].local_desc = fi_mr_desc(mr);
         }
+        hdl.key = fi_mr_key(hdl.mr);
+        hdl.local_desc = fi_mr_desc(hdl.mr);
     }
 
     if (!local_only && libfabric_state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
@@ -2925,6 +3008,9 @@ out:
             }
         }
     }
+    if (mr_dmabuf.fd >= 0 && close(mr_dmabuf.fd) != 0) {
+        NVSHMEMI_WARN_PRINT("Unable to close libfabric DMA-BUF fd: %s\n", strerror(errno));
+    }
     return status;
 }
 
@@ -2962,6 +3048,7 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
     struct fid_mr *mr;
     struct fi_av_attr av_attr;
     struct fi_cq_attr cq_attr;
+    struct fi_cntr_attr cntr_attr;
     size_t ep_namelen = NVSHMEMT_LIBFABRIC_EP_LEN;
     int status = 0;
     size_t total_num_eps;
@@ -3036,6 +3123,10 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         cq_attr.wait_obj = FI_WAIT_NONE;
         cq_attr.size = 32768;
     }
+
+    memset(&cntr_attr, 0, sizeof(struct fi_cntr_attr));
+    cntr_attr.events = FI_CNTR_EVENTS_COMP;
+    cntr_attr.wait_obj = FI_WAIT_UNSPEC;
 
     memset(&av_attr, 0, sizeof(struct fi_av_attr));
     av_attr.type = FI_AV_TABLE;
@@ -3220,25 +3311,30 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
 
         state->eps[i]->submitted_ops = 0;
         state->eps[i]->completed_ops = 0;
+        state->eps[i]->counter = NULL;
 
         status = fi_cq_open(domain, &cq_attr, &state->eps[i]->cq, NULL);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Unable to open completion queue for endpoint.\n");
 
+        if (state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+            status = fi_cntr_open(domain, &cntr_attr, &state->eps[i]->counter, NULL);
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Unable to open completion counter for endpoint.\n");
+        }
+
         status = fi_endpoint(domain, state->prov_infos[i], &state->eps[i]->endpoint, NULL);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Unable to allocate endpoint.\n");
 
-        /* FI_OPT_CUDA_API_PERMITTED was introduced in libfabric 1.18.0 */
         if (state->provider == NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
             bool prohibit_cuda_api = false;
             status = fi_setopt(&state->eps[i]->endpoint->fid, FI_OPT_ENDPOINT,
                                FI_OPT_CUDA_API_PERMITTED, &prohibit_cuda_api, sizeof(bool));
             if (status == -FI_ENOPROTOOPT) {
                 NVSHMEMI_WARN_PRINT(
-                    "fi_setopt of FI_OPT_CUDA_API_PERMITTED returned as "
-                    "not implemented.\n Not setting. This is expected for libfabric "
-                    "versions < 1.18.\n");
+                    "EFA provider does not implement FI_OPT_CUDA_API_PERMITTED; "
+                    "leaving the provider default.\n");
             } else if (status) {
                 NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                                 "Unable to set endpoint CUDA API status.\n");
@@ -3268,6 +3364,13 @@ static int nvshmemt_libfabric_connect_endpoints(nvshmem_transport_t t, int *sele
         status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->cq->fid, flags);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                         "Unable to bind endpoint to completion queue.\n");
+
+        if (state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
+            flags = FI_READ | FI_WRITE;
+            status = fi_ep_bind(state->eps[i]->endpoint, &state->eps[i]->counter->fid, flags);
+            NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                                            "Unable to bind endpoint to completion counter.\n");
+        }
 
         status = fi_enable(state->eps[i]->endpoint);
         NVSHMEMT_LIBFABRIC_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
@@ -3347,6 +3450,10 @@ out:
             if (state->eps[i]->cq) {
                 fi_close(&state->eps[i]->cq->fid);
                 state->eps[i]->cq = NULL;
+            }
+            if (state->eps[i]->counter) {
+                fi_close(&state->eps[i]->counter->fid);
+                state->eps[i]->counter = NULL;
             }
         }
         state->recv_buf.clear();
@@ -3428,6 +3535,13 @@ static int nvshmemt_libfabric_finalize(nvshmem_transport_t transport) {
             status = fi_close(&libfabric_state->eps[i]->cq->fid);
             if (status) {
                 NVSHMEMI_WARN_PRINT("Unable to close fabric cq: %d: %s\n", status,
+                                    fi_strerror(status * -1));
+            }
+        }
+        if (libfabric_state->eps[i]->counter) {
+            status = fi_close(&libfabric_state->eps[i]->counter->fid);
+            if (status) {
+                NVSHMEMI_WARN_PRINT("Unable to close fabric counter: %d: %s\n", status,
                                     fi_strerror(status * -1));
             }
         }
@@ -3620,12 +3734,22 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
     int status = 0;
     std::unique_ptr<nvshmemt_libfabric_state_t> libfabric_state_owner;
 
+    const uint32_t fabric_version = fi_version();
+    if (fabric_version < FI_VERSION(NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER)) {
+        NVSHMEMI_ERROR_JMP(
+            status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            "NVSHMEM libfabric transport requires libfabric %d.%d or later; loaded %d.%d. "
+            "Update the libfabric runtime library path.\n",
+            NVSHMEMT_LIBFABRIC_MAJ_VER, NVSHMEMT_LIBFABRIC_MIN_VER, FI_MAJOR(fabric_version),
+            FI_MINOR(fabric_version));
+    }
+
     if (NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version) != NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION) {
-        NVSHMEMI_ERROR_PRINT(
-            "NVSHMEM provided an incompatible version of the transport interface. "
-            "This transport supports transport API major version %d. Host has %d",
-            NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION, NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version));
-        return NVSHMEMX_ERROR_INVALID_VALUE;
+        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                           "NVSHMEM provided an incompatible version of the transport interface. "
+                           "This transport supports transport API major version %d. Host has %d",
+                           NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION,
+                           NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version));
     }
 
     transport = (nvshmem_transport_t)calloc(1, sizeof(*transport));

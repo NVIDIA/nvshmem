@@ -1,0 +1,208 @@
+/*
+ * Copyright (c) 2018-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef _NVSHMEM_COMMON_H_
+#define _NVSHMEM_COMMON_H_
+
+#if !defined __CUDACC_RTC__
+#include <stdint.h>
+#include <limits.h>
+#else
+#include "cuda/std/cstdint"
+#include <cuda/std/climits>
+#include <cuda/std/cstddef>
+#if !defined SIZE_MAX
+#define SIZE_MAX (1ULL << 63)
+#endif
+#endif
+#include <cuda_runtime.h>
+#ifdef NVSHMEM_COMPLEX_SUPPORT
+#include <complex.h>
+#endif
+#include "cuda_fp16.h"
+#include "cuda_bf16.h"
+#include "c_api/nvshmem_api_macros.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
+#include "non_abi/device/transport/transport_constants.h"
+
+#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
+extern "C" {
+__device__ unsigned int __attribute__((noreturn)) __nvvm_reflect(const char *s);
+}
+#endif
+
+/* Utility macros for calculating psync space */
+#define NVSHMEMI_TEAM_ROUND_UP_DIV(x, y) (((x) + (y) - 1) / (y))
+#define NVSHMEMI_TEAM_ROUND_UP(x, y) (NVSHMEMI_TEAM_ROUND_UP_DIV(x, y) * (y))
+
+/* The LL 128 psync size for any PE is equal to:
+ * the size of the source buffer rounded up to the nearest multiple of 120
+ * plus (8 times the number of 120 byte packets consumed by the source buffer).
+ * Corrected for type.
+ */
+#define NVSHMEMI_FCOLLECT_LL128_CALC_PSYNC_SIZE(x, T) \
+    (NVSHMEMI_TEAM_ROUND_UP(x, (120 / sizeof(T))) +   \
+     sizeof(uint64_t) / sizeof(T) * NVSHMEMI_TEAM_ROUND_UP_DIV(x, (120 / sizeof(T))))
+
+typedef enum {
+    FCOLLECT_DEFAULT = 0,
+    FCOLLECT_LL8 = 1,
+    FCOLLECT_ONESHOT = 2,
+    FCOLLECT_NVLS = 3,
+    FCOLLECT_NVLS_LL = 4,
+    FCOLLECT_LL128 = 6,
+    FCOLLECT_INVALID = INT_MAX
+
+} fcollect_algo_t;
+
+enum nvshmemi_team_op_t {
+    SYNC = 0,
+    ALLTOALL,
+    BCAST,
+    FCOLLECT,
+    REDUCE,
+    FCOLLECT_128,
+    P2P_SYNC_ON_STREAM,
+    OP_SENTINEL = INT_MAX
+};
+
+typedef enum {
+    NVSHMEMI_JOB_GPU_LDST_ATOMICS = 1,
+    NVSHMEMI_JOB_GPU_LDST = 1 << 1,
+    NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS = 1 << 2,
+    NVSHMEMI_JOB_GPU_PROXY = 1 << 3,
+    NVSHMEMI_JOB_GPU_PROXY_CST = 1 << 4,
+    NVSHMEMI_JOB_CONN_TYPE_MAX = INT_MAX
+} nvshmemi_job_connectivity_t;
+
+enum nvshmemi_call_site_id {
+    NVSHMEMI_CALL_SITE_BARRIER = 0,
+    NVSHMEMI_CALL_SITE_BARRIER_WARP,
+    NVSHMEMI_CALL_SITE_BARRIER_THREADBLOCK,
+    NVSHMEMI_CALL_SITE_WAIT_UNTIL_GE,
+    NVSHMEMI_CALL_SITE_WAIT_UNTIL_EQ,
+    NVSHMEMI_CALL_SITE_WAIT_UNTIL_NE,
+    NVSHMEMI_CALL_SITE_WAIT_UNTIL_GT,
+    NVSHMEMI_CALL_SITE_WAIT_UNTIL_LT,
+    NVSHMEMI_CALL_SITE_WAIT_UNTIL_LE,
+    NVSHMEMI_CALL_SITE_WAIT_NE,
+    NVSHMEMI_CALL_SITE_PROXY_CHECK_CHANNEL_AVAILABILITY,
+    NVSHMEMI_CALL_SITE_PROXY_ENFORCE_CONSISTENCY_AT_TARGET,
+    NVSHMEMI_CALL_SITE_PROXY_GLOBAL_EXIT,
+    NVSHMEMI_CALL_SITE_PROXY_QUIET,
+    NVSHMEMI_CALL_SITE_SIGNAL_WAIT_UNTIL_GE,
+    NVSHMEMI_CALL_SITE_SIGNAL_WAIT_UNTIL_EQ,
+    NVSHMEMI_CALL_SITE_SIGNAL_WAIT_UNTIL_NE,
+    NVSHMEMI_CALL_SITE_SIGNAL_WAIT_UNTIL_GT,
+    NVSHMEMI_CALL_SITE_SIGNAL_WAIT_UNTIL_LT,
+    NVSHMEMI_CALL_SITE_SIGNAL_WAIT_UNTIL_LE,
+    NVSHMEMI_CALL_SITE_AMO_FETCH_WAIT_FLAG,
+    NVSHMEMI_CALL_SITE_AMO_FETCH_WAIT_DATA,
+    NVSHMEMI_CALL_SITE_G_WAIT_FLAG,
+    NVSHMEMI_CALL_SITE_SENTINEL = INT_MAX
+};
+
+/* Start shared connectivity constants */
+// Use get_pe_sync_addr to get the address of the sync for a given PE.
+#define SYNC_SIZE 27648 /*XXX:Number of GPUs on Summit; currently O(N), need to be O(1)*/
+#define NVSHMEMI_SYNC_SIZE (2 * SYNC_SIZE)
+#define NVSHMEMI_BCAST_SYNC_SIZE (10 * SYNC_SIZE)
+#define NVSHMEMI_ALLTOALL_SYNC_SIZE SYNC_SIZE
+#define NVSHMEMI_WARP_SIZE 32
+
+#define NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT 16
+#define NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT 16
+#define NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT 32 /* # of GPUs x 4 CTA per GPU for DGX */
+
+// Helper to compute PE's sync address given PE and base pSync address
+static __host__ __device__ inline long *get_pe_sync_addr(volatile void *sync_addr, int pe) {
+    return (long *)((char *)sync_addr + (pe * 8));
+}
+
+#define NVSHMEMI_DECL_THREAD_IDX_warp() \
+    ;                                   \
+    int myIdx;                          \
+    asm volatile("mov.u32  %0,  %%laneid;" : "=r"(myIdx));
+
+#define NVSHMEMI_DECL_THREADGROUP_SIZE_warp()                           \
+    ;                                                                   \
+    int groupSize = ((blockDim.x * blockDim.y * blockDim.z) < warpSize) \
+                        ? (blockDim.x * blockDim.y * blockDim.z)        \
+                        : warpSize;
+
+#define NVSHMEMI_DECL_THREAD_IDX_block() \
+    ;                                    \
+    int myIdx = (threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y);
+
+#define NVSHMEMI_DECL_THREADGROUP_SIZE_block() \
+    ;                                          \
+    int groupSize = (blockDim.x * blockDim.y * blockDim.z);
+
+#define NVSHMEMI_DECL_THREAD_IDX_thread() \
+    ;                                     \
+    int myIdx = 0;
+
+#define NVSHMEMI_DECL_THREADGROUP_SIZE_thread() \
+    ;                                           \
+    int groupSize = 1;
+
+#define NVSHMEMI_SYNC_warp() \
+    ;                        \
+    __syncwarp();
+
+#define NVSHMEMI_SYNC_block() \
+    ;                         \
+    __syncthreads();
+
+#define NVSHMEMI_SYNC_thread() ;
+
+typedef enum rdxn_ops {
+    RDXN_OPS_AND = 0,
+    RDXN_OPS_and = 0,
+    RDXN_OPS_OR = 1,
+    RDXN_OPS_or = 1,
+    RDXN_OPS_XOR = 2,
+    RDXN_OPS_xor = 2,
+    RDXN_OPS_MIN = 3,
+    RDXN_OPS_min = 3,
+    RDXN_OPS_MAX = 4,
+    RDXN_OPS_max = 4,
+    RDXN_OPS_SUM = 5,
+    RDXN_OPS_sum = 5,
+    RDXN_OPS_PROD = 6,
+    RDXN_OPS_prod = 6,
+    RDXN_OPS_MAXLOC = 7,
+    RDXN_OPS_maxloc,
+    RDXN_OPS_sentinel = INT_MAX
+} rdxn_ops_t;
+
+typedef enum {
+    NVSHMEMI_PROXY_NONE = 0,
+    NVSHMEMI_PROXY_MINIMAL = 1,
+    NVSHMEMI_PROXY_FULL = 1 << 1,
+    NVSHMEMI_PROXY_SENTINEL = INT_MAX
+} nvshmemi_proxy_status;
+
+typedef int (*nvshmemx_device_lib_init_cb)(void **dev_state_ptr, void **transport_dev_state_ptr);
+
+#if defined __cplusplus
+extern "C" {
+#endif
+#if !defined __CUDACC_RTC__
+int nvshmemid_hostlib_init_attr(int requested, int *provided, unsigned int bootstrap_flags,
+                                nvshmemx_init_attr_t *attr,
+                                nvshmemi_version_t nvshmem_device_lib_version,
+                                nvshmemx_device_lib_init_cb cb);
+void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx);
+
+int nvshmemid_init_status();
+#endif
+#if defined __cplusplus
+}
+#endif
+
+#endif

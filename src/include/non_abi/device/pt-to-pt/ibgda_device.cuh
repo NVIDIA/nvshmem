@@ -14,12 +14,13 @@
 #endif
 #include "infiniband/mlx5dv.h"
 
+#include "device/nvshmem_device_macros.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device_host_transport/nvshmem_common_ibgda.h"
-#include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/device/transport/nvshmem_common_ibgda.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh"
 #include "non_abi/device/common/nvshmemi_region_state.cuh"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 #include "utils_device.h"
 
 #include <algorithm>
@@ -3394,14 +3395,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
             }
         }
     } else {
-        if (ibgda_use_address_stable_amo(pe, qp_index)) {
-            ibgda_rma_thread<NVSHMEMI_OP_PUT, true, support_half_av_seg>(
-                (uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe, qp_index, qp,
-                is_qp_shared_among_ctas);
-        } else {
-            ibgda_rma_thread<NVSHMEMI_OP_PUT, true, support_half_av_seg>(
-                (uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe);
-        }
+        ibgda_rma_thread<NVSHMEMI_OP_PUT, true, support_half_av_seg>(
+            (uintptr_t)rptr, (uintptr_t)lptr, bytes, pe, pe, qp_index, qp, is_qp_shared_among_ctas);
 
         num_wqes = num_atomic_wqes_per_cmd + (need_additional_wqe ? 1 : 0);
 

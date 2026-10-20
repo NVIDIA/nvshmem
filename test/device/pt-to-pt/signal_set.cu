@@ -21,7 +21,7 @@ __device__ int error_d;
                           NVSHMEMI_TEST_STRINGIFY(test_nvshmem_signal_set_kernel)); \
     CU_CHECK(cuLaunchKernel(test_sig_cubin, 1, 1, 1, 1, 1, 1, 0, 0, args_sig, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -41,7 +41,7 @@ __global__ void test_nvshmem_signal_set_kernel(uint64_t *remote, size_t dynamic_
     NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

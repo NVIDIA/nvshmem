@@ -20,6 +20,7 @@ from cuda.core import Device, system
 from nvshmem.bindings.device.cute import int_p as cute_int_p
 from nvshmem.bindings.device.cute import my_pe as cute_my_pe
 from nvshmem.bindings.device.cute import n_pes as cute_n_pes
+from nvshmem.core.interop.cute import register_cute_library
 
 
 @cute.kernel
@@ -60,9 +61,7 @@ def run():
     compilerd_func = cute.compile(simple_shift, tensor_dlpack)
 
     compilerd_func = compilerd_func.to(my_pe)
-    cuda_library = compilerd_func.jit_module.cuda_library
-    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
-    nvshmem.core.library_init(nvshmem_kernel)
+    register_cute_library(compilerd_func)
 
     # launch the kernel
     compilerd_func(tensor_dlpack)

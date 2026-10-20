@@ -7,7 +7,7 @@
 
 #include "coll_test.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -62,7 +62,7 @@ BARRIER_KERNEL(, , 1);
 BARRIER_KERNEL(x, _warp, warpSize);
 BARRIER_KERNEL(x, _block, INT_MAX);
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

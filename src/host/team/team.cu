@@ -106,8 +106,8 @@ int nvshmem_team_split_2d(nvshmem_team_t parent_team, int xrange,
 void nvshmem_team_destroy(nvshmem_team_t team) {
     NVSHMEMI_CHECK_INIT_STATUS();
     if (team == NVSHMEM_TEAM_WORLD || team == NVSHMEM_TEAM_SHARED || team == NVSHMEMX_TEAM_NODE ||
-        team == NVSHMEMX_TEAM_SAME_MYPE_NODE || team == NVSHMEMI_TEAM_SAME_GPU ||
-        team == NVSHMEMI_TEAM_GPU_LEADERS || team == NVSHMEM_TEAM_MC_SHARED) {
+        team == NVSHMEMX_TEAM_SAME_MYPE_NODE || team == NVSHMEM_TEAM_SAME_GPU_INDEX ||
+        team == NVSHMEM_TEAM_GPU_LEADERS_INDEX || team == NVSHMEM_TEAM_MC_SHARED) {
         NVSHMEMI_ERROR_PRINT("Cannot destroy a pre-defined team");
         return;
     }

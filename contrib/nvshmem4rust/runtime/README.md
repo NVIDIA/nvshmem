@@ -51,9 +51,11 @@ same MPI implementation as NVSHMEM and keeping the communicator valid while
 the runtime is live.
 
 Cargo builds need to find the host library. Set `NVSHMEM_HOST_LIB_DIR` to the
-directory containing `libnvshmem_host.so`. The generated `Cargo.toml` points
-`cuda-core` at the `NVSHMEM_CUDA_OXIDE_ROOT` configured by CMake. At runtime,
-the dynamic loader must resolve NVSHMEM and its dependencies through
-`LD_LIBRARY_PATH`, an rpath, or a system installation.
+directory containing `libnvshmem_host.so`. The generated `Cargo.toml` depends
+on the published `cuda-core` version selected by `NVSHMEM_CUDA_CORE_VERSION`
+(0.3.1 by default) and requires Rust 1.89 or newer. Another `cuda-core` version
+may require a newer Rust toolchain. At runtime, the dynamic loader must resolve
+NVSHMEM and its dependencies through `LD_LIBRARY_PATH`, an rpath, or a system
+installation.
 `NVSHMEM_HOST_LIB_PATH` may additionally select the exact host-library path
 that the crate reopens with `RTLD_GLOBAL`.

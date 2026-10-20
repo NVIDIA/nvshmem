@@ -22,8 +22,8 @@
 #include "internal/host/util.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/cudawrap.h"
-#include "non_abi/nvshmemx_error.h"
-#include "device_host/logical_endpoint_types.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
+#include "non_abi/device/common/logical_endpoint_types.h"
 
 // Forward declarations
 class nvshmemi_mem_p2p_transport;
@@ -192,6 +192,9 @@ class nvshmemi_symmetric_heap {
     template <typename T>
     int is_symmetric(T value);
 
+    /** Resolve the local GPU or its host NUMA socket without collective communication. */
+    int get_buffer_location(bool on_gpu, int &location_id) const;
+
     /*
      * Multicast expects memory buffers to be on different devices (GPU or CPU), which may
      * not be true in case of MPG and EGM buffers on same CPU socket. This function detects
@@ -203,11 +206,6 @@ class nvshmemi_symmetric_heap {
      * This function will initialize mspace container for managing virtual address range
      */
     virtual int setup_mspace() = 0;
-
-    /**
-     * This function will destroy the mspace container initialized in setup_mspace()
-     */
-    int cleanup_mspace(void);
 
     /**
      * Given a mem_granualarity, this API will compute heap size attributes such as heapextra
@@ -243,12 +241,14 @@ class nvshmemi_symmetric_heap {
     nvshmemi_mem_remote_transport *remote_ref_ =
         nullptr;                                     // holds an instance of remote abstraction
     nvshmemi_mem_p2p_transport *p2p_ref_ = nullptr;  // holds an instance of memp2p abstraction
-    mspace *heap_mspace_ = nullptr;
-    mspace *mmap_mspace_ = nullptr;  // mspace for mmaped region
+    std::unique_ptr<mspace> heap_mspace_;
+    std::unique_ptr<mspace> mmap_mspace_;  // mspace for mmaped region
     // track indices of mc_handles created for mmaped user buffers
     // needed for selectively unbinding them on unmap
     std::unordered_map<void *, size_t> idx_in_mmap_mc_handles_;
     std::unordered_map<void *, size_t> mmap_handle_idx_in_cumem_handles_;
+    // Track the mapped physical range separately from the rounded mspace/VA allocation.
+    std::unordered_map<void *, size_t> mmap_physical_sizes_;
     // track alias virtual addresses for mmaped user buffers
     // map heap addr -> user buffer addr
     std::unordered_map<void *, void *> alias_va_map_;
@@ -315,8 +315,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
      * while memory allocated using nvshmem_malloc is referred to as internal
      * allocation in the code
      */
-    void *mmap_mem(void *ptr, size_t size, void *pref_addr, int flags);
+    void *mmap_mem(void *ptr, size_t physical_size, size_t va_size, void *pref_addr, int flags);
     int unmap_mem(void *ptr, size_t size);
+    size_t get_mmap_physical_size(void *ptr) const;
 
     /* Functions for logical endpoints */
     int reserve_unicast_endpoint(size_t size, bool counted_operations);
@@ -366,7 +367,15 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
         return;
     }
 
-    int check_user_buffer_for_mmap(void *ptr, size_t &size, unsigned int *ptr_mem_type);
+    struct MmapAccess;
+    class PendingMmapRegistration;
+    int validate_user_buffer_for_mmap(void *ptr, size_t size, unsigned int &ptr_mem_type);
+    int check_user_buffer_for_mmap(void *ptr, size_t size, unsigned int &ptr_mem_type);
+    int get_mmap_access(void *buffer, unsigned int memory_type, int flags, MmapAccess &access);
+    int extend_mmap_space(void *address, size_t size);
+    int notify_mmap_observers(CUmemGenericAllocationHandle handle, off_t heap_offset, size_t size);
+    int publish_mmap_registration(CUmemGenericAllocationHandle handle, void *address,
+                                  size_t physical_size, size_t va_size);
     int converge_unicast_endpoint_status(int local_status);
     int bind_unicast_endpoint_memory(CUmemGenericAllocationHandle mem_handle, off_t heap_offset,
                                      off_t mem_offset, size_t size);

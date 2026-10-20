@@ -11,14 +11,16 @@ from cutlass.cute.typing import Int32
 from cutlass.cute.arch.nvvm_wrappers import WARP_SIZE
 
 import nvshmem.core
+from nvshmem.core.interop.cute import cute_compile_helper
 import nvshmem.core.device.cute as nvshmem_cute
 import nvshmem.bindings.device.cute as nvshmem_cute_bindings
 
-_KERNEL_OBJECTS: list[nvshmem.core.NvshmemKernelObject] = []
-
-rma_dtypes = ["float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"]
+rma_dtypes = [
+    "bfloat16", "float32", "float64", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"
+]
 
 _TORCH_DTYPE_MAP = {
+    "bfloat16": torch.bfloat16,
     "float32": torch.float32,
     "float64": torch.float64,
     "int8": torch.int8,
@@ -61,18 +63,8 @@ def _nvshmem_stream():
 
 
 def _compile_kernel(kernel, *example_args):
-    compiled = cute.compile(kernel, *example_args)
-    compiled = compiled.to(Device().device_id)
-    cuda_library = compiled.jit_module.cuda_library
-    nvshmem_kernel = nvshmem.core.NvshmemKernelObject.from_handle(int(cuda_library[0]))
-    nvshmem.core.library_init(nvshmem_kernel)
-    _KERNEL_OBJECTS.append(nvshmem_kernel)
+    compiled, _ = cute_compile_helper(kernel, *example_args)
     return compiled
-
-
-def _finalize_kernels():
-    while _KERNEL_OBJECTS:
-        nvshmem.core.library_finalize(_KERNEL_OBJECTS.pop())
 
 
 @pytest.mark.mpi
@@ -179,14 +171,17 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
     compiled = _compile_kernel(test_put_launcher, dst_cute, src_cute, 0)
 
     peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    # All PEs must finish initializing their destination before a peer writes it.
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
     compiled(dst_cute, src_cute, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    expected = ((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()) + 1
-    _assert_torch_tensor(buf_dst, expected)
+    predecessor = (nvshmem.core.my_pe() - 1 + nvshmem.core.n_pes()) % nvshmem.core.n_pes()
+    _assert_torch_tensor(buf_dst, predecessor + 1)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -197,11 +192,11 @@ def test_put_on_tensor(nvshmem_init_fini, dtype):
 def test_get_on_tensor(nvshmem_init_fini, dtype):
     stream = _nvshmem_stream()
     dev = Device()
-    buf_src = _make_torch_tensor((4, 4), dtype, 0)
-    buf_dst = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_src = _make_torch_tensor((4, 4), dtype, nvshmem.core.my_pe() + 1)
+    buf_dst = _make_torch_tensor((4, 4), dtype, 0)
 
-    dst_cute = _cute_from_torch(buf_src)
-    src_cute = _cute_from_torch(buf_dst)
+    dst_cute = _cute_from_torch(buf_dst)
+    src_cute = _cute_from_torch(buf_src)
 
     @cute.kernel
     def test_get(dst: cute.Tensor, src: cute.Tensor, pe: Int32):
@@ -217,13 +212,17 @@ def test_get_on_tensor(nvshmem_init_fini, dtype):
         )
 
     compiled = _compile_kernel(test_get_launcher, dst_cute, src_cute, 0)
-    compiled(dst_cute, src_cute, nvshmem.core.my_pe())
+    # Read the same predecessor whose value the ring put delivers locally.
+    peer = (nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(dst_cute, src_cute, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
+    _assert_torch_tensor(buf_dst, peer + 1)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -260,13 +259,18 @@ def test_put_signal_on_tensor(nvshmem_init_fini, dtype):
         )
 
     compiled = _compile_kernel(test_put_signal_launcher, dst_cute, src_cute, signal_cute, 0, 0, 0)
-    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
+    expected = ((nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()) + 1
+    _assert_torch_tensor(buf_dst, expected)
+    _assert_torch_tensor(signal_var, signal_val)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -305,14 +309,18 @@ def test_put_signal_with_wait_on_tensor(nvshmem_init_fini, dtype):
         )
 
     compiled = _compile_kernel(test_put_signal_with_wait_launcher, dst_cute, src_cute, signal_cute, 0, 0, 0)
-    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(dst_cute, src_cute, signal_cute, signal_val, signal_op, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
 
-    if nvshmem.core.my_pe() == 1:
-        _assert_torch_tensor(buf_dst, nvshmem.core.my_pe() + 1)
+    expected = ((nvshmem.core.my_pe() - 1) % nvshmem.core.n_pes()) + 1
+    _assert_torch_tensor(buf_dst, expected)
+    _assert_torch_tensor(signal_var, signal_val)
 
     nvshmem.core.free_tensor(buf_dst)
     nvshmem.core.free_tensor(buf_src)
@@ -344,11 +352,16 @@ def test_signal_op_signal_wait(nvshmem_init_fini):
         )
 
     compiled = _compile_kernel(test_signal_op_signal_wait_launcher, signal_cute, 0, 0, 0)
-    compiled(signal_cute, signal_val, signal_op, nvshmem.core.my_pe())
+    peer = (nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+    compiled(signal_cute, signal_val, signal_op, peer)
 
     dev.sync()  # Sync to ensure kernel completes before barrier
     nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
     stream.sync()
+
+    _assert_torch_tensor(signal_var, signal_val)
 
     nvshmem.core.free_tensor(signal_var)
 
@@ -424,6 +437,100 @@ def test_g(dtype, nvshmem_init_fini):
 
     nvshmem.core.free_tensor(dest)
     nvshmem.core.free_tensor(var)
+
+
+_SCOPE_WARPS = 2
+_SCOPE_CHUNK = 128  # elements handled per warp for warp-scoped calls
+_SCOPE_NELEMS = _SCOPE_WARPS * _SCOPE_CHUNK
+_SCOPE_OPS = ["put", "put_nbi", "get", "get_nbi", "put_signal", "put_signal_nbi"]
+_SCOPES = ["", "_warp", "_block"]
+_SCOPE_DTYPES = ["int8", "float32"]
+
+
+def _make_scope_rma_kernel(op, scope):
+    """Build a launcher that issues ``op`` at ``scope`` from a 2-warp CTA.
+
+    Thread scope issues one call from thread 0, warp scope issues one call per
+    warp on that warp's slice, and block scope issues one call from the whole CTA.
+    """
+    rma = getattr(nvshmem_cute, f"{op}{scope}")
+    is_signal = op.startswith("put_signal")
+    is_nbi = op.endswith("_nbi")
+
+    @cute.jit
+    def issue(dst, src, signal_var, signal_op, pe):
+        if cutlass.const_expr(is_signal):
+            rma(dst, src, signal_var, cutlass.Uint64(1), signal_op, pe)
+        else:
+            rma(dst, src, pe)
+
+    @cute.kernel
+    def scope_rma(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_op: Int32, pe: Int32):
+        tidx, _, _ = cute.arch.thread_idx()
+        if cutlass.const_expr(scope == "_warp"):
+            warp = cute.arch.make_warp_uniform(cute.arch.warp_idx())
+            issue(cute.local_tile(dst, (_SCOPE_CHUNK, ), (warp, )), cute.local_tile(src, (_SCOPE_CHUNK, ), (warp, )),
+                  signal_var, signal_op, pe)
+        elif cutlass.const_expr(scope == "_block"):
+            issue(dst, src, signal_var, signal_op, pe)
+        else:
+            if tidx == 0:
+                issue(dst, src, signal_var, signal_op, pe)
+        if cutlass.const_expr(is_nbi):
+            nvshmem_cute.quiet()
+
+    @cute.jit
+    def scope_rma_launcher(dst: cute.Tensor, src: cute.Tensor, signal_var: cute.Tensor, signal_op: Int32, pe: Int32):
+        scope_rma(dst, src, signal_var, signal_op, pe).launch(
+            grid=[1, 1, 1],
+            block=[_SCOPE_WARPS * 32, 1, 1],
+        )
+
+    return scope_rma_launcher
+
+
+@pytest.mark.mpi
+@pytest.mark.parametrize("dtype", _SCOPE_DTYPES)
+@pytest.mark.parametrize("scope", _SCOPES, ids=["thread", "warp", "block"])
+@pytest.mark.parametrize("op", _SCOPE_OPS)
+def test_rma_scopes(nvshmem_init_fini, op, scope, dtype):
+    """Validate thread-, warp-, and block-scoped RMA wrappers end to end."""
+    stream = _nvshmem_stream()
+    dev = Device()
+    my_pe = nvshmem.core.my_pe()
+    n_pes = nvshmem.core.n_pes()
+    peer = (my_pe + 1) % n_pes
+    previous_pe = (my_pe - 1) % n_pes
+
+    src = _make_torch_tensor((_SCOPE_NELEMS, ), dtype, my_pe + 1)
+    dst = _make_torch_tensor((_SCOPE_NELEMS, ), dtype, 0)
+    signal_var = _make_torch_tensor((1, ), "int64", 0)
+    src_cute = _cute_from_torch(src)
+    dst_cute = _cute_from_torch(dst)
+    signal_cute = _cute_from_torch(signal_var)
+
+    signal_op = nvshmem.core.SignalOp.SIGNAL_ADD
+
+    compiled = _compile_kernel(_make_scope_rma_kernel(op, scope), dst_cute, src_cute, signal_cute, 0, 0)
+    compiled(dst_cute, src_cute, signal_cute, signal_op, peer)
+
+    dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
+    stream.sync()
+
+    if op.startswith("get"):
+        # get pulls the peer's source into the local destination.
+        _assert_torch_tensor(dst, peer + 1)
+    else:
+        # put writes into the next PE, so the local destination holds the previous PE's source.
+        _assert_torch_tensor(dst, previous_pe + 1)
+    if op.startswith("put_signal"):
+        expected_signals = _SCOPE_WARPS if scope == "_warp" else 1
+        assert int(signal_var.item()) == expected_signals
+
+    nvshmem.core.free_tensor(src)
+    nvshmem.core.free_tensor(dst)
+    nvshmem.core.free_tensor(signal_var)
 
 
 @pytest.mark.mpi

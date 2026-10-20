@@ -13,7 +13,9 @@
 #include <cuda_runtime.h>
 
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
+#include <strings.h>
 #include <unistd.h>
 
 #define THREADS_PER_BLOCK 128
@@ -69,6 +71,11 @@ static void init_nvshmem_and_select_device() {
     int npes_per_gpu = (npes_node + dev_count - 1) / dev_count;
     CUDA_CHECK(cudaSetDevice(mype_node / npes_per_gpu));
     nvshmem_barrier_all();
+}
+
+static bool vmm_heap_requested() {
+    const char *heap_kind = std::getenv("NVSHMEM_HEAP_KIND");
+    return heap_kind == nullptr || strcasecmp(heap_kind, "SYSMEM") != 0;
 }
 
 static void log_status(int mype, int npes, const char *fmt, ...) {
@@ -257,6 +264,13 @@ int main() {
     scratch = (ncclUniqueId *)nvshmem_malloc(sizeof(ncclUniqueId));
     if (scratch == nullptr) {
         fprintf(stderr, "nvshmem_malloc failed for NCCL unique ID scratch\n");
+        status = -1;
+        goto out;
+    }
+    if (!vmm_heap_requested()) {
+        if (mype == 0) {
+            std::fprintf(stderr, "interop_nccl requires a VMM-backed device heap\n");
+        }
         status = -1;
         goto out;
     }

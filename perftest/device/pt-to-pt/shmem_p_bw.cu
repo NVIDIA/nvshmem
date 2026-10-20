@@ -121,6 +121,9 @@ int main(int argc, char *argv[]) {
     unsigned int *counter_d;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(datatype.size)) {
+        return EXIT_FAILURE;
+    }
     int array_size, i;
     void **h_tables = NULL;
     uint64_t *h_size_arr;

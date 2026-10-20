@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include "utils.h"
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -42,7 +42,7 @@ __global__ void ping_pong(int *data_d, uint64_t *flag_d, int len, int pe, int it
     nvshmem_quiet();
 }
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 
@@ -66,6 +66,9 @@ int main(int argc, char *argv[]) {
     cudaStream_t stream;
 
     read_args(argc, argv);
+    if (!validate_message_size_range(sizeof(int))) {
+        return EXIT_FAILURE;
+    }
     int iter = iters;
     int skip = warmup_iters;
 

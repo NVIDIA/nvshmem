@@ -35,7 +35,7 @@ __device__ int errors_d;
     CU_CHECK(cuLaunchKernel(test_##FUNC##_cubin_##SC_SUFFIX, 1, 1, 1, num_threads, 1, 1, 0, 0, \
                             args_##FUNC##_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -159,12 +159,13 @@ DEFINE_SIGNAL_PUT_SIZE(long, long_put, thread, , )
 DEFINE_SIGNAL_PUT_SIZE(long, long_put, warp, _warp, x)
 DEFINE_SIGNAL_PUT_SIZE(long, long_put, block, _block, x)
 DEFINE_SIGNAL_PUT_SIZE(int8_t, put8, warp, _warp, x)
+DEFINE_SIGNAL_PUT_SIZE(int16_t, put16, block, _block, x)
 DEFINE_SIGNAL_PUT_SIZE(int32_t, put32, block, _block, x)
 DEFINE_SIGNAL_PUT_SIZE(int64_t, put64, thread, , )
 DEFINE_SIGNAL_PUT_SIZE(char, putmem, block, _block, x)
 #undef DEFINE_SIGNAL_PUT_SIZE
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 
@@ -185,6 +186,7 @@ int main(int argc, char *argv[]) {
     errors += run_long_put__warp_test(me, npes);
     errors += run_long_put__block_test(me, npes);
     errors += run_put8__warp_test(me, npes);
+    errors += run_put16__block_test(me, npes);
     errors += run_put32__block_test(me, npes);
     errors += run_put64__test(me, npes);
     errors += run_putmem__block_test(me, npes);

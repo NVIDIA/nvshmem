@@ -20,8 +20,8 @@
 #include "bootstrap_host_transport/env_defs_internal.h"          // for nvsh...
 #include "infiniband/verbs.h"                                    // for ibv_gid
 #include "internal/host_transport/nvshmemi_transport_defines.h"  // for nvsh...
-#include "non_abi/nvshmem_build_options.h"                       // for NVSH...
-#include "non_abi/nvshmemx_error.h"                              // for NVSH...
+#include "non_abi/c/nvshmem_build_options.h"                     // for NVSH...
+#include "non_abi/c/nvshmemi_error_macros.h"                     // for NVSH...
 #include "transport_common.h"                                    // for INFO
 #include "transport_ib_common.h"                                 // lines 26-26
 
@@ -65,8 +65,10 @@ struct nvshmemt_ib_common_ep {
     int selected_dev_slot;
 };
 
+/* Verbs port numbers and ibv_device_attr::phys_port_cnt are uint8_t. Keep
+ * storage for every valid one-based port number, including virtual ports. */
 #ifndef MAX_NUM_PORTS
-#define MAX_NUM_PORTS 4
+#define MAX_NUM_PORTS UINT8_MAX
 #endif
 
 struct nvshmemt_ib_gid_info {
@@ -196,6 +198,8 @@ struct nvshmemt_ibv_function_table {
     int (*destroy_cq)(struct ibv_cq *cq);
     int (*destroy_srq)(struct ibv_srq *srq);
     int (*destroy_ah)(struct ibv_ah *ah);
+    void (*free_device_list)(struct ibv_device **list);
+    const char *(*wc_status_str)(enum ibv_wc_status status);
 };
 
 struct nvshmemt_mlx5dv_function_table {

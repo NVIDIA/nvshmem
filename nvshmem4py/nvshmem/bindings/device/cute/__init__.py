@@ -13,7 +13,7 @@ from nvshmem.core.nvshmem_types import NvshmemWarning
 
 if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cuteast.py")):
     if not hasattr(cute, "extern"):
-        raise RuntimeError("NVSHMEM CuTe DSL bindings require nvidia-cutlass-dsl>=4.5.2; "
+        raise RuntimeError("NVSHMEM CuTe DSL bindings require nvidia-cutlass-dsl>=4.8.0; "
                            "the installed version does not provide cute.extern.")
 
     from ._cuteast import *

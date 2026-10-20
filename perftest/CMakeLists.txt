@@ -12,7 +12,7 @@ set(NVSHMEM_PERFTEST_TLD ${CMAKE_CURRENT_SOURCE_DIR})
 if (DEFINED ENV{NVSHMEM_PERFTEST_INSTALL})
   set(NVSHMEM_PERFTEST_INSTALL_PREFIX $ENV{NVSHMEM_PERFTEST_INSTALL})
 else()
-  set(NVSHMEM_PERFTEST_INSTALL_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/perftest_install")
+  set(NVSHMEM_PERFTEST_INSTALL_PREFIX "perftest_install")
 endif()
 
 get_directory_property(SubBuild PARENT_DIRECTORY)
@@ -129,19 +129,8 @@ endif()
 
 add_subdirectory(common)
 
-if(CUDAToolkit_VERSION_MAJOR EQUAL 12)
-  set(NVSHMEM_CLANG_ARCH "sm_90")
-  set(NVSHMEM_PTX_ARCH "ptx82")
-else()
-  set(NVSHMEM_CLANG_ARCH "sm_90")
-  set(NVSHMEM_PTX_ARCH "ptx86")
-endif()
-
-if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13 AND CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED CMAKE_CUDA_ARCHITECTURES_UNDEFINED)
-  list(GET CMAKE_CUDA_ARCHITECTURES 0 NVSHMEM_CLANG_ARCH)
-  string(REGEX REPLACE "-(real|virtual)$" "" NVSHMEM_CLANG_ARCH "${NVSHMEM_CLANG_ARCH}")
-  set(NVSHMEM_CLANG_ARCH "sm_${NVSHMEM_CLANG_ARCH}")
-endif()
+include(NVSHMEMLTOIRLibrary)
+nvshmem_set_cubin_architectures()
 
 set(BITCODE_CXX_STD "c++${CMAKE_CXX_STANDARD}")
 set(CUBIN_CXX_STD "c++${CMAKE_CXX_STANDARD}")
@@ -229,9 +218,11 @@ function(nvshmem_add_cubin_perftest_prefix SOURCE PREFIX)
     set(CUBIN_EXTRA_DEPENDS nvshmem_perftest_helper libnvshmem_device_bitcode)
   endif()
 
+  # Internal perftest kernels use API declarations and link the precompiled bitcode device library.
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                  COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                          --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.bc.unoptimized
+                  COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${_NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} ${CUBIN_OPT_LEVEL} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                          --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_DEVICE_DECLARATIONS_ONLY
+                          -DNVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY ${DIR_} -o ${NAME_}.bc.unoptimized
                   COMMAND llvm::llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
                   COMMAND llvm::opt ${CUBIN_OPT_LEVEL} ${NAME_}.bc.unoptimized.linked -o ${NAME_}.bc
                   COMMAND llvm::llc ${CUBIN_OPT_LEVEL} --disable-tail-calls -mcpu=${NVSHMEM_CLANG_ARCH} -mattr=${NVSHMEM_PTX_ARCH} ${NAME_}.bc -o ${NAME_}.ptx
@@ -272,24 +263,25 @@ macro(nvshmem_add_ltoir_cubin_perftest_prefix SOURCE PREFIX)
   set(INCLUDE_DIRECTORIES "-I${NVSHMEM_PERFTEST_TLD}/common" "-I${NVSHMEM_PERFTEST_TLD}/../src/include/" "-I${NVSHMEM_PREFIX}/include")
 
   if (NOT SubBuild)
-    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
+    set(LTOIR_LIB_PATH ${NVSHMEM_PREFIX}/lib/libnvshmem_device_${NVSHMEM_LTOIR_ARCH}.ltoir)
     set(LTOIR_INCLUDE_PREFIX "")
     set(LTOIR_EXTRA_DEPENDS nvshmem_perftest_helper ${LTOIR_LIB_PATH})
   else()
-    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_CLANG_ARCH}.ltoir)
+    set(LTOIR_LIB_PATH ${CMAKE_BINARY_DIR}/src/lib/libnvshmem_device_${NVSHMEM_LTOIR_ARCH}.ltoir)
     set(LTOIR_INCLUDE_PREFIX "-I${CMAKE_SOURCE_DIR}/perftest/common" "-I${CMAKE_SOURCE_DIR}/src/include")
     set(LTOIR_EXTRA_DEPENDS nvshmem_perftest_helper libnvshmem_device_ltoir)
   endif()
 
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-                    COMMAND cuda::nvcc -std=${BITCODE_CXX_STD} -x cu -arch=${NVSHMEM_CLANG_ARCH} -dlto --ltoir
-                            ${LTOIR_INCLUDE_PREFIX} ${INCLUDE_DIRECTORIES} -DNVSHMEM_HOSTLIB_ONLY ${DIR_} -o ${NAME_}.ltoir
-                    COMMAND cuda::nvcc -arch=${NVSHMEM_CLANG_ARCH} -dlto -dlink -o ${CUBIN_NAME} ${NAME_}.ltoir ${LTOIR_LIB_PATH}
-                    COMMAND rm ${NAME_}.ltoir
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    DEPENDS ${LTOIR_EXTRA_DEPENDS})
-
-  add_custom_target(${NAME_}_ltoir_cubin ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME})
+  nvshmem_add_ltoir_library(
+    TARGET ${NAME_}_ltoir_cubin
+    SOURCE ${DIR_}
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
+    ARCHITECTURE ${NVSHMEM_LTOIR_ARCH}
+    CXX_STANDARD ${BITCODE_CXX_STD}
+    LIBRARY ${LTOIR_LIB_PATH}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    INCLUDE_OPTIONS ${LTOIR_INCLUDE_PREFIX} ${INCLUDE_DIRECTORIES}
+    DEPENDS ${LTOIR_EXTRA_DEPENDS})
 
   install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}

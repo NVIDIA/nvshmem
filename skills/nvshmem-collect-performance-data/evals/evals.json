@@ -19,10 +19,10 @@
       "prompt": "I explicitly choose the recommended NVSHMEM device sanity suite. The perftests are installed under /opt/nvshmem/bin/perftest, and I have an active two-node Slurm allocation with two GPUs per node. Use srun and prepare the collection plan before running anything.",
       "expected_output": "The agent resolves exactly the four canonical device point-to-point tests, plans two-PE same-node and two-node placements, and stages environment collection, launcher preflight, information probes, serial repetitions, artifacts, validation, and reporting.",
       "assertions": [
-        "The selected executables are exactly device/pt-to-pt/shmem_put_bw, shmem_put_latency, shmem_get_bw, and shmem_get_latency",
+        "The selected executables are exactly device/pt-to-pt/shmem_put_bw, shmem_put_latency, shmem_get_bw, and shmem_get_latency; shmem_put_bw uses the first nonempty .args line without --bidir and records its full scope, CTA, and thread configuration",
         "The agent uses two PEs, keeps same-node and one-PE-per-node two-node results separate, and does not use shortened _lat aliases",
-        "The plan collects system evidence on every participating node and runs an NVSHMEM_INFO=1 shmem_put_latency probe before measured tests for each placement",
-        "The plan uses srun --overlap, serial execution, machine-readable output, three repetitions, timestamped artifacts, and exact command/stdout/stderr/status capture",
+        "The plan collects system evidence with the resolved prefix on every participating node and runs an NVSHMEM_INFO=1 NVSHMEM_DEBUG=INFO shmem_put_latency probe before measured tests for each placement",
+        "The plan uses srun --overlap, retains per-rank launcher-preflight hostname and GPU-binding artifacts, and uses serial execution, machine-readable output, three repetitions, timestamped artifacts, and exact command/stdout/stderr/status capture",
         "The agent does not inventory unrelated perftest executables"
       ],
       "expected_skill": "nvshmem-collect-performance-data",
@@ -36,7 +36,7 @@
         "The agent selects device/pt-to-pt/shmem_atomic_latency and does not add the four-test default suite",
         "The exact atomic operation and 64-bit integer datatype remain explicit in commands and reporting",
         "The agent consults only the selected test's standard .args or --help when resolving its requested options and does not perform a preliminary inventory pass",
-        "The agent preserves rather than replaces the user's transport and tuning environment"
+        "The agent does not ask for or inject a remote transport override and preserves the user's transport and tuning environment"
       ],
       "expected_skill": "nvshmem-collect-performance-data",
       "expected_script": "None"
@@ -101,7 +101,7 @@
         "The agent uses the four canonical device tests with two PEs on the allocated node",
         "The agent does not call salloc, sbatch, or otherwise request a second node",
         "The report marks two-node collection incomplete or unavailable and never claims that the remote path was measured",
-        "The same-node run still includes system collection, placement proof, an NVSHMEM_INFO probe, repetitions, and raw artifacts"
+        "The same-node run still includes prefix-aware system collection, retained launcher preflight, an NVSHMEM_INFO=1 NVSHMEM_DEBUG=INFO probe with runtime transport proof, repetitions, and raw artifacts"
       ],
       "expected_skill": "nvshmem-collect-performance-data",
       "expected_script": "None"
@@ -114,7 +114,7 @@
         "The agent stops the placement after the failed NVSHMEM_INFO probe",
         "The exact command, stdout, stderr, and exit status are retained in the artifact/report plan",
         "No measured bandwidth or latency row from that placement is accepted as valid",
-        "The agent does not force a transport, enable extra debugging, or change tuning variables merely to make initialization pass"
+        "The agent does not force or substitute a transport, select an HCA, disable P2P, or change tuning variables merely to make initialization pass"
       ],
       "expected_skill": "nvshmem-collect-performance-data",
       "expected_script": "None"

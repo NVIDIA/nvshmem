@@ -24,7 +24,7 @@ __device__ int errors_d;
     CU_CHECK(cuLaunchKernel(test_put_cubin_##SC_SUFFIX, 1, 1, 1, num_threads, 1, 1, 0, 0,    \
                             args_put_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -128,7 +128,7 @@ TEST_PUT_SIGNAL_NBI_SCOPE_KERNEL(thread, , )
 TEST_PUT_SIGNAL_NBI_SCOPE_KERNEL(warp, _warp, x)
 TEST_PUT_SIGNAL_NBI_SCOPE_KERNEL(block, _block, x)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

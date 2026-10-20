@@ -69,7 +69,7 @@ emit container_runtimes "$(command_list docker podman apptainer singularity)"
 if command -v nvidia-smi >/dev/null 2>&1; then
     emit nvidia_smi "$(command_path nvidia-smi)"
     if gpu_rows="$(nvidia-smi --query-gpu=index,name,compute_cap,driver_version --format=csv,noheader 2>/dev/null)"; then
-        emit gpu_count "$(printf '%s\n' "$gpu_rows" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+        emit gpu_count "$(awk 'NF { count++ } END { print count + 0 }' <<<"$gpu_rows")"
         emit gpu_inventory "$gpu_rows"
         emit gpu_topology "$(nvidia-smi topo -m 2>/dev/null || true)"
     else

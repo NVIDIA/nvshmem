@@ -6,9 +6,9 @@
 #define _NVSHMEM_TILE_UTILS_CUH_
 
 #include <cuda_runtime.h>
-#include "non_abi/nvshmemi_cccl_compat.h"
-#include "host/nvshmem_macros.h"
-#include "device_host/nvshmem_tensor.h"
+#include "non_abi/device/common/nvshmemi_cccl_compat.h"
+#include "c_api/nvshmem_macros.h"
+#include "cpp_api/nvshmem_tensor.hpp"
 #ifdef CUTLASS_ENABLED
 #include "cutlass/half.h"
 #include "cutlass/bfloat16.h"

@@ -48,6 +48,7 @@ def test_rma_on_buffer():
     stream = dev.create_stream()
 
     nvshmem.core.put(buf_dst, buf_src, remote_pe=((nvshmem.core.my_pe() + 1) % nvshmem.core.n_pes()), stream=stream)
+    stream.sync()
 
     nvshmem.core.free(buf_src)
     nvshmem.core.free(buf_dst)
@@ -314,6 +315,7 @@ def test_signal_wait_array():
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
 
     if nvshmem.core.my_pe() == 0:
         # TODO: Expose signal ops as an enum
@@ -357,6 +359,7 @@ def test_signal_wait_array_non_one():
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
 
     if nvshmem.core.my_pe() == 0:
         nvshmem.core.put_signal(
@@ -409,6 +412,7 @@ def test_signal_wait_tensor():
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
 
     if nvshmem.core.my_pe() == 0:
         # TODO: Expose signal ops as an enum
@@ -445,6 +449,7 @@ def test_signalop_wait():
     buf_sig, sz, type = nvshmem.core.array_get_buffer(signal)
 
     dev.sync()
+    nvshmem.core.barrier(nvshmem.core.Teams.TEAM_WORLD, stream=stream)
 
     if nvshmem.core.my_pe() == 0:
         nvshmem.core.signal_op(buf_sig, 1, nvshmem.core.SignalOp.SIGNAL_SET, remote_pe=1, stream=stream)

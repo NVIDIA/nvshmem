@@ -25,6 +25,8 @@ try:
     torch_to_numpy = {
         torch.float16: np.float16,
         torch.bfloat16: np.float16,  # Note: bfloat16 isn't supported by default in NumPy
+        torch.float8_e4m3fn: np.uint8,  # Note: FP8 isn't supported by NumPy; only itemsize is used
+        torch.float8_e5m2: np.uint8,
         torch.float32: np.float32,
         torch.float64: np.float64,
         torch.int8: np.int8,

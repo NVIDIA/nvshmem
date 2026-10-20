@@ -37,6 +37,7 @@ ExternalProject_Add(nvshmem_device_project
                     BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/device
                     CMAKE_ARGS  ${my_cmake_args}
                                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                                -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                                 -DNVSHMEM_PREFIX=${NVSHMEM_PREFIX}
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
                                 -DNVSHMEM_VERBOSE=${NVSHMEM_VERBOSE}
@@ -49,6 +50,9 @@ ExternalProject_Add(nvshmem_device_project
                                 -DCUTLASS_HOME=${CUTLASS_HOME}
                                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                                -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
+                                -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
+                                -DCMAKE_CUDA_COMPILER_LAUNCHER=${CMAKE_CUDA_COMPILER_LAUNCHER}
                                 -DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}
                                 -DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}
                                 -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
@@ -59,9 +63,9 @@ ExternalProject_Add(nvshmem_device_project
                                 -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                                 -DCMAKE_CUDA_STANDARD=${CMAKE_CUDA_STANDARD}
                                 -DPROJECT_VERSION=${PROJECT_VERSION}
-				$ENV{CMAKE_CCACHE_FLAGS}
                     CMAKE_CACHE_ARGS ${my_cmake_cache_args}
-                    STEP_TARGETS build install
+                    INSTALL_COMMAND ""
+                    STEP_TARGETS build
                     BUILD_ALWAYS TRUE
                     BUILD_BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a
                     )
@@ -166,7 +170,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
     endif()
 
     add_custom_command(OUTPUT ${ARCH_BC_FILE}
-                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${NVSHMEM_FILE_PREFIX_MAP_FLAGS} -MMD -MF ${ARCH_BC_DEPFILE} -MT ${ARCH_BC_FILE} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+                      COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${_NVSHMEM_CLANG_BITCODE_WORKAROUND_FLAGS} ${NVSHMEM_FILE_PREFIX_MAP_FLAGS} -MMD -MF ${ARCH_BC_DEPFILE} -MT ${ARCH_BC_FILE} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                       --cuda-gpu-arch=${ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                       -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
                       ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
@@ -213,7 +217,8 @@ endif()
 #                  that nvcc -dlink can consume
 #   - CUDA 12.8-12.x: fatbinary --image3=kind=nvvm creates fatbins but
 #                  nvcc -dlink cannot extract from them (unresolved symbols).
-#                  Fall back to a single sm_90 .ltoir file.
+#                  Use per-arch .ltoir files directly and keep a single-arch
+#                  copy at the legacy .ltoir.fatbin entry point.
 #
 if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   # nvcc --ltoir requires CUDA 12.8 or later
@@ -222,22 +227,12 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "Build the nvshmem_device LTOIR library and tests" FORCE)
   else()
 
-  if(CUDAToolkit_VERSION_MAJOR GREATER_EQUAL 13)
-    # CUDA 13+: build multi-arch LTOIR fatbin from all target architectures
-    set(LTOIR_LIB_ARCHS ${DEVICE_LIB_ARCHS})
-  else()
-    # CUDA 12.8-12.x: single-arch sm_90 only. Multi-arch fatbins created with
-    # fatbinary --image3=kind=nvvm cannot be consumed by nvcc -dlink on CUDA 12
-    # (unresolved symbols). Hardcoded to sm_90 to match pre-multi-arch behavior.
-    set(LTOIR_LIB_ARCHS "sm_90")
-    message(STATUS "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}: "
-            "LTOIR fatbin extraction requires CUDA 13+. Building single-arch sm_90 LTOIR.")
-  endif()
+  set(LTOIR_LIB_ARCHS ${DEVICE_LIB_ARCHS})
 
   if(NOT LTOIR_LIB_ARCHS)
     message(WARNING "No architectures for LTOIR library. Disabling LTOIR build.")
     set(NVSHMEM_BUILD_LTOIR_LIBRARY OFF CACHE BOOL "" FORCE)
-  endif()
+  else()
 
   set(LTOIR_CXX_STD "c++17")
 
@@ -285,11 +280,16 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
       COMMAND_EXPAND_LISTS
     )
   else()
-    # CUDA 12.x: copy the single-arch .ltoir as the "fatbin" (no actual bundling)
+    # CUDA 12.x: retain the legacy single-arch entry point (no actual bundling).
+    list(GET LTOIR_LIB_ARCHS 0 LTOIR_COMPAT_ARCH)
+    message(STATUS "CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}: "
+            "Building per-arch LTOIR for ${LTOIR_LIB_ARCHS}. "
+            "The legacy .ltoir.fatbin entry point contains ${LTOIR_COMPAT_ARCH} only; "
+            "use the per-arch .ltoir files for other architectures.")
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
       COMMAND ${CMAKE_COMMAND} -E copy
-              ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_sm_90.ltoir
+              ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${LTOIR_COMPAT_ARCH}.ltoir
               ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
       DEPENDS ${LTOIR_ARCH_FILES}
     )
@@ -319,6 +319,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir
             DESTINATION lib/)
   endforeach()
+  endif()
   endif()
   endif()
 ## End ltoir library configurations
@@ -628,7 +629,6 @@ set(NVSHMEM_HOST_SOURCES
     host/mem/mem_transport.cpp
     host/team/team.cu
     host/team/team_internal.cpp
-    host/team/team_internal_cuda.cu
     host/team/team_internal_nvls.cpp
     host/topo/topo.cpp
     host/util/debug.cpp
@@ -637,6 +637,12 @@ set(NVSHMEM_HOST_SOURCES
     host/util/sockets.cpp
     host/util/shared_memory.cpp
 )
+
+if(NVSHMEM_DEBUG)
+  list(APPEND NVSHMEM_HOST_SOURCES_NOMAXREGCOUNT host/team/team_internal_cuda.cu)
+else()
+  list(APPEND NVSHMEM_HOST_SOURCES host/team/team_internal_cuda.cu)
+endif()
 
 target_include_directories(
   nvshmem_host
@@ -890,6 +896,35 @@ if(NVSHMEM_LIBFABRIC_SUPPORT)
   set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_libfabric)
 endif()
 
+if(NVSHMEM_STAGED_SUPPORT)
+  if(CUDAToolkit_VERSION VERSION_LESS 12.6)
+    message(FATAL_ERROR "NVSHMEM_STAGED_SUPPORT requires CUDA 12.6 or newer for CUDA Green Contexts")
+  endif()
+  add_library(
+    nvshmem_transport_staged SHARED
+  )
+  nvshmem_library_set_base_config(nvshmem_transport_staged)
+  target_sources(nvshmem_transport_staged PRIVATE
+                 modules/transport/staged/staged.cpp
+                 modules/transport/staged/staged_gdrcopy.cpp
+                 modules/transport/common/transport_common.cpp
+                 modules/transport/common/transport_ib_common.cpp
+  )
+  target_link_options(nvshmem_transport_staged PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../nvshmem_transport.sym")
+  target_include_directories(nvshmem_transport_staged
+                             PRIVATE include
+                             modules/transport/common
+  )
+  target_link_libraries(nvshmem_transport_staged PRIVATE CUDA::cudart_static CUDA::cuda_driver)
+  if(NVSHMEM_USE_GDRCOPY)
+    target_sources(nvshmem_transport_staged PRIVATE
+                   modules/transport/common/transport_gdr_common.cpp
+                   modules/transport/common/transport_gdr_dmabuf.cpp
+    )
+  endif()
+  set(ACTIVE_TRANSPORTS ${ACTIVE_TRANSPORTS} nvshmem_transport_staged)
+endif()
+
 set_target_properties(${ACTIVE_TRANSPORTS}
                       PROPERTIES PREFIX ""
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
@@ -959,31 +994,36 @@ target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # End nvshmem-info definitions.
 
 # Start header configuration and export
-configure_file(include/non_abi/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmem_version.h @ONLY)
-configure_file(include/non_abi/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/nvshmem_build_options.h)
+configure_file(include/c_api/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/c_api/nvshmem_version.h @ONLY)
+configure_file(include/non_abi/c/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmemi_build_metadata.h @ONLY)
+configure_file(include/non_abi/c/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmem_build_options.h)
 
 set(INC_EXPORTS
     ${INC_EXPORTS}
-    bootstrap_device_host/nvshmem_uniqueid.h
-    device_host/nvshmem_proxy_channel.h
-    device_host/nvshmem_types.h
-    device_host_transport/nvshmem_common_transport.h
-    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
-    non_abi/device/common/nvshmemi_common_device.cuh
-    non_abi/device/common/nvshmemi_region_device.cuh
-    non_abi/device/common/nvshmemi_region_state.cuh
-    non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
-    non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh
+    c_api/nvshmem_api.h
+    c_api/nvshmem_api_constants.h
+    c_api/nvshmem_api_macros.h
+    c_api/nvshmem_coll_api.h
+    c_api/nvshmem_macros.h
+    c_api/nvshmem_types.h
+    c_api/nvshmem_version.h
+    c_api/nvshmemx_api.h
+    c_api/nvshmemx_coll_api.h
+    c_api/nvshmemx_collective_launch_apis.h
+    c_api/nvshmemx_status.h
+    c_api/nvshmemx_uniqueid.h
+    cpp_api/nvshmem_tensor.hpp
+    cpp_api/nvshmemx_tile_api.hpp
     device/nvshmem_coll_defines.cuh
     device/nvshmem_defines.h
     device/nvshmem_device_macros.h
-    device/logical_endpoint_device.cuh
-    device/nvshmemx_collective_launch_apis.h
     device/nvshmemx_coll_defines.cuh
-    non_abi/nvshmemi_region_types.h
     device/nvshmemx_defines.h
-    device/tile/nvshmemx_tile_api.hpp
     device/tile/nvshmemx_tile_api_defines.cuh
+    non_abi/c/nvshmem_build_options.h
+    non_abi/c/nvshmemi_build_metadata.h
+    non_abi/c/nvshmemi_error_macros.h
+    non_abi/c/nvshmemi_region_constants.h
     non_abi/device/coll/alltoall.cuh
     non_abi/device/coll/barrier.cuh
     non_abi/device/coll/broadcast.cuh
@@ -992,38 +1032,41 @@ set(INC_EXPORTS
     non_abi/device/coll/reduce.cuh
     non_abi/device/coll/reducescatter.cuh
     non_abi/device/coll/utils.cuh
-    non_abi/device/wait/nvshmemi_wait_until_apis.cuh
-    non_abi/device/pt-to-pt/ibgda_device.cuh
-    non_abi/device/pt-to-pt/gdaki_device.cuh
+    non_abi/device/common/logical_endpoint_device.cuh
+    non_abi/device/common/logical_endpoint_types.h
+    non_abi/device/common/nvshmem_common.cuh
+    non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
+    non_abi/device/common/nvshmemi_cccl_compat.h
+    non_abi/device/common/nvshmemi_common_device.cuh
+    non_abi/device/common/nvshmemi_extern_constant.h
+    non_abi/device/common/nvshmemi_path_predicates.cuh
+    non_abi/device/common/nvshmemi_region_device.cuh
+    non_abi/device/common/nvshmemi_region_state.cuh
+    non_abi/device/common/nvshmemi_region_types.h
+    non_abi/device/common/nvshmemi_runtime_types.h
+    non_abi/device/common/nvshmemi_tile_utils.cuh
+    non_abi/device/common/nvshmemi_type_traits.cuh
     non_abi/device/pt-to-pt/counted_device.cuh
+    non_abi/device/pt-to-pt/gdaki_device.cuh
+    non_abi/device/pt-to-pt/ibgda_device.cuh
     non_abi/device/pt-to-pt/proxy_device.cuh
+    non_abi/device/pt-to-pt/tile.cuh
     non_abi/device/pt-to-pt/tma_device.cuh
     non_abi/device/pt-to-pt/utils_device.h
-    non_abi/device/pt-to-pt/tile.cuh
-    non_abi/device/common/nvshmemi_tile_utils.cuh
-    non_abi/device/common/nvshmemi_path_predicates.cuh
-    device_host/nvshmem_common.cuh
-    device_host/nvshmemi_extern_constant.h
-    device_host/logical_endpoint_types.h
-    device_host/nvshmem_tensor.h
-    device_host_transport/nvshmem_common_ibgda.h
-    device_host_transport/nvshmem_common_gpunetio.h
-    device_host_transport/nvshmem_constants.h
     non_abi/device/team/nvshmemi_team_defines.cuh
-    host/nvshmem_api.h
-    host/nvshmem_coll_api.h
-    host/nvshmem_macros.h
-    host/nvshmemx_api.h
-    host/nvshmemx_coll_api.h
-    non_abi/nvshmemi_cccl_compat.h
-    non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemx_error.h
-    non_abi/nvshmem_build_options.h
-    non_abi/nvshmem_version.h
+    non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh
+    non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp
+    non_abi/device/transport/nvshmem_common_gpunetio.h
+    non_abi/device/transport/nvshmem_common_ibgda.h
+    non_abi/device/transport/nvshmem_common_transport.h
+    non_abi/device/transport/nvshmem_proxy_channel.h
+    non_abi/device/transport/transport_constants.h
+    non_abi/device/wait/nvshmemi_wait_until_apis.cuh
     nvshmem.h
     nvshmem_host.h
     nvshmemx.h
 )
+
 
 foreach(INC ${INC_EXPORTS})
   configure_file(include/${INC} ${CMAKE_CURRENT_BINARY_DIR}/include/${INC} COPYONLY)
@@ -1061,12 +1104,14 @@ foreach(SHARE ${BOOTSTRAP_EXPORTS})
 endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 
 set(BOOTSTRAP_INC_EXPORTS
-    bootstrap_device_host/nvshmem_uniqueid.h
     bootstrap_host_transport/env_defs_internal.h
+    c_api/nvshmem_version.h
+    c_api/nvshmemx_status.h
+    c_api/nvshmemx_uniqueid.h
     internal/bootstrap_host/nvshmemi_bootstrap.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
-    non_abi/nvshmem_version.h
-    non_abi/nvshmemx_error.h
+    non_abi/c/nvshmemi_build_metadata.h
+    non_abi/c/nvshmemi_error_macros.h
 )
 
 foreach(SHARE ${BOOTSTRAP_INC_EXPORTS})
@@ -1097,22 +1142,28 @@ configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
 
 set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
-    device_host_transport/nvshmem_common_ibgda.h
-    device_host_transport/nvshmem_common_gpunetio.h
-    device_host_transport/nvshmem_common_batch_rma_pending_qps.hpp
-    device_host_transport/nvshmem_common_transport.h
-    device_host_transport/nvshmem_constants.h
+    c_api/nvshmem_api_constants.h
+    c_api/nvshmem_types.h
+    c_api/nvshmem_version.h
+    c_api/nvshmemx_status.h
+    c_api/nvshmemx_uniqueid.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
     internal/host/scope_guard.h
     internal/host_transport/cudawrap.h
     internal/host_transport/nvshmemi_transport_defines.h
     internal/host_transport/region.hpp
     internal/host_transport/transport.h
-    non_abi/nvshmemi_region_constants.h
-    non_abi/nvshmemi_region_types.h
-    non_abi/nvshmem_version.h
-    non_abi/nvshmemx_error.h
-    non_abi/nvshmem_build_options.h
+    non_abi/c/nvshmem_build_options.h
+    non_abi/c/nvshmemi_build_metadata.h
+    non_abi/c/nvshmemi_error_macros.h
+    non_abi/c/nvshmemi_region_constants.h
+    non_abi/device/common/nvshmemi_extern_constant.h
+    non_abi/device/common/nvshmemi_region_types.h
+    non_abi/device/transport/nvshmem_common_batch_rma_pending_qps.hpp
+    non_abi/device/transport/nvshmem_common_gpunetio.h
+    non_abi/device/transport/nvshmem_common_ibgda.h
+    non_abi/device/transport/nvshmem_common_transport.h
+    non_abi/device/transport/transport_constants.h
 )
 
 foreach(SHARE ${TRANSPORT_INC_EXPORTS})
@@ -1142,6 +1193,11 @@ set(TRANSPORT_EXPORTS
     ibrc/ibrc.cpp
     libfabric/libfabric.cpp
     libfabric/libfabric.h
+    staged/staged.cpp
+    staged/staged_config.h
+    staged/staged_control.h
+    staged/staged_gdrcopy.cpp
+    staged/staged_gdrcopy.h
     ucx/ucx.cpp
     ucx/ucx.h
 )
@@ -1155,6 +1211,7 @@ set(TRANSPORT_CMAKE_EXPORTS
     common/CMakeLists.txt
     gpunetio/CMakeLists.txt
     libfabric/CMakeLists.txt
+    staged/CMakeLists.txt
     ibdevx/CMakeLists.txt
     ibgda/CMakeLists.txt
     ibrc/CMakeLists.txt
@@ -1213,26 +1270,17 @@ if(NVSHMEM_BUILD_PACKAGES AND NVSHMEM_BUILD_HYDRA_LAUNCHER)
   add_dependencies(nvshmem_host git_commit hydra)
 endif()
 add_dependencies(nvshmem_host nvshmem_device_project-build)
+if(TARGET libnvshmem_device_ltoir)
+  add_dependencies(nvshmem_host libnvshmem_device_ltoir)
+endif()
 
 # Start Installation definitions
 install(CODE "
-  # Patch NVSHMEM target files
-  file(GLOB_RECURSE targets_files \"${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/Export/*/NVSHMEM*Targets*.cmake\")
-  foreach(targets_file IN LISTS targets_files)
-    message(STATUS \"Processing targets_file=\${targets_file}\")
-    file(READ \"\${targets_file}\" _file_contents)
-    string(REPLACE \"\\\${_IMPORT_PREFIX}/bin\" \"\\\${NVSHMEM_BIN_DIR}\" _file_contents \"\${_file_contents}\")
-        string(REPLACE \"\\\${_IMPORT_PREFIX}/include\" \"\\\${NVSHMEM_INCLUDE_DIR}\" _file_contents \"\${_file_contents}\")
-    string(REPLACE \"\\\${_IMPORT_PREFIX}/lib\" \"\\\${NVSHMEM_LIB_DIR}\" _file_contents \"\${_file_contents}\")
-    file(WRITE \"\${targets_file}\" \"\${_file_contents}\")
-  endforeach()
-")
-
-
-# This makes sure the device config file is included as well
-install(CODE "
-  # Patch NVSHMEM target files
-  file(GLOB_RECURSE targets_files \"${CMAKE_BINARY_DIR}/lib/cmake/NVSHMEM*Targets*.cmake\")
+  # Patch NVSHMEM host and device target files
+  file(GLOB_RECURSE targets_files
+    \"${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/Export/*/NVSHMEM*Targets*.cmake\"
+    \"${CMAKE_CURRENT_BINARY_DIR}/device/CMakeFiles/Export/*/NVSHMEMDeviceTargets*.cmake\"
+  )
   foreach(targets_file IN LISTS targets_files)
     message(STATUS \"Processing targets_file=\${targets_file}\")
     file(READ \"\${targets_file}\" _file_contents)
@@ -1265,6 +1313,7 @@ install(
     ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCUDAArchitectures.cmake
     ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCUDATools.cmake
     ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMCxxStandard.cmake
+    ${NVSHMEM_CMAKE_MODULE_DIR}/NVSHMEMLTOIRLibrary.cmake
   DESTINATION lib/cmake/nvshmem/modules
 )
 
@@ -1285,32 +1334,17 @@ install(
   PUBLIC_HEADER DESTINATION include
 )
 
-install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.a
-  DESTINATION lib/
-  PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
-              GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-)
-
-install(
-  FILES ${CMAKE_BINARY_DIR}/lib/cmake/nvshmem/NVSHMEMDeviceTargets.cmake
-  DESTINATION lib/cmake/nvshmem/
-  PERMISSIONS OWNER_READ OWNER_WRITE
-              GROUP_READ WORLD_READ
-)
-
-install(
-  FILES ${CMAKE_BINARY_DIR}/lib/cmake/nvshmem/NVSHMEMDeviceTargets-$<LOWER_CASE:${CMAKE_BUILD_TYPE}>.cmake
-  DESTINATION lib/cmake/nvshmem/
-  PERMISSIONS OWNER_READ OWNER_WRITE
-              GROUP_READ WORLD_READ
-)
+# Install the ExternalProject's device library and CMake package exports
+# directly to the active top-level prefix. The generated subproject script
+# inherits CMAKE_INSTALL_PREFIX, including a cmake --install --prefix override.
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/device/cmake_install.cmake")
 
 install(
   DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib/
   DESTINATION lib
   FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
                    GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  PATTERN "libnvshmem_device.a" EXCLUDE
 )
 
 install(
@@ -1416,8 +1450,9 @@ set(CPACK_SOURCE_IGNORE_FILES
 /bind.sh;\
 /testcommon.py;\
 /examples/examples_install/;\
-/include/non_abi/nvshmem_build_options.h$;\
-/include/non_abi/nvshmem_version.h$;\
+/include/c_api/nvshmem_version.h$;\
+/include/non_abi/c/nvshmem_build_options.h$;\
+/include/non_abi/c/nvshmemi_build_metadata.h$;\
 /nvshmem4py/cmake/addCybind.cmake;\
 /nvshmem4py/cmake/addNumbast.cmake;\
 /nvshmem4py/cmake/addNumbastMlir.cmake;\

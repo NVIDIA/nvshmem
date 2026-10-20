@@ -9,8 +9,8 @@
 #include <cuda_runtime.h>
 #include <iostream>
 #include "stdio.h"
-#include "device_host/nvshmem_common.cuh"
-#include "device_host/nvshmem_tensor.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
+#include "cpp_api/nvshmem_tensor.hpp"
 #include "utils.h"
 #include "coll_common.h"
 #include "cuda/std/tuple"

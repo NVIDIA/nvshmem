@@ -189,8 +189,8 @@ bool run_selected_scopes(char *destination, const char *source, size_t allocatio
 
 int main(int argc, char **argv) {
     read_args(argc, argv);
-    if (min_size == 0 || step_factor < 2 || iters == 0 || num_blocks == 0 ||
-        threads_per_block == 0 || num_blocks > std::numeric_limits<unsigned int>::max() ||
+    if (min_size == 0 || step_factor < 2 || iters == 0 ||
+        num_blocks > std::numeric_limits<unsigned int>::max() ||
         threads_per_block > std::numeric_limits<unsigned int>::max() ||
         num_blocks > std::numeric_limits<size_t>::max() / max_size) {
         std::fprintf(stderr,

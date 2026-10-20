@@ -4,6 +4,7 @@
  */
 
 #include "transport_ib_common.h"
+#include <algorithm>           // for min_element
 #include <assert.h>            // for assert
 #include <cuda.h>              // for CUdeviceptr, CU_MEM_RA...
 #include <cuda_runtime.h>      // for cudaGetLastError, cuda...
@@ -16,10 +17,10 @@
 #include <strings.h>           // for strcasecmp
 #include <unistd.h>            // for access, close, sysconf
 #include <vector>              // for vector
-#include "device_host_transport/nvshmem_constants.h"
+#include "non_abi/device/transport/transport_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
-#include "non_abi/nvshmemx_error.h"            // for NVSHMEMX_ERROR_INTERNAL
-#include "non_abi/nvshmem_build_options.h"     // for NVSHMEM_USE_MLX5DV
+#include "non_abi/c/nvshmemi_error_macros.h"   // for NVSHMEMX_ERROR_INTERNAL
+#include "non_abi/c/nvshmem_build_options.h"   // for NVSHMEM_USE_MLX5DV
 #include "transport_common.h"                  // for LOAD_SYM, INFO, MAXPAT...
 
 static void *ibv_lib_handle = nullptr;
@@ -440,13 +441,13 @@ int nvshmemt_ib_common_reg_mem_handle(struct nvshmemt_ibv_function_table *ftable
         host_memory = true;
     }
 
-#if defined(HAVE_IBV_ACCESS_RELAXED_ORDERING)
-#if HAVE_IBV_ACCESS_RELAXED_ORDERING == 1
+#if defined(HAVE_IBV_ACCESS_RELAXED_ORDERING) && HAVE_IBV_ACCESS_RELAXED_ORDERING
     // IBV_ACCESS_RELAXED_ORDERING has been introduced to rdma-core since v28.0.
     if (relaxed_ordering) {
         ro_flag = IBV_ACCESS_RELAXED_ORDERING;
     }
-#endif
+#else
+    (void)relaxed_ordering;
 #endif
 
     if (ftable->reg_dmabuf_mr != nullptr && !host_memory && dmabuf_support &&
@@ -639,7 +640,6 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
                                              int num_candidate_devs) {
     nvshmemt_ib_common_state_t state = (nvshmemt_ib_common_state_t)t->state;
     int status = 0;
-    int *peer_counts = nullptr;
     int max_selected = state->max_selected_dev_ids > 0 ? state->max_selected_dev_ids : 1;
     bool capped = false;
 
@@ -687,20 +687,24 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
     }
 
     if (state->max_selected_dev_ids > 1 && t->n_pes > 1) {
-        peer_counts = (int *)calloc(t->n_pes, sizeof(int));
-        NVSHMEMI_NULL_ERROR_JMP(peer_counts, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
-                                "Unable to allocate selected NIC counts.\n");
-        status = t->boot_handle->allgather(&state->n_selected_dev_ids, peer_counts, sizeof(int),
-                                           t->boot_handle);
+        std::vector<int> peer_counts(t->n_pes);
+        status = t->boot_handle->allgather(&state->n_selected_dev_ids, peer_counts.data(),
+                                           sizeof(int), t->boot_handle);
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Allgather of selected NIC counts failed.\n");
-        for (int pe = 0; pe < t->n_pes; ++pe) {
-            if (peer_counts[pe] != state->n_selected_dev_ids) {
-                NVSHMEMI_ERROR_JMP(
-                    status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                    "Selected NIC count differs across PEs: local PE has %d, PE %d has %d.\n",
-                    state->n_selected_dev_ids, pe, peer_counts[pe]);
-            }
+        int min_count = *std::min_element(peer_counts.begin(), peer_counts.end());
+
+        if (min_count <= 0) {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+                               "At least one PE selected no usable NICs.\n");
+        }
+
+        if (state->n_selected_dev_ids > min_count) {
+            NVSHMEMI_WARN_PRINT(
+                "Selected NIC count differs across PEs; truncating local count from %d to the "
+                "global minimum of %d.\n",
+                state->n_selected_dev_ids, min_count);
+            state->n_selected_dev_ids = min_count;
         }
     }
 
@@ -709,7 +713,6 @@ static int nvshmemt_ib_common_select_devices(nvshmem_transport_t t, int *candida
          state->n_selected_dev_ids);
 
 out:
-    free(peer_counts);
     return status;
 }
 
@@ -821,6 +824,7 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_d
     nvshmemt_ib_common_state_t ib_state = (nvshmemt_ib_common_state_t)t->state;
     int n_pes = t->n_pes;
     int status = 0;
+    int local_connect_status = NVSHMEMX_SUCCESS;
     int first_ep_idx;
     bool is_initial_call = (ib_state->ep == nullptr);
 
@@ -917,18 +921,41 @@ int nvshmemt_ib_common_connect_endpoints(nvshmem_transport_t t, int *candidate_d
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather of ep handles failed \n");
 
-    /* Connect endpoints */
-    for (int i = first_ep_idx; i < first_ep_idx + qps_to_create; i++) {
+    /* Connect endpoints locally, then establish job-wide consensus. */
+    for (int i = first_ep_idx;
+         i < first_ep_idx + qps_to_create && local_connect_status == NVSHMEMX_SUCCESS; i++) {
         for (int j = 0; j < n_pes; j++) {
             int ep_idx = i * n_pes + j;
             int handle_idx = j * qps_to_create + (i - first_ep_idx);
 
-            status = ib_state->ib_transport_ftable->ep_connect(ib_state->ep[ep_idx],
-                                                               &ep_handles[handle_idx]);
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                                  "transport create connect failed \n");
+            local_connect_status = ib_state->ib_transport_ftable->ep_connect(
+                ib_state->ep[ep_idx], &ep_handles[handle_idx]);
+            if (local_connect_status != NVSHMEMX_SUCCESS) {
+                NVSHMEMI_ERROR_PRINT("transport create connect failed \n");
+                break;
+            }
         }
     }
+
+    if (n_pes > 1) {
+        std::vector<int> peer_connect_status(n_pes);
+        status = t->boot_handle->allgather(&local_connect_status, peer_connect_status.data(),
+                                           sizeof(local_connect_status), t->boot_handle);
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Allgather of IB endpoint connection statuses failed.\n");
+
+        for (int pe = 0; pe < n_pes; ++pe) {
+            if (peer_connect_status[pe] != NVSHMEMX_SUCCESS) {
+                if (local_connect_status == NVSHMEMX_SUCCESS) {
+                    NVSHMEMI_ERROR_PRINT("IB endpoint connection failed on PE %d.\n", pe);
+                }
+                status = peer_connect_status[pe];
+                goto out;
+            }
+        }
+    }
+    status = local_connect_status;
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "IB endpoint connection failed.\n");
 
     /* Populate out_qp_indices array with QP numbers */
     if (out_qp_indices != nullptr) {
@@ -1294,6 +1321,8 @@ int nvshmemt_ibv_ftable_init(void **ibv_handle, struct nvshmemt_ibv_function_tab
     LOAD_SYM(*ibv_handle, "ibv_destroy_cq", ftable->destroy_cq);
     LOAD_SYM(*ibv_handle, "ibv_destroy_srq", ftable->destroy_srq);
     LOAD_SYM(*ibv_handle, "ibv_destroy_ah", ftable->destroy_ah);
+    LOAD_SYM(*ibv_handle, "ibv_free_device_list", ftable->free_device_list);
+    LOAD_SYM(*ibv_handle, "ibv_wc_status_str", ftable->wc_status_str);
 
     return 0;
 }

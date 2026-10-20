@@ -28,13 +28,13 @@
 #include "internal/host_transport/cudawrap.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "infiniband/verbs.h"
-#include "non_abi/nvshmem_build_options.h"
-#include "device_host_transport/nvshmem_constants.h"
-#include "device_host_transport/nvshmem_common_transport.h"
+#include "non_abi/c/nvshmem_build_options.h"
+#include "non_abi/device/transport/transport_constants.h"
+#include "non_abi/device/transport/nvshmem_common_transport.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
-#include "non_abi/nvshmemx_error.h"
-#include "non_abi/nvshmem_version.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
+#include "non_abi/c/nvshmemi_build_metadata.h"
 #include "internal/host_transport/transport.h"
 #include "transport_common.h"
 #ifdef NVSHMEM_USE_GDRCOPY
@@ -69,7 +69,6 @@ static inline int get_ibrc_srq_depth(nvshmemt_ib_common_state_t state) { return 
 #error Unknown cache line size
 #endif
 
-#define MAX_NUM_PORTS 4
 #define MAX_NUM_PES_PER_NODE 32
 #ifdef NVSHMEM_USE_GDRCOPY
 #define BAR_READ_BUFSIZE (2 * 1024 * 1024)

@@ -65,7 +65,14 @@ if(EXISTS "${_bc_compat}")
     endif()
 endif()
 
-# Stage LTOIR fatbin if it was built.
+# Stage per-arch LTOIR files for consumers that link an architecture directly.
+# CUDA 12 cannot extract these images from a multi-arch LTOIR fatbin.
+file(GLOB _ltoir_files "${SOURCE_DIR}/libnvshmem_device_sm_*.ltoir")
+foreach(_f IN LISTS _ltoir_files)
+    file(COPY "${_f}" DESTINATION "${DEST_DIR}")
+endforeach()
+
+# Stage the LTOIR compatibility entry point if it was built.
 if(EXISTS "${SOURCE_DIR}/libnvshmem_device.ltoir.fatbin")
     file(COPY "${SOURCE_DIR}/libnvshmem_device.ltoir.fatbin" DESTINATION "${DEST_DIR}")
 endif()

@@ -8,11 +8,11 @@
 
 #include <cuda_runtime.h>
 #include "device/nvshmem_device_macros.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/pt-to-pt/counted_device.cuh"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
-#include "device/nvshmemx_collective_launch_apis.h"
+#include "c_api/nvshmemx_collective_launch_apis.h"
 
 #if defined __cplusplus || defined __clang_llvm_bitcode_lib__ || defined NVSHMEM_BUILD_LTOIR_LIBRARY
 extern "C" {
@@ -251,27 +251,33 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal(T *dest, const T v
     }
 }
 
-#define NVSHMEMI_TYPENAME_PUT_SIGNAL_SCOPE(SCOPE, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)        \
-    __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_##TYPENAME##_put_signal##SC_SUFFIX( \
-        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal,    \
-        int sig_op, int pe, bool is_nbi) {                                                     \
-        NVSHMEMI_DECL_THREAD_IDX##SC_SUFFIX();                                                 \
-        void *peer_base_addr = (void *)__ldg(                                                  \
-            (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);      \
-        if (nvshmemi_peer_reachable(peer_base_addr)) {                                         \
-            nvshmemx_##TYPENAME##_put##SC_SUFFIX(dest, source, nelems, pe);                    \
-            if (myIdx == 0) {                                                                  \
-                __threadfence_system();                                                        \
-                nvshmemx_signal_op(sig_addr, signal, sig_op, pe);                              \
-            }                                                                                  \
-            NVSHMEMI_SYNC##SC_SUFFIX();                                                        \
-        } else {                                                                               \
-            NVSHMEMI_SYNC##SC_SUFFIX();                                                        \
-            nvshmemi_transfer_put_signal<nvshmemi_threadgroup_##SCOPE>(                        \
-                (void *)dest, (void *)source, nelems * sizeof(TYPE), (void *)sig_addr, signal, \
-                (nvshmemi_amo_t)sig_op, pe, is_nbi);                                           \
-            NVSHMEMI_SYNC##SC_SUFFIX();                                                        \
-        }                                                                                      \
+#define NVSHMEMI_TYPENAME_PUT_SIGNAL_SCOPE(SCOPE, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)            \
+    __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_##TYPENAME##_put_signal##SC_SUFFIX(     \
+        TYPE *dest, const TYPE *source, size_t nelems, uint64_t *sig_addr, uint64_t signal,        \
+        int sig_op, int pe, bool is_nbi) {                                                         \
+        NVSHMEMI_DECL_THREAD_IDX##SC_SUFFIX();                                                     \
+        void *peer_base_addr = (void *)__ldg(                                                      \
+            (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);          \
+        if (nvshmemi_peer_reachable(peer_base_addr)) {                                             \
+            nvshmemx_##TYPENAME##_put##SC_SUFFIX(dest, source, nelems, pe);                        \
+            if (myIdx == 0) {                                                                      \
+                __threadfence_system();                                                            \
+                nvshmemx_signal_op(sig_addr, signal, sig_op, pe);                                  \
+            }                                                                                      \
+            NVSHMEMI_SYNC##SC_SUFFIX();                                                            \
+        } else {                                                                                   \
+            NVSHMEMI_SYNC##SC_SUFFIX();                                                            \
+            if (is_nbi) {                                                                          \
+                nvshmemi_transfer_put_signal_nbi<nvshmemi_threadgroup_##SCOPE>(                    \
+                    (void *)dest, (void *)source, nelems * sizeof(TYPE), (void *)sig_addr, signal, \
+                    (nvshmemi_amo_t)sig_op, pe);                                                   \
+            } else {                                                                               \
+                nvshmemi_transfer_put_signal<nvshmemi_threadgroup_##SCOPE>(                        \
+                    (void *)dest, (void *)source, nelems * sizeof(TYPE), (void *)sig_addr, signal, \
+                    (nvshmemi_amo_t)sig_op, pe);                                                   \
+            }                                                                                      \
+            NVSHMEMI_SYNC##SC_SUFFIX();                                                            \
+        }                                                                                          \
     }
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES_WITH_SCOPE2(NVSHMEMI_TYPENAME_PUT_SIGNAL_SCOPE, warp, _warp, x)
@@ -827,6 +833,30 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_flush_warp(vo
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_flush_block(void) {
     nvshmemi_flush<NVSHMEMI_THREADGROUP_BLOCK>();
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_warp(void) {
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_quiet<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_quiet_block(void) {
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
+    nvshmemi_quiet<NVSHMEMI_THREADGROUP_BLOCK>();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_fence_warp(void) {
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_fence<NVSHMEMI_THREADGROUP_WARP>();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_WARP>();
+}
+
+NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_fence_block(void) {
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
+    nvshmemi_fence<NVSHMEMI_THREADGROUP_BLOCK>();
+    nvshmemi_threadgroup_sync<NVSHMEMI_THREADGROUP_BLOCK>();
 }
 
 NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_qp_quiet(

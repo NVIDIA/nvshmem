@@ -28,16 +28,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <sstream>
-#include <tuple>
-#include <vector>
 #include <inttypes.h>
-#include "device_host/nvshmem_types.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/common/error_codes_internal.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmemi_types.h"
 #include "bootstrap_host_transport/env_defs_internal.h"
-#include "non_abi/nvshmem_build_options.h"
+#include "non_abi/c/nvshmem_build_options.h"
 
 #ifndef likely
 #define likely(x) (__builtin_expect(!!(x), 1))
@@ -146,36 +144,6 @@
         exit(-1);                                                                                \
     }
 
-#define NVSHMEMU_MAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                           \
-    toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_local_pe_bases()[peer]) + \
-                     ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
-
-#define NVSHMEMU_UNMAPPED_PTR_PE_TRANSLATE(toPtr, fromPtr, peer)                                  \
-    if (nvshmemi_device_state.enable_rail_opt) {                                                  \
-        int proxy_pe = (peer / nvshmemi_state->npes_node) * nvshmemi_state->npes_node +           \
-                       nvshmemi_state->mype_node;                                                 \
-        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[proxy_pe]) +    \
-                         +((int)(peer % nvshmemi_state->npes_node) - nvshmemi_state->mype_node) * \
-                             nvshmemi_device_state.heap_size +                                    \
-                         ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));          \
-        peer = proxy_pe;                                                                          \
-    } else {                                                                                      \
-        toPtr = (void *)((char *)(nvshmemi_state->heap_obj->get_remote_pe_bases()[peer]) +        \
-                         ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));          \
-    }
-
-#define NVSHMEMU_UNMAPPED_PTR_TRANSLATE(toPtr, fromPtr, peer)                      \
-    toPtr = (void *)((char *)(nvshmemi_device_state.peer_heap_base_remote[peer]) + \
-                     ((char *)fromPtr - (char *)(nvshmemi_device_state.heap_base)));
-
-#define NVSHMEMU_PE_TRANSLATE(peer)                                                 \
-    do {                                                                            \
-        if (nvshmemi_device_state.enable_rail_opt) {                                \
-            peer = (peer / nvshmemi_state->npes_node) * nvshmemi_state->npes_node + \
-                   nvshmemi_state->mype_node;                                       \
-        }                                                                           \
-    } while (0)
-
 int nvshmemu_get_num_gpus_per_node();
 
 uint64_t nvshmemu_getHostHash();
@@ -213,18 +181,6 @@ int nvshmemi_check_state_and_init();
 void nvshmemi_ibgda_get_device_state(void **state);
 void nvshmemi_gpunetio_get_device_state(void **state);
 
-#define NVSHMEMU_FOR_EACH(__index, count) \
-    for (uint64_t __index = 0; __index < (uint64_t)(count); __index++)
-#define NVSHMEMU_FOR_EACH_IF(x, count, condition, code) \
-    do {                                                \
-        NVSHMEMU_FOR_EACH(x, count) {                   \
-            if ((condition)) {                          \
-                do {                                    \
-                    code                                \
-                } while (0);                            \
-            }                                           \
-        }                                               \
-    } while (0)
 #define NVSHMEMU_ROUND_UP(x, y) (((x) + (y) - 1) / (y)) * (y)
 #define NVSHMEMU_HOST_PTR_FREE(ptr) \
     do {                            \
@@ -233,18 +189,5 @@ void nvshmemi_gpunetio_get_device_state(void **state);
             ptr = NULL;             \
         }                           \
     } while (0)
-
-#define NVSHMEMU_HOST_PTR_DELETE(ptr) \
-    do {                              \
-        if ((ptr) != nullptr) {       \
-            delete (ptr);             \
-            (ptr) = nullptr;          \
-        }                             \
-    } while (0)
-
-/* Inspired from C++ bitset */
-#define NVSHMEMU_IS_BIT_SET(bmp, bitpos) ((bmp) & (1 << (bitpos)))
-#define NVSHMEMU_SET_BIT(bmp, bitpos) ((bmp) | (1 << (bitpos)))
-#define NVSHMEMU_CLEAR_BIT(bmp, bitpos) ((bmp) & ~(1 << (bitpos)))
 
 #endif

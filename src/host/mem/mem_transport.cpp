@@ -13,11 +13,12 @@
 #include <stdlib.h>                                                        // for malloc
 #include <string.h>                                                        // for memcmp
 #include <unistd.h>                                                        // for pid_t
+#include <algorithm>                                                       // for any_of, count
 #include <map>                                                             // for map
 #include <memory>                                                          // for alloc...
 #include <vector>                                                          // for vector
 #include "internal/host_transport/cudawrap.h"                              // for CUPFN
-#include "non_abi/nvshmemx_error.h"                                        // for NVSHM...
+#include "non_abi/c/nvshmemi_error_macros.h"                               // for NVSHM...
 #include "internal/host/debug.h"                                           // for INFO
 #include "internal/host/nvshmem_internal.h"                                // for nvshm...
 #include "internal/host/nvmlwrap.h"                                        // for nvmlG...
@@ -29,7 +30,7 @@
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"  // for nvshm...
 #include "internal/host_transport/nvshmemi_transport_defines.h"            // for nvshm...
 #include "internal/host_transport/transport.h"                             // for nvshm...
-#include "non_abi/nvshmem_build_options.h"                                 // for NVSHM...
+#include "non_abi/c/nvshmem_build_options.h"                               // for NVSHM...
 
 namespace {
 
@@ -44,6 +45,11 @@ struct nvshmemi_cuda_clique_record {
     uint8_t valid_types = 0;  // Bitmask of clique types returned by cuDeviceGetCliqueInfo.
     uint8_t query_valid = 0;  // Whether all CUDA clique queries completed with consistent results.
 };
+
+bool nvshmemi_cuda_clique_record_is_valid(const nvshmemi_cuda_clique_record &record) {
+    const CUuuid null_uuid{};
+    return record.query_valid && memcmp(&record.cluster_uuid, &null_uuid, sizeof(null_uuid)) != 0;
+}
 
 const char *nvshmemi_cuda_clique_type_name(size_t type) {
     switch (static_cast<CUcliqueType>(type)) {
@@ -63,8 +69,8 @@ const char *nvshmemi_cuda_clique_type_name(size_t type) {
 bool nvshmemi_cuda_clique_records_match(const nvshmemi_cuda_clique_record &lhs,
                                         const nvshmemi_cuda_clique_record &rhs, size_t type) {
     const uint32_t type_bit = 1u << type;
-    return lhs.query_valid && rhs.query_valid && (lhs.valid_types & type_bit) &&
-           (rhs.valid_types & type_bit) &&
+    return nvshmemi_cuda_clique_record_is_valid(lhs) && nvshmemi_cuda_clique_record_is_valid(rhs) &&
+           (lhs.valid_types & type_bit) && (rhs.valid_types & type_bit) &&
            memcmp(&lhs.cluster_uuid, &rhs.cluster_uuid, sizeof(CUuuid)) == 0 &&
            lhs.clique_ids[type] == rhs.clique_ids[type];
 }
@@ -131,12 +137,11 @@ int nvshmemi_discover_cuda_cliques(
         return status;
     }
 
-    if (!std::all_of(
-            peer_records.begin(), peer_records.end(),
-            [](const nvshmemi_cuda_clique_record &record) { return record.query_valid != 0; })) {
+    if (!std::all_of(peer_records.begin(), peer_records.end(),
+                     nvshmemi_cuda_clique_record_is_valid)) {
         INFO(NVSHMEM_MEM,
-             "CUDA fabric clique discovery is unavailable on at least one PE; using legacy NVML "
-             "discovery");
+             "CUDA fabric clique discovery returned invalid data on at least one PE; using "
+             "legacy NVML discovery");
         return 0;
     }
 
@@ -189,10 +194,13 @@ int nvshmemi_mem_p2p_transport::create_proc_map(int npes,
                                             &nvshmemi_boot_handle);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "allgather of pids failed \n");
 
-    NVSHMEMU_FOR_EACH(pe, npes) {
-        NVSHMEMU_FOR_EACH_IF(j, transports.num_transports(),
-                             transports.active_has_cap(j, pe, NVSHMEM_TRANSPORT_CAP_MAP),
-                             { proc_map_[peer_pids[pe]] = pe; });
+    for (int pe = 0; pe < npes; pe++) {
+        for (int j = 0; j < transports.num_transports(); j++) {
+            if (transports.active_has_cap(j, pe, NVSHMEM_TRANSPORT_CAP_MAP)) {
+                proc_map_[peer_pids[pe]] = pe;
+                break;
+            }
+        }
     }
 
     INFO(NVSHMEM_MEM, "I am connected to %lu p2p processes (including myself)", proc_map_.size());
@@ -229,10 +237,10 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     int flag = false;
     nvmlDevice_t local_device;
     nvmlGpuFabricInfoV_t fabricInfo = {}, fabricInfo1 = {}, fabricInfo2 = {};
-    nvmlPlatformInfo_t platformInfo = {}, platformInfo1 = {}, platformInfo2 = {};
+    nvshmemi_nvmlPlatformInfo_v2_t platformInfo = {}, platformInfo1 = {}, platformInfo2 = {};
     const unsigned char zero[NVML_GPU_FABRIC_UUID_LEN] = {0};
     nvmlGpuFabricInfoV_t *pe_fabricInfo = nullptr;
-    std::vector<nvmlPlatformInfo_t> pe_platformInfo;
+    std::vector<nvshmemi_nvmlPlatformInfo_v2_t> pe_platformInfo;
     fabricInfo.version = nvmlGpuFabricInfo_v2;
     fabricInfo1.version = nvmlGpuFabricInfo_v2;
     fabricInfo2.version = nvmlGpuFabricInfo_v2;
@@ -270,7 +278,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
     NVSHMEMI_NULL_ERROR_JMP(cudev, status, NVSHMEMX_ERROR_OUT_OF_MEMORY, out,
                             "cudev array allocation failed \n");
 
-    NVSHMEMU_FOR_EACH(i, ndev) {
+    for (int i = 0; i < ndev; i++) {
         status = CUPFN(nvshmemi_cuda_syms, cuDeviceGet(&cudev[i], i));
         NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL,
                                  out, "cuDeviceGet failed \n");
@@ -335,7 +343,7 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
 
             pe_platformInfo.resize(npes);
 
-            platformInfo.version = nvmlPlatformInfo_v2;
+            platformInfo.version = NVSHMEMI_NVML_PLATFORM_INFO_V2;
             nvml_status = nvml_ftable_.nvmlDeviceGetPlatformInfo(local_device, &platformInfo);
             NVSHMEMI_CHECK_ERROR_JMP(nvml_status != NVML_SUCCESS, status, NVSHMEMX_ERROR_INTERNAL,
                                      out, "nvmlDeviceGetPlatformInfo failed with NVML error %d\n",
@@ -344,8 +352,8 @@ nvshmemi_mem_p2p_transport::nvshmemi_mem_p2p_transport(int mype, int npes) {
             pe_platformInfo[mype] = platformInfo;
 
             status = nvshmemi_boot_handle.allgather(
-                (void *)&platformInfo, (void *)pe_platformInfo.data(), sizeof(nvmlPlatformInfo_t),
-                &nvshmemi_boot_handle);
+                (void *)&platformInfo, (void *)pe_platformInfo.data(),
+                sizeof(nvshmemi_nvmlPlatformInfo_v2_t), &nvshmemi_boot_handle);
             NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                                   "allgather of pe_platformInfo failed \n");
             platformInfo1 = pe_platformInfo[mype];
@@ -466,12 +474,8 @@ out:
     peer_error_status = (bool *)std::calloc(npes, sizeof(*peer_error_status));
     nvshmemi_boot_handle.allgather((void *)(&errored_on_initialization_), peer_error_status,
                                    sizeof(bool), &nvshmemi_boot_handle);
-    NVSHMEMU_FOR_EACH(i, npes) {
-        if (static_cast<int>(i) != mype && peer_error_status[i] != errored_on_initialization_) {
-            errored_on_initialization_ = true;
-            break;
-        }
-    }
+    errored_on_initialization_ = std::any_of(peer_error_status, peer_error_status + npes,
+                                             [](bool peer_errored) { return peer_errored; });
 
     NVSHMEMU_HOST_PTR_FREE(peer_error_status);
 }
@@ -498,7 +502,7 @@ int nvshmemi_mem_remote_transport::gather_mem_handles(const nvshmemi_transport_v
                                                       uint64_t heap_offset, size_t size) {
     int status = 0;
 
-    NVSHMEMU_FOR_EACH(i, transports.num_transports()) {
+    for (int i = 0; i < transports.num_transports(); i++) {
         nvshmem_transport_t tcurr = transports.transport(i);
         if (transports.is_active(i) && transports.supports_add_device_remote_mem(i)) {
             status = tcurr->host_ops.add_device_remote_mem_handles(
@@ -529,23 +533,21 @@ int nvshmemi_mem_remote_transport::register_mem_handle(nvshmem_mem_handle_t *loc
 int nvshmemi_mem_remote_transport::release_mem_handles(nvshmem_mem_handle_t *handles,
                                                        const nvshmemi_transport_view &transports) {
     int first_status = NVSHMEMX_SUCCESS;
-    NVSHMEMU_FOR_EACH_IF(i, transports.num_transports(),
-                         transports.is_active(i) && transports.supports_release_mem(i), {
-                             if (!is_mem_handle_null(&handles[i])) {
-                                 int status = transports.transport(i)->host_ops.release_mem_handle(
-                                     &handles[i], transports.transport(i));
-                                 if (status == NVSHMEMX_SUCCESS) {
-                                     memset(&handles[i], 0, sizeof(handles[i]));
-                                 } else {
-                                     if (first_status == NVSHMEMX_SUCCESS) {
-                                         first_status = status;
-                                     }
-                                     NVSHMEMI_ERROR_PRINT(
-                                         "transport %llu failed to release memory handle "
-                                         "(status=%d)",
-                                         static_cast<unsigned long long>(i), status);
-                                 }
-                             }
-                         });
+    for (int i = 0; i < transports.num_transports(); i++) {
+        if (transports.is_active(i) && transports.supports_release_mem(i) &&
+            !is_mem_handle_null(handles[i])) {
+            int status = transports.transport(i)->host_ops.release_mem_handle(
+                &handles[i], transports.transport(i));
+            if (status == NVSHMEMX_SUCCESS) {
+                handles[i] = {};
+            } else {
+                if (first_status == NVSHMEMX_SUCCESS) {
+                    first_status = status;
+                }
+                NVSHMEMI_ERROR_PRINT("transport %d failed to release memory handle (status=%d)", i,
+                                     status);
+            }
+        }
+    }
     return first_status;
 }

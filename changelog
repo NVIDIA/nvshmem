@@ -1,5 +1,86 @@
 # Changelog
 
+## 3.8.0
+
+### Features
+
+- Added host- and device-side RMA regions for application-controlled batching of nonblocking `put` and `get` operations.
+- Added counted-signal APIs (based on counted writes) for block-scoped CFT transfers. See https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#fabric-counted-completion-mechanism for details.
+- Added multicast logical endpoints for NVLS `fcollect` and reduction operations.
+- Extended logical endpoints to additional execution scopes, including tile RMA and collective operations, and added support for device atomics.
+- Added a collective-launch API that accepts user-provided CUDA launch attributes.
+- Added CUDA 13.4 features for Vera Rubin architectures, including support for locality domains and fabric-clique detection.
+- Added locality-domain aware `put` and `get` bandwidth benchmarks, including TMA modes.
+- Added multi-NIC support for IBRC and IBDevX transports.
+- Added `BLOCK` assignment for explicit HCA-to-PE mapping.
+- Added configurable RC QP mapping and race-free QP/NIC rotation through `NVSHMEM_IBGDA_RC_MAP_BY` and `NVSHMEM_GPUNETIO_RC_MAP_BY`.
+- Added capability-aware multi-NIC atomic routing through `NVSHMEM_IB_ATOMIC_POLICY` across the InfiniBand and GPUNetIO transports.
+- Added a CUDA DMA-BUF fallback for CPU mappings of GPU memory on supported systems when GDRCopy is unavailable.
+- Added experimental Rust bindings for host APIs and CUDA-Oxide device APIs.
+- Expanded performance-test reporting with statistics across repeated measurements, message rates, and aggregate and per-PE-pair machine-readable bandwidth results.
+- Added installable NVSHMEM agent skills for onboarding, configuration, troubleshooting, and performance workflows.
+
+### Changes
+
+- Increased the minimum supported CMake version from 3.19 to 3.20.
+- Enabled multi-port NIC use by default through `NVSHMEM_ENABLE_MULTI_PORT`.
+- Changed the default IBGDA and GPUNetIO GDAKI RC QP mapping from `cta` to `none`.
+- Increased the default maximum number of teams from 128 to 256.
+- Added `NVSHMEM_TMA_MAX_BLOCKS` to configure the maximum number of CTAs that can register shared memory for TMA.
+- Renamed the CFT build option from `NVSHMEM_ENABLE_CFT_HANDLES` to `NVSHMEM_CFT_HANDLES_SUPPORT`.
+- Improved logical-endpoint performance for unicast operations and NVLS collectives.
+- Updated bundled GPUNetIO to version 4.0.0 and removed its unsupported `gpu_sm_bf` NIC-handler mode.
+
+### Bug Fixes
+
+- Fixed memory visibility after device-side signal waits.
+- Fixed collective-launch APIs being exported with C++ rather than C linkage.
+- Fixed CFT synchronization and completion issues involving warp-group barrier IDs, proxy fencing, synchronization before final partial transfers, deferred `put` and `get` completion, and counted-write pipelines.
+- Fixed TMA completion by draining pending operations and final staging reads before barriers complete, and prevented shared-memory registration races across concurrent grids.
+- Fixed bootstrap compatibility issues involving undersized PMIx buffers, bootstrap-helper linkage, and plugin fallback handling.
+- Fixed UID bootstrap message ordering and stale process-exit cleanup after repeated initialization.
+- Fixed error-handling macros that did not propagate errors.
+- Fixed automatic HCA selection and RoCE GID validation for unrestricted address ranges, systems with both InfiniBand and Ethernet/RoCE links, and long HCA names.
+- Fixed IBGDA DCT routing over paths that require a global routing header.
+- Fixed IBGDA WQE serialization that could be removed by compiler dead-store elimination.
+- Fixed an IBRC endpoint-setup hang when only one peer reports a failure.
+- Fixed wraparound of the GPUNetIO CPU proxy's producer index and CPU communication with multiple NICs.
+- Fixed PE translation for rail-optimized proxy `put_signal` operations and host RMA submission to the peer's selected network rail.
+- Fixed P2P reachability handling for mixed static-heap jobs.
+- Fixed symmetric-heap resource leaks after failed dynamic VMM allocations and partial or failed transport registrations.
+- Fixed NVLS resource leaks involving duplicated teams and the dedicated `NVSHMEM_TEAM_MC_SHARED` allocation.
+- Fixed `nvshmemx_mc_ptr` when NVLS is unavailable and corrected collective CTA limits when duplicate-team capacity is constrained.
+- Fixed false fabric-clique matches when the fabric-cluster UUID is null.
+- Fixed low-latency `fcollect` algorithm selection on mixed topologies.
+- Fixed UCX handling of user-provided transport configuration.
+- Fixed incorrect double-precision device `swap` results and builds where CUDA C++ atomics are unavailable.
+- Fixed the installed CMake package by correcting its `RPATH` and including the helper modules required for standalone test builds.
+- Fixed device-library builds by propagating CUDA architectures and custom CMake options and rebuilding when included headers change.
+- Fixed LLVM bitcode generation for `noinline` functions.
+- Fixed device-library compilation with newer CUTLASS releases.
+- Fixed compatibility between NVML PlatformInfo v2 and NVML 12 headers.
+- Fixed pointer types used by load/store reductions.
+- Fixed performance-test synchronization and initialization, including ping-pong flag resets and fetch-XOR input data.
+- Fixed broadcast row counts, `reducescatter` reported sizes, and `redmaxloc` buffer bounds in performance tests.
+- Fixed benchmarks returning a zero exit status after failures.
+- Fixed flush benchmark failures with CFT handles and kernels that use both static and dynamic shared memory.
+- Fixed premature unloading of MPI libraries during performance-test teardown.
+- Corrected generation of the 16-bit scoped put-with-signal APIs.
+
+### NVSHMEM4Py 0.4.0
+
+- Added Numba CUDA MLIR device bindings for RMA, atomics, collectives, memory operations, signaling, and synchronization.
+- Added high-level host wrappers for atomics, RMA, signaling, memory management, and teams.
+- Added wrappers for TMA shared-memory registration in Numba and CuTe DSL, and for device-side `fence` and `quiet` operations in CuTe DSL.
+- Added controls for selecting which wheel components to build.
+- Added Torch `float8_e4m3fn` and `float8_e5m2` tensor allocation and `bfloat16` support to CuTe RMA and collective bindings.
+- Added an initialization example, corrected and expanded the peer-access example, and updated the onboarding documentation.
+- Fixed CuTe bindings for pointers in CUDA shared memory, compatibility with newer binding interfaces, and library lifetime during finalization.
+- Fixed Numba/CuPy tensor argument handling.
+- Fixed version constraints for Python and CUDA dependencies.
+- Fixed collective element-size calculation.
+- Fixed debug-mode initialization and CUDA-device restoration after high-level RMA errors; eliminated duplicate state updates when freeing buffers.
+
 ## 3.7.2
 
 ### Bug Fixes

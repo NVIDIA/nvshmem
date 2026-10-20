@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef NVSHMEMX_UNIQUEID_H
+#define NVSHMEMX_UNIQUEID_H
+
+#define NVSHMEMX_UNIQUEID_RESERVED_BYTES 124
+#define NVSHMEMX_UNIQUEID_ARGS_INVALID -1
+#if !defined __CUDACC_RTC__
+#include <stddef.h>  // for NULL
+#define NVSHMEMX_UNIQUEID_INITIALIZER                       \
+    {(1 << 16) + sizeof(nvshmemx_uniqueid_t), /* version */ \
+     {0}}
+
+#define NVSHMEMX_UNIQUEID_ARGS_INITIALIZER                          \
+    {                                                               \
+        (1 << 16) + sizeof(nvshmemx_uniqueid_args_t), /* version */ \
+        NULL,                                         /* id */      \
+        NVSHMEMX_UNIQUEID_ARGS_INVALID,               /* myrank */  \
+        NVSHMEMX_UNIQUEID_ARGS_INVALID                /* nranks */  \
+    }
+#endif
+typedef struct {
+    int version;
+    char internal[NVSHMEMX_UNIQUEID_RESERVED_BYTES];
+} nvshmemx_uniqueid_v1;
+#if defined(__cplusplus)
+static_assert(sizeof(nvshmemx_uniqueid_v1) == 128, "uniqueid_v1 must be 128 bytes.");
+#else
+_Static_assert(sizeof(nvshmemx_uniqueid_v1) == 128, "uniqueid_v1 must be 128 bytes.");
+#endif
+
+typedef nvshmemx_uniqueid_v1 nvshmemx_uniqueid_t;
+
+typedef struct {
+    int version;
+    nvshmemx_uniqueid_v1 *id;
+    int myrank;
+    int nranks;
+} nvshmemx_uniqueid_args_v1;
+#if defined(__cplusplus)
+static_assert(sizeof(nvshmemx_uniqueid_args_v1) == 24, "uniqueid_args_v1 must be 24 bytes.");
+#else
+_Static_assert(sizeof(nvshmemx_uniqueid_args_v1) == 24, "uniqueid_args_v1 must be 24 bytes.");
+#endif
+
+typedef nvshmemx_uniqueid_args_v1 nvshmemx_uniqueid_args_t;
+
+#endif

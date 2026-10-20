@@ -136,6 +136,7 @@ int main(int argc, char *argv[]) {
     std::vector<perf_stats_t> tma_quiet_stats;
     std::vector<perf_stats_t> tma_flush_stats;
     bool machine_readable = false;
+    int exit_status = EXIT_FAILURE;
 
     read_args(argc, argv);
     max_threads = (int)threads_per_block;
@@ -205,6 +206,9 @@ int main(int argc, char *argv[]) {
             max_size = max_data_bytes & ~(size_t)15; /* keep 16 B aligned */
         }
     }
+    if (!validate_message_size_range(sizeof(double))) {
+        goto finalize;
+    }
     CUDA_CHECK(cudaFuncSetAttribute(pipelined_put_smem_src<true, true>,
                                     cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
     CUDA_CHECK(cudaFuncSetAttribute(pipelined_put_smem_src<true, false>,
@@ -233,9 +237,6 @@ int main(int argc, char *argv[]) {
             size = max_size;
         }
         size_t nelems = size / sizeof(double);
-        if (nelems == 0) {
-            continue;
-        }
 
         auto run = [&](auto kernel_ptr, size_t n) {
             kernel_ptr<<<1, max_threads, smem_size>>>(dst_d, nelems, peer, n);
@@ -382,10 +383,12 @@ int main(int argc, char *argv[]) {
                           nullptr, size_values.size(), tma_flush_stats.data());
     }
 
+    exit_status = EXIT_SUCCESS;
+
 finalize:
     if (dst_d) {
         nvshmem_free(dst_d);
     }
     finalize_wrapper();
-    return 0;
+    return exit_status;
 }

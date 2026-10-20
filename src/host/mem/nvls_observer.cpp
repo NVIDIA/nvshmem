@@ -12,10 +12,10 @@
 #include <map>
 #include <typeinfo>
 #include <vector>
-#include "device_host/nvshmem_types.h"
-#include "host/nvshmem_api.h"
-#include "host/nvshmemx_api.h"
-#include "non_abi/nvshmemx_error.h"
+#include "non_abi/device/common/nvshmemi_runtime_types.h"
+#include "c_api/nvshmem_api.h"
+#include "c_api/nvshmemx_api.h"
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/host/debug.h"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_mem_transport.hpp"
@@ -334,6 +334,14 @@ int nvshmemi_nvls_observer::nvls_bind_heap_memory_by_size(nvshmemi_team_t *team,
     if (!nvls_obj->is_owner(team)) {
         return 0;
     }
+    const size_t bind_granularity = nvls_obj->get_bind_granularity();
+    status = bind_granularity == 0 || mc_offset % bind_granularity != 0 ||
+             mmap_offset % bind_granularity != 0 || mmap_size % bind_granularity != 0;
+    NVSHMEMI_NZ_ERROR_JMP(
+        status, NVSHMEMX_ERROR_INVALID_VALUE, out,
+        "NVLS binding offset/size is not aligned to multicast granularity %zu: mc offset %ld, "
+        "mmap offset %ld, size %zu\n",
+        bind_granularity, mc_offset, mmap_offset, mmap_size);
 
     /* Get the most recently allocated mc_handle */
     mc_handle = nvls_obj->get_mc_handle_ptr(nvls_obj->get_mc_handle_size() - 1);
@@ -544,9 +552,10 @@ void nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_team(nvshmemi_team_t *te
         // unbind mmaped buffers
         for (auto iter = mmapped_buf->begin(); iter != mmapped_buf->end(); ++iter) {
             // iter->first => ptr in heap of mmaped buffer
-            // iter->second => size
+            // mspace tracks the rounded VA size; NVLS was bound only to the physical mapping.
             off_t mc_offset = (char *)iter->first - (char *)heap_->get_base();
-            nvls_obj->unbind_group_mem(nvls_obj->get_mc_handle_ptr(i), mc_offset, iter->second);
+            nvls_obj->unbind_group_mem(nvls_obj->get_mc_handle_ptr(i), mc_offset,
+                                       heap_->get_mmap_physical_size(iter->first));
         }
     }
 
@@ -560,11 +569,12 @@ void nvshmemi_nvls_observer::nvls_unbind_heap_memory_by_team(nvshmemi_team_t *te
 
     for (auto iter = mmapped_buf->begin(); iter != mmapped_buf->end(); ++iter) {
         off_t mc_offset = (char *)iter->first - (char *)heap_->get_base();
-        status = heap_->nvls_unbind_multicast_endpoint(team, mc_offset, iter->second);
+        const size_t physical_size = heap_->get_mmap_physical_size(iter->first);
+        status = heap_->nvls_unbind_multicast_endpoint(team, mc_offset, physical_size);
         NVSHMEMI_NZ_ERROR_JMP(
             status, NVSHMEMX_ERROR_INTERNAL, out,
             "cuLogicalEndpointUnbind for multicast endpoint failed at offset: %lu for size: %zu\n",
-            mc_offset, iter->second);
+            mc_offset, physical_size);
     }
 out:
     return;

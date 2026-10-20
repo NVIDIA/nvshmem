@@ -409,6 +409,9 @@ def reduce_block(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_min_reduce_block(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_min_reduce_block(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "max"):
 
@@ -444,6 +447,9 @@ def reduce_block(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_max_reduce_block(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_max_reduce_block(team, dst_ptr, src_ptr, nelem)
 
 
     elif const_expr(op == "sum"):
@@ -481,6 +487,9 @@ def reduce_block(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_sum_reduce_block(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_sum_reduce_block(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "prod"):
 
@@ -516,6 +525,9 @@ def reduce_block(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_prod_reduce_block(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_prod_reduce_block(team, dst_ptr, src_ptr, nelem)
 
 
 
@@ -669,6 +681,9 @@ def reduce_warp(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_min_reduce_warp(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_min_reduce_warp(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "max"):
 
@@ -704,6 +719,9 @@ def reduce_warp(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_max_reduce_warp(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_max_reduce_warp(team, dst_ptr, src_ptr, nelem)
 
 
     elif const_expr(op == "sum"):
@@ -741,6 +759,9 @@ def reduce_warp(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_sum_reduce_warp(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_sum_reduce_warp(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "prod"):
 
@@ -776,6 +797,9 @@ def reduce_warp(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_prod_reduce_warp(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_prod_reduce_warp(team, dst_ptr, src_ptr, nelem)
 
 
 
@@ -929,6 +953,9 @@ def reduce(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_min_reduce(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_min_reduce(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "max"):
 
@@ -964,6 +991,9 @@ def reduce(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_max_reduce(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_max_reduce(team, dst_ptr, src_ptr, nelem)
 
 
     elif const_expr(op == "sum"):
@@ -1001,6 +1031,9 @@ def reduce(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_sum_reduce(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_sum_reduce(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "prod"):
 
@@ -1036,6 +1069,9 @@ def reduce(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_prod_reduce(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_prod_reduce(team, dst_ptr, src_ptr, nelem)
 
 
 
@@ -1193,6 +1229,9 @@ def reducescatter_block(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_min_reducescatter_block(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_min_reducescatter_block(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "max"):
 
@@ -1228,6 +1267,9 @@ def reducescatter_block(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_max_reducescatter_block(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_max_reducescatter_block(team, dst_ptr, src_ptr, nelem)
 
 
     elif const_expr(op == "sum"):
@@ -1265,6 +1307,9 @@ def reducescatter_block(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_sum_reducescatter_block(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_sum_reducescatter_block(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "prod"):
 
@@ -1300,6 +1345,9 @@ def reducescatter_block(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_prod_reducescatter_block(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_prod_reducescatter_block(team, dst_ptr, src_ptr, nelem)
 
 
 
@@ -1454,6 +1502,9 @@ def reducescatter_warp(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_min_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_min_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "max"):
 
@@ -1489,6 +1540,9 @@ def reducescatter_warp(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_max_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_max_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
 
 
     elif const_expr(op == "sum"):
@@ -1526,6 +1580,9 @@ def reducescatter_warp(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_sum_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_sum_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "prod"):
 
@@ -1561,6 +1618,9 @@ def reducescatter_warp(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_prod_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_prod_reducescatter_warp(team, dst_ptr, src_ptr, nelem)
 
 
 
@@ -1715,6 +1775,9 @@ def reducescatter(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_min_reducescatter(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_min_reducescatter(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "max"):
 
@@ -1750,6 +1813,9 @@ def reducescatter(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_max_reducescatter(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_max_reducescatter(team, dst_ptr, src_ptr, nelem)
 
 
     elif const_expr(op == "sum"):
@@ -1787,6 +1853,9 @@ def reducescatter(team, dst, src, op):
         elif const_expr(dtype == cutlass.Float16):
             return half_sum_reducescatter(team, dst_ptr, src_ptr, nelem)
 
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_sum_reducescatter(team, dst_ptr, src_ptr, nelem)
+
 
     elif const_expr(op == "prod"):
 
@@ -1822,6 +1891,9 @@ def reducescatter(team, dst, src, op):
 
         elif const_expr(dtype == cutlass.Float16):
             return half_prod_reducescatter(team, dst_ptr, src_ptr, nelem)
+
+        elif const_expr(dtype == cutlass.BFloat16):
+            return bfloat16_prod_reducescatter(team, dst_ptr, src_ptr, nelem)
 
 
 
@@ -1974,6 +2046,9 @@ def fcollect_block(team, dst, src):
     elif const_expr(dtype == cutlass.Float16):
         return half_fcollect_block(team, dst_ptr, src_ptr, nelem)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_fcollect_block(team, dst_ptr, src_ptr, nelem)
+
     raise RuntimeError(f"Unsupported CuTe dtype for fcollect: {dtype}")
 
 
@@ -2039,6 +2114,9 @@ def fcollect_warp(team, dst, src):
     elif const_expr(dtype == cutlass.Float16):
         return half_fcollect_warp(team, dst_ptr, src_ptr, nelem)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_fcollect_warp(team, dst_ptr, src_ptr, nelem)
+
     raise RuntimeError(f"Unsupported CuTe dtype for fcollect: {dtype}")
 
 
@@ -2103,6 +2181,9 @@ def fcollect(team, dst, src):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_fcollect(team, dst_ptr, src_ptr, nelem)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_fcollect(team, dst_ptr, src_ptr, nelem)
 
     raise RuntimeError(f"Unsupported CuTe dtype for fcollect: {dtype}")
 
@@ -2172,6 +2253,9 @@ def broadcast_block(team, dst, src, root=0):
     elif const_expr(dtype == cutlass.Float16):
         return half_broadcast_block(team, dst_ptr, src_ptr, nelem, root)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_broadcast_block(team, dst_ptr, src_ptr, nelem, root)
+
     raise RuntimeError(f"Unsupported CuTe dtype for broadcast: {dtype}")
 
 
@@ -2237,6 +2321,9 @@ def broadcast_warp(team, dst, src, root=0):
     elif const_expr(dtype == cutlass.Float16):
         return half_broadcast_warp(team, dst_ptr, src_ptr, nelem, root)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_broadcast_warp(team, dst_ptr, src_ptr, nelem, root)
+
     raise RuntimeError(f"Unsupported CuTe dtype for broadcast: {dtype}")
 
 
@@ -2301,6 +2388,9 @@ def broadcast(team, dst, src, root=0):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_broadcast(team, dst_ptr, src_ptr, nelem, root)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_broadcast(team, dst_ptr, src_ptr, nelem, root)
 
     raise RuntimeError(f"Unsupported CuTe dtype for broadcast: {dtype}")
 
@@ -2373,6 +2463,9 @@ def alltoall_block(team, dst, src):
     elif const_expr(dtype == cutlass.Float16):
         return half_alltoall_block(team, dst_ptr, src_ptr, nelem)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_alltoall_block(team, dst_ptr, src_ptr, nelem)
+
     raise RuntimeError(f"Unsupported CuTe dtype for alltoall: {dtype}")
 
 
@@ -2441,6 +2534,9 @@ def alltoall_warp(team, dst, src):
     elif const_expr(dtype == cutlass.Float16):
         return half_alltoall_warp(team, dst_ptr, src_ptr, nelem)
 
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_alltoall_warp(team, dst_ptr, src_ptr, nelem)
+
     raise RuntimeError(f"Unsupported CuTe dtype for alltoall: {dtype}")
 
 
@@ -2508,5 +2604,8 @@ def alltoall(team, dst, src):
 
     elif const_expr(dtype == cutlass.Float16):
         return half_alltoall(team, dst_ptr, src_ptr, nelem)
+
+    elif const_expr(dtype == cutlass.BFloat16):
+        return bfloat16_alltoall(team, dst_ptr, src_ptr, nelem)
 
     raise RuntimeError(f"Unsupported CuTe dtype for alltoall: {dtype}")

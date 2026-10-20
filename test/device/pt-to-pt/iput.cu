@@ -159,7 +159,7 @@ __global__ void ring(T *src, T *dest, int dstride, int sstride, size_t len, int 
     rma_iput_wrapper(src, dest, dstride, sstride, len, nextpe); \
     nvshmem_quiet();
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -194,7 +194,7 @@ __global__ void ring_int(int *src, int *dest, int dstride, int sstride, int len,
     }
 DEFINE_Group(warp) DEFINE_Group(block)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

@@ -12,33 +12,33 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
-#include <stdint.h>                                      // for uint64_t
-#include <stdio.h>                                       // for snprintf, printf
-#include <stdlib.h>                                      // for free, malloc
-#include <string.h>                                      // for memset, memcmp
-#include <cmath>                                         // for ceil
-#include "../coll/rdxn/rdxn.h"                           // for nvshmemi_call...
-#include "device_host/nvshmem_types.h"                   // for nvshmemi_team_t
-#include "cpu_coll.h"                                    // for nccl_ftable
-#include "bootstrap_device_host/nvshmem_uniqueid.h"      // for nvshmemx_team_uniqueid_t
-#include "device_host/nvshmem_common.cuh"                // for nvshmemi_pe_i...
-#include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_opti...
-#include "host/nvshmem_api.h"                            // for nvshmem_quiet
-#include "host/nvshmem_coll_api.h"                       // for nvshmem_team_...
-#include "host/nvshmemx_api.h"                           // for nvshmemx_char...
-#include "non_abi/nvshmemx_error.h"                      // for NVSHMEMI_NULL...
-#include "internal/host/debug.h"                         // for INFO, NVSHMEM...
-#include "internal/host/nvshmem_internal.h"              // for nvshmemi_free
-#include "internal/host/nvshmemi_coll.h"                 // for nvshmemi_barrier
-#include "internal/host/nvshmemi_symmetric_heap.hpp"     // for nvshmemi_symm...
-#include "internal/host/nvshmemi_mem_transport.hpp"      // for nvshmemi_mem_p2p_transport
-#include "internal/host/nvshmemi_nvls_observer.hpp"      // for nvshmemi_nvls_observer
-#include "internal/host/nvshmemi_team.h"                 // for N_PSYNC_BYTES
-#include "internal/host/nvshmemi_types.h"                // for nvshmemi_state
-#include "internal/host/util.h"                          // for CUDA_RUNTIME_...
+#include <stdint.h>                                        // for uint64_t
+#include <stdio.h>                                         // for snprintf, printf
+#include <stdlib.h>                                        // for free, malloc
+#include <string.h>                                        // for memset, memcmp
+#include <cmath>                                           // for ceil
+#include "../coll/rdxn/rdxn.h"                             // for nvshmemi_call...
+#include "non_abi/device/common/nvshmemi_runtime_types.h"  // for nvshmemi_team_t
+#include "cpu_coll.h"                                      // for nccl_ftable
+#include "c_api/nvshmemx_uniqueid.h"                       // for nvshmemx_team_uniqueid_t
+#include "non_abi/device/common/nvshmem_common.cuh"        // for nvshmemi_pe_i...
+#include "bootstrap_host_transport/env_defs_internal.h"    // for nvshmemi_opti...
+#include "c_api/nvshmem_api.h"                             // for nvshmem_quiet
+#include "c_api/nvshmem_coll_api.h"                        // for nvshmem_team_...
+#include "c_api/nvshmemx_api.h"                            // for nvshmemx_char...
+#include "non_abi/c/nvshmemi_error_macros.h"               // for NVSHMEMI_NULL...
+#include "internal/host/debug.h"                           // for INFO, NVSHMEM...
+#include "internal/host/nvshmem_internal.h"                // for nvshmemi_free
+#include "internal/host/nvshmemi_coll.h"                   // for nvshmemi_barrier
+#include "internal/host/nvshmemi_symmetric_heap.hpp"       // for nvshmemi_symm...
+#include "internal/host/nvshmemi_mem_transport.hpp"        // for nvshmemi_mem_p2p_transport
+#include "internal/host/nvshmemi_nvls_observer.hpp"        // for nvshmemi_nvls_observer
+#include "internal/host/nvshmemi_team.h"                   // for N_PSYNC_BYTES
+#include "internal/host/nvshmemi_types.h"                  // for nvshmemi_state
+#include "internal/host/util.h"                            // for CUDA_RUNTIME_...
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"  // for nvshmemi_boot...
 #include "internal/host_transport/transport.h"                             // for nvshmem_trans...
-#include "non_abi/nvshmem_build_options.h"                                 // for NVSHMEM_USE_NCCL
+#include "non_abi/c/nvshmem_build_options.h"                               // for NVSHMEM_USE_NCCL
 #include "internal/host/nvshmemi_nvls_rsc.hpp"                             // for nvshmemi_nvls...
 #ifdef NVSHMEM_USE_NCCL
 #include "nccl.h"  // for ncclUniqueId
@@ -1278,6 +1278,36 @@ static int init_team_node() {
     return 0;
 }
 
+static int init_fcollect_ll_support() {
+    int local_support = nvshmemi_team_world->are_gpus_p2p_connected ||
+                        nvshmemi_team_shared->is_team_node ||
+                        !nvshmemi_team_node->are_gpus_p2p_connected;
+    std::vector<int> support_all(nvshmemi_state->npes);
+
+    int status = nvshmemi_boot_handle.allgather(&local_support, support_all.data(), sizeof(int),
+                                                &nvshmemi_boot_handle);
+    if (status != 0) {
+        NVSHMEMI_ERROR_PRINT("allgather of fcollect LL support failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    size_t supported_count = std::count(support_all.begin(), support_all.end(), 1);
+    bool global_support = supported_count == support_all.size();
+    bool mixed_support = supported_count != 0 && !global_support;
+
+    nvshmemi_device_state.gpu_coll_env_params_var.fcollect_ll_supported = global_support;
+
+    if (nvshmemi_state->mype == 0) {
+        INFO(NVSHMEM_INIT, "FCOLLECT LL support: %zu/%d PEs locally eligible; job-wide=%d",
+             supported_count, nvshmemi_state->npes, global_support);
+    }
+    if (mixed_support && !local_support) {
+        INFO(NVSHMEM_INIT, "FCOLLECT LL disabled job-wide due to this PE's local topology");
+    }
+
+    return 0;
+}
+
 static int init_team_same_mype_node() {
     /* Initialize NVSHMEMX_TEAM_SAME_MYPE_NODE */
     if (nvshmemi_team_allocate_team(
@@ -1320,7 +1350,7 @@ static int init_team_same_mype_node() {
 static int init_team_same_gpu() {
     int start = -1, stride = -1, size = 0;
 
-    /* Initialize team NVSHMEMI_TEAM_SAME_GPU */
+    /* Initialize team NVSHMEM_TEAM_SAME_GPU_INDEX */
     nvshmem_transport_pe_info_t *pe_info = nvshmemi_state->pe_info;
     for (int pe = 0; pe < nvshmemi_state->npes; pe++) {
         if (pe_info[pe].hostHash != pe_info[nvshmemi_state->mype].hostHash ||
@@ -1330,7 +1360,7 @@ static int init_team_same_gpu() {
         }
         int ret = check_for_linear_stride(pe, &start, &stride, &size);
         if (ret < 0) {
-            NVSHMEMI_ERROR_EXIT("Could not form NVSHMEMI_TEAM_SAME_GPU\n");
+            NVSHMEMI_ERROR_EXIT("Could not form NVSHMEM_TEAM_SAME_GPU_INDEX\n");
             break;
         }
     }
@@ -1356,7 +1386,7 @@ static int init_team_same_gpu() {
     nvshmemi_team_same_gpu->size = size;
     nvshmemi_team_same_gpu->is_team_node = true;
     nvshmemi_team_same_gpu->is_team_same_mype_node = false;
-    INFO(NVSHMEM_INIT, "NVSHMEMI_TEAM_SAME_GPU: start=%d, stride=%d, size=%d",
+    INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SAME_GPU_INDEX: start=%d, stride=%d, size=%d",
          nvshmemi_team_same_gpu->start, nvshmemi_team_same_gpu->stride,
          nvshmemi_team_same_gpu->size);
 
@@ -1370,7 +1400,7 @@ static int init_team_same_gpu() {
 }
 
 static int init_team_gpu_leaders() {
-    /* Initialize team NVSHMEMI_TEAM_GPU_LEADERS */
+    /* Initialize team NVSHMEM_TEAM_GPU_LEADERS_INDEX */
     std::vector<int> scratch(nvshmemi_state->npes);
 
     if (nvshmemi_team_same_gpu->start ==
@@ -1415,7 +1445,8 @@ static int init_team_gpu_leaders() {
             if (scratch[i] != -1) {
                 if (scratch[i] != last_mype + 1) {
                     WARN(
-                        "NVSHMEMI_TEAM_GPU_LEADERS could not be formed, Limited MPG support will "
+                        "NVSHMEM_TEAM_GPU_LEADERS_INDEX could not be formed, Limited MPG support "
+                        "will "
                         "not be available\n");
                     break;
                 } else {
@@ -1427,7 +1458,7 @@ static int init_team_gpu_leaders() {
          * nvshmemi_team_gpu_leaders */
         nvshmemi_team_gpu_leaders->is_team_node = false;
         nvshmemi_team_gpu_leaders->is_team_same_mype_node = false;
-        INFO(NVSHMEM_INIT, "NVSHMEMI_TEAM_GPU_LEADERS: start=%d, stride=%d, size=%d",
+        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_GPU_LEADERS_INDEX: start=%d, stride=%d, size=%d",
              nvshmemi_team_gpu_leaders->start, nvshmemi_team_gpu_leaders->stride,
              nvshmemi_team_gpu_leaders->size);
     } else {
@@ -1686,6 +1717,11 @@ int nvshmemi_team_init(void) {
     }
 
     status = init_team_node();
+    if (status) {
+        return status;
+    }
+
+    status = init_fcollect_ll_support();
     if (status) {
         return status;
     }
@@ -2182,7 +2218,7 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
         (*new_team)->config.version = NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER;
         (*new_team)->config.num_contexts = TEAM_CONFIG_SCALAR_INVALID;
     } else {
-        (*new_team)->config = NVSHMEMI_TEAM_CONFIG_INITIALIZER;
+        (*new_team)->config = NVSHMEM_TEAM_CONFIG_INITIALIZER;
         (*new_team)->config.uniqueid = parent_team->config.uniqueid;
     }
     (*new_team)->config.num_contexts = parent_team->config.num_contexts;
@@ -2360,8 +2396,7 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
 
     INFO(NVSHMEM_COLL, "entering nvshmemi_team_split_from_non_strided_parent with parent ID %d\n",
          parent_team->team_idx);
-    if (config == NULL &&
-        parent_team->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER) {
+    if (config == NULL && parent_team->config.version == NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER) {
         ;
     } else if (config == NULL) {
         NVSHMEMI_ERROR_PRINT("Unable to initialize unstrided team with NULL config\n");
@@ -2396,8 +2431,8 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
         }
 
         if (config == NULL) {
-            myteam->config = NVSHMEMI_TEAM_CONFIG_INITIALIZER;
-            myteam->config.version = NVSHMEMI_TEAM_CONFIG_VERSION_2_IDENTIFIER;
+            myteam->config = NVSHMEM_TEAM_CONFIG_INITIALIZER;
+            myteam->config.version = NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER;
             myteam->config.uniqueid = parent_team->config.uniqueid;
             myteam->config.num_contexts = parent_team->config.num_contexts;
             myteam->config_mask = parent_team->config_mask;

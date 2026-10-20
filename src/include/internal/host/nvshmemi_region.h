@@ -7,7 +7,7 @@
 #define _NVSHMEMI_REGION_H_
 
 #include "internal/host_transport/transport.h"
-#include "non_abi/nvshmemi_region_constants.h"
+#include "non_abi/c/nvshmemi_region_constants.h"
 
 struct nvshmemi_state_dec;
 

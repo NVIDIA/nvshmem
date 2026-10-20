@@ -7,7 +7,7 @@
 #include "utils.h"
 #include "coll_test.h"
 #include "coll_common.h"
-#include "device_host/nvshmem_common.cuh"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "barrier_common.h"
 #include "test_teams.h"
 
@@ -30,7 +30,7 @@
     CU_CHECK(cuLaunchKernel(test_barrier_##SC_SUFFIX_cubin, 1, 1, 1, num_threads, 1, 1,    \
                             _dynamic_smem_size, cstrm, args_##SC_SUFFIX, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -74,7 +74,7 @@ NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_ALL_KERNEL)
     }
 NVSHMEMI_REPT_FOR_SCOPES2(TEST_BARRIER_KERNEL)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

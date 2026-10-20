@@ -37,7 +37,7 @@ enum op { ATOMIC_FETCH = 0 };
     CU_CHECK(cuLaunchKernel(test_##TYPENAME##_fetch_##OP##_cubin, 1, 1, 1, 1, 1, 1,          \
                             _dynamic_smem_size, 0, args_##TYPENAME##_fetch_##OP, NULL));
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 extern "C" {
 #endif
 
@@ -76,7 +76,7 @@ extern "C" {
     }
 REPT_MACRO_FOR_TYPES(TEST_NVSHMEM_ATOMIC_FETCH_KERNEL, ATOMIC_FETCH)
 
-#if defined __cplusplus || defined NVSHMEM_HOSTLIB_ONLY
+#if defined __cplusplus
 }
 #endif
 

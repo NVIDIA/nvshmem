@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <iostream>
+#include <memory>
 #include <stdlib.h>
 #include <unistd.h>
 #include <vector>
@@ -252,6 +253,9 @@ class UserBuffer {
     }
 
     int register_symmetric() { return symmetric_mapping_.register_symmetric(ptr_, size_); }
+    int register_symmetric_at_preferred(void *preferred_addr) {
+        return symmetric_mapping_.register_at_preferred(ptr_, size_, preferred_addr);
+    }
     int unregister_symmetric() { return symmetric_mapping_.unregister(); }
 
     void *user_ptr() const { return ptr_; }
@@ -288,6 +292,253 @@ class UserBuffer {
     SymmetricMapping symmetric_mapping_;
 };
 
+int test_physical_allocation_reclaimed(const CUmemAllocationProp &prop, size_t size,
+                                       unsigned int iterations, int mype) {
+    size_t free_before = 0;
+    size_t free_after = 0;
+    size_t total = 0;
+    void *preferred_addr = nullptr;
+
+    auto run_iteration = [&]() -> int {
+        {
+            UserBuffer buffer{};
+            int status = buffer.allocate(size, prop);
+            if (status) {
+                return status;
+            }
+
+            if (preferred_addr == nullptr) {
+                status = buffer.register_symmetric();
+            } else {
+                status = buffer.register_symmetric_at_preferred(preferred_addr);
+            }
+            if (status) {
+                ERROR_PRINT("symmetric registration failed during reclaim test \n");
+                return status;
+            }
+
+            if (preferred_addr == nullptr) {
+                preferred_addr = buffer.mapped_ptr();
+            } else if (buffer.mapped_ptr() != preferred_addr) {
+                ERROR_PRINT("preferred symmetric address changed from %p to %p \n", preferred_addr,
+                            buffer.mapped_ptr());
+                return -1;
+            }
+
+            status = buffer.unregister_symmetric();
+            if (status) {
+                ERROR_PRINT("symmetric unregistration failed during reclaim test \n");
+                return status;
+            }
+        }
+
+        return 0;
+    };
+
+    int status = run_iteration();
+    if (status) {
+        return status;
+    }
+
+    nvshmem_barrier_all();
+    status = check_cuda_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+    if (status) {
+        return status;
+    }
+    status = check_cuda_runtime(cudaMemGetInfo(&free_before, &total), "cudaMemGetInfo");
+    if (status) {
+        return status;
+    }
+
+    for (unsigned int i = 0; i < iterations; ++i) {
+        status = run_iteration();
+        if (status) {
+            return status;
+        }
+
+        nvshmem_barrier_all();
+        status = check_cuda_runtime(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        if (status) {
+            return status;
+        }
+        status = check_cuda_runtime(cudaMemGetInfo(&free_after, &total), "cudaMemGetInfo");
+        if (status) {
+            return status;
+        }
+
+        const size_t unreclaimed = free_before > free_after ? free_before - free_after : 0;
+        printf(
+            "PE %d reclaim iteration %u: baseline free=%zu MiB, current free=%zu MiB, "
+            "unreclaimed=%zu MiB\n",
+            mype, i + 1, free_before / (1024 * 1024), free_after / (1024 * 1024),
+            unreclaimed / (1024 * 1024));
+        fflush(stdout);
+
+        if (free_after < free_before) {
+            ERROR_PRINT("%zu MiB remains allocated after reclaim iteration %u\n",
+                        unreclaimed / (1024 * 1024), i + 1);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+// Agree on failures before returning so every PE follows the same collective cleanup path.
+int collective_status(int *status_buffer, int local_status) {
+    nvshmem_int_p(status_buffer, local_status ? EXIT_FAILURE : EXIT_SUCCESS, nvshmem_my_pe());
+    nvshmem_quiet();
+    const int reduce_status =
+        nvshmem_int_max_reduce(NVSHMEM_TEAM_WORLD, status_buffer + 1, status_buffer, 1);
+    int failed = EXIT_SUCCESS;
+    const int copy_status = check_cuda_runtime(
+        cudaMemcpy(&failed, status_buffer + 1, sizeof(failed), cudaMemcpyDeviceToHost),
+        "cudaMemcpy");
+    // Every PE must consume the result before the next reduction reuses its storage.
+    nvshmem_barrier_all();
+    return reduce_status || copy_status || failed ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
+int test_rejected_registration(const CUmemAllocationProp &prop, size_t size, int dev_count,
+                               int mype) {
+    std::unique_ptr<int, decltype(&nvshmem_free)> status_buffer(
+        static_cast<int *>(nvshmem_malloc(2 * sizeof(int))), nvshmem_free);
+    if (!status_buffer) {
+        ERROR_PRINT("failed to allocate validation status buffer\n");
+        return EXIT_FAILURE;
+    }
+    const int npes = nvshmem_n_pes();
+
+    UserBuffer existing{};
+    int status = collective_status(status_buffer.get(), existing.allocate(size, prop));
+    if (!status) {
+        status = collective_status(status_buffer.get(), existing.register_symmetric());
+    }
+    if (status) {
+        ERROR_PRINT("failed to prepare validation regression\n");
+        return status;
+    }
+
+    auto reject = [&](const char *name, void *candidate, size_t candidate_size, int flags) {
+        void *mapping = nvshmemx_buffer_register_symmetric(candidate, candidate_size, flags);
+        if (mapping != nullptr) {
+            ERROR_PRINT("PE %d: %s unexpectedly registered\n", mype, name);
+        }
+        int status = collective_status(status_buffer.get(), mapping != nullptr);
+        if (status) {
+            return status;
+        }
+
+        const int next = (mype + 1) % npes;
+        const int previous = (mype + npes - 1) % npes;
+        nvshmem_int_p(static_cast<int *>(existing.mapped_ptr()), mype + 1, next);
+        nvshmem_quiet();
+        nvshmem_barrier_all();
+        int value = 0;
+        const int copy_status = check_cuda_runtime(
+            cudaMemcpy(&value, existing.mapped_ptr(), sizeof(value), cudaMemcpyDeviceToHost),
+            "cudaMemcpy");
+        if (copy_status || value != previous + 1) {
+            ERROR_PRINT("PE %d: existing registration broken after %s\n", mype, name);
+        }
+        status = collective_status(status_buffer.get(), copy_status || value != previous + 1);
+        if (status) {
+            return status;
+        }
+        if (mype == 0) {
+            printf("Rejected %s on one PE; existing registration remains usable\n", name);
+        }
+        return EXIT_SUCCESS;
+    };
+
+    void *valid = existing.user_ptr();
+    if (reject("zero size", valid, mype == 0 ? 0 : size, 0) ||
+        reject("unaligned size", valid, mype == 0 ? size - 1 : size, 0) ||
+        reject("invalid pointer", mype == 0 ? nullptr : valid, size, 0) ||
+        reject("unsupported flags", valid, size, mype == 0 ? 1 : 0)) {
+        return EXIT_FAILURE;
+    }
+
+    {
+        UserBuffer undersized{};
+        status = collective_status(status_buffer.get(),
+                                   undersized.allocate(mype == 0 ? size : 2 * size, prop));
+        if (status) {
+            return status;
+        }
+        status = reject("CUDA map beyond allocation", undersized.user_ptr(), 2 * size, 0);
+        if (status) {
+            return status;
+        }
+
+        UserBuffer hole{};
+        if (collective_status(status_buffer.get(), hole.allocate(2 * size, prop)) ||
+            collective_status(status_buffer.get(), hole.register_symmetric()) ||
+            collective_status(status_buffer.get(), hole.unregister_symmetric())) {
+            return EXIT_FAILURE;
+        }
+        void *preferred = hole.mapped_ptr();
+        status = reject("CUDA map failure in a reused hole", undersized.user_ptr(), 2 * size, 0);
+        if (status) {
+            return status;
+        }
+        if (collective_status(status_buffer.get(),
+                              hole.register_symmetric_at_preferred(preferred)) ||
+            collective_status(status_buffer.get(), hole.mapped_ptr() != preferred) ||
+            collective_status(status_buffer.get(), hole.unregister_symmetric())) {
+            ERROR_PRINT("failed mapping did not restore the reusable address range\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    const int can_test_wrong_gpu =
+        prop.location.type == CU_MEM_LOCATION_TYPE_DEVICE && dev_count > 1;
+    nvshmem_barrier_all();
+    if (mype == 0) {
+        for (int pe = 0; pe < npes; ++pe) {
+            nvshmem_int_p(static_cast<int *>(existing.mapped_ptr()), can_test_wrong_gpu, pe);
+        }
+        nvshmem_quiet();
+    }
+    nvshmem_barrier_all();
+    int root_can_test = 0;
+    status = collective_status(
+        status_buffer.get(),
+        check_cuda_runtime(cudaMemcpy(&root_can_test, existing.mapped_ptr(), sizeof(root_can_test),
+                                      cudaMemcpyDeviceToHost),
+                           "cudaMemcpy"));
+    if (status) {
+        return status;
+    }
+    if (root_can_test) {
+        UserBuffer wrong_device{};
+        int allocation_status = 0;
+        if (mype == 0) {
+            CUmemAllocationProp wrong_prop = prop;
+            wrong_prop.location.id = (prop.location.id + 1) % dev_count;
+            allocation_status = wrong_device.allocate(size, wrong_prop);
+        }
+        status = collective_status(status_buffer.get(), allocation_status);
+        if (status) {
+            return status;
+        }
+        status = reject("wrong GPU", mype == 0 ? wrong_device.user_ptr() : valid, size, 0);
+        if (status) {
+            return status;
+        }
+    }
+
+    UserBuffer subsequent{};
+    if (collective_status(status_buffer.get(), subsequent.allocate(size, prop)) ||
+        collective_status(status_buffer.get(), subsequent.register_symmetric()) ||
+        collective_status(status_buffer.get(), subsequent.unregister_symmetric()) ||
+        collective_status(status_buffer.get(), existing.unregister_symmetric())) {
+        ERROR_PRINT("heap could not register/unregister after rejected inputs\n");
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 int check_collective_errors(uint64_t *errs) {
     int status =
         check_cuda_runtime(cudaMemcpyFromSymbol(errs, errs_d, sizeof(unsigned long long int), 0),
@@ -316,9 +567,12 @@ int test_allocation_at_preferred_address(void *user_buf, size_t size, void *mmap
         ERROR_PRINT("shmem_mmap of user buffer at preferred address failed \n");
         return status;
     }
-    // this should allocate at preferred address
-    if (should_match_preferred_addr && (mapping.addr() != mmaped_addr)) {
-        ERROR_PRINT("Could not allocate at preferred address %p %p\n", mapping.addr(), mmaped_addr);
+    // A free preferred address must be honored; an occupied one must use another address.
+    if ((mapping.addr() == mmaped_addr) != should_match_preferred_addr) {
+        ERROR_PRINT(
+            "Unexpected preferred-address result: requested %p, mapped %p, expected match "
+            "%d\n",
+            mmaped_addr, mapping.addr(), should_match_preferred_addr);
         status = -1;
     }
 
@@ -421,6 +675,22 @@ int main(int argc, char **argv) {
         prop.requestedHandleTypes =
             (CUmemAllocationHandleType)(CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR);
     }
+    status = check_cuda_driver(
+        cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM),
+        "cuMemGetAllocationGranularity");
+    if (status) {
+        return status;
+    }
+
+    size_t reclaim_test_size = ((_max_size - 1) / granularity + 1) * granularity;
+    status = test_rejected_registration(prop, reclaim_test_size, dev_count, mype);
+    if (status) {
+        return status;
+    }
+    status = test_physical_allocation_reclaimed(prop, reclaim_test_size, _repeat, mype);
+    if (status) {
+        return status;
+    }
 
     std::vector<UserBuffer> buffers(iter);
 
@@ -428,9 +698,14 @@ int main(int argc, char **argv) {
         DEBUG_PRINT("creating and mmapping %d buffers ", iter);
     }
     for (unsigned int i = 0; i < iter; i++) {
-        seed = i;
-        lsize = rand_r(&seed) % (_max_size - _min_size + 1) + _min_size;
-        lsize = ((lsize - 1) / granularity + 1) * granularity;
+        if (i == 0) {
+            // Exercise a physical mapping smaller than the NVSHMEM heap granularity.
+            lsize = granularity;
+        } else {
+            seed = i;
+            lsize = rand_r(&seed) % (_max_size - _min_size + 1) + _min_size;
+            lsize = ((lsize - 1) / granularity + 1) * granularity;
+        }
 
         UserBuffer &buffer = buffers[i];
         status = buffer.allocate(lsize, prop);

@@ -21,7 +21,7 @@ Do not recite every executable or option unless the user asks for the full catal
 | `shmem_get_bw` | Device-initiated bulk get bandwidth | Two PEs |
 | `shmem_get_latency` | Device-initiated bulk get latency | Two PEs |
 
-Use this suite for a general performance sanity package. Run the standard non-bidirectional `shmem_put_bw` variant. Keep same-node and two-node results separate.
+Use this suite for a general performance sanity package. For `shmem_put_bw`, use the first nonempty `.args` line without `--bidir` and record its full scope, CTA-count, and threads-per-CTA configuration. Keep same-node and two-node results separate.
 
 ## Device Point-to-Point Families
 
