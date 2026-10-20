@@ -123,9 +123,62 @@ set(_element_type "transport-specific RMA element type must be a standard NVSHME
 expect_compile_failure(unsupported_type "${_element_type}" -DCONTRACT_CASE_unsupported_type)
 expect_compile_failure(cv_qualified_type "${_element_type}" -DCONTRACT_CASE_cv_qualified_type)
 
+# A P2P-only package must not need network transport symbols. The fixture
+# instantiates every Auto / Network API at every scope; in the P2P-only
+# emulation its device object may reference no transfer, proxy, IBGDA, or
+# GPUNetIO symbol. The control build against this package must reference the
+# transfer primitives when the package links them from its device library.
+get_filename_component(_cuda_bin_dir "${CUDA_COMPILER}" DIRECTORY)
+find_program(_cuobjdump cuobjdump HINTS "${_cuda_bin_dir}" NO_DEFAULT_PATH)
+if(NOT _cuobjdump)
+  find_program(_cuobjdump cuobjdump)
+endif()
+if(NOT _cuobjdump)
+  message(FATAL_ERROR "transport-specific compile contract: cuobjdump not found")
+endif()
+
+function(device_symbols name output_var)
+  set(_object "${CONTRACT_BINARY_DIR}/${name}.o")
+  execute_process(
+    COMMAND "${_cuobjdump}" -elf "${_object}"
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _stdout
+    ERROR_VARIABLE _stderr)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR
+            "transport-specific compile contract '${name}': cuobjdump failed:\n${_stderr}")
+  endif()
+  set(${output_var} "${_stdout}" PARENT_SCOPE)
+endfunction()
+
+set(_network_symbol_re "nvshmemi_(transfer|proxy|ibgda|gdaki)_[A-Za-z_]+")
+expect_compile_success(network_p2p_only -DCONTRACT_CASE_network_p2p_only)
+device_symbols(network_p2p_only _p2p_only_symbols)
+if(NOT _p2p_only_symbols MATCHES "network_symbols")
+  message(FATAL_ERROR
+          "transport-specific compile contract 'network_p2p_only': the fixture kernel is "
+          "missing from the device object")
+endif()
+string(REGEX MATCHALL "${_network_symbol_re}" _p2p_only_network "${_p2p_only_symbols}")
+if(_p2p_only_network)
+  list(REMOVE_DUPLICATES _p2p_only_network)
+  message(FATAL_ERROR
+          "transport-specific compile contract 'network_p2p_only': a P2P-only Auto / Network "
+          "consumer references network transport symbols: ${_p2p_only_network}")
+endif()
+
+expect_compile_success(network_symbols -DCONTRACT_CASE_network_symbols)
+device_symbols(network_symbols _control_symbols)
+if(_control_symbols MATCHES "transport_specific_contract_expects_transfer_symbols" AND
+   NOT _control_symbols MATCHES "nvshmemi_transfer_[A-Za-z_]+")
+  message(FATAL_ERROR
+          "transport-specific compile contract 'network_symbols': the control object has no "
+          "nvshmemi_transfer_* reference, so the P2P-only symbol check can no longer observe one")
+endif()
+
 # __isShared lowers to the PTX shared-window test. Explicit shared and global
-# local operands of Pointer / SM and Pointer / TMA must compile without it,
-# while the generic spelling must still classify.
+# local operands of Pointer / SM, Pointer / TMA, and Auto / Network must
+# compile without it, while the generic spelling must still classify.
 function(compile_ptx name)
   set(_ptx "${CONTRACT_BINARY_DIR}/${name}.ptx")
   file(REMOVE "${_ptx}")

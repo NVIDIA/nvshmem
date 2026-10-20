@@ -106,6 +106,12 @@ struct route_backend<pointer_tma_route> {
         return pointer_preflight_signal(sig_addr, sig_op, pe, plan.peer);
     }
 
+    /* Completion waits only on this thread's bulk group and the CTA's deferred
+     * gets, which need no capability. */
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
+        return NVSHMEMX_SUCCESS;
+    }
+
     /* ---- Issue: called only after the whole group agreed on preflight,
      * which is also the pre-issue group barrier. The stable TMA primitives
      * elect the issuing thread and end with the scope's own barrier. ---- */

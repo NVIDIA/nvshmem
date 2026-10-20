@@ -49,6 +49,11 @@ struct route_backend<automatic_route> {
         return check_signal_arguments(sig_addr, sig_op, pe);
     }
 
+    /* The portable ordering helpers serve every job. */
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
+        return NVSHMEMX_SUCCESS;
+    }
+
     /* ---- Issue: called only after the whole group agreed on preflight ---- */
 
     template <threadgroup Scope, bool IsNbi, typename Source>

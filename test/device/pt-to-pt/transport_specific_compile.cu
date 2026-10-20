@@ -133,6 +133,18 @@ __global__ void compile_pointer_tma(void *remote, void *local, uint64_t *signal,
     put_family<A, P, kWarp, kGeneric>(remote, local, signal, pe);
 }
 
+/* Auto / Network: every API at every scope. Explicit shared local values are
+ * legal spellings that return INVALID_VALUE at run time. */
+__global__ void compile_auto_network(void *remote, void *local, uint64_t *signal, int pe) {
+    using A = ts::addressing::Auto;
+    using P = ts::transport_policy::Network;
+    all_scopes<A, P, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
+    typed_all<A, P, kBlock, kGlobal>(remote, local, signal, pe);
+    typed_all<A, P, kThread, kGeneric>(remote, local, signal, pe);
+    /* Pointer / Network is the same route. */
+    all_scopes<ts::addressing::Pointer, P, kGlobal, kGeneric>(remote, local, signal, pe);
+}
+
 __global__ void compile_auto_auto(void *remote, void *local, uint64_t *signal, int pe) {
     using A = ts::addressing::Auto;
     using P = ts::transport_policy::Auto;
