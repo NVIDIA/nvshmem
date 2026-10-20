@@ -43,24 +43,14 @@ struct route_backend<pointer_sm_route> {
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }
-        plan.peer = peer_pointer(remote, pe);
+        plan.peer = pointer_peer(remote, pe);
         return plan.peer != nullptr ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_signal(uint64_t *sig_addr,
                                                                          int sig_op, int pe,
                                                                          signal_plan &plan) {
-        plan.peer = nullptr;
-        const int status = check_signal_arguments(sig_addr, sig_op, pe);
-        if (status != NVSHMEMX_SUCCESS) {
-            return status;
-        }
-        plan.peer = peer_pointer(sig_addr, pe);
-        /* ADD is a system-scope atomic on the mapped peer. */
-        const bool supported =
-            plan.peer != nullptr &&
-            (sig_op == NVSHMEM_SIGNAL_SET || nvshmemi_device_state_d.mapped_peer_atomics);
-        return supported ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
+        return pointer_preflight_signal(sig_addr, sig_op, pe, plan.peer);
     }
 
     /* ---- Issue: called only after the whole group agreed on preflight,
@@ -90,7 +80,7 @@ struct route_backend<pointer_sm_route> {
         put<Scope, IsNbi, Source>(plan, source, bytes);
         if (scope_leader<Scope>()) {
             __threadfence_system();
-            issue_signal(sig.peer, signal, sig_op);
+            pointer_issue_signal(sig.peer, signal, sig_op);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -100,7 +90,7 @@ struct route_backend<pointer_sm_route> {
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int signal_op(const signal_plan &plan,
                                                                   uint64_t signal, int sig_op) {
         if (scope_leader<Scope>()) {
-            issue_signal(plan.peer, signal, sig_op);
+            pointer_issue_signal(plan.peer, signal, sig_op);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -126,21 +116,6 @@ struct route_backend<pointer_sm_route> {
     }
 
    private:
-    /* The mapped peer address, or null. */
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void *peer_pointer(const void *remote, int pe) {
-        return nvshmemi_ptr(remote, pe);
-    }
-
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void issue_signal(void *peer, uint64_t signal,
-                                                                      int sig_op) {
-        if (sig_op == NVSHMEM_SIGNAL_SET) {
-            *reinterpret_cast<volatile uint64_t *>(peer) = signal;
-        } else {
-            atomicAdd_system(reinterpret_cast<unsigned long long *>(peer),
-                             static_cast<unsigned long long>(signal));
-        }
-    }
-
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int system_fence() {
         scope_sync<Scope>();

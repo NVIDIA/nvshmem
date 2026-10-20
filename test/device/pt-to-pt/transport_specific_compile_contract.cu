@@ -42,6 +42,7 @@ using Pointer = nvshmemx::addressing::Pointer;
 using AutoPolicy = nvshmemx::transport_policy::Auto;
 using Network = nvshmemx::transport_policy::Network;
 using SM = nvshmemx::transport_policy::SM;
+using TMA = nvshmemx::transport_policy::TMA;
 namespace space = nvshmemx::memory_space;
 constexpr auto kBlock = nvshmemx::threadgroup::block;
 
@@ -64,6 +65,20 @@ __global__ void legal(uint8_t *destination, const uint8_t *source, uint64_t *sig
 #elif defined(CONTRACT_CASE_invalid_pair)
 __global__ void invalid_pair(uint8_t *destination, const uint8_t *source, int pe) {
     (void)nvshmemx_put<uint8_t, Pointer, Network, kBlock>(destination, source, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_tma_get_below_block)
+/* TMA gets complete on the CTA-wide mbarrier, so they are block-scope only. */
+__global__ void tma_get_below_block(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_get_nbi<uint8_t, Pointer, TMA, nvshmemx::threadgroup::warp>(destination, source,
+                                                                               16, pe);
+}
+
+#elif defined(CONTRACT_CASE_tma_global_put_below_block)
+/* A global source stages through the CTA-wide tile, so it is block-scope only. */
+__global__ void tma_global_put_below_block(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_put<uint8_t, Pointer, TMA, nvshmemx::threadgroup::thread, space::source::global>(
+        destination, source, 16, pe);
 }
 
 #elif defined(CONTRACT_CASE_remote_put_tag)
@@ -108,11 +123,12 @@ __global__ void cv_qualified_type(const float *destination, const float *source,
  * or generic). The contract requires the shared-window test (isspacep.shared)
  * that __isShared lowers to in the generic build and forbids it otherwise.
  * Pointer / SM must never classify its local operand, so every RMA family and
- * scope of that route is instantiated. The internal source_local / dest_local classifiers,
- * which later routes use to classify a generic operand, are instantiated as
- * well: they keep the generic build observable and must fold away for an
- * explicit spelling. Auto / Auto intentionally retains portable classification
- * and is excluded. */
+ * scope of that route is instantiated. Pointer / TMA is instantiated for every
+ * RMA family at block scope and, except from a global source, for the put
+ * family below block scope, its only legal forms. The internal source_local / dest_local
+ * classifiers, which later routes use to classify a generic operand, are instantiated as well: they
+ * keep the generic build observable and must fold away for an explicit spelling. Auto / Auto
+ * intentionally retains portable classification and is excluded. */
 #ifndef LOCAL_SPACE
 #error "LOCAL_SPACE must be shared, global, or generic"
 #endif
@@ -137,6 +153,18 @@ __device__ int route_rma(uint8_t *remote, uint8_t *local, uint64_t *signal, size
     return status;
 }
 
+template <typename A, typename P, nvshmemx::threadgroup Scope>
+__device__ int route_put(uint8_t *remote, uint8_t *local, uint64_t *signal, size_t bytes, int pe) {
+    int status = nvshmemx_put<uint8_t, A, P, Scope, kSource, kRemoteDest>(remote, local, bytes, pe);
+    status |=
+        nvshmemx_put_nbi<uint8_t, A, P, Scope, kSource, kRemoteDest>(remote, local, bytes, pe);
+    status |= nvshmemx_put_signal<uint8_t, A, P, Scope, kSource, kRemoteDest>(
+        remote, local, bytes, signal, 1, NVSHMEM_SIGNAL_SET, pe);
+    status |= nvshmemx_put_signal_nbi<uint8_t, A, P, Scope, kSource, kRemoteDest>(
+        remote, local, bytes, signal, 1, NVSHMEM_SIGNAL_SET, pe);
+    return status;
+}
+
 template <nvshmemx::threadgroup Scope>
 __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *signal, size_t bytes,
                                  int pe, int *status) {
@@ -145,6 +173,11 @@ __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *sign
     uint8_t *local;
     asm("mov.b64 %0, %1;" : "=l"(local) : "l"(param));
     int result = route_rma<Pointer, SM, Scope>(remote, local, signal, bytes, pe);
+    if constexpr (Scope == nvshmemx::threadgroup::block) {
+        result += route_rma<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
+    } else if constexpr (kSource != space::source::global) {
+        result += route_put<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
+    }
 #ifdef __CUDA_ARCH__
     result += nvshmemi::transport_policy::source_local<kSource>::is_shared(local);
     result += nvshmemi::transport_policy::dest_local<kDest>::is_shared(local);

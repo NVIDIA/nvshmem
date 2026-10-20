@@ -30,6 +30,7 @@
 #include "non_abi/device/transport_specific/types.cuh"
 #include "non_abi/device/transport_specific/traits.cuh"
 #include "non_abi/device/transport_specific/pointer_sm.cuh"
+#include "non_abi/device/transport_specific/pointer_tma.cuh"
 #include "non_abi/device/transport_specific/automatic.cuh"
 #include "non_abi/device/transport_specific/api.cuh"
 #endif

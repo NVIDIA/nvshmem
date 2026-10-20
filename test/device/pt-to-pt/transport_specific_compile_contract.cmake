@@ -85,12 +85,22 @@ expect_compile_failure(
   "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
   -DCONTRACT_CASE_package_unavailable)
 
-# Pointer / SM and Auto / Auto are the only supported pairs; every other pair
-# is rejected with one diagnostic.
+# Pointer / SM, Pointer / TMA, and Auto / Auto are the only supported pairs;
+# every other pair is rejected with one diagnostic.
 expect_compile_failure(
   invalid_pair
   "unsupported addressing/transport-policy pair"
   -DCONTRACT_CASE_invalid_pair)
+# Pointer / TMA gets, and puts from an explicit global source, use CTA-wide
+# TMA state and are rejected below block scope.
+expect_compile_failure(
+  tma_get_below_block
+  "Pointer/TMA get and get_nbi are block-scope only"
+  -DCONTRACT_CASE_tma_get_below_block)
+expect_compile_failure(
+  tma_global_put_below_block
+  "Pointer/TMA put from a global source is block-scope only"
+  -DCONTRACT_CASE_tma_global_put_below_block)
 expect_compile_failure(
   remote_put_tag
   "transport-specific put destination must be remote symmetric global memory"
@@ -114,8 +124,8 @@ expect_compile_failure(unsupported_type "${_element_type}" -DCONTRACT_CASE_unsup
 expect_compile_failure(cv_qualified_type "${_element_type}" -DCONTRACT_CASE_cv_qualified_type)
 
 # __isShared lowers to the PTX shared-window test. Explicit shared and global
-# local operands must compile without it, while the generic spelling must
-# still classify.
+# local operands of Pointer / SM and Pointer / TMA must compile without it,
+# while the generic spelling must still classify.
 function(compile_ptx name)
   set(_ptx "${CONTRACT_BINARY_DIR}/${name}.ptx")
   file(REMOVE "${_ptx}")

@@ -87,6 +87,7 @@ if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
         DEPENDS "${_transport_specific_contract_stamp}")
     nvshmem_add_test(transport_specific_compile.cu)
     nvshmem_add_test(transport_specific_p2p.cu)
+    nvshmem_add_test(transport_specific_tma.cu)
 endif()
 nvshmem_add_test(wait.cu)
 
