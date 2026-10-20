@@ -49,7 +49,7 @@
  * elect.sync chose.
  */
 __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, int iter) {
-    extern __shared__ int smem[];
+    extern __shared__ __align__(16) unsigned char smem[];
     int tid = threadIdx.x;
     int bid = blockIdx.x;
     int nblocks = gridDim.x;
@@ -67,10 +67,15 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
     nvshmemx_give_smem(smem, smem_size);
     __syncthreads();
 
-    /* Pre-fill smem (amortized; simulates prior compute filling smem) */
-    size_t chunk = (size_t)smem_size;
-    for (int j = tid; j < (int)(chunk / sizeof(*smem)); j += blockDim.x) {
-        smem[j] = tid;
+    /* Keep payload data beyond NVSHMEM's TMA/CFT barrier, pending-tracking,
+     * and counted-operation state. */
+    size_t smem_data_offset = (size_t)nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+    int *payload = reinterpret_cast<int *>(smem + smem_data_offset);
+    size_t chunk = (size_t)smem_size - smem_data_offset;
+
+    /* Pre-fill payload (amortized; simulates prior compute filling smem) */
+    for (int j = tid; j < (int)(chunk / sizeof(*payload)); j += blockDim.x) {
+        payload[j] = tid;
     }
     __syncthreads();
 
@@ -78,8 +83,8 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
 
     for (int i = 0; i < iter; i++) {
         for (size_t c = 0; c < n_chunks; c++) {
-            /* Clamp last chunk to the actual remaining bytes so the BW
-             * measurement is accurate when bytes_per_block < smem_size. */
+            /* Clamp the final chunk to the remaining bytes so accounting uses
+             * the payload capacity rather than the full donated SMEM size. */
             size_t this_bytes =
                 ((c + 1) * chunk <= bytes_per_block) ? chunk : (bytes_per_block - c * chunk);
 
@@ -91,9 +96,9 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
             asm volatile("fence.proxy.async.shared::cta;\n" ::: "memory");
 #endif
 
-            /* NBI put: elected leader issues cp.async.bulk from smem to
+            /* NBI put: elected leader issues cp.async.bulk from payload to
              * remote gmem; remote write proceeds asynchronously. */
-            nvshmemx_putmem_nbi_block(block_dst + c * chunk, smem, this_bytes, peer);
+            nvshmemx_putmem_nbi_block(block_dst + c * chunk, payload, this_bytes, peer);
 
             /* wait_group.read: waits for TMA to finish reading from smem so
              * smem can be safely overwritten for the next chunk.  The remote
@@ -120,13 +125,13 @@ __global__ void bw_smem_tma(char *dst, size_t bytes, int smem_size, int peer, in
  * number of logical TMA operations rather than the number of bytes.  TMA can
  * translate a request into hardware-dependent memory transactions; this
  * benchmark has no visibility into that on-wire transaction count. */
-static size_t tma_messages_per_iteration(size_t bytes, int num_blocks, int smem_size) {
-    if (num_blocks <= 0 || smem_size <= 0) {
+static size_t tma_messages_per_iteration(size_t bytes, int num_blocks, int payload_size) {
+    if (num_blocks <= 0 || payload_size <= 0) {
         return 0;
     }
 
     const size_t block_count = (size_t)num_blocks;
-    const size_t chunk_size = (size_t)smem_size;
+    const size_t chunk_size = (size_t)payload_size;
     const size_t base_bytes_per_block = bytes / block_count;
     const size_t extra_blocks = bytes % block_count;
     size_t messages = 0;
@@ -170,6 +175,13 @@ int main(int argc, char *argv[]) {
 
     {
         int smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_RECOMMENDED);
+        int smem_data_offset = nvshmemx_ask_smem(NVSHMEMX_SMEM_BARRIERS_ONLY);
+        int payload_size = smem_size - smem_data_offset;
+        if (payload_size <= 0) {
+            fprintf(stderr, "NVSHMEM recommended shared memory has no payload capacity\n");
+            exit_code = 1;
+            goto finalize;
+        }
 
         CUDA_CHECK(cudaFuncSetAttribute(bw_smem_tma, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                         smem_size));
@@ -210,8 +222,9 @@ int main(int argc, char *argv[]) {
 
                 cudaEventElapsedTime(&milliseconds, start, stop);
                 h_bw[i] = (double)size / (milliseconds * (B_TO_GB / ((double)iters * MS_TO_S)));
-                h_msgrate[i] = calculate_msgrate(
-                    tma_messages_per_iteration(size, max_blocks, smem_size), iters, milliseconds);
+                h_msgrate[i] =
+                    calculate_msgrate(tma_messages_per_iteration(size, max_blocks, payload_size),
+                                      iters, milliseconds);
                 nvshmem_barrier_all();
 
                 i++;
@@ -230,10 +243,10 @@ int main(int argc, char *argv[]) {
         }
 
         /* Optional correctness check: set NVSHMEM_PERFTEST_VERIFY=1 to enable.
-         * PE 0 sends one smem-sized chunk (pre-filled: element j = j % threads).
+         * PE 0 sends one payload-sized chunk (pre-filled: element j = j % threads).
          * PE 1 checks the received buffer and reports PASS or FAIL. */
         if (getenv("NVSHMEM_PERFTEST_VERIFY")) {
-            size_t verify_size = (size_t)smem_size < max_size ? (size_t)smem_size : max_size;
+            size_t verify_size = (size_t)payload_size < max_size ? (size_t)payload_size : max_size;
             verify_size -= verify_size % sizeof(int);
 
             if (verify_size == 0) {
