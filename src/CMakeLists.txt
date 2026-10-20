@@ -991,7 +991,7 @@ target_sources(nvshmem_host PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURC
 add_executable(nvshmem-info)
 target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp host/util/env_vars.cpp host/util/util.cpp host/init/init_nvtx.cpp)
 set_target_properties(nvshmem-info PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
-target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem_host nvshmem_device)
+target_link_libraries(nvshmem-info CUDA::cudart_static nvshmem_host nvshmem_device)
 target_include_directories(nvshmem-info PRIVATE include include/host/env)
 target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # End nvshmem-info definitions.
