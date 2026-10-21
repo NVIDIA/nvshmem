@@ -928,7 +928,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread_i
                 assert(0);
         }
 
-        if (can_coalesce_warp) {
+        if (can_coalesce_warp && !gdaki_is_free_flow<NIC_HANDLER>(qp)) {
             gdaki_warp_sync();
         }
 
@@ -956,7 +956,26 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gdaki_rma_thread_i
                     doca_update_get_head(qp, base_wqe_idx + num_wqes);
                 }
             }
+        }
 
+        if (gdaki_is_free_flow<NIC_HANDLER>(qp)) {
+            // Make GET bookkeeping visible before publishing readiness
+            if (can_coalesce_warp && need_cst) {
+                gdaki_warp_sync();
+            }
+
+            if (channel_op == NVSHMEMI_OP_PUT && is_data_buf_in_sysmem) {
+                __threadfence_system();
+            }
+
+            // Publish WQEs independently
+            uint32_t ready_wqes = num_wqes_per_cmd;
+            if (my_tid == tg_size - 1 && need_additional_wqe) {
+                ++ready_wqes;
+            }
+            gdaki_mark_wqes_ready<NIC_HANDLER>(qp, base_wqe_idx + my_tid * num_wqes_per_cmd,
+                                               ready_wqes);
+        } else if (my_tid == tg_size - 1) {
             // Require membar.sys to push data buffer to the point of consistency.
             if (channel_op == NVSHMEMI_OP_PUT && is_data_buf_in_sysmem) {
                 __threadfence_system();
