@@ -1079,6 +1079,7 @@ set(NVSHMEM_TRANSPORT_POLICY_HEADERS
     non_abi/device/transport_specific/traits.cuh
     non_abi/device/transport_specific/pointer_sm.cuh
     non_abi/device/transport_specific/pointer_tma.cuh
+    non_abi/device/transport_specific/cft_tma.cuh
     non_abi/device/transport_specific/network.cuh
     non_abi/device/transport_specific/automatic.cuh
     non_abi/device/transport_specific/api.cuh)

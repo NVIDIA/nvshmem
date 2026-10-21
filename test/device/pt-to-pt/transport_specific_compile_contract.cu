@@ -48,10 +48,11 @@ __global__ void names_absent(uint8_t *destination, const uint8_t *source, int pe
 
 #else
 using Auto = nvshmemx::addressing::Auto;
+using CFT = nvshmemx::addressing::CFT;
 using Pointer = nvshmemx::addressing::Pointer;
 using AutoPolicy = nvshmemx::transport_policy::Auto;
+using CE = nvshmemx::transport_policy::CE;
 using Network = nvshmemx::transport_policy::Network;
-using CFT = nvshmemx::addressing::CFT;
 using SM = nvshmemx::transport_policy::SM;
 using TMA = nvshmemx::transport_policy::TMA;
 namespace space = nvshmemx::memory_space;
@@ -127,6 +128,40 @@ __global__ void pointer_network_pair(uint8_t *destination, const uint8_t *source
     (void)nvshmemx_put<uint8_t, Pointer, Network, kBlock>(destination, source, 16, pe);
 }
 
+#elif defined(CONTRACT_CASE_cft_ce_pair)
+/* CFT / CE belongs to the copy-engine work and has no route here. */
+__global__ void cft_ce_pair(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_put<uint8_t, CFT, CE, kBlock>(destination, source, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_cft_sm_pair)
+__global__ void cft_sm_pair(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_get<uint8_t, CFT, SM, kBlock>(destination, source, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_cft_rma_thread)
+/* The logical-endpoint handle path runs only with the whole CTA. */
+__global__ void cft_rma_thread(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_put_nbi<uint8_t, CFT, TMA, nvshmemx::threadgroup::thread>(destination, source,
+                                                                             16, pe);
+}
+
+#elif defined(CONTRACT_CASE_cft_rma_warp)
+__global__ void cft_rma_warp(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_get<uint8_t, CFT, TMA, nvshmemx::threadgroup::warp>(destination, source, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_cft_signal_warp)
+__global__ void cft_signal_warp(uint64_t *signal, int pe) {
+    (void)nvshmemx_signal_op<CFT, TMA, nvshmemx::threadgroup::warp>(signal, 1, NVSHMEM_SIGNAL_SET,
+                                                                    pe);
+}
+
+#elif defined(CONTRACT_CASE_cft_ordering_warp)
+__global__ void cft_ordering_warp() {
+    (void)nvshmemx_quiet<CFT, TMA, nvshmemx::threadgroup::warp>();
+}
+
 #elif defined(CONTRACT_CASE_tma_get_below_block)
 /* TMA gets complete on the CTA-wide mbarrier, so they are block-scope only. */
 __global__ void tma_get_below_block(uint8_t *destination, const uint8_t *source, int pe) {
@@ -185,7 +220,10 @@ __global__ void cv_qualified_type(const float *destination, const float *source,
  * Pointer / SM must never classify its local operand, so every RMA family and
  * scope of that route is instantiated. Pointer / TMA is instantiated for every
  * RMA family at block scope and, except from a global source, for the put
- * family below block scope, its only legal forms. Auto / Network is
+ * family below block scope, its only legal forms. CFT / TMA is instantiated
+ * for every RMA family at block scope, its only scope; the PTX target (sm_90)
+ * compiles the logical-endpoint handle path out, so this checks the route's
+ * own operand classification. Auto / Network is
  * instantiated for every RMA family and scope: its explicit shared spelling
  * returns INVALID_VALUE without classification and its explicit global
  * spelling is trusted. The internal source_local / dest_local classifiers,
@@ -240,6 +278,7 @@ __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *sign
     result += route_rma<Auto, Network, Scope>(remote, local, signal, bytes, pe);
     if constexpr (Scope == nvshmemx::threadgroup::block) {
         result += route_rma<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
+        result += route_rma<CFT, TMA, Scope>(remote, local, signal, bytes, pe);
     } else if constexpr (kSource != space::source::global) {
         result += route_put<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
     }

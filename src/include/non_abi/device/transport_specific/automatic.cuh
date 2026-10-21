@@ -42,6 +42,7 @@ struct route_backend<automatic_route> {
         return check_rma_arguments(remote, local, bytes, pe);
     }
 
+    template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_signal(uint64_t *sig_addr,
                                                                          int sig_op, int pe,
                                                                          signal_plan &plan) {
