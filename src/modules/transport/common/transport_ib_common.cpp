@@ -16,6 +16,7 @@
 #include <string.h>            // for strerror
 #include <strings.h>           // for strcasecmp
 #include <unistd.h>            // for access, close, sysconf
+#include <string>              // for string
 #include <vector>              // for vector
 #include "non_abi/device/transport/transport_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
@@ -1383,12 +1384,6 @@ bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *na
     } else {
         device_supported = strstr(name, hca_prefix) != nullptr;
     }
-    if (!device_supported) {
-        NVSHMEMI_WARN_PRINT(
-            "device %s is not supported (expected HCA interface: %s). Skipping...\n", name,
-            hca_prefix);
-    }
-
     return device_supported;
 }
 
@@ -1704,6 +1699,8 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
 
     INFO(log_level,
          "Begin - Enumerating IB devices in the system ([<dev_id, device_name, num_ports>]) - ");
+    std::string skipped_devices;
+    int skipped_count = 0;
     for (int i = 0; i < num_devices; i++) {
         struct nvshmemt_ib_common_device *device =
             (struct nvshmemt_ib_common_device *)((char *)devices + i * device_struct_size);
@@ -1722,6 +1719,11 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
         bool device_supported = nvshmemt_check_hca_prefix(options, name);
 
         if (!device_supported) {
+            if (!skipped_devices.empty()) {
+                skipped_devices += ", ";
+            }
+            skipped_devices += name;
+            ++skipped_count;
             ftable->close_device(device->context);
             device->context = nullptr;
             continue;
@@ -1886,6 +1888,11 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
     }
 
 out:
+    if (skipped_count > 0) {
+        const char *hca_prefix = options->HCA_PREFIX_provided ? options->HCA_PREFIX : "^smi";
+        NVSHMEMI_WARN_PRINT("skipped %d IB device(s) not matching HCA prefix \"%s\": %s",
+                            skipped_count, hca_prefix, skipped_devices.c_str());
+    }
     if (status) {
         for (int i = 0; i < num_devices; i++) {
             struct nvshmemt_ib_common_device *device =
