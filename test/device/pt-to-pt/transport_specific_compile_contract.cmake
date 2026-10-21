@@ -85,13 +85,22 @@ expect_compile_failure(
   "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
   -DCONTRACT_CASE_package_unavailable)
 
-# A pair without a route, such as CFT / Network or Pointer / Network, is
-# rejected with one diagnostic.
-foreach(_pair invalid_pair pointer_network_pair)
+# A pair without a route is rejected with one diagnostic: CFT / Network and
+# Pointer / Network have none, and CFT / CE and CFT / SM have none in this
+# series.
+foreach(_pair invalid_pair pointer_network_pair cft_ce_pair cft_sm_pair)
   expect_compile_failure(
     ${_pair}
     "unsupported addressing/transport-policy pair"
     -DCONTRACT_CASE_${_pair})
+endforeach()
+# CFT / TMA is block-scope only for every operation: RMA, signals, and
+# ordering below block scope are rejected with one diagnostic.
+foreach(_case cft_rma_thread cft_rma_warp cft_signal_warp cft_ordering_warp)
+  expect_compile_failure(
+    ${_case}
+    "CFT/TMA is block-scope only"
+    -DCONTRACT_CASE_${_case})
 endforeach()
 # Pointer / TMA gets, and puts from an explicit global source, use CTA-wide
 # TMA state and are rejected below block scope.
@@ -179,7 +188,7 @@ if(_control_symbols MATCHES "transport_specific_contract_expects_transfer_symbol
 endif()
 
 # __isShared lowers to the PTX shared-window test. Explicit shared and global
-# local operands of Pointer / SM, Pointer / TMA, and Auto / Network must
+# local operands of Pointer / SM, Pointer / TMA, CFT / TMA, and Auto / Network must
 # compile without it, while the generic spelling must still classify.
 function(compile_ptx name)
   set(_ptx "${CONTRACT_BINARY_DIR}/${name}.ptx")

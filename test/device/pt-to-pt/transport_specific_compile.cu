@@ -133,6 +133,15 @@ __global__ void compile_pointer_tma(void *remote, void *local, uint64_t *signal,
     put_family<A, P, kWarp, kGeneric>(remote, local, signal, pe);
 }
 
+/* CFT / TMA: every API at block scope, its only scope. In a build without
+ * CFT handles these compile to NOT_SUPPORTED. */
+__global__ void compile_cft_tma(void *remote, void *local, uint64_t *signal, int pe) {
+    using A = ts::addressing::CFT;
+    using P = ts::transport_policy::TMA;
+    scope_all<A, P, kBlock, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
+    typed_all<A, P, kBlock, kGlobal>(remote, local, signal, pe);
+}
+
 /* Auto / Network: every API at every scope. Explicit shared local values are
  * legal spellings that return INVALID_VALUE at run time. */
 __global__ void compile_auto_network(void *remote, void *local, uint64_t *signal, int pe) {

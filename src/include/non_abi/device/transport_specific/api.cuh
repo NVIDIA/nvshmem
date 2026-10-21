@@ -7,6 +7,7 @@
 #define _NVSHMEMI_TRANSPORT_SPECIFIC_API_CUH_
 
 #include "non_abi/device/transport_specific/automatic.cuh"
+#include "non_abi/device/transport_specific/cft_tma.cuh"
 #include "non_abi/device/transport_specific/network.cuh"
 #include "non_abi/device/transport_specific/pointer_sm.cuh"
 #include "non_abi/device/transport_specific/pointer_tma.cuh"
@@ -162,7 +163,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem_signal(void *dest, const voi
     typename Backend::signal_plan sig;
     const int status =
         agree<Scope>(worse(prepare_rma<Backend, Scope, Local>(dest, source, bytes, pe, plan),
-                           Backend::preflight_signal(sig_addr, sig_op, pe, sig)));
+                           Backend::template preflight_signal<Scope>(sig_addr, sig_op, pe, sig)));
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
@@ -178,7 +179,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int signal_op(uint64_t *sig_addr, uint6
     validate_scope<Scope>();
 
     typename Backend::signal_plan sig;
-    const int status = agree<Scope>(Backend::preflight_signal(sig_addr, sig_op, pe, sig));
+    const int status =
+        agree<Scope>(Backend::template preflight_signal<Scope>(sig_addr, sig_op, pe, sig));
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, trace_op::signal_op>(status, pe);
     }

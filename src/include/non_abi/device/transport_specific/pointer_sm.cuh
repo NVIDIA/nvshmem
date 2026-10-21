@@ -47,6 +47,7 @@ struct route_backend<pointer_sm_route> {
         return plan.peer != nullptr ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 
+    template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_signal(uint64_t *sig_addr,
                                                                          int sig_op, int pe,
                                                                          signal_plan &plan) {
