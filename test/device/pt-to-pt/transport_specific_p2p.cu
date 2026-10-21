@@ -609,7 +609,6 @@ int auto_auto_cases(const route_context &c) {
     failures += put_case<A, P, kGlobal, false, true>(c, "Auto put_nbi Global+flush reuse");
     failures += get_case<A, P, kGlobal, false, false>(c, "Auto get Global");
     failures += get_case<A, P, kGlobal, false, true>(c, "Auto get_nbi Global+quiet");
-    /* Thread and warp scopes never select the block-only CFT path. */
     failures += thread_warp_cases<A, P, kGeneric>(c.scoped(), "Auto");
     failures += common_cases<A, P, kGeneric>(c);
     failures += divergent_cases<A, P, kGeneric>(c);

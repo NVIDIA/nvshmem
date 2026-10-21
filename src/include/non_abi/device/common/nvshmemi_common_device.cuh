@@ -1336,12 +1336,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_rma_nbi(void *rptr, void 
     nvshmemi_transfer_rma_nbi<SCOPE, CHANNEL_OP, REGION_OPERATION>(rptr, lptr, bytes, pe, qp_index);
 }
 
-/* ALLOW_CFT = false removes the CFT/logical-endpoint branch from the portable
- * RMA dispatch below, so a reachable peer always takes the P2P path and an
- * unreachable one the device transport. The default keeps existing behavior. */
 template <typename T, threadgroup_t SCOPE,
-          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_CFT = true>
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1349,8 +1345,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!ALLOW_CFT || !nvshmemi_is_le_supported_and_prioritized<true>(pe, nelems * sizeof(T),
-                                                                       SCOPE, source, dest))) {
+        !nvshmemi_is_le_supported_and_prioritized<true>(pe, nelems * sizeof(T), SCOPE, source,
+                                                        dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1370,8 +1366,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (ALLOW_CFT &&
-               nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
+    } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
@@ -1381,7 +1376,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE, bool ALLOW_CFT = true>
+template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1389,8 +1384,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!ALLOW_CFT || !nvshmemi_is_le_supported_and_prioritized<true>(pe, nelems * sizeof(T),
-                                                                       SCOPE, source, dest))) {
+        !nvshmemi_is_le_supported_and_prioritized<true>(pe, nelems * sizeof(T), SCOPE, source,
+                                                        dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1412,8 +1407,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (ALLOW_CFT &&
-               nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
+    } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
 #endif
     } else {
@@ -1446,16 +1440,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
 }
 
 template <typename T, threadgroup_t SCOPE,
-          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_CFT = true>
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!ALLOW_CFT || !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T),
-                                                                        SCOPE, dest, source))) {
+        !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T), SCOPE, dest,
+                                                         source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1469,8 +1462,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (ALLOW_CFT &&
-               nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+    } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
     } else {
@@ -1480,17 +1472,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
 }
 
 template <typename T, threadgroup_t SCOPE,
-          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_CFT = true>
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION, ALLOW_CFT>(dest, source, nelems, pe, qp_index);
+    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION>(dest, source, nelems, pe, qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE, bool ALLOW_CFT = true>
+template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1498,8 +1489,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!ALLOW_CFT || !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T),
-                                                                        SCOPE, dest, source))) {
+        !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T), SCOPE, dest,
+                                                         source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1515,8 +1506,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (ALLOW_CFT &&
-               nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+    } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>((void *)source, (void *)dest, nelems * sizeof(T), pe, true);
 #endif
     } else {
@@ -1567,7 +1557,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     }
 }
 
-template <typename T, threadgroup_t SCOPE, bool ALLOW_CFT = true>
+template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
     int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1575,8 +1565,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        (!ALLOW_CFT || !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T),
-                                                                        SCOPE, dest, source))) {
+        !nvshmemi_is_le_supported_and_prioritized<false>(pe, nelems * sizeof(T), SCOPE, dest,
+                                                         source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1602,8 +1592,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
             nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (ALLOW_CFT &&
-               nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+    } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
         nvshmemi_threadgroup_sync<SCOPE>();
         if (!myIdx) {
@@ -1629,13 +1618,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     }
 }
 
-template <typename T, threadgroup_t SCOPE, bool ALLOW_CFT = true>
+template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_signal(
     T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
     int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_signal<T, SCOPE, ALLOW_CFT>(dest, source, nelems, sig_addr, signal, sig_op, pe,
-                                              is_nbi, qp_index);
+    nvshmemii_put_signal<T, SCOPE>(dest, source, nelems, sig_addr, signal, sig_op, pe, is_nbi,
+                                   qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
