@@ -859,9 +859,19 @@ __device__ __forceinline__ void nvshmemi_handle_quiet() {
         if (!registration.is_valid()) {
             return;
         }
-        nvshmemi_cft_thread_mutex_lock(registration.base);
-        nvshmemi_handle_quiet_all();
-        nvshmemi_cft_thread_mutex_unlock(registration.base);
+        /* Coalesce concurrent thread-scoped quiet calls within each warp. A
+         * lane-per-thread spin on the CTA mutex can starve the lane that owns
+         * the lock. One active leader per warp avoids intra-warp lock
+         * contention while retaining thread-scoped participation semantics. */
+        unsigned int active_mask = __activemask();
+        int leader_lane = __ffs(static_cast<int>(active_mask)) - 1;
+        int lane = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>() % warpSize;
+        if (lane == leader_lane) {
+            nvshmemi_cft_thread_mutex_lock(registration.base);
+            nvshmemi_handle_quiet_all();
+            nvshmemi_cft_thread_mutex_unlock(registration.base);
+        }
+        __syncwarp(active_mask);
     } else {
         // Publish every issuer's pending state before physical warp leaders
         // drain their owned slots in parallel. The trailing synchronization
