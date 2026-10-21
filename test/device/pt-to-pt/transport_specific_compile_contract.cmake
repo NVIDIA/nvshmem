@@ -1,7 +1,7 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Compile-only contracts for the transport-specific preview. These run as a
+# Compile-only contracts for the transport-policy API. These run as a
 # build step instead of ordinary executables: the positive fixture must
 # compile, and each negative fixture must fail during CUDA compilation with its
 # expected diagnostic, before linking or requiring a GPU. A final PTX check
@@ -89,7 +89,7 @@ expect_compile_failure(
 # is rejected with one diagnostic.
 expect_compile_failure(
   invalid_pair
-  "unsupported addressing/transport-policy pair for transport-specific preview"
+  "unsupported addressing/transport-policy pair"
   -DCONTRACT_CASE_invalid_pair)
 expect_compile_failure(
   remote_put_tag

@@ -64,7 +64,7 @@ message( "\n__FUNCTIONALITY__\n")
 nvshmem_add_default_on_option(NVSHMEM_USE_GDRCOPY "Enable CPU-mappable GPU-memory paths for remote-transport atomics")
 nvshmem_add_default_on_option(NVSHMEM_USE_MLX5DV "Enable directNIC feature")
 nvshmem_add_default_on_option(NVSHMEM_NVTX "Enable NVSHMEM NVTX support")
-nvshmem_add_default_on_option(NVSHMEM_ENABLE_TRANSPORT_POLICY "Build and install the transport-policy preview API")
+nvshmem_add_default_on_option(NVSHMEM_ENABLE_TRANSPORT_POLICY "Build and install the transport-policy API")
 
 message( "\n__BUILD__\n")
 nvshmem_add_default_on_option(NVSHMEM_BUILD_TESTS "Build tests")

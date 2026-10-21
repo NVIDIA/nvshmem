@@ -95,6 +95,10 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
             local, remote_source, bytes, peer);
     }
     __syncthreads();
+    if (result == NVSHMEMX_SUCCESS &&
+        __syncthreads_or(!payload_matches(local, bytes, peer, 0, threadIdx.x, blockDim.x))) {
+        result = kDataMismatch;
+    }
     if (InShared && result == NVSHMEMX_SUCCESS) {
         copy_block(out, smem, bytes);
     }
@@ -103,10 +107,15 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
     }
 }
 
+/* Block 0 sends to `peer`; block 1 receives from `previous` concurrently. */
 template <typename A, typename P, LocalSpace Local, bool Nbi>
 __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
                                   uint64_t *signal, uint64_t value, int sig_op, int peer,
-                                  int *status) {
+                                  uint64_t expected, int previous, int *status) {
+    if (blockIdx.x == 1) {
+        receive_and_check(signal, expected, remote, bytes, previous, status);
+        return;
+    }
     int result;
     if constexpr (Nbi) {
         result = nvshmemx_put_signal_nbi<uint8_t, A, P, kBlock, Local, kRemoteDest>(
@@ -118,9 +127,7 @@ __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *so
         result = nvshmemx_put_signal<uint8_t, A, P, kBlock, Local, kRemoteDest>(
             remote, source, bytes, signal, value, sig_op, peer);
     }
-    if (threadIdx.x == 0) {
-        *status = result;
-    }
+    report_sender(status, result);
 }
 
 template <typename A, typename P>
@@ -132,10 +139,16 @@ __global__ void signal_op_kernel(uint64_t *signal, uint64_t value, int sig_op, i
     }
 }
 
-/* fence orders the NBI payload before the following signal. */
+/* fence orders the NBI payload before the following signal; block 1 checks
+ * that order on the receiving side while the peer sends. */
 template <typename A, typename P, LocalSpace Local>
 __global__ void fence_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
-                             uint64_t *signal, uint64_t value, int peer, int *status) {
+                             uint64_t *signal, uint64_t value, int peer, uint64_t expected,
+                             int previous, int *status) {
+    if (blockIdx.x == 1) {
+        receive_and_check(signal, expected, remote, bytes, previous, status);
+        return;
+    }
     int result =
         nvshmemx_put_nbi<uint8_t, A, P, kBlock, Local, kRemoteDest>(remote, source, bytes, peer);
     if (result == NVSHMEMX_SUCCESS) {
@@ -147,9 +160,7 @@ __global__ void fence_kernel(unsigned char *remote, const unsigned char *source,
     if (result == NVSHMEMX_SUCCESS) {
         result = nvshmemx_quiet<A, P, kBlock>();
     }
-    if (threadIdx.x == 0) {
-        *status = result;
-    }
+    report_sender(status, result);
 }
 
 template <typename T, typename A, typename P, LocalSpace Local>
@@ -164,6 +175,10 @@ __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsig
     }
     if (result == NVSHMEMX_SUCCESS) {
         result = nvshmemx_quiet<A, P, kBlock>();
+    }
+    if (result == NVSHMEMX_SUCCESS &&
+        __syncthreads_or(!payload_matches(out, bytes, peer, 0, threadIdx.x, blockDim.x))) {
+        result = kDataMismatch;
     }
     if (threadIdx.x == 0) {
         *status = result;
@@ -348,8 +363,9 @@ int put_signal_case(const route_context &c, const char *what, int sig_op) {
             set_signal(c.b.signal, initial);
         },
         [&] {
-            put_signal_kernel<A, P, Local, Nbi><<<1, kThreads>>>(
-                c.b.remote, c.b.source, kBytes, c.b.signal, value, sig_op, c.peer, c.w.status);
+            put_signal_kernel<A, P, Local, Nbi><<<2, kThreads>>>(c.b.remote, c.b.source, kBytes,
+                                                                 c.b.signal, value, sig_op, c.peer,
+                                                                 expected, c.previous, c.w.status);
         },
         [&] {
             return check_payload(what, c.b.remote, kBytes, c.previous) +
@@ -384,8 +400,9 @@ int fence_case(const route_context &c, const char *what) {
             set_signal(c.b.signal, 0);
         },
         [&] {
-            fence_kernel<A, P, Local><<<1, kThreads>>>(c.b.remote, c.b.source, kBytes, c.b.signal,
-                                                       kSignalBase + c.w.mype, c.peer, c.w.status);
+            fence_kernel<A, P, Local><<<2, kThreads>>>(c.b.remote, c.b.source, kBytes, c.b.signal,
+                                                       kSignalBase + c.w.mype, c.peer, expected,
+                                                       c.previous, c.w.status);
         },
         [&] {
             return check_signal_and_wait(what, c.b.signal, expected, c.w.status) +

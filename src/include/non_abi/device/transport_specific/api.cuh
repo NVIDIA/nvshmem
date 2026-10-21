@@ -72,14 +72,14 @@ __device__ inline const char *trace_scope_name(threadgroup scope) {
 
 /* Returns a status that was decided before any work was issued. Debug builds
  * report it once per threadgroup; release builds compile this to a plain
- * return. `pe` is negative for the ordering operations, which have no target. */
+ * return. */
 template <typename Route, threadgroup Scope, trace_op Op>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int not_issued(int status, int pe) {
 #ifdef NVSHMEM_DEBUG
     if (scope_leader<Scope>()) {
         printf(
-            "NVSHMEM transport-policy preview: PE %d %s on %s at %s scope (target PE %d) failed "
-            "before issuing work with status %d\n",
+            "NVSHMEM transport-policy: PE %d %s on %s at %s scope (target PE %d) failed before "
+            "issuing work with status %d\n",
             nvshmemi_device_state_d.mype, trace_op_name(Op), route_backend<Route>::name(),
             trace_scope_name(Scope), pe, status);
     }
@@ -87,6 +87,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int not_issued(int status, int pe) {
     (void)pe;
 #endif
     return status;
+}
+
+/* Per-participant RMA preparation: the debug annotation check and the route's
+ * preflight. It contains no group synchronization; callers agree on its status
+ * (with any other operand's) before issuing. */
+template <typename Backend, threadgroup Scope, typename Local>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int prepare_rma(const void *remote, const void *local,
+                                                         size_t bytes, int pe,
+                                                         typename Backend::rma_plan &plan) {
+    assert_local_annotation<Local>(local);
+    return Backend::template preflight_rma<Scope, Local>(remote, local, bytes, pe, plan);
 }
 
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, bool IsNbi,
@@ -99,11 +110,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem(void *dest, const void *sour
     constexpr trace_op kOp = IsNbi ? trace_op::put_nbi : trace_op::put;
     validate_scope<Scope>();
     validate_put_memory_spaces<Src, Dst>();
-    assert_local_annotation<Local>(source);
 
     typename Backend::rma_plan plan;
     const int status =
-        agree<Scope>(Backend::template preflight_rma<Scope, Local>(dest, source, bytes, pe, plan));
+        agree<Scope>(prepare_rma<Backend, Scope, Local>(dest, source, bytes, pe, plan));
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
@@ -120,11 +130,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int getmem(void *dest, const void *sour
     constexpr trace_op kOp = IsNbi ? trace_op::get_nbi : trace_op::get;
     validate_scope<Scope>();
     validate_get_memory_spaces<Src, Dst>();
-    assert_local_annotation<Local>(dest);
 
     typename Backend::rma_plan plan;
     const int status =
-        agree<Scope>(Backend::template preflight_rma<Scope, Local>(source, dest, bytes, pe, plan));
+        agree<Scope>(prepare_rma<Backend, Scope, Local>(source, dest, bytes, pe, plan));
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
@@ -142,13 +151,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem_signal(void *dest, const voi
     constexpr trace_op kOp = IsNbi ? trace_op::put_signal_nbi : trace_op::put_signal;
     validate_scope<Scope>();
     validate_put_memory_spaces<Src, Dst>();
-    assert_local_annotation<Local>(source);
 
+    /* One agreement covers the payload and the signal before either is issued. */
     typename Backend::rma_plan plan;
     typename Backend::signal_plan sig;
-    const int status = agree<Scope>(
-        worse(Backend::template preflight_rma<Scope, Local>(dest, source, bytes, pe, plan),
-              Backend::preflight_signal(sig_addr, sig_op, pe, sig)));
+    const int status =
+        agree<Scope>(worse(prepare_rma<Backend, Scope, Local>(dest, source, bytes, pe, plan),
+                           Backend::preflight_signal(sig_addr, sig_op, pe, sig)));
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }

@@ -60,7 +60,7 @@ if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
     # run in every build without slowing incremental builds.
     set(_transport_specific_contract_stamp
         "${CMAKE_CURRENT_BINARY_DIR}/transport_specific_compile_contract.stamp")
-    file(GLOB _transport_specific_preview_headers CONFIGURE_DEPENDS
+    file(GLOB _transport_specific_headers CONFIGURE_DEPENDS
          "${_transport_specific_package_include}/non_abi/device/transport_specific/*.cuh")
     add_custom_command(
         OUTPUT "${_transport_specific_contract_stamp}"
@@ -79,9 +79,9 @@ if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
             "${CMAKE_BINARY_DIR}/CMakeCache.txt"
             ${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cmake
             ${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cu
-            ${_transport_specific_preview_headers}
+            ${_transport_specific_headers}
             "${_transport_specific_package_include}/nvshmemx.h"
-        COMMENT "Checking transport-specific preview compile contracts"
+        COMMENT "Checking transport-specific compile contracts"
         VERBATIM)
     add_custom_target(device_transport_specific_compile_contract ALL
         DEPENDS "${_transport_specific_contract_stamp}")

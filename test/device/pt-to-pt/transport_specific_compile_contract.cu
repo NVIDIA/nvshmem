@@ -27,7 +27,7 @@
 #endif
 
 #if defined(CONTRACT_CASE_optin_required) || defined(CONTRACT_CASE_host_header_only)
-/* The preview declarations must not leak into these consumers. */
+/* The transport-policy declarations must not leak into these consumers. */
 __global__ void names_absent(uint8_t *destination, const uint8_t *source, int pe) {
     (void)nvshmemx_put<uint8_t, nvshmemx::addressing::Pointer, nvshmemx::transport_policy::SM,
                        nvshmemx::threadgroup::block>(destination, source, 16, pe);
@@ -108,7 +108,7 @@ __global__ void cv_qualified_type(const float *destination, const float *source,
  * or generic). The contract requires the shared-window test (isspacep.shared)
  * that __isShared lowers to in the generic build and forbids it otherwise.
  * Pointer / SM must never classify its local operand, so every RMA family and
- * scope of that route is instantiated. The internal is_shared_*_ptr helpers,
+ * scope of that route is instantiated. The internal source_local / dest_local classifiers,
  * which later routes use to classify a generic operand, are instantiated as
  * well: they keep the generic build observable and must fold away for an
  * explicit spelling. Auto / Auto intentionally retains portable classification
@@ -146,8 +146,8 @@ __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *sign
     asm("mov.b64 %0, %1;" : "=l"(local) : "l"(param));
     int result = route_rma<Pointer, SM, Scope>(remote, local, signal, bytes, pe);
 #ifdef __CUDA_ARCH__
-    result += nvshmemi::transport_policy::is_shared_source_ptr<kSource>(local);
-    result += nvshmemi::transport_policy::is_shared_dest_ptr<kDest>(local);
+    result += nvshmemi::transport_policy::source_local<kSource>::is_shared(local);
+    result += nvshmemi::transport_policy::dest_local<kDest>::is_shared(local);
 #endif
     *status = result;
 }
