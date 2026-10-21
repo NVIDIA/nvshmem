@@ -15,11 +15,8 @@ namespace transport_policy {
 
 /*
  * Auto / Auto: the compatibility route over the portable dispatcher, keeping
- * its route selection, fallback, MemorySpace classification, and ordering.
- * The CFT data-movement branch of that dispatcher is block-only, so thread and
- * warp scopes instantiate it with ALLOW_CFT = false: a reachable peer uses TMA
- * when this CTA registered shared memory and the copy qualifies, otherwise
- * LD/ST, and an unreachable peer uses the device transport.
+ * its route selection, scope rules, fallback, MemorySpace classification, and
+ * ordering unchanged.
  */
 template <>
 struct route_backend<automatic_route> {
@@ -60,10 +57,9 @@ struct route_backend<automatic_route> {
         char *dest = static_cast<char *>(plan.remote);
         const char *src = static_cast<const char *>(source);
         if constexpr (IsNbi) {
-            nvshmemi_put_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, kAllowCft<Scope>>(
-                dest, src, bytes, plan.pe);
+            nvshmemi_put_nbi<char, kScope<Scope>>(dest, src, bytes, plan.pe);
         } else {
-            nvshmemi_put<char, kScope<Scope>, kAllowCft<Scope>>(dest, src, bytes, plan.pe);
+            nvshmemi_put<char, kScope<Scope>>(dest, src, bytes, plan.pe);
         }
         return NVSHMEMX_SUCCESS;
     }
@@ -74,10 +70,9 @@ struct route_backend<automatic_route> {
         char *dst = static_cast<char *>(dest);
         const char *src = static_cast<const char *>(plan.remote);
         if constexpr (IsNbi) {
-            nvshmemi_get_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, kAllowCft<Scope>>(
-                dst, src, bytes, plan.pe);
+            nvshmemi_get_nbi<char, kScope<Scope>>(dst, src, bytes, plan.pe);
         } else {
-            nvshmemi_get<char, kScope<Scope>, kAllowCft<Scope>>(dst, src, bytes, plan.pe);
+            nvshmemi_get<char, kScope<Scope>>(dst, src, bytes, plan.pe);
         }
         return NVSHMEMX_SUCCESS;
     }
@@ -87,9 +82,9 @@ struct route_backend<automatic_route> {
                                                                    const signal_plan &sig,
                                                                    const void *source, size_t bytes,
                                                                    uint64_t signal, int sig_op) {
-        nvshmemi_put_signal<char, kScope<Scope>, kAllowCft<Scope>>(
-            static_cast<char *>(plan.remote), static_cast<const char *>(source), bytes,
-            sig.sig_addr, signal, sig_op, plan.pe, IsNbi);
+        nvshmemi_put_signal<char, kScope<Scope>>(static_cast<char *>(plan.remote),
+                                                 static_cast<const char *>(source), bytes,
+                                                 sig.sig_addr, signal, sig_op, plan.pe, IsNbi);
         return NVSHMEMX_SUCCESS;
     }
 
@@ -126,8 +121,6 @@ struct route_backend<automatic_route> {
    private:
     template <threadgroup Scope>
     static constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
-    template <threadgroup Scope>
-    static constexpr bool kAllowCft = Scope == threadgroup::block;
 };
 
 }  // namespace transport_policy
