@@ -4,7 +4,7 @@
  */
 
 /*
- * Positive compile contract for the transport-specific preview surface. The
+ * Positive compile contract for the transport-specific API surface. The
  * kernels are never launched: compiling every legal route, scope, local memory space,
  * API, and element-type instantiation is the test. Negative combinations
  * live in transport_specific_compile_contract.cmake.

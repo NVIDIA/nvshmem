@@ -65,17 +65,15 @@ struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_polic
 template <typename Route>
 struct route_backend;
 
-template <typename...>
-using void_t = void;
-
 template <typename Addressing, typename TransportPolicy, typename = void>
 struct is_supported_pair {
     static constexpr bool value = false;
 };
 
 template <typename Addressing, typename TransportPolicy>
-struct is_supported_pair<Addressing, TransportPolicy,
-                         void_t<typename route_compatibility<Addressing, TransportPolicy>::route>> {
+struct is_supported_pair<
+    Addressing, TransportPolicy,
+    std::void_t<typename route_compatibility<Addressing, TransportPolicy>::route>> {
     static constexpr bool value = true;
 };
 
@@ -88,7 +86,7 @@ struct route_selection {
 template <typename Addressing, typename TransportPolicy>
 struct route_selection<Addressing, TransportPolicy, false> {
     static_assert(is_supported_pair<Addressing, TransportPolicy>::value,
-                  "unsupported addressing/transport-policy pair for transport-specific preview");
+                  "unsupported addressing/transport-policy pair");
     /* Any complete route, so that the assertion above is the only diagnostic. */
     using route = automatic_route;
 };
@@ -145,6 +143,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool scope_leader() {
  * nvshmemi_threadgroup_sync, so a route may issue right after it succeeds.
  * Warp scope uses the whole warp, as the stable warp APIs do.
  */
+static_assert(NVSHMEMX_SUCCESS < NVSHMEMX_ERROR_INVALID_VALUE &&
+                  NVSHMEMX_ERROR_INVALID_VALUE < NVSHMEMX_ERROR_NOT_SUPPORTED &&
+                  NVSHMEMX_ERROR_NOT_SUPPORTED < NVSHMEMX_ERROR_INTERNAL,
+              "agree() and worse() rank preflight statuses by numeric value");
+
 template <threadgroup Scope>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int agree(int status) {
     if constexpr (Scope == threadgroup::thread) {
@@ -179,30 +182,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int agree(int status) {
 
 /* ---- Memory spaces ----------------------------------------------------- */
 
-/* Only a generic local operand is classified at run time. Explicit shared and
- * global values compile directly to their path and never call __isShared. */
-template <nvshmemx::memory_space::source Space>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_source_ptr(const void *ptr) {
-    if constexpr (Space == nvshmemx::memory_space::source::shared) {
-        return true;
-    } else if constexpr (Space == nvshmemx::memory_space::source::global) {
-        return false;
-    } else {
-        return __isShared(ptr);
-    }
-}
-
-template <nvshmemx::memory_space::dest Space>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_dest_ptr(const void *ptr) {
-    if constexpr (Space == nvshmemx::memory_space::dest::shared) {
-        return true;
-    } else if constexpr (Space == nvshmemx::memory_space::dest::global) {
-        return false;
-    } else {
-        return __isShared(ptr);
-    }
-}
-
 enum class local_space {
     invalid,
     shared,
@@ -224,14 +203,27 @@ __host__ __device__ constexpr local_space to_local_space(nvshmemx::memory_space:
                                                             : local_space::invalid;
 }
 
-/* A route's direction-agnostic view of the local operand: `kind` is its
- * compile-time category and is_shared() classifies it through the helper for
- * the direction in which it was spelled. */
+/* Only a generic local operand is classified at run time. Explicit shared and
+ * global values compile directly to their path and never call __isShared. */
+template <local_space Space>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_ptr(const void *ptr) {
+    if constexpr (Space == local_space::shared) {
+        return true;
+    } else if constexpr (Space == local_space::global) {
+        return false;
+    } else {
+        static_assert(Space == local_space::generic, "unsupported local memory space");
+        return __isShared(ptr);
+    }
+}
+
+/* A route's view of the local operand, whichever direction spelled it: `kind`
+ * is its compile-time category and is_shared() classifies it. */
 template <nvshmemx::memory_space::source Space>
 struct source_local {
     static constexpr local_space kind = to_local_space(Space);
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared(const void *ptr) {
-        return is_shared_source_ptr<Space>(ptr);
+        return is_shared_ptr<kind>(ptr);
     }
 };
 
@@ -239,7 +231,7 @@ template <nvshmemx::memory_space::dest Space>
 struct dest_local {
     static constexpr local_space kind = to_local_space(Space);
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared(const void *ptr) {
-        return is_shared_dest_ptr<Space>(ptr);
+        return is_shared_ptr<kind>(ptr);
     }
 };
 
@@ -312,11 +304,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_rma_arguments(const void *rem
 }
 
 /* The arguments every signalling route needs: a valid PE, a SET or ADD
- * opcode, and a signal word inside the symmetric heap. */
+ * opcode, and an 8-byte-aligned signal word inside the symmetric heap. */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_signal_arguments(const uint64_t *sig_addr,
                                                                     int sig_op, int pe) {
     const bool valid = pe >= 0 && pe < nvshmemi_device_state_d.npes &&
                        (sig_op == NVSHMEM_SIGNAL_SET || sig_op == NVSHMEM_SIGNAL_ADD) &&
+                       reinterpret_cast<uintptr_t>(sig_addr) % sizeof(*sig_addr) == 0 &&
                        heap_range_is_valid(sig_addr, sizeof(*sig_addr));
     return valid ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_INVALID_VALUE;
 }

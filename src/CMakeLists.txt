@@ -1069,7 +1069,7 @@ set(INC_EXPORTS
 )
 
 
-# The preview header is part of a default-on package build, but applications
+# The transport-policy headers are part of a default-on package build, but applications
 # still have to define NVSHMEMX_ENABLE_TRANSPORT_POLICY themselves.
 set(NVSHMEM_TRANSPORT_POLICY_HEADERS
     non_abi/device/transport_specific/types.cuh
@@ -1081,10 +1081,10 @@ if (NVSHMEM_ENABLE_TRANSPORT_POLICY)
   list(APPEND INC_EXPORTS ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/non_abi/device/transport_specific")
 else()
-  # A reconfigure from ON to OFF must not leave preview headers in the staged
+  # A reconfigure from ON to OFF must not leave transport-policy headers in the staged
   # include tree, which is installed wholesale below.
-  foreach(_preview_header ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
-    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/include/${_preview_header}")
+  foreach(_transport_policy_header ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
+    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/include/${_transport_policy_header}")
   endforeach()
 endif()
 

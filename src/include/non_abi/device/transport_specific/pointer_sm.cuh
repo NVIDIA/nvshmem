@@ -56,7 +56,11 @@ struct route_backend<pointer_sm_route> {
             return status;
         }
         plan.peer = peer_pointer(sig_addr, pe);
-        return plan.peer != nullptr ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
+        /* ADD is a system-scope atomic on the mapped peer. */
+        const bool supported =
+            plan.peer != nullptr &&
+            (sig_op == NVSHMEM_SIGNAL_SET || nvshmemi_device_state_d.mapped_peer_atomics);
+        return supported ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 
     /* ---- Issue: called only after the whole group agreed on preflight,
@@ -122,10 +126,9 @@ struct route_backend<pointer_sm_route> {
     }
 
    private:
-    /* The mapped and P2P-reachable peer address, or null. */
+    /* The mapped peer address, or null. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void *peer_pointer(const void *remote, int pe) {
-        void *peer = nvshmemi_ptr(remote, pe);
-        return peer != nullptr && nvshmemi_peer_reachable(peer) ? peer : nullptr;
+        return nvshmemi_ptr(remote, pe);
     }
 
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void issue_signal(void *peer, uint64_t signal,

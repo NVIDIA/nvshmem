@@ -1906,15 +1906,23 @@ int set_job_connectivity(nvshmemi_state_t *state) {
     int *job_connectivity_all;
     bool proxy_ops_are_ordered = true;
     int gpu_remote_atomics = false;
+    bool mapped_peer_atomics = true;
 
     // determine job level connectivity among GPUs
     nvshmemi_job_connectivity = NVSHMEMI_JOB_GPU_LDST_ATOMICS;
     for (int i = 0; i < state->npes; i++) {
         int peer_connectivity = NVSHMEMI_JOB_GPU_PROXY;
         bool enforce_cst = false;
+        bool peer_mapped = false;
+        bool peer_atomics = false;
         // for each PE, pick the best connectivity of any transport
         for (int j = 0; j < state->num_initialized_transports; j++) {
             if (state->transports[j]) {
+                peer_mapped |=
+                    (state->transports[j]->cap[i] &
+                     (NVSHMEM_TRANSPORT_CAP_MAP_GPU_ST | NVSHMEM_TRANSPORT_CAP_MAP_GPU_LD)) != 0;
+                peer_atomics |=
+                    (state->transports[j]->cap[i] & NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS) != 0;
                 if (state->transports[j]->cap[i] & NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS) {
                     peer_connectivity = (int)NVSHMEMI_JOB_GPU_LDST_ATOMICS;
                 } else if (state->transports[j]->cap[i] &
@@ -1946,6 +1954,10 @@ int set_job_connectivity(nvshmemi_state_t *state) {
                     enforce_cst = (state->transports[j]->host_ops.enforce_cst_at_target != nullptr);
                 }
             }
+        }
+
+        if (peer_mapped && !peer_atomics) {
+            mapped_peer_atomics = false;
         }
 
         if ((peer_connectivity == NVSHMEMI_JOB_GPU_PROXY) && (enforce_cst)) {
@@ -1987,6 +1999,9 @@ int set_job_connectivity(nvshmemi_state_t *state) {
     }
     free(job_connectivity_all);
     nvshmemi_device_state.job_connectivity = nvshmemi_job_connectivity;
+    /* Pointer-addressed transport-policy routes issue system-scope atomics
+     * directly to a mapped peer only when every mapped peer supports them. */
+    nvshmemi_device_state.mapped_peer_atomics = mapped_peer_atomics;
 
 #ifdef NVSHMEM_BUILD_P2P_ONLY
     if (nvshmemi_job_connectivity > NVSHMEMI_JOB_GPU_LDST_ATOMICS) {
