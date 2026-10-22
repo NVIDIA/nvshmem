@@ -122,7 +122,7 @@ set(MPI_EXAMPLES "")
 set(ALL_EXAMPLES "")
 if(NVSHMEM_MPI_SUPPORT)
   target_compile_definitions(nvshmem_example_helper INTERFACE NVSHMEMTEST_MPI_SUPPORT)
-  target_include_directories(nvshmem_example_helper INTERFACE $<BUILD_INTERFACE:${MPI_CXX_INCLUDE_DIRS}>)
+  target_include_directories(nvshmem_example_helper INTERFACE "$<BUILD_INTERFACE:${MPI_CXX_INCLUDE_DIRS}>")
   target_compile_definitions(nvshmem_example_helper INTERFACE NVSHMEMTEST_MPI_SUPPORT)
   list(APPEND MPI_EXAMPLES
     mpi-based-init.cu
