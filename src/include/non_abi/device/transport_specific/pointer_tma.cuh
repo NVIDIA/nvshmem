@@ -308,9 +308,9 @@ struct route_backend<pointer_tma_route> {
      * to the pending transaction count, and the next block-scope TMA quiet,
      * flush, or fence performs the single arrival and waits for the phase. A
      * block-scope operation is issued convergently by the whole CTA, so the
-     * state has one user at a time. The state slot records which grid opened
-     * the epoch, so stale shared memory from an earlier kernel is never
-     * mistaken for a live barrier.
+     * state has one user at a time. nvshmemx_give_smem clears the state slot
+     * when the CTA registers its shared memory, and the slot records which
+     * grid opened the epoch.
      *
      * The epoch outlives the call that opened it, so its two slots must be
      * ones no other operation reinitializes meanwhile. The stable TMA copies
@@ -324,8 +324,8 @@ struct route_backend<pointer_tma_route> {
      * in the last two slots, which only a stable warpgroup-scope handle copy
      * issued by the eighth warpgroup of a 1024-thread CTA can reach.
      */
-    static constexpr int kDeferredGetBarrierSlot = NVSHMEMI_TMA_NUM_BARRIER_SLOTS - 2;
-    static constexpr int kDeferredGetStateSlot = NVSHMEMI_TMA_NUM_BARRIER_SLOTS - 1;
+    static constexpr int kDeferredGetBarrierSlot = NVSHMEMI_TMA_DEFERRED_GET_BARRIER_SLOT;
+    static constexpr int kDeferredGetStateSlot = NVSHMEMI_TMA_DEFERRED_GET_STATE_SLOT;
     static_assert(kDeferredGetBarrierSlot >=
                       NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES,
                   "deferred Pointer/TMA gets must not share a TMA barrier slot with a block- or "
@@ -336,6 +336,9 @@ struct route_backend<pointer_tma_route> {
         uint64_t owner;
         uint32_t pending_bytes;
     };
+    static_assert(sizeof(deferred_get_state) <= 16,
+                  "the deferred-get state must fit in the TMA barrier slot nvshmemx_give_smem "
+                  "clears");
 
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE deferred_get_state *deferred_state(
         uintptr_t smem_base) {
