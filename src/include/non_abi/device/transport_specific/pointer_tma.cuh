@@ -310,10 +310,26 @@ struct route_backend<pointer_tma_route> {
      * block-scope operation is issued convergently by the whole CTA, so the
      * state has one user at a time. The state slot records which grid opened
      * the epoch, so stale shared memory from an earlier kernel is never
-     * mistaken for a live barrier. Slots 0-4 belong to the stable TMA copies.
+     * mistaken for a live barrier.
+     *
+     * The epoch outlives the call that opened it, so its two slots must be
+     * ones no other operation reinitializes meanwhile. The stable TMA copies
+     * use slots 0-4. CFT handle copies also borrow TMA barrier slots: a
+     * single-issuer copy uses its issuing warp's index, and a multi-warp copy
+     * uses four slots per threadgroup. A block-scope copy stays in slots 0-3,
+     * but the stable warp-scope handle path (the stable warp APIs, or
+     * Auto/Auto at warp scope) uses the calling warp's index, up to
+     * NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES - 1 because the
+     * handle resource check admits no further warp. The epoch therefore lives
+     * in the last two slots, which only a stable warpgroup-scope handle copy
+     * issued by the eighth warpgroup of a 1024-thread CTA can reach.
      */
-    static constexpr int kDeferredGetBarrierSlot = 5;
-    static constexpr int kDeferredGetStateSlot = 6;
+    static constexpr int kDeferredGetBarrierSlot = NVSHMEMI_TMA_NUM_BARRIER_SLOTS - 2;
+    static constexpr int kDeferredGetStateSlot = NVSHMEMI_TMA_NUM_BARRIER_SLOTS - 1;
+    static_assert(kDeferredGetBarrierSlot >=
+                      NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES,
+                  "deferred Pointer/TMA gets must not share a TMA barrier slot with a block- or "
+                  "warp-scope stable CFT handle copy");
     static constexpr uint32_t kMaxPendingTx = (1u << 20) - 1;
 
     struct deferred_get_state {
