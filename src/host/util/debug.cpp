@@ -22,6 +22,30 @@
 extern "C" {
 int nvshmem_debug_file_active(void) { return nvshmem_debug_file != stdout; }
 
+void nvshmem_debug_log_unfiltered(const char *filefunc, int line, const char *fmt, ...) {
+    pthread_mutex_lock(&nvshmem_debug_output_lock);
+    fprintf(nvshmem_debug_file, "%s:%d: ", filefunc, line);
+    va_list vargs;
+    va_start(vargs, fmt);
+    (void)vfprintf(nvshmem_debug_file, fmt, vargs);
+    va_end(vargs);
+    fprintf(nvshmem_debug_file, "\n");
+    fflush(nvshmem_debug_file);
+    pthread_mutex_unlock(&nvshmem_debug_output_lock);
+}
+
+void nvshmem_debug_log_status_unfiltered(const char *filefunc, int line, int status,
+                                         const char *fmt, ...) {
+    pthread_mutex_lock(&nvshmem_debug_output_lock);
+    fprintf(nvshmem_debug_file, "%s:%d: non-zero status: %d ", filefunc, line, status);
+    va_list vargs;
+    va_start(vargs, fmt);
+    (void)vfprintf(nvshmem_debug_file, fmt, vargs);
+    va_end(vargs);
+    fflush(nvshmem_debug_file);
+    pthread_mutex_unlock(&nvshmem_debug_output_lock);
+}
+
 void nvshmem_debug_printf(const char *fmt, ...) {
     pthread_mutex_lock(&nvshmem_debug_output_lock);
     va_list vargs;
