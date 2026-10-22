@@ -43,6 +43,9 @@ typedef enum {
 extern "C" {
 void nvshmem_debug_log(nvshmem_debug_log_level level, unsigned long flags, const char *filefunc,
                        int line, const char *fmt, ...);
+void nvshmem_debug_log_unfiltered(const char *filefunc, int line, const char *fmt, ...);
+void nvshmem_debug_log_status_unfiltered(const char *filefunc, int line, int status,
+                                         const char *fmt, ...);
 void nvshmem_debug_printf(const char *fmt, ...);
 void nvshmem_debug_warn(const char *fmt, ...);
 int nvshmem_debug_file_active(void);

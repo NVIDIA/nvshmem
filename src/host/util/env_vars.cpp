@@ -110,6 +110,10 @@ static void nvshmemi_options_print_heading(FILE *output, const char *h, int styl
 
 void nvshmemi_options_print(int style) {
     FILE *output = style == NVSHMEMI_OPTIONS_STYLE_INFO ? nvshmem_debug_file : stdout;
+    const bool lock_output = output == nvshmem_debug_file;
+    if (lock_output) {
+        pthread_mutex_lock(&nvshmem_debug_output_lock);
+    }
     nvshmemi_options_print_heading(output, "Standard options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)       \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, \
@@ -179,4 +183,7 @@ void nvshmemi_options_print(int style) {
 
     fprintf(output, "\n");
     fflush(output);
+    if (lock_output) {
+        pthread_mutex_unlock(&nvshmem_debug_output_lock);
+    }
 }

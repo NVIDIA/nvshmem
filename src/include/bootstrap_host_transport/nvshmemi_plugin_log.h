@@ -18,8 +18,8 @@ extern "C" {
  * These symbols are supplied by libnvshmem_host. Keep them weak so that
  * standalone and third-party plugin tests retain their legacy output path.
  */
-void nvshmem_debug_log(int level, unsigned long flags, const char *filefunc, int line,
-                       const char *fmt, ...) __attribute__((weak));
+void nvshmem_debug_log_unfiltered(const char *filefunc, int line, const char *fmt, ...)
+    __attribute__((weak));
 void nvshmem_debug_printf(const char *fmt, ...) __attribute__((weak));
 int nvshmem_debug_file_active(void) __attribute__((weak));
 
@@ -61,12 +61,14 @@ static inline void nvshmemi_plugin_log(int level, unsigned long flags, FILE *fal
     if (message == NULL) {
         return;
     }
-    if (nvshmem_debug_log != NULL && nvshmem_debug_file_active != NULL &&
+    if (nvshmem_debug_log_unfiltered != NULL && nvshmem_debug_file_active != NULL &&
         nvshmem_debug_file_active()) {
-        nvshmem_debug_log(level, flags, filefunc, line, "%s", message);
+        nvshmem_debug_log_unfiltered(filefunc, line, "%s", message);
     } else {
         fprintf(fallback, "%s:%d: %s\n", filefunc, line, message);
     }
+    (void)level;
+    (void)flags;
     free(message);
 }
 
