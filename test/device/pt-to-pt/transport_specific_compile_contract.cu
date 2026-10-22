@@ -41,6 +41,7 @@ using Auto = nvshmemx::addressing::Auto;
 using Pointer = nvshmemx::addressing::Pointer;
 using AutoPolicy = nvshmemx::transport_policy::Auto;
 using Network = nvshmemx::transport_policy::Network;
+using CFT = nvshmemx::addressing::CFT;
 using SM = nvshmemx::transport_policy::SM;
 using TMA = nvshmemx::transport_policy::TMA;
 namespace space = nvshmemx::memory_space;
@@ -64,7 +65,7 @@ __global__ void legal(uint8_t *destination, const uint8_t *source, uint64_t *sig
 
 #elif defined(CONTRACT_CASE_invalid_pair)
 __global__ void invalid_pair(uint8_t *destination, const uint8_t *source, int pe) {
-    (void)nvshmemx_put<uint8_t, Pointer, Network, kBlock>(destination, source, 16, pe);
+    (void)nvshmemx_put<uint8_t, CFT, Network, kBlock>(destination, source, 16, pe);
 }
 
 #elif defined(CONTRACT_CASE_tma_get_below_block)

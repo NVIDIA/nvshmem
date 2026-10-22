@@ -603,6 +603,13 @@ int auto_auto_cases(const route_context &c) {
     failures += put_case<A, P, kGeneric, false, false>(c, "Auto put");
     failures += put_case<A, P, kGeneric, false, true>(c, "Auto put_nbi+flush reuse");
     failures += get_case<A, P, kGeneric, false, false>(c, "Auto get");
+    /* Pairs that lower to the portable dispatch. */
+    failures += put_case<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::Auto, kGeneric,
+                         false, false>(c, "Pointer/Auto put");
+    failures += get_case<nvshmemx::addressing::CFT, nvshmemx::transport_policy::Auto, kGeneric,
+                         false, true>(c, "CFT/Auto get_nbi+quiet");
+    failures +=
+        put_case<A, nvshmemx::transport_policy::SM, kGeneric, false, true>(c, "Auto/SM put_nbi");
     failures += get_case<A, P, kGeneric, false, true>(c, "Auto get_nbi+quiet");
     /* Explicit local memory spaces are legal and use the portable dispatch. */
     failures += put_case<A, P, kGlobal, false, false>(c, "Auto put Global");

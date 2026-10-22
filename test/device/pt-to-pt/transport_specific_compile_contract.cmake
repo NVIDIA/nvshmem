@@ -85,8 +85,8 @@ expect_compile_failure(
   "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
   -DCONTRACT_CASE_package_unavailable)
 
-# Pointer / SM, Pointer / TMA, and Auto / Auto are the only supported pairs;
-# every other pair is rejected with one diagnostic.
+# A pair without a route, such as CFT / Network, is rejected with one
+# diagnostic.
 expect_compile_failure(
   invalid_pair
   "unsupported addressing/transport-policy pair"
