@@ -2065,7 +2065,16 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 #endif
 #define SCOPE NVSHMEMI_THREADGROUP_BLOCK
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
-    switch (nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_maxloc_algo) {
+    int reduce_maxloc_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_maxloc_algo;
+    if (!nvshmemi_team_has_hierarchical_subteams(teami)) {
+        if (reduce_maxloc_algo == 3) {
+            reduce_maxloc_algo = 2;
+        } else if (reduce_maxloc_algo == 4) {
+            reduce_maxloc_algo = 1;
+        }
+    }
+
+    switch (reduce_maxloc_algo) {
         case 1: /*  Alltoall algorithm */
             nvshmemi_double2_maxloc_reduce_alltoall_block(team, dest, source);
             break;
