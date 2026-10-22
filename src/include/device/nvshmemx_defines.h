@@ -106,6 +106,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
     if (nvshmemi_tma_block_is_elected()) {
         int registration_slot = nvshmemi_tma_claim_smem_registration();
         if (registration_slot >= 0) {
+            /* No deferred get is pending in a newly registered buffer. */
+            uint64_t *deferred_get_state = nvshmemi_tma_barrier_slot(
+                reinterpret_cast<uintptr_t>(smem), NVSHMEMI_TMA_DEFERRED_GET_STATE_SLOT);
+            deferred_get_state[0] = 0;
+            deferred_get_state[1] = 0;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
             for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
