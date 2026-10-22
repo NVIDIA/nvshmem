@@ -6,12 +6,14 @@
 #ifndef _NVSHMEMI_TRANSPORT_SPECIFIC_TRAITS_CUH_
 #define _NVSHMEMI_TRANSPORT_SPECIFIC_TRAITS_CUH_
 
+#if !defined __CUDACC_RTC__
 #include <assert.h>
-#include <type_traits>
+#endif
 
 #include "c_api/nvshmem_api_macros.h"
 #include "c_api/nvshmemx_status.h"
 #include "device/nvshmem_device_macros.h"
+#include "non_abi/device/common/nvshmemi_cccl_compat.h"
 #include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/device/transport_specific/types.cuh"
 
@@ -22,7 +24,7 @@ namespace transport_policy {
  * public wrappers check it in both compilation passes. */
 template <typename Type>
 struct is_supported_rma_type {
-#define NVSHMEMI_TS_IS_RMA_TYPE(NAME, TYPE) std::is_same<Type, TYPE>::value ||
+#define NVSHMEMI_TS_IS_RMA_TYPE(NAME, TYPE) cuda::std::is_same<Type, TYPE>::value ||
     static constexpr bool value =
         NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMI_TS_IS_RMA_TYPE) false;
 #undef NVSHMEMI_TS_IS_RMA_TYPE
@@ -73,7 +75,7 @@ struct is_supported_pair {
 template <typename Addressing, typename TransportPolicy>
 struct is_supported_pair<
     Addressing, TransportPolicy,
-    std::void_t<typename route_compatibility<Addressing, TransportPolicy>::route>> {
+    cuda::std::void_t<typename route_compatibility<Addressing, TransportPolicy>::route>> {
     static constexpr bool value = true;
 };
 
