@@ -999,6 +999,14 @@ target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 
 # Start header configuration and export
 configure_file(include/c_api/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/c_api/nvshmem_version.h @ONLY)
+foreach(_build_path CUDA_HOME LIBFABRIC_HOME MPI_HOME NCCL_HOME NVSHMEM_PREFIX
+                    PMIX_HOME SHMEM_HOME CUTLASS_HOME UCX_HOME)
+  if(NOT "${${_build_path}}" STREQUAL "")
+    string(REPLACE "${_build_path}=${${_build_path}}" "${_build_path}=<build-path>"
+           INFO_BUILD_VARS "${INFO_BUILD_VARS}")
+  endif()
+endforeach()
+unset(_build_path)
 configure_file(include/non_abi/c/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmemi_build_metadata.h @ONLY)
 set(NVSHMEMX_TRANSPORT_POLICY_AVAILABLE ${NVSHMEM_ENABLE_TRANSPORT_POLICY})
 configure_file(include/non_abi/c/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmem_build_options.h)
