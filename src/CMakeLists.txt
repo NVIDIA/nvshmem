@@ -1047,6 +1047,7 @@ set(INC_EXPORTS
     non_abi/device/coll/utils.cuh
     non_abi/device/common/logical_endpoint_device.cuh
     non_abi/device/common/logical_endpoint_types.h
+    non_abi/device/common/device_rma_completion.cuh
     non_abi/device/common/nvshmem_common.cuh
     non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
     non_abi/device/common/nvshmemi_cccl_compat.h
