@@ -353,10 +353,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_direct_thre
     nvshmemi_barrier_threadgroup<SCOPE>(team);
 }
 
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_team_has_hierarchical_subteams(
+    const nvshmemi_team_t *teami) {
+    return teami->is_team_node || teami->is_team_same_mype_node ||
+           (teami->team_node != NVSHMEM_TEAM_INVALID &&
+            teami->team_same_mype_node != NVSHMEM_TEAM_INVALID);
+}
+
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_hierarchical_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+    if (!nvshmemi_team_has_hierarchical_subteams(teami)) {
+        nvshmemi_bcast_tree_threadgroup<T, SCOPE>(
+            team, dest, source, nelems, PE_root,
+            nvshmemi_device_state_d.gpu_coll_env_params_var.bcast_tree_kval);
+        return;
+    }
+
     if (teami->is_team_same_mype_node) {
         nvshmemi_bcast_internode_tree_threadgroup<T, SCOPE>(
             team, dest, source, nelems, PE_root,
@@ -385,14 +399,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int bcast_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.bcast_algo;
+    const bool has_hierarchical_subteams = nvshmemi_team_has_hierarchical_subteams(teami);
     switch (bcast_algo) {
         case 0:
             if (NVSHMEMI_BCAST_SYNC_SIZE * sizeof(long) >= (nelems * sizeof(T) * 2) &&
                 sizeof(T) >= sizeof(uint32_t) && nelems % 2 == 0 &&
                 nelems * sizeof(T) <= 16384) { /* LL algos */
                 if (nvshmemi_team_n_pes(team) > 32 &&
-                    nvshmemi_device_state_d.pe_dist ==
-                        NVSHMEMI_PE_DIST_BLOCK) { /* hierarchical topo-aware */
+                    nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_BLOCK &&
+                    has_hierarchical_subteams) { /* hierarchical topo-aware */
                     bcast_algo = 2;
                 } else {
                     bcast_algo = 3;
@@ -407,6 +422,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
             if (NVSHMEMI_BCAST_SYNC_SIZE * sizeof(long) >= (nelems * sizeof(T) * 2) &&
                 sizeof(T) >= sizeof(uint32_t) && nelems % 2 == 0 &&
                 nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_BLOCK) {
+                if (!has_hierarchical_subteams) {
+                    bcast_algo = 3;
+                }
             } else {
                 /*printf("User selected algo: %d, but it is not supported with currect config, \
                         using default algo selection strategy..\n", \
