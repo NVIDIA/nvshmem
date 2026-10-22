@@ -68,6 +68,29 @@ struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_polic
     using route = automatic_route;
 };
 
+/* A pair with an Auto side lowers to an existing route. An Auto policy, and
+ * Auto addressing with SM, use the portable dispatch; Auto addressing with TMA
+ * uses the pointer route. */
+template <>
+struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::Auto> {
+    using route = automatic_route;
+};
+
+template <>
+struct route_compatibility<nvshmemx::addressing::CFT, nvshmemx::transport_policy::Auto> {
+    using route = automatic_route;
+};
+
+template <>
+struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_policy::SM> {
+    using route = automatic_route;
+};
+
+template <>
+struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_policy::TMA> {
+    using route = pointer_tma_route;
+};
+
 /* Everything about one route: preflight, issue, and completion. Each route
  * specializes it in its own header. */
 template <typename Route>

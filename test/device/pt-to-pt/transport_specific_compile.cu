@@ -106,12 +106,10 @@ __global__ void compile_pointer_sm(void *remote, void *local, uint64_t *signal, 
 
 /* Pointer / TMA: every API at block scope; below block scope only the put
  * family from a shared or generic local source. */
-template <ts::threadgroup S, Source Local>
+template <typename A, typename P, ts::threadgroup S, Source Local>
 __device__ void put_family(void *remote_ptr, void *local_ptr, uint64_t *signal, int pe) {
     uint8_t *remote = static_cast<uint8_t *>(remote_ptr);
     const uint8_t *local = static_cast<const uint8_t *>(local_ptr);
-    using A = ts::addressing::Pointer;
-    using P = ts::transport_policy::TMA;
     (void)nvshmemx_put<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, pe);
     (void)nvshmemx_put_nbi<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, pe);
     (void)nvshmemx_put_signal<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, signal, 1,
@@ -129,10 +127,10 @@ __global__ void compile_pointer_tma(void *remote, void *local, uint64_t *signal,
     using P = ts::transport_policy::TMA;
     scope_all<A, P, kBlock, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
     typed_all<A, P, kBlock, kShared>(remote, local, signal, pe);
-    put_family<kThread, kShared>(remote, local, signal, pe);
-    put_family<kThread, kGeneric>(remote, local, signal, pe);
-    put_family<kWarp, kShared>(remote, local, signal, pe);
-    put_family<kWarp, kGeneric>(remote, local, signal, pe);
+    put_family<A, P, kThread, kShared>(remote, local, signal, pe);
+    put_family<A, P, kThread, kGeneric>(remote, local, signal, pe);
+    put_family<A, P, kWarp, kShared>(remote, local, signal, pe);
+    put_family<A, P, kWarp, kGeneric>(remote, local, signal, pe);
 }
 
 __global__ void compile_auto_auto(void *remote, void *local, uint64_t *signal, int pe) {
@@ -140,6 +138,21 @@ __global__ void compile_auto_auto(void *remote, void *local, uint64_t *signal, i
     using P = ts::transport_policy::Auto;
     all_scopes<A, P, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
     typed_all<A, P, kBlock, kGeneric>(remote, local, signal, pe);
+}
+
+/* Pairs with an Auto side lower to an existing route with that route's rules:
+ * Pointer / Auto, CFT / Auto, and Auto / SM to the portable dispatch, and
+ * Auto / TMA to Pointer / TMA. */
+__global__ void compile_auto_aliases(void *remote, void *local, uint64_t *signal, int pe) {
+    all_scopes<ts::addressing::Pointer, ts::transport_policy::Auto, kGeneric>(remote, local, signal,
+                                                                              pe);
+    all_scopes<ts::addressing::CFT, ts::transport_policy::Auto, kGeneric>(remote, local, signal,
+                                                                          pe);
+    all_scopes<ts::addressing::Auto, ts::transport_policy::SM, kGeneric>(remote, local, signal, pe);
+    using A = ts::addressing::Auto;
+    using P = ts::transport_policy::TMA;
+    scope_all<A, P, kBlock, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
+    put_family<A, P, kWarp, kShared>(remote, local, signal, pe);
 }
 
 int main() { return 0; }
