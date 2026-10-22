@@ -209,7 +209,8 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
         0,                                                /* region_slots_len */                  \
         0,                                                /* region_slot_probe_limit */           \
         false,                                            /* mapped_peer_atomics */               \
-        false                                             /* has_cft_routed_peer */               \
+        false,                                            /* has_cft_routed_peer */               \
+        NULL                                              /* device_rma_state */                  \
     }
 #else
 #include <cuda/std/cstddef>
@@ -495,9 +496,10 @@ typedef struct {
     uint32_t region_slot_probe_limit;
     bool mapped_peer_atomics; /* Every P2P-mapped peer supports native GPU atomics */
     bool has_cft_routed_peer;
+    void *device_rma_state; /* Optional runtime-owned device RMA completion state. */
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 856,
-              "device_host_state_v1 must be 856 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 864,
+              "device_host_state_v1 must be 864 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 

@@ -7,6 +7,7 @@
 
 #include <cuda/atomic>
 #include <cuda_runtime.h>
+#include <cuda/atomic>
 #include <cuda/std/array>
 #include <cuda/std/limits>
 #if !defined __CUDACC_RTC__
@@ -19,10 +20,21 @@
 #include <cuda/std/type_traits>
 #endif
 #include "non_abi/c/nvshmem_build_options.h"
+#include "device/nvshmem_device_macros.h"
 #include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/transport/nvshmem_common_transport.h"
 #include "non_abi/device/transport/transport_constants.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
+
+#ifdef __CUDA_ARCH__
+template <typename T>
+__device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE T nvshmemi_load_acquire_gpu(const T *address) {
+    return cuda::atomic_ref<T, cuda::thread_scope_device>(*const_cast<T *>(address))
+        .load(cuda::memory_order_acquire);
+}
+
+#endif
+
 // This is added so the entrypoint (init_device.cu) can receive the implementations of NVSHMEM
 // transfer APIs.
 #if defined(NVSHMEM_ENABLE_ALL_DEVICE_INLINING) || defined(__NVSHMEM_NUMBA_SUPPORT__) || \
@@ -40,6 +52,7 @@
 #include "non_abi/device/team/nvshmemi_team_defines.cuh"
 #include "non_abi/device/common/logical_endpoint_device.cuh"
 #include "non_abi/device/pt-to-pt/tma_device.cuh"
+#include "non_abi/device/common/device_rma_completion.cuh"
 
 #define _LL_MAX_UNROLL 4
 
@@ -1332,6 +1345,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet_impl(int pe,
     /* Handle operations retain their SMEM completion barriers until quiet. */
     nvshmemi_handle_quiet<SCOPE>();
 #endif
+    nvshmemi::complete_device_rma<SCOPE>(false);
 
     /* Drain TMA unconditionally BEFORE the connectivity-based quiet.  In a
      * mixed topology (some peers via NVLink P2P, others via IB/transport),
@@ -1406,6 +1420,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_flush(int pe = NVSHMEMX_P
                                                              nvshmemx_qp_handle_t *qp_handle = NULL,
                                                              int num_qps = NVSHMEMX_QP_ALL) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
+    nvshmemi::complete_device_rma<SCOPE>(true);
 
     nvshmemi_threadgroup_sync<SCOPE>();
     /* TMA source-reuse drain.  Gated on smem registration so only CTAs that
@@ -1440,6 +1455,7 @@ template <threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fence(int pe = NVSHMEMX_PE_ALL,
                                                              nvshmemx_qp_handle_t *qp_handle = NULL,
                                                              int num_qps = NVSHMEMX_QP_ALL) {
+    nvshmemi::complete_device_rma<SCOPE>(false);
     /* Drain prior TMA-initiated puts.  Like nvshmemi_quiet, this must not be
      * gated on job_connectivity — in a mixed topology (some peers via NVLink
      * P2P + TMA, others via network) a user calling fence after a TMA put
