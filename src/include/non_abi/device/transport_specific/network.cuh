@@ -184,9 +184,10 @@ struct route_backend<network_route> {
      * default QP, never nvshmemi_quiet/flush/fence, which also drain TMA and
      * CFT work. The guarantee is a minimum: direct backends can share DCIs and
      * the proxy completes PE_ALL globally, so broader Network work may complete
-     * too. quiet completes on every participant and adds a system fence; flush
-     * is the leader's quiet without it, which makes put sources reusable;
-     * fence orders the default QP and then memory. ---- */
+     * too. quiet completes on every participant, with the transport's own
+     * memory barrier; flush is the leader's quiet without it, which makes put
+     * sources reusable; fence is the transport fence alone, since the route
+     * issues no direct loads or stores that a system fence would order. ---- */
 
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int quiet() {
@@ -212,7 +213,6 @@ struct route_backend<network_route> {
         if (scope_leader<Scope>()) {
             nvshmemx_qp_handle_t qp = NVSHMEMX_QP_DEFAULT;
             nvshmemi_transfer_fence<NVSHMEMI_THREADGROUP_THREAD>(NVSHMEMX_PE_ALL, &qp, 1);
-            __threadfence_system();
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
