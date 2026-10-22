@@ -10,6 +10,7 @@
 
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_region.h"
+#include "internal/host/device_rma.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "non_abi/c/nvshmemi_error_macros.h"
@@ -133,6 +134,7 @@ void nvshmemx_quiet_on_stream(cudaStream_t cstrm) {
         nvshmemi_call_proxy_quiet_entrypoint(cstrm);
         /* Otherwise, we only need to launch the quiet if we have a remote transport. */
     } else {
+        nvshmemi_device_rma_on_stream(cstrm, false);
         int tbitmap = nvshmemi_state->transport_bitmap;
 
         for (int j = 0; j < nvshmemi_state->num_initialized_transports; j++) {
@@ -164,6 +166,7 @@ void nvshmemx_flush_on_stream(cudaStream_t cstrm) {
 
     /* Ensure any internally-managed streams are ordered before cstrm. */
     nvshmemi_quiesce_internal_streams(cstrm);
+    nvshmemi_device_rma_on_stream(cstrm, true);
 
     /* For P2P-only deployments (NVLink, no network transports), st.global
      * puts have already consumed their source buffers when they retire.  No
