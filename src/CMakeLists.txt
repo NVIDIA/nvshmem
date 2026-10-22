@@ -2,6 +2,7 @@
 include(CheckCompilerFlag)
 include(CheckSourceCompiles)
 include(ExternalProject)
+include("${CMAKE_CURRENT_SOURCE_DIR}/private/config.cmake" OPTIONAL)
 
 check_compiler_flag(CUDA -t4 NVCC_THREADS)
 
@@ -1497,6 +1498,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /scripts/iwyu_test_functionality.sh;\
 /scripts/testrunner.pl;\
 /src/build/;")
+list(APPEND CPACK_SOURCE_IGNORE_FILES ${NVSHMEM_PRIVATE_SOURCE_EXCLUSIONS})
 
 if(NOT NVSHMEM_INSTALL_FUNCTIONAL_TESTS)
   list(APPEND CPACK_SOURCE_IGNORE_FILES "/test/" "/docker/" "/nvshmem4py/test/")
