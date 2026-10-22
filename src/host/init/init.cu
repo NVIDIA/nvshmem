@@ -57,6 +57,7 @@
 #include "internal/host/shared_memory.h"
 #include "internal/host/nvshmemi_symmetric_heap.hpp"
 #include "internal/host/nvshmemi_mem_transport.hpp"
+#include "internal/host/device_rma.h"
 
 extern __constant__ nvshmemi_device_host_state_t nvshmemi_device_state_d;
 struct nvshmemi_registered_state_info {
@@ -1695,6 +1696,9 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Teams cleanup device synchronization failed \n");
         nvshmemi_region_host_reset();
+        status = nvshmemi_device_rma_finalize();
+        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
+                              "Device RMA state cleanup failed\n");
 
         /* barrier to ensure all previous ops are complete */
         nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
@@ -2396,6 +2400,8 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     nvshmemi_device_state.region_slot_probe_limit = region_slot_probe_limit;
     region_slots_published = true;
 
+    status = nvshmemi_device_rma_init();
+    NVSHMEMI_NZ_ERROR_JMP(status, status, out, "Device RMA initialization failed\n");
     status = nvshmemi_update_device_state();
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "nvshmemi_update_device_state failed\n");
@@ -2403,6 +2409,10 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
 
 out:
     if (status) {
+        const int device_rma_status = nvshmemi_device_rma_finalize();
+        if (device_rma_status) {
+            status = device_rma_status;
+        }
         if (region_slots_published) {
             nvshmemi_device_state.region_slots = NULL;
             nvshmemi_device_state.region_active_count = NULL;
