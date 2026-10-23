@@ -158,7 +158,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   foreach(ARCH IN LISTS BITCODE_LIB_ARCHS)
     string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
     set(ARCH_BC_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.bc)
-    set(ARCH_BC_DEPFILE ${ARCH_BC_FILE}.d)
+    set(ARCH_BC_DEPFILE ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device_${ARCH}.bc.d)
 
     if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
       set(ARCH_OPT_COMMAND cp libnvshmem_device_${ARCH}.bc.unoptimized libnvshmem_device_${ARCH}.bc)
@@ -247,7 +247,7 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   foreach(ARCH IN LISTS LTOIR_LIB_ARCHS)
     string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
     set(ARCH_LTOIR_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir)
-    set(ARCH_LTOIR_DEPFILE ${ARCH_LTOIR_FILE}.d)
+    set(ARCH_LTOIR_DEPFILE ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/libnvshmem_device_${ARCH}.ltoir.d)
 
     add_custom_command(
       OUTPUT ${ARCH_LTOIR_FILE}
