@@ -55,6 +55,9 @@ __device__ void byte_rma(void *remote_ptr, void *local_ptr, uint64_t *signal, in
                                                                      NVSHMEM_SIGNAL_SET, pe);
     (void)nvshmemx_put_signal_nbi<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, signal,
                                                                          1, NVSHMEM_SIGNAL_ADD, pe);
+    /* The capability query in both directions, for the same local space. */
+    (void)nvshmemx_rma_capability<A, P, S, Local>(remote, local, 16, pe);
+    (void)nvshmemx_rma_capability<A, P, S, kLocalDest>(remote, local, 16, pe);
 }
 
 template <typename A, typename P, ts::threadgroup S, Source... Locals>
@@ -120,6 +123,7 @@ __device__ void put_family(void *remote_ptr, void *local_ptr, uint64_t *signal, 
     (void)nvshmemx_quiet<A, P, S>();
     (void)nvshmemx_flush<A, P, S>();
     (void)nvshmemx_fence<A, P, S>();
+    (void)nvshmemx_rma_capability<A, P, S, Local>(remote, local, 16, pe);
 }
 
 __global__ void compile_pointer_tma(void *remote, void *local, uint64_t *signal, int pe) {
@@ -172,6 +176,17 @@ __global__ void compile_auto_aliases(void *remote, void *local, uint64_t *signal
     using P = ts::transport_policy::TMA;
     scope_all<A, P, kBlock, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
     put_family<A, P, kWarp, kShared>(remote, local, signal, pe);
+}
+
+/* Without a local memory space the capability query is the put preflight
+ * from a generic source. */
+__global__ void compile_capability_default(void *remote, void *local, int pe) {
+    (void)nvshmemx_rma_capability<ts::addressing::Pointer, ts::transport_policy::SM, kWarp>(
+        remote, local, 16, pe);
+    (void)nvshmemx_rma_capability<ts::addressing::Auto, ts::transport_policy::Network, kThread>(
+        remote, local, 16, pe);
+    (void)nvshmemx_rma_capability<ts::addressing::CFT, ts::transport_policy::TMA, kBlock>(
+        remote, local, 16, pe);
 }
 
 int main() { return 0; }

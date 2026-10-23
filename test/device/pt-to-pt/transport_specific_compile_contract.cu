@@ -74,6 +74,10 @@ __global__ void legal(uint8_t *destination, const uint8_t *source, uint64_t *sig
     (void)nvshmemx_signal_op<Pointer, SM, kBlock>(signal, 1, NVSHMEM_SIGNAL_ADD, pe);
     (void)nvshmemx_quiet<Pointer, SM, kBlock>();
     (void)nvshmemx_fence<Auto, AutoPolicy, kBlock>();
+    (void)nvshmemx_rma_capability<Pointer, TMA, kBlock, space::dest::shared>(source, destination,
+                                                                             16, pe);
+    (void)nvshmemx_rma_capability<Auto, Network, nvshmemx::threadgroup::warp>(destination, source,
+                                                                              16, pe);
 }
 
 #elif defined(CONTRACT_CASE_network_p2p_only) || defined(CONTRACT_CASE_network_symbols)
@@ -169,6 +173,34 @@ __global__ void tma_global_put_below_block(uint8_t *destination, const uint8_t *
         destination, source, 16, pe);
 }
 
+#elif defined(CONTRACT_CASE_capability_invalid_pair)
+/* nvshmemx_rma_capability runs the operation's checks, so it rejects the same
+ * structural errors with the same diagnostics. */
+__global__ void capability_invalid_pair(const uint8_t *remote, const uint8_t *local, int pe) {
+    (void)nvshmemx_rma_capability<CFT, Network, kBlock>(remote, local, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_capability_cft_warp)
+__global__ void capability_cft_warp(const uint8_t *remote, const uint8_t *local, int pe) {
+    (void)nvshmemx_rma_capability<CFT, TMA, nvshmemx::threadgroup::warp, space::dest::global>(
+        remote, local, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_capability_tma_get_below_block)
+__global__ void capability_tma_get_below_block(const uint8_t *remote, const uint8_t *local,
+                                               int pe) {
+    (void)nvshmemx_rma_capability<Pointer, TMA, nvshmemx::threadgroup::warp, space::dest::shared>(
+        remote, local, 16, pe);
+}
+
+#elif defined(CONTRACT_CASE_capability_tma_global_put_below_block)
+__global__ void capability_tma_global_put_below_block(const uint8_t *remote, const uint8_t *local,
+                                                      int pe) {
+    (void)
+        nvshmemx_rma_capability<Pointer, TMA, nvshmemx::threadgroup::thread, space::source::global>(
+            remote, local, 16, pe);
+}
+
 #elif defined(CONTRACT_CASE_remote_put_tag)
 __global__ void remote_put_tag(uint8_t *destination, const uint8_t *source, int pe) {
     (void)nvshmemx_put<uint8_t, Pointer, SM, kBlock, space::source::global, space::dest::shared>(
@@ -226,7 +258,9 @@ __global__ void cv_qualified_type(const float *destination, const float *source,
  * which compiles it in and so covers the stable handle helpers that CFT / TMA
  * and Auto / Auto call. The internal source_local / dest_local
  * classifiers are instantiated as well: they keep the generic build
- * observable and must fold away for an explicit spelling. */
+ * observable and must fold away for an explicit spelling. Every RMA family
+ * includes nvshmemx_rma_capability for its legal directions, which must
+ * classify exactly as the operation does. */
 #ifndef LOCAL_SPACE
 #error "LOCAL_SPACE must be shared, global, or generic"
 #endif
@@ -248,6 +282,8 @@ __device__ int route_rma(uint8_t *remote, uint8_t *local, uint64_t *signal, size
         remote, local, bytes, signal, 1, NVSHMEM_SIGNAL_SET, pe);
     status |= nvshmemx_put_signal_nbi<uint8_t, A, P, Scope, kSource, kRemoteDest>(
         remote, local, bytes, signal, 1, NVSHMEM_SIGNAL_SET, pe);
+    status |= nvshmemx_rma_capability<A, P, Scope, kSource>(remote, local, bytes, pe);
+    status |= nvshmemx_rma_capability<A, P, Scope, kDest>(remote, local, bytes, pe);
     return status;
 }
 
@@ -260,6 +296,7 @@ __device__ int route_put(uint8_t *remote, uint8_t *local, uint64_t *signal, size
         remote, local, bytes, signal, 1, NVSHMEM_SIGNAL_SET, pe);
     status |= nvshmemx_put_signal_nbi<uint8_t, A, P, Scope, kSource, kRemoteDest>(
         remote, local, bytes, signal, 1, NVSHMEM_SIGNAL_SET, pe);
+    status |= nvshmemx_rma_capability<A, P, Scope, kSource>(remote, local, bytes, pe);
     return status;
 }
 
