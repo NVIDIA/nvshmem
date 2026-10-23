@@ -27,6 +27,8 @@ namespace transport_policy {
  * pair to a route, applies the operation, scope, and memory-space checks,
  * runs the route's preflight on every participant, agrees on one status across
  * the group, and only then lets the route backend issue the work.
+ * nvshmemx_rma_capability runs the same steps for a put or get and stops after
+ * the agreement.
  */
 
 enum class trace_op {
@@ -106,24 +108,73 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int prepare_rma(const void *remote, con
     return Backend::template preflight_rma<Scope, Local>(remote, local, bytes, pe, plan);
 }
 
+template <typename Addressing, typename TransportPolicy>
+using backend_for = route_backend<route_for<Addressing, TransportPolicy>>;
+
+/*
+ * The put and get preflights, shared by the operations and by
+ * nvshmemx_rma_capability so that a query and its operation apply identical
+ * rules: the operation's compile-time scope and memory-space checks (the
+ * route's own scope rules are static_asserts inside its preflight), then each
+ * participant's prepare_rma. prepare_* leave group agreement to the caller,
+ * which lets put_signal fold its signal preflight into the same agreement;
+ * preflight_* return the agreed group-uniform status. Neither issues work.
+ */
+template <typename Addressing, typename TransportPolicy, threadgroup Scope,
+          nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int prepare_put(
+    const void *remote, const void *source, size_t bytes, int pe,
+    typename backend_for<Addressing, TransportPolicy>::rma_plan &plan) {
+    validate_scope<Scope>();
+    validate_put_memory_spaces<Src, Dst>();
+    return prepare_rma<backend_for<Addressing, TransportPolicy>, Scope, source_local<Src>>(
+        remote, source, bytes, pe, plan);
+}
+
+template <typename Addressing, typename TransportPolicy, threadgroup Scope,
+          nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int prepare_get(
+    const void *remote, const void *dest, size_t bytes, int pe,
+    typename backend_for<Addressing, TransportPolicy>::rma_plan &plan) {
+    validate_scope<Scope>();
+    validate_get_memory_spaces<Src, Dst>();
+    return prepare_rma<backend_for<Addressing, TransportPolicy>, Scope, dest_local<Dst>>(
+        remote, dest, bytes, pe, plan);
+}
+
+template <typename Addressing, typename TransportPolicy, threadgroup Scope,
+          nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_put(
+    const void *remote, const void *source, size_t bytes, int pe,
+    typename backend_for<Addressing, TransportPolicy>::rma_plan &plan) {
+    return agree<Scope>(
+        prepare_put<Addressing, TransportPolicy, Scope, Src, Dst>(remote, source, bytes, pe, plan));
+}
+
+template <typename Addressing, typename TransportPolicy, threadgroup Scope,
+          nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_get(
+    const void *remote, const void *dest, size_t bytes, int pe,
+    typename backend_for<Addressing, TransportPolicy>::rma_plan &plan) {
+    return agree<Scope>(
+        prepare_get<Addressing, TransportPolicy, Scope, Src, Dst>(remote, dest, bytes, pe, plan));
+}
+
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, bool IsNbi,
           nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem(void *dest, const void *source, size_t bytes,
                                                     int pe) {
     using Route = route_for<Addressing, TransportPolicy>;
     using Backend = route_backend<Route>;
-    using Local = source_local<Src>;
     constexpr trace_op kOp = IsNbi ? trace_op::put_nbi : trace_op::put;
-    validate_scope<Scope>();
-    validate_put_memory_spaces<Src, Dst>();
 
     typename Backend::rma_plan plan;
     const int status =
-        agree<Scope>(prepare_rma<Backend, Scope, Local>(dest, source, bytes, pe, plan));
+        preflight_put<Addressing, TransportPolicy, Scope, Src, Dst>(dest, source, bytes, pe, plan);
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
-    return Backend::template put<Scope, IsNbi, Local>(plan, dest, source, bytes);
+    return Backend::template put<Scope, IsNbi, source_local<Src>>(plan, dest, source, bytes);
 }
 
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, bool IsNbi,
@@ -132,18 +183,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int getmem(void *dest, const void *sour
                                                     int pe) {
     using Route = route_for<Addressing, TransportPolicy>;
     using Backend = route_backend<Route>;
-    using Local = dest_local<Dst>;
     constexpr trace_op kOp = IsNbi ? trace_op::get_nbi : trace_op::get;
-    validate_scope<Scope>();
-    validate_get_memory_spaces<Src, Dst>();
 
     typename Backend::rma_plan plan;
     const int status =
-        agree<Scope>(prepare_rma<Backend, Scope, Local>(source, dest, bytes, pe, plan));
+        preflight_get<Addressing, TransportPolicy, Scope, Src, Dst>(source, dest, bytes, pe, plan);
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
-    return Backend::template get<Scope, IsNbi, Local>(plan, dest, source, bytes);
+    return Backend::template get<Scope, IsNbi, dest_local<Dst>>(plan, dest, source, bytes);
 }
 
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, bool IsNbi,
@@ -153,22 +201,19 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem_signal(void *dest, const voi
                                                            uint64_t signal, int sig_op, int pe) {
     using Route = route_for<Addressing, TransportPolicy>;
     using Backend = route_backend<Route>;
-    using Local = source_local<Src>;
     constexpr trace_op kOp = IsNbi ? trace_op::put_signal_nbi : trace_op::put_signal;
-    validate_scope<Scope>();
-    validate_put_memory_spaces<Src, Dst>();
 
     /* One agreement covers the payload and the signal before either is issued. */
     typename Backend::rma_plan plan;
     typename Backend::signal_plan sig;
-    const int status =
-        agree<Scope>(worse(prepare_rma<Backend, Scope, Local>(dest, source, bytes, pe, plan),
-                           Backend::template preflight_signal<Scope>(sig_addr, sig_op, pe, sig)));
+    const int status = agree<Scope>(worse(
+        prepare_put<Addressing, TransportPolicy, Scope, Src, Dst>(dest, source, bytes, pe, plan),
+        Backend::template preflight_signal<Scope>(sig_addr, sig_op, pe, sig)));
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
-    return Backend::template put_signal<Scope, IsNbi, Local>(plan, sig, dest, source, bytes, signal,
-                                                             sig_op);
+    return Backend::template put_signal<Scope, IsNbi, source_local<Src>>(plan, sig, dest, source,
+                                                                         bytes, signal, sig_op);
 }
 
 template <typename Addressing, typename TransportPolicy, threadgroup Scope>
@@ -185,6 +230,31 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int signal_op(uint64_t *sig_addr, uint6
         return not_issued<Route, Scope, trace_op::signal_op>(status, pe);
     }
     return Backend::template signal_op<Scope>(sig, signal, sig_op);
+}
+
+/*
+ * nvshmemx_rma_capability: exactly the put (source overload) or get (dest
+ * overload) preflight, with the remote operand in global memory as every put
+ * destination and get source is. It returns the agreed status and discards the
+ * plan, so it never issues work. A non-success result is the expected answer to
+ * a query, so it is not traced.
+ */
+template <typename Addressing, typename TransportPolicy, threadgroup Scope,
+          nvshmemx::memory_space::source Local>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int put_capability(const void *remote, const void *local,
+                                                            size_t bytes, int pe) {
+    typename backend_for<Addressing, TransportPolicy>::rma_plan plan;
+    return preflight_put<Addressing, TransportPolicy, Scope, Local,
+                         nvshmemx::memory_space::dest::global>(remote, local, bytes, pe, plan);
+}
+
+template <typename Addressing, typename TransportPolicy, threadgroup Scope,
+          nvshmemx::memory_space::dest Local>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int get_capability(const void *remote, const void *local,
+                                                            size_t bytes, int pe) {
+    typename backend_for<Addressing, TransportPolicy>::rma_plan plan;
+    return preflight_get<Addressing, TransportPolicy, Scope, nvshmemx::memory_space::source::global,
+                         Local>(remote, local, bytes, pe, plan);
 }
 
 /* Ordering has no arguments, only the route's capability to preflight. That
@@ -328,6 +398,29 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_fence() {
     NVSHMEMXI_TS_RETURN(
         nvshmemi::transport_policy::ordering<Addressing, TransportPolicy, Scope,
                                              nvshmemi::transport_policy::trace_op::fence>());
+}
+
+/* Runs the put (source LocalMemorySpace) or get (dest LocalMemorySpace)
+ * preflight of the route without issuing work. `remote` is the symmetric-heap
+ * operand and `local` the put source or get destination. */
+template <typename Addressing, typename TransportPolicy, nvshmemx::threadgroup Scope,
+          nvshmemx::memory_space::source LocalMemorySpace = nvshmemx::memory_space::source::generic>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_rma_capability(const void *remote,
+                                                                     const void *local,
+                                                                     size_t bytes, int pe) {
+    NVSHMEMXI_TS_RETURN(
+        nvshmemi::transport_policy::put_capability<Addressing, TransportPolicy, Scope,
+                                                   LocalMemorySpace>(remote, local, bytes, pe));
+}
+
+template <typename Addressing, typename TransportPolicy, nvshmemx::threadgroup Scope,
+          nvshmemx::memory_space::dest LocalMemorySpace>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_rma_capability(const void *remote,
+                                                                     const void *local,
+                                                                     size_t bytes, int pe) {
+    NVSHMEMXI_TS_RETURN(
+        nvshmemi::transport_policy::get_capability<Addressing, TransportPolicy, Scope,
+                                                   LocalMemorySpace>(remote, local, bytes, pe));
 }
 
 #undef NVSHMEMXI_TS_RETURN

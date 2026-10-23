@@ -112,6 +112,25 @@ expect_compile_failure(
   tma_global_put_below_block
   "Pointer/TMA put from a global source is block-scope only"
   -DCONTRACT_CASE_tma_global_put_below_block)
+# nvshmemx_rma_capability runs the operation's own checks, so it rejects the
+# same structural errors with the same diagnostics: the dest overload is the
+# get, and the source overload the put.
+expect_compile_failure(
+  capability_invalid_pair
+  "unsupported addressing/transport-policy pair"
+  -DCONTRACT_CASE_capability_invalid_pair)
+expect_compile_failure(
+  capability_cft_warp
+  "CFT/TMA is block-scope only"
+  -DCONTRACT_CASE_capability_cft_warp)
+expect_compile_failure(
+  capability_tma_get_below_block
+  "Pointer/TMA get and get_nbi are block-scope only"
+  -DCONTRACT_CASE_capability_tma_get_below_block)
+expect_compile_failure(
+  capability_tma_global_put_below_block
+  "Pointer/TMA put from a global source is block-scope only"
+  -DCONTRACT_CASE_capability_tma_global_put_below_block)
 expect_compile_failure(
   remote_put_tag
   "transport-specific put destination must be remote symmetric global memory"
