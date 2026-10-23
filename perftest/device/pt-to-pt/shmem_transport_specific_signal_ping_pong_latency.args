@@ -1,0 +1,1 @@
+-n 500 -w 50 -b 16 -e 64K -f 2 --repetitions 3

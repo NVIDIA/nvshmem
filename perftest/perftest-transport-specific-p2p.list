@@ -1,0 +1,4 @@
+/device/pt-to-pt/shmem_transport_specific_rma_bw
+/device/pt-to-pt/shmem_transport_specific_rma_latency
+/device/pt-to-pt/shmem_transport_specific_flush_bench
+/device/pt-to-pt/shmem_transport_specific_signal_ping_pong_latency
