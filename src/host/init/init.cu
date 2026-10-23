@@ -30,7 +30,7 @@
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmem_nvtx.hpp"
-#include "internal/host/scope_guard.h"
+#include "internal/common/scope_guard.h"
 #include "internal/host_transport/region.hpp"
 #include "non_abi/device/common/nvshmemi_region_types.h"
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"

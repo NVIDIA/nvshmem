@@ -17,7 +17,7 @@
 
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "internal/host_transport/cudawrap.h"
-#include "internal/host/scope_guard.h"
+#include "internal/common/scope_guard.h"
 #include "transport_common.h"
 #include "transport_ib_common.h"  // for nvshmemt_ib_common_mem_handle
 #include "transport_mlx5_common.h"
