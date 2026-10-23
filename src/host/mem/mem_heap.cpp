@@ -49,7 +49,7 @@
 #include "internal/host_transport/nvshmemi_transport_defines.h"            // for nvshm...
 #include "internal/host_transport/transport.h"                             // for nvshm..
 #include "internal/host/nvshmemi_nvls_rsc.hpp"
-#include "internal/host/scope_guard.h"
+#include "internal/common/scope_guard.h"
 #include "internal/host/unique_cuda_handle.hpp"
 #include "internal/host/unique_cuda_mapping.hpp"
 #include "internal/host/nvshmemi_nvls_observer.hpp"

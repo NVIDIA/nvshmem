@@ -1185,7 +1185,7 @@ set(TRANSPORT_INC_EXPORTS
     c_api/nvshmemx_status.h
     c_api/nvshmemx_uniqueid.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
-    internal/host/scope_guard.h
+    internal/common/scope_guard.h
     internal/host_transport/cudawrap.h
     internal/host_transport/nvshmemi_transport_defines.h
     internal/host_transport/region.hpp
