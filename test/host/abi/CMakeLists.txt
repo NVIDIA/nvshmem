@@ -1,5 +1,14 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_program(NVSHMEM_CXXFILT NAMES c++filt llvm-cxxfilt REQUIRED)
+# Demangle with the binutils that provide CMAKE_NM. CMake finds nm with the
+# compiler's target prefix, and cross toolchains may install only prefixed
+# tools (for example aarch64-linux-gnu-c++filt).
+get_filename_component(NVSHMEM_NM_DIR "${CMAKE_NM}" DIRECTORY)
+get_filename_component(NVSHMEM_NM_NAME "${CMAKE_NM}" NAME)
+set(NVSHMEM_CXXFILT_NAMES c++filt llvm-cxxfilt)
+if(NVSHMEM_NM_NAME MATCHES "^(.+-)nm$")
+  list(PREPEND NVSHMEM_CXXFILT_NAMES "${CMAKE_MATCH_1}c++filt")
+endif()
+find_program(NVSHMEM_CXXFILT NAMES ${NVSHMEM_CXXFILT_NAMES} HINTS "${NVSHMEM_NM_DIR}" REQUIRED)
 
 if(SubBuild)
   # Use the configured headers that the test target itself consumes. In
