@@ -28,8 +28,15 @@ __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int) {
     return (CUlogicalEndpointId)-1;
 }
 
-__device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *, size_t) {
-    return false;
+/* Pure heap-offset arithmetic, so NVRTC gets the same answer as other builds. */
+__device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *addr, size_t size) {
+    if (addr == nullptr) {
+        return false;
+    }
+    if (size == 0) {
+        return true;
+    }
+    return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
 template <bool REQUIRE_TX_SIZE_MULTIPLE>
