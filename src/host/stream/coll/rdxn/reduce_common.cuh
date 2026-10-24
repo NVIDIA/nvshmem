@@ -20,8 +20,11 @@ __global__ void rdxn_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYP
                                       size_t nreduce, int in_cuda_graph) {
 #ifdef __CUDA_ARCH__
     nvshmem_team_t myteam = nvshmemi_device_state_d.team_pool[team]->team_dups[blockIdx.x];
-    int nreduce_remain = (nreduce % gridDim.x);
-    int nreduce_per_block = (nreduce / gridDim.x);
+    /* Keep every block's slice a multiple of 16 bytes so that each slice starts aligned and can
+     * use the NVLS path; the last block takes the remainder. */
+    constexpr size_t align_elems = sizeof(TYPE) < 16 ? 16 / sizeof(TYPE) : 1;
+    int nreduce_per_block = (nreduce / gridDim.x) / align_elems * align_elems;
+    int nreduce_remain = nreduce - (size_t)nreduce_per_block * gridDim.x;
     int my_nreduce = nreduce_per_block;
     if (blockIdx.x == gridDim.x - 1) {
         my_nreduce = nreduce_per_block + nreduce_remain;
