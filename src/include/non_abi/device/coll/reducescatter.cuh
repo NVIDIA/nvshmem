@@ -176,6 +176,27 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_threadgroup
         (nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL) &&
         ((nreduce * sizeof(TYPE)) % 4 == 0);
 
+#if defined(NVSHMEM_FORCE_CFT)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+    if constexpr (is_handle_pullred_supported<TYPE, OP>()) {
+        is_nvls_algo_supported =
+            is_nvls_algo_supported &&
+            nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(teami->mc_leid_with_flag,
+                                                               nreduce * sizeof(TYPE)) &&
+            nvshmemi_tma_smem_registered() && !__isShared(dest) &&
+            !__isShared(source + source_offset) &&
+            nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+            ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
+            nvshmemi_is_addr_offset_aligned(source + source_offset, CFT_HANDLE_TX_SIZE);
+    } else {
+        is_nvls_algo_supported = false;
+    }
+#else
+    is_nvls_algo_supported = false;
+#endif
+#endif
+
     int reducescatter_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.reducescatter_algo;
     /* This 2-level selection logic is implemented to reduce code duplication of calling leaf
      * functions on the device code */
