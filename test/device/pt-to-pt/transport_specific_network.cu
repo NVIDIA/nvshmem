@@ -272,14 +272,27 @@ __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsig
     }
 }
 
-__global__ void zero_length_kernel(unsigned char *remote, const unsigned char *source, int peer,
-                                   int *status) {
+/* A zero-length put_signal moves no payload and still delivers its signal:
+ * SET into signal[0] and, through the NBI spelling, ADD 1 into signal[1]. */
+__global__ void zero_length_kernel(unsigned char *remote, const unsigned char *source,
+                                   uint64_t *signal, uint64_t set_value, int peer, int *status) {
     using A = AutoAddressing;
     int result =
         nvshmemx_put<uint8_t, A, Network, kBlock, kGeneric, kRemoteDest>(remote, nullptr, 0, peer);
     if (result == NVSHMEMX_SUCCESS) {
         result = nvshmemx_get<uint8_t, A, Network, kBlock, kRemoteSource, local_dest(kGlobal)>(
             nullptr, source, 0, peer);
+    }
+    if (result == NVSHMEMX_SUCCESS) {
+        result = nvshmemx_put_signal<uint8_t, A, Network, kBlock, kGeneric, kRemoteDest>(
+            remote, nullptr, 0, signal, set_value, NVSHMEM_SIGNAL_SET, peer);
+    }
+    if (result == NVSHMEMX_SUCCESS) {
+        result = nvshmemx_put_signal_nbi<uint8_t, A, Network, kBlock, kGeneric, kRemoteDest>(
+            remote, nullptr, 0, signal + 1, 1, NVSHMEM_SIGNAL_ADD, peer);
+    }
+    if (result == NVSHMEMX_SUCCESS) {
+        result = nvshmemx_quiet<A, Network, kBlock>();
     }
     if (threadIdx.x == 0) {
         *status = result;
@@ -442,11 +455,19 @@ int zero_length_case(const route_context &c, const char *what) {
         [&] {
             CUDA_CHECK(cudaMemset(c.remote, kSentinelByte, kBytes));
             CUDA_CHECK(cudaMemset(c.source, kSentinelByte, kBytes));
+            set_signals(c.signal, 2, kSignalBase);
         },
-        [&] { zero_length_kernel<<<1, kThreads>>>(c.remote, c.source, c.peer, c.w.status); },
+        [&] {
+            zero_length_kernel<<<1, kThreads>>>(c.remote, c.source, c.signal,
+                                                kSignalBase + 1 + c.w.mype, c.peer, c.w.status);
+        },
         [&] {
             return check_fill(what, c.remote, kBytes, kSentinelByte) +
-                   check_fill(what, c.source, kBytes, kSentinelByte);
+                   check_fill(what, c.source, kBytes, kSentinelByte) +
+                   check_signal_and_wait(what, c.signal,
+                                         kSignalBase + 1 + static_cast<uint64_t>(c.previous),
+                                         c.w.status) +
+                   check_signal_and_wait(what, c.signal + 1, kSignalBase + 1, c.w.status);
         });
 }
 
