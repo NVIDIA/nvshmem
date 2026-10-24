@@ -1773,7 +1773,6 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration::reserve
         }
     }
     if (address_ != nullptr) {
-        assert(address_ >= mmap_start);
         // The preferred address is a hint; a reservation at another address is also valid.
         return NVSHMEMX_SUCCESS;
     }
