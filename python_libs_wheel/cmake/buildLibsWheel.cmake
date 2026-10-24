@@ -11,6 +11,7 @@
 #   nvidia/nvshmem/lib/libnvshmem_host.so.3
 #   nvidia/nvshmem/lib/libnvshmem_device.a
 #   nvidia/nvshmem/lib/libnvshmem_device.bc
+#   nvidia/nvshmem/lib/libnvshmem_device.ltoir.fatbin
 #   nvidia/nvshmem/lib/nvshmem_bootstrap_*.so.3
 #   nvidia/nvshmem/lib/nvshmem_transport_*.so.5
 #
@@ -74,6 +75,16 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
     # Source directory for headers (generated into the build tree by src/).
     set(INCLUDE_SOURCE_DIR "${CMAKE_BINARY_DIR}/src/include")
 
+    # Stage, and build first, exactly the plugins this build enables, so a
+    # plugin left in the build tree by an earlier configuration cannot ship.
+    # cmake -P takes the list with "|" separators.
+    get_property(_PLUGIN_TARGETS GLOBAL PROPERTY NVSHMEM_PLUGIN_TARGETS)
+    set(_PLUGIN_FILES "")
+    foreach(_PLUGIN IN LISTS _PLUGIN_TARGETS)
+        list(APPEND _PLUGIN_FILES "$<TARGET_SONAME_FILE:${_PLUGIN}>")
+    endforeach()
+    list(JOIN _PLUGIN_FILES "|" _PLUGIN_FILES)
+
     # ------------------------------------------------------------------
     # Main wheel build target.
     #
@@ -87,13 +98,31 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
     # ------------------------------------------------------------------
     add_custom_target(
         ${WHEEL_TARGET}
+        # Recreate the package payload on every invocation so a transport,
+        # SOVERSION, or header removed by a reconfigure cannot survive in a
+        # reused build tree.
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "${LIB_STAGING_DIR}"
+                "${INCLUDE_STAGING_DIR}"
         # Stage library files — only SOVERSION symlinks, matching published wheel
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LIB_STAGING_DIR}"
-        COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${LIBS_SOURCE_DIR} -DDEST_DIR=${LIB_STAGING_DIR} -DHOST_SOVERSION=${PROJECT_VERSION_MAJOR} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stagePlugins.cmake"
+        COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${LIBS_SOURCE_DIR} -DDEST_DIR=${LIB_STAGING_DIR} -DHOST_SOVERSION=${PROJECT_VERSION_MAJOR} -DPLUGINS=${_PLUGIN_FILES} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stagePlugins.cmake"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/nvidia/nvshmem/lib/__init__.py"
+                "${LIB_STAGING_DIR}/__init__.py"
         # Stage headers
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${INCLUDE_SOURCE_DIR}" "${INCLUDE_STAGING_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/nvidia/nvshmem/include/__init__.py"
+                "${INCLUDE_STAGING_DIR}/__init__.py"
         # Remove internal headers not shipped in the published wheel
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${INCLUDE_STAGING_DIR}/modules"
+        # setuptools creates these below the staging source.  Remove them so a
+        # repeated wheel build cannot rediscover its previous build/ tree as a
+        # nested namespace package.
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "${STAGING_DIR}/build"
+                "${STAGING_DIR}/nvidia_nvshmem_cu${CUDA_MAJOR}.egg-info"
         # Build wheel
         COMMAND ${CMAKE_COMMAND} -E make_directory "${BUILD_DIR}"
         COMMAND "${VENV_PYTHON}" -m build --wheel --outdir "${BUILD_DIR}" --no-isolation
@@ -105,24 +134,14 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
         VERBATIM
     )
 
-    # The wheel depends on all library targets being compiled first.
-    # Enumerate known targets with guards so the wheel builds regardless of
-    # which optional transports/bootstraps are enabled.
+    # The wheel depends on every library it stages being compiled first;
+    # the optional device libraries are guarded.
     set(_WHEEL_DEP_TARGETS
         nvshmem_host
         nvshmem_device_project
         libnvshmem_device_bitcode
-        nvshmem_bootstrap_pmi
-        nvshmem_bootstrap_pmi2
-        nvshmem_bootstrap_pmix
-        nvshmem_bootstrap_mpi
-        nvshmem_bootstrap_shmem
-        nvshmem_bootstrap_uid
-        nvshmem_transport_ucx
-        nvshmem_transport_ibrc
-        nvshmem_transport_ibdevx
-        nvshmem_transport_ibgda
-        nvshmem_transport_libfabric
+        libnvshmem_device_ltoir
+        ${_PLUGIN_TARGETS}
     )
     foreach(_DEP IN LISTS _WHEEL_DEP_TARGETS)
         if(TARGET ${_DEP})

@@ -928,6 +928,8 @@ set_target_properties(${ACTIVE_TRANSPORTS}
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
                       VERSION ${TRANSPORT_VERSION_MAJOR}.${TRANSPORT_VERSION_MINOR}.${TRANSPORT_VERSION_PATCH}
                       SOVERSION ${TRANSPORT_VERSION_MAJOR})
+# The libraries wheel ships exactly the plugins this build enables.
+set_property(GLOBAL PROPERTY NVSHMEM_PLUGIN_TARGETS ${ACTIVE_BOOTSTRAPS} ${ACTIVE_TRANSPORTS})
 ## End transports
 
 ## Start dependencies
