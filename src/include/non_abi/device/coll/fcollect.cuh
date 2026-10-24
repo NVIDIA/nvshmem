@@ -387,6 +387,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     int p2p_direct =
         (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS) &&
         teami->are_gpus_p2p_connected;
+#if defined(NVSHMEM_FORCE_CFT)
+    p2p_direct = 0;
+#endif
     const size_t fcollect_ll_threshold =
         nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold;
     const size_t fcollect_ll128_threshold =
@@ -397,10 +400,31 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     bool is_nvls_algo_supported =
         nvshmemi_device_has_nvls_multimem &&
         nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL;
+    bool is_nvls_ll_supported = is_nvls_algo_supported;
+
+#if defined(NVSHMEM_FORCE_CFT)
+    /* NVLS LL uses multicast pointers directly and has no CFT-handle implementation. */
+    is_nvls_ll_supported = false;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && LE_HW_SW_REQUIREMENTS_MET
+    is_nvls_algo_supported =
+        is_nvls_algo_supported &&
+        nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, nelems * sizeof(T), SCOPE) &&
+        nvshmemi_tma_smem_registered() && !__isShared(source) &&
+        !__isShared(dest + dest_offset) &&
+        nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)source) &&
+        nvshmemi_is_addr_offset_aligned(dest + dest_offset, CFT_HANDLE_TX_SIZE);
+#else
+    is_nvls_algo_supported = false;
+#endif
+#endif
+
     bool valid_ll_configuration = (SCOPE != NVSHMEMI_THREADGROUP_THREAD &&
                                    ((sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0)) ||
                                     (is_half_prec && (nelems % 4 == 0) &&
                                      (nvshmemi_device_state_d.team_pool[team]->size % 2 == 0))));
+#if defined(NVSHMEM_FORCE_CFT)
+    valid_ll_configuration = false;
+#endif
     /* Disable non-NVLS LL unless every PE agreed that the job topology supports it. */
     valid_ll_configuration &= nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_supported;
     /* This 2-level selection logic is implemented to reduce code duplication of calling leaf
@@ -414,7 +438,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             } else if (sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0) &&
                        nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
                            (nelems * sizeof(T)) &&
-                       is_nvls_algo_supported && prefer_nvls_ll) {
+                       is_nvls_ll_supported && prefer_nvls_ll) {
                 fcollect_algo = FCOLLECT_NVLS_LL; /* NVLS LL algorithm */
             } else if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 fcollect_algo = FCOLLECT_NVLS; /* NVLS One shot algorithm */
@@ -441,7 +465,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             if (sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0) &&
                 nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
                     (nelems * sizeof(T)) &&
-                is_nvls_algo_supported) {
+                is_nvls_ll_supported) {
                 fcollect_algo = FCOLLECT_NVLS_LL; /* Use NVLS LL */
             } else if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 fcollect_algo = FCOLLECT_NVLS; /* Switch to NVLS simple */
