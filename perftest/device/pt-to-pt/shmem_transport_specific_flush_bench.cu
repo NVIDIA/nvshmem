@@ -127,7 +127,7 @@ struct flush_bench : ts::payload_buffers {
             constexpr placement P = decltype(placement_tag)::value;
             int failures = ts::failed(run_variant<R, P, completion::quiet>(ctx));
             failures += ts::failed(run_variant<R, P, completion::flush>(ctx));
-            if constexpr (R != route::auto_auto) {
+            if constexpr (R != route::auto_auto && R != route::stable) {
                 failures += ts::failed(run_variant<R, P, completion::quiet, true>(ctx));
             }
             return failures;

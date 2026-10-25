@@ -87,7 +87,7 @@ PORTABLE_KERNELS = {
     "get": "{prefix}getmem{suffix}(opaque(local), remote, bytes, pe);",
     "put_signal": "{prefix}putmem_signal{suffix}(remote, opaque(local), bytes, signal, 1, "
     "NVSHMEM_SIGNAL_SET, pe);",
-    "quiet": "nvshmem_quiet();",
+    "quiet": "{prefix}quiet{suffix}();",
 }
 
 SIGNATURE = ("uint8_t *remote, uint8_t *local, size_t bytes, uint64_t *signal, int pe, "

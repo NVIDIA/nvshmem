@@ -6,7 +6,10 @@
 /* Shared scaffolding for the transport-policy route perftests: route
  * descriptors, route availability through nvshmemx_rma_capability, job-wide
  * status agreement, and a size-sweep driver that reports through the standard
- * perftest tables. */
+ * perftest tables. The `stable` pseudo-route issues the same operations
+ * through the stable device API (nvshmem_putmem, nvshmemx_putmem_block,
+ * nvshmemx_quiet_block, ...) inside the same kernels, so its rows are the
+ * baseline for every route. */
 
 #ifndef TRANSPORT_SPECIFIC_PERFTEST_CUH
 #define TRANSPORT_SPECIFIC_PERFTEST_CUH
@@ -33,7 +36,8 @@ namespace Addressing = nvshmemx::addressing;
 namespace Policy = nvshmemx::transport_policy;
 namespace Memory = nvshmemx::memory_space;
 
-constexpr auto kBlock = nvshmemx::threadgroup::block;
+using Scope = nvshmemx::threadgroup;
+constexpr auto kBlock = Scope::block;
 /* The TMA alignment and size granule, which is also the CFT handle transfer
  * size (CFT_HANDLE_TX_SIZE). */
 constexpr size_t kAlignment = 16;
@@ -42,7 +46,7 @@ constexpr size_t kStaticSmemReserve = 1024;
 /* Status slots start out unset so a block that never published is visible. */
 constexpr int kStatusFill = 0xff;
 
-enum class route { auto_auto, pointer_sm, pointer_tma, cft_tma, auto_network, count };
+enum class route { auto_auto, pointer_sm, pointer_tma, cft_tma, auto_network, stable, count };
 enum class placement { global, shared };
 enum class rma_operation { put, get };
 enum class rma_nbi { no, yes };
@@ -69,6 +73,7 @@ constexpr route_info kRouteInfo[] = {
      "NVSHMEM_TMA_POLICY=ENABLE, and registered shared memory"},
     {"network", "auto_network", "Auto / Network",
      "needs a device network transport (a job not run over P2P alone)"},
+    {"stable", "stable_api", "Stable API", "the stable device API is always available"},
 };
 static_assert(sizeof(kRouteInfo) / sizeof(kRouteInfo[0]) == static_cast<size_t>(route::count),
               "route descriptor table is incomplete");
@@ -132,6 +137,40 @@ struct route_traits<route::auto_network> {
     static constexpr bool shared_local = false;
 };
 
+/* The stable pseudo-route's addressing and policy: the call helpers below
+ * issue the stable device API instead of a transport-policy entry point. */
+struct stable_api {};
+
+template <>
+struct route_traits<route::stable> {
+    using addressing = stable_api;
+    using policy = stable_api;
+    static constexpr bool registers_smem = false;
+    static constexpr size_t granule = 1;
+    static constexpr bool shared_local = false;
+};
+
+template <typename A>
+constexpr bool is_stable = std::is_same<A, stable_api>::value;
+
+/* Whether route R accepts the operation at scope S with local placement P
+ * (the routes' static scope rules): CFT / TMA is block-only and Pointer / TMA
+ * below block scope moves only puts from a shared source. */
+template <route R, Scope S, placement P, rma_operation Op>
+constexpr bool scope_legal =
+    S == Scope::block ||
+    (R != route::cft_tma &&
+     (R != route::pointer_tma || (Op == rma_operation::put && P == placement::shared)));
+
+inline const char *scope_key(Scope s) {
+    return s == Scope::thread ? "thread" : s == Scope::warp ? "warp" : "block";
+}
+
+/* Threads per CTA for a single-group latency kernel at scope S. */
+constexpr int scope_threads(Scope s, int block_threads) {
+    return s == Scope::thread ? 1 : s == Scope::warp ? 32 : block_threads;
+}
+
 /* Auto / Auto keeps generic local classification; every strict route gets
  * the explicit memory space that matches where the local operand lives. The
  * local operand is a put source or, via local_dest(), a get destination. */
@@ -146,100 +185,148 @@ __host__ __device__ constexpr Memory::dest local_dest(Memory::source local) {
                                              : Memory::dest::generic;
 }
 
+/* The stable device API at scope S: the thread, _warp, or _block form. */
+template <Scope S, rma_operation Op, rma_nbi Nbi>
+__device__ void stable_rma(uint8_t *remote, uint8_t *local, size_t bytes, int pe) {
+    constexpr bool kPut = Op == rma_operation::put;
+    constexpr bool kNbi = Nbi == rma_nbi::yes;
+    if constexpr (S == Scope::thread) {
+        if constexpr (kPut) {
+            kNbi ? nvshmem_putmem_nbi(remote, local, bytes, pe)
+                 : nvshmem_putmem(remote, local, bytes, pe);
+        } else {
+            kNbi ? nvshmem_getmem_nbi(local, remote, bytes, pe)
+                 : nvshmem_getmem(local, remote, bytes, pe);
+        }
+    } else if constexpr (S == Scope::warp) {
+        if constexpr (kPut) {
+            kNbi ? nvshmemx_putmem_nbi_warp(remote, local, bytes, pe)
+                 : nvshmemx_putmem_warp(remote, local, bytes, pe);
+        } else {
+            kNbi ? nvshmemx_getmem_nbi_warp(local, remote, bytes, pe)
+                 : nvshmemx_getmem_warp(local, remote, bytes, pe);
+        }
+    } else {
+        if constexpr (kPut) {
+            kNbi ? nvshmemx_putmem_nbi_block(remote, local, bytes, pe)
+                 : nvshmemx_putmem_block(remote, local, bytes, pe);
+        } else {
+            kNbi ? nvshmemx_getmem_nbi_block(local, remote, bytes, pe)
+                 : nvshmemx_getmem_block(local, remote, bytes, pe);
+        }
+    }
+}
+
 template <rma_operation Op, rma_nbi Nbi>
-struct rma_call;
-
-template <>
-struct rma_call<rma_operation::put, rma_nbi::no> {
-    template <typename A, typename P, Memory::source Local>
+struct rma_call {
+    template <typename A, typename P, Memory::source Local, Scope S = kBlock>
     __device__ static int invoke(uint8_t *remote, uint8_t *local, size_t bytes, int pe) {
-        return nvshmemx_put<uint8_t, A, P, kBlock, Local, Memory::dest::global>(remote, local,
-                                                                                bytes, pe);
+        constexpr bool kNbi = Nbi == rma_nbi::yes;
+        if constexpr (is_stable<A>) {
+            stable_rma<S, Op, Nbi>(remote, local, bytes, pe);
+            return NVSHMEMX_SUCCESS;
+        } else if constexpr (Op == rma_operation::put && kNbi) {
+            return nvshmemx_put_nbi<uint8_t, A, P, S, Local, Memory::dest::global>(remote, local,
+                                                                                   bytes, pe);
+        } else if constexpr (Op == rma_operation::put) {
+            return nvshmemx_put<uint8_t, A, P, S, Local, Memory::dest::global>(remote, local, bytes,
+                                                                               pe);
+        } else if constexpr (kNbi) {
+            return nvshmemx_get_nbi<uint8_t, A, P, S, Memory::source::global, local_dest(Local)>(
+                local, remote, bytes, pe);
+        } else {
+            return nvshmemx_get<uint8_t, A, P, S, Memory::source::global, local_dest(Local)>(
+                local, remote, bytes, pe);
+        }
     }
 };
 
-template <>
-struct rma_call<rma_operation::put, rma_nbi::yes> {
-    template <typename A, typename P, Memory::source Local>
-    __device__ static int invoke(uint8_t *remote, uint8_t *local, size_t bytes, int pe) {
-        return nvshmemx_put_nbi<uint8_t, A, P, kBlock, Local, Memory::dest::global>(remote, local,
-                                                                                    bytes, pe);
+template <Scope S, rma_nbi Nbi>
+__device__ void stable_put_signal(uint8_t *remote, uint8_t *local, size_t bytes, uint64_t *sig_addr,
+                                  uint64_t signal, int sig_op, int pe) {
+    constexpr bool kNbi = Nbi == rma_nbi::yes;
+    if constexpr (S == Scope::thread) {
+        kNbi ? nvshmem_putmem_signal_nbi(remote, local, bytes, sig_addr, signal, sig_op, pe)
+             : nvshmem_putmem_signal(remote, local, bytes, sig_addr, signal, sig_op, pe);
+    } else if constexpr (S == Scope::warp) {
+        kNbi ? nvshmemx_putmem_signal_nbi_warp(remote, local, bytes, sig_addr, signal, sig_op, pe)
+             : nvshmemx_putmem_signal_warp(remote, local, bytes, sig_addr, signal, sig_op, pe);
+    } else {
+        kNbi ? nvshmemx_putmem_signal_nbi_block(remote, local, bytes, sig_addr, signal, sig_op, pe)
+             : nvshmemx_putmem_signal_block(remote, local, bytes, sig_addr, signal, sig_op, pe);
     }
-};
-
-template <>
-struct rma_call<rma_operation::get, rma_nbi::no> {
-    template <typename A, typename P, Memory::source Local>
-    __device__ static int invoke(uint8_t *remote, uint8_t *local, size_t bytes, int pe) {
-        return nvshmemx_get<uint8_t, A, P, kBlock, Memory::source::global, local_dest(Local)>(
-            local, remote, bytes, pe);
-    }
-};
-
-template <>
-struct rma_call<rma_operation::get, rma_nbi::yes> {
-    template <typename A, typename P, Memory::source Local>
-    __device__ static int invoke(uint8_t *remote, uint8_t *local, size_t bytes, int pe) {
-        return nvshmemx_get_nbi<uint8_t, A, P, kBlock, Memory::source::global, local_dest(Local)>(
-            local, remote, bytes, pe);
-    }
-};
+}
 
 template <rma_nbi Nbi>
-struct put_signal_call;
-
-template <>
-struct put_signal_call<rma_nbi::no> {
-    template <typename A, typename P, Memory::source Local>
+struct put_signal_call {
+    template <typename A, typename P, Memory::source Local, Scope S = kBlock>
     __device__ static int invoke(uint8_t *remote, uint8_t *local, size_t bytes, uint64_t *sig_addr,
                                  uint64_t signal, int sig_op, int pe) {
-        return nvshmemx_put_signal<uint8_t, A, P, kBlock, Local, Memory::dest::global>(
-            remote, local, bytes, sig_addr, signal, sig_op, pe);
+        if constexpr (is_stable<A>) {
+            stable_put_signal<S, Nbi>(remote, local, bytes, sig_addr, signal, sig_op, pe);
+            return NVSHMEMX_SUCCESS;
+        } else if constexpr (Nbi == rma_nbi::yes) {
+            return nvshmemx_put_signal_nbi<uint8_t, A, P, S, Local, Memory::dest::global>(
+                remote, local, bytes, sig_addr, signal, sig_op, pe);
+        } else {
+            return nvshmemx_put_signal<uint8_t, A, P, S, Local, Memory::dest::global>(
+                remote, local, bytes, sig_addr, signal, sig_op, pe);
+        }
     }
 };
 
-template <>
-struct put_signal_call<rma_nbi::yes> {
-    template <typename A, typename P, Memory::source Local>
-    __device__ static int invoke(uint8_t *remote, uint8_t *local, size_t bytes, uint64_t *sig_addr,
-                                 uint64_t signal, int sig_op, int pe) {
-        return nvshmemx_put_signal_nbi<uint8_t, A, P, kBlock, Local, Memory::dest::global>(
-            remote, local, bytes, sig_addr, signal, sig_op, pe);
+/* The stable nvshmemx_signal_op is a single-thread call; at warp and block
+ * scope the leader issues it and the group synchronizes, as Auto / Auto does. */
+template <typename A, typename P, Scope S = kBlock>
+__device__ int signal_op_call(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
+    if constexpr (is_stable<A>) {
+        if constexpr (S == Scope::thread) {
+            nvshmemx_signal_op(sig_addr, signal, sig_op, pe);
+        } else if constexpr (S == Scope::warp) {
+            if ((threadIdx.x % warpSize) == 0) {
+                nvshmemx_signal_op(sig_addr, signal, sig_op, pe);
+            }
+            __syncwarp();
+        } else {
+            if (threadIdx.x == 0) {
+                nvshmemx_signal_op(sig_addr, signal, sig_op, pe);
+            }
+            __syncthreads();
+        }
+        return NVSHMEMX_SUCCESS;
+    } else {
+        return nvshmemx_signal_op<A, P, S>(sig_addr, signal, sig_op, pe);
     }
-};
+}
 
 template <completion C>
-struct completion_call;
-
-template <>
-struct completion_call<completion::none> {
-    template <typename A, typename P>
+struct completion_call {
+    template <typename A, typename P, Scope S = kBlock>
     __device__ static int invoke() {
-        return NVSHMEMX_SUCCESS;
-    }
-};
-
-template <>
-struct completion_call<completion::quiet> {
-    template <typename A, typename P>
-    __device__ static int invoke() {
-        return nvshmemx_quiet<A, P, kBlock>();
-    }
-};
-
-template <>
-struct completion_call<completion::flush> {
-    template <typename A, typename P>
-    __device__ static int invoke() {
-        return nvshmemx_flush<A, P, kBlock>();
-    }
-};
-
-template <>
-struct completion_call<completion::fence> {
-    template <typename A, typename P>
-    __device__ static int invoke() {
-        return nvshmemx_fence<A, P, kBlock>();
+        if constexpr (C == completion::none) {
+            return NVSHMEMX_SUCCESS;
+        } else if constexpr (is_stable<A>) {
+            if constexpr (C == completion::quiet) {
+                S == Scope::thread ? nvshmem_quiet()
+                : S == Scope::warp ? nvshmemx_quiet_warp()
+                                   : nvshmemx_quiet_block();
+            } else if constexpr (C == completion::flush) {
+                S == Scope::thread ? nvshmemx_flush()
+                : S == Scope::warp ? nvshmemx_flush_warp()
+                                   : nvshmemx_flush_block();
+            } else {
+                S == Scope::thread ? nvshmem_fence()
+                : S == Scope::warp ? nvshmemx_fence_warp()
+                                   : nvshmemx_fence_block();
+            }
+            return NVSHMEMX_SUCCESS;
+        } else if constexpr (C == completion::quiet) {
+            return nvshmemx_quiet<A, P, S>();
+        } else if constexpr (C == completion::flush) {
+            return nvshmemx_flush<A, P, S>();
+        } else {
+            return nvshmemx_fence<A, P, S>();
+        }
     }
 };
 
@@ -313,7 +400,7 @@ __device__ inline void block_slice(size_t bytes, size_t granule, size_t *offset,
 /* The route's own answer for one operation in the benchmark's launch shape
  * (registration, block size, and local operand placement): exactly the
  * preflight the operation runs, without issuing work. */
-template <route R, placement P, rma_operation Op>
+template <route R, placement P, rma_operation Op, Scope S = kBlock>
 __global__ void rma_capability_kernel(unsigned char *remote, unsigned char *local_global,
                                       size_t bytes, int registration, int peer, int *statuses) {
     using traits = route_traits<R>;
@@ -324,18 +411,20 @@ __global__ void rma_capability_kernel(unsigned char *remote, unsigned char *loca
     unsigned char *shared = acquire_smem<R>(registration);
     unsigned char *local = P == placement::shared ? shared : local_global;
     int result;
-    if constexpr (Op == rma_operation::put) {
-        result = nvshmemx_rma_capability<A, Pol, kBlock, kLocal>(remote, local, bytes, peer);
+    if constexpr (is_stable<A>) {
+        result = NVSHMEMX_SUCCESS;
+    } else if constexpr (Op == rma_operation::put) {
+        result = nvshmemx_rma_capability<A, Pol, S, kLocal>(remote, local, bytes, peer);
     } else {
-        result =
-            nvshmemx_rma_capability<A, Pol, kBlock, local_dest(kLocal)>(remote, local, bytes, peer);
+        result = nvshmemx_rma_capability<A, Pol, S, local_dest(kLocal)>(remote, local, bytes, peer);
     }
     release_smem<R>();
     publish_block_status(result, statuses);
 }
 
 /* NVSHMEM_TRANSPORT_SPECIFIC_ROUTE is a comma-separated subset of
- * auto,sm,tma,cft,network (cft is CFT / TMA), or "all" (the default). */
+ * auto,sm,tma,cft,network,stable (cft is CFT / TMA; stable is the stable
+ * device API baseline), or "all" (the default). */
 inline bool parse_route_selection(unsigned *mask) {
     const char *value = getenv("NVSHMEM_TRANSPORT_SPECIFIC_ROUTE");
     if (value == nullptr || strcmp(value, "all") == 0) {
@@ -432,7 +521,7 @@ inline bool setup_context(context &ctx, const char *benchmark, int max_blocks, i
         if (ctx.mype == 0) {
             fprintf(stderr,
                     "%s: NVSHMEM_TRANSPORT_SPECIFIC_ROUTE must be a comma-separated list of "
-                    "auto, sm, tma, cft, network, or all\n",
+                    "auto, sm, tma, cft, network, stable, or all\n",
                     benchmark);
         }
         *exit_code = 1;
@@ -511,12 +600,12 @@ inline bool placement_available(context &ctx, route r, placement p) {
 
 /*
  * Asks nvshmemx_rma_capability, on every issuing PE, whether route R can run
- * operation Op with the row's local placement, block size, and registration
+ * operation Op at scope S with the row's local placement, block size, and registration
  * for a granule-sized payload. NOT_SUPPORTED on any issuer skips the row;
  * any other non-success answer means the benchmark built invalid arguments
  * and fails it.
  */
-template <route R, placement P, rma_operation Op>
+template <route R, placement P, rma_operation Op, Scope S = kBlock>
 outcome rma_available(context &ctx, const std::string &subjob, unsigned char *remote,
                       unsigned char *local, int threads, bool issuer) {
     const int registration = static_cast<int>(registration_bytes(ctx, R));
@@ -524,9 +613,9 @@ outcome rma_available(context &ctx, const std::string &subjob, unsigned char *re
     int status = NVSHMEMX_SUCCESS;
     if (issuer) {
         const size_t smem = registration + (P == placement::shared ? bytes : 0);
-        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((rma_capability_kernel<R, P, Op>), smem);
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((rma_capability_kernel<R, P, Op, S>), smem);
         CUDA_CHECK(cudaMemset(ctx.statuses, kStatusFill, sizeof(int)));
-        rma_capability_kernel<R, P, Op>
+        rma_capability_kernel<R, P, Op, S>
             <<<1, threads, smem>>>(remote, local, bytes, registration, ctx.peer, ctx.statuses);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -572,6 +661,40 @@ int for_each_placement(context &ctx, Fn &&fn) {
 
 inline int failed(outcome o) { return o == outcome::failed ? 1 : 0; }
 
+/* Whether `-s/--scope` (default: all scopes) selects scope s. */
+inline bool scope_selected(Scope s) {
+    switch (threadgroup_scope.type) {
+        case NVSHMEM_THREAD:
+            return s == Scope::thread;
+        case NVSHMEM_WARP:
+            return s == Scope::warp;
+        case NVSHMEM_BLOCK:
+            return s == Scope::block;
+        default:
+            return true;
+    }
+}
+
+template <Scope S>
+using scope_constant = std::integral_constant<Scope, S>;
+
+/* Calls fn(scope_constant<S>{}) for each scope the user selected and returns
+ * the summed failure count. */
+template <typename Fn>
+int for_each_scope(Fn &&fn) {
+    int failures = 0;
+    if (scope_selected(Scope::thread)) {
+        failures += fn(scope_constant<Scope::thread>{});
+    }
+    if (scope_selected(Scope::warp)) {
+        failures += fn(scope_constant<Scope::warp>{});
+    }
+    if (scope_selected(Scope::block)) {
+        failures += fn(scope_constant<Scope::block>{});
+    }
+    return failures;
+}
+
 /* Runs Bench::run<R> for every route the benchmark measures and the user
  * selected; rows the route cannot serve report a SKIP. Returns the number of
  * failed rows. */
@@ -588,6 +711,7 @@ int run_route(context &ctx, Bench &bench) {
 template <typename Bench>
 int run_selected_routes(context &ctx, Bench &bench) {
     int failures = 0;
+    failures += run_route<route::stable>(ctx, bench);
     failures += run_route<route::auto_auto>(ctx, bench);
     failures += run_route<route::pointer_sm>(ctx, bench);
     failures += run_route<route::pointer_tma>(ctx, bench);

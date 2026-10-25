@@ -5,7 +5,8 @@
 
 /* Transport-policy route signal ping-pong: PE 0 sends a route put_signal
  * (blocking, or NBI followed by a route quiet) and PE 1 acknowledges with the
- * same route's signal_op. SET and ADD run on every route; ADD needs native
+ * same route's signal_op, at thread (one thread), warp (one warp), and block
+ * (128 threads) scope; -s/--scope selects one. SET and ADD run on every route; ADD needs native
  * P2P atomics on the Pointer routes and the fabric atomic capability on
  * CFT / TMA. nvshmemx_rma_capability decides whether the route can move the
  * payload, and one unwaited send and acknowledgement then probe the signal
@@ -42,7 +43,7 @@ __device__ void block_wait_until(uint64_t *flag, uint64_t value) {
     __syncthreads();
 }
 
-template <route R, placement P, rma_nbi Nbi, int SigOp>
+template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
 __device__ int send(unsigned char *remote, unsigned char *local, size_t bytes, uint64_t *signal,
                     uint64_t value, int peer) {
     using traits = ts::route_traits<R>;
@@ -50,37 +51,37 @@ __device__ int send(unsigned char *remote, unsigned char *local, size_t bytes, u
     using Pol = typename traits::policy;
     constexpr completion kCompletion = Nbi == rma_nbi::yes ? completion::quiet : completion::none;
 
-    const int result = ts::put_signal_call<Nbi>::template invoke<A, Pol, ts::local_space<R, P>>(
+    const int result = ts::put_signal_call<Nbi>::template invoke<A, Pol, ts::local_space<R, P>, S>(
         remote, local, bytes, signal, value, SigOp, peer);
     if (result != NVSHMEMX_SUCCESS) {
         return result;
     }
-    return ts::completion_call<kCompletion>::template invoke<A, Pol>();
+    return ts::completion_call<kCompletion>::template invoke<A, Pol, S>();
 }
 
-template <route R, int SigOp>
+template <route R, int SigOp, ts::Scope S>
 __device__ int acknowledge(uint64_t *ack, uint64_t value, int peer) {
     using traits = ts::route_traits<R>;
-    return nvshmemx_signal_op<typename traits::addressing, typename traits::policy, ts::kBlock>(
-        ack, value, SigOp, peer);
+    return ts::signal_op_call<typename traits::addressing, typename traits::policy, S>(ack, value,
+                                                                                       SigOp, peer);
 }
 
 /* Exercises both directions once without waiting on the peer. */
-template <route R, placement P, rma_nbi Nbi, int SigOp>
+template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
 __global__ void signal_probe(unsigned char *remote, unsigned char *local_global, size_t bytes,
                              uint64_t *signal, uint64_t *ack, int registration, int peer,
                              int *statuses) {
     unsigned char *shared = ts::acquire_smem<R>(registration);
     unsigned char *local = P == placement::shared ? shared : local_global;
-    int result = send<R, P, Nbi, SigOp>(remote, local, bytes, signal, kProbeValue, peer);
+    int result = send<R, P, Nbi, SigOp, S>(remote, local, bytes, signal, kProbeValue, peer);
     if (result == NVSHMEMX_SUCCESS) {
-        result = acknowledge<R, SigOp>(ack, kProbeValue, peer);
+        result = acknowledge<R, SigOp, S>(ack, kProbeValue, peer);
     }
     ts::release_smem<R>();
     ts::publish_block_status(result, statuses);
 }
 
-template <route R, placement P, rma_nbi Nbi, int SigOp>
+template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
 __global__ void signal_ping_pong(unsigned char *remote, unsigned char *local_global, size_t bytes,
                                  uint64_t *signal, uint64_t *ack, int registration, int mype,
                                  size_t iterations, int *statuses) {
@@ -92,14 +93,14 @@ __global__ void signal_ping_pong(unsigned char *remote, unsigned char *local_glo
     for (uint64_t i = 1; i <= iterations; i++) {
         const uint64_t value = signal_value<SigOp>(i);
         if (mype == 0) {
-            result = send<R, P, Nbi, SigOp>(remote, local, bytes, signal, value, peer);
+            result = send<R, P, Nbi, SigOp, S>(remote, local, bytes, signal, value, peer);
             if (ts::block_failed(result)) {
                 break;
             }
             block_wait_until(ack, i);
         } else {
             block_wait_until(signal, i);
-            result = acknowledge<R, SigOp>(ack, value, peer);
+            result = acknowledge<R, SigOp, S>(ack, value, peer);
             if (ts::block_failed(result)) {
                 break;
             }
@@ -144,15 +145,15 @@ struct signal_ping_pong_bench : ts::payload_buffers {
     }
 
     /* Both PEs send and acknowledge once; NOT_SUPPORTED on either is a SKIP. */
-    template <route R, placement P, rma_nbi Nbi, int SigOp>
+    template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
     ts::outcome probe_signal(ts::context &ctx, const std::string &subjob, int registration) {
         const size_t probe_bytes = ts::route_traits<R>::granule;
         const size_t probe_smem = registration + (P == placement::shared ? probe_bytes : 0);
-        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((signal_probe<R, P, Nbi, SigOp>), probe_smem);
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((signal_probe<R, P, Nbi, SigOp, S>), probe_smem);
 
         reset_flags();
         CUDA_CHECK(cudaMemset(ctx.statuses, ts::kStatusFill, sizeof(int)));
-        signal_probe<R, P, Nbi, SigOp><<<1, kThreads, probe_smem>>>(
+        signal_probe<R, P, Nbi, SigOp, S><<<1, ts::scope_threads(S, kThreads), probe_smem>>>(
             remote, local, probe_bytes, signal, ack, registration, ctx.peer, ctx.statuses);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -180,18 +181,19 @@ struct signal_ping_pong_bench : ts::payload_buffers {
         return ts::outcome::success;
     }
 
-    template <route R, placement P, rma_nbi Nbi, int SigOp>
+    template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
     ts::outcome run_variant(ts::context &ctx) {
-        const std::string variant = std::string("put_signal_") +
-                                    (Nbi == rma_nbi::yes ? "nbi_quiet" : "blocking") + "_" +
-                                    (SigOp == NVSHMEM_SIGNAL_SET ? "set" : "add") + "_signal_op";
+        constexpr int kScopeThreads = ts::scope_threads(S, kThreads);
+        const std::string variant =
+            std::string("put_signal_") + (Nbi == rma_nbi::yes ? "nbi_quiet" : "blocking") + "_" +
+            (SigOp == NVSHMEM_SIGNAL_SET ? "set" : "add") + "_signal_op_" + ts::scope_key(S);
         const ts::sweep_spec spec = ts::make_spec(R, variant, P, "latency", "us", '-',
                                                   ts::route_traits<R>::granule, 1, ctx);
         const int registration = static_cast<int>(ts::registration_bytes(ctx, R));
-        ts::outcome available = ts::rma_available<R, P, rma_operation::put>(
-            ctx, spec.subjob, remote, local, kThreads, ctx.mype == 0);
+        ts::outcome available = ts::rma_available<R, P, rma_operation::put, S>(
+            ctx, spec.subjob, remote, local, kScopeThreads, ctx.mype == 0);
         if (available == ts::outcome::success) {
-            available = probe_signal<R, P, Nbi, SigOp>(ctx, spec.subjob, registration);
+            available = probe_signal<R, P, Nbi, SigOp, S>(ctx, spec.subjob, registration);
         }
         if (available != ts::outcome::success) {
             return available;
@@ -199,10 +201,10 @@ struct signal_ping_pong_bench : ts::payload_buffers {
 
         auto launch = [&](size_t bytes, int, size_t iterations) {
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((signal_ping_pong<R, P, Nbi, SigOp>), smem);
-            signal_ping_pong<R, P, Nbi, SigOp><<<1, kThreads, smem>>>(remote, local, bytes, signal,
-                                                                      ack, registration, ctx.mype,
-                                                                      iterations, ctx.statuses);
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((signal_ping_pong<R, P, Nbi, SigOp, S>), smem);
+            signal_ping_pong<R, P, Nbi, SigOp, S>
+                <<<1, kScopeThreads, smem>>>(remote, local, bytes, signal, ack, registration,
+                                             ctx.mype, iterations, ctx.statuses);
             return 1;
         };
         auto metric = [](size_t, float milliseconds) {
@@ -215,18 +217,26 @@ struct signal_ping_pong_bench : ts::payload_buffers {
         return result;
     }
 
-    template <route R, placement P, int SigOp>
+    /* A scope the route does not accept has no row. */
+    template <route R, placement P, int SigOp, ts::Scope S>
     int run_signal_op(ts::context &ctx) {
-        return ts::failed(run_variant<R, P, rma_nbi::no, SigOp>(ctx)) +
-               ts::failed(run_variant<R, P, rma_nbi::yes, SigOp>(ctx));
+        if constexpr (ts::scope_legal<R, S, P, rma_operation::put>) {
+            return ts::failed(run_variant<R, P, rma_nbi::no, SigOp, S>(ctx)) +
+                   ts::failed(run_variant<R, P, rma_nbi::yes, SigOp, S>(ctx));
+        } else {
+            return 0;
+        }
     }
 
     template <route R>
     int run(ts::context &ctx) {
         return ts::for_each_placement<R>(ctx, [&](auto placement_tag) {
             constexpr placement P = decltype(placement_tag)::value;
-            return run_signal_op<R, P, NVSHMEM_SIGNAL_SET>(ctx) +
-                   run_signal_op<R, P, NVSHMEM_SIGNAL_ADD>(ctx);
+            return ts::for_each_scope([&](auto scope_tag) {
+                constexpr ts::Scope S = decltype(scope_tag)::value;
+                return run_signal_op<R, P, NVSHMEM_SIGNAL_SET, S>(ctx) +
+                       run_signal_op<R, P, NVSHMEM_SIGNAL_ADD, S>(ctx);
+            });
         });
     }
 };
