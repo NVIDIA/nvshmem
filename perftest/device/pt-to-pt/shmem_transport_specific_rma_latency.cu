@@ -5,8 +5,10 @@
 
 /* Transport-policy route put/get latency: PE 0 issues one blocking or NBI
  * operation followed by a route quiet per iteration, from global and (where
- * the route accepts it) CTA shared local operands. A row the route cannot
- * serve, as nvshmemx_rma_capability reports, is a SKIP. */
+ * the route accepts it) CTA shared local operands, at thread (one thread),
+ * warp (one warp), and block (128 threads) scope; -s/--scope selects one. A
+ * row the route cannot serve, as nvshmemx_rma_capability reports, is a SKIP;
+ * a scope the route does not accept has no row. */
 
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
@@ -24,7 +26,7 @@ namespace {
 constexpr const char *kBenchmark = "shmem_transport_specific_rma_latency";
 constexpr int kThreads = 128;
 
-template <route R, placement P, rma_operation Op, rma_nbi Nbi>
+template <route R, placement P, rma_operation Op, rma_nbi Nbi, ts::Scope S>
 __global__ void latency_batch(unsigned char *remote, unsigned char *local_global, size_t bytes,
                               int registration, int peer, size_t iterations, int *statuses) {
     using traits = ts::route_traits<R>;
@@ -36,10 +38,10 @@ __global__ void latency_batch(unsigned char *remote, unsigned char *local_global
 
     int result = NVSHMEMX_SUCCESS;
     for (size_t i = 0; i < iterations; i++) {
-        result = ts::rma_call<Op, Nbi>::template invoke<A, Pol, ts::local_space<R, P>>(
+        result = ts::rma_call<Op, Nbi>::template invoke<A, Pol, ts::local_space<R, P>, S>(
             remote, local, bytes, peer);
         if (result == NVSHMEMX_SUCCESS) {
-            result = ts::completion_call<completion::quiet>::template invoke<A, Pol>();
+            result = ts::completion_call<completion::quiet>::template invoke<A, Pol, S>();
         }
         if (ts::block_failed(result)) {
             break;
@@ -50,15 +52,17 @@ __global__ void latency_batch(unsigned char *remote, unsigned char *local_global
 }
 
 struct rma_latency : ts::payload_buffers {
-    template <route R, placement P, rma_operation Op, rma_nbi Nbi>
+    template <route R, placement P, rma_operation Op, rma_nbi Nbi, ts::Scope S>
     ts::outcome run_variant(ts::context &ctx) {
+        constexpr int kScopeThreads = ts::scope_threads(S, kThreads);
         const std::string variant = std::string(Op == rma_operation::put ? "put" : "get") + "_" +
-                                    (Nbi == rma_nbi::yes ? "nbi" : "blocking") + "_quiet";
+                                    (Nbi == rma_nbi::yes ? "nbi" : "blocking") + "_quiet_" +
+                                    ts::scope_key(S);
         const ts::sweep_spec spec = ts::make_spec(R, variant, P, "latency", "us", '-',
                                                   ts::route_traits<R>::granule, 1, ctx);
         const int registration = static_cast<int>(ts::registration_bytes(ctx, R));
-        const ts::outcome available =
-            ts::rma_available<R, P, Op>(ctx, spec.subjob, remote, local, kThreads, ctx.mype == 0);
+        const ts::outcome available = ts::rma_available<R, P, Op, S>(
+            ctx, spec.subjob, remote, local, kScopeThreads, ctx.mype == 0);
         if (available != ts::outcome::success) {
             return available;
         }
@@ -68,9 +72,9 @@ struct rma_latency : ts::payload_buffers {
                 return 0;
             }
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((latency_batch<R, P, Op, Nbi>), smem);
-            latency_batch<R, P, Op, Nbi><<<1, kThreads, smem>>>(remote, local, bytes, registration,
-                                                                ctx.peer, iterations, ctx.statuses);
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((latency_batch<R, P, Op, Nbi, S>), smem);
+            latency_batch<R, P, Op, Nbi, S><<<1, kScopeThreads, smem>>>(
+                remote, local, bytes, registration, ctx.peer, iterations, ctx.statuses);
             return 1;
         };
         auto metric = [](size_t, float milliseconds) {
@@ -79,14 +83,27 @@ struct rma_latency : ts::payload_buffers {
         return ts::run_sweep(ctx, spec, launch, metric);
     }
 
+    /* A scope the route does not accept has no row. */
+    template <route R, placement P, rma_operation Op, rma_nbi Nbi, ts::Scope S>
+    int run_legal(ts::context &ctx) {
+        if constexpr (ts::scope_legal<R, S, P, Op>) {
+            return ts::failed(run_variant<R, P, Op, Nbi, S>(ctx));
+        } else {
+            return 0;
+        }
+    }
+
     template <route R>
     int run(ts::context &ctx) {
         return ts::for_each_placement<R>(ctx, [&](auto placement_tag) {
             constexpr placement P = decltype(placement_tag)::value;
-            return ts::failed(run_variant<R, P, rma_operation::put, rma_nbi::no>(ctx)) +
-                   ts::failed(run_variant<R, P, rma_operation::put, rma_nbi::yes>(ctx)) +
-                   ts::failed(run_variant<R, P, rma_operation::get, rma_nbi::no>(ctx)) +
-                   ts::failed(run_variant<R, P, rma_operation::get, rma_nbi::yes>(ctx));
+            return ts::for_each_scope([&](auto scope_tag) {
+                constexpr ts::Scope S = decltype(scope_tag)::value;
+                return run_legal<R, P, rma_operation::put, rma_nbi::no, S>(ctx) +
+                       run_legal<R, P, rma_operation::put, rma_nbi::yes, S>(ctx) +
+                       run_legal<R, P, rma_operation::get, rma_nbi::no, S>(ctx) +
+                       run_legal<R, P, rma_operation::get, rma_nbi::yes, S>(ctx);
+            });
         });
     }
 };
