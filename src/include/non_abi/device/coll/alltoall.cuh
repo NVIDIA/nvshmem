@@ -45,9 +45,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
         if (!peer_base_addr) {
             /* We are breaking rank with the rest of the group here so send the RMA with thread
              * scope. */
+#if defined(NVSHMEM_FORCE_CFT)
+            nvshmemii_put_signal<T, NVSHMEMI_THREADGROUP_THREAD>(
+                dest + dst_offset, source + src_offset, nelems, psync + mype, 1ULL,
+                NVSHMEMI_AMO_SIGNAL_ADD, next_rank, true);
+#else
             nvshmemi_transfer_put_signal_nbi<NVSHMEMI_THREADGROUP_THREAD>(
                 (void *)(dest + dst_offset), (void *)(source + src_offset), msgsize,
                 (void *)(psync + mype), 1ULL, NVSHMEMI_AMO_SIGNAL_ADD, next_rank);
+#endif
         } else if (msgsize <= NVSHMEMI_ALLTOALL_SMALL_MSGSIZE) {
             nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE, false>(
                 dest + dst_offset, source + src_offset, nelems, next_rank);
@@ -156,7 +162,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_threadgroup(nvsh
                                                                             const T *source,
                                                                             size_t nelems) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
-    if (nvshmemi_use_ldst_remote_atomics_path() && teami->are_gpus_p2p_connected) {
+    if (!nvshmemi_is_cft_forced() && nvshmemi_use_ldst_remote_atomics_path() &&
+        teami->are_gpus_p2p_connected) {
         nvshmemi_alltoall_p2p_allpush_threadgroup<T, SCOPE>(team, dest, source, nelems);
     } else {
         nvshmemi_alltoall_allpush_threadgroup<T, SCOPE>(team, dest, source, nelems);

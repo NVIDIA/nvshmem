@@ -440,9 +440,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
             break;
     }
 
+#if defined(NVSHMEM_FORCE_CFT)
+    /* Tree algorithms can dereference mapped peer pointers directly. Route
+     * forced-CFT broadcasts through the put-to-all implementation instead. */
+    bcast_algo = 1;
+#endif
+
     switch (bcast_algo) {
         case 1: /* Brutefoce algorithm: send one to all followed by barrier */
-            if (nvshmemi_use_ldst_remote_atomics_path() && teami->are_gpus_p2p_connected) {
+            if (!nvshmemi_is_cft_forced() && nvshmemi_use_ldst_remote_atomics_path() &&
+                teami->are_gpus_p2p_connected) {
                 nvshmemi_bcast_put2all_direct_threadgroup<T, SCOPE>(team, dest, source, nelems,
                                                                     PE_root);
             } else {
