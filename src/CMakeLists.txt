@@ -1421,6 +1421,7 @@ install(
 install(
   DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../perftest/
   DESTINATION share/src/perftest/
+  PATTERN "private" EXCLUDE
   PATTERN "perftest_install" EXCLUDE
   PATTERN "perftestCommon.py" EXCLUDE
   PATTERN "perftest-ib.list" EXCLUDE
