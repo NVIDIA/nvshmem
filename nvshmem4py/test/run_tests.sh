@@ -960,6 +960,12 @@ fi
 ########################################
 rm -rf "$VENV_DIR"
 
+if [ -n "$CUPY_CACHE_DIR" ] && [ -d "$CUPY_CACHE_DIR" ]; then
+    _cupy_cache_size=$(du -sh "$CUPY_CACHE_DIR" 2>/dev/null | cut -f1)
+    _cupy_cache_files=$(find "$CUPY_CACHE_DIR" -type f 2>/dev/null | wc -l)
+    echo "CuPy kernel cache: ${_cupy_cache_size} in ${_cupy_cache_files} files (${CUPY_CACHE_DIR})"
+fi
+
 echo "================================================"
 echo "Tests finished with exit code: $EXIT_CODE"
 echo "================================================"
