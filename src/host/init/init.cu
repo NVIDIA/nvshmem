@@ -349,6 +349,35 @@ static int nvshmemi_transport_cap_support_amo(int cap) {
     return 0;
 }
 
+static void nvshmemi_warn_if_atomics_unavailable(nvshmemi_state_t *state) {
+    constexpr int atomic_capabilities =
+        NVSHMEM_TRANSPORT_CAP_MAP_GPU_ATOMICS | NVSHMEM_TRANSPORT_CAP_CPU_ATOMICS |
+        NVSHMEM_TRANSPORT_CAP_GPU_ATOMICS | NVSHMEM_TRANSPORT_CAP_LOGICAL_ENDPOINT;
+
+    for (int peer = 0; peer < state->npes; peer++) {
+        int capabilities = 0;
+        for (int transport_index = 0; transport_index < state->num_initialized_transports;
+             transport_index++) {
+            nvshmem_transport_t transport = state->transports[transport_index];
+            if (transport && transport->is_successfully_initialized &&
+                (state->transport_bitmap & (1 << transport_index))) {
+                capabilities |= transport->cap[peer];
+            }
+        }
+
+        if (!(capabilities & atomic_capabilities)) {
+            NVSHMEMI_WARN_PRINT(
+                "[%d] No atomic-capable transport is available to PE %d. Native GPU atomics "
+                "are unavailable and no remote atomic path was initialized "
+                "(NVSHMEM_REMOTE_TRANSPORT=%s). Atomic operations, including operations "
+                "targeting the calling PE, may fail. Enable a remote transport with atomic "
+                "support or use a topology with native GPU atomics support.\n",
+                state->mype, peer, nvshmemi_options.REMOTE_TRANSPORT);
+            return;
+        }
+    }
+}
+
 static void nvshmemi_refresh_selected_transports(nvshmemi_state_t *state) {
     for (int pe = 0; pe < state->npes; pe++) {
         state->selected_transport_for_rma[pe] = -1;
@@ -1398,6 +1427,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
                           "nvshmemi_setup_transport failed \n");
     /* Static VIDMEM heap registration may prune MAP capabilities after IPC-open failures. */
     nvshmemi_refresh_selected_transports(state);
+    nvshmemi_warn_if_atomics_unavailable(state);
 
     nvshmemi_coll_common_cpu_check_ll128_availability();
 
