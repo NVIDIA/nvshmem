@@ -65,7 +65,8 @@ void call_nvshmemi_signal_op_kernel(uint64_t *sig_addr, uint64_t signal, int sig
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
 void call_nvshmemi_cft_signal_add_kernel(uint64_t *sig_addr, uint64_t signal, int pe,
                                          cudaStream_t cstrm) {
-    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     nvshmemi_cft_signal_add_kernel<<<1, 1, smem_size, cstrm>>>(sig_addr, signal, pe);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
 }

@@ -53,7 +53,8 @@ template <typename TYPE, rdxn_ops_t OP>
 void nvshmemi_call_reduce_kernel(int start, int stride, int size, TYPE *dst, const TYPE *source,
                                  size_t nreduce, TYPE *pWrk, volatile long *pSync,
                                  volatile long *sync_counter) {
-    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     nvshmemi_reduce_kernel<TYPE, OP>
         <<<1, 1, smem_size>>>(start, stride, size, dst, source, nreduce, pWrk, pSync, sync_counter);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
@@ -259,7 +260,8 @@ void nvshmemi_call_team_mapping_kernel(
     nvshmemi_team_creation_psync_t *nvshmemi_team_creation_psync) {
     int *num_peers_found;
     CUDA_RUNTIME_CHECK(cudaMalloc(&num_peers_found, sizeof(int)));
-    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     nvshmemi_team_mapping_kernel<NVSHMEMI_THREADGROUP_WARP><<<1, 32, smem_size>>>(
         uniqueid, npes, num_peers_found, pe_mapping, nvshmemi_team_creation_psync);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
@@ -274,7 +276,8 @@ void nvshmemi_call_team_index_kernel(nvshmemi_team_t *myteam,
 
     INFO(NVSHMEM_COLL, "in team index kernel mype: %d\n", nvshmemi_state->mype);
     CUDA_RUNTIME_CHECK(cudaMalloc(&team_index_array, N_PSYNC_BYTES));
-    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     nvshmemi_team_index_kernel<NVSHMEMI_THREADGROUP_THREAD><<<1, 1, smem_size>>>(
         myteam, nvshmemi_team_creation_psync, team_index_array, N_PSYNC_BYTES);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
