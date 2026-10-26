@@ -809,8 +809,6 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
             &device->common_device.gid_info[portid - 1].local_gid, port_attr->lid, ep_handle->lid,
             ep_handle->spn, ep_handle->iid);
 
-        DEVX_SET(qpc, qp_context, primary_address_path.tclass,
-                 ibdevx_state->options->IB_TRAFFIC_CLASS);
         DEVX_SET(qpc, qp_context, primary_address_path.rlid, path.dlid);
         DEVX_SET(qpc, qp_context, primary_address_path.mlid, 0);
         DEVX_SET(qpc, qp_context, primary_address_path.sl, ibdevx_state->options->IB_SL);
@@ -859,6 +857,10 @@ static int ep_connect(struct ibdevx_ep *ep, struct nvshmemt_ib_common_ep_handle 
             ep->ah = ah;
 
             DEVX_SET(qpc, qp_context, primary_address_path.grh, true);
+            /* The traffic class is a GRH field. Firmware rejects a nonzero tclass on a
+             * LID-routed path without a GRH at INIT->RTR (#45), so set it only here. */
+            DEVX_SET(qpc, qp_context, primary_address_path.tclass,
+                     ibdevx_state->options->IB_TRAFFIC_CLASS);
             memcpy(DEVX_ADDR_OF(qpc, qp_context, primary_address_path.rgid_rip), &dah.av->rgid,
                    sizeof(dah.av->rgid));
             DEVX_SET(qpc, qp_context, primary_address_path.hop_limit, ah_attr.grh.hop_limit);

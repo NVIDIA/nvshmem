@@ -1889,12 +1889,14 @@ static int ibgda_rc_init2rtr(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
 
     if (port_attr->link_layer == IBV_LINK_LAYER_INFINIBAND) {
         DEVX_SET(qpc, qpc, primary_address_path.mlid, 0);
-        DEVX_SET(qpc, qpc, primary_address_path.tclass,
-                 ibgda_state->common.options->IB_TRAFFIC_CLASS);
         DEVX_SET(qpc, qpc, primary_address_path.rlid, ah_attr.dlid);
         DEVX_SET(qpc, qpc, primary_address_path.sl, ibgda_state->common.options->IB_SL);
         DEVX_SET(qpc, qpc, primary_address_path.grh, ah_attr.is_global);
         if (ah_attr.is_global) {
+            /* The traffic class is a GRH field. Firmware rejects a nonzero tclass on a
+             * LID-routed path without a GRH at INIT->RTR (#45), so set it only here. */
+            DEVX_SET(qpc, qpc, primary_address_path.tclass,
+                     ibgda_state->common.options->IB_TRAFFIC_CLASS);
             memcpy(DEVX_ADDR_OF(qpc, qpc, primary_address_path.rgid_rip), &dah.av->rgid,
                    sizeof(dah.av->rgid));
             DEVX_SET(qpc, qpc, primary_address_path.hop_limit, ah_attr.grh.hop_limit);
