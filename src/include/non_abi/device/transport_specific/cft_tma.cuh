@@ -90,6 +90,13 @@ struct route_backend<cft_tma_route> {
             return status;
         }
 #if NVSHMEMI_TS_CFT_HANDLES
+        /* A zero-length transfer moves nothing, so it needs only the route:
+         * registered shared memory and a valid logical endpoint for the peer. */
+        if (bytes == 0) {
+            return nvshmemi_tma_smem_registered() && nvshmemi_ld_and_check_valid_le_id(pe)
+                       ? NVSHMEMX_SUCCESS
+                       : NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
         /* The size and alignment parts of the stable predicate passed above,
          * so a false result is a missing capability. */
         if (!nvshmemi_is_le_implemented<false>(pe, bytes, scope_traits<Scope>::internal, remote,
@@ -251,13 +258,13 @@ struct route_backend<cft_tma_route> {
                                                                               size_t bytes,
                                                                               bool &shared_local) {
         shared_local = false;
+        if (bytes == 0) {
+            return NVSHMEMX_SUCCESS;
+        }
         if (bytes % CFT_HANDLE_TX_SIZE != 0 ||
             !nvshmemi_is_addr_offset_aligned(remote, CFT_HANDLE_TX_SIZE) ||
             !nvshmemi_tma_is_16b_aligned(reinterpret_cast<uintptr_t>(local))) {
             return NVSHMEMX_ERROR_INVALID_VALUE;
-        }
-        if (bytes == 0) {
-            return NVSHMEMX_SUCCESS;
         }
         shared_local = Local::is_shared(local);
         if constexpr (Local::kind == local_space::generic) {

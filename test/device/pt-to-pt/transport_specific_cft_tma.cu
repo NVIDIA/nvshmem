@@ -286,8 +286,9 @@ __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsig
     }
 }
 
-/* A zero-length transfer may name a null local operand: it succeeds once the
- * route is available and modifies nothing. */
+/* A zero-length transfer may name a null local operand and a misaligned
+ * remote address: it succeeds once the route is available and modifies
+ * nothing. */
 __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *remote_source,
                                    int peer, int *status) {
     constexpr auto kLocalDest = local_dest(kGeneric);
@@ -297,6 +298,14 @@ __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *r
     if (result == NVSHMEMX_SUCCESS) {
         result = nvshmemx_get_nbi<uint8_t, CFT, TMA, kBlock, kRemoteSource, kLocalDest>(
             nullptr, remote_source, 0, peer);
+    }
+    if (result == NVSHMEMX_SUCCESS) {
+        result = nvshmemx_put<uint8_t, CFT, TMA, kBlock, kGeneric, kRemoteDest>(remote + 1, nullptr,
+                                                                                0, peer);
+    }
+    if (result == NVSHMEMX_SUCCESS) {
+        result = nvshmemx_get<uint8_t, CFT, TMA, kBlock, kRemoteSource, kLocalDest>(
+            nullptr, remote_source + 1, 0, peer);
     }
     if (__syncthreads_or(result != NVSHMEMX_SUCCESS)) {
         result = result != NVSHMEMX_SUCCESS ? result : NVSHMEMX_ERROR_INTERNAL;
