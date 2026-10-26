@@ -37,6 +37,13 @@
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "non_abi/c/nvshmem_build_options.h"
 
+static inline size_t nvshmemi_get_tma_cft_smem_size(size_t requested_size) {
+    return nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE ||
+                   nvshmemi_device_state.has_cft_routed_peer
+               ? requested_size
+               : 0;
+}
+
 #ifndef likely
 #define likely(x) (__builtin_expect(!!(x), 1))
 #endif

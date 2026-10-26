@@ -49,7 +49,8 @@ void nvshmemi_call_alltoall_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
         in_cuda_graph = 1;
     }
 
-    const size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     alltoall_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, smem_size, stream>>>(
         team, dest, source, nelems, in_cuda_graph);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
