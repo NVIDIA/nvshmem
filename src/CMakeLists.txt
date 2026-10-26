@@ -307,6 +307,9 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
 
   add_custom_target(libnvshmem_device_ltoir ALL
                     DEPENDS ${LTOIR_VALIDATION_DEPENDS} ${LTOIR_ARCH_FILES})
+  # Code linked against this library, such as the cuTile TileLib's shims, is
+  # built for the same architectures.
+  set_target_properties(libnvshmem_device_ltoir PROPERTIES NVSHMEM_LTOIR_ARCHS "${LTOIR_LIB_ARCHS}")
 
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
           DESTINATION lib/
