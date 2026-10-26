@@ -290,8 +290,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_allpush_ll
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup(
+template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup_impl(
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int next_rank;
@@ -300,9 +300,22 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgr
     // nvshmemi_threadgroup_sync<SCOPE>();
     for (int ii = teami->my_pe; ii < teami->size + teami->my_pe; ii++) {
         next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
-        nvshmemi_put_nbi<T, SCOPE>(dest + dest_offset, source, nelems, next_rank);
+        nvshmemi_put_nbi<T, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(
+            dest + dest_offset, source, nelems, next_rank);
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup(
+    nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, false>(team, dest, source, dest_offset,
+                                                                    nelems);
+    } else {
+        nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, true>(team, dest, source, dest_offset,
+                                                                   nelems);
+    }
 }
 
 template <typename T, threadgroup_t SCOPE>

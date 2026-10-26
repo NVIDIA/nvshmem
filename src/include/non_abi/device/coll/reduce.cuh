@@ -1048,7 +1048,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_on_demand
 /* pWrk usage - (k - 1) * nreduce for step 1
               - k * step2_nphases * nreduce for receiving step 2 data
               - step2_nphases * nreduce for sending data of each phase */
-template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
+template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE, bool ALLOW_TMA>
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_threadgroup(
     nvshmem_team_t team, TYPE *dst, const TYPE *source, size_t nreduce) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
@@ -1113,8 +1113,9 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
             nvshmemi_threadgroup_sync<SCOPE>();
             for (int i = 0; i < k - 1; i++) {
                 size_t offset = recv_offset + k * phase * nreduce + num_small * nreduce;
-                nvshmemi_put_nbi<TYPE, SCOPE>(pWrk + offset, pWrk + send_offset + phase * nreduce,
-                                              nreduce, step2_nbrs[phase][i]);
+                nvshmemi_put_nbi<TYPE, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(
+                    pWrk + offset, pWrk + send_offset + phase * nreduce, nreduce,
+                    step2_nbrs[phase][i]);
             }
             if (!myIdx) {
                 nvshmemi_fence<nvshmemi_threadgroup_thread>();
@@ -1144,7 +1145,8 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void gpu_rdxn_recexch_t
     /* Step 3 */
     if (step1_nrecvs > 0) {
         for (int i = 0; i < step1_nrecvs; i++) {
-            nvshmemi_put_nbi<TYPE, SCOPE>(dst, dst, nreduce, step1_recvfrom[i]);
+            nvshmemi_put_nbi<TYPE, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(
+                dst, dst, nreduce, step1_recvfrom[i]);
         }
         if (!myIdx) {
             nvshmemi_fence<nvshmemi_threadgroup_thread>();
@@ -1208,7 +1210,7 @@ nvshmemi_gpu_rdxn_threadgroup_zcopy_get_bar_direct(nvshmem_team_t team, TYPE *de
     nvshmemi_barrier_threadgroup<SCOPE>(team);
 }
 
-template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
+template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE, bool ALLOW_TMA>
 NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_rdxn_segment_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nelems) {
     int type_size = sizeof(TYPE);
@@ -1264,7 +1266,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void gpu_rdxn_segment_t
             for (i = pe_offset; ((round < pes_per_round) && (i < teami->size)); i++) {
                 next_rank =
                     nvshmemi_team_translate_pe_to_team_world_wrap(teami, my_active_set_pe + i);
-                nvshmemi_put_nbi<TYPE, SCOPE>(
+                nvshmemi_put_nbi<TYPE, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(
                     (TYPE *)((TYPE *)tmp_operand + (round * (exchange_size / sizeof(TYPE)))),
                     (TYPE *)source + offset, (exchange_size / sizeof(TYPE)), next_rank);
                 round++;
@@ -1386,9 +1388,17 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void nvshmemi_gpu_rdxn_
                 sizeof(long)) >=
                    ((k - 1) * nreduce + k * teami->reduce_recexch.step2_nphases * nreduce +
                     teami->reduce_recexch.step2_nphases * nreduce)) {
-        gpu_rdxn_recexch_threadgroup<TYPE, OP, SCOPE>(team, dest, source, nreduce);
+        if (teami->has_cft_routed_peer) {
+            gpu_rdxn_recexch_threadgroup<TYPE, OP, SCOPE, false>(team, dest, source, nreduce);
+        } else {
+            gpu_rdxn_recexch_threadgroup<TYPE, OP, SCOPE, true>(team, dest, source, nreduce);
+        }
     } else {
-        gpu_rdxn_segment_threadgroup<TYPE, OP, SCOPE>(team, dest, source, nreduce);
+        if (teami->has_cft_routed_peer) {
+            gpu_rdxn_segment_threadgroup<TYPE, OP, SCOPE, false>(team, dest, source, nreduce);
+        } else {
+            gpu_rdxn_segment_threadgroup<TYPE, OP, SCOPE, true>(team, dest, source, nreduce);
+        }
     }
 #endif
 }
@@ -1942,9 +1952,10 @@ nvshmemi_double2_maxloc_reduce_alltoall_block(nvshmem_team_t team, double2 *dest
     for (int i = myIdx + 1; i < n_pes; i += groupSize) {
         int peer = (my_pe + i) % n_pes;
         size_t offset = 2 * sizeof(double2) * (my_pe + 2);
-        nvshmemi_put_nbi<uint64_t, NVSHMEMI_THREADGROUP_THREAD>(
-            (uint64_t *)(pWrk + offset), (uint64_t *)(pWrk), sizeof(double2) / sizeof(uint32_t),
-            nvshmemi_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD));
+        nvshmemi_put_nbi<uint64_t, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE,
+                         false>((uint64_t *)(pWrk + offset), (uint64_t *)(pWrk),
+                                sizeof(double2) / sizeof(uint32_t),
+                                nvshmemi_team_translate_pe(team, peer, NVSHMEM_TEAM_WORLD));
     }
 
     if (!myIdx) {

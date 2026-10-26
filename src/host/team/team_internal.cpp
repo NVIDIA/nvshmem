@@ -22,20 +22,21 @@
 #include "cpu_coll.h"                                      // for nccl_ftable
 #include "c_api/nvshmemx_uniqueid.h"                       // for nvshmemx_team_uniqueid_t
 #include "non_abi/device/common/nvshmem_common.cuh"        // for nvshmemi_pe_i...
-#include "bootstrap_host_transport/env_defs_internal.h"    // for nvshmemi_opti...
-#include "c_api/nvshmem_api.h"                             // for nvshmem_quiet
-#include "c_api/nvshmem_coll_api.h"                        // for nvshmem_team_...
-#include "c_api/nvshmemx_api.h"                            // for nvshmemx_char...
-#include "non_abi/c/nvshmemi_error_macros.h"               // for NVSHMEMI_NULL...
-#include "internal/host/debug.h"                           // for INFO, NVSHMEM...
-#include "internal/host/nvshmem_internal.h"                // for nvshmemi_free
-#include "internal/host/nvshmemi_coll.h"                   // for nvshmemi_barrier
-#include "internal/host/nvshmemi_symmetric_heap.hpp"       // for nvshmemi_symm...
-#include "internal/host/nvshmemi_mem_transport.hpp"        // for nvshmemi_mem_p2p_transport
-#include "internal/host/nvshmemi_nvls_observer.hpp"        // for nvshmemi_nvls_observer
-#include "internal/host/nvshmemi_team.h"                   // for N_PSYNC_BYTES
-#include "internal/host/nvshmemi_types.h"                  // for nvshmemi_state
-#include "internal/host/util.h"                            // for CUDA_RUNTIME_...
+#include "non_abi/device/common/logical_endpoint_types.h"
+#include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_opti...
+#include "c_api/nvshmem_api.h"                           // for nvshmem_quiet
+#include "c_api/nvshmem_coll_api.h"                      // for nvshmem_team_...
+#include "c_api/nvshmemx_api.h"                          // for nvshmemx_char...
+#include "non_abi/c/nvshmemi_error_macros.h"             // for NVSHMEMI_NULL...
+#include "internal/host/debug.h"                         // for INFO, NVSHMEM...
+#include "internal/host/nvshmem_internal.h"              // for nvshmemi_free
+#include "internal/host/nvshmemi_coll.h"                 // for nvshmemi_barrier
+#include "internal/host/nvshmemi_symmetric_heap.hpp"     // for nvshmemi_symm...
+#include "internal/host/nvshmemi_mem_transport.hpp"      // for nvshmemi_mem_p2p_transport
+#include "internal/host/nvshmemi_nvls_observer.hpp"      // for nvshmemi_nvls_observer
+#include "internal/host/nvshmemi_team.h"                 // for N_PSYNC_BYTES
+#include "internal/host/nvshmemi_types.h"                // for nvshmemi_state
+#include "internal/host/util.h"                          // for CUDA_RUNTIME_...
 #include "internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h"  // for nvshmemi_boot...
 #include "internal/host_transport/transport.h"                             // for nvshmem_trans...
 #include "non_abi/c/nvshmem_build_options.h"                               // for NVSHMEM_USE_NCCL
@@ -726,6 +727,26 @@ void nvshmemi_team_init_nccl_comm(nvshmemi_team_t *teami) {
 #endif /* NVSHMEM_USE_NCCL */
 void nvshmemi_team_set_p2p_connectivity(nvshmemi_team_t *teami) {
     teami->are_gpus_p2p_connected = nvshmemi_team_is_subset(teami, nvshmemi_team_shared);
+    teami->has_cft_routed_peer = false;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if (const uint64_t *unicast_le_ids = nvshmemi_state->heap_obj->get_unicast_le_ids()) {
+        const auto &peer_heap_bases = nvshmemi_state->heap_obj->get_local_pe_bases();
+        for (int i = 0; i < teami->size; i++) {
+            const int pe = teami->pe_mapping[i];
+            if (pe == nvshmemi_state->mype || !IS_VALID_LE_ID(unicast_le_ids[pe])) {
+                continue;
+            }
+#if defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+            teami->has_cft_routed_peer = true;
+#else
+            teami->has_cft_routed_peer = peer_heap_bases[pe] == nullptr;
+#endif
+            if (teami->has_cft_routed_peer) {
+                break;
+            }
+        }
+    }
+#endif
 }
 
 void nvshmemi_team_set_nvls_connectivity(nvshmemi_team_t *teami) {
