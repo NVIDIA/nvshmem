@@ -155,8 +155,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_internode_tree_thre
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
+template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup_impl(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root, int k) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     const int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -209,9 +209,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
 
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
         if (!is_remote) {
-            nvshmemii_put_nbi<uint64_t, SCOPE>((uint64_t *)(pWrk + recv_offset),
-                                               (uint64_t *)(pWrk + recv_offset),
-                                               nelems * sizeof(T) / sizeof(uint32_t), child);
+            nvshmemii_put_nbi<uint64_t, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(
+                (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
+                nelems * sizeof(T) / sizeof(uint32_t), child);
         }
     }
 
@@ -222,6 +222,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
         teami->bcast_sync_offset += sizeof(T) * nelems * 2;
     }
     nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
+    nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root, int k) {
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, false>(team, dest, source, nelems, PE_root,
+                                                              k);
+    } else {
+        nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, true>(team, dest, source, nelems, PE_root,
+                                                             k);
+    }
 }
 
 template <typename T, threadgroup_t SCOPE>
@@ -294,8 +306,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_nonLL_tree_threadgr
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup(
+template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup_impl(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int i;
@@ -303,10 +315,23 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup
     if (root == nvshmemi_device_state_d.mype) {
         for (i = 0; i < teami->size; i++) {
             int pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, i);
-            nvshmemi_put_nbi<T, SCOPE>(dest, source, nelems, pe);
+            nvshmemi_put_nbi<T, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(dest, source,
+                                                                                  nelems, pe);
         }
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup(
+    nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, false>(team, dest, source, nelems,
+                                                                 PE_root);
+    } else {
+        nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, true>(team, dest, source, nelems,
+                                                                PE_root);
+    }
 }
 
 template <typename T, threadgroup_t SCOPE>

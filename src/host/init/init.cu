@@ -2194,6 +2194,23 @@ int nvshmemi_init_device_state(nvshmemi_state_t *state) {
     nvshmemi_device_state.counted_operations_available =
         state->heap_obj->counted_operations_available();
     nvshmemi_device_state.unicast_le_ids_ = (void *)unicast_le_ids_dptr;
+    nvshmemi_device_state.has_cft_routed_peer = false;
+    if (const uint64_t *unicast_le_ids = state->heap_obj->get_unicast_le_ids()) {
+        const auto &peer_heap_bases = state->heap_obj->get_local_pe_bases();
+        for (int pe = 0; pe < state->npes; pe++) {
+            if (pe == state->mype || !IS_VALID_LE_ID(unicast_le_ids[pe])) {
+                continue;
+            }
+#if defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT)
+            nvshmemi_device_state.has_cft_routed_peer = true;
+#else
+            nvshmemi_device_state.has_cft_routed_peer = peer_heap_bases[pe] == nullptr;
+#endif
+            if (nvshmemi_device_state.has_cft_routed_peer) {
+                break;
+            }
+        }
+    }
 #endif
 
     CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(state->my_stream), status, out);

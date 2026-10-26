@@ -117,6 +117,7 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
         NULL,                                           /* pe_mapping */               \
         TEAM_ULSCALAR_INVALID,                          /* p2p_sync_on_stream_count */ \
         false,                                          /* are_gpus_nvls_connected */  \
+        false,                                          /* has_cft_routed_peer */      \
         TEAM_ULSCALAR_DEFAULT,                          /* mc_leid_with_flag */        \
     }
 
@@ -206,7 +207,8 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
         NULL,                                             /* region_active_count */               \
         0,                                                /* region_slots_len */                  \
         0,                                                /* region_slot_probe_limit */           \
-        false                                             /* mapped_peer_atomics */               \
+        false,                                            /* mapped_peer_atomics */               \
+        false                                             /* has_cft_routed_peer */               \
     }
 #else
 #include <cuda/std/cstddef>
@@ -281,6 +283,7 @@ typedef struct {
     int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
     uint64_t p2p_sync_on_stream_count;
     bool are_gpus_nvls_connected;
+    bool has_cft_routed_peer;
     uint64_t mc_leid_with_flag; /* Logical endpoint ID with valid flag for multicast */
 } nvshmemi_team_v4;
 
@@ -489,6 +492,7 @@ typedef struct {
     uint32_t region_slots_len;
     uint32_t region_slot_probe_limit;
     bool mapped_peer_atomics; /* Every P2P-mapped peer supports native GPU atomics */
+    bool has_cft_routed_peer;
 } nvshmemi_device_host_state_v1;
 static_assert(sizeof(nvshmemi_device_host_state_v1) == 856,
               "device_host_state_v1 must be 856 bytes.");

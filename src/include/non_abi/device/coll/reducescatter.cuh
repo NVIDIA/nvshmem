@@ -34,8 +34,8 @@ namespace cg = cooperative_groups;
 
 #ifdef __CUDA_ARCH__
 
-template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup(
+template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE, bool ALLOW_TMA>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup_impl(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     TYPE *pWrk = (TYPE *)nvshmemi_team_get_psync(teami, REDUCE);
@@ -57,7 +57,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
     for (int i = 1; i < teami->size; i++) {  // don't send to self
         int peer_pe_idx = (teami->my_pe + i) % teami->size;
         int peer_pe = nvshmemi_team_translate_pe(team, peer_pe_idx, NVSHMEM_TEAM_WORLD);
-        nvshmemii_put_nbi<TYPE, SCOPE>(
+        nvshmemii_put_nbi<TYPE, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, ALLOW_TMA>(
             (TYPE *)((char *)pWrk + teami->my_pe * nreduce * sizeof(TYPE)),
             source + peer_pe_idx * nreduce, nreduce, peer_pe);
     }
@@ -89,6 +89,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
         gpu_linear_reduce_threadgroup<TYPE, OP, SCOPE>(op1, op2, op3, nreduce);
     }
     nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup(
+    nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE, false>(team, dest, source,
+                                                                                nreduce);
+    } else {
+        nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE, true>(team, dest, source,
+                                                                               nreduce);
+    }
 }
 
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>

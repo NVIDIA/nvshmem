@@ -49,8 +49,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
                 (void *)(dest + dst_offset), (void *)(source + src_offset), msgsize,
                 (void *)(psync + mype), 1ULL, NVSHMEMI_AMO_SIGNAL_ADD, next_rank);
         } else if (msgsize <= NVSHMEMI_ALLTOALL_SMALL_MSGSIZE) {
-            nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(dest + dst_offset, source + src_offset,
-                                                             nelems, next_rank);
+            nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE, false>(
+                dest + dst_offset, source + src_offset, nelems, next_rank);
         }
     }
 
@@ -67,8 +67,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
                     (const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p +
                     next_rank);
                 if (peer_base_addr) {
-                    nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_WARP>(
-                        dest + dst_offset, source + src_offset, nelems, next_rank);
+                    nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_WARP, NVSHMEMI_REGION_OPERATION_NONE,
+                                     false>(dest + dst_offset, source + src_offset, nelems,
+                                            next_rank);
                 }
             }
         }
@@ -87,11 +88,11 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
     }
 
     nvshmemi_threadgroup_sync<SCOPE>();
-    /* A fence and signal is required - note that we can skip any size check here because it's
-     * inherent in the boolean. */
+    /* Complete asynchronous CFT/TMA puts and order direct P2P stores before publishing the
+     * completion signals. The fence helper handles disabled or unused transports internally. */
+    nvshmemi_fence<SCOPE>();
     if (myIdx == 0) {
         atomicAdd((unsigned long long *)pwrk, 1ULL);
-        __threadfence_system();
     }
     nvshmemi_threadgroup_sync<SCOPE>();
     for (int i = myIdx; i < PE_size; i += groupSize) {

@@ -79,6 +79,9 @@ __host__ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_ask_smem(
  * Block-scoped TMA puts from global-memory sources use a double-buffered
  * staging path that additionally requires at least two full warps in the CTA;
  * smaller CTAs fall back to P2P stores.
+ * Independent thread- or warp-scoped TMA operations and CFT operations must
+ * not concurrently use the same registered CTA shared-memory buffer. The
+ * caller must serialize those operations.
  *
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))

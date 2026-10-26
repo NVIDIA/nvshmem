@@ -1511,7 +1511,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA = true>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1524,19 +1524,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        const auto registration = nvshmemi_tma_get_smem_registration();
-        if (registration.is_valid()) {
-            if (__isShared(dest)) {
-                if (nvshmemi_memcpy_tma_global_shared<SCOPE>(
-                        registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
-                    nvshmemi_threadgroup_sync<SCOPE>();
-                    return;
-                }
-            } else {
-                if (nvshmemi_memcpy_tma_global_global<SCOPE>(
-                        registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
-                    nvshmemi_threadgroup_sync<SCOPE>();
-                    return;
+        if constexpr (ALLOW_TMA) {
+            const auto registration = nvshmemi_tma_get_smem_registration();
+            if (registration.is_valid()) {
+                if (__isShared(dest)) {
+                    if (nvshmemi_memcpy_tma_global_shared<SCOPE>(
+                            registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
+                        nvshmemi_threadgroup_sync<SCOPE>();
+                        return;
+                    }
+                } else {
+                    if (nvshmemi_memcpy_tma_global_global<SCOPE>(
+                            registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
+                        nvshmemi_threadgroup_sync<SCOPE>();
+                        return;
+                    }
                 }
             }
         }
@@ -1575,7 +1577,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
 }
 
 template <typename T, threadgroup_t SCOPE,
-          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
+          bool ALLOW_TMA = true>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1589,11 +1592,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         size_t nbytes = nelems * sizeof(T);
         /* TMA fast path when this CTA registered smem.  Fall through to P2P
          * stores on alignment/size/registration failure. */
-        const auto registration = nvshmemi_tma_get_smem_registration();
-        if (registration.is_valid() &&
-            nvshmemi_memcpy_tma_nbi<SCOPE>(registration, (void *)dest_actual, (const void *)source,
-                                           nbytes) == 0) {
-            return;
+        if constexpr (ALLOW_TMA) {
+            const auto registration = nvshmemi_tma_get_smem_registration();
+            if (registration.is_valid() &&
+                nvshmemi_memcpy_tma_nbi<SCOPE>(registration, (void *)dest_actual,
+                                               (const void *)source, nbytes) == 0) {
+                return;
+            }
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
@@ -1607,12 +1612,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
 }
 
 template <typename T, threadgroup_t SCOPE,
-          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
+          bool ALLOW_TMA = true>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION>(dest, source, nelems, pe, qp_index);
+    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION, ALLOW_TMA>(dest, source, nelems, pe, qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -3382,6 +3388,7 @@ nvshmemi_handle_atomic_once(const nvshmemi_tma_smem_registration_t &registration
         nvshmemi_handle_barrier_slot(smem_base, warp_idx_in_block * TMA_COPY_NUM_STAGES);
 
     if (lane_idx == leader_lane) {
+        nvshmemi_cft_thread_mutex_lock(smem_base);
         /* prepare_handle() preserves pending batches owned by this same warp.
          * Drain explicitly before overwriting staging memory that such a batch
          * may still be reading. The atomic itself is blocking, so retaining the
@@ -3422,7 +3429,13 @@ nvshmemi_handle_atomic_once(const nvshmemi_tma_smem_registration_t &registration
     }
     __syncwarp(active_mask);
 
-    return *reinterpret_cast<T *>(return_value_smem);
+    const T result = *reinterpret_cast<T *>(return_value_smem);
+    __syncwarp(active_mask);
+
+    if (lane_idx == leader_lane) {
+        nvshmemi_cft_thread_mutex_unlock(smem_base);
+    }
+    return result;
 }
 
 template <typename T>
