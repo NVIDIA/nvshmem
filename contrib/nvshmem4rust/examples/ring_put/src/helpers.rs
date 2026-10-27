@@ -30,17 +30,17 @@ pub fn copy_to<T: Copy>(
     }
 }
 
-pub fn copy_from(
+pub fn copy_from<T: Copy + Default>(
     ctx: &CudaContext,
-    buf: &SymmetricBuffer<i32>,
-) -> Result<Vec<i32>, DriverError> {
+    buf: &SymmetricBuffer<T>,
+) -> Result<Vec<T>, DriverError> {
     ctx.bind_to_thread()?;
-    let mut values = vec![0i32; buf.len()];
+    let mut values = vec![T::default(); buf.len()];
     unsafe {
         memory::memcpy_dtoh_async(
             values.as_mut_ptr(),
             buf.as_mut_ptr() as sys::CUdeviceptr,
-            buf.len() * size_of::<i32>(),
+            buf.len() * size_of::<T>(),
             ptr::null_mut(),
         )?;
     }
@@ -49,13 +49,7 @@ pub fn copy_from(
 }
 
 /// Launch `name` from `module`. Each arg is a reference to a kernel parameter.
-///
-/// # Safety
-///
-/// `name` must be a kernel in `module` whose parameters match `args` in number,
-/// order and type, and every pointer argument must be valid for the accesses the
-/// kernel makes until it completes.
-pub unsafe fn launch(
+pub fn launch(
     module: &Arc<CudaModule>,
     cfg: LaunchConfig,
     name: &str,
