@@ -40,8 +40,9 @@
 #include "internal/host_transport/nvshmemi_transport_defines.h"  // for nvshmem_mem_handle_t, NVSHM...
 #include "internal/host_transport/transport.h"  // for nvshmem_transport, nvshmem_...
 #include "transport_common.h"                   // for nvshmemt_ibv_function_table
-#include "transport_ib_common.h"                // for nvshmemt_ib_common_mem_handle
-#include "transport_mlx5_common.h"              // for nvshmemt_ib_common_check_ni...
+#include "transport_nonuniform.hpp"
+#include "transport_ib_common.h"    // for nvshmemt_ib_common_mem_handle
+#include "transport_mlx5_common.h"  // for nvshmemt_ib_common_check_ni...
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
 #endif
@@ -4450,6 +4451,21 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
     status = ibgda_connect_global_setup(ibgda_state, num_selected_devs, selected_dev_ids);
     if (status) {
         return status;
+    }
+
+    std::vector<int> devices(ibgda_state->selected_dev_ids,
+                             ibgda_state->selected_dev_ids + ibgda_state->n_devs_selected);
+    std::vector<int> ports(ibgda_state->selected_port_ids,
+                           ibgda_state->selected_port_ids + ibgda_state->n_devs_selected);
+    bool nonuniform = false;
+    status = nvshmemt_limit_nonuniform_devices(t->boot_handle, devices, ports, nonuniform);
+    if (status) {
+        return status;
+    }
+    if (nonuniform) {
+        std::copy(devices.begin(), devices.end(), ibgda_state->selected_dev_ids);
+        std::copy(ports.begin(), ports.end(), ibgda_state->selected_port_ids);
+        ibgda_state->n_devs_selected = devices.size();
     }
 
     status = ibgda_configure_multinic_amo_routing(t, ibgda_state);
