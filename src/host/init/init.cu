@@ -1696,9 +1696,15 @@ void nvshmemid_hostlib_finalize(void *device_ctx, void *transport_device_ctx) {
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                               "Teams cleanup device synchronization failed \n");
         nvshmemi_region_host_reset();
-        status = nvshmemi_device_rma_finalize();
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                              "Device RMA state cleanup failed\n");
+        const int device_rma_status = nvshmemi_device_rma_finalize();
+        if (device_rma_status) {
+            // Device work is synchronized above. Retain state that cannot be
+            // reclaimed safely, but do not strand peers in the teardown barrier.
+            WARN(
+                "Device RMA state cleanup failed (%d); continuing finalization without "
+                "reclaiming that allocation",
+                device_rma_status);
+        }
 
         /* barrier to ensure all previous ops are complete */
         nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
