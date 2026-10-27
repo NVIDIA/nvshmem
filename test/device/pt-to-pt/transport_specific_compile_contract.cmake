@@ -5,7 +5,8 @@
 # build step instead of ordinary executables: the positive fixture must
 # compile, and each negative fixture must fail during CUDA compilation with its
 # expected diagnostic, before linking or requiring a GPU. A final PTX check
-# confirms which local memory-space spellings classify with __isShared.
+# confirms which local memory-space spellings classify with __isShared or
+# __isGlobal.
 
 foreach(_required_var CUDA_COMPILER CUDA_GENCODE PACKAGE_INCLUDE_DIR TEST_COMMON_INCLUDE_DIR
                       CONTRACT_SOURCE CONTRACT_BINARY_DIR)
@@ -186,14 +187,18 @@ if(_control_symbols MATCHES "transport_specific_contract_expects_transfer_symbol
           "nvshmemi_transfer_* reference, so the P2P-only symbol check can no longer observe one")
 endif()
 
-# __isShared lowers to the PTX shared-window test. Explicit shared and global
-# local operands of Pointer / SM, Pointer / TMA, CFT / TMA, and Auto / Network must
-# compile without it, while the generic spelling must still classify.
-function(compile_ptx name)
+# __isShared and __isGlobal lower to the PTX shared- and global-window tests.
+# Explicit shared and global local operands must compile without either on
+# every route, in the route and in the stable helpers it calls, while the
+# generic spelling must still classify. A variant compiles the PTX for one
+# target architecture; it fails unless every PTX pattern in REQUIRE is present
+# in each of its builds, which proves the variant compiled the code it is
+# meant to check.
+function(compile_ptx name arch)
   set(_ptx "${CONTRACT_BINARY_DIR}/${name}.ptx")
   file(REMOVE "${_ptx}")
   execute_process(
-    COMMAND ${_compiler_command} ${ARGN} -std=c++17 -rdc=true -arch=sm_90 -ptx
+    COMMAND ${_compiler_command} ${ARGN} -std=c++17 -rdc=true -arch=${arch} -ptx
             "${CONTRACT_SOURCE}" -o "${_ptx}"
     RESULT_VARIABLE _result
     OUTPUT_VARIABLE _stdout
@@ -202,23 +207,66 @@ function(compile_ptx name)
     message(FATAL_ERROR
             "transport-specific compile contract '${name}' failed to compile:\n${_stdout}\n${_stderr}")
   endif()
-  file(STRINGS "${_ptx}" _shared_tests REGEX "isspacep\\.shared")
-  list(LENGTH _shared_tests _count)
-  set(${name}_shared_tests ${_count} PARENT_SCOPE)
+  file(READ "${_ptx}" _ptx_text)
+  set(${name}_ptx "${_ptx_text}" PARENT_SCOPE)
 endfunction()
 
-foreach(_space shared global generic)
-  compile_ptx(memory_space_${_space} -DCONTRACT_CASE_memory_space_ptx -DLOCAL_SPACE=${_space})
-  set(_count ${memory_space_${_space}_shared_tests})
-  if(_space STREQUAL "generic")
-    if(_count EQUAL 0)
-      message(FATAL_ERROR
-              "transport-specific compile contract 'memory_space_generic' has no __isShared "
-              "classification; the PTX check can no longer observe it")
-    endif()
-  elseif(NOT _count EQUAL 0)
-    message(FATAL_ERROR
-            "transport-specific compile contract 'memory_space_${_space}': explicit ${_space} "
-            "instantiations contain ${_count} isspacep.shared (__isShared) instructions")
-  endif()
-endforeach()
+function(check_memory_spaces variant arch)
+  cmake_parse_arguments(_check "" "" "REQUIRE" ${ARGN})
+  foreach(_space shared global generic)
+    set(_name ${variant}_${_space})
+    compile_ptx(${_name} ${arch} -DCONTRACT_CASE_memory_space_ptx -DLOCAL_SPACE=${_space})
+    foreach(_required IN LISTS _check_REQUIRE)
+      if(NOT ${_name}_ptx MATCHES "${_required}")
+        message(FATAL_ERROR
+                "transport-specific compile contract '${_name}': the ${arch} PTX has no "
+                "'${_required}', so the check cannot observe the code it covers")
+      endif()
+    endforeach()
+    foreach(_window shared global)
+      string(REGEX MATCHALL "isspacep\\.${_window}" _tests "${${_name}_ptx}")
+      list(LENGTH _tests _count)
+      if(_space STREQUAL "generic")
+        if(_count EQUAL 0)
+          message(FATAL_ERROR
+                  "transport-specific compile contract '${_name}' has no isspacep.${_window} "
+                  "classification; the PTX check can no longer observe it")
+        endif()
+      elseif(NOT _count EQUAL 0)
+        message(FATAL_ERROR
+                "transport-specific compile contract '${_name}': explicit ${_space} "
+                "instantiations contain ${_count} isspacep.${_window} (run-time memory-space "
+                "classification) instructions")
+      endif()
+    endforeach()
+  endforeach()
+endfunction()
+
+check_memory_spaces(memory_space sm_90)
+
+# The CFT/TMA handle path, and the stable handle helpers it and Auto / Auto
+# call, compile only in a package built with NVSHMEM_CFT_HANDLES_SUPPORT, for
+# sm_100 or later, with CUDA 13.3 or later. Check them when this package and
+# compiler can build them.
+file(STRINGS "${PACKAGE_INCLUDE_DIR}/non_abi/c/nvshmem_build_options.h" _cft_handles_define
+     REGEX "^#define[ \t]+NVSHMEM_CFT_HANDLES_SUPPORT")
+execute_process(
+  COMMAND "${CUDA_COMPILER}" --version
+  RESULT_VARIABLE _version_result
+  OUTPUT_VARIABLE _version_output
+  ERROR_QUIET)
+set(_cuda_version "0")
+if(_version_result EQUAL 0 AND _version_output MATCHES "release ([0-9]+\\.[0-9]+)")
+  set(_cuda_version "${CMAKE_MATCH_1}")
+endif()
+if(NOT _cft_handles_define)
+  message(STATUS
+          "transport-specific compile contract: skipping the CFT handle-path memory-space "
+          "check; the package was built without NVSHMEM_CFT_HANDLES_SUPPORT")
+elseif(_cuda_version VERSION_LESS "13.3")
+  message(STATUS
+          "transport-specific compile contract: skipping the CFT handle-path memory-space "
+          "check; it needs CUDA 13.3 or later (found ${_cuda_version})")
+else()
+  check_memory_spaces(memory_space_cft sm_100 REQUIRE "fabric\\.")
+endif()

@@ -81,6 +81,7 @@ if(NVSHMEM_ENABLE_TRANSPORT_POLICY)
             ${CMAKE_CURRENT_SOURCE_DIR}/transport_specific_compile_contract.cu
             ${_transport_specific_headers}
             "${_transport_specific_package_include}/nvshmemx.h"
+            "${_transport_specific_package_include}/non_abi/device/common/nvshmemi_common_device.cuh"
         COMMENT "Checking transport-specific compile contracts"
         VERBATIM)
     add_custom_target(device_transport_specific_compile_contract ALL

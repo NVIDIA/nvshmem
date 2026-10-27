@@ -75,6 +75,26 @@ __device__ __forceinline__ const void *nvshmemi_ptr_add(const void *ptr, size_t 
     return static_cast<const void *>(static_cast<const char *>(ptr) + byte_offset);
 }
 
+/* What a caller knows at compile time about a local operand's memory space.
+ * UNKNOWN, the default of every helper that takes it, classifies the pointer at
+ * run time; SHARED and GLOBAL are trusted and select their path without
+ * classifying. */
+enum nvshmemi_local_space_t {
+    NVSHMEMI_LOCAL_SPACE_UNKNOWN = 0,
+    NVSHMEMI_LOCAL_SPACE_SHARED,
+    NVSHMEMI_LOCAL_SPACE_GLOBAL,
+};
+
+/* Whether a local operand is in shared memory: the known answer, or
+ * __isShared for UNKNOWN. LOCAL_SPACE must be a constant expression, so the
+ * unused arms fold away. It is a macro rather than a function so that UNKNOWN
+ * callers compile exactly as with a bare __isShared: an extra call level, even
+ * a force-inlined one, changes the inliner's decisions in the callers. */
+#define NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, ptr)          \
+    ((LOCAL_SPACE) == NVSHMEMI_LOCAL_SPACE_SHARED   ? true  \
+     : (LOCAL_SPACE) == NVSHMEMI_LOCAL_SPACE_GLOBAL ? false \
+                                                    : __isShared(ptr))
+
 /* This is used to create custom floating type traits such fp16, fp8, and native float types etc
  */
 #if !defined __CUDACC_RTC__
@@ -161,12 +181,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_atomic_nonfetch(T 
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 // forward declaration
 
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *src, void *dst,
                                                                   size_t len, int pe,
                                                                   bool is_blocking);
 
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *src, void *dst,
                                                                   size_t len, int pe,
                                                                   bool is_blocking);
@@ -1285,22 +1305,22 @@ __device__ inline int nvshmemi_memcpy_tma_global_shared(
  * Returns the underlying rc (0 on success; -1 on alignment/size
  * mismatch or non-supported target).
  */
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma(
     const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *source,
     size_t nbytes) {
-    if (__isShared(source)) {
+    if (NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, source)) {
         return nvshmemi_memcpy_tma_shared_global<SCOPE>(gmem_dst, source, nbytes);
     } else {
         return nvshmemi_memcpy_tma_global_global<SCOPE>(registration, gmem_dst, source, nbytes);
     }
 }
 
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_memcpy_tma_nbi(
     const nvshmemi_tma_smem_registration_t &registration, void *gmem_dst, const void *source,
     size_t nbytes) {
-    if (__isShared(source)) {
+    if (NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, source)) {
         return nvshmemi_memcpy_tma_shared_global_nbi<SCOPE>(gmem_dst, source, nbytes);
     }
     return nvshmemi_memcpy_tma_global_global_nbi<SCOPE>(registration, gmem_dst, source, nbytes);
@@ -1487,7 +1507,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_rma_nbi(void *rptr, void 
 }
 
 template <typename T, threadgroup_t SCOPE,
-          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE>
+          nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1501,7 +1522,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         size_t nbytes = nelems * sizeof(T);
         const auto registration = nvshmemi_tma_get_smem_registration();
         if (registration.is_valid()) {
-            if (__isShared(dest)) {
+            if (NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, dest)) {
                 if (nvshmemi_memcpy_tma_global_shared<SCOPE>(
                         registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
                     return;
@@ -1516,7 +1537,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
-        nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
+        nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1529,7 +1550,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA = true>
+template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA = true,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1544,7 +1566,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         if constexpr (ALLOW_TMA) {
             const auto registration = nvshmemi_tma_get_smem_registration();
             if (registration.is_valid()) {
-                if (__isShared(dest)) {
+                if (NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, dest)) {
                     if (nvshmemi_memcpy_tma_global_shared<SCOPE>(
                             registration, (void *)dest, (const void *)source_actual, nbytes) == 0) {
                         nvshmemi_threadgroup_sync<SCOPE>();
@@ -1562,7 +1584,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
-        nvshmemi_handle_get<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
+        nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, true);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1603,7 +1625,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
 
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_TMA = true>
+          bool ALLOW_TMA = true, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1619,15 +1641,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         if constexpr (ALLOW_TMA) {
             const auto registration = nvshmemi_tma_get_smem_registration();
             if (registration.is_valid() &&
-                nvshmemi_memcpy_tma_nbi<SCOPE>(registration, (void *)dest_actual,
-                                               (const void *)source, nbytes) == 0) {
+                nvshmemi_memcpy_tma_nbi<SCOPE, LOCAL_SPACE>(registration, (void *)dest_actual,
+                                                            (const void *)source, nbytes) == 0) {
                 return;
             }
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
-        nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, false);
+        nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1641,16 +1663,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
 
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_TMA = true>
+          bool ALLOW_TMA = true, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION, ALLOW_TMA>(dest, source, nelems, pe, qp_index);
+    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION, ALLOW_TMA, LOCAL_SPACE>(dest, source, nelems, pe,
+                                                                          qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1667,15 +1691,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
          * redundant in the TMA path but harmless. */
         const auto registration = nvshmemi_tma_get_smem_registration();
         if (registration.is_valid() &&
-            nvshmemi_memcpy_tma<SCOPE>(registration, (void *)dest_actual, (const void *)source,
-                                       nbytes) == 0) {
+            nvshmemi_memcpy_tma<SCOPE, LOCAL_SPACE>(registration, (void *)dest_actual,
+                                                    (const void *)source, nbytes) == 0) {
             nvshmemi_threadgroup_sync<SCOPE>();
             return;
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
-        nvshmemi_handle_put<SCOPE>((void *)source, (void *)dest, nelems * sizeof(T), pe, true);
+        nvshmemi_handle_put<SCOPE, LOCAL_SPACE>((void *)source, (void *)dest, nelems * sizeof(T),
+                                                pe, true);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1736,7 +1761,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
     int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1754,8 +1780,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
          */
         const auto registration = nvshmemi_tma_get_smem_registration();
         if (registration.is_valid() &&
-            nvshmemi_memcpy_tma<SCOPE>(registration, (void *)dest_actual, (const void *)source,
-                                       nbytes) == 0) {
+            nvshmemi_memcpy_tma<SCOPE, LOCAL_SPACE>(registration, (void *)dest_actual,
+                                                    (const void *)source, nbytes) == 0) {
             nvshmemi_threadgroup_sync<SCOPE>();
             if (!myIdx) {
                 __threadfence_system();
@@ -1771,7 +1797,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
-        nvshmemi_handle_put<SCOPE>(source, dest, nelems * sizeof(T), pe, true);
+        nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, true);
         nvshmemi_threadgroup_sync<SCOPE>();
         if (!myIdx) {
             __threadfence_system();
@@ -1800,13 +1826,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
+template <typename T, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_signal(
     T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
     int pe, bool is_nbi, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_signal<T, SCOPE>(dest, source, nelems, sig_addr, signal, sig_op, pe, is_nbi,
-                                   qp_index);
+    nvshmemii_put_signal<T, SCOPE, LOCAL_SPACE>(dest, source, nelems, sig_addr, signal, sig_op, pe,
+                                                is_nbi, qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -2446,7 +2473,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_try_get_wrapper_thread(
 
 /* Multi-warp threadgroups use separate producer/consumer warp leaders, so
  * double-buffering can overlap TMA loads with fabric puts. */
-template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
+template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_threadgroup_specialized(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
@@ -2460,7 +2488,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
         assert(((blockDim.x * blockDim.y * blockDim.z) % (4 * warpSize)) == 0);
     }
 
-    const bool is_src_shared = __isShared(src);
+    const bool is_src_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, src);
     if (is_src_shared) {
         assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src));
     }
@@ -2616,7 +2644,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_use_threadgroup_specializ
  * Generic non-thread scopes are single-issuer, so use one full per-threadgroup
  * tile to reduce per-chunk TMA/fabric overhead instead of double-buffering.
  */
-template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
+template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generic(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
@@ -2629,7 +2658,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
 
     assert((len % CFT_HANDLE_TX_SIZE) == 0);
     assert(is_thrdgrp_smem_rsc_available<SCOPE>(smem_chunk_size));
-    const bool is_src_shared = __isShared(src);
+    const bool is_src_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, src);
     if (is_src_shared) {
         assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src));
     }
@@ -2720,7 +2749,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_generi
     }
 }
 
-template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
+template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
@@ -2728,13 +2758,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size(
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
         if (nvshmemi_use_threadgroup_specialized_handle_path<SCOPE>(registration,
                                                                     smem_chunk_size)) {
-            nvshmemi_handle_put_TX_size_threadgroup_specialized<cft_handle_kind, SCOPE>(
+            nvshmemi_handle_put_TX_size_threadgroup_specialized<cft_handle_kind, SCOPE,
+                                                                LOCAL_SPACE>(
                 registration, dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
             return;
         }
     }
 
-    nvshmemi_handle_put_TX_size_generic<cft_handle_kind, SCOPE>(
+    nvshmemi_handle_put_TX_size_generic<cft_handle_kind, SCOPE, LOCAL_SPACE>(
         registration, dst, src, len, dest_le_id, is_blocking, smem_chunk_size);
 }
 
@@ -2760,7 +2791,8 @@ nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Multicast, NVSHMEMI_THREADGRO
 }
 
 // Function used for 1 single sub 16B data transfer
-template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE>
+template <le_fabric_handle_kind cft_handle_kind, threadgroup_t SCOPE,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, CUlogicalEndpointId dest_le_id, bool is_blocking,
@@ -2775,7 +2807,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_sub_TX_size(
     // For larger transfers, use the regular nvshmemi_handle_put16B function
     assert(len < CFT_HANDLE_TX_SIZE);
     assert(is_thrdgrp_smem_rsc_available<SCOPE>(smem_chunk_size));
-    const bool is_src_shared = __isShared(src);
+    const bool is_src_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, src);
     if (is_src_shared) {
         assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src));
     }
@@ -2947,7 +2979,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
 /* Generic GET is used by warp scope.  Keep two fabric GET slots in flight and
  * use each handle barrier as the ready signal before TMA drains that SMEM tile
  * to local global memory. */
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_generic(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, int pe, [[maybe_unused]] bool is_blocking,
@@ -2960,7 +2992,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
 
     assert((len % CFT_HANDLE_TX_SIZE) == 0);
     assert(is_thrdgrp_smem_rsc_available<SCOPE>(smem_chunk_size));
-    const bool is_dst_shared = __isShared(dst);
+    const bool is_dst_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, dst);
     if (is_dst_shared) {
         assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst));
     }
@@ -3066,7 +3098,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
  * keeps two fabric GETs in flight, the consumer waits the handle barrier
  * directly as the ready signal, and done_bar protects SMEM buffer reuse after
  * TMA drains. */
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threadgroup_specialized(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, int pe, [[maybe_unused]] bool is_blocking,
@@ -3074,7 +3106,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     static_assert(SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK,
                   "specialized handle get requires a multi-warp threadgroup");
     assert((len % CFT_HANDLE_TX_SIZE) == 0);
-    const bool is_dst_shared = __isShared(dst);
+    const bool is_dst_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, dst);
     if (is_dst_shared) {
         assert(nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dst));
     }
@@ -3220,21 +3252,21 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     }
 }
 
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated(
     const nvshmemi_tma_smem_registration_t &registration, void *__restrict__ dst,
     const void *__restrict__ src, size_t len, int pe, bool is_blocking, size_t smem_chunk_size) {
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_WARPGROUP || SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
         if (nvshmemi_use_threadgroup_specialized_handle_path<SCOPE>(registration,
                                                                     smem_chunk_size)) {
-            nvshmemi_handle_get_emulated_threadgroup_specialized<SCOPE>(
+            nvshmemi_handle_get_emulated_threadgroup_specialized<SCOPE, LOCAL_SPACE>(
                 registration, dst, src, len, pe, is_blocking, smem_chunk_size);
             return;
         }
     }
 
-    nvshmemi_handle_get_emulated_generic<SCOPE>(registration, dst, src, len, pe, is_blocking,
-                                                smem_chunk_size);
+    nvshmemi_handle_get_emulated_generic<SCOPE, LOCAL_SPACE>(registration, dst, src, len, pe,
+                                                             is_blocking, smem_chunk_size);
 }
 
 template <>
@@ -3249,7 +3281,8 @@ nvshmemi_handle_get_emulated<NVSHMEMI_THREADGROUP_WARP>(
 /* Serialize thread-scope handle puts over the CTA-wide staging tile. Deferred
  * completion remains on the issuing physical warp's handle barrier; the mutex
  * can be released once fabric has consumed the shared source. */
-template <le_fabric_handle_kind cft_handle_kind>
+template <le_fabric_handle_kind cft_handle_kind,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_thread(
     const nvshmemi_tma_smem_registration_t &registration, const void *src, void *dst, size_t len,
     CUlogicalEndpointId dest_le_id, bool is_blocking) {
@@ -3265,7 +3298,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_thread(
     fence_async_proxy();
 
     auto dst_handle = nvshmemi_fabric_handle_for_le_id<cft_handle_kind>(dest_le_id, dst);
-    const bool is_src_shared = __isShared(src);
+    const bool is_src_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, src);
     uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
     const size_t staging_size = nvshmemi_smem_data_buf_size(registration, 1);
     const size_t adjusted_size = (len / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
@@ -3325,7 +3358,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_thread(
 /* The destination address must be CFT_HANDLE_TX_SIZE-aligned; non-thread
  * scopes retain their existing partitioned paths and thread scope uses the
  * serialized full-tile implementation above. */
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *src, void *dst,
                                                                   size_t len, int pe,
                                                                   bool is_blocking) {
@@ -3340,7 +3373,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *sr
     const auto registration = nvshmemi_tma_get_smem_registration();
 
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
-        nvshmemi_handle_put_thread<le_fabric_handle_kind::Unicast>(
+        nvshmemi_handle_put_thread<le_fabric_handle_kind::Unicast, LOCAL_SPACE>(
             registration, src, dst, len, nvshmemi_ld_and_get_le_id(pe), is_blocking);
     } else {
         CUlogicalEndpointId dest_le_id = nvshmemi_ld_and_get_le_id((pe));
@@ -3352,14 +3385,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *sr
             nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES) / num_threadgroups);
 
         if (adjusted_size) {
-            nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Unicast, SCOPE>(
+            nvshmemi_handle_put_TX_size<le_fabric_handle_kind::Unicast, SCOPE, LOCAL_SPACE>(
                 registration, dst, src, adjusted_size, dest_le_id, is_blocking, smem_chunk_size);
         }
 
         size_t remaining_size = len - adjusted_size;
         if (remaining_size) {
             nvshmemi_threadgroup_sync<SCOPE>();
-            nvshmemi_handle_put_sub_TX_size<le_fabric_handle_kind::Unicast, SCOPE>(
+            nvshmemi_handle_put_sub_TX_size<le_fabric_handle_kind::Unicast, SCOPE, LOCAL_SPACE>(
                 registration, nvshmemi_ptr_add(dst, adjusted_size),
                 nvshmemi_ptr_add(src, adjusted_size), remaining_size, dest_le_id, is_blocking,
                 smem_chunk_size);
@@ -3578,6 +3611,7 @@ nvshmemi_handle_atomic_fetch_impl(const nvshmemi_tma_smem_registration_t &regist
 /* Serialize thread-scope handle gets over the CTA-wide staging tile. Fabric
  * completion is consumed before copying each tile to the caller's destination,
  * so the shared tile can safely pass to the next mutex owner. */
+template <nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_thread(
     const nvshmemi_tma_smem_registration_t &registration, const void *src, void *dst, size_t len,
     int pe) {
@@ -3593,7 +3627,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_thread(
     fence_async_proxy();
 
     auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
-    const bool is_dst_shared = __isShared(dst);
+    const bool is_dst_shared = NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, dst);
     uint8_t *smem_data_buf = reinterpret_cast<uint8_t *>(nvshmemi_tma_data_buffer(smem_base));
     const size_t staging_size = nvshmemi_smem_data_buf_size(registration, 1);
     size_t byte_offset = 0;
@@ -3622,7 +3656,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_thread(
     nvshmemi_cft_thread_mutex_unlock(smem_base);
 }
 
-template <threadgroup_t SCOPE>
+template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *src, void *dst,
                                                                   size_t len, int pe,
                                                                   bool is_blocking) {
@@ -3637,7 +3671,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *sr
     const auto registration = nvshmemi_tma_get_smem_registration();
 
     if constexpr (SCOPE == NVSHMEMI_THREADGROUP_THREAD) {
-        nvshmemi_handle_get_thread(registration, src, dst, len, pe);
+        nvshmemi_handle_get_thread<LOCAL_SPACE>(registration, src, dst, len, pe);
     } else {
         uint32_t num_threadgroups =
             NVSHMEMI_TEAM_ROUND_UP_DIV(nvshmemi_threadgroup_size<NVSHMEMI_THREADGROUP_BLOCK>(),
@@ -3645,8 +3679,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *sr
         size_t smem_chunk_size = nvshmemi_tma_align_down_16(
             nvshmemi_smem_data_buf_size(registration, TMA_COPY_NUM_STAGES) / num_threadgroups);
 
-        nvshmemi_handle_get_emulated<SCOPE>(registration, dst, src, len, pe, is_blocking,
-                                            smem_chunk_size);
+        nvshmemi_handle_get_emulated<SCOPE, LOCAL_SPACE>(registration, dst, src, len, pe,
+                                                         is_blocking, smem_chunk_size);
     }
 #else
     assert(0 && "nvshmemi_handle_get: not supported");
@@ -3790,6 +3824,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_atomic_nonfetch(T 
     (void)pe;
 #endif
 }
+
+#undef NVSHMEMI_LOCAL_IS_SHARED
 
 #endif /* __CUDA__ARCH__ */
 #endif /* _NVSHMEM_COMMON_DEVICE_CUH_ */

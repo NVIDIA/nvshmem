@@ -246,7 +246,8 @@ __host__ __device__ constexpr local_space to_local_space(nvshmemx::memory_space:
 }
 
 /* Only a generic local operand is classified at run time. Explicit shared and
- * global values compile directly to their path and never call __isShared. */
+ * global values compile directly to their path and never call __isShared, in
+ * the route or in the stable helpers it calls. */
 template <local_space Space>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_ptr(const void *ptr) {
     if constexpr (Space == local_space::shared) {
@@ -279,6 +280,16 @@ struct dest_local {
         return is_shared_ptr<kind>(ptr);
     }
 };
+
+/* The space a route passes to the stable helpers that take a local operand.
+ * An explicit spelling is passed through, so the stable code selects its path
+ * without classifying; generic passes UNKNOWN, which classifies as the
+ * portable API does. */
+template <typename Local>
+inline constexpr nvshmemi_local_space_t stable_local_space =
+    Local::kind == local_space::shared   ? NVSHMEMI_LOCAL_SPACE_SHARED
+    : Local::kind == local_space::global ? NVSHMEMI_LOCAL_SPACE_GLOBAL
+                                         : NVSHMEMI_LOCAL_SPACE_UNKNOWN;
 
 template <nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void validate_put_memory_spaces() {

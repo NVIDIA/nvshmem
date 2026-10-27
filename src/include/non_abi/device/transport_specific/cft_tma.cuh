@@ -63,6 +63,7 @@ struct route_backend<cft_tma_route> {
     struct rma_plan {
         void *remote;
         int pe;
+        bool shared_local;
     };
     struct signal_plan {
         uint64_t *sig_addr;
@@ -79,13 +80,12 @@ struct route_backend<cft_tma_route> {
                                                                       size_t bytes, int pe,
                                                                       rma_plan &plan) {
         validate_cft_tma_scope<Scope>();
-        plan = rma_plan{const_cast<void *>(remote), pe};
+        plan = rma_plan{const_cast<void *>(remote), pe, false};
         int status = check_rma_arguments(remote, local, bytes, pe);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }
-        bool shared_local = false;
-        status = check_handle_operands<Local>(remote, local, bytes, shared_local);
+        status = check_handle_operands<Local>(remote, local, bytes, plan.shared_local);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }
@@ -108,12 +108,11 @@ struct route_backend<cft_tma_route> {
                                                local)) {
             return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
-        if (shared_local && overlaps_registration(local, bytes)) {
+        if (plan.shared_local && overlaps_registration(local, bytes)) {
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
         return NVSHMEMX_SUCCESS;
 #else
-        (void)shared_local;
         return NVSHMEMX_ERROR_NOT_SUPPORTED;
 #endif
     }
@@ -173,8 +172,20 @@ struct route_backend<cft_tma_route> {
             return NVSHMEMX_SUCCESS;
         }
 #if NVSHMEMI_TS_CFT_HANDLES
-        nvshmemi_handle_put<scope_traits<Scope>::internal>(source, plan.remote, bytes, plan.pe,
-                                                           !IsNbi);
+        /* The handle helper never classifies the local operand: an explicit
+         * space is passed through, and a generic one passes the space its
+         * preflight classified. */
+        constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
+        constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
+        if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
+            nvshmemi_handle_put<kScope, kLocal>(source, plan.remote, bytes, plan.pe, !IsNbi);
+        } else if (plan.shared_local) {
+            nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(source, plan.remote, bytes,
+                                                                     plan.pe, !IsNbi);
+        } else {
+            nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(source, plan.remote, bytes,
+                                                                     plan.pe, !IsNbi);
+        }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
 #else
@@ -194,8 +205,18 @@ struct route_backend<cft_tma_route> {
             return NVSHMEMX_SUCCESS;
         }
 #if NVSHMEMI_TS_CFT_HANDLES
-        nvshmemi_handle_get<scope_traits<Scope>::internal>(plan.remote, dest, bytes, plan.pe,
-                                                           !IsNbi);
+        /* As in put, the handle helper never classifies the destination. */
+        constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
+        constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
+        if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
+            nvshmemi_handle_get<kScope, kLocal>(plan.remote, dest, bytes, plan.pe, !IsNbi);
+        } else if (plan.shared_local) {
+            nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(plan.remote, dest, bytes,
+                                                                     plan.pe, !IsNbi);
+        } else {
+            nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(plan.remote, dest, bytes,
+                                                                     plan.pe, !IsNbi);
+        }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
 #else
