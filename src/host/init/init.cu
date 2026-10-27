@@ -519,33 +519,6 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
 
     nvshmemi_pe_topology.initialize(nvshmemi_host_hashes, npes);
 
-    // Check for same number of PEs on every node
-    // Use myHostHash value to indicate a given PE has been counted already
-    // This overwrites the hostHash values, but we don't them past this point
-
-    for (int i = 0; i < npes; i++) {
-        // If this host's node hasn't been counted yet, count it
-        if (hostHash[i] != myHostHash) {
-            const uint64_t peer_hash = hostHash[i];
-            int npes_peer_node = 0;
-            for (int j = i; j < npes; j++) {
-                if (peer_hash == hostHash[j]) {
-                    npes_peer_node++;
-                    hostHash[j] = myHostHash;
-                }
-            }
-            if (npes_peer_node != npes_node) {
-                char hostname[1024];
-                nvshmemu_gethostname(hostname, 1024);
-
-                NVSHMEMI_ERROR_JMP(
-                    status, NVSHMEMX_ERROR_INTERNAL, out,
-                    "NVSHMEM requires the same number of PEs on all nodes (%d PEs on %s)\n",
-                    npes_node, hostname);
-            }
-        }
-    }
-
     nvshmem_nvtx_set_thread_name(mype);
 
     /* Algorithms using node/local-rank arithmetic require equal node sizes
