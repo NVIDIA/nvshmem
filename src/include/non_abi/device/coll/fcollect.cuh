@@ -409,8 +409,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     is_nvls_algo_supported =
         is_nvls_algo_supported &&
         nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, nelems * sizeof(T), SCOPE) &&
-        nvshmemi_tma_smem_registered() && !__isShared(source) &&
-        !__isShared(dest + dest_offset) &&
+        nvshmemi_tma_smem_registered() && !__isShared(source) && !__isShared(dest + dest_offset) &&
         nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)source) &&
         nvshmemi_is_addr_offset_aligned(dest + dest_offset, CFT_HANDLE_TX_SIZE);
 #else
