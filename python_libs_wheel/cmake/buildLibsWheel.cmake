@@ -12,6 +12,7 @@
 #   nvidia/nvshmem/lib/libnvshmem_device.a
 #   nvidia/nvshmem/lib/libnvshmem_device.bc
 #   nvidia/nvshmem/lib/libnvshmem_device.ltoir.fatbin
+#   nvidia/nvshmem/lib/libnvshmem_device.tilelib (with the cuTile TileLib)
 #   nvidia/nvshmem/lib/nvshmem_bootstrap_*.so.3
 #   nvidia/nvshmem/lib/nvshmem_transport_*.so.5
 #
@@ -85,6 +86,13 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
     endforeach()
     list(JOIN _PLUGIN_FILES "|" _PLUGIN_FILES)
 
+    # Stage the cuTile TileLib only if this configuration builds it, so one
+    # left in the build tree by an earlier configuration cannot ship.
+    set(_TILELIB_FILE "")
+    if(TARGET libnvshmem_device_tilelib)
+        get_target_property(_TILELIB_FILE libnvshmem_device_tilelib NVSHMEM_TILELIB_FILE)
+    endif()
+
     # ------------------------------------------------------------------
     # Main wheel build target.
     #
@@ -106,7 +114,7 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
                 "${INCLUDE_STAGING_DIR}"
         # Stage library files — only SOVERSION symlinks, matching published wheel
         COMMAND ${CMAKE_COMMAND} -E make_directory "${LIB_STAGING_DIR}"
-        COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${LIBS_SOURCE_DIR} -DDEST_DIR=${LIB_STAGING_DIR} -DHOST_SOVERSION=${PROJECT_VERSION_MAJOR} -DPLUGINS=${_PLUGIN_FILES} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stagePlugins.cmake"
+        COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${LIBS_SOURCE_DIR} -DDEST_DIR=${LIB_STAGING_DIR} -DHOST_SOVERSION=${PROJECT_VERSION_MAJOR} -DPLUGINS=${_PLUGIN_FILES} -DTILELIB=${_TILELIB_FILE} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stagePlugins.cmake"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_CURRENT_SOURCE_DIR}/nvidia/nvshmem/lib/__init__.py"
                 "${LIB_STAGING_DIR}/__init__.py"
@@ -141,6 +149,7 @@ function(BuildLibsWheel WHEEL_TARGET LIBS_SOURCE_DIR CUDA_MAJOR)
         nvshmem_device_project
         libnvshmem_device_bitcode
         libnvshmem_device_ltoir
+        libnvshmem_device_tilelib
         ${_PLUGIN_TARGETS}
     )
     foreach(_DEP IN LISTS _WHEEL_DEP_TARGETS)

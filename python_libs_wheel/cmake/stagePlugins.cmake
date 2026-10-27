@@ -13,6 +13,7 @@
 #   SOURCE_DIR  — directory containing the built .so files (e.g. build/src/lib)
 #   DEST_DIR    — wheel staging lib directory
 #   PLUGINS     — the enabled plugins' SOVERSION links, separated by "|"
+#   TILELIB     — the cuTile TileLib this configuration builds, if any
 
 # Stage the host shared library — resolve the SOVERSION symlink.
 set(_host "${SOURCE_DIR}/libnvshmem_host.so.${HOST_SOVERSION}")
@@ -74,4 +75,9 @@ endforeach()
 # Stage the LTOIR compatibility entry point if it was built.
 if(EXISTS "${SOURCE_DIR}/libnvshmem_device.ltoir.fatbin")
     file(COPY "${SOURCE_DIR}/libnvshmem_device.ltoir.fatbin" DESTINATION "${DEST_DIR}")
+endif()
+
+# Stage the cuTile TileLib if this configuration builds it.
+if(TILELIB)
+    file(COPY "${TILELIB}" DESTINATION "${DEST_DIR}")
 endif()
