@@ -121,6 +121,12 @@ __global__ void invalid_pair(uint8_t *destination, const uint8_t *source, int pe
     (void)nvshmemx_put<uint8_t, CFT, Network, kBlock>(destination, source, 16, pe);
 }
 
+#elif defined(CONTRACT_CASE_pointer_network_pair)
+/* Network is paired only with Auto addressing. */
+__global__ void pointer_network_pair(uint8_t *destination, const uint8_t *source, int pe) {
+    (void)nvshmemx_put<uint8_t, Pointer, Network, kBlock>(destination, source, 16, pe);
+}
+
 #elif defined(CONTRACT_CASE_tma_get_below_block)
 /* TMA gets complete on the CTA-wide mbarrier, so they are block-scope only. */
 __global__ void tma_get_below_block(uint8_t *destination, const uint8_t *source, int pe) {
