@@ -576,6 +576,9 @@ static inline void nvshmemi_bit_to_string(char *str, size_t str_size, unsigned c
  * This is used to determine whether we can use the older stride based index selection.
  */
 static inline int nvshmemi_team_get_stride(nvshmemi_team_t *team) {
+    if (team->size == 1) {
+        return 1;
+    }
     int stride = team->pe_mapping[1] - team->pe_mapping[0];
     for (int i = 2; i < team->size; ++i) {
         if (team->pe_mapping[i] - team->pe_mapping[i - 1] != stride) {
@@ -2116,7 +2119,16 @@ int nvshmemi_team_set_team_idx_v2(nvshmemi_team_t *myteam, nvshmemi_team_t *myde
     INFO(NVSHMEM_COLL, "entering nvshmemi_team_set_team_idx_v2\n");
     assert(myteam->config.version != NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER);
 
-    nvshmemi_team_populate_from_uid(myteam, mydeviceteam, myteam->config.uniqueid, myteam->size);
+    if (myteam->pe_mapping[0] == NVSHMEM_TEAM_INVALID) {
+        status = nvshmemi_team_populate_from_uid(myteam, mydeviceteam, myteam->config.uniqueid,
+                                                 myteam->size);
+    } else {
+        /* Internal topology intersections and strided splits already know their membership.
+         * Publish their index availability without rediscovering peers by unique ID. */
+        status = nvshmemi_copy_internal_team_pe_info(myteam);
+        copy_team_to_device(myteam, mydeviceteam);
+    }
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Failed to populate team\n");
 
     nvshmemi_call_team_index_kernel(mydeviceteam, nvshmemi_team_creation_psync, N_PSYNC_BYTES);
 
@@ -2247,7 +2259,6 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
     int start = TEAM_SCALAR_INVALID;
     int size = 0;
     int my_pe = TEAM_SCALAR_INVALID;
-    int status = NVSHMEMX_SUCCESS;
 
     bool stride_is_invalid = false;
     bool is_reversed = false;
@@ -2309,13 +2320,6 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    if (parent_team->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER &&
-        stride == TEAM_SCALAR_INVALID) {
-        NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_INVALID_VALUE, out,
-                           "Stride is invalid for version 1 team\n");
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
     if (nvshmemi_team_allocate_team(new_team, mydeviceteam, size) != NVSHMEMX_SUCCESS) {
         NVSHMEMI_ERROR_PRINT("Failed to allocate team\n");
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
@@ -2327,7 +2331,8 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
     (*new_team)->my_pe = my_pe;
 
     /* Follow the proper initialization path based on the parent team's version */
-    if (parent_team->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER) {
+    if (parent_team->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER &&
+        stride != TEAM_SCALAR_INVALID) {
         (*new_team)->config.version = NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER;
         (*new_team)->config.num_contexts = TEAM_CONFIG_SCALAR_INVALID;
     } else {
@@ -2338,12 +2343,7 @@ int nvshmemi_team_initialize_from_overlap(nvshmemi_team_t *parent_team,
 
     memcpy((*new_team)->pe_mapping, pes_in_team.data(), (size) * sizeof(int));
     nvshmemi_team_populate_from_world_pe_mapping(*new_team);
-out:
-    if (status != NVSHMEMX_SUCCESS) {
-        nvshmemi_team_destroy(*new_team);
-        *new_team = NULL;
-    }
-    return status;
+    return NVSHMEMX_SUCCESS;
 }
 
 int nvshmemi_team_split_same_mype_node(nvshmemi_team_t *parent_team, nvshmem_team_t *new_team) {
@@ -2509,23 +2509,7 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
 
     INFO(NVSHMEM_COLL, "entering nvshmemi_team_split_from_non_strided_parent with parent ID %d\n",
          parent_team->team_idx);
-    if (config == NULL && parent_team->config.version == NVSHMEM_TEAM_CONFIG_VERSION_2_IDENTIFIER) {
-        ;
-    } else if (config == NULL) {
-        NVSHMEMI_ERROR_PRINT("Unable to initialize unstrided team with NULL config\n");
-        *team_ret_val = NVSHMEMX_ERROR_INVALID_VALUE;
-        goto out;
-    } else if (config->version == NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER) {
-        NVSHMEMI_ERROR_PRINT("Version 1 team config on unstrided team is not supported\n");
-        *team_ret_val = NVSHMEMX_ERROR_INVALID_VALUE;
-        goto out;
-    } else if (config->uniqueid == TEAM_ULSCALAR_INVALID) {
-        NVSHMEMI_ERROR_PRINT("Unique ID not initialized. This is required for unstrided teams\n");
-        *team_ret_val = NVSHMEMX_ERROR_INVALID_VALUE;
-        goto out;
-    }
-
-    for (int i = PE_start; i < PE_start + PE_size; ++i) {
+    for (int i = 0; i < PE_size; ++i) {
         int parent_team_index = PE_start + i * PE_stride;
         int team_world_index = parent_team->pe_mapping[parent_team_index];
 
@@ -2555,6 +2539,19 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
         }
         myteam->my_pe = my_pe;
         myteam->size = PE_size;
+        for (int i = 0; i < PE_size; ++i) {
+            myteam->pe_mapping[i] = parent_team->pe_mapping[PE_start + i * PE_stride];
+        }
+        myteam->start = myteam->pe_mapping[0];
+        myteam->stride = nvshmemi_team_get_stride(myteam);
+        nvshmemi_team_populate_from_world_pe_mapping(myteam);
+        if (myteam->stride == TEAM_SCALAR_INVALID &&
+            myteam->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER) {
+            /* The split specifies membership completely, including for v1 callers. */
+            int num_contexts = myteam->config.num_contexts;
+            myteam->config = NVSHMEM_TEAM_CONFIG_INITIALIZER;
+            myteam->config.num_contexts = num_contexts;
+        }
 
         if (nvshmemi_team_allocate_resources(myteam, mydeviceteam, parent_team, NULL, 0) != 0) {
             *team_ret_val = NVSHMEMX_ERROR_INTERNAL;
@@ -2580,7 +2577,7 @@ out:
     if (*team_ret_val_reduced != NVSHMEMX_SUCCESS) {
         nvshmemi_team_destroy(myteam);
         CUDA_RUNTIME_CHECK(cudaFree(mydeviceteam));
-    } else {
+    } else if (in_team) {
         *new_team = myteam->team_idx;
     }
     INFO(NVSHMEM_COLL,
@@ -2605,10 +2602,12 @@ int nvshmemi_team_split_strided(nvshmemi_team_t *parent_team, int PE_start, int 
     *team_ret_val = NVSHMEMX_SUCCESS;
     *team_ret_val_reduced = NVSHMEMX_SUCCESS;
 
+    /* Bound the last parent index without overflowing (PE_size - 1) * PE_stride. */
     if (PE_start < 0 || PE_start >= parent_team->size || PE_size <= 0 ||
-        PE_size > parent_team->size || PE_stride < 1) {
+        PE_size > parent_team->size || PE_stride < 1 ||
+        PE_size - 1 > (parent_team->size - 1 - PE_start) / PE_stride) {
         NVSHMEMI_ERROR_JMP(
-            *team_ret_val_reduced, NVSHMEMX_ERROR_INVALID_VALUE, out,
+            *team_ret_val, NVSHMEMX_ERROR_INVALID_VALUE, out,
             "Invalid <start, stride, size>: child <%d, %d, %d>, parent <%d, %d, %d>\n", PE_start,
             PE_stride, PE_size, parent_team->start, parent_team->stride, parent_team->size);
     }
