@@ -67,10 +67,13 @@ class DeviceLibLanguage(enum.Enum):
     single-arch LTOIR image for the first configured architecture.
     Consumers that require per-arch LTOIR on CUDA 12 should use the installed
     ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
+
+    ``TILELIB`` maps to ``libnvshmem_device.tilelib``, the cuTile TileLib.
     """
     LLVM_BITCODE = "bc"
     LTOIR = "ltoir"
     STATIC = "a"
+    TILELIB = "tilelib"
 
 
 logger = logging.getLogger("nvshmem")
@@ -558,14 +561,15 @@ def find_device_bitcode_library(
             ``libnvshmem_device_sm_<arch>.ltoir`` file directly.
             ``DeviceLibLanguage.STATIC`` returns the ``.a`` static archive
             (for use with standard device linking).
+            ``DeviceLibLanguage.TILELIB`` returns the cuTile TileLib.
         arch: SM architecture number (e.g. ``"90"``, ``"sm_90"``,
             ``"80"``, ``"100"``). By default, LLVM_BITCODE lookup prefers
             the current device's per-arch file when available, then falls back
             to the backward-compatible ``libnvshmem_device.bc`` entry point.
             For LLVM_BITCODE, selects the requested per-arch file
             (e.g. ``libnvshmem_device_sm_90.bc``) when this value is set.
-            For LTOIR and STATIC, this helper returns the install-layout entry
-            point regardless of this value.
+            For LTOIR, STATIC, and TILELIB, this helper returns the
+            install-layout entry point regardless of this value.
 
     Returns:
         The path to the device library file. (a string)
@@ -581,6 +585,8 @@ def find_device_bitcode_library(
         filename = "libnvshmem_device.ltoir.fatbin"
     elif language == DeviceLibLanguage.STATIC:
         filename = "libnvshmem_device.a"
+    elif language == DeviceLibLanguage.TILELIB:
+        filename = "libnvshmem_device.tilelib"
     else:
         if arch is None:
             candidates = []
