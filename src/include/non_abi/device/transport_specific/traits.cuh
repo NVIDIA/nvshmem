@@ -42,8 +42,7 @@ using nvshmemx::threadgroup;
 
 /* ---- Routes ------------------------------------------------------------ */
 
-/* Canonical internal routes. CFT / CE is owned separately and has no route
- * yet, so that pair stays unsupported. */
+/* Canonical internal routes. */
 struct pointer_sm_route {};
 struct pointer_tma_route {};
 struct cft_tma_route {};
