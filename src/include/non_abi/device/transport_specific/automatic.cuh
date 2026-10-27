@@ -15,8 +15,10 @@ namespace transport_policy {
 
 /*
  * Auto / Auto: the compatibility route over the portable dispatcher, keeping
- * its route selection, scope rules, fallback, MemorySpace classification, and
- * ordering unchanged.
+ * its route selection, scope rules, fallback, and ordering unchanged. A
+ * generic local operand keeps the portable run-time classification; an
+ * explicit shared or global one is passed to the dispatcher, which then
+ * selects its TMA and handle paths without classifying.
  */
 template <>
 struct route_backend<automatic_route> {
@@ -62,10 +64,12 @@ struct route_backend<automatic_route> {
                                                             const void *source, size_t bytes) {
         char *dest = static_cast<char *>(plan.remote);
         const char *src = static_cast<const char *>(source);
+        constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (IsNbi) {
-            nvshmemi_put_nbi<char, kScope<Scope>>(dest, src, bytes, plan.pe);
+            nvshmemi_put_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, true, kLocal>(
+                dest, src, bytes, plan.pe);
         } else {
-            nvshmemi_put<char, kScope<Scope>>(dest, src, bytes, plan.pe);
+            nvshmemi_put<char, kScope<Scope>, kLocal>(dest, src, bytes, plan.pe);
         }
         return NVSHMEMX_SUCCESS;
     }
@@ -75,10 +79,12 @@ struct route_backend<automatic_route> {
                                                             size_t bytes) {
         char *dst = static_cast<char *>(dest);
         const char *src = static_cast<const char *>(plan.remote);
+        constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
         if constexpr (IsNbi) {
-            nvshmemi_get_nbi<char, kScope<Scope>>(dst, src, bytes, plan.pe);
+            nvshmemi_get_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, kLocal>(
+                dst, src, bytes, plan.pe);
         } else {
-            nvshmemi_get<char, kScope<Scope>>(dst, src, bytes, plan.pe);
+            nvshmemi_get<char, kScope<Scope>, true, kLocal>(dst, src, bytes, plan.pe);
         }
         return NVSHMEMX_SUCCESS;
     }
@@ -88,9 +94,9 @@ struct route_backend<automatic_route> {
                                                                    const signal_plan &sig,
                                                                    const void *source, size_t bytes,
                                                                    uint64_t signal, int sig_op) {
-        nvshmemi_put_signal<char, kScope<Scope>>(static_cast<char *>(plan.remote),
-                                                 static_cast<const char *>(source), bytes,
-                                                 sig.sig_addr, signal, sig_op, plan.pe, IsNbi);
+        nvshmemi_put_signal<char, kScope<Scope>, stable_local_space<Source>>(
+            static_cast<char *>(plan.remote), static_cast<const char *>(source), bytes,
+            sig.sig_addr, signal, sig_op, plan.pe, IsNbi);
         return NVSHMEMX_SUCCESS;
     }
 

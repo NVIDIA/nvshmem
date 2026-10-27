@@ -208,22 +208,25 @@ __global__ void cv_qualified_type(const float *destination, const float *source,
 
 #elif defined(CONTRACT_CASE_memory_space_ptx)
 /* Compiled to PTX once per local memory space (LOCAL_SPACE is shared, global,
- * or generic). The contract requires the shared-window test (isspacep.shared)
- * that __isShared lowers to in the generic build and forbids it otherwise.
- * Pointer / SM must never classify its local operand, so every RMA family and
- * scope of that route is instantiated. Pointer / TMA is instantiated for every
- * RMA family at block scope and, except from a global source, for the put
- * family below block scope, its only legal forms. CFT / TMA is instantiated
- * for every RMA family at block scope, its only scope; the PTX target (sm_90)
- * compiles the logical-endpoint handle path out, so this checks the route's
- * own operand classification. Auto / Network is
- * instantiated for every RMA family and scope: its explicit shared spelling
- * returns INVALID_VALUE without classification and its explicit global
- * spelling is trusted. The internal source_local / dest_local classifiers,
- * which later routes use to classify a generic operand, are instantiated as
- * well: they keep the generic build observable and must fold away for an
- * explicit spelling. Auto / Auto intentionally retains portable
- * classification and is excluded. */
+ * or generic). __isShared and __isGlobal lower to the shared- and
+ * global-window tests (isspacep.shared, isspacep.global). The contract
+ * forbids both in the explicit builds and requires them in the generic build,
+ * so an explicit local memory space never classifies on any route, in the
+ * route or in the stable helpers it calls, while generic still does.
+ *
+ * Every pair is instantiated with every operation its route admits: the RMA
+ * families with the local operand, and the signal and ordering operations,
+ * which have none. Pointer / SM, Auto / Network, and the portable Auto / Auto
+ * route (with its Pointer / Auto, CFT / Auto, and Auto / SM spellings) at every
+ * scope; Pointer / TMA and Auto / TMA for every RMA family at block scope and,
+ * except from a global source, for the put family below block scope, their
+ * only legal forms; CFT / TMA at block scope, its only scope. The sm_90 target
+ * compiles the logical-endpoint handle path out; when the package was built
+ * with NVSHMEM_CFT_HANDLES_SUPPORT, the driver repeats the check for sm_100,
+ * which compiles it in and so covers the stable handle helpers that CFT / TMA
+ * and Auto / Auto call. The internal source_local / dest_local
+ * classifiers are instantiated as well: they keep the generic build
+ * observable and must fold away for an explicit spelling. */
 #ifndef LOCAL_SPACE
 #error "LOCAL_SPACE must be shared, global, or generic"
 #endif
@@ -260,6 +263,34 @@ __device__ int route_put(uint8_t *remote, uint8_t *local, uint64_t *signal, size
     return status;
 }
 
+template <typename A, typename P, nvshmemx::threadgroup Scope>
+__device__ int route_signal_ordering(uint64_t *signal, int pe) {
+    int status = nvshmemx_signal_op<A, P, Scope>(signal, 1, NVSHMEM_SIGNAL_ADD, pe);
+    status |= nvshmemx_quiet<A, P, Scope>();
+    status |= nvshmemx_flush<A, P, Scope>();
+    status |= nvshmemx_fence<A, P, Scope>();
+    return status;
+}
+
+template <typename A, typename P, nvshmemx::threadgroup Scope>
+__device__ int route_all(uint8_t *remote, uint8_t *local, uint64_t *signal, size_t bytes, int pe) {
+    return route_rma<A, P, Scope>(remote, local, signal, bytes, pe) +
+           route_signal_ordering<A, P, Scope>(signal, pe);
+}
+
+/* Pointer / TMA and Auto / TMA, which lowers to it, in their legal forms. */
+template <typename A, nvshmemx::threadgroup Scope>
+__device__ int route_tma(uint8_t *remote, uint8_t *local, uint64_t *signal, size_t bytes, int pe) {
+    if constexpr (Scope == nvshmemx::threadgroup::block) {
+        return route_all<A, TMA, Scope>(remote, local, signal, bytes, pe);
+    } else if constexpr (kSource != space::source::global) {
+        return route_put<A, TMA, Scope>(remote, local, signal, bytes, pe) +
+               route_signal_ordering<A, TMA, Scope>(signal, pe);
+    } else {
+        return route_signal_ordering<A, TMA, Scope>(signal, pe);
+    }
+}
+
 template <nvshmemx::threadgroup Scope>
 __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *signal, size_t bytes,
                                  int pe, int *status) {
@@ -267,13 +298,16 @@ __global__ void memory_space_ptx(uint8_t *remote, uint8_t *param, uint64_t *sign
      * global address and fold __isShared away. */
     uint8_t *local;
     asm("mov.b64 %0, %1;" : "=l"(local) : "l"(param));
-    int result = route_rma<Pointer, SM, Scope>(remote, local, signal, bytes, pe);
-    result += route_rma<Auto, Network, Scope>(remote, local, signal, bytes, pe);
+    int result = route_all<Pointer, SM, Scope>(remote, local, signal, bytes, pe);
+    result += route_all<Auto, Network, Scope>(remote, local, signal, bytes, pe);
+    result += route_all<Auto, AutoPolicy, Scope>(remote, local, signal, bytes, pe);
+    result += route_all<Pointer, AutoPolicy, Scope>(remote, local, signal, bytes, pe);
+    result += route_all<CFT, AutoPolicy, Scope>(remote, local, signal, bytes, pe);
+    result += route_all<Auto, SM, Scope>(remote, local, signal, bytes, pe);
+    result += route_tma<Pointer, Scope>(remote, local, signal, bytes, pe);
+    result += route_tma<Auto, Scope>(remote, local, signal, bytes, pe);
     if constexpr (Scope == nvshmemx::threadgroup::block) {
-        result += route_rma<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
-        result += route_rma<CFT, TMA, Scope>(remote, local, signal, bytes, pe);
-    } else if constexpr (kSource != space::source::global) {
-        result += route_put<Pointer, TMA, Scope>(remote, local, signal, bytes, pe);
+        result += route_all<CFT, TMA, Scope>(remote, local, signal, bytes, pe);
     }
 #ifdef __CUDA_ARCH__
     result += nvshmemi::transport_policy::source_local<kSource>::is_shared(local);
