@@ -64,12 +64,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // 4. Launch the kernel: each PE pushes its data to (me + 1) % npes.
     let cfg = LaunchConfig { grid_dim: (1, 1, 1), block_dim: (32, 1, 1), shared_mem_bytes: 0 };
-    // SAFETY: the arguments match `ring_put`'s (dst, src, n) signature, and both
-    // symmetric buffers hold `n` ints and outlive the synchronize below.
-    unsafe {
-        launch(&module, cfg, "ring_put",
-               &[&dst.as_mut_ptr(), &src.as_mut_ptr(), &(n as u64)])?;
-    }
+    launch(&module, cfg, "ring_put",
+           &[&dst.as_mut_ptr(), &src.as_mut_ptr(), &(n as u64)])?;
     ctx.synchronize()?;
     nvshmem::barrier_all(); // everyone's puts are done
 
