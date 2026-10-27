@@ -589,28 +589,6 @@ static inline int nvshmemi_team_get_stride(nvshmemi_team_t *team) {
     return stride;
 }
 
-/* Checks whether a PE has a consistent stride given (start, stride, size).
- * This function is useful within a loop across PE IDs, and sets 'start',
- * 'stride' and 'size' accordingly upon exiting the loop. It also assumes
- * 'start' and 'stride' are initialized to a negative number and 'size' to 0.
- * If an inconsistent stride is found, returns -1. */
-static inline int check_for_linear_stride(int pe, int *start, int *stride, int *size) {
-    if (*start < 0) {
-        *start = pe;
-        (*size)++;
-    } else if (*stride < 0) {
-        *stride = pe - *start;
-        (*size)++;
-    } else if ((pe - *start) % *stride != 0) {
-        NVSHMEMI_WARN_PRINT("Detected non-uniform stride inserting PE %d into <%d, %d, %d>\n", pe,
-                            *start, *stride, *size);
-        return -1;
-    } else {
-        (*size)++;
-    }
-    return 0;
-}
-
 static inline int nvshmemi_pe_in_active_set(int global_pe, int PE_start, int PE_stride,
                                             int PE_size) {
     int n = (global_pe - PE_start) / PE_stride;
@@ -1417,7 +1395,7 @@ static int init_team_same_mype_node() {
 }
 
 static int init_team_same_gpu() {
-    int start = -1, stride = -1, size = 0;
+    std::vector<int> pes;
 
     /* Initialize team NVSHMEM_TEAM_SAME_GPU_INDEX */
     nvshmem_transport_pe_info_t *pe_info = nvshmemi_state->pe_info;
@@ -1427,13 +1405,10 @@ static int init_team_same_gpu() {
                    sizeof(cudaUUID_t)) != 0) {
             continue;
         }
-        int ret = check_for_linear_stride(pe, &start, &stride, &size);
-        if (ret < 0) {
-            NVSHMEMI_ERROR_EXIT("Could not form NVSHMEM_TEAM_SAME_GPU_INDEX\n");
-            break;
-        }
+        pes.push_back(pe);
     }
-    assert(start >= 0 && size > 0);
+    int size = static_cast<int>(pes.size());
+    assert(size > 0);
 
     if (nvshmemi_team_allocate_team(&nvshmemi_team_same_gpu, &nvshmemi_device_team_same_gpu,
                                     size) != NVSHMEMX_SUCCESS) {
@@ -1449,99 +1424,70 @@ static int init_team_same_gpu() {
     nvshmemi_team_same_gpu->fcollect_count = 0;
     nvshmemi_team_same_gpu->p2p_sync_on_stream_count = 0;
     nvshmemi_team_same_gpu->config_mask = 0;
-    nvshmemi_team_same_gpu->my_pe = (nvshmemi_state->mype - start) / stride;
-    nvshmemi_team_same_gpu->start = start;
-    nvshmemi_team_same_gpu->stride = (stride == -1) ? 1 : stride;
     nvshmemi_team_same_gpu->size = size;
+    populate_topology_team(nvshmemi_team_same_gpu, pes);
     nvshmemi_team_same_gpu->is_team_node = true;
     nvshmemi_team_same_gpu->is_team_same_mype_node = false;
     INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_SAME_GPU_INDEX: start=%d, stride=%d, size=%d",
          nvshmemi_team_same_gpu->start, nvshmemi_team_same_gpu->stride,
          nvshmemi_team_same_gpu->size);
 
-    nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_same_gpu);
     nvshmemi_team_set_p2p_connectivity(nvshmemi_team_same_gpu);
     nvshmemi_team_set_nvls_connectivity(nvshmemi_team_same_gpu);
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_same_gpu);
-    /* All GPUs must have same number of processes (requires for us to form teams) */
 
     return 0;
 }
 
 static int init_team_gpu_leaders() {
-    /* Initialize team NVSHMEM_TEAM_GPU_LEADERS_INDEX */
-    std::vector<int> scratch(nvshmemi_state->npes);
-
-    if (nvshmemi_team_same_gpu->start ==
-        nvshmemi_state->mype) { /* Only GPU leaders are part of this team */
-        if (nvshmemi_team_allocate_team(
-                &nvshmemi_team_gpu_leaders, &nvshmemi_device_team_gpu_leaders,
-                nvshmemi_state->npes / nvshmemi_team_same_gpu->size) != NVSHMEMX_SUCCESS) {
-            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
-        }
-        nvshmemi_team_gpu_leaders->team_idx = NVSHMEM_TEAM_GPU_LEADERS_INDEX;
-        nvshmemi_team_init_dups(nvshmemi_team_gpu_leaders, NVSHMEM_TEAM_GPU_LEADERS_INDEX);
-        nvshmemi_team_gpu_leaders->config_mask = 0;
-
-        nvshmemi_team_gpu_leaders->start = 0;
-        nvshmemi_team_gpu_leaders->stride =
-            (nvshmemi_team_same_gpu->stride == 1) ? nvshmemi_team_same_gpu->size : 1;
-        nvshmemi_team_gpu_leaders->size = nvshmemi_state->npes / nvshmemi_team_same_gpu->size;
-        nvshmemi_team_gpu_leaders->my_pe =
-            (nvshmemi_state->mype - nvshmemi_team_gpu_leaders->start) /
-            nvshmemi_team_gpu_leaders->stride;
-        nvshmemi_team_gpu_leaders->rdxn_count = 0;
-        nvshmemi_team_gpu_leaders->ll_flag = 1;
-        nvshmemi_team_gpu_leaders->alltoall_count = 0;
-        nvshmemi_team_gpu_leaders->bcast_count = 0;
-        nvshmemi_team_gpu_leaders->bcast_sync_offset = 0;
-        nvshmemi_team_gpu_leaders->fcollect_count = 0;
-        nvshmemi_team_gpu_leaders->p2p_sync_on_stream_count = 0;
-
-        nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_gpu_leaders);
-        nvshmemi_team_set_p2p_connectivity(nvshmemi_team_gpu_leaders);
-        nvshmemi_team_set_nvls_connectivity(nvshmemi_team_gpu_leaders);
-        nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_gpu_leaders);
-        int status = nvshmemi_boot_handle.allgather(
-            &nvshmemi_team_gpu_leaders->my_pe, scratch.data(), sizeof(int), &nvshmemi_boot_handle);
-        if (status != 0) {
-            NVSHMEMI_ERROR_PRINT("allgather of gpu leaders failed\n");
-            return NVSHMEMX_ERROR_INTERNAL;
-        }
-        /* Check whether a valid TEAM_GPU_LEADERS was formed */
-        int last_mype = -1;
-        for (int i = 0; i < nvshmemi_state->npes; ++i) {
-            if (scratch[i] != -1) {
-                if (scratch[i] != last_mype + 1) {
-                    WARN(
-                        "NVSHMEM_TEAM_GPU_LEADERS_INDEX could not be formed, Limited MPG support "
-                        "will "
-                        "not be available\n");
-                    break;
-                } else {
-                    last_mype++;
-                }
+    /* One leader for each distinct (host, GPU), in world-PE order. Neither
+     * equal sharing counts nor a constant stride is required. */
+    const nvshmem_transport_pe_info_t *info = nvshmemi_state->pe_info;
+    std::vector<int> leaders;
+    for (int pe = 0; pe < nvshmemi_state->npes; ++pe) {
+        bool first = true;
+        for (int earlier : leaders) {
+            if (info[earlier].hostHash == info[pe].hostHash &&
+                memcmp(&info[earlier].gpu_uuid, &info[pe].gpu_uuid, sizeof(cudaUUID_t)) == 0) {
+                first = false;
+                break;
             }
         }
-        /* XXX: Note that we are not setting team_node and team_same_mype_node for
-         * nvshmemi_team_gpu_leaders */
-        nvshmemi_team_gpu_leaders->is_team_node = false;
-        nvshmemi_team_gpu_leaders->is_team_same_mype_node = false;
-        INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_GPU_LEADERS_INDEX: start=%d, stride=%d, size=%d",
-             nvshmemi_team_gpu_leaders->start, nvshmemi_team_gpu_leaders->stride,
-             nvshmemi_team_gpu_leaders->size);
-    } else {
-        int my_pe = -1;
-        nvshmemi_team_gpu_leaders = NULL;
-        int status = nvshmemi_boot_handle.allgather(&my_pe, scratch.data(), sizeof(int),
-                                                    &nvshmemi_boot_handle);
-        if (status != 0) {
-            NVSHMEMI_ERROR_PRINT("allgather of gpu leaders failed\n");
-            return NVSHMEMX_ERROR_INTERNAL;
+        if (first) {
+            leaders.push_back(pe);
         }
     }
-
-    return 0;
+    if (nvshmemi_team_same_gpu->start != nvshmemi_state->mype) {
+        nvshmemi_team_gpu_leaders = nullptr;
+        return NVSHMEMX_SUCCESS;
+    }
+    int size = static_cast<int>(leaders.size());
+    int status = nvshmemi_team_allocate_team(&nvshmemi_team_gpu_leaders,
+                                             &nvshmemi_device_team_gpu_leaders, size);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
+    }
+    auto *team = nvshmemi_team_gpu_leaders;
+    team->team_idx = NVSHMEM_TEAM_GPU_LEADERS_INDEX;
+    nvshmemi_team_init_dups(team, NVSHMEM_TEAM_GPU_LEADERS_INDEX);
+    team->config_mask = 0;
+    team->size = size;
+    populate_topology_team(team, leaders);
+    team->rdxn_count = 0;
+    team->ll_flag = 1;
+    team->alltoall_count = 0;
+    team->bcast_count = 0;
+    team->bcast_sync_offset = 0;
+    team->fcollect_count = 0;
+    team->p2p_sync_on_stream_count = 0;
+    team->is_team_node = false;
+    team->is_team_same_mype_node = false;
+    nvshmemi_team_set_p2p_connectivity(team);
+    nvshmemi_team_set_nvls_connectivity(team);
+    nvshmemi_recexchalgo_get_neighbors(team);
+    INFO(NVSHMEM_INIT, "NVSHMEM_TEAM_GPU_LEADERS_INDEX: start=%d, stride=%d, size=%d", team->start,
+         team->stride, team->size);
+    return NVSHMEMX_SUCCESS;
 }
 
 static int init_team_pool_and_psync() {
@@ -1692,11 +1638,7 @@ static int finalize_team_init() {
         nvshmemi_team_init_nccl_comm(nvshmemi_team_same_mype_node);
         nvshmemi_team_init_nccl_comm(nvshmemi_team_same_gpu);
         if (nvshmemi_team_gpu_leaders != NULL) {
-            if (nvshmemi_pe_in_active_set(nvshmemi_state->mype, nvshmemi_team_gpu_leaders->start,
-                                          nvshmemi_team_gpu_leaders->stride,
-                                          nvshmemi_team_gpu_leaders->size) >= 0) {
-                nvshmemi_team_init_nccl_comm(nvshmemi_team_gpu_leaders);
-            }
+            nvshmemi_team_init_nccl_comm(nvshmemi_team_gpu_leaders);
         }
     }
 #endif /* NVSHMEM_USE_NCCL */

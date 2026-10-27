@@ -1018,120 +1018,90 @@ static bool mpsServerRunning(int *serverPID) {
     return true;
 }
 
-static bool get_mps_server_active_thread_percentage(float *percentage) {
-    FILE *output;
-    const int lineSize = 256;
-    char line[lineSize];
-    int ret;
-    char *retstr = NULL;
-    bool status = false;
-    std::stringstream cmd;
-    int serverPID;
-    /* one PE per node queries the control daemon */
-    if (nvshmemi_state->mype == nvshmemi_team_node->start) {
-        if (!mpsServerRunning(&serverPID)) {
-            return false;
-        }
-
-        cmd << "echo get_active_thread_percentage " << serverPID << " | nvidia-cuda-mps-control";
-        output = popen(cmd.str().c_str(), "r");
-
-        if (!output) {
-            return false;
-        }
-
-        retstr = fgets(line, lineSize, output);
-
-        ret = pclose(output);
-        status = (ret != -1) && WIFEXITED(ret) && (WEXITSTATUS(ret) == 0);
-        if (!status || retstr == NULL) {
-            return false;
-        }
-
-        if (!trimNewline(line)) {
-            return false;
-        }
-
-        if (percentage) {
-            int result;
-            std::stringstream ss(line);
-            ss >> result;
-            *percentage = result;
-        }
+static bool get_mps_server_active_thread_percentage(int server_pid, float *percentage) {
+    std::stringstream command;
+    command << "echo get_active_thread_percentage " << server_pid << " | nvidia-cuda-mps-control";
+    FILE *output = popen(command.str().c_str(), "r");
+    if (!output) {
+        return false;
     }
-    float *scratch = (float *)malloc(sizeof(float) * nvshmemi_state->npes);
-    /* for lack of a better available bootstrap collective, using allagther */
-    status = nvshmemi_boot_handle.allgather((void *)percentage, (void *)scratch, sizeof(float),
-                                            &nvshmemi_boot_handle);
-
-    if (percentage) {
-        *percentage = scratch[nvshmemi_team_node->start];
+    char line[256];
+    char *result = fgets(line, sizeof(line), output);
+    int status = pclose(output);
+    if (!result || status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        return false;
     }
-
-    free(scratch);
-
-    return true;
+    std::stringstream value(line);
+    return static_cast<bool>(value >> *percentage);
 }
 
 static int nvshmemi_determine_mpg_support_level() {
+    // Only sharing groups need MPS. All PEs, including unshared GPUs and nodes
+    // without MPS, take the same bootstrap collectives and select one protocol.
+    struct mps_group_profile {
+        int running;
+        float percentage;
+        int query_ok;
+    };
+    mps_group_profile local = {0, 100.0f, 1};
     int status = 0;
-    bool is_mps_server_running = false;
-    if (nvshmemi_state->mype == nvshmemi_team_node->start) {
-        is_mps_server_running = mpsServerRunning(NULL);
+    // Concurrent control clients on a node can reject each other. Probe group
+    // leaders in local-rank order, allowing different MPS servers/settings for
+    // different GPUs while nodes perform their independent probes in parallel.
+    for (int local_rank = 0; local_rank < nvshmemi_pe_topology.max_pes_per_node; ++local_rank) {
+        if (nvshmemi_state->mype_node == local_rank && nvshmemi_team_same_gpu->size > 1 &&
+            nvshmemi_team_same_gpu->my_pe == 0) {
+            int server_pid = 0;
+            local.running = mpsServerRunning(&server_pid);
+            if (local.running) {
+                local.query_ok =
+                    get_mps_server_active_thread_percentage(server_pid, &local.percentage);
+            }
+        }
+        status = nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
+        NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                              "barrier between MPS group probes failed\n");
     }
-    bool *scratch = (bool *)malloc(sizeof(bool) * nvshmemi_state->npes);
-    /* for lack of a better available bootstrap collective, using allagther */
-    status = nvshmemi_boot_handle.allgather((void *)&is_mps_server_running, (void *)scratch,
-                                            sizeof(bool), &nvshmemi_boot_handle);
-    is_mps_server_running = scratch[nvshmemi_team_node->start];
-    free(scratch);
-
-    if (!is_mps_server_running) {
-        INFO(NVSHMEM_INIT,
-             "Multiple PEs per GPU (MPG) detected but MPS is not running. "
-             "Hence limited MPG support is available");
-        nvshmemi_is_limited_mpg_run = 1;
-    } else {
-        float active_thread_percentage = 0;
-        bool success = get_mps_server_active_thread_percentage(&active_thread_percentage);
-        if (!success) {
-            INFO(NVSHMEM_INIT, "failed in get_mps_server_active_thread_percentage");
-            exit(-1);
+    std::vector<mps_group_profile> profiles(nvshmemi_state->npes);
+    status = nvshmemi_boot_handle.allgather(&local, profiles.data(), sizeof(local),
+                                            &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                          "allgather of MPS group profiles failed\n");
+    for (const auto &profile : profiles) {
+        if (!profile.query_ok) {
+            NVSHMEMI_ERROR_PRINT("Failed to query an MPS server's active thread percentage\n");
+            return NVSHMEMX_ERROR_INTERNAL;
         }
-        char *env = getenv("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE");
-        if (env) {
-            active_thread_percentage = atof(env);
-        }
-
-        float *active_percentages = (float *)malloc(sizeof(float) * nvshmemi_state->npes);
-        status = nvshmemi_boot_handle.allgather((void *)&active_thread_percentage,
-                                                (void *)active_percentages, sizeof(float),
-                                                &nvshmemi_boot_handle);
-        float total_percentage = 0;
-        for (int i = 0; i < nvshmemi_team_same_gpu->size; i += 1) {
-            total_percentage +=
-                *((float *)active_percentages +
-                  nvshmemi_team_translate_pe_to_team_world_wrap(nvshmemi_team_same_gpu, i));
-        }
-        if (total_percentage <= 100.0 ||
-            nvshmemi_options.IGNORE_CUDA_MPS_ACTIVE_THREAD_PERCENTAGE) {
-            nvshmemi_is_limited_mpg_run = 0;
-            INFO(NVSHMEM_INIT,
-                 "Multiple PEs per GPU (MPG) detected, MPS is also available, "
-                 "and either active thread percentages for PEs on the same GPU add "
-                 "up to be <= 100 or user has requested to ignore active thread percentage. "
-                 "Hence full MPG support is available. If active thread percentage "
-                 "adds to be more than 100, NVSHMEM synchronizing APIs might deadlock.");
-        } else {
-            nvshmemi_is_limited_mpg_run = 1;
-            INFO(NVSHMEM_INIT,
-                 "Multiple PEs per PU (MPG) detected, MPS is also available, "
-                 "but active thread percentages for PEs on the same GPU add "
-                 "up to be greater than 100. Hence limited MPG support is available");
-        }
-        free(active_percentages);
     }
-    return status;
+    const auto &group = profiles[nvshmemi_team_same_gpu->start];
+    float active_percentage = group.percentage;
+    if (const char *value = getenv("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE")) {
+        active_percentage = atof(value);
+    }
+    std::vector<float> active_percentages(nvshmemi_state->npes);
+    status = nvshmemi_boot_handle.allgather(&active_percentage, active_percentages.data(),
+                                            sizeof(float), &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                          "allgather of MPS thread percentages failed\n");
+    float total_percentage = 0;
+    for (int i = 0; i < nvshmemi_team_same_gpu->size; ++i) {
+        total_percentage += active_percentages[nvshmemi_team_translate_pe_to_team_world_wrap(
+            nvshmemi_team_same_gpu, i)];
+    }
+    int full_support =
+        nvshmemi_team_same_gpu->size == 1 ||
+        (group.running &&
+         (total_percentage <= 100.0f || nvshmemi_options.IGNORE_CUDA_MPS_ACTIVE_THREAD_PERCENTAGE));
+    std::vector<int> full_support_all(nvshmemi_state->npes);
+    status = nvshmemi_boot_handle.allgather(&full_support, full_support_all.data(), sizeof(int),
+                                            &nvshmemi_boot_handle);
+    NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
+                          "allgather of MPG support levels failed\n");
+    nvshmemi_is_limited_mpg_run = std::any_of(full_support_all.begin(), full_support_all.end(),
+                                              [](int full) { return !full; });
+    INFO(NVSHMEM_INIT, "MPG synchronization support selected for all PEs: %s",
+         nvshmemi_is_limited_mpg_run ? "limited" : "full");
+    return NVSHMEMX_SUCCESS;
 }
 
 static int nvshmemi_setup_limited_mpg_support() {
@@ -1141,8 +1111,7 @@ static int nvshmemi_setup_limited_mpg_support() {
     cudaEvent_t event;
     int counter = 0;
 
-    /* Ensure supported MPS runs */
-    /* Do reduction to check to that each GPU has same stride and size for team_same_gpu */
+    /* Each slab belongs to its actual same-GPU group, independently of other groups. */
     int ret = snprintf(shm_name, 100, "mps_shm_%d", nvshmemi_team_same_gpu->start);
     if (ret < 0) {
         INFO(NVSHMEM_INIT, "snprintf failed");
@@ -1447,6 +1416,7 @@ int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr) {
 
     nvshmemi_boot_handle.barrier(&nvshmemi_boot_handle);
 
+    nvshmemi_is_limited_mpg_run = false;
     if (nvshmemi_is_mpg_run) {
         status = nvshmemi_determine_mpg_support_level();
         NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
