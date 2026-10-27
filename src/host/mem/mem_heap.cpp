@@ -53,6 +53,7 @@
 #include "internal/host/unique_cuda_handle.hpp"
 #include "internal/host/unique_cuda_mapping.hpp"
 #include "internal/host/nvshmemi_nvls_observer.hpp"
+#include "internal/host/nvshmemi_pe_topology.hpp"
 
 #ifdef NVSHMEM_USE_DLMALLOC
 #include "dlmalloc.h"
@@ -2161,8 +2162,12 @@ int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr)
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
                           "allgather in check_buffers_on_same_device failed \n");
 
-    loc_id = scratch[0];
-    for (int i = 1; i < cfg_.npes_node; i++) {
+    loc_id = scratch[cfg_.mype];
+    for (int i = 0; i < cfg_.npes; i++) {
+        if (i == cfg_.mype ||
+            nvshmemi_pe_topology.node_of_pe[i] != nvshmemi_pe_topology.node_of_pe[cfg_.mype]) {
+            continue;
+        }
         status = (scratch[i] == loc_id) ? 1 : 0;
         NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
                               "Memory buffers allocated are on same device, disable NVLS "
