@@ -1381,7 +1381,8 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void nvshmemi_gpu_rdxn_
     bool is_team_world =
         nvshmemi_team_is_identical(teami, nvshmemi_device_state_d.team_pool[NVSHMEM_TEAM_WORLD]);
     int k = nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_recexch_kval;
-    if (is_team_world && sizeof(TYPE) >= 4 && nreduce % 2 == 0 &&
+    if (is_team_world && nvshmemi_device_state_d.pe_dist != NVSHMEMI_PE_DIST_MISC &&
+        sizeof(TYPE) >= 4 && nreduce % 2 == 0 &&
         nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_scratch_size / 2 >=
             teami->size * nreduce * sizeof(TYPE) &&
         nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
@@ -2071,7 +2072,8 @@ NVSHMEMI_STATIC __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemi_double2_ma
 #define SCOPE NVSHMEMI_THREADGROUP_BLOCK
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int reduce_maxloc_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_maxloc_algo;
-    if (!nvshmemi_team_has_hierarchical_subteams(teami)) {
+    if (!nvshmemi_team_has_hierarchical_subteams(teami) ||
+        nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_MISC) {
         if (reduce_maxloc_algo == 3) {
             reduce_maxloc_algo = 2;
         } else if (reduce_maxloc_algo == 4) {
