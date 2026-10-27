@@ -27,6 +27,7 @@
 #include "c_api/nvshmemx_api.h"
 #include "internal/host/nvmlwrap.h"
 #include "internal/host/nvshmemi_team.h"
+#include "internal/host/nvshmemi_pe_topology.hpp"
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_region.h"
 #include "internal/host/nvshmem_nvtx.hpp"
@@ -94,6 +95,7 @@ nvshmemi_state_t *nvshmemi_state;
 bootstrap_handle_t nvshmemi_boot_handle;
 nvshmemi_session_t *nvshmemi_default_session = nullptr;
 nvshmemi_pe_dist_t nvshmemi_pe_dist;
+nvshmemi_pe_topology_t nvshmemi_pe_topology;
 uint64_t *nvshmemi_host_hashes;
 int nvshmemi_init_counter = 0;
 nvshmem_options_t nvshmem_options;
@@ -481,7 +483,6 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
     uint64_t *hostHash = NULL;
     int mype, npes;
     int mype_node = 0, npes_node = 0;
-    int num_nodes;
 
     bootstrap_attr_t attr = {};
     status = bootstrap_set_bootattr(flags, nvshmem_attr, (nvshmem_attr) ? &attr : NULL);
@@ -516,6 +517,8 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
     nvshmemi_boot_handle.mype_node = mype_node;
     nvshmemi_boot_handle.npes_node = npes_node;
 
+    nvshmemi_pe_topology.initialize(nvshmemi_host_hashes, npes);
+
     // Check for same number of PEs on every node
     // Use myHostHash value to indicate a given PE has been counted already
     // This overwrites the hostHash values, but we don't them past this point
@@ -545,42 +548,18 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
 
     nvshmem_nvtx_set_thread_name(mype);
 
-    /* Set pe distribution type. First check for round robin distribution. Then check for block
-     * distribution. */
+    /* Algorithms using node/local-rank arithmetic require equal node sizes
+     * and the expected PE ordering. */
     nvshmemi_pe_dist = NVSHMEMI_PE_DIST_MISC;
-
-    if (npes_node != 0) {
-        if (npes % npes_node != 0) {
-            goto out;
-        }
-        num_nodes = npes / npes_node;
-    } else {
-        NVSHMEMI_ERROR_JMP(
-            status, NVSHMEMX_ERROR_INTERNAL, out,
-            "NVSHMEM hit the error of division by zero: npes_node == 0 what happen!?\n");
+    if (nvshmemi_pe_topology.is_block_distribution()) {
+        nvshmemi_pe_dist = NVSHMEMI_PE_DIST_BLOCK;
+        INFO(NVSHMEM_INIT, "PE distribution has been identified as NVSHMEMI_PE_DIST_BLOCK");
+    } else if (nvshmemi_pe_topology.is_roundrobin_distribution()) {
+        nvshmemi_pe_dist = NVSHMEMI_PE_DIST_ROUNDROBIN;
+        INFO(NVSHMEM_INIT, "PE distribution has been identified as NVSHMEMI_PE_DIST_ROUNDROBIN");
+    } else if (!nvshmemi_pe_topology.is_uniform()) {
+        INFO(NVSHMEM_INIT, "Non-uniform PEs per node: using general PE mappings");
     }
-
-    for (int i = 0; i < num_nodes; i++) {
-        for (int j = 0; j < npes_node; j++) {
-            if (nvshmemi_host_hashes[i * npes_node] != nvshmemi_host_hashes[i * num_nodes + j]) {
-                goto check_roundrobin_dist;
-            }
-        }
-    }
-    nvshmemi_pe_dist = NVSHMEMI_PE_DIST_BLOCK;
-    INFO(NVSHMEM_INIT, "PE distribution has been identified as NVSHMEMI_PE_DIST_BLOCK");
-    goto out;
-
-check_roundrobin_dist:
-    for (int i = 0; i < npes_node; i++) {
-        for (int j = 0; j < num_nodes; j++) {
-            if (nvshmemi_host_hashes[j * npes_node] != nvshmemi_host_hashes[i * num_nodes + j]) {
-                goto out;
-            }
-        }
-    }
-    nvshmemi_pe_dist = NVSHMEMI_PE_DIST_ROUNDROBIN;
-    INFO(NVSHMEM_INIT, "PE distribution has been identified as NVSHMEMI_PE_DIST_ROUNDROBIN");
 
 out:
     nvshmemi_device_state.pe_dist = nvshmemi_pe_dist;
