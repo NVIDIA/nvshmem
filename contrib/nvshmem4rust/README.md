@@ -9,7 +9,6 @@ APIs. It provides:
   and CUDA-module registration helpers
 - CUDA-Oxide smoke and performance test programs
 - A minimal CUDA-Oxide example, [`ring_put`](examples/ring_put/README.md)
-- A companion NCCL-from-Rust example, [`nccl_allreduce`](examples/nccl_allreduce/README.md)
 
 This is an experimental, contributor-maintained project. It is not part of the
 NVSHMEM core release quality commitment.
@@ -148,7 +147,7 @@ The same configuration also provides `example_rust_ring_put`, which builds the
 - `tests/` contains CUDA-Oxide smoke and performance programs plus their
   shared support crate.
 - `examples/` contains a minimal CUDA-Oxide program that puts data to another
-  PE from a Rust kernel, and a companion NCCL allreduce program.
+  PE from a Rust kernel.
 - `cmake/` contains the standalone generation and test targets.
 
 ## Known limitations
