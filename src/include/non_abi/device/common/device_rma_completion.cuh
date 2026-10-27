@@ -9,7 +9,9 @@
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 namespace nvshmemi {
-template <threadgroup_t Scope>
+// CallerSynchronizes means the caller provides group barriers before and after
+// the hook, allowing an implementation to share those barriers.
+template <threadgroup_t Scope, bool CallerSynchronizes = false>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void complete_device_rma(bool) {}
 }  // namespace nvshmemi
 #endif

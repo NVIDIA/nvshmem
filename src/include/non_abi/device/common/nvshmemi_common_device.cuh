@@ -1420,9 +1420,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_flush(int pe = NVSHMEMX_P
                                                              nvshmemx_qp_handle_t *qp_handle = NULL,
                                                              int num_qps = NVSHMEMX_QP_ALL) {
     int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
-    nvshmemi::complete_device_rma<SCOPE>(true);
-
     nvshmemi_threadgroup_sync<SCOPE>();
+    nvshmemi::complete_device_rma<SCOPE, true>(true);
     /* TMA source-reuse drain.  Gated on smem registration so only CTAs that
      * actually issued TMA ops pay the wait_group.read cost; other CTAs skip
      * all three PTX instructions. */
