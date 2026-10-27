@@ -4,6 +4,7 @@
  */
 
 #include "team_internal.h"
+#include "internal/host/nvshmemi_pe_topology.hpp"
 #include <assert.h>        // for assert
 #include <cuda_runtime.h>  // for cudaMemcpy
 #include <driver_types.h>  // for cudaMemcpyHos...
@@ -1295,33 +1296,29 @@ static int init_team_mc_shared_alias(void) {
     return 0;
 }
 
-static int init_team_node() {
-    int start = -1, stride = -1, size = 0;
-
-    /* Search for on-node peer PEs while checking for a consistent stride */
-    uint64_t myHostHash = nvshmemu_getHostHash();
-    std::vector<uint64_t> hostHash(nvshmemi_state->npes);
-    int status = nvshmemi_boot_handle.allgather(&myHostHash, hostHash.data(), sizeof(uint64_t),
-                                                &nvshmemi_boot_handle);
-    if (status != 0) {
-        NVSHMEMI_ERROR_PRINT("allgather of host hashes failed\n");
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
-    for (int pe = 0; pe < nvshmemi_state->npes; pe++) {
-        if (hostHash[pe] != myHostHash) {
-            continue;
-        }
-
-        int ret = check_for_linear_stride(pe, &start, &stride, &size);
-        if (ret < 0) {
-            start = nvshmemi_state->mype;
-            stride = 1;
-            size = 1;
+static void populate_topology_team(nvshmemi_team_t *team, const std::vector<int> &pes) {
+    team->start = pes.front();
+    team->stride = pes.size() > 1 ? pes[1] - pes[0] : 1;
+    for (size_t i = 2; i < pes.size(); ++i) {
+        if (pes[i] - pes[i - 1] != team->stride) {
+            team->stride = TEAM_SCALAR_INVALID;
             break;
         }
     }
-    assert(start >= 0 && size > 0);
+    std::copy(pes.begin(), pes.end(), team->pe_mapping);
+    nvshmemi_team_populate_from_world_pe_mapping(team);
+    team->my_pe = team->pe_mapping[team->size + nvshmemi_state->mype];
+}
+
+static int init_team_node() {
+    std::vector<int> pes;
+    int my_node = nvshmemi_pe_topology.node_of_pe[nvshmemi_state->mype];
+    for (int pe = 0; pe < nvshmemi_state->npes; ++pe) {
+        if (nvshmemi_pe_topology.node_of_pe[pe] == my_node) {
+            pes.push_back(pe);
+        }
+    }
+    int size = static_cast<int>(pes.size());
 
     /* Initialize NVSHMEMX_TEAM_NODE */
     if (nvshmemi_team_allocate_team(&nvshmemi_team_node, &nvshmemi_device_team_node, size) !=
@@ -1341,9 +1338,8 @@ static int init_team_node() {
     nvshmemi_team_node->fcollect_count = 0;
     nvshmemi_team_node->p2p_sync_on_stream_count = 0;
 
-    nvshmemi_team_node->start = start;
-    nvshmemi_team_node->stride = (stride == -1) ? 1 : stride;
     nvshmemi_team_node->size = size;
+    populate_topology_team(nvshmemi_team_node, pes);
     if (nvshmemi_team_is_identical(nvshmemi_team_world, nvshmemi_team_node)) {
         nvshmemi_team_world->is_team_node = true;
     }
@@ -1354,7 +1350,6 @@ static int init_team_node() {
         nvshmemi_team_mc_shared->is_team_node = true;
     }
 
-    nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_node);
     nvshmemi_team_set_p2p_connectivity(nvshmemi_team_node);
     nvshmemi_team_set_nvls_connectivity(nvshmemi_team_node);
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_node);
@@ -1397,23 +1392,26 @@ static int init_fcollect_ll_support() {
 }
 
 static int init_team_same_mype_node() {
+    std::vector<int> pes;
+    for (int pe = 0; pe < nvshmemi_state->npes; ++pe) {
+        if (nvshmemi_pe_topology.local_rank[pe] == nvshmemi_state->mype_node) {
+            pes.push_back(pe);
+        }
+    }
     /* Initialize NVSHMEMX_TEAM_SAME_MYPE_NODE */
-    if (nvshmemi_team_allocate_team(
-            &nvshmemi_team_same_mype_node, &nvshmemi_device_team_same_mype_node,
-            nvshmemi_state->npes / nvshmemi_state->npes_node) != NVSHMEMX_SUCCESS) {
+    if (nvshmemi_team_allocate_team(&nvshmemi_team_same_mype_node,
+                                    &nvshmemi_device_team_same_mype_node,
+                                    static_cast<int>(pes.size())) != NVSHMEMX_SUCCESS) {
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
     nvshmemi_team_same_mype_node->team_idx = NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX;
     nvshmemi_team_init_dups(nvshmemi_team_same_mype_node, NVSHMEM_TEAM_SAME_MYPE_NODE_INDEX);
     nvshmemi_team_world->team_same_mype_node = nvshmemi_team_same_mype_node->team_idx;
-    nvshmemi_team_same_mype_node->my_pe = nvshmemi_state->mype / nvshmemi_state->npes_node;
     nvshmemi_team_same_mype_node->rdxn_count = 0;
     nvshmemi_team_same_mype_node->config_mask = 0;
 
-    nvshmemi_team_same_mype_node->start = nvshmemi_state->mype_node;
-    nvshmemi_team_same_mype_node->stride = nvshmemi_state->npes_node;
-    nvshmemi_team_same_mype_node->size = nvshmemi_state->npes / nvshmemi_state->npes_node;
-    assert(nvshmemi_state->npes % nvshmemi_state->npes_node == 0);
+    nvshmemi_team_same_mype_node->size = static_cast<int>(pes.size());
+    populate_topology_team(nvshmemi_team_same_mype_node, pes);
     nvshmemi_team_same_mype_node->ll_flag = 1;
     nvshmemi_team_same_mype_node->alltoall_count = 0;
     nvshmemi_team_same_mype_node->bcast_count = 0;
@@ -1427,7 +1425,6 @@ static int init_team_same_mype_node() {
          nvshmemi_team_same_mype_node->start, nvshmemi_team_same_mype_node->stride,
          nvshmemi_team_same_mype_node->size);
 
-    nvshmemi_team_populate_pe_mappings_from_constant_stride(nvshmemi_team_same_mype_node);
     nvshmemi_team_set_p2p_connectivity(nvshmemi_team_same_mype_node);
     nvshmemi_team_set_nvls_connectivity(nvshmemi_team_same_mype_node);
     nvshmemi_recexchalgo_get_neighbors(nvshmemi_team_same_mype_node);
@@ -2363,7 +2360,7 @@ int nvshmemi_team_split_same_mype_node(nvshmemi_team_t *parent_team, nvshmem_tea
 
     myteam->is_team_same_mype_node = true;
 
-    for (int i = 0; i < nvshmemi_state->npes_node; ++i) {
+    for (int i = 0; i < nvshmemi_pe_topology.max_pes_per_node; ++i) {
         if (nvshmemi_state->mype_node == i) {
             myteam->config.uniqueid = parent_team->config.uniqueid + nvshmemi_state->mype_node;
             if (nvshmemi_team_allocate_resources(myteam, mydeviceteam, parent_team, NULL, 0) != 0) {
@@ -2410,10 +2407,10 @@ int nvshmemi_team_split_node(nvshmemi_team_t *parent_team, nvshmem_team_t *new_t
     myteam->is_team_node = true;
 
     /* Do node creation in sequence to avoid race condition */
-    for (int i = 0; i < nvshmemi_state->npes / nvshmemi_state->npes_node; ++i) {
-        uint64_t my_node_idx = nvshmemi_state->mype / nvshmemi_state->npes_node;
+    for (size_t i = 0; i < nvshmemi_pe_topology.node_sizes.size(); ++i) {
+        uint64_t my_node_idx = nvshmemi_pe_topology.node_of_pe[nvshmemi_state->mype];
         myteam->config.uniqueid = parent_team->config.uniqueid + (my_node_idx << 32);
-        if (nvshmemi_state->mype / nvshmemi_state->npes_node == i) {
+        if (my_node_idx == i) {
             if (nvshmemi_team_allocate_resources(myteam, mydeviceteam, parent_team, NULL, 0) != 0) {
                 status = NVSHMEMX_ERROR_INTERNAL;
             }
