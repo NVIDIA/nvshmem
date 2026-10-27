@@ -1083,7 +1083,9 @@ static int init_team_world() {
     return 0;
 }
 
-/* Check that peer connected PE lists are symmetric and form a constant stride pattern.
+static void populate_topology_team(nvshmemi_team_t *team, const std::vector<int> &pes);
+
+/* Check that peer connected PE lists are symmetric.
  * Returns true if the lists can form a valid NVSHMEM_TEAM_SHARED/NVSHMEM_TEAM_MC_SHARED,
  * false otherwise. */
 static bool validate_peer_pe_lists(const std::vector<int> &peer_pe_list,
@@ -1110,15 +1112,6 @@ static bool validate_peer_pe_lists(const std::vector<int> &peer_pe_list,
         }
     }
 
-    /* Check if peer-connected PE list is of the form (start, stride, size) */
-    for (int i = 2; i < n_peer_pes; ++i) {
-        if (peer_pe_list[i] - peer_pe_list[i - 1] != peer_pe_list[i - 1] - peer_pe_list[i - 2]) {
-            INFO(NVSHMEM_INIT,
-                 "Peer list is not of the form (start, stride, size). Cannot form "
-                 "SHARED TEAM.");
-            return false;
-        }
-    }
     return true;
 }
 
@@ -1136,7 +1129,6 @@ static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
     nvshmemi_team_t *team_peer_shared_ptr = nullptr;
     peer_pe_list.reserve(nvshmemi_team_world->size);  // avoid reallocations
 
-    int my_idx_in_peer_list = 0;
     for (int i = 0; i < nvshmemi_team_world->size; i++) {
         bool is_peer_connected = false;
         switch (domain) {
@@ -1158,9 +1150,6 @@ static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
         }
 
         if (is_peer_connected) {
-            if (i == nvshmemi_team_world->my_pe) {
-                my_idx_in_peer_list = peer_pe_list.size();
-            }
             peer_pe_list.push_back(i);
         }
     }
@@ -1235,18 +1224,13 @@ static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
     if (n_peer_pes > 0 && validate_peer_pe_lists(peer_pe_list, n_peer_pes_all, peer_pe_list_all,
                                                  n_peer_pes, max_num_peer_pes)) {
         /* Initialize the predefined team from its peer list. */
-        team_peer_shared_ptr->my_pe = my_idx_in_peer_list;
-        team_peer_shared_ptr->start = peer_pe_list[0];
-        team_peer_shared_ptr->stride = n_peer_pes > 1 ? (peer_pe_list[1] - peer_pe_list[0]) : 1;
         team_peer_shared_ptr->size = n_peer_pes;
         team_peer_shared_ptr->is_team_same_mype_node = false;
     } else {
         INFO(NVSHMEM_INIT, "Setting %s to self", team_name);
         /* Fall back to single-PE team */
-        team_peer_shared_ptr->my_pe = 0;
-        team_peer_shared_ptr->start = nvshmemi_state->mype;
-        team_peer_shared_ptr->stride = 1;
         team_peer_shared_ptr->size = 1;
+        peer_pe_list.assign(1, nvshmemi_state->mype);
         team_peer_shared_ptr->is_team_node = true;
         team_peer_shared_ptr->is_team_same_mype_node = true;
     }
@@ -1263,7 +1247,7 @@ static int init_team_shared(nvshmemi_predefined_team_shared_domain domain) {
     team_peer_shared_ptr->supports_mc_endpoint =
         domain == nvshmemi_predefined_team_shared_domain::MULTICAST_LOGICAL_ENDPOINT;
 
-    nvshmemi_team_populate_pe_mappings_from_constant_stride(team_peer_shared_ptr);
+    populate_topology_team(team_peer_shared_ptr, peer_pe_list);
     nvshmemi_team_set_p2p_connectivity(team_peer_shared_ptr);
     nvshmemi_recexchalgo_get_neighbors(team_peer_shared_ptr);
 
