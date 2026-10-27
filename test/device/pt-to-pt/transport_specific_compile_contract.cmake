@@ -85,12 +85,14 @@ expect_compile_failure(
   "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
   -DCONTRACT_CASE_package_unavailable)
 
-# A pair without a route, such as CFT / Network, is rejected with one
-# diagnostic.
-expect_compile_failure(
-  invalid_pair
-  "unsupported addressing/transport-policy pair"
-  -DCONTRACT_CASE_invalid_pair)
+# A pair without a route, such as CFT / Network or Pointer / Network, is
+# rejected with one diagnostic.
+foreach(_pair invalid_pair pointer_network_pair)
+  expect_compile_failure(
+    ${_pair}
+    "unsupported addressing/transport-policy pair"
+    -DCONTRACT_CASE_${_pair})
+endforeach()
 # Pointer / TMA gets, and puts from an explicit global source, use CTA-wide
 # TMA state and are rejected below block scope.
 expect_compile_failure(

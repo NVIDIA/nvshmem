@@ -141,8 +141,6 @@ __global__ void compile_auto_network(void *remote, void *local, uint64_t *signal
     all_scopes<A, P, kShared, kGlobal, kGeneric>(remote, local, signal, pe);
     typed_all<A, P, kBlock, kGlobal>(remote, local, signal, pe);
     typed_all<A, P, kThread, kGeneric>(remote, local, signal, pe);
-    /* Pointer / Network is the same route. */
-    all_scopes<ts::addressing::Pointer, P, kGlobal, kGeneric>(remote, local, signal, pe);
 }
 
 __global__ void compile_auto_auto(void *remote, void *local, uint64_t *signal, int pe) {

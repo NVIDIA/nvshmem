@@ -69,11 +69,6 @@ struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_polic
 };
 
 template <>
-struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::Network> {
-    using route = network_route;
-};
-
-template <>
 struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_policy::Auto> {
     using route = automatic_route;
 };
