@@ -19,6 +19,7 @@
 #include "internal/host_transport/cudawrap.h"
 #include "internal/common/scope_guard.h"
 #include "transport_common.h"
+#include "transport_nonuniform.hpp"
 #include "transport_ib_common.h"  // for nvshmemt_ib_common_mem_handle
 #include "transport_mlx5_common.h"
 #include "non_abi/device/transport/transport_constants.h"
@@ -346,6 +347,7 @@ struct nvshmemt_gpunetio_state_t {
     std::vector<int> dev_ids;
     std::vector<int> port_ids;
     std::vector<int> selected_dev_ids;
+    std::vector<int> selected_port_ids;
     // Global array of all QPs from all devices (to be transferred to GPU later on)
     std::vector<nvshmemi_gpunetio_device_qp_t> qp_h;
     // Global array of lkeys / rkeys
@@ -397,7 +399,7 @@ struct nvshmemt_gpunetio_state_t {
 
     void initialize_cache_state();
     int get_cuda_device_id(CUdevice *out);
-    int connect_global_setup(int num_selected_devs, int *selected_dev_ids);
+    int connect_global_setup(nvshmem_transport_t t, int num_selected_devs, int *selected_dev_ids);
     int configure_multinic_amo_routing(nvshmem_transport_t t);
     int setup_gpu_state(nvshmem_transport_t t);
     int connect_qps_only(nvshmem_transport_t t, int *out_qp_indices, int num_qps);
@@ -1632,7 +1634,8 @@ void nvshmemt_gpunetio_state_t::initialize_cache_state() {
 }
 
 // Phase 1: One-time global setup
-int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *selected_dev_ids) {
+int nvshmemt_gpunetio_state_t::connect_global_setup(nvshmem_transport_t t, int num_selected_devs,
+                                                    int *selected_dev_ids) {
     int status = get_cuda_device_id(&cached_gpu_device_id);
     if (status) {
         return status;
@@ -1643,6 +1646,7 @@ int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *
         this->selected_dev_ids.resize(num_selected_devs);
     }
 
+    std::vector<int> ports;
     // Validate device IDs
     for (int i = 0; i < num_selected_devs; i++) {
         if (selected_dev_ids[i] < 0 || selected_dev_ids[i] >= static_cast<int>(dev_ids.size())) {
@@ -1650,6 +1654,16 @@ int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
         this->selected_dev_ids[i] = dev_ids[selected_dev_ids[i]];
+        ports.push_back(port_ids[selected_dev_ids[i]]);
+    }
+    bool nonuniform = false;
+    status = nvshmemt_limit_nonuniform_devices(t->boot_handle, this->selected_dev_ids, ports,
+                                               nonuniform);
+    if (status) {
+        return status;
+    }
+    if (nonuniform) {
+        selected_port_ids.swap(ports);
     }
 
     return NVSHMEMX_SUCCESS;
@@ -1970,7 +1984,8 @@ int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_
         int n_devs_selected = static_cast<int>(selected_dev_ids.size());
         int selected_dev_idx = last_device_index % n_devs_selected;
         int dev_idx = selected_dev_ids[selected_dev_idx];
-        int portid = port_ids[selected_dev_idx];
+        int portid = selected_port_ids.empty() ? port_ids[selected_dev_idx]
+                                               : selected_port_ids[selected_dev_idx];
         gpunetio_device &device = *devices[dev_idx];
 
         if (use_gdaki) {
@@ -2013,7 +2028,7 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
     }
 
     // Phase 1: Global setup (only on first call)
-    status = connect_global_setup(num_selected_devs, selected_dev_ids);
+    status = connect_global_setup(t, num_selected_devs, selected_dev_ids);
     if (status) {
         NVSHMEMI_ERROR_PRINT("connect_global_setup failed.\n");
         return NVSHMEMX_ERROR_INTERNAL;
@@ -2026,11 +2041,12 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
     }
 
     // Phase 2-3: Per-device processing (cached per device)
-    for (int i = 0; i < num_selected_devs; i++) {
-        int dev_idx = dev_ids[selected_dev_ids[i]];
+    for (size_t i = 0; i < this->selected_dev_ids.size(); i++) {
+        int dev_idx = this->selected_dev_ids[i];
         gpunetio_device &device = *devices[dev_idx];
         device.selected_dev_slot = i;
-        int portid = port_ids[selected_dev_ids[i]];
+        int portid =
+            selected_port_ids.empty() ? port_ids[selected_dev_ids[i]] : selected_port_ids[i];
 
         if (options->GPUNETIO_NUM_RC_PER_PE_GPU > 0) {
             status = device.add_endpoints(t, portid, options->GPUNETIO_NUM_RC_PER_PE_GPU,
