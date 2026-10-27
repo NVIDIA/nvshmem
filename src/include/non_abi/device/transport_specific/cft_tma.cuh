@@ -89,6 +89,11 @@ struct route_backend<cft_tma_route> {
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }
+        /* The handle path serves a self-targeted transfer with SM copies, which
+         * would break the strict route. */
+        if (bytes != 0 && pe == nvshmemi_device_state_d.mype) {
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
 #if NVSHMEMI_TS_CFT_HANDLES
         /* A zero-length transfer moves nothing, so it needs only the route:
          * registered shared memory and a valid logical endpoint for the peer. */
@@ -129,6 +134,10 @@ struct route_backend<cft_tma_route> {
         if (sig_op == NVSHMEM_SIGNAL_ADD &&
             !nvshmemi_is_addr_offset_aligned(sig_addr, CFT_HANDLE_TX_SIZE)) {
             return NVSHMEMX_ERROR_INVALID_VALUE;
+        }
+        /* A self-targeted signal would be a direct store, not a handle op. */
+        if (pe == nvshmemi_device_state_d.mype) {
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
         if (!scope_leader<Scope>()) {
             return NVSHMEMX_SUCCESS;
@@ -304,7 +313,6 @@ struct route_backend<cft_tma_route> {
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int complete() {
         validate_cft_tma_scope<Scope>();
-        scope_sync<Scope>();
         nvshmemi_handle_quiet<scope_traits<Scope>::internal>();
         __threadfence_system();
         fence_proxy_fabric2fabric_alias();

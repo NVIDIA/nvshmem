@@ -85,10 +85,9 @@ expect_compile_failure(
   "NVSHMEMX_ENABLE_TRANSPORT_POLICY requires an NVSHMEM package built with NVSHMEM_ENABLE_TRANSPORT_POLICY=ON"
   -DCONTRACT_CASE_package_unavailable)
 
-# A pair without a route is rejected with one diagnostic: CFT / Network and
-# Pointer / Network have none, and CFT / CE and CFT / SM have none in this
-# series.
-foreach(_pair invalid_pair pointer_network_pair cft_ce_pair cft_sm_pair)
+# A pair without a route is rejected with one diagnostic: CFT / Network,
+# Pointer / Network, and CFT / SM have none.
+foreach(_pair invalid_pair pointer_network_pair cft_sm_pair)
   expect_compile_failure(
     ${_pair}
     "unsupported addressing/transport-policy pair"

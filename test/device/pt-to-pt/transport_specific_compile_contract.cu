@@ -51,7 +51,6 @@ using Auto = nvshmemx::addressing::Auto;
 using CFT = nvshmemx::addressing::CFT;
 using Pointer = nvshmemx::addressing::Pointer;
 using AutoPolicy = nvshmemx::transport_policy::Auto;
-using CE = nvshmemx::transport_policy::CE;
 using Network = nvshmemx::transport_policy::Network;
 using SM = nvshmemx::transport_policy::SM;
 using TMA = nvshmemx::transport_policy::TMA;
@@ -126,12 +125,6 @@ __global__ void invalid_pair(uint8_t *destination, const uint8_t *source, int pe
 /* Network is paired only with Auto addressing. */
 __global__ void pointer_network_pair(uint8_t *destination, const uint8_t *source, int pe) {
     (void)nvshmemx_put<uint8_t, Pointer, Network, kBlock>(destination, source, 16, pe);
-}
-
-#elif defined(CONTRACT_CASE_cft_ce_pair)
-/* CFT / CE belongs to the copy-engine work and has no route here. */
-__global__ void cft_ce_pair(uint8_t *destination, const uint8_t *source, int pe) {
-    (void)nvshmemx_put<uint8_t, CFT, CE, kBlock>(destination, source, 16, pe);
 }
 
 #elif defined(CONTRACT_CASE_cft_sm_pair)
