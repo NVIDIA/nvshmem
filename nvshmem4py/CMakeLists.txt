@@ -145,6 +145,9 @@ if(NVSHMEM4PY_BUILD_CUTILE_BINDINGS AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND
    EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cutile/generate_tilelib.py")
     include(cmake/generateCutileTileLib.cmake)
     generateCutileTileLib()
+    if(TARGET package_src_target)
+        add_dependencies(package_src_target build_bindings_cutile)
+    endif()
 endif()
 
 # Cybind and Numbast share the base binding-generator environment.
@@ -268,6 +271,10 @@ foreach(LINE IN LISTS PYTHON_LINE_LIST)
 
         if(TARGET build_bindings_cute AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
             add_dependencies(${WHEEL_TARGET} build_bindings_cute)
+        endif()
+
+        if(TARGET build_bindings_cutile AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+            add_dependencies(${WHEEL_TARGET} build_bindings_cutile)
         endif()
 
         set(PREV_WHEEL_TARGET ${WHEEL_TARGET})

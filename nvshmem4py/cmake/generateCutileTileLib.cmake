@@ -168,6 +168,8 @@ function(generateCutileTileLib)
     # The default build assembles the TileLib, which installs with the other
     # device libraries.
     add_custom_target(libnvshmem_device_tilelib ALL DEPENDS "${CUTILE_TILELIB}")
+    # The libraries wheel stages this file only while this target exists.
+    set_target_properties(libnvshmem_device_tilelib PROPERTIES NVSHMEM_TILELIB_FILE "${CUTILE_TILELIB}")
     install(FILES "${CUTILE_TILELIB}" DESTINATION lib)
 
     add_custom_target(build_bindings_cutile DEPENDS ${CUTILE_OUTPUTS})

@@ -3,7 +3,7 @@
 
 from importlib import import_module
 
-__all__ = ["numba", "numba_cuda_mlir", "cute"]
+__all__ = ["numba", "numba_cuda_mlir", "cute", "tile"]
 
 
 def __getattr__(name):
