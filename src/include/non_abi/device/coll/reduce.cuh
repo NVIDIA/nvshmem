@@ -1896,30 +1896,27 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reduce_threadgroup(nvshme
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     if constexpr (is_handle_pullred_supported<TYPE, RDXN_OPS_SUM>()) {
-        const bool cft_common_supported =
-            nvshmemi_tma_smem_registered() && !__isShared(dest) && !__isShared(source) &&
-            ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0);
+        const bool cft_common_supported = nvshmemi_tma_smem_registered() && !__isShared(dest) &&
+                                          !__isShared(source) &&
+                                          ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0);
         const size_t elems_per_pe = nreduce / teami->size;
         const size_t last_pe_elems = elems_per_pe + nreduce % teami->size;
         const bool two_shot_sizes_supported =
-            (elems_per_pe == 0 ||
-             nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(
-                 teami->mc_leid_with_flag, elems_per_pe * sizeof(TYPE))) &&
-            (last_pe_elems == 0 ||
-             nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(
-                 teami->mc_leid_with_flag, last_pe_elems * sizeof(TYPE)));
+            (elems_per_pe == 0 || nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(
+                                      teami->mc_leid_with_flag, elems_per_pe * sizeof(TYPE))) &&
+            (last_pe_elems == 0 || nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(
+                                       teami->mc_leid_with_flag, last_pe_elems * sizeof(TYPE)));
 
-        is_one_shot_supported =
-            is_one_shot_supported && cft_common_supported &&
-            nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(teami->mc_leid_with_flag,
-                                                               nreduce * sizeof(TYPE)) &&
-            nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
-            nvshmemi_is_addr_offset_aligned(source, CFT_HANDLE_TX_SIZE);
-        is_two_shot_supported =
-            is_two_shot_supported && cft_common_supported && two_shot_sizes_supported &&
-            nvshmemi_is_addr_offset_aligned(dest, CFT_HANDLE_TX_SIZE) &&
-            nvshmemi_is_addr_offset_aligned(source, CFT_HANDLE_TX_SIZE) &&
-            ((elems_per_pe * sizeof(TYPE)) % CFT_HANDLE_TX_SIZE == 0);
+        is_one_shot_supported = is_one_shot_supported && cft_common_supported &&
+                                nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(
+                                    teami->mc_leid_with_flag, nreduce * sizeof(TYPE)) &&
+                                nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+                                nvshmemi_is_addr_offset_aligned(source, CFT_HANDLE_TX_SIZE);
+        is_two_shot_supported = is_two_shot_supported && cft_common_supported &&
+                                two_shot_sizes_supported &&
+                                nvshmemi_is_addr_offset_aligned(dest, CFT_HANDLE_TX_SIZE) &&
+                                nvshmemi_is_addr_offset_aligned(source, CFT_HANDLE_TX_SIZE) &&
+                                ((elems_per_pe * sizeof(TYPE)) % CFT_HANDLE_TX_SIZE == 0);
     } else {
         is_one_shot_supported = false;
         is_two_shot_supported = false;
