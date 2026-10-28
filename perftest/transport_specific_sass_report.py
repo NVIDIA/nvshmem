@@ -27,7 +27,6 @@ import subprocess
 import sys
 import tempfile
 
-# (row label, addressing, transport policy, local memory space)
 ROUTES = [
     ("pointer_sm", "Pointer", "SM", "global"),
     ("pointer_sm", "Pointer", "SM", "generic"),
@@ -43,10 +42,8 @@ ROUTES = [
 
 OPERATIONS = ["put", "put_nbi", "get", "put_signal", "quiet", "capability"]
 
-# Operations that take a local operand; the others are emitted once per route.
 LOCAL_OPERATIONS = {"put", "put_nbi", "get", "put_signal", "capability"}
 
-# Routes whose every operation is block-scope only.
 BLOCK_ONLY_ROUTES = {"cft_tma"}
 
 PORTABLE_SUFFIX = {"thread": "", "warp": "_warp", "block": "_block"}
@@ -99,13 +96,11 @@ PREDICATE = re.compile(r"^@!?U?P[T0-9]+\s+")
 
 
 def legal(label, op, space, scope):
-    """Whether the route accepts the operation at this scope."""
     if scope == "block":
         return True
     if label in BLOCK_ONLY_ROUTES:
         return False
     if label == "pointer_tma":
-        # Below block scope only the put family from a non-global source.
         return op == "quiet" or (op != "get" and space != "global")
     return True
 
@@ -120,7 +115,7 @@ def kernel_source(scope):
             local = op in LOCAL_OPERATIONS
             name = f"{label}_{op}_{space}" if local else f"{label}_{op}"
             if any(row[0] == name for row in rows):
-                continue  # ordering has no local operand; emit it once per route
+                continue
             body = PREVIEW_KERNELS[op].format(a=f"nvshmemx::addressing::{addressing}",
                                               p=f"nvshmemx::transport_policy::{policy}",
                                               src=space)

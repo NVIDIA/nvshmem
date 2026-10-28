@@ -3,13 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Transport-policy route RMA bandwidth: blocking and NBI put/get for every
- * route, from global and (where the route accepts it) CTA shared local
- * operands. An NBI row issues `iters` operations per block and completes them
- * with one route quiet. NVSHMEM_TRANSPORT_SPECIFIC_ROUTE restricts the routes;
- * a row the route cannot serve, as nvshmemx_rma_capability reports, is a
- * SKIP. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_perftest.cuh"

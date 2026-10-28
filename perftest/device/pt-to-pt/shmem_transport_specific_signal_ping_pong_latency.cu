@@ -3,16 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Transport-policy route signal ping-pong: PE 0 sends a route put_signal
- * (blocking, or NBI followed by a route quiet) and PE 1 acknowledges with the
- * same route's signal_op, at thread (one thread), warp (one warp), and block
- * (128 threads) scope; -s/--scope selects one. SET and ADD run on every route; ADD needs native
- * P2P atomics on the Pointer routes and the fabric atomic capability on
- * CFT / TMA. nvshmemx_rma_capability decides whether the route can move the
- * payload, and one unwaited send and acknowledgement then probe the signal
- * path, so neither a missing capability nor a rejected signal can leave the
- * peer waiting forever: either is a SKIP. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_perftest.cuh"
@@ -66,7 +56,6 @@ __device__ int acknowledge(uint64_t *ack, uint64_t value, int peer) {
                                                                                        SigOp, peer);
 }
 
-/* Exercises both directions once without waiting on the peer. */
 template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
 __global__ void signal_probe(unsigned char *remote, unsigned char *local_global, size_t bytes,
                              uint64_t *signal, uint64_t *ack, int registration, int peer,
@@ -106,8 +95,7 @@ __global__ void signal_ping_pong(unsigned char *remote, unsigned char *local_glo
             }
         }
     }
-    /* The peer no longer writes the flag this PE consumed, so it can be
-     * rearmed here for the next launch. */
+    /* The peer no longer writes this flag, so rearm it for the next launch. */
     if (threadIdx.x == 0 && result == NVSHMEMX_SUCCESS) {
         *(mype == 0 ? ack : signal) = 0;
     }
@@ -121,7 +109,6 @@ struct signal_ping_pong_bench : ts::payload_buffers {
 
     void setup(ts::context &ctx) {
         ts::payload_buffers::setup(ctx);
-        /* CFT ADD updates a 16-byte block, so the signal words are 16-byte aligned. */
         signal = static_cast<uint64_t *>(nvshmem_align(ts::kAlignment, ts::kAlignment));
         ack = static_cast<uint64_t *>(nvshmem_align(ts::kAlignment, ts::kAlignment));
         if (signal == nullptr || ack == nullptr) {
@@ -144,7 +131,6 @@ struct signal_ping_pong_bench : ts::payload_buffers {
         nvshmem_barrier_all();
     }
 
-    /* Both PEs send and acknowledge once; NOT_SUPPORTED on either is a SKIP. */
     template <route R, placement P, rma_nbi Nbi, int SigOp, ts::Scope S>
     ts::outcome probe_signal(ts::context &ctx, const std::string &subjob, int registration) {
         const size_t probe_bytes = ts::route_traits<R>::granule;
@@ -217,7 +203,6 @@ struct signal_ping_pong_bench : ts::payload_buffers {
         return result;
     }
 
-    /* A scope the route does not accept has no row. */
     template <route R, placement P, int SigOp, ts::Scope S>
     int run_signal_op(ts::context &ctx) {
         if constexpr (ts::scope_legal<R, S, P, rma_operation::put>) {

@@ -3,18 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Transport-policy route NBI source-reuse benchmark. Each iteration rewrites
- * the local source, issues a put_nbi, and then waits at a route flush (source
- * reuse) or quiet (remote completion) before the next rewrite. A final quiet
- * retires the last write before shared memory is released.
- *
- * The put_nbi_quiet_plus_auto rows measure the cost of route-specific
- * ordering when a kernel uses more than one route: each iteration moves half
- * of the payload through the measured route and half through Auto / Auto
- * (from a global source), then issues a quiet for each route. Compare them
- * with the single-route put_nbi_quiet rows of the same size. A row the route
- * cannot serve, as nvshmemx_rma_capability reports, is a SKIP. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_perftest.cuh"
@@ -30,7 +18,6 @@ namespace {
 
 constexpr const char *kBenchmark = "shmem_transport_specific_flush_bench";
 constexpr int kThreads = 128;
-/* The plus_auto rows split each payload into two halves. */
 constexpr size_t kPlusAutoParts = 2;
 
 template <route R, placement P, completion C, bool PlusAuto>
@@ -44,8 +31,6 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
 
     unsigned char *shared = ts::acquire_smem<R>(registration);
     unsigned char *source = P == placement::shared ? shared : local_global;
-    /* With PlusAuto the measured route moves [0, half) and Auto / Auto moves
-     * [half, bytes) from the global source. */
     const size_t half = PlusAuto ? bytes / kPlusAutoParts : bytes;
 
     int result = NVSHMEMX_SUCCESS;
@@ -93,7 +78,6 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
 struct flush_bench : ts::payload_buffers {
     template <route R, placement P, completion C, bool PlusAuto = false>
     ts::outcome run_variant(ts::context &ctx) {
-        /* Each half must stay a multiple of the measured route's granule. */
         const ts::sweep_spec spec = ts::make_spec(
             R, std::string("put_nbi_") + ts::completion_key(C) + (PlusAuto ? "_plus_auto" : ""), P,
             "BW", "GB/sec", '+', ts::route_traits<R>::granule * (PlusAuto ? kPlusAutoParts : 1), 1,

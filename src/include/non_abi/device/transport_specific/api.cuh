@@ -27,8 +27,6 @@ namespace transport_policy {
  * pair to a route, applies the operation, scope, and memory-space checks,
  * runs the route's preflight on every participant, agrees on one status across
  * the group, and only then lets the route backend issue the work.
- * nvshmemx_rma_capability runs the same steps for a put or get and stops after
- * the agreement.
  */
 
 enum class trace_op {
@@ -111,15 +109,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int prepare_rma(const void *remote, con
 template <typename Addressing, typename TransportPolicy>
 using backend_for = route_backend<route_for<Addressing, TransportPolicy>>;
 
-/*
- * The put and get preflights, shared by the operations and by
- * nvshmemx_rma_capability so that a query and its operation apply identical
- * rules: the operation's compile-time scope and memory-space checks (the
- * route's own scope rules are static_asserts inside its preflight), then each
- * participant's prepare_rma. prepare_* leave group agreement to the caller,
- * which lets put_signal fold its signal preflight into the same agreement;
- * preflight_* return the agreed group-uniform status. Neither issues work.
- */
+/* Shared by the operations and nvshmemx_rma_capability so both apply the same
+ * rules. prepare_* leave agreement to the caller; preflight_* agree. */
 template <typename Addressing, typename TransportPolicy, threadgroup Scope,
           nvshmemx::memory_space::source Src, nvshmemx::memory_space::dest Dst>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int prepare_put(
@@ -232,13 +223,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int signal_op(uint64_t *sig_addr, uint6
     return Backend::template signal_op<Scope>(sig, signal, sig_op);
 }
 
-/*
- * nvshmemx_rma_capability: exactly the put (source overload) or get (dest
- * overload) preflight, with the remote operand in global memory as every put
- * destination and get source is. It returns the agreed status and discards the
- * plan, so it never issues work. A non-success result is the expected answer to
- * a query, so it is not traced.
- */
+/* A non-success result is the expected answer to a query, so it is not traced. */
 template <typename Addressing, typename TransportPolicy, threadgroup Scope,
           nvshmemx::memory_space::source Local>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int put_capability(const void *remote, const void *local,
@@ -400,9 +385,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_fence() {
                                              nvshmemi::transport_policy::trace_op::fence>());
 }
 
-/* Runs the put (source LocalMemorySpace) or get (dest LocalMemorySpace)
- * preflight of the route without issuing work. `remote` is the symmetric-heap
- * operand and `local` the put source or get destination. */
 template <typename Addressing, typename TransportPolicy, nvshmemx::threadgroup Scope,
           nvshmemx::memory_space::source LocalMemorySpace = nvshmemx::memory_space::source::generic>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_rma_capability(const void *remote,

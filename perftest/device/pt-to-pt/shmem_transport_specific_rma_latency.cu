@@ -3,13 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Transport-policy route put/get latency: PE 0 issues one blocking or NBI
- * operation followed by a route quiet per iteration, from global and (where
- * the route accepts it) CTA shared local operands, at thread (one thread),
- * warp (one warp), and block (128 threads) scope; -s/--scope selects one. A
- * row the route cannot serve, as nvshmemx_rma_capability reports, is a SKIP;
- * a scope the route does not accept has no row. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_perftest.cuh"
@@ -83,7 +76,6 @@ struct rma_latency : ts::payload_buffers {
         return ts::run_sweep(ctx, spec, launch, metric);
     }
 
-    /* A scope the route does not accept has no row. */
     template <route R, placement P, rma_operation Op, rma_nbi Nbi, ts::Scope S>
     int run_legal(ts::context &ctx) {
         if constexpr (ts::scope_legal<R, S, P, Op>) {

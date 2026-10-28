@@ -54,7 +54,6 @@ __device__ void byte_rma(void *remote_ptr, void *local_ptr, uint64_t *signal, in
                                                                      NVSHMEM_SIGNAL_SET, pe);
     (void)nvshmemx_put_signal_nbi<uint8_t, A, P, S, Local, Dest::global>(remote, local, 16, signal,
                                                                          1, NVSHMEM_SIGNAL_ADD, pe);
-    /* The capability query in both directions, for the same local space. */
     (void)nvshmemx_rma_capability<A, P, S, Local>(remote, local, 16, pe);
     (void)nvshmemx_rma_capability<A, P, S, kLocalDest>(remote, local, 16, pe);
 }
@@ -177,8 +176,7 @@ __global__ void compile_auto_aliases(void *remote, void *local, uint64_t *signal
     put_family<A, P, kWarp, kShared>(remote, local, signal, pe);
 }
 
-/* Without a local memory space the capability query is the put preflight
- * from a generic source. */
+/* The default local space is a generic put source. */
 __global__ void compile_capability_default(void *remote, void *local, int pe) {
     (void)nvshmemx_rma_capability<ts::addressing::Pointer, ts::transport_policy::SM, kWarp>(
         remote, local, 16, pe);
