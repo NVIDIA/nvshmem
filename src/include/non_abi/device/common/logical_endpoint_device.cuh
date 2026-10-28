@@ -14,6 +14,8 @@
 
 #ifdef __CUDA_ARCH__
 
+enum class nvshmemi_le_size_rule { any_size, tx_size_multiple };
+
 #if defined(__CUDACC_RTC__)
 
 typedef unsigned int CUlogicalEndpointId;
@@ -39,7 +41,7 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *addr
     return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
+template <nvshmemi_le_size_rule SIZE_RULE>
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int, size_t, threadgroup_t, const void *,
                                                            const void *) {
     return false;
@@ -67,7 +69,7 @@ __device__ __forceinline__ void nvshmemi_cft_force_unsupported() {
 
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return nvshmemi_is_cft_forced(); }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
+template <nvshmemi_le_size_rule SIZE_RULE>
 __device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int, size_t, threadgroup_t,
                                                                    const void *, const void *) {
     return nvshmemi_is_cft_forced();
@@ -204,12 +206,12 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void* addr
     return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
+template <nvshmemi_le_size_rule SIZE_RULE>
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, threadgroup_t scope,
                                                            const void* le_addr,
                                                            const void* tma_addr) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    if constexpr (REQUIRE_TX_SIZE_MULTIPLE) {
+    if constexpr (SIZE_RULE == nvshmemi_le_size_rule::tx_size_multiple) {
         if (size == 0 || (size % CFT_HANDLE_TX_SIZE) != 0) {
             return false;
         }
@@ -348,7 +350,7 @@ __device__ __forceinline__ void nvshmemi_cft_force_unsupported() {
 #endif
 }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
+template <nvshmemi_le_size_rule SIZE_RULE>
 __device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int pe, size_t size,
                                                                    threadgroup_t scope,
                                                                    const void* le_addr,
@@ -357,7 +359,7 @@ __device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int pe, size_
     return true;
 #elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
-    return nvshmemi_is_le_implemented<REQUIRE_TX_SIZE_MULTIPLE>(pe, size, scope, le_addr, tma_addr);
+    return nvshmemi_is_le_implemented<SIZE_RULE>(pe, size, scope, le_addr, tma_addr);
 #else
     return false;
 #endif

@@ -64,8 +64,8 @@ struct route_backend<cft_tma_route> {
                        ? NVSHMEMX_SUCCESS
                        : NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
-        if (!nvshmemi_is_le_implemented<false>(pe, bytes, scope_traits<Scope>::internal, remote,
-                                               local)) {
+        if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(
+                pe, bytes, scope_traits<Scope>::internal, remote, local)) {
             return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
         if (plan.shared_local && overlaps_registration(local, bytes)) {

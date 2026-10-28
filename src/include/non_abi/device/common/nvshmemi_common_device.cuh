@@ -76,6 +76,8 @@ __device__ __forceinline__ const void *nvshmemi_ptr_add(const void *ptr, size_t 
 }
 
 /* UNKNOWN classifies at run time; SHARED and GLOBAL are trusted. */
+enum class nvshmemi_tma_use { allowed, disallowed };
+
 enum nvshmemi_local_space_t {
     NVSHMEMI_LOCAL_SPACE_UNKNOWN = 0,
     NVSHMEMI_LOCAL_SPACE_SHARED,
@@ -1509,7 +1511,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_cft_preempts_pointer_path<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
+        !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::tx_size_multiple>(
+            pe, nelems * sizeof(T), SCOPE, source, dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1529,7 +1532,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+                   pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
@@ -1543,7 +1547,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE, bool ALLOW_TMA = true,
+template <typename T, threadgroup_t SCOPE, nvshmemi_tma_use TMA_USE = nvshmemi_tma_use::allowed,
           nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     T *dest, const T *source, size_t nelems, int pe,
@@ -1552,11 +1556,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_cft_preempts_pointer_path<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
+        !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::tx_size_multiple>(
+            pe, nelems * sizeof(T), SCOPE, source, dest)) {
         char *source_actual = (char *)(peer_base_addr) +
                               ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
-        if constexpr (ALLOW_TMA) {
+        if constexpr (TMA_USE == nvshmemi_tma_use::allowed) {
             const auto registration = nvshmemi_tma_get_smem_registration();
             if (registration.is_valid()) {
                 if (NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, dest)) {
@@ -1576,7 +1581,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_is_le_implemented<true>(pe, nelems * sizeof(T), SCOPE, source, dest)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+                   pe, nelems * sizeof(T), SCOPE, source, dest)) {
         nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, true);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
@@ -1618,20 +1624,22 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
 
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_TMA = true, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
+          nvshmemi_tma_use TMA_USE = nvshmemi_tma_use::allowed,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_cft_preempts_pointer_path<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+        !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                             SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
         /* TMA fast path when this CTA registered smem.  Fall through to P2P
          * stores on alignment/size/registration failure. */
-        if constexpr (ALLOW_TMA) {
+        if constexpr (TMA_USE == nvshmemi_tma_use::allowed) {
             const auto registration = nvshmemi_tma_get_smem_registration();
             if (registration.is_valid() &&
                 nvshmemi_memcpy_tma_nbi<SCOPE, LOCAL_SPACE>(registration, (void *)dest_actual,
@@ -1641,7 +1649,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                           SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
@@ -1656,13 +1665,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
 
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
-          bool ALLOW_TMA = true, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
+          nvshmemi_tma_use TMA_USE = nvshmemi_tma_use::allowed,
+          nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
-    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION, ALLOW_TMA, LOCAL_SPACE>(dest, source, nelems, pe,
-                                                                          qp_index);
+    nvshmemii_put_nbi<T, SCOPE, REGION_OPERATION, TMA_USE, LOCAL_SPACE>(dest, source, nelems, pe,
+                                                                        qp_index);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -1675,7 +1685,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_cft_preempts_pointer_path<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+        !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                             SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1691,7 +1702,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                           SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE, LOCAL_SPACE>((void *)source, (void *)dest, nelems * sizeof(T),
                                                 pe, true);
 #endif
@@ -1763,7 +1775,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
-        !nvshmemi_cft_preempts_pointer_path<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+        !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                             SCOPE, dest, source)) {
         char *dest_actual =
             (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
@@ -1789,7 +1802,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
             nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_is_le_implemented<false>(pe, nelems * sizeof(T), SCOPE, dest, source)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                           SCOPE, dest, source)) {
         nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, true);
         nvshmemi_threadgroup_sync<SCOPE>();
         if (!myIdx) {

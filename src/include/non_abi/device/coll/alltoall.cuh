@@ -55,8 +55,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
                 (void *)(psync + mype), 1ULL, NVSHMEMI_AMO_SIGNAL_ADD, next_rank);
 #endif
         } else if (msgsize <= NVSHMEMI_ALLTOALL_SMALL_MSGSIZE) {
-            nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE, false>(
-                dest + dst_offset, source + src_offset, nelems, next_rank);
+            nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE,
+                             nvshmemi_tma_use::disallowed>(dest + dst_offset, source + src_offset,
+                                                           nelems, next_rank);
         }
     }
 
@@ -74,8 +75,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_alltoall_allpush_threadgr
                     next_rank);
                 if (peer_base_addr) {
                     nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_WARP, NVSHMEMI_REGION_OPERATION_NONE,
-                                     false>(dest + dst_offset, source + src_offset, nelems,
-                                            next_rank);
+                                     nvshmemi_tma_use::disallowed>(
+                        dest + dst_offset, source + src_offset, nelems, next_rank);
                 }
             }
         }

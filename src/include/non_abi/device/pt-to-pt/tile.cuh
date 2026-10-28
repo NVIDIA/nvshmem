@@ -269,8 +269,8 @@ __device__ inline bool nvshmemi_tile_try_handle_put_threadgroup_dim(src_tensor_t
                                                                     tuple_t boundary, int pe) {
     using T = typename src_tensor_t::value_type;
 
-    if (!nvshmemi_is_le_implemented<false>(pe, CFT_HANDLE_TX_SIZE, scope, dst_tensor.data(),
-                                           src_tensor.data())) {
+    if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(
+            pe, CFT_HANDLE_TX_SIZE, scope, dst_tensor.data(), src_tensor.data())) {
         return false;
     }
 
@@ -347,8 +347,8 @@ __device__ inline bool nvshmemi_tile_try_handle_get_threadgroup_dim(src_tensor_t
 
     if (is_fully_contiguous) {
         const size_t copy_bytes = row_bytes * valid_minor_dim;
-        if (!nvshmemi_is_le_implemented<true>(pe, copy_bytes, scope, src_tensor.data(),
-                                              dst_tensor.data())) {
+        if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+                pe, copy_bytes, scope, src_tensor.data(), dst_tensor.data())) {
             return false;
         }
 
@@ -363,8 +363,8 @@ __device__ inline bool nvshmemi_tile_try_handle_get_threadgroup_dim(src_tensor_t
         return false;
     }
 
-    if (!nvshmemi_is_le_implemented<true>(pe, row_bytes, scope, src_tensor.data(),
-                                          dst_tensor.data())) {
+    if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+            pe, row_bytes, scope, src_tensor.data(), dst_tensor.data())) {
         return false;
     }
 
