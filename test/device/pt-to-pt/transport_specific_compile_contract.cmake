@@ -163,9 +163,6 @@ find_program(_cuobjdump cuobjdump HINTS "${_cuda_bin_dir}" NO_DEFAULT_PATH)
 if(NOT _cuobjdump)
   find_program(_cuobjdump cuobjdump)
 endif()
-if(NOT _cuobjdump)
-  message(FATAL_ERROR "transport-specific compile contract: cuobjdump not found")
-endif()
 
 function(device_symbols name output_var)
   set(_object "${CONTRACT_BINARY_DIR}/${name}.o")
@@ -181,29 +178,37 @@ function(device_symbols name output_var)
   set(${output_var} "${_stdout}" PARENT_SCOPE)
 endfunction()
 
-set(_network_symbol_re "nvshmemi_(transfer|proxy|ibgda|gdaki)_[A-Za-z_]+")
 expect_compile_success(network_p2p_only -DCONTRACT_CASE_network_p2p_only)
-device_symbols(network_p2p_only _p2p_only_symbols)
-if(NOT _p2p_only_symbols MATCHES "network_symbols")
-  message(FATAL_ERROR
-          "transport-specific compile contract 'network_p2p_only': the fixture kernel is "
-          "missing from the device object")
-endif()
-string(REGEX MATCHALL "${_network_symbol_re}" _p2p_only_network "${_p2p_only_symbols}")
-if(_p2p_only_network)
-  list(REMOVE_DUPLICATES _p2p_only_network)
-  message(FATAL_ERROR
-          "transport-specific compile contract 'network_p2p_only': a P2P-only Auto / Network "
-          "consumer references network transport symbols: ${_p2p_only_network}")
-endif()
-
 expect_compile_success(network_symbols -DCONTRACT_CASE_network_symbols)
-device_symbols(network_symbols _control_symbols)
-if(_control_symbols MATCHES "transport_specific_contract_expects_transfer_symbols" AND
-   NOT _control_symbols MATCHES "nvshmemi_transfer_[A-Za-z_]+")
-  message(FATAL_ERROR
-          "transport-specific compile contract 'network_symbols': the control object has no "
-          "nvshmemi_transfer_* reference, so the P2P-only symbol check can no longer observe one")
+# Inspecting the objects needs cuobjdump; build environments without it still
+# compile both fixtures above and skip only the symbol check.
+if(NOT _cuobjdump)
+  message(WARNING
+          "transport-specific compile contract: cuobjdump not found, skipping the P2P-only "
+          "network-symbol check")
+else()
+  set(_network_symbol_re "nvshmemi_(transfer|proxy|ibgda|gdaki)_[A-Za-z_]+")
+  device_symbols(network_p2p_only _p2p_only_symbols)
+  if(NOT _p2p_only_symbols MATCHES "network_symbols")
+    message(FATAL_ERROR
+            "transport-specific compile contract 'network_p2p_only': the fixture kernel is "
+            "missing from the device object")
+  endif()
+  string(REGEX MATCHALL "${_network_symbol_re}" _p2p_only_network "${_p2p_only_symbols}")
+  if(_p2p_only_network)
+    list(REMOVE_DUPLICATES _p2p_only_network)
+    message(FATAL_ERROR
+            "transport-specific compile contract 'network_p2p_only': a P2P-only Auto / Network "
+            "consumer references network transport symbols: ${_p2p_only_network}")
+  endif()
+
+  device_symbols(network_symbols _control_symbols)
+  if(_control_symbols MATCHES "transport_specific_contract_expects_transfer_symbols" AND
+     NOT _control_symbols MATCHES "nvshmemi_transfer_[A-Za-z_]+")
+    message(FATAL_ERROR
+            "transport-specific compile contract 'network_symbols': the control object has no "
+            "nvshmemi_transfer_* reference, so the P2P-only symbol check can no longer observe one")
+  endif()
 endif()
 
 # __isShared and __isGlobal lower to the PTX shared- and global-window tests.
