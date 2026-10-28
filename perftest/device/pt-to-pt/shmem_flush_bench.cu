@@ -138,6 +138,8 @@ int main(int argc, char *argv[]) {
     bool machine_readable = false;
     int exit_status = EXIT_FAILURE;
 
+    // The default minimum message size must hold at least one element.
+    min_size = sizeof(double);
     read_args(argc, argv);
     max_threads = (int)threads_per_block;
 

@@ -42,6 +42,8 @@ int main(int argc, char *argv[]) {
     uint64_t *data_d = NULL;
     uint64_t set_value = 1;
     unsigned int *counter_d;
+    // The default minimum message size must hold at least one element.
+    min_size = sizeof(uint64_t);
     read_args(argc, argv);
     if (!validate_message_size_range(sizeof(uint64_t))) {
         return EXIT_FAILURE;
@@ -104,7 +106,7 @@ int main(int argc, char *argv[]) {
     if (use_smem && max_threads > MAX_CFT_ATOMIC_THREADS) {
         if (mype == 0) {
             fprintf(stderr,
-                    "Capping atomic bandwidth test at %d threads per block for CFT atomics\n",
+                    "Capping atomic bandwidth test at %zu threads per block for CFT atomics\n",
                     MAX_CFT_ATOMIC_THREADS);
         }
         max_threads = MAX_CFT_ATOMIC_THREADS;
