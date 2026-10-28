@@ -1711,7 +1711,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
         nvshmemi_handle_p((void *)sig_addr, signal, pe);
 #endif
-    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && pe == nvshmemi_device_state_d.mype) {
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && pe == nvshmemi_device_state_d.mype &&
+               nvshmemi_use_ldst_path()) {
         atomicAdd_system((unsigned long long *)sig_addr, signal);
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && !nvshmemi_is_cft_forced() &&
                nvshmemi_use_ldst_path() && nvshmemi_peer_reachable(peer_base_addr) &&
