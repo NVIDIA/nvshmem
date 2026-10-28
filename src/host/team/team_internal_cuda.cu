@@ -189,7 +189,7 @@ __global__ void nvshmemi_team_mapping_kernel(
         /* pe_in_team begins an aligned 16-byte lane and state_idx starts at the next lane.
          * Transfer the complete first lane to avoid the unsupported masked sub-16-byte CFT PUT. */
         nvshmemi_put_nbi<unsigned char, NVSHMEMI_THREADGROUP_THREAD, NVSHMEMI_REGION_OPERATION_NONE,
-                         false>(
+                         nvshmemi_tma_use::disallowed>(
             reinterpret_cast<unsigned char *>(
                 &nvshmemi_team_creation_psync->pe_info[nvshmemi_device_state_d.mype].pe_in_team),
             reinterpret_cast<const unsigned char *>(
@@ -214,12 +214,14 @@ __global__ void nvshmemi_team_mapping_kernel(
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             const unsigned char *uniqueid_lane =
                 reinterpret_cast<const unsigned char *>(&nvshmemi_team_creation_psync->uniqueid);
-            if (nvshmemi_is_le_implemented<true>(i, CFT_HANDLE_TX_SIZE, NVSHMEMI_THREADGROUP_THREAD,
-                                                 uniqueid_lane, peer_uniqueid_lane)) {
+            if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+                    i, CFT_HANDLE_TX_SIZE, NVSHMEMI_THREADGROUP_THREAD, uniqueid_lane,
+                    peer_uniqueid_lane)) {
                 /* Scalar g has no CFT route. Fetch its aligned 16-byte lane into a per-thread
                  * shared slot when pointer access is unavailable. */
-                nvshmemi_get<unsigned char, NVSHMEMI_THREADGROUP_THREAD, false>(
-                    peer_uniqueid_lane, uniqueid_lane, CFT_HANDLE_TX_SIZE, i);
+                nvshmemi_get<unsigned char, NVSHMEMI_THREADGROUP_THREAD,
+                             nvshmemi_tma_use::disallowed>(peer_uniqueid_lane, uniqueid_lane,
+                                                           CFT_HANDLE_TX_SIZE, i);
                 peer_uniqueid = *reinterpret_cast<uint64_t *>(peer_uniqueid_lane);
             } else
 #endif

@@ -65,8 +65,8 @@ struct route_backend<automatic_route> {
         const char *src = static_cast<const char *>(source);
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (IsNbi) {
-            nvshmemi_put_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, true, kLocal>(
-                dest, src, bytes, plan.pe);
+            nvshmemi_put_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE,
+                             nvshmemi_tma_use::allowed, kLocal>(dest, src, bytes, plan.pe);
         } else {
             nvshmemi_put<char, kScope<Scope>, kLocal>(dest, src, bytes, plan.pe);
         }
@@ -83,7 +83,8 @@ struct route_backend<automatic_route> {
             nvshmemi_get_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, kLocal>(
                 dst, src, bytes, plan.pe);
         } else {
-            nvshmemi_get<char, kScope<Scope>, true, kLocal>(dst, src, bytes, plan.pe);
+            nvshmemi_get<char, kScope<Scope>, nvshmemi_tma_use::allowed, kLocal>(dst, src, bytes,
+                                                                                 plan.pe);
         }
         return NVSHMEMX_SUCCESS;
     }
