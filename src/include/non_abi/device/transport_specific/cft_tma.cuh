@@ -29,7 +29,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void validate_cft_tma_scope() {
 template <>
 struct route_backend<cft_tma_route> {
     struct rma_plan {
-        void *remote;
         int pe;
         bool shared_local;
     };
@@ -46,7 +45,7 @@ struct route_backend<cft_tma_route> {
                                                                       size_t bytes, int pe,
                                                                       rma_plan &plan) {
         validate_cft_tma_scope<Scope>();
-        plan = rma_plan{const_cast<void *>(remote), pe, false};
+        plan = rma_plan{pe, false};
         int status = check_rma_arguments(remote, local, bytes, pe);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
@@ -114,7 +113,7 @@ struct route_backend<cft_tma_route> {
     }
 
     template <threadgroup Scope, bool IsNbi, typename Source>
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan,
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *remote,
                                                             const void *source, size_t bytes) {
         if (bytes == 0) {
             return NVSHMEMX_SUCCESS;
@@ -123,13 +122,13 @@ struct route_backend<cft_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
-            nvshmemi_handle_put<kScope, kLocal>(source, plan.remote, bytes, plan.pe, !IsNbi);
+            nvshmemi_handle_put<kScope, kLocal>(source, remote, bytes, plan.pe, !IsNbi);
         } else if (plan.shared_local) {
-            nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(source, plan.remote, bytes,
-                                                                     plan.pe, !IsNbi);
+            nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(source, remote, bytes, plan.pe,
+                                                                     !IsNbi);
         } else {
-            nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(source, plan.remote, bytes,
-                                                                     plan.pe, !IsNbi);
+            nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(source, remote, bytes, plan.pe,
+                                                                     !IsNbi);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -143,7 +142,7 @@ struct route_backend<cft_tma_route> {
     /* The handle get drains before it returns, so get_nbi is eager. */
     template <threadgroup Scope, bool IsNbi, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
-                                                            size_t bytes) {
+                                                            const void *remote, size_t bytes) {
         if (bytes == 0) {
             return NVSHMEMX_SUCCESS;
         }
@@ -151,13 +150,13 @@ struct route_backend<cft_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
-            nvshmemi_handle_get<kScope, kLocal>(plan.remote, dest, bytes, plan.pe, !IsNbi);
+            nvshmemi_handle_get<kScope, kLocal>(remote, dest, bytes, plan.pe, !IsNbi);
         } else if (plan.shared_local) {
-            nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(plan.remote, dest, bytes,
-                                                                     plan.pe, !IsNbi);
+            nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(remote, dest, bytes, plan.pe,
+                                                                     !IsNbi);
         } else {
-            nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(plan.remote, dest, bytes,
-                                                                     plan.pe, !IsNbi);
+            nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(remote, dest, bytes, plan.pe,
+                                                                     !IsNbi);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -173,9 +172,10 @@ struct route_backend<cft_tma_route> {
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
-                                                                   const void *source, size_t bytes,
-                                                                   uint64_t signal, int sig_op) {
-        const int status = put<Scope, false, Source>(plan, source, bytes);
+                                                                   void *remote, const void *source,
+                                                                   size_t bytes, uint64_t signal,
+                                                                   int sig_op) {
+        const int status = put<Scope, false, Source>(plan, remote, source, bytes);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }

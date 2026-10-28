@@ -48,7 +48,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool network_available() {
 template <>
 struct route_backend<network_route> {
     struct rma_plan {
-        void *remote;
         int pe;
     };
     struct signal_plan {
@@ -67,7 +66,7 @@ struct route_backend<network_route> {
                                                                       const void *local,
                                                                       size_t bytes, int pe,
                                                                       rma_plan &plan) {
-        plan = rma_plan{const_cast<void *>(remote), pe};
+        plan = rma_plan{pe};
         if constexpr (Local::kind == local_space::shared) {
             return NVSHMEMX_ERROR_INVALID_VALUE;
         } else {
@@ -108,7 +107,7 @@ struct route_backend<network_route> {
      * transfer moves nothing and is not posted. ---- */
 
     template <threadgroup Scope, bool IsNbi, typename Source>
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan,
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *remote,
                                                             const void *source, size_t bytes) {
         if (bytes == 0) {
             return NVSHMEMX_SUCCESS;
@@ -116,10 +115,10 @@ struct route_backend<network_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         void *local = const_cast<void *>(source);
         if constexpr (IsNbi) {
-            nvshmemi_transfer_rma_nbi<kScope, NVSHMEMI_OP_PUT>(plan.remote, local, bytes, plan.pe,
+            nvshmemi_transfer_rma_nbi<kScope, NVSHMEMI_OP_PUT>(remote, local, bytes, plan.pe,
                                                                NVSHMEMX_QP_DEFAULT);
         } else {
-            nvshmemi_transfer_rma<kScope, NVSHMEMI_OP_PUT>(plan.remote, local, bytes, plan.pe,
+            nvshmemi_transfer_rma<kScope, NVSHMEMI_OP_PUT>(remote, local, bytes, plan.pe,
                                                            NVSHMEMX_QP_DEFAULT);
         }
         scope_sync<Scope>();
@@ -128,16 +127,17 @@ struct route_backend<network_route> {
 
     template <threadgroup Scope, bool IsNbi, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
-                                                            size_t bytes) {
+                                                            const void *remote, size_t bytes) {
         if (bytes == 0) {
             return NVSHMEMX_SUCCESS;
         }
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
+        void *rptr = const_cast<void *>(remote);
         if constexpr (IsNbi) {
-            nvshmemi_transfer_rma_nbi<kScope, NVSHMEMI_OP_GET>(plan.remote, dest, bytes, plan.pe,
+            nvshmemi_transfer_rma_nbi<kScope, NVSHMEMI_OP_GET>(rptr, dest, bytes, plan.pe,
                                                                NVSHMEMX_QP_DEFAULT);
         } else {
-            nvshmemi_transfer_rma<kScope, NVSHMEMI_OP_GET>(plan.remote, dest, bytes, plan.pe,
+            nvshmemi_transfer_rma<kScope, NVSHMEMI_OP_GET>(rptr, dest, bytes, plan.pe,
                                                            NVSHMEMX_QP_DEFAULT);
         }
         scope_sync<Scope>();
@@ -149,8 +149,9 @@ struct route_backend<network_route> {
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
-                                                                   const void *source, size_t bytes,
-                                                                   uint64_t signal, int sig_op) {
+                                                                   void *remote, const void *source,
+                                                                   size_t bytes, uint64_t signal,
+                                                                   int sig_op) {
         if (bytes == 0) {
             return signal_op<Scope>(sig, signal, sig_op);
         }
@@ -158,11 +159,11 @@ struct route_backend<network_route> {
         void *local = const_cast<void *>(source);
         const nvshmemi_amo_t op = static_cast<nvshmemi_amo_t>(sig_op);
         if constexpr (IsNbi) {
-            nvshmemi_transfer_put_signal_nbi<kScope>(plan.remote, local, bytes, sig.sig_addr,
-                                                     signal, op, plan.pe, NVSHMEMX_QP_DEFAULT);
+            nvshmemi_transfer_put_signal_nbi<kScope>(remote, local, bytes, sig.sig_addr, signal, op,
+                                                     plan.pe, NVSHMEMX_QP_DEFAULT);
         } else {
-            nvshmemi_transfer_put_signal<kScope>(plan.remote, local, bytes, sig.sig_addr, signal,
-                                                 op, plan.pe, NVSHMEMX_QP_DEFAULT);
+            nvshmemi_transfer_put_signal<kScope>(remote, local, bytes, sig.sig_addr, signal, op,
+                                                 plan.pe, NVSHMEMX_QP_DEFAULT);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;

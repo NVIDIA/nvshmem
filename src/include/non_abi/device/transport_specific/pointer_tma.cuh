@@ -118,7 +118,7 @@ struct route_backend<pointer_tma_route> {
      * elect the issuing thread and end with the scope's own barrier. ---- */
 
     template <threadgroup Scope, bool IsNbi, typename Source>
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan,
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *,
                                                             const void *source, size_t bytes) {
         if (bytes == 0) {
             return NVSHMEMX_SUCCESS;
@@ -144,7 +144,7 @@ struct route_backend<pointer_tma_route> {
 
     template <threadgroup Scope, bool IsNbi, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
-                                                            size_t bytes) {
+                                                            const void *, size_t bytes) {
         if constexpr (Scope != threadgroup::block) {
             /* Rejected at compile time by preflight_rma. */
             return NVSHMEMX_ERROR_INTERNAL;
@@ -179,9 +179,10 @@ struct route_backend<pointer_tma_route> {
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
-                                                                   const void *source, size_t bytes,
-                                                                   uint64_t signal, int sig_op) {
-        const int status = put<Scope, IsNbi, Source>(plan, source, bytes);
+                                                                   void *dest, const void *source,
+                                                                   size_t bytes, uint64_t signal,
+                                                                   int sig_op) {
+        const int status = put<Scope, IsNbi, Source>(plan, dest, source, bytes);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }

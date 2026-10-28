@@ -63,7 +63,7 @@ struct route_backend<pointer_sm_route> {
      * which is also the pre-issue group barrier ---- */
 
     template <threadgroup Scope, bool IsNbi, typename Source>
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan,
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *,
                                                             const void *source, size_t bytes) {
         nvshmemi_memcpy_threadgroup<scope_traits<Scope>::internal>(plan.peer, source, bytes);
         scope_sync<Scope>();
@@ -72,7 +72,7 @@ struct route_backend<pointer_sm_route> {
 
     template <threadgroup Scope, bool IsNbi, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
-                                                            size_t bytes) {
+                                                            const void *, size_t bytes) {
         nvshmemi_memcpy_threadgroup<scope_traits<Scope>::internal>(dest, plan.peer, bytes);
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -81,9 +81,10 @@ struct route_backend<pointer_sm_route> {
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
-                                                                   const void *source, size_t bytes,
-                                                                   uint64_t signal, int sig_op) {
-        put<Scope, IsNbi, Source>(plan, source, bytes);
+                                                                   void *dest, const void *source,
+                                                                   size_t bytes, uint64_t signal,
+                                                                   int sig_op) {
+        put<Scope, IsNbi, Source>(plan, dest, source, bytes);
         if (scope_leader<Scope>()) {
             __threadfence_system();
             pointer_issue_signal(sig.peer, signal, sig_op);

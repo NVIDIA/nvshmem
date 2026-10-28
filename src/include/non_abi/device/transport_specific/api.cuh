@@ -123,7 +123,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem(void *dest, const void *sour
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
-    return Backend::template put<Scope, IsNbi, Local>(plan, source, bytes);
+    return Backend::template put<Scope, IsNbi, Local>(plan, dest, source, bytes);
 }
 
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, bool IsNbi,
@@ -143,7 +143,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int getmem(void *dest, const void *sour
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
-    return Backend::template get<Scope, IsNbi, Local>(plan, dest, bytes);
+    return Backend::template get<Scope, IsNbi, Local>(plan, dest, source, bytes);
 }
 
 template <typename Addressing, typename TransportPolicy, threadgroup Scope, bool IsNbi,
@@ -167,7 +167,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int putmem_signal(void *dest, const voi
     if (status != NVSHMEMX_SUCCESS) {
         return not_issued<Route, Scope, kOp>(status, pe);
     }
-    return Backend::template put_signal<Scope, IsNbi, Local>(plan, sig, source, bytes, signal,
+    return Backend::template put_signal<Scope, IsNbi, Local>(plan, sig, dest, source, bytes, signal,
                                                              sig_op);
 }
 
