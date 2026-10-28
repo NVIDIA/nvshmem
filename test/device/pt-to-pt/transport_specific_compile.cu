@@ -6,8 +6,7 @@
 /*
  * Positive compile contract for the transport-specific API surface. The
  * kernels are never launched: compiling every legal route, scope, local memory space,
- * API, and element-type instantiation is the test. Negative combinations
- * live in transport_specific_compile_contract.cmake.
+ * API, and element-type instantiation is the test.
  */
 
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
