@@ -16,12 +16,16 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <fcntl.h>
 #include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <list>
 #include <map>
 #include <mutex>
 #include <set>
+#include <string>
 
 #include "c_api/nvshmemx_api.h"
 #include "internal/host/nvmlwrap.h"
@@ -913,101 +917,168 @@ static bool trimNewline(char *str) {
     return strlen(str) > 0;
 }
 
-static bool mpsServerRunning(int *serverPID) {
+/* Several NVSHMEM jobs on one node can query the MPS control daemon at the same time (for
+ * example, MPI_Comm_split followed by one initialization per sub-communicator, or independent
+ * jobs started in parallel). Concurrent nvidia-cuda-mps-control clients are not reliable, so
+ * queries from all NVSHMEM processes on the node are serialized with an advisory lock in the MPS
+ * pipe directory, and a query that still fails is retried a few times. */
+#define NVSHMEMI_MPS_CONTROL_ATTEMPTS 3
+#define NVSHMEMI_MPS_CONTROL_RETRY_US 100000
+
+enum mps_control_result { MPS_CONTROL_OK, MPS_CONTROL_NO_DAEMON, MPS_CONTROL_FAILED };
+
+struct mps_percentage_result {
+    float percentage;
+    int ok;
+};
+
+static std::string mps_pipe_directory() {
+    const char *pipe_dir = getenv("CUDA_MPS_PIPE_DIRECTORY");
+    return (pipe_dir != NULL && pipe_dir[0] != '\0') ? pipe_dir : "/tmp/nvidia-mps";
+}
+
+/* Returns a locked descriptor, -1 if locking is not possible, or -2 if the pipe directory does
+ * not exist, in which case no control daemon is running for this client. flock() needs no write
+ * access, so a lock file created by another user can be shared. */
+static int mps_control_lock() {
+    std::string path = mps_pipe_directory() + "/nvshmem-mps-control.lock";
+    int fd = open(path.c_str(), O_RDONLY | O_CREAT | O_CLOEXEC, 0666);
+    if (fd < 0) {
+        if (errno == ENOENT) {
+            return -2;
+        }
+        INFO(NVSHMEM_INIT, "could not open MPS control lock %s: %s", path.c_str(), strerror(errno));
+        return -1;
+    }
+    while (flock(fd, LOCK_EX) != 0) {
+        if (errno != EINTR) {
+            INFO(NVSHMEM_INIT, "could not lock %s: %s", path.c_str(), strerror(errno));
+            close(fd);
+            return -1;
+        }
+    }
+    return fd;
+}
+
+static void mps_control_unlock(int fd) {
+    if (fd >= 0) {
+        flock(fd, LOCK_UN);
+        close(fd);
+    }
+}
+
+/* Runs one nvidia-cuda-mps-control command under the node-wide lock. On success, last_line
+ * holds the last non-empty output line, or is empty if the command printed nothing. */
+static mps_control_result mps_control_query_once(const std::string &command,
+                                                 std::string *last_line) {
     const int lineSize = 256;
     char line[lineSize];
-    int ret;
-    bool status = false;
-    bool serverExist = false;
+    std::string cmd = "echo " + command + " | nvidia-cuda-mps-control 2> /dev/null";
 
-    FILE *output = popen("echo get_server_list | nvidia-cuda-mps-control 2> /dev/null", "r");
+    int lock_fd = mps_control_lock();
+    if (lock_fd == -2) {
+        return MPS_CONTROL_NO_DAEMON;
+    }
+    FILE *output = popen(cmd.c_str(), "r");
     if (!output) {
-        INFO(NVSHMEM_INIT, "popen retuned NULL");
-        return false;
+        mps_control_unlock(lock_fd);
+        INFO(NVSHMEM_INIT, "popen returned NULL for '%s'", command.c_str());
+        return MPS_CONTROL_FAILED;
     }
-
+    last_line->clear();
     while (fgets(line, lineSize, output) != NULL) {
-        serverExist = true;
+        if (trimNewline(line)) {
+            *last_line = line;
+        }
     }
+    int ret = pclose(output);
+    mps_control_unlock(lock_fd);
 
-    ret = pclose(output);
-    status = (ret != -1) && WIFEXITED(ret) && (WEXITSTATUS(ret) == 0);
-    if (!status) {
-        INFO(NVSHMEM_INIT, "pclose retuned error");
+    if (ret == -1 || !WIFEXITED(ret) || WEXITSTATUS(ret) != 0) {
+        INFO(NVSHMEM_INIT, "nvidia-cuda-mps-control '%s' failed (status %d)", command.c_str(), ret);
+        return MPS_CONTROL_FAILED;
+    }
+    return MPS_CONTROL_OK;
+}
+
+/* Parses a positive number that spans the whole string. The daemon prints a server PID as an
+ * integer and an active thread percentage with a fraction (e.g. "100.0"); as before, only the
+ * integer part is used. */
+static bool parse_positive_number(const std::string &str, int *value) {
+    char *end = NULL;
+    errno = 0;
+    double parsed = strtod(str.c_str(), &end);
+    if (errno != 0 || end == str.c_str() || *end != '\0' || !(parsed > 0) || parsed > INT_MAX) {
         return false;
     }
-
-    if (!serverExist) {
-        return false;
-    }
-
-    if (!trimNewline(line)) {
-        return false;
-    }
-
-    if (serverPID) {
-        std::stringstream ss(line);
-        int result;
-        ss >> result;
-        *serverPID = result;
-    }
-
+    *value = static_cast<int>(parsed);
     return true;
 }
 
-static bool get_mps_server_active_thread_percentage(float *percentage) {
-    FILE *output;
-    const int lineSize = 256;
-    char line[lineSize];
-    int ret;
-    char *retstr = NULL;
-    bool status = false;
-    std::stringstream cmd;
-    int serverPID;
-    /* one PE per node queries the control daemon */
-    if (nvshmemi_state->mype == nvshmemi_team_node->start) {
-        if (!mpsServerRunning(&serverPID)) {
+/* Returns true and the integer part of the answer if the command answered with a positive
+ * number. */
+static bool mps_control_query_int(const std::string &command, int *value) {
+    std::string line;
+    for (int attempt = 0; attempt < NVSHMEMI_MPS_CONTROL_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+            usleep(NVSHMEMI_MPS_CONTROL_RETRY_US);
+        }
+        mps_control_result result = mps_control_query_once(command, &line);
+        if (result == MPS_CONTROL_NO_DAEMON) {
             return false;
         }
-
-        cmd << "echo get_active_thread_percentage " << serverPID << " | nvidia-cuda-mps-control";
-        output = popen(cmd.str().c_str(), "r");
-
-        if (!output) {
-            return false;
-        }
-
-        retstr = fgets(line, lineSize, output);
-
-        ret = pclose(output);
-        status = (ret != -1) && WIFEXITED(ret) && (WEXITSTATUS(ret) == 0);
-        if (!status || retstr == NULL) {
-            return false;
-        }
-
-        if (!trimNewline(line)) {
-            return false;
-        }
-
-        if (percentage) {
-            int result;
-            std::stringstream ss(line);
-            ss >> result;
-            *percentage = result;
+        /* An empty answer with exit status 0 also occurs when clients race, so it is retried
+         * like a failed query. */
+        if (result == MPS_CONTROL_OK && !line.empty()) {
+            if (parse_positive_number(line, value)) {
+                return true;
+            }
+            INFO(NVSHMEM_INIT, "unexpected output '%s' from '%s'", line.c_str(), command.c_str());
         }
     }
-    float *scratch = (float *)malloc(sizeof(float) * nvshmemi_state->npes);
-    /* for lack of a better available bootstrap collective, using allagther */
-    status = nvshmemi_boot_handle.allgather((void *)percentage, (void *)scratch, sizeof(float),
-                                            &nvshmemi_boot_handle);
+    return false;
+}
 
-    if (percentage) {
-        *percentage = scratch[nvshmemi_team_node->start];
+static bool mpsServerRunning(int *serverPID) {
+    int pid = 0;
+    if (!mps_control_query_int("get_server_list", &pid)) {
+        return false;
     }
-
-    free(scratch);
-
+    if (serverPID) {
+        *serverPID = pid;
+    }
     return true;
+}
+
+/* Collective over the bootstrap: the first PE on the node queries the control daemon and every
+ * PE receives its result, so all PEs succeed or fail together. */
+static bool get_mps_server_active_thread_percentage(float *percentage) {
+    mps_percentage_result mine = {0.0f, 0};
+    if (nvshmemi_state->mype == nvshmemi_team_node->start) {
+        int serverPID = 0;
+        int result = 0;
+        if (mpsServerRunning(&serverPID) &&
+            mps_control_query_int("get_active_thread_percentage " + std::to_string(serverPID),
+                                  &result)) {
+            mine.percentage = result;
+            mine.ok = 1;
+        }
+    }
+
+    mps_percentage_result *all =
+        (mps_percentage_result *)malloc(sizeof(mps_percentage_result) * nvshmemi_state->npes);
+    if (all == NULL) {
+        return false;
+    }
+    /* for lack of a better available bootstrap collective, using allgather */
+    int status = nvshmemi_boot_handle.allgather((void *)&mine, (void *)all, sizeof(mine),
+                                                &nvshmemi_boot_handle);
+    bool ok = (status == 0) && all[nvshmemi_team_node->start].ok;
+    if (ok) {
+        *percentage = all[nvshmemi_team_node->start].percentage;
+    }
+    free(all);
+    return ok;
 }
 
 static int nvshmemi_determine_mpg_support_level() {
@@ -1032,8 +1103,10 @@ static int nvshmemi_determine_mpg_support_level() {
         float active_thread_percentage = 0;
         bool success = get_mps_server_active_thread_percentage(&active_thread_percentage);
         if (!success) {
-            INFO(NVSHMEM_INIT, "failed in get_mps_server_active_thread_percentage");
-            exit(-1);
+            NVSHMEMI_ERROR_PRINT(
+                "MPS is running, but its active thread percentage could not be read from "
+                "nvidia-cuda-mps-control\n");
+            return NVSHMEMX_ERROR_INTERNAL;
         }
         char *env = getenv("CUDA_MPS_ACTIVE_THREAD_PERCENTAGE");
         if (env) {
