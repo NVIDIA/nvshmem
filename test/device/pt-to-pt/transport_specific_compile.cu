@@ -3,12 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/*
- * Positive compile contract for the transport-specific API surface. The
- * kernels are never launched: compiling every legal route, scope, local memory space,
- * API, and element-type instantiation is the test.
- */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include <stddef.h>
@@ -33,14 +27,11 @@ constexpr auto kBlock = ts::threadgroup::block;
 static_assert(!std::is_convertible<Source, Dest>::value);
 static_assert(!std::is_convertible<Dest, Source>::value);
 
-/* The same local memory space spelled as a get destination. */
 __host__ __device__ constexpr Dest as_dest(Source local) {
     return local == Source::shared ? Dest::shared
                                    : (local == Source::global ? Dest::global : Dest::generic);
 }
 
-/* Every data-moving API (byte-typed) for one local memory space. Put sources and get destinations
- * are local; the remote operand is always global. */
 template <typename A, typename P, ts::threadgroup S, Source Local>
 __device__ void byte_rma(void *remote_ptr, void *local_ptr, uint64_t *signal, int pe) {
     constexpr Dest kLocalDest = as_dest(Local);
@@ -105,8 +96,7 @@ __global__ void compile_pointer_sm(void *remote, void *local, uint64_t *signal, 
     typed_all<A, P, kBlock, kGlobal>(remote, local, signal, pe);
 }
 
-/* Pointer / TMA: every API at block scope; below block scope only the put
- * family from a shared or generic local source. */
+/* Below block scope Pointer / TMA only puts from shared or generic sources. */
 template <typename A, typename P, ts::threadgroup S, Source Local>
 __device__ void put_family(void *remote_ptr, void *local_ptr, uint64_t *signal, int pe) {
     uint8_t *remote = static_cast<uint8_t *>(remote_ptr);
@@ -135,8 +125,6 @@ __global__ void compile_pointer_tma(void *remote, void *local, uint64_t *signal,
     put_family<A, P, kWarp, kGeneric>(remote, local, signal, pe);
 }
 
-/* CFT / TMA: every API at block scope, its only scope. In a build without
- * CFT handles these compile to NOT_SUPPORTED. */
 __global__ void compile_cft_tma(void *remote, void *local, uint64_t *signal, int pe) {
     using A = ts::addressing::CFT;
     using P = ts::transport_policy::TMA;
@@ -144,8 +132,7 @@ __global__ void compile_cft_tma(void *remote, void *local, uint64_t *signal, int
     typed_all<A, P, kBlock, kGlobal>(remote, local, signal, pe);
 }
 
-/* Auto / Network: every API at every scope. Explicit shared local values are
- * legal spellings that return INVALID_VALUE at run time. */
+/* Shared local operands compile here and return INVALID_VALUE at run time. */
 __global__ void compile_auto_network(void *remote, void *local, uint64_t *signal, int pe) {
     using A = ts::addressing::Auto;
     using P = ts::transport_policy::Network;
@@ -161,9 +148,7 @@ __global__ void compile_auto_auto(void *remote, void *local, uint64_t *signal, i
     typed_all<A, P, kBlock, kGeneric>(remote, local, signal, pe);
 }
 
-/* Pairs with an Auto side lower to an existing route with that route's rules:
- * Pointer / Auto, CFT / Auto, and Auto / SM to the portable dispatch, and
- * Auto / TMA to Pointer / TMA. */
+/* Auto / TMA follows Pointer / TMA rules; the other Auto pairs are portable. */
 __global__ void compile_auto_aliases(void *remote, void *local, uint64_t *signal, int pe) {
     all_scopes<ts::addressing::Pointer, ts::transport_policy::Auto, kGeneric>(remote, local, signal,
                                                                               pe);
@@ -176,7 +161,6 @@ __global__ void compile_auto_aliases(void *remote, void *local, uint64_t *signal
     put_family<A, P, kWarp, kShared>(remote, local, signal, pe);
 }
 
-/* The default local space is a generic put source. */
 __global__ void compile_capability_default(void *remote, void *local, int pe) {
     (void)nvshmemx_rma_capability<ts::addressing::Pointer, ts::transport_policy::SM, kWarp>(
         remote, local, 16, pe);

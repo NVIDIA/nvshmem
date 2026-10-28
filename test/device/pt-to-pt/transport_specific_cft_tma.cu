@@ -99,18 +99,18 @@ __global__ void add_probe_kernel(uint64_t *signal, int peer, int *status) {
     }
 }
 
-template <LocalSpace Local, bool InShared, bool Nbi>
+template <LocalSpace Local, placement Where, issue_mode Issue>
 __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t bytes, int peer,
                            int *status) {
     unsigned char *payload = register_smem(kRegistered);
-    unsigned char *local = InShared ? payload : source;
-    if (InShared) {
+    unsigned char *local = Where == placement::shared ? payload : source;
+    if (Where == placement::shared) {
         copy_block(payload, source, bytes);
     }
     __syncthreads();
 
     int result;
-    if constexpr (Nbi) {
+    if constexpr (Issue == issue_mode::nbi) {
         result = nvshmemx_put_nbi<uint8_t, CFT, TMA, kBlock, Local, kRemoteDest>(remote, local,
                                                                                  bytes, peer);
         if (result == NVSHMEMX_SUCCESS) {
@@ -131,19 +131,19 @@ __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t 
     }
 }
 
-template <LocalSpace Local, bool InShared, bool Nbi, boundary B>
+template <LocalSpace Local, placement Where, issue_mode Issue, boundary B>
 __global__ void get_kernel(unsigned char *out, const unsigned char *remote_source, size_t bytes,
                            int peer, int *status) {
     constexpr auto kLocalDest = local_dest(Local);
     unsigned char *payload = register_smem(kRegistered);
-    unsigned char *local = InShared ? payload : out;
-    if (InShared) {
+    unsigned char *local = Where == placement::shared ? payload : out;
+    if (Where == placement::shared) {
         fill_block(payload, bytes, 0);
     }
     __syncthreads();
 
     int result;
-    if constexpr (Nbi) {
+    if constexpr (Issue == issue_mode::nbi) {
         const size_t half = bytes / 2;
         result = nvshmemx_get_nbi<uint8_t, CFT, TMA, kBlock, kRemoteSource, kLocalDest>(
             local, remote_source, half, peer);
@@ -162,7 +162,7 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
     if (result == NVSHMEMX_SUCCESS && !block_payload_matches(local, bytes, peer)) {
         result = kDataMismatch;
     }
-    if (InShared && result == NVSHMEMX_SUCCESS) {
+    if (Where == placement::shared && result == NVSHMEMX_SUCCESS) {
         copy_block(out, payload, bytes);
     }
     release_smem(kRegistered);
@@ -171,7 +171,7 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
     }
 }
 
-template <LocalSpace Local, bool InShared, bool Nbi>
+template <LocalSpace Local, placement Where, issue_mode Issue>
 __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
                                   uint64_t *signal, uint64_t value, int sig_op, int peer,
                                   uint64_t expected, int previous, int *status) {
@@ -180,14 +180,14 @@ __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *so
         return;
     }
     unsigned char *payload = register_smem(kRegistered);
-    const unsigned char *local = InShared ? payload : source;
-    if (InShared) {
+    const unsigned char *local = Where == placement::shared ? payload : source;
+    if (Where == placement::shared) {
         copy_block(payload, source, bytes);
     }
     __syncthreads();
 
     int result;
-    if constexpr (Nbi) {
+    if constexpr (Issue == issue_mode::nbi) {
         result = nvshmemx_put_signal_nbi<uint8_t, CFT, TMA, kBlock, Local, kRemoteDest>(
             remote, local, bytes, signal, value, sig_op, peer);
         if (result == NVSHMEMX_SUCCESS) {
@@ -461,7 +461,7 @@ struct route_context {
     uint64_t *signal;
 };
 
-template <LocalSpace Local, bool InShared, bool Nbi>
+template <LocalSpace Local, placement Where, issue_mode Issue>
 int put_case(const route_context &c, const char *what) {
     return run_case(
         c.w, c.active, what, NVSHMEMX_SUCCESS,
@@ -470,13 +470,12 @@ int put_case(const route_context &c, const char *what) {
             CUDA_CHECK(cudaMemset(c.remote, 0, kBytes));
         },
         [&] {
-            launch(put_kernel<Local, InShared, Nbi>, c.remote, c.source, kBytes, c.peer,
-                   c.w.status);
+            launch(put_kernel<Local, Where, Issue>, c.remote, c.source, kBytes, c.peer, c.w.status);
         },
         [&] { return check_payload(what, c.remote, kBytes, c.previous); });
 }
 
-template <LocalSpace Local, bool InShared, bool Nbi, boundary B = boundary::quiet>
+template <LocalSpace Local, placement Where, issue_mode Issue, boundary B = boundary::quiet>
 int get_case(const route_context &c, const char *what) {
     return run_case(
         c.w, c.active, what, NVSHMEMX_SUCCESS,
@@ -485,13 +484,13 @@ int get_case(const route_context &c, const char *what) {
             CUDA_CHECK(cudaMemset(c.out, 0, kBytes));
         },
         [&] {
-            launch(get_kernel<Local, InShared, Nbi, B>, c.out,
+            launch(get_kernel<Local, Where, Issue, B>, c.out,
                    static_cast<const unsigned char *>(c.source), kBytes, c.peer, c.w.status);
         },
         [&] { return check_payload(what, c.out, kBytes, c.peer); });
 }
 
-template <LocalSpace Local, bool InShared, bool Nbi>
+template <LocalSpace Local, placement Where, issue_mode Issue>
 int put_signal_case(const route_context &c, const char *what, int sig_op) {
     const bool add = sig_op == NVSHMEM_SIGNAL_ADD;
     const uint64_t value = add ? static_cast<uint64_t>(c.w.mype) + 1 : kSignalBase + c.w.mype;
@@ -504,7 +503,7 @@ int put_signal_case(const route_context &c, const char *what, int sig_op) {
             set_signal(c.signal, add ? kSignalBase : 0);
         },
         [&] {
-            launch_shape(2, kThreads, put_signal_kernel<Local, InShared, Nbi>, c.remote,
+            launch_shape(2, kThreads, put_signal_kernel<Local, Where, Issue>, c.remote,
                          static_cast<const unsigned char *>(c.source), kBytes, c.signal, value,
                          sig_op, c.peer, expected, c.previous, c.w.status);
         },
@@ -662,40 +661,56 @@ int error_cases(const route_context &c) {
 
 int cft_cases(const route_context &c) {
     int failures = 0;
-    failures += put_case<kShared, true, false>(c, "CFT put Shared");
-    failures += put_case<kGlobal, false, false>(c, "CFT put Global");
-    failures += put_case<kGeneric, true, false>(c, "CFT put generic(shared)");
-    failures += put_case<kGeneric, false, false>(c, "CFT put generic(global)");
-    failures += put_case<kShared, true, true>(c, "CFT put_nbi Shared+flush reuse");
-    failures += put_case<kGlobal, false, true>(c, "CFT put_nbi Global+flush reuse");
-    failures += put_case<kGeneric, true, true>(c, "CFT put_nbi generic(shared)+flush reuse");
-    failures += put_case<kGeneric, false, true>(c, "CFT put_nbi generic(global)+flush reuse");
+    failures += put_case<kShared, placement::shared, issue_mode::blocking>(c, "CFT put Shared");
+    failures += put_case<kGlobal, placement::global, issue_mode::blocking>(c, "CFT put Global");
+    failures +=
+        put_case<kGeneric, placement::shared, issue_mode::blocking>(c, "CFT put generic(shared)");
+    failures +=
+        put_case<kGeneric, placement::global, issue_mode::blocking>(c, "CFT put generic(global)");
+    failures +=
+        put_case<kShared, placement::shared, issue_mode::nbi>(c, "CFT put_nbi Shared+flush reuse");
+    failures +=
+        put_case<kGlobal, placement::global, issue_mode::nbi>(c, "CFT put_nbi Global+flush reuse");
+    failures += put_case<kGeneric, placement::shared, issue_mode::nbi>(
+        c, "CFT put_nbi generic(shared)+flush reuse");
+    failures += put_case<kGeneric, placement::global, issue_mode::nbi>(
+        c, "CFT put_nbi generic(global)+flush reuse");
 
-    failures += get_case<kShared, true, false>(c, "CFT get Shared");
-    failures += get_case<kGlobal, false, false>(c, "CFT get Global");
-    failures += get_case<kGeneric, true, false>(c, "CFT get generic(shared)");
-    failures += get_case<kGeneric, false, false>(c, "CFT get generic(global)");
-    failures += get_case<kShared, true, true, boundary::quiet>(c, "CFT 2x get_nbi Shared+quiet");
-    failures += get_case<kGlobal, false, true, boundary::flush>(c, "CFT 2x get_nbi Global+flush");
+    failures += get_case<kShared, placement::shared, issue_mode::blocking>(c, "CFT get Shared");
+    failures += get_case<kGlobal, placement::global, issue_mode::blocking>(c, "CFT get Global");
     failures +=
-        get_case<kGeneric, false, true, boundary::fence>(c, "CFT 2x get_nbi generic(global)+fence");
+        get_case<kGeneric, placement::shared, issue_mode::blocking>(c, "CFT get generic(shared)");
     failures +=
-        get_case<kGeneric, true, true, boundary::quiet>(c, "CFT 2x get_nbi generic(shared)+quiet");
+        get_case<kGeneric, placement::global, issue_mode::blocking>(c, "CFT get generic(global)");
+    failures += get_case<kShared, placement::shared, issue_mode::nbi, boundary::quiet>(
+        c, "CFT 2x get_nbi Shared+quiet");
+    failures += get_case<kGlobal, placement::global, issue_mode::nbi, boundary::flush>(
+        c, "CFT 2x get_nbi Global+flush");
+    failures += get_case<kGeneric, placement::global, issue_mode::nbi, boundary::fence>(
+        c, "CFT 2x get_nbi generic(global)+fence");
+    failures += get_case<kGeneric, placement::shared, issue_mode::nbi, boundary::quiet>(
+        c, "CFT 2x get_nbi generic(shared)+quiet");
 
     const int set = NVSHMEM_SIGNAL_SET;
-    failures += put_signal_case<kShared, true, false>(c, "CFT put_signal Shared SET", set);
-    failures += put_signal_case<kGlobal, false, false>(c, "CFT put_signal Global SET", set);
-    failures +=
-        put_signal_case<kGeneric, false, false>(c, "CFT put_signal generic(global) SET", set);
-    failures += put_signal_case<kShared, true, true>(c, "CFT put_signal_nbi Shared SET", set);
-    failures += put_signal_case<kGlobal, false, true>(c, "CFT put_signal_nbi Global SET", set);
-    failures +=
-        put_signal_case<kGeneric, true, true>(c, "CFT put_signal_nbi generic(shared) SET", set);
+    failures += put_signal_case<kShared, placement::shared, issue_mode::blocking>(
+        c, "CFT put_signal Shared SET", set);
+    failures += put_signal_case<kGlobal, placement::global, issue_mode::blocking>(
+        c, "CFT put_signal Global SET", set);
+    failures += put_signal_case<kGeneric, placement::global, issue_mode::blocking>(
+        c, "CFT put_signal generic(global) SET", set);
+    failures += put_signal_case<kShared, placement::shared, issue_mode::nbi>(
+        c, "CFT put_signal_nbi Shared SET", set);
+    failures += put_signal_case<kGlobal, placement::global, issue_mode::nbi>(
+        c, "CFT put_signal_nbi Global SET", set);
+    failures += put_signal_case<kGeneric, placement::shared, issue_mode::nbi>(
+        c, "CFT put_signal_nbi generic(shared) SET", set);
     failures += signal_op_case(c, "CFT signal_op SET", set);
     if (c.add_supported) {
         const int add = NVSHMEM_SIGNAL_ADD;
-        failures += put_signal_case<kShared, true, false>(c, "CFT put_signal Shared ADD", add);
-        failures += put_signal_case<kGlobal, false, true>(c, "CFT put_signal_nbi Global ADD", add);
+        failures += put_signal_case<kShared, placement::shared, issue_mode::blocking>(
+            c, "CFT put_signal Shared ADD", add);
+        failures += put_signal_case<kGlobal, placement::global, issue_mode::nbi>(
+            c, "CFT put_signal_nbi Global ADD", add);
         failures += signal_op_case(c, "CFT signal_op ADD", add);
     } else if (c.w.mype == 0) {
         printf("transport_specific_cft_tma: SKIP CFT signal ADD (no fabric atomic capability)\n");

@@ -3,11 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Functional coverage for the direct Pointer / SM route and the portable
- * Auto / Auto route. Auto / Auto always runs, so a topology without a direct
- * peer mapping still checks the portable route rather than skipping the
- * executable. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_common.cuh"
@@ -18,53 +13,51 @@ namespace {
 
 constexpr size_t kBytes = 256;
 
-/* Each case is rejected by preflight before any work is issued. */
 enum class error_case {
-    invalid_pe,         /* INVALID_VALUE */
-    invalid_sig_op,     /* INVALID_VALUE */
-    invalid_signal_op,  /* INVALID_VALUE */
-    private_put_dest,   /* INVALID_VALUE: remote range outside the heap */
-    private_get_source, /* INVALID_VALUE: remote range outside the heap */
-    private_signal,     /* INVALID_VALUE: signal outside the heap */
-    null_put_source,    /* INVALID_VALUE: null local operand with bytes */
-    null_get_dest,      /* INVALID_VALUE: null local operand with bytes */
-    count_overflow,     /* INVALID_VALUE: saturated byte count leaves the heap */
-    unmapped_put,       /* NOT_SUPPORTED on Pointer / SM: peer has no direct mapping */
-    unmapped_signal,    /* NOT_SUPPORTED on Pointer / SM: peer has no direct mapping */
+    invalid_pe,
+    invalid_sig_op,
+    invalid_signal_op,
+    private_put_dest,
+    private_get_source,
+    private_signal,
+    null_put_source,
+    null_get_dest,
+    count_overflow,
+    unmapped_put,
+    unmapped_signal,
 };
 
 struct buffers {
-    unsigned char *remote; /* symmetric put destination */
-    unsigned char *source; /* symmetric put source and peer get source */
-    unsigned char *out;    /* symmetric get destination */
+    unsigned char *remote;
+    unsigned char *source;
+    unsigned char *out;
     unsigned char *private_buffer;
     uint64_t *signal;
     uint64_t *private_signal;
-    /* symmetric targets of the portable-API reference transfers */
     unsigned char *ref_remote;
     unsigned char *ref_out;
     uint64_t *ref_signal;
 };
 
-template <typename A, typename P, LocalSpace Local, bool InShared, bool Nbi>
+template <typename A, typename P, LocalSpace Local, placement Where, issue_mode Issue>
 __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t bytes, int peer,
                            int *status) {
     extern __shared__ __align__(16) unsigned char smem[];
-    unsigned char *local = InShared ? smem : source;
-    if (InShared) {
+    unsigned char *local = Where == placement::shared ? smem : source;
+    if (Where == placement::shared) {
         copy_block(smem, source, bytes);
     }
     __syncthreads();
 
     int result;
-    if constexpr (Nbi) {
+    if constexpr (Issue == issue_mode::nbi) {
         result =
             nvshmemx_put_nbi<uint8_t, A, P, kBlock, Local, kRemoteDest>(remote, local, bytes, peer);
         if (result == NVSHMEMX_SUCCESS) {
             result = nvshmemx_flush<A, P, kBlock>();
         }
         if (result == NVSHMEMX_SUCCESS) {
-            /* flush makes the source reusable; the peer must still see the original. */
+            /* After flush the source is reusable; the peer must still see the original. */
             fill_block(local, bytes, kPoisonByte);
             __syncthreads();
             result = nvshmemx_quiet<A, P, kBlock>();
@@ -78,13 +71,13 @@ __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t 
     }
 }
 
-template <typename A, typename P, LocalSpace Local, bool InShared, bool Nbi>
+template <typename A, typename P, LocalSpace Local, placement Where, issue_mode Issue>
 __global__ void get_kernel(unsigned char *out, const unsigned char *remote_source, size_t bytes,
                            int peer, int *status) {
     extern __shared__ __align__(16) unsigned char smem[];
-    unsigned char *local = InShared ? smem : out;
+    unsigned char *local = Where == placement::shared ? smem : out;
     int result;
-    if constexpr (Nbi) {
+    if constexpr (Issue == issue_mode::nbi) {
         result = nvshmemx_get_nbi<uint8_t, A, P, kBlock, kRemoteSource, local_dest(Local)>(
             local, remote_source, bytes, peer);
         if (result == NVSHMEMX_SUCCESS) {
@@ -99,7 +92,7 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
         __syncthreads_or(!payload_matches(local, bytes, peer, 0, threadIdx.x, blockDim.x))) {
         result = kDataMismatch;
     }
-    if (InShared && result == NVSHMEMX_SUCCESS) {
+    if (Where == placement::shared && result == NVSHMEMX_SUCCESS) {
         copy_block(out, smem, bytes);
     }
     if (threadIdx.x == 0) {
@@ -107,8 +100,7 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
     }
 }
 
-/* Block 0 sends to `peer`; block 1 receives from `previous` concurrently. */
-template <typename A, typename P, LocalSpace Local, bool Nbi>
+template <typename A, typename P, LocalSpace Local, issue_mode Issue>
 __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
                                   uint64_t *signal, uint64_t value, int sig_op, int peer,
                                   uint64_t expected, int previous, int *status) {
@@ -117,7 +109,7 @@ __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *so
         return;
     }
     int result;
-    if constexpr (Nbi) {
+    if constexpr (Issue == issue_mode::nbi) {
         result = nvshmemx_put_signal_nbi<uint8_t, A, P, kBlock, Local, kRemoteDest>(
             remote, source, bytes, signal, value, sig_op, peer);
         if (result == NVSHMEMX_SUCCESS) {
@@ -139,8 +131,6 @@ __global__ void signal_op_kernel(uint64_t *signal, uint64_t value, int sig_op, i
     }
 }
 
-/* fence orders the NBI payload before the following signal; block 1 checks
- * that order on the receiving side while the peer sends. */
 template <typename A, typename P, LocalSpace Local>
 __global__ void fence_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
                              uint64_t *signal, uint64_t value, int peer, uint64_t expected,
@@ -188,8 +178,6 @@ __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsig
 using typed_kernel_t = void (*)(unsigned char *, unsigned char *, unsigned char *, size_t, int,
                                 int *);
 
-/* A zero-length transfer may name a null local operand: it succeeds and
- * nothing is modified. */
 template <typename A, typename P>
 __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *remote_source,
                                    int peer, int *status) {
@@ -270,12 +258,7 @@ __global__ void error_kernel(error_case which, buffers b, size_t bytes, int peer
     }
 }
 
-/*
- * Group-uniform preflight: one participant per group passes an invalid
- * argument (an out-of-range PE, or an invalid signal opcode). The group must
- * agree before issuing, so every participant returns INVALID_VALUE and nothing
- * is written. Every warp (or the block) issues to its own slice.
- */
+/* One lane per group passes a bad argument; the whole group must reject the call. */
 enum class divergent_op { put_pe, put_signal_op };
 
 template <typename A, typename P, threadgroup Scope, LocalSpace Local>
@@ -315,9 +298,9 @@ struct route_context {
     }
 };
 
-template <typename A, typename P, LocalSpace Local, bool InShared, bool Nbi>
+template <typename A, typename P, LocalSpace Local, placement Where, issue_mode Issue>
 int put_case(const route_context &c, const char *what) {
-    const size_t smem = InShared ? kBytes : 0;
+    const size_t smem = Where == placement::shared ? kBytes : 0;
     return run_case(
         c.w, c.active, what, NVSHMEMX_SUCCESS,
         [&] {
@@ -325,15 +308,15 @@ int put_case(const route_context &c, const char *what) {
             CUDA_CHECK(cudaMemset(c.b.remote, 0, kBytes));
         },
         [&] {
-            put_kernel<A, P, Local, InShared, Nbi>
+            put_kernel<A, P, Local, Where, Issue>
                 <<<1, kThreads, smem>>>(c.b.remote, c.b.source, kBytes, c.peer, c.w.status);
         },
         [&] { return check_payload(what, c.b.remote, kBytes, c.previous); });
 }
 
-template <typename A, typename P, LocalSpace Local, bool InShared, bool Nbi>
+template <typename A, typename P, LocalSpace Local, placement Where, issue_mode Issue>
 int get_case(const route_context &c, const char *what) {
-    const size_t smem = InShared ? kBytes : 0;
+    const size_t smem = Where == placement::shared ? kBytes : 0;
     return run_case(
         c.w, c.active, what, NVSHMEMX_SUCCESS,
         [&] {
@@ -341,13 +324,13 @@ int get_case(const route_context &c, const char *what) {
             CUDA_CHECK(cudaMemset(c.b.out, 0, kBytes));
         },
         [&] {
-            get_kernel<A, P, Local, InShared, Nbi>
+            get_kernel<A, P, Local, Where, Issue>
                 <<<1, kThreads, smem>>>(c.b.out, c.b.source, kBytes, c.peer, c.w.status);
         },
         [&] { return check_payload(what, c.b.out, kBytes, c.peer); });
 }
 
-template <typename A, typename P, LocalSpace Local, bool Nbi>
+template <typename A, typename P, LocalSpace Local, issue_mode Issue>
 int put_signal_case(const route_context &c, const char *what, int sig_op) {
     const uint64_t initial = sig_op == NVSHMEM_SIGNAL_ADD ? kSignalBase : 0;
     const uint64_t value =
@@ -363,9 +346,9 @@ int put_signal_case(const route_context &c, const char *what, int sig_op) {
             set_signal(c.b.signal, initial);
         },
         [&] {
-            put_signal_kernel<A, P, Local, Nbi><<<2, kThreads>>>(c.b.remote, c.b.source, kBytes,
-                                                                 c.b.signal, value, sig_op, c.peer,
-                                                                 expected, c.previous, c.w.status);
+            put_signal_kernel<A, P, Local, Issue>
+                <<<2, kThreads>>>(c.b.remote, c.b.source, kBytes, c.b.signal, value, sig_op, c.peer,
+                                  expected, c.previous, c.w.status);
         },
         [&] {
             return check_payload(what, c.b.remote, kBytes, c.previous) +
@@ -442,8 +425,6 @@ int zero_length_case(const route_context &c, const char *what,
         });
 }
 
-/* A rejected call must not issue work: every PE's destination, get buffer,
- * and signal keep their sentinels. */
 template <typename A, typename P, LocalSpace Local>
 int error_case_run(const route_context &c, const char *what, error_case which,
                    int expected = NVSHMEMX_ERROR_INVALID_VALUE) {
@@ -492,10 +473,14 @@ int error_cases(const route_context &c) {
 template <typename A, typename P, LocalSpace Local>
 int common_cases(const route_context &c) {
     int failures = 0;
-    failures += put_signal_case<A, P, Local, false>(c, "put_signal SET", NVSHMEM_SIGNAL_SET);
-    failures += put_signal_case<A, P, Local, false>(c, "put_signal ADD", NVSHMEM_SIGNAL_ADD);
-    failures += put_signal_case<A, P, Local, true>(c, "put_signal_nbi SET", NVSHMEM_SIGNAL_SET);
-    failures += put_signal_case<A, P, Local, true>(c, "put_signal_nbi ADD", NVSHMEM_SIGNAL_ADD);
+    failures +=
+        put_signal_case<A, P, Local, issue_mode::blocking>(c, "put_signal SET", NVSHMEM_SIGNAL_SET);
+    failures +=
+        put_signal_case<A, P, Local, issue_mode::blocking>(c, "put_signal ADD", NVSHMEM_SIGNAL_ADD);
+    failures +=
+        put_signal_case<A, P, Local, issue_mode::nbi>(c, "put_signal_nbi SET", NVSHMEM_SIGNAL_SET);
+    failures +=
+        put_signal_case<A, P, Local, issue_mode::nbi>(c, "put_signal_nbi ADD", NVSHMEM_SIGNAL_ADD);
     failures += signal_op_case<A, P>(c, "signal_op SET", NVSHMEM_SIGNAL_SET);
     failures += signal_op_case<A, P>(c, "signal_op ADD", NVSHMEM_SIGNAL_ADD);
     failures += fence_case<A, P, Local>(c, "put_nbi+fence+signal_op");
@@ -541,8 +526,6 @@ int divergent_cases(const route_context &c) {
     return failures;
 }
 
-/* On PEs whose ring neighbour has no direct mapping, the explicit Pointer / SM
- * route reports the missing capability instead of falling back. */
 int pointer_sm_unmapped_cases(const route_context &c) {
     using A = nvshmemx::addressing::Pointer;
     using P = nvshmemx::transport_policy::SM;
@@ -556,43 +539,58 @@ int pointer_sm_cases(const route_context &c) {
     using A = nvshmemx::addressing::Pointer;
     using P = nvshmemx::transport_policy::SM;
     int failures = 0;
-    failures += put_case<A, P, kShared, true, false>(c, "SM put Shared");
-    failures += put_case<A, P, kGlobal, false, false>(c, "SM put Global");
-    failures += put_case<A, P, kGeneric, true, false>(c, "SM put generic(shared)");
-    failures += put_case<A, P, kGeneric, false, false>(c, "SM put generic(global)");
-    failures += put_case<A, P, kShared, true, true>(c, "SM put_nbi Shared+flush reuse");
-    failures += put_case<A, P, kGlobal, false, true>(c, "SM put_nbi Global+flush reuse");
-    failures += put_case<A, P, kGeneric, false, true>(c, "SM put_nbi generic+flush reuse");
-    failures += get_case<A, P, kShared, true, false>(c, "SM get Shared");
-    failures += get_case<A, P, kGlobal, false, false>(c, "SM get Global");
-    failures += get_case<A, P, kGeneric, true, false>(c, "SM get generic(shared)");
-    failures += get_case<A, P, kGeneric, false, false>(c, "SM get generic(global)");
-    failures += get_case<A, P, kShared, true, true>(c, "SM get_nbi Shared+quiet");
-    failures += get_case<A, P, kGlobal, false, true>(c, "SM get_nbi Global+quiet");
-    failures += get_case<A, P, kGeneric, false, true>(c, "SM get_nbi generic+quiet");
+    failures +=
+        put_case<A, P, kShared, placement::shared, issue_mode::blocking>(c, "SM put Shared");
+    failures +=
+        put_case<A, P, kGlobal, placement::global, issue_mode::blocking>(c, "SM put Global");
+    failures += put_case<A, P, kGeneric, placement::shared, issue_mode::blocking>(
+        c, "SM put generic(shared)");
+    failures += put_case<A, P, kGeneric, placement::global, issue_mode::blocking>(
+        c, "SM put generic(global)");
+    failures += put_case<A, P, kShared, placement::shared, issue_mode::nbi>(
+        c, "SM put_nbi Shared+flush reuse");
+    failures += put_case<A, P, kGlobal, placement::global, issue_mode::nbi>(
+        c, "SM put_nbi Global+flush reuse");
+    failures += put_case<A, P, kGeneric, placement::global, issue_mode::nbi>(
+        c, "SM put_nbi generic+flush reuse");
+    failures +=
+        get_case<A, P, kShared, placement::shared, issue_mode::blocking>(c, "SM get Shared");
+    failures +=
+        get_case<A, P, kGlobal, placement::global, issue_mode::blocking>(c, "SM get Global");
+    failures += get_case<A, P, kGeneric, placement::shared, issue_mode::blocking>(
+        c, "SM get generic(shared)");
+    failures += get_case<A, P, kGeneric, placement::global, issue_mode::blocking>(
+        c, "SM get generic(global)");
+    failures +=
+        get_case<A, P, kShared, placement::shared, issue_mode::nbi>(c, "SM get_nbi Shared+quiet");
+    failures +=
+        get_case<A, P, kGlobal, placement::global, issue_mode::nbi>(c, "SM get_nbi Global+quiet");
+    failures +=
+        get_case<A, P, kGeneric, placement::global, issue_mode::nbi>(c, "SM get_nbi generic+quiet");
     failures += common_cases<A, P, kGlobal>(c);
     failures += divergent_cases<A, P, kGlobal>(c);
     failures += zero_length_case(c, "SM zero-length null local", zero_length_kernel<A, P>);
     failures += thread_warp_cases<A, P, kGlobal>(c.scoped(), "SM");
-    /* Auto / Auto keeps the portable zero-length behavior; a direct peer keeps
-     * the null local operand off the network transport. */
+    /* Direct peers only: a null local operand must stay off the network transports. */
     failures += zero_length_case(
         c, "Auto zero-length null local",
         zero_length_kernel<nvshmemx::addressing::Auto, nvshmemx::transport_policy::Auto>);
     return failures;
 }
 
-/* A shared-memory local operand is unregistered, so like the stable API the
- * portable route can move it only to a directly mapped peer; the network
- * transports require a registered local buffer. */
+/* Shared memory is unregistered, so it needs a directly mapped peer. */
 int auto_auto_shared_cases(const route_context &c) {
     using A = nvshmemx::addressing::Auto;
     using P = nvshmemx::transport_policy::Auto;
     int failures = 0;
-    failures += put_case<A, P, kShared, true, false>(c, "Auto put Shared");
-    failures += put_case<A, P, kShared, true, true>(c, "Auto put_nbi Shared+flush reuse");
-    failures += get_case<A, P, kShared, true, false>(c, "Auto get Shared");
-    failures += get_case<A, P, kShared, true, true>(c, "Auto get_nbi Shared+quiet");
+    failures +=
+        put_case<A, P, kShared, placement::shared, issue_mode::blocking>(c, "Auto put Shared");
+    failures += put_case<A, P, kShared, placement::shared, issue_mode::nbi>(
+        c, "Auto put_nbi Shared+flush reuse");
+    failures +=
+        get_case<A, P, kShared, placement::shared, issue_mode::blocking>(c, "Auto get Shared");
+    failures +=
+        get_case<A, P, kShared, placement::shared, issue_mode::nbi>(c, "Auto get_nbi Shared+quiet");
     return failures;
 }
 
@@ -600,22 +598,28 @@ int auto_auto_cases(const route_context &c) {
     using A = nvshmemx::addressing::Auto;
     using P = nvshmemx::transport_policy::Auto;
     int failures = 0;
-    failures += put_case<A, P, kGeneric, false, false>(c, "Auto put");
-    failures += put_case<A, P, kGeneric, false, true>(c, "Auto put_nbi+flush reuse");
-    failures += get_case<A, P, kGeneric, false, false>(c, "Auto get");
+    failures += put_case<A, P, kGeneric, placement::global, issue_mode::blocking>(c, "Auto put");
+    failures +=
+        put_case<A, P, kGeneric, placement::global, issue_mode::nbi>(c, "Auto put_nbi+flush reuse");
+    failures += get_case<A, P, kGeneric, placement::global, issue_mode::blocking>(c, "Auto get");
     /* Pairs that lower to the portable dispatch. */
     failures += put_case<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::Auto, kGeneric,
-                         false, false>(c, "Pointer/Auto put");
+                         placement::global, issue_mode::blocking>(c, "Pointer/Auto put");
     failures += get_case<nvshmemx::addressing::CFT, nvshmemx::transport_policy::Auto, kGeneric,
-                         false, true>(c, "CFT/Auto get_nbi+quiet");
+                         placement::global, issue_mode::nbi>(c, "CFT/Auto get_nbi+quiet");
     failures +=
-        put_case<A, nvshmemx::transport_policy::SM, kGeneric, false, true>(c, "Auto/SM put_nbi");
-    failures += get_case<A, P, kGeneric, false, true>(c, "Auto get_nbi+quiet");
-    /* Explicit local memory spaces are legal and use the portable dispatch. */
-    failures += put_case<A, P, kGlobal, false, false>(c, "Auto put Global");
-    failures += put_case<A, P, kGlobal, false, true>(c, "Auto put_nbi Global+flush reuse");
-    failures += get_case<A, P, kGlobal, false, false>(c, "Auto get Global");
-    failures += get_case<A, P, kGlobal, false, true>(c, "Auto get_nbi Global+quiet");
+        put_case<A, nvshmemx::transport_policy::SM, kGeneric, placement::global, issue_mode::nbi>(
+            c, "Auto/SM put_nbi");
+    failures +=
+        get_case<A, P, kGeneric, placement::global, issue_mode::nbi>(c, "Auto get_nbi+quiet");
+    failures +=
+        put_case<A, P, kGlobal, placement::global, issue_mode::blocking>(c, "Auto put Global");
+    failures += put_case<A, P, kGlobal, placement::global, issue_mode::nbi>(
+        c, "Auto put_nbi Global+flush reuse");
+    failures +=
+        get_case<A, P, kGlobal, placement::global, issue_mode::blocking>(c, "Auto get Global");
+    failures +=
+        get_case<A, P, kGlobal, placement::global, issue_mode::nbi>(c, "Auto get_nbi Global+quiet");
     failures += thread_warp_cases<A, P, kGeneric>(c.scoped(), "Auto");
     failures += common_cases<A, P, kGeneric>(c);
     failures += divergent_cases<A, P, kGeneric>(c);
@@ -666,8 +670,6 @@ int main(int argc, char **argv) {
     const world w{mype, npes, scratch, status};
     int failures = 0;
 
-    /* Pointer / SM runs inside each direct-P2P clique of TEAM_SHARED; ranks
-     * without a mapped ring neighbour only join the barriers. */
     const int shared_npes = nvshmem_team_n_pes(NVSHMEM_TEAM_SHARED);
     const int shared_mype = nvshmem_team_my_pe(NVSHMEM_TEAM_SHARED);
     int strict_peer = -1;

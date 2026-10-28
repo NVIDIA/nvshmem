@@ -20,8 +20,6 @@
 namespace nvshmemi {
 namespace transport_policy {
 
-/* Exactly the element types of the stable typed RMA API, cv-unqualified. The
- * public wrappers check it in both compilation passes. */
 template <typename Type>
 struct is_supported_rma_type {
 #define NVSHMEMI_TS_IS_RMA_TYPE(NAME, TYPE) cuda::std::is_same<Type, TYPE>::value ||
@@ -40,7 +38,7 @@ namespace transport_policy {
 
 using nvshmemx::threadgroup;
 
-/* ---- Routes ------------------------------------------------------------ */
+enum class issue_mode { blocking, nbi };
 
 struct pointer_sm_route {};
 struct pointer_tma_route {};
@@ -48,8 +46,6 @@ struct cft_tma_route {};
 struct network_route {};
 struct automatic_route {};
 
-/* Maps a public addressing/transport-policy pair to its route. There is no
- * primary definition: an unsupported pair has no mapping. */
 template <typename Addressing, typename TransportPolicy>
 struct route_compatibility;
 
@@ -78,9 +74,6 @@ struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_polic
     using route = automatic_route;
 };
 
-/* A pair with an Auto side lowers to an existing route. An Auto policy, and
- * Auto addressing with SM, use the portable dispatch; Auto addressing with TMA
- * uses the pointer route. */
 template <>
 struct route_compatibility<nvshmemx::addressing::Pointer, nvshmemx::transport_policy::Auto> {
     using route = automatic_route;
@@ -101,8 +94,6 @@ struct route_compatibility<nvshmemx::addressing::Auto, nvshmemx::transport_polic
     using route = pointer_tma_route;
 };
 
-/* Everything about one route: preflight, issue, and completion. Each route
- * specializes it in its own header. */
 template <typename Route>
 struct route_backend;
 
@@ -128,14 +119,12 @@ template <typename Addressing, typename TransportPolicy>
 struct route_selection<Addressing, TransportPolicy, false> {
     static_assert(is_supported_pair<Addressing, TransportPolicy>::value,
                   "unsupported addressing/transport-policy pair");
-    /* Any complete route, so that the assertion above is the only diagnostic. */
+    /* Any complete route, so the static_assert is the only diagnostic. */
     using route = automatic_route;
 };
 
 template <typename Addressing, typename TransportPolicy>
 using route_for = typename route_selection<Addressing, TransportPolicy>::route;
-
-/* ---- Scopes ------------------------------------------------------------ */
 
 template <threadgroup Scope>
 struct scope_traits {
@@ -176,14 +165,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool scope_leader() {
     return nvshmemi_thread_id_in_threadgroup<scope_traits<Scope>::internal>() == 0;
 }
 
-/*
- * Group-uniform preflight. Every participant passes its own preflight status;
- * all of them return the numerically largest one, so the most severe category
- * (INTERNAL > NOT_SUPPORTED > INVALID_VALUE > SUCCESS) wins deterministically.
- * The agreement is also a group barrier with the ordering of
- * nvshmemi_threadgroup_sync, so a route may issue right after it succeeds.
- * Warp scope uses the whole warp, as the stable warp APIs do.
- */
+/* The most severe status wins; agreement is also the pre-issue group barrier. */
 static_assert(NVSHMEMX_SUCCESS < NVSHMEMX_ERROR_INVALID_VALUE &&
                   NVSHMEMX_ERROR_INVALID_VALUE < NVSHMEMX_ERROR_NOT_SUPPORTED &&
                   NVSHMEMX_ERROR_NOT_SUPPORTED < NVSHMEMX_ERROR_INTERNAL,
@@ -204,7 +186,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int agree(int status) {
         return status;
 #endif
     } else {
-        /* One barrier when everyone succeeded; the reduction runs only on failure. */
+        /* One barrier when all succeeded; reduce only on failure. */
         if (!__syncthreads_or(status != NVSHMEMX_SUCCESS)) {
             return NVSHMEMX_SUCCESS;
         }
@@ -220,8 +202,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int agree(int status) {
         return status;
     }
 }
-
-/* ---- Memory spaces ----------------------------------------------------- */
 
 enum class local_space {
     invalid,
@@ -244,9 +224,6 @@ __host__ __device__ constexpr local_space to_local_space(nvshmemx::memory_space:
                                                             : local_space::invalid;
 }
 
-/* Only a generic local operand is classified at run time. Explicit shared and
- * global values compile directly to their path and never call __isShared, in
- * the route or in the stable helpers it calls. */
 template <local_space Space>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_ptr(const void *ptr) {
     if constexpr (Space == local_space::shared) {
@@ -259,9 +236,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared_ptr(const void *ptr) {
     }
 }
 
-/* A route's view of the local operand: `kind` is its compile-time category,
- * `is_source` tells a put source from a get destination, and is_shared()
- * classifies it. */
 template <nvshmemx::memory_space::source Space>
 struct source_local {
     static constexpr local_space kind = to_local_space(Space);
@@ -302,8 +276,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void validate_get_memory_spaces() {
                   "unsupported transport-specific get destination memory space");
 }
 
-/* Explicit shared and global annotations are trusted preconditions. Debug
- * builds check them; release builds never classify the pointer. */
+/* Explicit shared/global annotations are trusted; only debug builds check them. */
 template <typename Local>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void assert_local_annotation(const void *ptr) {
 #ifdef NVSHMEM_DEBUG
@@ -317,10 +290,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void assert_local_annotation(const void
 #endif
 }
 
-/* ---- Argument checks shared by route preflights ------------------------ */
-
-/* Saturate instead of wrapping so an overflowing element count reaches the byte
- * preflight, which rejects the heap range. */
+/* Saturate so an overflowing count fails the heap-range check. */
 template <typename Type>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE size_t bytes_for_elements(size_t nelems) {
     return nelems > static_cast<size_t>(-1) / sizeof(Type) ? static_cast<size_t>(-1)
@@ -343,9 +313,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool heap_range_is_valid(const void *pt
     return offset <= heap_size && bytes <= heap_size - offset;
 }
 
-/* The arguments every RMA route needs: a valid PE, a remote range inside the
- * symmetric heap, and a local operand that may be null only when no bytes
- * move (the portable zero-length behavior). */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_rma_arguments(const void *remote,
                                                                  const void *local, size_t bytes,
                                                                  int pe) {
@@ -354,8 +321,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_rma_arguments(const void *rem
     return valid ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_INVALID_VALUE;
 }
 
-/* The arguments every signalling route needs: a valid PE, a SET or ADD
- * opcode, and an 8-byte-aligned signal word inside the symmetric heap. */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_signal_arguments(const uint64_t *sig_addr,
                                                                     int sig_op, int pe) {
     const bool valid = pe >= 0 && pe < nvshmemi_device_state_d.npes &&
@@ -365,15 +330,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int check_signal_arguments(const uint64
     return valid ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_INVALID_VALUE;
 }
 
-/* ---- Pointer addressing, shared by the Pointer routes ------------------- */
-
-/* The mapped peer address, or null. */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void *pointer_peer(const void *remote, int pe) {
     return nvshmemi_ptr(remote, pe);
 }
 
-/* The direct P2P signal update: a volatile store for SET, a system-scope
- * atomic for ADD. The opcode has already passed check_signal_arguments. */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void pointer_issue_signal(void *peer, uint64_t signal,
                                                                    int sig_op) {
     if (sig_op == NVSHMEM_SIGNAL_SET) {
@@ -384,9 +344,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void pointer_issue_signal(void *peer, u
     }
 }
 
-/* The Pointer-route signal preflight: valid arguments and a mapped peer word.
- * ADD is a system-scope atomic on that peer, so it also needs native P2P
- * atomics. */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int pointer_preflight_signal(uint64_t *sig_addr,
                                                                       int sig_op, int pe,
                                                                       void *&peer) {
@@ -401,7 +358,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int pointer_preflight_signal(uint64_t *
     return supported ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
 }
 
-/* The more severe of two preflight statuses, with the ordering agree() uses. */
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int worse(int a, int b) { return a > b ? a : b; }
 
 }  // namespace transport_policy

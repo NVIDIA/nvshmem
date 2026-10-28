@@ -3,10 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Shared host/device helpers for the transport-specific tests. Each
- * test defines NVSHMEMX_ENABLE_TRANSPORT_POLICY before including this
- * header. */
-
 #ifndef TRANSPORT_SPECIFIC_COMMON_CUH
 #define TRANSPORT_SPECIFIC_COMMON_CUH
 
@@ -20,8 +16,6 @@
 
 namespace ts_test {
 
-/* Tests name the local operand by its put-source spelling; gets use
- * local_dest() for the same memory space. The remote operand is global. */
 using LocalSpace = nvshmemx::memory_space::source;
 inline constexpr LocalSpace kShared = LocalSpace::shared;
 inline constexpr LocalSpace kGlobal = LocalSpace::global;
@@ -35,6 +29,9 @@ __host__ __device__ constexpr nvshmemx::memory_space::dest local_dest(LocalSpace
                                          : nvshmemx::memory_space::dest::generic;
 }
 inline constexpr auto kBlock = nvshmemx::threadgroup::block;
+
+enum class issue_mode { blocking, nbi };
+enum class placement { global, shared };
 
 inline constexpr int kThreads = 128;
 inline constexpr unsigned char kSentinelByte = 0xee;
@@ -68,9 +65,6 @@ __global__ void fill_payload(unsigned char *buffer, size_t bytes, int pe) {
     fill_payload_block(buffer, bytes, pe);
 }
 
-/* Kernel status words start as kStatusUnset (run_case fills them with 0xff).
- * Data checks made inside a kernel report kDataMismatch, and a receiver whose
- * signal never arrived reports kReceiveTimeout. */
 inline constexpr int kStatusUnset = -1;
 inline constexpr int kDataMismatch = -1001;
 inline constexpr int kReceiveTimeout = -1002;
@@ -82,8 +76,7 @@ __device__ inline uint64_t global_time_ns() {
     return now;
 }
 
-/* A sender's failure always wins: it is why a concurrent receiver timed out.
- * A sender's success never replaces a receiver's failure. */
+/* A sender failure overrides any status; a sender success never hides a receiver failure. */
 __device__ inline void report_sender(int *status, int result) {
     if (threadIdx.x == 0) {
         if (result != NVSHMEMX_SUCCESS) {
@@ -94,7 +87,6 @@ __device__ inline void report_sender(int *status, int result) {
     }
 }
 
-/* A receiver's failure is recorded only while no sender failure is. */
 __device__ inline void report_receiver(int *status, int failure) {
     int observed = *reinterpret_cast<volatile int *>(status);
     while (observed == kStatusUnset || observed == NVSHMEMX_SUCCESS) {
@@ -106,8 +98,6 @@ __device__ inline void report_receiver(int *status, int failure) {
     }
 }
 
-/* Whether this thread's share of `bytes` holds `pe`'s payload. Each thread
- * checks offsets lane, lane + width, ... so a group covers its whole slice. */
 __device__ inline bool payload_matches(const unsigned char *buffer, size_t bytes, int pe,
                                        size_t base, size_t lane, size_t width) {
     const volatile unsigned char *data = buffer;
@@ -118,13 +108,7 @@ __device__ inline bool payload_matches(const unsigned char *buffer, size_t bytes
     return matches;
 }
 
-/*
- * The receiving half of a signalled case, run by its own CTA while the peer
- * sends: wait for `expected` and check the payload at once, before any kernel
- * boundary, barrier, or completion call could hide a signal that overtook its
- * payload. A receiver that never sees the signal reports kReceiveTimeout,
- * which run_case accepts only when the case is skipped.
- */
+/* Checks in-kernel so no barrier or quiet can hide a signal that overtook its payload. */
 __device__ inline void receive_and_check(uint64_t *signal, uint64_t expected,
                                          const unsigned char *payload, size_t bytes, int source_pe,
                                          int *status) {
@@ -160,8 +144,6 @@ inline int read_status(const int *status) {
     return host_status;
 }
 
-/* WORLD max-reduction through a symmetric int[2]. A failed reduction reports 1
- * so callers treat it as a failure rather than a pass. */
 inline int world_max(int *scratch, int local_value) {
     CUDA_CHECK(cudaMemcpy(scratch, &local_value, sizeof(local_value), cudaMemcpyHostToDevice));
     if (nvshmem_int_max_reduce(NVSHMEM_TEAM_WORLD, scratch + 1, scratch, 1) != NVSHMEMX_SUCCESS) {
@@ -217,7 +199,6 @@ inline int check_signal(const char *what, const uint64_t *device, uint64_t expec
     return 0;
 }
 
-/* Checks the value directly, then confirms the stable wait API observes it. */
 inline int check_signal_and_wait(const char *what, uint64_t *signal, uint64_t expected,
                                  int *status) {
     if (check_signal(what, signal, expected)) {
@@ -237,20 +218,10 @@ inline int check_signal_and_wait(const char *what, uint64_t *signal, uint64_t ex
 struct world {
     int mype;
     int npes;
-    int *scratch; /* symmetric int[2] */
-    int *status;  /* device int */
+    int *scratch;
+    int *status;
 };
 
-/*
- * One route case: every PE resets its buffers, active PEs launch the sender,
- * and all PEs agree on the sender statuses before any receiver inspects data,
- * so a failed sender never leaves a peer verifying (or waiting on) data that
- * was not sent. Inactive PEs only join the barriers.
- *
- * A case that expects success but receives NVSHMEMX_ERROR_NOT_SUPPORTED on any
- * PE is a capability skip on every PE: it is reported and not verified. Any
- * other unexpected status, NVSHMEMX_ERROR_INTERNAL included, is a failure.
- */
 inline const char *status_name(int status) {
     return status == kDataMismatch     ? " (data mismatch observed in the kernel)"
            : status == kReceiveTimeout ? " (receiver never observed the signal)"
@@ -300,18 +271,9 @@ int run_case(const world &w, bool active, const char *what, int expected_status,
     return failures;
 }
 
-/*
- * Scope-parametrized data and ordering coverage. Each of the first `issuers`
- * threadgroups of Scope in the CTA moves its own contiguous slice of the
- * buffers, so thread and warp scopes run with several concurrent issuers.
- */
 using threadgroup = nvshmemx::threadgroup;
 
-enum class scoped_op {
-    put_get,       /* put + quiet, then get_nbi + quiet */
-    put_nbi_flush, /* put_nbi + flush, poison the source slice, quiet */
-    put_nbi_fence, /* put_nbi + fence + signal_op ADD 1 + quiet */
-};
+enum class scoped_op { put_get, put_nbi_flush, put_nbi_fence };
 
 template <threadgroup Scope>
 __device__ inline int scope_group_index() {
@@ -366,7 +328,7 @@ __device__ int scoped_rma(scoped_op which, unsigned char *remote, unsigned char 
                 result = nvshmemx_flush<A, P, Scope>();
             }
             if (result == NVSHMEMX_SUCCESS) {
-                /* flush makes the source reusable; the peer must still see the original. */
+                /* After flush the source is reusable; the peer must still see the original. */
                 fill_group<Scope>(source, bytes, kPoisonByte);
             }
             break;
@@ -385,11 +347,6 @@ __device__ int scoped_rma(scoped_op which, unsigned char *remote, unsigned char 
     return result;
 }
 
-/*
- * Reports only failures; the caller zeroes *status. Block 0 issues; for
- * put_nbi_fence, block 1 receives the previous PE's payload and signal. Each
- * group checks its get result right after its route quiet.
- */
 template <typename A, typename P, threadgroup Scope, LocalSpace Local>
 __global__ void scoped_kernel(scoped_op which, unsigned char *remote, unsigned char *source,
                               unsigned char *out, uint64_t *signal, size_t bytes, int issuers,
@@ -423,10 +380,10 @@ struct scoped_target {
     bool active;
     int peer;
     int previous;
-    unsigned char *remote; /* symmetric */
-    unsigned char *source; /* symmetric */
-    unsigned char *out;    /* symmetric */
-    uint64_t *signal;      /* symmetric */
+    unsigned char *remote;
+    unsigned char *source;
+    unsigned char *out;
+    uint64_t *signal;
     size_t bytes;
 };
 
@@ -459,8 +416,6 @@ int scoped_case(const scoped_target &t, const char *what, scoped_op which, int i
         });
 }
 
-/* put/get, put_nbi + flush, and put_nbi + fence + signal at thread and warp
- * scope, with every thread or warp of the CTA issuing. */
 template <typename A, typename P, LocalSpace Local>
 int thread_warp_cases(const scoped_target &t, const char *route) {
     const int thread_issuers = kThreads;
@@ -480,12 +435,6 @@ int thread_warp_cases(const scoped_target &t, const char *route) {
     return failures;
 }
 
-/*
- * Auto / Auto against the existing portable API at the matching scope: the
- * same transfer is issued once through each into separate buffers, and both
- * must produce identical data and signal values. The stable APIs return no
- * status, so the route must report success.
- */
 enum class compare_op { put, put_nbi, get, get_nbi, put_signal, put_signal_nbi };
 
 template <threadgroup Scope>
@@ -577,7 +526,6 @@ __device__ inline int auto_rma(compare_op which, unsigned char *remote, unsigned
     }
 }
 
-/* ref_* receive the stable API's transfer; the others the route's. */
 struct compare_buffers {
     unsigned char *remote;
     unsigned char *out;
@@ -587,7 +535,6 @@ struct compare_buffers {
     uint64_t *ref_signal;
 };
 
-/* Reports only failures; the caller zeroes *status. */
 template <threadgroup Scope>
 __global__ void auto_vs_stable_kernel(compare_op which, compare_buffers b, unsigned char *source,
                                       size_t bytes, int issuers, int peer, int *status) {
@@ -666,7 +613,6 @@ int auto_vs_stable_case(const scoped_target &t, const compare_buffers &b, const 
         });
 }
 
-/* Every RMA family at thread, warp, and block scope. */
 inline int auto_vs_stable_cases(const scoped_target &t, const compare_buffers &b,
                                 const char *route) {
     const compare_op ops[] = {compare_op::put,        compare_op::put_nbi,
