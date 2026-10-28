@@ -71,6 +71,8 @@ int main(int argc, char *argv[]) {
     double *data_d = NULL, *remote_d;
     unsigned int *counter_d;
 
+    // The default minimum message size must hold at least one element.
+    min_size = sizeof(double);
     read_args(argc, argv);
     if (!validate_message_size_range(sizeof(double))) {
         return EXIT_FAILURE;
