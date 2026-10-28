@@ -3,14 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* CFT / TMA completion-mode sweep: block-scoped put, get, and put_signal (SET,
- * and ADD where the fabric atomic capability exists), each blocking or NBI
- * followed by one CFT quiet, flush, or fence per operation. The CFT get and
- * put_signal paths complete before they return, so NBI rows are labelled by
- * the completion they use rather than claiming deferred completion.
- * nvshmemx_rma_capability decides whether the route can serve each row, and
- * an unavailable route or signal is a SKIP. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_perftest.cuh"
@@ -27,7 +19,7 @@ namespace {
 constexpr const char *kBenchmark = "shmem_transport_specific_cft_tma_bw";
 constexpr int kThreads = 128;
 constexpr route kRoute = route::cft_tma;
-/* Adding zero probes the fabric atomic capability without changing the word. */
+/* Adding zero probes the fabric atomic without changing the word. */
 constexpr uint64_t kAddProbeValue = 0;
 constexpr uint64_t kAddIncrement = 1;
 
@@ -132,7 +124,7 @@ struct cft_tma_bw : ts::payload_buffers {
 
     void setup(ts::context &ctx) {
         ts::payload_buffers::setup(ctx);
-        /* CFT ADD updates a 16-byte block, so the signal word is 16-byte aligned. */
+        /* CFT ADD updates a 16-byte block. */
         signal = static_cast<uint64_t *>(nvshmem_align(ts::kAlignment, ts::kAlignment));
         if (signal == nullptr) {
             fprintf(stderr, "PE %d: %s: signal allocation failed\n", ctx.mype, ctx.benchmark);
@@ -147,7 +139,6 @@ struct cft_tma_bw : ts::payload_buffers {
         ts::payload_buffers::teardown();
     }
 
-    /* Whether PE 0 can issue signal ADD; NOT_SUPPORTED skips the ADD rows. */
     ts::outcome probe_add(ts::context &ctx) {
         const int registration = static_cast<int>(ts::registration_bytes(ctx, kRoute));
         int status = NVSHMEMX_SUCCESS;

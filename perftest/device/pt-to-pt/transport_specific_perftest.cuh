@@ -3,14 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Shared scaffolding for the transport-policy route perftests: route
- * descriptors, route availability through nvshmemx_rma_capability, job-wide
- * status agreement, and a size-sweep driver that reports through the standard
- * perftest tables. The `stable` pseudo-route issues the same operations
- * through the stable device API (nvshmem_putmem, nvshmemx_putmem_block,
- * nvshmemx_quiet_block, ...) inside the same kernels, so its rows are the
- * baseline for every route. */
-
 #ifndef TRANSPORT_SPECIFIC_PERFTEST_CUH
 #define TRANSPORT_SPECIFIC_PERFTEST_CUH
 
@@ -38,12 +30,9 @@ namespace Memory = nvshmemx::memory_space;
 
 using Scope = nvshmemx::threadgroup;
 constexpr auto kBlock = Scope::block;
-/* The TMA alignment and size granule, which is also the CFT handle transfer
- * size (CFT_HANDLE_TX_SIZE). */
+/* TMA granule; also CFT_HANDLE_TX_SIZE. */
 constexpr size_t kAlignment = 16;
-/* Headroom for the kernels' static shared memory when sizing shared payloads. */
 constexpr size_t kStaticSmemReserve = 1024;
-/* Status slots start out unset so a block that never published is visible. */
 constexpr int kStatusFill = 0xff;
 
 enum class route { auto_auto, pointer_sm, pointer_tma, cft_tma, auto_network, stable, count };
@@ -53,8 +42,6 @@ enum class rma_nbi { no, yes };
 enum class completion { none, quiet, flush, fence };
 enum class outcome { success, skipped, failed };
 
-/* option: the NVSHMEM_TRANSPORT_SPECIFIC_ROUTE name; key: the subjob prefix;
- * requirement: what the route needs when its capability is missing. */
 struct route_info {
     const char *option;
     const char *key;
@@ -86,9 +73,6 @@ inline const char *placement_key(placement p) {
     return p == placement::shared ? "shared" : "global";
 }
 
-/* registers_smem: the route consumes a CTA shared-memory registration.
- * granule: payload sizes and per-block slices must be multiples of this.
- * shared_local: the route accepts a CTA shared-memory local operand. */
 template <route R>
 struct route_traits;
 
@@ -137,8 +121,6 @@ struct route_traits<route::auto_network> {
     static constexpr bool shared_local = false;
 };
 
-/* The stable pseudo-route's addressing and policy: the call helpers below
- * issue the stable device API instead of a transport-policy entry point. */
 struct stable_api {};
 
 template <>
@@ -153,9 +135,6 @@ struct route_traits<route::stable> {
 template <typename A>
 constexpr bool is_stable = std::is_same<A, stable_api>::value;
 
-/* Whether route R accepts the operation at scope S with local placement P
- * (the routes' static scope rules): CFT / TMA is block-only and Pointer / TMA
- * below block scope moves only puts from a shared source. */
 template <route R, Scope S, placement P, rma_operation Op>
 constexpr bool scope_legal =
     S == Scope::block ||
@@ -166,14 +145,10 @@ inline const char *scope_key(Scope s) {
     return s == Scope::thread ? "thread" : s == Scope::warp ? "warp" : "block";
 }
 
-/* Threads per CTA for a single-group latency kernel at scope S. */
 constexpr int scope_threads(Scope s, int block_threads) {
     return s == Scope::thread ? 1 : s == Scope::warp ? 32 : block_threads;
 }
 
-/* Auto / Auto keeps generic local classification; every strict route gets
- * the explicit memory space that matches where the local operand lives. The
- * local operand is a put source or, via local_dest(), a get destination. */
 template <route R, placement P>
 constexpr Memory::source local_space = R == route::auto_auto    ? Memory::source::generic
                                        : P == placement::shared ? Memory::source::shared
@@ -185,7 +160,6 @@ __host__ __device__ constexpr Memory::dest local_dest(Memory::source local) {
                                              : Memory::dest::generic;
 }
 
-/* The stable device API at scope S: the thread, _warp, or _block form. */
 template <Scope S, rma_operation Op, rma_nbi Nbi>
 __device__ void stable_rma(uint8_t *remote, uint8_t *local, size_t bytes, int pe) {
     constexpr bool kPut = Op == rma_operation::put;
@@ -275,8 +249,6 @@ struct put_signal_call {
     }
 };
 
-/* The stable nvshmemx_signal_op is a single-thread call; at warp and block
- * scope the leader issues it and the group synchronizes, as Auto / Auto does. */
 template <typename A, typename P, Scope S = kBlock>
 __device__ int signal_op_call(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
     if constexpr (is_stable<A>) {
@@ -343,8 +315,6 @@ inline const char *completion_key(completion c) {
     }
 }
 
-/* Dynamic shared memory is laid out as [registration][payload]; the payload
- * therefore never aliases NVSHMEM's barrier or staging area. */
 template <route R>
 __device__ unsigned char *acquire_smem(int registration) {
     extern __shared__ __align__(16) unsigned char transport_specific_smem[];
@@ -366,8 +336,7 @@ __device__ void release_smem() {
     }
 }
 
-/* Block-uniform early exit so no thread skips a block-scoped call its peers
- * still make. */
+/* Block-uniform so no thread skips a block-scoped call its peers still make. */
 __device__ inline bool block_failed(int result) {
     return __syncthreads_or(result != NVSHMEMX_SUCCESS) != 0;
 }
@@ -397,9 +366,6 @@ __device__ inline void block_slice(size_t bytes, size_t granule, size_t *offset,
     *length = (base + (block < remainder ? 1 : 0)) * granule;
 }
 
-/* The route's own answer for one operation in the benchmark's launch shape
- * (registration, block size, and local operand placement): exactly the
- * preflight the operation runs, without issuing work. */
 template <route R, placement P, rma_operation Op, Scope S = kBlock>
 __global__ void rma_capability_kernel(unsigned char *remote, unsigned char *local_global,
                                       size_t bytes, int registration, int peer, int *statuses) {
@@ -422,9 +388,6 @@ __global__ void rma_capability_kernel(unsigned char *remote, unsigned char *loca
     publish_block_status(result, statuses);
 }
 
-/* NVSHMEM_TRANSPORT_SPECIFIC_ROUTE is a comma-separated subset of
- * auto,sm,tma,cft,network,stable (cft is CFT / TMA; stable is the stable
- * device API baseline), or "all" (the default). */
 inline bool parse_route_selection(unsigned *mask) {
     const char *value = getenv("NVSHMEM_TRANSPORT_SPECIFIC_ROUTE");
     if (value == nullptr || strcmp(value, "all") == 0) {
@@ -456,8 +419,7 @@ inline bool parse_route_selection(unsigned *mask) {
     return selected != 0;
 }
 
-/* TMA and CFT need a TMA-enabled runtime. Respect an explicit user policy so
- * that NVSHMEM_TMA_POLICY=DISABLE still produces a TMA/CFT SKIP. */
+/* No overwrite: an explicit NVSHMEM_TMA_POLICY=DISABLE must still SKIP TMA/CFT. */
 inline void default_tma_policy(unsigned mask) {
     if (mask & (route_bit(route::pointer_tma) | route_bit(route::cft_tma))) {
         setenv("NVSHMEM_TMA_POLICY", "ENABLE", 0);
@@ -481,7 +443,7 @@ struct context {
     bool selected(route r) const { return (selection & route_bit(r)) != 0; }
 };
 
-/* Job-wide OR. Every PE must call this in the same order. */
+/* Job-wide OR; every PE must call this in the same order. */
 inline bool any_pe(context &ctx, bool local) {
     const int value = local ? 1 : 0;
     CUDA_CHECK(cudaMemcpy(ctx.state, &value, sizeof(value), cudaMemcpyHostToDevice));
@@ -506,8 +468,6 @@ inline int read_status(const int *statuses, int count) {
     return NVSHMEMX_SUCCESS;
 }
 
-/* Returns false (after printing the reason) when the job cannot run the
- * benchmark at all; the caller then exits with the returned code. */
 inline bool setup_context(context &ctx, const char *benchmark, int max_blocks, int *exit_code) {
     ctx.benchmark = benchmark;
     ctx.mype = nvshmem_my_pe();
@@ -575,15 +535,12 @@ inline size_t registration_bytes(const context &ctx, route r) {
                                                             : 0;
 }
 
-/* Per-block shared payload capacity after the route's registration. */
 inline size_t shared_capacity(const context &ctx, route r) {
     const size_t optin = ctx.properties.sharedMemPerBlockOptin;
     const size_t reserved = registration_bytes(ctx, r) + kStaticSmemReserve;
     return optin > reserved ? (optin - reserved) & ~(kAlignment - 1) : 0;
 }
 
-/* A shared payload must fit next to the registration; this is a benchmark
- * resource limit rather than a route capability. */
 inline bool placement_available(context &ctx, route r, placement p) {
     const bool gap = p == placement::shared && shared_capacity(ctx, r) < kAlignment;
     if (!any_pe(ctx, gap)) {
@@ -598,13 +555,6 @@ inline bool placement_available(context &ctx, route r, placement p) {
     return false;
 }
 
-/*
- * Asks nvshmemx_rma_capability, on every issuing PE, whether route R can run
- * operation Op at scope S with the row's local placement, block size, and registration
- * for a granule-sized payload. NOT_SUPPORTED on any issuer skips the row;
- * any other non-success answer means the benchmark built invalid arguments
- * and fails it.
- */
 template <route R, placement P, rma_operation Op, Scope S = kBlock>
 outcome rma_available(context &ctx, const std::string &subjob, unsigned char *remote,
                       unsigned char *local, int threads, bool issuer) {
@@ -643,8 +593,6 @@ outcome rma_available(context &ctx, const std::string &subjob, unsigned char *re
 template <placement P>
 using placement_constant = std::integral_constant<placement, P>;
 
-/* Calls fn(placement_constant<P>{}) for each local placement of R that fits
- * and returns the summed failure count. */
 template <route R, typename Fn>
 int for_each_placement(context &ctx, Fn &&fn) {
     int failures = 0;
@@ -661,7 +609,6 @@ int for_each_placement(context &ctx, Fn &&fn) {
 
 inline int failed(outcome o) { return o == outcome::failed ? 1 : 0; }
 
-/* Whether `-s/--scope` (default: all scopes) selects scope s. */
 inline bool scope_selected(Scope s) {
     switch (threadgroup_scope.type) {
         case NVSHMEM_THREAD:
@@ -678,8 +625,6 @@ inline bool scope_selected(Scope s) {
 template <Scope S>
 using scope_constant = std::integral_constant<Scope, S>;
 
-/* Calls fn(scope_constant<S>{}) for each scope the user selected and returns
- * the summed failure count. */
 template <typename Fn>
 int for_each_scope(Fn &&fn) {
     int failures = 0;
@@ -695,9 +640,6 @@ int for_each_scope(Fn &&fn) {
     return failures;
 }
 
-/* Runs Bench::run<R> for every route the benchmark measures and the user
- * selected; rows the route cannot serve report a SKIP. Returns the number of
- * failed rows. */
 template <route R, typename Bench>
 int run_route(context &ctx, Bench &bench) {
     if constexpr ((Bench::kRoutes & route_bit(R)) != 0) {
@@ -742,9 +684,6 @@ inline sweep_spec make_spec(route r, std::string variant, placement p, const cha
             p == placement::shared ? shared_capacity(ctx, r) : SIZE_MAX};
 }
 
-/* One timed launch. Launch(bytes, grid, iterations) enqueues the kernel(s) on
- * the default stream and returns the number of status slots written, or 0
- * when this PE does not issue in this row. */
 template <typename Launch>
 int timed_launch(context &ctx, Launch &launch, size_t bytes, int grid, size_t iterations,
                  float *milliseconds) {
@@ -761,10 +700,6 @@ int timed_launch(context &ctx, Launch &launch, size_t bytes, int grid, size_t it
     return slots > 0 ? read_status(ctx.statuses, slots) : NVSHMEMX_SUCCESS;
 }
 
-/* Sweeps min_size..max_size, measuring warmup plus `repetitions` timed runs
- * per size and printing one standard perftest table on PE 0. Metric(bytes,
- * milliseconds) converts PE 0's timing into the reported value. Any nonzero
- * route status on any PE stops the sweep and fails the row. */
 template <typename Launch, typename Metric>
 outcome run_sweep(context &ctx, const sweep_spec &spec, Launch launch, Metric metric) {
     std::vector<uint64_t> sizes;
@@ -827,7 +762,6 @@ outcome run_sweep(context &ctx, const sweep_spec &spec, Launch launch, Metric me
     return failed ? outcome::failed : outcome::success;
 }
 
-/* Symmetric remote target and local global operand shared by the benchmarks. */
 struct payload_buffers {
     static constexpr unsigned kRoutes = kAllRoutes;
     static constexpr int kPayloadFill = 0xa5;
@@ -854,8 +788,6 @@ struct payload_buffers {
     }
 };
 
-/* Common main(): Bench provides max_blocks(), setup(ctx), teardown(), and
- * run<R>(ctx). Returns nonzero when any route row failed. */
 template <typename Bench>
 int run_benchmark(int argc, char **argv, const char *name, Bench &bench) {
     read_args(argc, argv);

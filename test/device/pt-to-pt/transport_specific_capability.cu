@@ -3,18 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Functional coverage for nvshmemx_rma_capability. The source overload must
- * run exactly the put preflight and the dest overload exactly the get
- * preflight, so for every route and argument variant the kernel queries the
- * capability and then, with the same arguments, issues the operation: both
- * must return the same group-uniform status, and an operation that did not
- * succeed must leave every buffer unchanged. Capability-only runs check that
- * the query itself never moves data, whatever it returns.
- *
- * Every PE runs each case against its ring neighbour. A route whose
- * prerequisites are missing reports NOT_SUPPORTED for a valid call, which is
- * a per-case skip; on a PE whose peer has no direct mapping the Pointer routes
- * must report NOT_SUPPORTED. */
+/* The capability must return the same group-uniform status as the operation, and
+ * neither may move data unless the operation succeeds. */
 
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
@@ -35,34 +25,27 @@ using AutoPolicy = nvshmemx::transport_policy::Auto;
 constexpr auto kThread = threadgroup::thread;
 constexpr auto kWarp = threadgroup::warp;
 
-/* Dynamic shared memory: [0, kRegistered) may be given to NVSHMEM and the
- * user payload area follows it, outside the registration. */
 constexpr int kRegistered = 65536;
 constexpr size_t kSmem = static_cast<size_t>(kRegistered) + kBytes;
 constexpr int kNoRegistration = 0;
 constexpr int kWarpThreads = 32;
 
-/* A size and a remote offset that break the 16-byte TMA and CFT_HANDLE_TX_SIZE
- * rules while staying inside the buffers. */
 constexpr size_t kUnalignedBytes = 24;
 constexpr size_t kMisalignedOffset = 8;
 constexpr size_t kSmallBytes = 64;
 
 enum class direction { put, get };
 
-/* How a case deviates from a valid call. */
 enum class variant {
     valid,
-    bad_pe,            /* every participant passes an out-of-range PE */
-    divergent_pe,      /* only the group's last participant passes it */
-    outside_heap,      /* remote operand outside the symmetric heap */
-    null_local,        /* null local operand with a nonzero size */
-    unaligned_size,    /* size not a 16-byte multiple */
-    misaligned_remote, /* remote operand 8 bytes past a 16-byte boundary */
+    bad_pe,
+    divergent_pe,
+    outside_heap,
+    null_local,
+    unaligned_size,
+    misaligned_remote,
 };
 
-/* capability_only queries and issues nothing; the others query and then
- * issue the blocking or NBI operation, completed with the route quiet. */
 enum class mode { capability_only, blocking, nbi };
 
 struct kernel_args {
@@ -70,13 +53,13 @@ struct kernel_args {
     mode run;
     bool in_shared;
     int registration;
-    unsigned char *remote;  /* symmetric: put destination, or the peer's get source */
-    unsigned char *local;   /* symmetric: put source or get destination */
-    unsigned char *outside; /* device memory outside the symmetric heap */
+    unsigned char *remote;
+    unsigned char *local;
+    unsigned char *outside;
     int peer;
     int npes;
-    int *capability; /* per-thread status */
-    int *operation;  /* per-thread status */
+    int *capability;
+    int *operation;
 };
 
 template <threadgroup Scope>
@@ -121,14 +104,8 @@ __device__ int operation(mode run, unsigned char *remote, unsigned char *local, 
     return result;
 }
 
-/*
- * The participants (thread 0, warp 0, or the whole CTA) query the capability
- * and, unless the run is capability_only, issue the operation with the same
- * arguments. A shared local operand lives past the registration: a put copies
- * its source there first, and a get destination is filled with the sentinel
- * and copied back to `local` afterwards, so the host checks either placement
- * in the same buffer.
- */
+/* A shared local operand lives past the registration and is copied to and from
+ * `local`, so the host checks either placement in the same buffer. */
 template <typename A, typename P, threadgroup Scope, direction Dir, LocalSpace Local>
 __global__ void capability_kernel(kernel_args a) {
     if (a.registration > 0) {
@@ -190,24 +167,20 @@ __global__ void capability_kernel(kernel_args a) {
     }
 }
 
-/* ---- Host side ------------------------------------------------------------ */
-
 struct context {
     world w;
     int peer;
     int previous;
     bool peer_mapped;
-    unsigned char *remote;  /* symmetric put destination */
-    unsigned char *source;  /* symmetric put source and peer get source */
-    unsigned char *out;     /* symmetric get destination */
-    unsigned char *outside; /* cudaMalloc, outside the heap */
-    int *capability;        /* device int[kThreads] */
-    int *operation;         /* device int[kThreads] */
-    int *flags;             /* symmetric int[2 * npes] */
+    unsigned char *remote;
+    unsigned char *source;
+    unsigned char *out;
+    unsigned char *outside;
+    int *capability;
+    int *operation;
+    int *flags;
 };
 
-/* The status a case must report, and whether NOT_SUPPORTED is an accepted
- * capability skip instead. */
 struct expectation {
     int status;
     bool skip_if_unsupported;
@@ -218,7 +191,6 @@ constexpr expectation kInvalid{NVSHMEMX_ERROR_INVALID_VALUE, false};
 constexpr expectation kInvalidWhenAvailable{NVSHMEMX_ERROR_INVALID_VALUE, true};
 constexpr expectation kUnsupported{NVSHMEMX_ERROR_NOT_SUPPORTED, false};
 
-/* Each PE's flag, gathered on every PE. */
 std::vector<int> gather_flags(const context &c, int local) {
     const int npes = c.w.npes;
     std::vector<int> host(npes, 0);
@@ -239,7 +211,6 @@ const char *mode_name(mode run) {
                                         : "capability + NBI operation";
 }
 
-/* Whether every participant reported the same status; stores it in *status. */
 bool uniform(const std::vector<int> &statuses, int count, int *status) {
     *status = statuses[0];
     for (int i = 1; i < count; i++) {
@@ -250,8 +221,6 @@ bool uniform(const std::vector<int> &statuses, int count, int *status) {
     return true;
 }
 
-/* One run of a case. Returns the failure count (job-wide) and sets *skipped
- * when any PE took the NOT_SUPPORTED skip. */
 template <typename A, typename P, threadgroup Scope, direction Dir, LocalSpace Local>
 int run_mode(const context &c, const char *what, variant which, expectation expected,
              bool in_shared, int registration, mode run, bool *skipped) {
@@ -322,7 +291,6 @@ int run_mode(const context &c, const char *what, variant which, expectation expe
         }
     }
 
-    /* Data moved only where the operation ran and succeeded. */
     const int moved = run != mode::capability_only && operation[0] == NVSHMEMX_SUCCESS ? 1 : 0;
     const std::vector<int> moved_on = gather_flags(c, moved);
     if (is_put) {
@@ -339,7 +307,6 @@ int run_mode(const context &c, const char *what, variant which, expectation expe
     return world_max(c.w.scratch, failures != 0);
 }
 
-/* Runs a case capability-only and with each operation spelling. */
 template <typename A, typename P, threadgroup Scope, direction Dir, LocalSpace Local>
 int run_case(const context &c, const char *route, const char *label, variant which,
              expectation expected, bool in_shared = false, int registration = kNoRegistration) {
@@ -363,10 +330,8 @@ int run_case(const context &c, const char *route, const char *label, variant whi
     return failures;
 }
 
-/* Argument problems every route rejects with INVALID_VALUE before any
- * capability check. When only one participant passes a bad PE, the others
- * reach the capability check, so the group agrees on the more severe
- * NOT_SUPPORTED where the route is unavailable: `divergent` says which. */
+/* With one bad participant the others reach the capability check, so an
+ * unavailable route agrees on NOT_SUPPORTED. */
 template <typename A, typename P, direction Dir, LocalSpace Local>
 int argument_cases(const context &c, const char *route, bool in_shared, int registration,
                    expectation divergent) {
@@ -382,7 +347,6 @@ int argument_cases(const context &c, const char *route, bool in_shared, int regi
     return failures;
 }
 
-/* Size and alignment rules of the TMA and CFT data paths. */
 template <typename A, typename P, direction Dir, LocalSpace Local>
 int alignment_cases(const context &c, const char *route, bool in_shared) {
     return run_case<A, P, kBlock, Dir, Local>(c, route, "unaligned size", variant::unaligned_size,
@@ -392,9 +356,7 @@ int alignment_cases(const context &c, const char *route, bool in_shared) {
                                               in_shared, kRegistered);
 }
 
-/* On a Pointer route a peer without a direct mapping is a missing
- * capability, not a skip: a valid call, and every participant of a group in
- * which only one passes a bad argument, must report NOT_SUPPORTED. */
+/* On a Pointer route an unmapped peer is NOT_SUPPORTED, not a skip. */
 expectation pointer_valid(const context &c) { return c.peer_mapped ? kSucceeds : kUnsupported; }
 expectation pointer_divergent(const context &c, expectation mapped) {
     return c.peer_mapped ? mapped : kUnsupported;
@@ -429,7 +391,6 @@ int pointer_sm_cases(const context &c) {
     return failures;
 }
 
-/* Pointer / TMA, reached through Pointer / TMA or the Auto / TMA alias. */
 template <typename A>
 int pointer_tma_cases(const context &c, const char *route) {
     const expectation valid = pointer_valid(c);
@@ -446,8 +407,6 @@ int pointer_tma_cases(const context &c, const char *route) {
         c, route, "global", variant::valid, valid, false, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::get, kGeneric>(
         c, route, "generic(shared)", variant::valid, valid, true, kRegistered);
-    /* Below block scope only a shared put source is legal, and a generic
-     * one that is not in shared memory is INVALID_VALUE. */
     failures += run_case<A, TMA, kWarp, direction::put, kShared>(c, route, "shared", variant::valid,
                                                                  valid, true, kRegistered);
     failures += run_case<A, TMA, kThread, direction::put, kGeneric>(
@@ -461,7 +420,6 @@ int pointer_tma_cases(const context &c, const char *route) {
     failures += run_case<A, TMA, kWarp, direction::put, kShared>(
         c, route, "divergent PE", variant::divergent_pe,
         pointer_divergent(c, kInvalidWhenAvailable), true, kRegistered);
-    /* Without registered shared memory the route is unavailable. */
     failures += run_case<A, TMA, kBlock, direction::put, kShared>(
         c, route, "shared without registration", variant::valid, kUnsupported, true,
         kNoRegistration);
@@ -477,8 +435,6 @@ int pointer_tma_cases(const context &c, const char *route) {
     return failures;
 }
 
-/* CFT / TMA, block scope only. In a build without CFT handles every valid
- * call is NOT_SUPPORTED. */
 int cft_tma_cases(const context &c) {
     const char *route = "CFT/TMA";
     int failures = 0;
@@ -509,8 +465,6 @@ int cft_tma_cases(const context &c) {
     return failures;
 }
 
-/* Auto / Network. A shared local operand is INVALID_VALUE in every build and
- * job. */
 template <typename A>
 int network_cases(const context &c, const char *route) {
     int failures = 0;
@@ -541,8 +495,7 @@ int network_cases(const context &c, const char *route) {
     return failures;
 }
 
-/* Auto / Auto and the pairs that lower to it. The portable route keeps its
- * fallback, so a valid call always succeeds. */
+/* The portable route keeps its fallback, so a valid call always succeeds. */
 template <typename A, typename P>
 int automatic_cases(const context &c, const char *route, bool full) {
     int failures = 0;
