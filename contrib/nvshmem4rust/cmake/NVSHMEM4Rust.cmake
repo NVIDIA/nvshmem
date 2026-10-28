@@ -13,6 +13,7 @@ function(generateRustBindings)
     set(GENERATOR_DIR "${NVSHMEM4RUST_SOURCE_DIR}/generator")
     set(RUNTIME_SOURCE_DIR "${NVSHMEM4RUST_SOURCE_DIR}/runtime")
     set(TEST_SOURCE_DIR "${NVSHMEM4RUST_SOURCE_DIR}/tests")
+    set(EXAMPLE_SOURCE_DIR "${NVSHMEM4RUST_SOURCE_DIR}/examples")
     set(RUST_DEVICE_CONFIG_PATH "${WORKDIR}/config_nvshmem_device.yml")
     set(RUST_HOST_CONFIG_PATH "${WORKDIR}/config_nvshmem_host.yml")
     set(DEVICE_OUTPUT_NAME "nvshmem_device_cuda_oxide.rs")
@@ -352,7 +353,20 @@ function(generateRustBindings)
         configure_file("${NVSHMEM_CUDA_OXIDE_ROOT}/Cargo.lock"
                        "${RUST_PERF_BINARY_DIR}/Cargo.lock" COPYONLY)
 
-        foreach(RUST_TEST_DIR IN ITEMS "${RUST_TEST_BINARY_DIR}" "${RUST_PERF_BINARY_DIR}")
+        set(RUST_RING_PUT_BINARY_DIR
+            "${NVSHMEM_RUST_BINDINGS_OUTPUT_DIR}/ring_put")
+        file(MAKE_DIRECTORY "${RUST_RING_PUT_BINARY_DIR}/src")
+        configure_file("${EXAMPLE_SOURCE_DIR}/ring_put/Cargo.toml.in"
+                       "${RUST_RING_PUT_BINARY_DIR}/Cargo.toml" @ONLY)
+        foreach(RING_PUT_SOURCE main.rs helpers.rs)
+            configure_file("${EXAMPLE_SOURCE_DIR}/ring_put/src/${RING_PUT_SOURCE}"
+                           "${RUST_RING_PUT_BINARY_DIR}/src/${RING_PUT_SOURCE}" COPYONLY)
+        endforeach()
+        configure_file("${NVSHMEM_CUDA_OXIDE_ROOT}/Cargo.lock"
+                       "${RUST_RING_PUT_BINARY_DIR}/Cargo.lock" COPYONLY)
+
+        foreach(RUST_TEST_DIR IN ITEMS "${RUST_TEST_BINARY_DIR}" "${RUST_PERF_BINARY_DIR}"
+                                       "${RUST_RING_PUT_BINARY_DIR}")
             execute_process(
                 COMMAND "${CARGO_EXECUTABLE}" generate-lockfile --offline
                 WORKING_DIRECTORY "${RUST_TEST_DIR}"
@@ -403,6 +417,26 @@ function(generateRustBindings)
             WORKING_DIRECTORY "${RUST_PERF_BINARY_DIR}"
             DEPENDS build_bindings_rust
             COMMENT "Building the CUDA-Oxide Rust NVSHMEM performance tests"
+            USES_TERMINAL
+            VERBATIM
+        )
+
+        add_custom_target(
+            example_rust_ring_put
+            COMMAND "${CMAKE_COMMAND}" -E env
+                "CUDA_HOME=${NVSHMEM_CUDA_HOME}"
+                "CUDA_TOOLKIT_PATH=${NVSHMEM_CUDA_HOME}"
+                "CUDA_OXIDE_TARGET=${NVSHMEM_RUST_TEST_ARCH}"
+                "NVSHMEM_RUST_BINDINGS=${RUST_DEVICE_BINDINGS_OUTPUT}"
+                "NVSHMEM_DEVICE_LTOIR=${NVSHMEM_RUST_TEST_DEVICE_LTOIR}"
+                "NVSHMEM_HOST_LIB_DIR=${NVSHMEM_HOST_LIB_DIR}"
+                "NVSHMEM_RUST_COMPILE_ONLY=1"
+                "LD_LIBRARY_PATH=${NVSHMEM_HOST_LIB_DIR}:$ENV{LD_LIBRARY_PATH}"
+                "${NVSHMEM_CARGO_OXIDE_EXECUTABLE}" run
+                --emit-nvvm-ir --arch=${NVSHMEM_RUST_TEST_ARCH}
+            WORKING_DIRECTORY "${RUST_RING_PUT_BINARY_DIR}"
+            DEPENDS build_bindings_rust
+            COMMENT "Building the CUDA-Oxide Rust NVSHMEM ring-put example"
             USES_TERMINAL
             VERBATIM
         )

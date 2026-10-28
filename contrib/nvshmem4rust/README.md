@@ -8,6 +8,7 @@ APIs. It provides:
 - A small `nvshmem` host runtime crate with initialization, symmetric-memory,
   and CUDA-module registration helpers
 - CUDA-Oxide smoke and performance test programs
+- A minimal CUDA-Oxide example, [`ring_put`](examples/ring_put/README.md)
 
 This is an experimental, contributor-maintained project. It is not part of the
 NVSHMEM core release quality commitment.
@@ -136,12 +137,17 @@ NVSHMEM bootstrap or MPI launcher. See the
 [performance-test](tests/cuda_oxide_perf/README.md) documentation for runtime
 settings.
 
+The same configuration also provides `example_rust_ring_put`, which builds the
+[ring-put example](examples/ring_put/README.md).
+
 ## Layout
 
 - `generator/` contains the Numbast configuration and Rust emitter.
 - `runtime/` contains the template for the generated host runtime crate.
 - `tests/` contains CUDA-Oxide smoke and performance programs plus their
   shared support crate.
+- `examples/` contains a minimal CUDA-Oxide program that puts data to another
+  PE from a Rust kernel.
 - `cmake/` contains the standalone generation and test targets.
 
 ## Known limitations
