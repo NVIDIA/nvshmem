@@ -24,7 +24,8 @@ __global__ void rma_batch(unsigned char *remote, unsigned char *local_global, si
     using traits = ts::route_traits<R>;
     using A = typename traits::addressing;
     using Pol = typename traits::policy;
-    constexpr completion kCompletion = Nbi == rma_nbi::yes ? completion::quiet : completion::none;
+    constexpr completion kCompletion =
+        (Op == rma_operation::put || Nbi == rma_nbi::yes) ? completion::quiet : completion::none;
 
     unsigned char *shared = ts::acquire_smem<R>(registration);
     size_t offset = 0;
@@ -80,8 +81,10 @@ struct rma_bw : ts::payload_buffers {
                                                               ctx.peer, iterations, ctx.statuses);
             return grid;
         };
-        auto metric = [](size_t bytes, float milliseconds) {
-            return ts::bandwidth_gbps(bytes, iters, milliseconds);
+        /* Bidirectional reports both PEs' bandwidth combined, as shmem_put_bw does. */
+        auto metric = [&](size_t bytes, float milliseconds) {
+            const double bw = ts::bandwidth_gbps(bytes, iters, milliseconds);
+            return bidirectional ? ts::world_sum(ctx, bw) : bw;
         };
         return ts::run_sweep(ctx, spec, launch, metric);
     }

@@ -433,6 +433,7 @@ struct context {
     int npes;
     int peer;
     int *state;
+    double *sum;
     int *statuses;
     int max_blocks;
     int registration;
@@ -454,6 +455,18 @@ inline bool any_pe(context &ctx, bool local) {
     int global = 0;
     CUDA_CHECK(cudaMemcpy(&global, ctx.state + 1, sizeof(global), cudaMemcpyDeviceToHost));
     return global != 0;
+}
+
+/* Job-wide sum; every PE must call this in the same order. */
+inline double world_sum(context &ctx, double local) {
+    CUDA_CHECK(cudaMemcpy(ctx.sum, &local, sizeof(local), cudaMemcpyHostToDevice));
+    if (nvshmem_double_sum_reduce(NVSHMEM_TEAM_WORLD, ctx.sum + 1, ctx.sum, 1) != 0) {
+        fprintf(stderr, "PE %d: %s: sum reduction failed\n", ctx.mype, ctx.benchmark);
+        nvshmem_global_exit(EXIT_FAILURE);
+    }
+    double global = 0.0;
+    CUDA_CHECK(cudaMemcpy(&global, ctx.sum + 1, sizeof(global), cudaMemcpyDeviceToHost));
+    return global;
 }
 
 inline int read_status(const int *statuses, int count) {
@@ -503,7 +516,8 @@ inline bool setup_context(context &ctx, const char *benchmark, int max_blocks, i
     }
 
     ctx.state = static_cast<int *>(nvshmem_malloc(2 * sizeof(int)));
-    if (ctx.state == nullptr) {
+    ctx.sum = static_cast<double *>(nvshmem_malloc(2 * sizeof(double)));
+    if (ctx.state == nullptr || ctx.sum == nullptr) {
         fprintf(stderr, "PE %d: %s: state allocation failed\n", ctx.mype, benchmark);
         nvshmem_global_exit(EXIT_FAILURE);
     }
@@ -525,6 +539,7 @@ inline bool setup_context(context &ctx, const char *benchmark, int max_blocks, i
 inline void teardown_context(context &ctx) {
     nvshmem_barrier_all();
     nvshmem_free(ctx.state);
+    nvshmem_free(ctx.sum);
     CUDA_CHECK(cudaFree(ctx.statuses));
     CUDA_CHECK(cudaEventDestroy(ctx.start));
     CUDA_CHECK(cudaEventDestroy(ctx.stop));
