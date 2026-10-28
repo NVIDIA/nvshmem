@@ -1939,8 +1939,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_store_128b_register(
             asm("ld.b32 %0, [%1];" : "=r"(lower) : "l"(src4 + 2));
             asm("ld.b32 %0, [%1];" : "=r"(upper) : "l"(src4 + 3));
             regs4[2] = __funnelshift_r(lower, upper, 8 * shift);
-            asm("ld.b32 %0, [%1];" : "=r"(lower) : "l"(src4 + 4));
-            asm("ld.b32 %0, [%1];" : "=r"(upper) : "l"(src4 + 5));
+            asm("ld.b32 %0, [%1];" : "=r"(lower) : "l"(src4 + 3));
+            asm("ld.b32 %0, [%1];" : "=r"(upper) : "l"(src4 + 4));
             regs4[3] = __funnelshift_r(lower, upper, 8 * shift);
         }
         dest_regs[unroll * 2] = regs8[0];
