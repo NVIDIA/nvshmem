@@ -23,7 +23,6 @@ namespace transport_policy {
 template <>
 struct route_backend<automatic_route> {
     struct rma_plan {
-        void *remote;
         int pe;
     };
     struct signal_plan {
@@ -40,7 +39,7 @@ struct route_backend<automatic_route> {
                                                                       const void *local,
                                                                       size_t bytes, int pe,
                                                                       rma_plan &plan) {
-        plan = rma_plan{const_cast<void *>(remote), pe};
+        plan = rma_plan{pe};
         return check_rma_arguments(remote, local, bytes, pe);
     }
 
@@ -60,9 +59,9 @@ struct route_backend<automatic_route> {
     /* ---- Issue: called only after the whole group agreed on preflight ---- */
 
     template <threadgroup Scope, bool IsNbi, typename Source>
-    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan,
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *remote,
                                                             const void *source, size_t bytes) {
-        char *dest = static_cast<char *>(plan.remote);
+        char *dest = static_cast<char *>(remote);
         const char *src = static_cast<const char *>(source);
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (IsNbi) {
@@ -76,9 +75,9 @@ struct route_backend<automatic_route> {
 
     template <threadgroup Scope, bool IsNbi, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
-                                                            size_t bytes) {
+                                                            const void *remote, size_t bytes) {
         char *dst = static_cast<char *>(dest);
-        const char *src = static_cast<const char *>(plan.remote);
+        const char *src = static_cast<const char *>(remote);
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
         if constexpr (IsNbi) {
             nvshmemi_get_nbi<char, kScope<Scope>, NVSHMEMI_REGION_OPERATION_NONE, kLocal>(
@@ -92,11 +91,12 @@ struct route_backend<automatic_route> {
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
-                                                                   const void *source, size_t bytes,
-                                                                   uint64_t signal, int sig_op) {
+                                                                   void *remote, const void *source,
+                                                                   size_t bytes, uint64_t signal,
+                                                                   int sig_op) {
         nvshmemi_put_signal<char, kScope<Scope>, stable_local_space<Source>>(
-            static_cast<char *>(plan.remote), static_cast<const char *>(source), bytes,
-            sig.sig_addr, signal, sig_op, plan.pe, IsNbi);
+            static_cast<char *>(remote), static_cast<const char *>(source), bytes, sig.sig_addr,
+            signal, sig_op, plan.pe, IsNbi);
         return NVSHMEMX_SUCCESS;
     }
 
