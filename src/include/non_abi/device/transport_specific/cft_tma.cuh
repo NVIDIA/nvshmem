@@ -10,9 +10,6 @@
 
 #ifdef __CUDA_ARCH__
 
-/* The handle data path exists only in a CFT-enabled build for a capable
- * architecture and CUDA version; elsewhere the route compiles to its argument
- * checks and NOT_SUPPORTED. */
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 #define NVSHMEMI_TS_CFT_HANDLES 1
 #else
@@ -22,7 +19,6 @@
 namespace nvshmemi {
 namespace transport_policy {
 
-/* The one scope rule of the route, checked by every preflight. */
 template <threadgroup Scope>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void validate_cft_tma_scope() {
     static_assert(Scope == threadgroup::block,
@@ -30,34 +26,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void validate_cft_tma_scope() {
                   "logical-endpoint handle path");
 }
 
-/*
- * CFT / TMA: the peer is addressed through its logical endpoint (a fabric
- * handle built from the peer's LE id and the symmetric-heap offset), and the
- * payload moves with the stable handle helpers nvshmemi_handle_put/get, which
- * stage local global memory through the CTA's registered shared memory with
- * TMA bulk copies and issue fabric transfers. The route needs a CFT-enabled
- * build on a capable GPU, NVSHMEM_ENABLE_LOGICAL_ENDPOINT=1 (which needs
- * NVSHMEM_TMA_POLICY=ENABLE), a CTA that registered its shared memory with
- * nvshmemx_give_smem, and a valid LE id for the peer; a missing prerequisite
- * is NOT_SUPPORTED and never falls back to another path. The capability is
- * the stable nvshmemi_is_le_implemented predicate the portable API uses.
- *
- * Every transfer moves a multiple of CFT_HANDLE_TX_SIZE bytes between a
- * remote address whose heap offset is CFT_HANDLE_TX_SIZE-aligned and a
- * 16-byte-aligned local operand. A shared local operand must lie outside the
- * registered region, which NVSHMEM uses for barriers and staging.
- *
- * Scope. Every operation is block-scope only, as in the portable API's CFT
- * use: the handle path stages through the CTA's registered shared memory and
- * its barriers, so all CTA threads participate convergently.
- *
- * Signals. SET uses the handle scalar put, which needs only an 8-byte-aligned
- * word. ADD uses the handle fabric atomic, which updates a 16-byte block: the
- * word's heap offset must be CFT_HANDLE_TX_SIZE-aligned, and the route needs
- * the stable atomic capability (nvshmemi_is_le_atomic_implemented), which a
- * build or CUDA version without fabric atomics lacks. Both forms complete
- * before they return.
- */
 template <>
 struct route_backend<cft_tma_route> {
     struct rma_plan {
@@ -71,8 +39,6 @@ struct route_backend<cft_tma_route> {
     };
 
     __device__ static const char *name() { return "CFT/TMA"; }
-
-    /* ---- Preflight: per participant, before any work is issued ---- */
 
     template <threadgroup Scope, typename Local>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_rma(const void *remote,
@@ -89,21 +55,16 @@ struct route_backend<cft_tma_route> {
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }
-        /* The handle path serves a self-targeted transfer with SM copies, which
-         * would break the strict route. */
+        /* The handle path would serve a self-target with SM copies. */
         if (bytes != 0 && pe == nvshmemi_device_state_d.mype) {
             return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
 #if NVSHMEMI_TS_CFT_HANDLES
-        /* A zero-length transfer moves nothing, so it needs only the route:
-         * registered shared memory and a valid logical endpoint for the peer. */
         if (bytes == 0) {
             return nvshmemi_tma_smem_registered() && nvshmemi_ld_and_check_valid_le_id(pe)
                        ? NVSHMEMX_SUCCESS
                        : NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
-        /* The size and alignment parts of the stable predicate passed above,
-         * so a false result is a missing capability. */
         if (!nvshmemi_is_le_implemented<false>(pe, bytes, scope_traits<Scope>::internal, remote,
                                                local)) {
             return NVSHMEMX_ERROR_NOT_SUPPORTED;
@@ -117,9 +78,7 @@ struct route_backend<cft_tma_route> {
 #endif
     }
 
-    /* The leader issues the signal, and the stable signal predicates describe
-     * the calling thread's handle slot and staging, so only the leader
-     * evaluates them; agree() carries its result to the group. */
+    /* The signal predicates describe the leader's handle slot. */
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_signal(uint64_t *sig_addr,
                                                                          int sig_op, int pe,
@@ -134,7 +93,6 @@ struct route_backend<cft_tma_route> {
             !nvshmemi_is_addr_offset_aligned(sig_addr, CFT_HANDLE_TX_SIZE)) {
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
-        /* A self-targeted signal would be a direct store, not a handle op. */
         if (pe == nvshmemi_device_state_d.mype) {
             return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
@@ -147,8 +105,6 @@ struct route_backend<cft_tma_route> {
         return supported ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 
-    /* The handle completion family lives in the CTA's registered shared
-     * memory, which is uniform across the CTA. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
 #if NVSHMEMI_TS_CFT_HANDLES
         return nvshmemi_tma_smem_registered() ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
@@ -157,14 +113,6 @@ struct route_backend<cft_tma_route> {
 #endif
     }
 
-    /* ---- Issue: called only after the whole group agreed on preflight,
-     * which is also the pre-issue group barrier. ---- */
-
-    /* Blocking: the payload is complete on return. NBI: the handle barriers
-     * keep the payload's completion pending until the next drain (quiet,
-     * flush, fence, or a blocking handle operation). Either
-     * way the stable helper has finished reading the source, so it is
-     * reusable on return. */
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan,
                                                             const void *source, size_t bytes) {
@@ -172,9 +120,6 @@ struct route_backend<cft_tma_route> {
             return NVSHMEMX_SUCCESS;
         }
 #if NVSHMEMI_TS_CFT_HANDLES
-        /* The handle helper never classifies the local operand: an explicit
-         * space is passed through, and a generic one passes the space its
-         * preflight classified. */
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
@@ -191,13 +136,11 @@ struct route_backend<cft_tma_route> {
 #else
         (void)plan;
         (void)source;
-        /* Preflight reports NOT_SUPPORTED in this build. */
         return NVSHMEMX_ERROR_INTERNAL;
 #endif
     }
 
-    /* The stable handle get drains its fabric transfers before it returns, so
-     * get_nbi completes eagerly, like get. */
+    /* The handle get drains before it returns, so get_nbi is eager. */
     template <threadgroup Scope, bool IsNbi, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
                                                             size_t bytes) {
@@ -205,7 +148,6 @@ struct route_backend<cft_tma_route> {
             return NVSHMEMX_SUCCESS;
         }
 #if NVSHMEMI_TS_CFT_HANDLES
-        /* As in put, the handle helper never classifies the destination. */
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
@@ -226,9 +168,8 @@ struct route_backend<cft_tma_route> {
 #endif
     }
 
-    /* A fabric operation is ordered after an earlier one only once that one
-     * has completed, so both spellings complete the payload before the leader
-     * publishes the signal; put_signal_nbi therefore completes eagerly. */
+    /* Fabric operations are ordered only after completion, so the payload
+     * completes before the signal and put_signal_nbi is eager. */
     template <threadgroup Scope, bool IsNbi, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
@@ -256,12 +197,7 @@ struct route_backend<cft_tma_route> {
         return NVSHMEMX_SUCCESS;
     }
 
-    /* ---- Completion: the CFT handle completion family. The CTA drains its
-     * pending handle barriers, and nothing here touches TMA bulk groups, deferred
-     * Pointer/TMA gets, or network work. Put sources are reusable as soon as
-     * the put returns and the only handle primitive is a drain, so flush is
-     * as strong as quiet. fence and quiet also order later fabric and generic
-     * operations after the drained ones. ---- */
+    /* The only handle primitive is a drain, so flush is as strong as quiet. */
 
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int quiet() {
@@ -279,9 +215,6 @@ struct route_backend<cft_tma_route> {
     }
 
    private:
-    /* The size and alignment rules of the handle path, and the local memory
-     * space. A zero-length transfer may name a null local operand and is never
-     * classified. A generic operand must be shared or global memory. */
     template <typename Local>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int check_handle_operands(const void *remote,
                                                                               const void *local,
@@ -319,8 +252,6 @@ struct route_backend<cft_tma_route> {
         fence_proxy_generic2fabric_alias();
     }
 
-    /* Preflight admitted SET with the scalar handle capability and ADD with
-     * the atomic one, so the leader issues exactly what the hardware can do. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void issue_signal(const signal_plan &plan,
                                                                       uint64_t signal, int sig_op) {
         if (sig_op == NVSHMEM_SIGNAL_SET) {
@@ -350,7 +281,6 @@ struct route_backend<cft_tma_route> {
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int complete() {
         validate_cft_tma_scope<Scope>();
-        /* Preflight reports NOT_SUPPORTED in this build. */
         return NVSHMEMX_ERROR_INTERNAL;
     }
 #endif

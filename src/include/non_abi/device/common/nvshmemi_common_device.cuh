@@ -75,21 +75,14 @@ __device__ __forceinline__ const void *nvshmemi_ptr_add(const void *ptr, size_t 
     return static_cast<const void *>(static_cast<const char *>(ptr) + byte_offset);
 }
 
-/* What a caller knows at compile time about a local operand's memory space.
- * UNKNOWN, the default of every helper that takes it, classifies the pointer at
- * run time; SHARED and GLOBAL are trusted and select their path without
- * classifying. */
+/* UNKNOWN classifies at run time; SHARED and GLOBAL are trusted. */
 enum nvshmemi_local_space_t {
     NVSHMEMI_LOCAL_SPACE_UNKNOWN = 0,
     NVSHMEMI_LOCAL_SPACE_SHARED,
     NVSHMEMI_LOCAL_SPACE_GLOBAL,
 };
 
-/* Whether a local operand is in shared memory: the known answer, or
- * __isShared for UNKNOWN. LOCAL_SPACE must be a constant expression, so the
- * unused arms fold away. It is a macro rather than a function so that UNKNOWN
- * callers compile exactly as with a bare __isShared: an extra call level, even
- * a force-inlined one, changes the inliner's decisions in the callers. */
+/* A macro so UNKNOWN callers compile exactly as with a bare __isShared. */
 #define NVSHMEMI_LOCAL_IS_SHARED(LOCAL_SPACE, ptr)          \
     ((LOCAL_SPACE) == NVSHMEMI_LOCAL_SPACE_SHARED   ? true  \
      : (LOCAL_SPACE) == NVSHMEMI_LOCAL_SPACE_GLOBAL ? false \
@@ -2571,7 +2564,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
     } else if (is_store) {
         auto dst_handle = nvshmemi_fabric_handle_for_le_id<cft_handle_kind>(dest_le_id, dst);
         size_t remaining = len;
-        uint32_t byte_offset_dst = 0;
+        size_t byte_offset_dst = 0;
         /* Consumer: wait for the producer to fill each buffer, issue the fabric
          * put from that buffer, then wait until fabric has consumed the shared
          * memory before signaling done_bar for reuse. */
@@ -3206,7 +3199,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
         }
     } else if (is_store) {
         size_t remaining = len;
-        uint32_t byte_offset_dst = 0;
+        size_t byte_offset_dst = 0;
 
         /* Consumer: wait for fabric to fill each SMEM tile, issue the local
          * S2G TMA copy, then signal done after TMA has read that tile. */

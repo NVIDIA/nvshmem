@@ -42,7 +42,6 @@ using nvshmemx::threadgroup;
 
 /* ---- Routes ------------------------------------------------------------ */
 
-/* Canonical internal routes. */
 struct pointer_sm_route {};
 struct pointer_tma_route {};
 struct cft_tma_route {};
@@ -281,10 +280,6 @@ struct dest_local {
     }
 };
 
-/* The space a route passes to the stable helpers that take a local operand.
- * An explicit spelling is passed through, so the stable code selects its path
- * without classifying; generic passes UNKNOWN, which classifies as the
- * portable API does. */
 template <typename Local>
 inline constexpr nvshmemi_local_space_t stable_local_space =
     Local::kind == local_space::shared   ? NVSHMEMI_LOCAL_SPACE_SHARED
