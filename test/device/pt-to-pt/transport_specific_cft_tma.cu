@@ -3,20 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Functional coverage for the strict CFT / TMA route. The route never falls
- * back to another data path, so once its prerequisites hold (a CFT-enabled
- * build on a capable GPU, NVSHMEM_ENABLE_LOGICAL_ENDPOINT=1 with
- * NVSHMEM_TMA_POLICY=ENABLE, registered CTA shared memory, and a valid logical
- * endpoint for the peer) every positive case must succeed. When they do not,
- * the route reports NOT_SUPPORTED and the executable is a clean skip. Each
- * kernel keeps its shared memory registered until its final completion call.
- *
- * Signalled cases launch a second CTA that receives the previous PE's payload
- * and signal concurrently and checks the payload as soon as the signal lands.
- * Registration is per CTA: that receiver neither registers shared memory nor
- * issues CFT work. Gets check their result in the kernel right after the call
- * that completes them. Signal ADD needs the fabric atomic capability; where it
- * is missing, ADD must report NOT_SUPPORTED without touching the signal. */
+/* Without the route's prerequisites every case must report NOT_SUPPORTED and
+ * the executable skips. Signal ADD needs the fabric atomic capability. */
 
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
@@ -31,18 +19,12 @@ using CFT = nvshmemx::addressing::CFT;
 using TMA = nvshmemx::transport_policy::TMA;
 using Pointer = nvshmemx::addressing::Pointer;
 
-/* The mixed-slot kernel runs eight warps, so a stable warp-scope handle copy
- * from warps 5 and 6 borrows the TMA barrier slots the deferred Pointer / TMA
- * get used before it moved to the last two. */
+/* Warps 5 and 6 reach the TMA barrier slots the deferred get used before. */
 constexpr int kMixedThreads = 256;
 
-/* Dynamic shared memory: [0, kRegistered) may be given to NVSHMEM and the
- * user payload area follows it, outside the registration. */
 constexpr int kRegistered = 65536;
 constexpr size_t kSmem = static_cast<size_t>(kRegistered) + kBytes;
 
-/* A size and an offset that break the CFT_HANDLE_TX_SIZE rules while staying
- * inside the buffers. */
 constexpr size_t kUnalignedBytes = 24;
 constexpr size_t kMisalignment = 8;
 constexpr size_t kSmallBytes = 64;
@@ -66,7 +48,6 @@ __device__ unsigned char *smem_base() {
     return smem;
 }
 
-/* Registers `registered` bytes (none when 0) and returns the payload area. */
 __device__ unsigned char *register_smem(int registered) {
     if (registered > 0) {
         nvshmemx_give_smem(smem_base(), registered);
@@ -99,8 +80,6 @@ __device__ bool block_payload_matches(const unsigned char *buffer, size_t bytes,
     return !__syncthreads_or(!payload_matches(buffer, bytes, pe, 0, threadIdx.x, blockDim.x));
 }
 
-/* A zero-length block put from the payload area: it runs the route's
- * capability checks and issues nothing. */
 __global__ void probe_kernel(unsigned char *remote, int peer, int *status) {
     unsigned char *payload = register_smem(kRegistered);
     const int result =
@@ -111,7 +90,6 @@ __global__ void probe_kernel(unsigned char *remote, int peer, int *status) {
     }
 }
 
-/* Adding zero probes the fabric atomic capability without changing the word. */
 __global__ void add_probe_kernel(uint64_t *signal, int peer, int *status) {
     register_smem(kRegistered);
     const int result = nvshmemx_signal_op<CFT, TMA, kBlock>(signal, 0, NVSHMEM_SIGNAL_ADD, peer);
@@ -120,8 +98,6 @@ __global__ void add_probe_kernel(uint64_t *signal, int peer, int *status) {
         *status = result;
     }
 }
-
-/* ---- Block scope ---------------------------------------------------------- */
 
 template <LocalSpace Local, bool InShared, bool Nbi>
 __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t bytes, int peer,
@@ -141,7 +117,6 @@ __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t 
             result = complete<kBlock, boundary::flush>();
         }
         if (result == NVSHMEMX_SUCCESS) {
-            /* flush makes the source reusable; the peer must still see the original. */
             fill_block(local, bytes, kPoisonByte);
             __syncthreads();
             result = complete<kBlock, boundary::quiet>();
@@ -156,7 +131,6 @@ __global__ void put_kernel(unsigned char *remote, unsigned char *source, size_t 
     }
 }
 
-/* NBI gets issue two transfers before one completion call. */
 template <LocalSpace Local, bool InShared, bool Nbi, boundary B>
 __global__ void get_kernel(unsigned char *out, const unsigned char *remote_source, size_t bytes,
                            int peer, int *status) {
@@ -197,7 +171,6 @@ __global__ void get_kernel(unsigned char *out, const unsigned char *remote_sourc
     }
 }
 
-/* Block 0 sends to `peer`; block 1 receives from `previous` concurrently. */
 template <LocalSpace Local, bool InShared, bool Nbi>
 __global__ void put_signal_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
                                   uint64_t *signal, uint64_t value, int sig_op, int peer,
@@ -240,8 +213,6 @@ __global__ void signal_op_kernel(uint64_t *signal, uint64_t value, int sig_op, i
     report_sender(status, result);
 }
 
-/* fence orders the NBI payload before the following signal; block 1 checks
- * that order on the receiving side while the peer sends. */
 __global__ void fence_kernel(unsigned char *remote, const unsigned char *source, size_t bytes,
                              uint64_t *signal, uint64_t value, int peer, uint64_t expected,
                              int previous, int *status) {
@@ -286,9 +257,6 @@ __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsig
     }
 }
 
-/* A zero-length transfer may name a null local operand and a misaligned
- * remote address: it succeeds once the route is available and modifies
- * nothing. */
 __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *remote_source,
                                    int peer, int *status) {
     constexpr auto kLocalDest = local_dest(kGeneric);
@@ -318,27 +286,16 @@ __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *r
     }
 }
 
-/* ---- Mixed routes ------------------------------------------------------- */
-
-/* A stable warp-scope put reaches the CFT handle path for a mapped peer only
- * in a build that prioritizes logical endpoints; elsewhere it would take the
- * P2P path, so the kernel leaves it out. */
+/* Only a build that prioritizes logical endpoints sends a warp-scope put through
+ * the handle path. */
 #ifdef NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT
 constexpr bool kStableWarpCft = true;
 #else
 constexpr bool kStableWarpCft = false;
 #endif
 
-/*
- * A Pointer / TMA block get_nbi into shared memory stays pending on its
- * deferred-get barrier while the CTA issues a block-scope CFT / TMA put from a
- * global source and, where the build routes it through the handle path, every
- * warp issues a stable warp-scope put. A single-issuer handle copy from a
- * global source borrows the TMA barrier slot of its warp index, so warps 5
- * and 6 reach the slots the deferred get used before; the get must survive
- * and complete at the Pointer / TMA quiet. Reports only failures; the caller
- * zeroes *status.
- */
+/* A pending Pointer / TMA get must survive CFT and warp-scope handle copies that
+ * reuse TMA barrier slots. Reports only failures. */
 __global__ void mixed_kernel(unsigned char *remote, const unsigned char *source, unsigned char *out,
                              size_t bytes, int peer, int *status) {
     constexpr auto kSharedDest = local_dest(kShared);
@@ -364,7 +321,6 @@ __global__ void mixed_kernel(unsigned char *remote, const unsigned char *source,
             result = complete<kBlock, boundary::quiet>();
         }
     }
-    /* get_result is block-uniform: the whole CTA completes its pending get. */
     if (get_result == NVSHMEMX_SUCCESS) {
         const int drained = nvshmemx_quiet<Pointer, TMA, kBlock>();
         if (result == NVSHMEMX_SUCCESS) {
@@ -384,26 +340,23 @@ __global__ void mixed_kernel(unsigned char *remote, const unsigned char *source,
     release_smem(kRegistered);
 }
 
-/* ---- Rejected calls ------------------------------------------------------- */
-
-/* Each case is rejected by preflight before any work is issued. */
 enum class error_case {
-    invalid_pe,                /* INVALID_VALUE */
-    unaligned_size_put,        /* INVALID_VALUE: size not a CFT_HANDLE_TX_SIZE multiple */
-    unaligned_size_get,        /* INVALID_VALUE: same, get */
-    misaligned_remote_put,     /* INVALID_VALUE: remote heap offset not 16-byte aligned */
-    misaligned_local_get_nbi,  /* INVALID_VALUE: local not 16-byte aligned */
-    generic_local_put,         /* INVALID_VALUE: generic source in neither shared nor global */
-    registered_region_put,     /* INVALID_VALUE: shared source inside the registration */
-    registered_region_get,     /* INVALID_VALUE: shared dest inside the registration */
-    unaligned_size_put_signal, /* INVALID_VALUE: size, with a signal */
-    invalid_sig_op,            /* INVALID_VALUE: opcode */
-    add_misaligned_signal,     /* INVALID_VALUE: ADD word not 16-byte aligned in the heap */
-    unregistered_put,          /* NOT_SUPPORTED: no registered shared memory */
-    unregistered_signal_op,    /* NOT_SUPPORTED: no registered shared memory */
-    unregistered_quiet,        /* NOT_SUPPORTED: no registered shared memory */
-    barriers_only_put,         /* NOT_SUPPORTED: no staging tile */
-    add_unavailable,           /* NOT_SUPPORTED where fabric atomics are missing */
+    invalid_pe,
+    unaligned_size_put,
+    unaligned_size_get,
+    misaligned_remote_put,
+    misaligned_local_get_nbi,
+    generic_local_put,
+    registered_region_put,
+    registered_region_get,
+    unaligned_size_put_signal,
+    invalid_sig_op,
+    add_misaligned_signal,
+    unregistered_put,
+    unregistered_signal_op,
+    unregistered_quiet,
+    barriers_only_put,
+    add_unavailable,
 };
 
 __host__ __device__ constexpr int error_registration(error_case which) {
@@ -421,7 +374,6 @@ __global__ void error_kernel(error_case which, unsigned char *remote, const unsi
     unsigned char *payload = register_smem(registered);
     copy_block(payload, source, kBytes);
     __syncthreads();
-    /* Registered shared memory past the barrier region, NVSHMEM's staging. */
     unsigned char *staging = smem_base() + NVSHMEMI_SMEM_DATA_REGION_OFFSET;
     __align__(16) unsigned char private_buffer[kSmallBytes];
 
@@ -496,8 +448,6 @@ __global__ void error_kernel(error_case which, unsigned char *remote, const unsi
     }
 }
 
-/* ---- Host-side cases ------------------------------------------------------ */
-
 struct route_context {
     world w;
     bool active;
@@ -505,10 +455,10 @@ struct route_context {
     bool pointer_mapped;
     int peer;
     int previous;
-    unsigned char *remote; /* symmetric put destination */
-    unsigned char *source; /* symmetric put source and peer get source */
-    unsigned char *out;    /* symmetric get destination */
-    uint64_t *signal;      /* symmetric, two 16-byte-aligned words */
+    unsigned char *remote;
+    unsigned char *source;
+    unsigned char *out;
+    uint64_t *signal;
 };
 
 template <LocalSpace Local, bool InShared, bool Nbi>
@@ -649,8 +599,6 @@ int mixed_case(const route_context &c, const char *what) {
         });
 }
 
-/* A rejected call must not issue work: every PE's destination, get buffer,
- * and signal words keep their sentinels. */
 int error_case_run(const route_context &c, const char *what, error_case which, int expected) {
     return run_case(
         c.w, c.active, what, expected,
@@ -765,9 +713,6 @@ int cft_cases(const route_context &c) {
     return failures;
 }
 
-/* The route is unavailable on this job: an argument error still reports
- * INVALID_VALUE and a valid put NOT_SUPPORTED, never INTERNAL, and neither
- * touches any buffer. */
 int unavailable_cases(const route_context &c) {
     return error_case_run(c, "CFT put invalid PE while the route is unavailable",
                           error_case::invalid_pe, NVSHMEMX_ERROR_INVALID_VALUE) +
@@ -826,12 +771,9 @@ int main(int argc, char **argv) {
     }
     c.w = world{mype, npes, scratch, status};
 
-    /* A ring over every PE: logical endpoints address peers across the
-     * fabric, mapped or not. */
     c.peer = (mype + 1) % npes;
     c.previous = (mype + npes - 1) % npes;
     c.active = true;
-    /* The mixed case also needs the Pointer / TMA route to the same peer. */
     c.pointer_mapped = world_max(scratch, nvshmem_ptr(c.remote, c.peer) == nullptr) == 0;
 
     int failures = 0;
