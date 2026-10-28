@@ -2193,19 +2193,19 @@ static int nvshmemt_gpunetio_add_device_remote_mem_handles(nvshmem_transport_t t
     static_assert(sizeof(nvshmemt_ib_common_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
                   "static_assert(sizeof(T) <= NVSHMEM_MEM_HANDLE_SIZE) failed");
 
-    size_t num_elements;
-    // size must be divisible by cumem_granularity, which is a power of 2.
-    assert((size & ((1ULL << t->log2_cumem_granularity) - 1)) == 0);
-
-    num_elements = size >> t->log2_cumem_granularity;
+    const size_t granularity = 1ULL << t->log2_cumem_granularity;
+    const size_t granularity_mask = granularity - 1;
+    // Heap mappings start on a heap-granularity boundary, but a user buffer's physical size may
+    // be smaller than that granularity.
+    assert((heap_offset & granularity_mask) == 0);
+    size_t num_elements = (size >> t->log2_cumem_granularity) + ((size & granularity_mask) != 0);
 
     // With user buffers being mmaped at the end of the heap, incrementally adding to lkeys vector
     // won't be sufficient as buffers from end of heap could be registered. So we resize
     // gpunetio_device_rkeys vector to number of chunks  * n_pes * n_devs_selected and populate
     // entries as they are added.
     size_t chunk_idx = heap_offset >> t->log2_cumem_granularity;
-    size_t num_chunks =
-        (heap_offset + size + t->log2_cumem_granularity - 1) >> t->log2_cumem_granularity;
+    size_t num_chunks = chunk_idx + num_elements;
     // assuming all PEs have same num_devs
     int num_devs = reinterpret_cast<gpunetio_mem_handle *>(&mem_handles[t->index])->num_devs;
     if (gpunetio_state->device_rkeys.size() < num_chunks * n_pes * num_devs) {
@@ -2406,23 +2406,22 @@ static int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, vo
         did_emplace = true;
     } else {
         size_t num_lkeys;
-        size_t num_elements;
-        // length must be divisible by cumem_granularity, which is a power of 2.
-        assert((length & ((1ULL << transport->log2_cumem_granularity) - 1)) == 0);
-
-        num_elements = length >> transport->log2_cumem_granularity;
+        const size_t granularity = 1ULL << transport->log2_cumem_granularity;
+        const size_t granularity_mask = granularity - 1;
+        const size_t heap_offset =
+            reinterpret_cast<char *>(buf) - reinterpret_cast<char *>(t->heap_base);
+        // Heap mappings start on a heap-granularity boundary, but a user buffer's physical size
+        // may be smaller than that granularity.
+        assert((heap_offset & granularity_mask) == 0);
+        size_t num_elements =
+            (length >> transport->log2_cumem_granularity) + ((length & granularity_mask) != 0);
 
         // With user buffers being mmaped at the of the heap, incremently adding to lkeys vector
         // won't be sufficient as buffers from end of heap could be registered. So we resize
         // gpunetio_device_lkeys vector to number of chunks  * n_devs_selected and populate entries
         // as they are added.
-        size_t chunk_idx =
-            (reinterpret_cast<char *>(buf) - reinterpret_cast<char *>(t->heap_base)) >>
-            t->log2_cumem_granularity;
-        size_t num_chunks =
-            (reinterpret_cast<char *>(buf) - reinterpret_cast<char *>(t->heap_base) + length +
-             t->log2_cumem_granularity - 1) >>
-            t->log2_cumem_granularity;
+        size_t chunk_idx = heap_offset >> t->log2_cumem_granularity;
+        size_t num_chunks = chunk_idx + num_elements;
         if (gpunetio_state->device_lkeys.size() < num_chunks * n_devs_selected) {
             gpunetio_state->device_lkeys.resize(num_chunks * n_devs_selected);
         }
