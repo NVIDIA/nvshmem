@@ -20,7 +20,9 @@ constexpr const char *kBenchmark = "shmem_transport_specific_flush_bench";
 constexpr int kThreads = 128;
 constexpr size_t kPlusAutoParts = 2;
 
-template <route R, placement P, completion C, bool PlusAuto>
+enum class auto_share { none, half };
+
+template <route R, placement P, completion C, auto_share Share>
 __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_global, size_t bytes,
                                    int registration, int peer, size_t iterations, int *statuses) {
     using traits = ts::route_traits<R>;
@@ -31,7 +33,7 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
 
     unsigned char *shared = ts::acquire_smem<R>(registration);
     unsigned char *source = P == placement::shared ? shared : local_global;
-    const size_t half = PlusAuto ? bytes / kPlusAutoParts : bytes;
+    const size_t half = Share == auto_share::half ? bytes / kPlusAutoParts : bytes;
 
     int result = NVSHMEMX_SUCCESS;
     for (size_t i = 0; i < iterations; i++) {
@@ -44,7 +46,7 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
             ts::rma_call<rma_operation::put, rma_nbi::yes>::template invoke<A, Pol,
                                                                             ts::local_space<R, P>>(
                 remote, source, half, peer);
-        if constexpr (PlusAuto) {
+        if constexpr (Share == auto_share::half) {
             if (result == NVSHMEMX_SUCCESS) {
                 result = ts::rma_call<rma_operation::put, rma_nbi::yes>::template invoke<
                     AutoA, AutoP, nvshmemx::memory_space::source::generic>(
@@ -54,7 +56,7 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
         if (result == NVSHMEMX_SUCCESS) {
             result = ts::completion_call<C>::template invoke<A, Pol>();
         }
-        if constexpr (PlusAuto) {
+        if constexpr (Share == auto_share::half) {
             if (result == NVSHMEMX_SUCCESS) {
                 result = ts::completion_call<C>::template invoke<AutoA, AutoP>();
             }
@@ -66,7 +68,7 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
     if (!ts::block_failed(result)) {
         result = ts::completion_call<completion::quiet>::template invoke<A, Pol>();
     }
-    if constexpr (PlusAuto) {
+    if constexpr (Share == auto_share::half) {
         if (!ts::block_failed(result)) {
             result = ts::completion_call<completion::quiet>::template invoke<AutoA, AutoP>();
         }
@@ -76,11 +78,14 @@ __global__ void source_reuse_batch(unsigned char *remote, unsigned char *local_g
 }
 
 struct flush_bench : ts::payload_buffers {
-    template <route R, placement P, completion C, bool PlusAuto = false>
+    template <route R, placement P, completion C, auto_share Share = auto_share::none>
     ts::outcome run_variant(ts::context &ctx) {
         const ts::sweep_spec spec = ts::make_spec(
-            R, std::string("put_nbi_") + ts::completion_key(C) + (PlusAuto ? "_plus_auto" : ""), P,
-            "BW", "GB/sec", '+', ts::route_traits<R>::granule * (PlusAuto ? kPlusAutoParts : 1), 1,
+            R,
+            std::string("put_nbi_") + ts::completion_key(C) +
+                (Share == auto_share::half ? "_plus_auto" : ""),
+            P, "BW", "GB/sec", '+',
+            ts::route_traits<R>::granule * (Share == auto_share::half ? kPlusAutoParts : 1), 1,
             ctx);
         const int registration = static_cast<int>(ts::registration_bytes(ctx, R));
         const ts::outcome available = ts::rma_available<R, P, rma_operation::put>(
@@ -94,8 +99,8 @@ struct flush_bench : ts::payload_buffers {
                 return 0;
             }
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((source_reuse_batch<R, P, C, PlusAuto>), smem);
-            source_reuse_batch<R, P, C, PlusAuto><<<1, kThreads, smem>>>(
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((source_reuse_batch<R, P, C, Share>), smem);
+            source_reuse_batch<R, P, C, Share><<<1, kThreads, smem>>>(
                 remote, local, bytes, registration, ctx.peer, iterations, ctx.statuses);
             return 1;
         };
@@ -112,7 +117,7 @@ struct flush_bench : ts::payload_buffers {
             int failures = ts::failed(run_variant<R, P, completion::quiet>(ctx));
             failures += ts::failed(run_variant<R, P, completion::flush>(ctx));
             if constexpr (R != route::auto_auto && R != route::stable) {
-                failures += ts::failed(run_variant<R, P, completion::quiet, true>(ctx));
+                failures += ts::failed(run_variant<R, P, completion::quiet, auto_share::half>(ctx));
             }
             return failures;
         });

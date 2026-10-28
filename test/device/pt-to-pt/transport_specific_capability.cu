@@ -356,7 +356,6 @@ int alignment_cases(const context &c, const char *route, bool in_shared) {
                                               in_shared, kRegistered);
 }
 
-/* On a Pointer route an unmapped peer is NOT_SUPPORTED, not a skip. */
 expectation pointer_valid(const context &c) { return c.peer_mapped ? kSucceeds : kUnsupported; }
 expectation pointer_divergent(const context &c, expectation mapped) {
     return c.peer_mapped ? mapped : kUnsupported;

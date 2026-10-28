@@ -13,21 +13,8 @@
 namespace nvshmemi {
 namespace transport_policy {
 
-/*
- * Pointer / TMA: the peer's symmetric address is mapped with nvshmemi_ptr and
- * the payload moves with TMA bulk copies through it. The route needs an sm_90+
- * build, a CTA that registered its shared memory with nvshmemx_give_smem
- * (which also requires NVSHMEM_TMA_POLICY to enable TMA), and a mapped peer;
- * a missing prerequisite is NOT_SUPPORTED and never falls back to another path.
- *
- * A put from a shared local source is a per-thread bulk copy that completes
- * through the issuing thread's own bulk group, so it is legal at every scope
- * and safe with independent concurrent issuers. A get, and a put from a global
- * source, stage through or complete on the CTA's single mbarrier and staging
- * tile, so they are block-scope only: an explicit global source or any get
- * below block scope is a compile-time error, and a generic source that is not
- * in shared memory is INVALID_VALUE below block scope.
- */
+/* Gets and global-source puts use the CTA's single mbarrier and staging tile,
+ * so they are block-scope only. */
 template <>
 struct route_backend<pointer_tma_route> {
     struct rma_plan {
@@ -40,8 +27,6 @@ struct route_backend<pointer_tma_route> {
     };
 
     __device__ static const char *name() { return "Pointer/TMA"; }
-
-    /* ---- Preflight: per participant, before any work is issued ---- */
 
     template <threadgroup Scope, typename Local>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_rma(const void *remote,
@@ -60,7 +45,7 @@ struct route_backend<pointer_tma_route> {
             return status;
         }
 #if __CUDA_ARCH__ >= 900
-        /* The registration lookup also reports NVSHMEM_TMA_POLICY=DISABLE. */
+        /* Also reports NVSHMEM_TMA_POLICY=DISABLE. */
         plan.registration = nvshmemi_tma_get_smem_registration();
         plan.peer = pointer_peer(remote, pe);
         if (!plan.registration.is_valid() || plan.peer == nullptr) {
@@ -85,12 +70,9 @@ struct route_backend<pointer_tma_route> {
             return staged_copy_ready(plan.registration);
         }
 
-        const int shared_status =
-            shared_copy_ready<Local::is_source>(plan.registration, local, bytes);
+        const int shared_status = shared_copy_ready<Local>(plan.registration, local, bytes);
         if (shared_status == NVSHMEMX_SUCCESS) {
-            /* Every participant publishes its earlier shared-memory writes to
-             * the async proxy before the agreement barrier, as the TMA
-             * shared-memory access pattern requires. */
+            /* Publish earlier smem writes to the async proxy before the agreement barrier. */
             nvshmemi_tma_fence_proxy_async_shared_cta();
         }
         return shared_status;
@@ -107,17 +89,11 @@ struct route_backend<pointer_tma_route> {
         return pointer_preflight_signal(sig_addr, sig_op, pe, plan.peer);
     }
 
-    /* Completion waits only on this thread's bulk group and the CTA's deferred
-     * gets, which need no capability. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
         return NVSHMEMX_SUCCESS;
     }
 
-    /* ---- Issue: called only after the whole group agreed on preflight,
-     * which is also the pre-issue group barrier. The stable TMA primitives
-     * elect the issuing thread and end with the scope's own barrier. ---- */
-
-    template <threadgroup Scope, bool IsNbi, typename Source>
+    template <threadgroup Scope, issue_mode Issue, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *,
                                                             const void *source, size_t bytes) {
         if (bytes == 0) {
@@ -126,9 +102,10 @@ struct route_backend<pointer_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         int status;
         if (is_shared<Source>(plan)) {
-            status = nvshmemi_memcpy_tma_shared_global<kScope, !IsNbi>(plan.peer, source, bytes);
+            status = nvshmemi_memcpy_tma_shared_global<kScope, Issue == issue_mode::blocking>(
+                plan.peer, source, bytes);
         } else if constexpr (Scope == threadgroup::block) {
-            if constexpr (IsNbi) {
+            if constexpr (Issue == issue_mode::nbi) {
                 status = nvshmemi_memcpy_tma_global_global_nbi<kScope>(plan.registration, plan.peer,
                                                                        source, bytes);
             } else {
@@ -136,13 +113,13 @@ struct route_backend<pointer_tma_route> {
                                                                    source, bytes);
             }
         } else {
-            /* Preflight admits only shared sources below block scope. */
+            /* Unreachable: preflight admits only shared sources here. */
             status = -1;
         }
         return status == 0 ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_INTERNAL;
     }
 
-    template <threadgroup Scope, bool IsNbi, typename Dest>
+    template <threadgroup Scope, issue_mode Issue, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
                                                             const void *, size_t bytes) {
         if constexpr (Scope != threadgroup::block) {
@@ -155,13 +132,13 @@ struct route_backend<pointer_tma_route> {
             constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
             int status;
             if (is_shared<Dest>(plan)) {
-                if constexpr (IsNbi) {
+                if constexpr (Issue == issue_mode::nbi) {
                     deferred_get_issue(plan, dest, bytes);
                     return NVSHMEMX_SUCCESS;
                 }
                 status = nvshmemi_memcpy_tma_global_shared<kScope>(plan.registration, dest,
                                                                    plan.peer, bytes);
-            } else if constexpr (IsNbi) {
+            } else if constexpr (Issue == issue_mode::nbi) {
                 status = nvshmemi_memcpy_tma_global_global_nbi<kScope>(plan.registration, dest,
                                                                        plan.peer, bytes);
             } else {
@@ -172,26 +149,23 @@ struct route_backend<pointer_tma_route> {
         }
     }
 
-    /* Blocking: the payload completes before the leader publishes the signal.
-     * NBI: the payload stays in flight; every participant, the elected TMA
-     * issuer among them, executes an async-proxy fence before the group
-     * barrier that precedes the signal. Neither form drains the bulk group. */
-    template <threadgroup Scope, bool IsNbi, typename Source>
+    /* NBI leaves the payload in flight; the async-proxy fence orders it before the signal. */
+    template <threadgroup Scope, issue_mode Issue, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
                                                                    void *dest, const void *source,
                                                                    size_t bytes, uint64_t signal,
                                                                    int sig_op) {
-        const int status = put<Scope, IsNbi, Source>(plan, dest, source, bytes);
+        const int status = put<Scope, Issue, Source>(plan, dest, source, bytes);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }
-        if constexpr (IsNbi) {
+        if constexpr (Issue == issue_mode::nbi) {
             fence_proxy_async_global();
             scope_sync<Scope>();
         }
         if (scope_leader<Scope>()) {
-            if constexpr (!IsNbi) {
+            if constexpr (Issue == issue_mode::blocking) {
                 __threadfence_system();
             }
             pointer_issue_signal(sig.peer, signal, sig_op);
@@ -210,32 +184,25 @@ struct route_backend<pointer_tma_route> {
         return NVSHMEMX_SUCCESS;
     }
 
-    /* ---- Completion: the hardware completion domain is the issuing thread's
-     * bulk group, and the issuer was elected inside the copy primitive, so
-     * every participant commits and waits on its own group (an empty group is
-     * harmless). Block scope also waits for deferred shared-destination gets.
-     * flush waits only for the bulk reads, which makes put sources reusable;
-     * quiet and fence wait for the writes and add a system fence. The signal
-     * path needs no TMA state, so ordering has no capability to preflight. ---- */
-
+    /* The copy primitive elected the issuer, so each participant waits on its own bulk group. */
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int quiet() {
-        return complete<Scope, false>();
+        return complete<Scope, bulk_wait::writes>();
     }
 
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int flush() {
-        return complete<Scope, true>();
+        return complete<Scope, bulk_wait::reads>();
     }
 
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int fence() {
-        return complete<Scope, false>();
+        return complete<Scope, bulk_wait::writes>();
     }
 
    private:
-    /* Whether the local operand takes the shared-memory path. An explicit
-     * spelling folds at compile time; generic uses the preflight result. */
+    enum class bulk_wait { writes, reads };
+
     template <typename Local>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE bool is_shared(const rma_plan &plan) {
         if constexpr (Local::kind == local_space::shared) {
@@ -253,7 +220,7 @@ struct route_backend<pointer_tma_route> {
 #endif
     }
 
-    template <threadgroup Scope, bool Flush>
+    template <threadgroup Scope, bulk_wait Wait>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int complete() {
         scope_sync<Scope>();
 #if __CUDA_ARCH__ >= 900
@@ -268,7 +235,7 @@ struct route_backend<pointer_tma_route> {
         }
 #endif
         nvshmemi_tma_bulk_commit_group();
-        if constexpr (Flush) {
+        if constexpr (Wait == bulk_wait::reads) {
             nvshmemi_tma_bulk_wait_group_read_0();
             nvshmemi_tma_fence_proxy_async_shared_cta();
         } else {
@@ -280,15 +247,11 @@ struct route_backend<pointer_tma_route> {
     }
 
 #if __CUDA_ARCH__ >= 900
-    /* Local shared operand. A put reads it with cp.async.bulk shared-to-global;
-     * a get writes it with the global-to-shared copy, which also needs a
-     * registration larger than the reserved barrier region. Neither may
-     * overlap that region. */
-    template <bool IsSource>
+    template <typename Local>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int shared_copy_ready(
         const nvshmemi_tma_smem_registration_t &registration, const void *local, size_t bytes) {
         constexpr size_t kReserve = static_cast<size_t>(NVSHMEMI_SMEM_DATA_REGION_OFFSET);
-        if (!IsSource && registration.size <= kReserve) {
+        if (!Local::is_source && registration.size <= kReserve) {
             return NVSHMEMX_ERROR_NOT_SUPPORTED;
         }
         const uintptr_t start = reinterpret_cast<uintptr_t>(local);
@@ -299,8 +262,6 @@ struct route_backend<pointer_tma_route> {
         return NVSHMEMX_SUCCESS;
     }
 
-    /* Local global operand, block scope: the double-buffered staging copy
-     * needs two non-empty tiles and two full warps. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int staged_copy_ready(
         const nvshmemi_tma_smem_registration_t &registration) {
         const unsigned int block_threads = blockDim.x * blockDim.y * blockDim.z;
@@ -309,29 +270,8 @@ struct route_backend<pointer_tma_route> {
                    : NVSHMEMX_ERROR_NOT_SUPPORTED;
     }
 
-    /*
-     * Deferred block-scope gets into shared memory. A global-to-shared bulk
-     * copy completes only on an mbarrier, so these gets share one CTA-wide
-     * barrier epoch in the registered barrier region: every get adds its bytes
-     * to the pending transaction count, and the next block-scope TMA quiet,
-     * flush, or fence performs the single arrival and waits for the phase. A
-     * block-scope operation is issued convergently by the whole CTA, so the
-     * state has one user at a time. nvshmemx_give_smem clears the state slot
-     * when the CTA registers its shared memory, and the slot records which
-     * grid opened the epoch.
-     *
-     * The epoch outlives the call that opened it, so its two slots must be
-     * ones no other operation reinitializes meanwhile. The stable TMA copies
-     * use slots 0-4. CFT handle copies also borrow TMA barrier slots: a
-     * single-issuer copy uses its issuing warp's index, and a multi-warp copy
-     * uses four slots per threadgroup. A block-scope copy stays in slots 0-3,
-     * but the stable warp-scope handle path (the stable warp APIs, or
-     * Auto/Auto at warp scope) uses the calling warp's index, up to
-     * NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS / TMA_COPY_NUM_STAGES - 1 because the
-     * handle resource check admits no further warp. The epoch therefore lives
-     * in the last two slots, which only a stable warpgroup-scope handle copy
-     * issued by the eighth warpgroup of a 1024-thread CTA can reach.
-     */
+    /* Deferred shared-destination gets share one CTA-wide mbarrier epoch, drained by
+     * the next block-scope quiet/flush/fence. Its slots are beyond stable handle copies. */
     static constexpr int kDeferredGetBarrierSlot = NVSHMEMI_TMA_DEFERRED_GET_BARRIER_SLOT;
     static constexpr int kDeferredGetStateSlot = NVSHMEMI_TMA_DEFERRED_GET_STATE_SLOT;
     static_assert(kDeferredGetBarrierSlot >=
@@ -368,8 +308,7 @@ struct route_backend<pointer_tma_route> {
         state->pending_bytes = 0;
     }
 
-    /* The agreement barrier orders this issue after the previous one, which
-     * may have been elected on another lane. */
+    /* The previous issue may have been elected on another lane; agreement orders it. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void deferred_get_issue(const rma_plan &plan,
                                                                             void *dest,
                                                                             size_t bytes) {
@@ -390,8 +329,7 @@ struct route_backend<pointer_tma_route> {
             state->owner = key;
             state->pending_bytes = 0;
         }
-        /* Orders the barrier initialization and earlier generic writes to the
-         * destination before the async-proxy copy. */
+        /* Orders the mbarrier init and earlier destination writes before the async copy. */
         nvshmemi_tma_fence_proxy_async_shared_cta();
         state->pending_bytes += tx;
         barrier_expect_tx(reinterpret_cast<__mbarrier_t *>(mbar), tx);

@@ -112,7 +112,7 @@ struct route_backend<cft_tma_route> {
 #endif
     }
 
-    template <threadgroup Scope, bool IsNbi, typename Source>
+    template <threadgroup Scope, issue_mode Issue, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *remote,
                                                             const void *source, size_t bytes) {
         if (bytes == 0) {
@@ -122,13 +122,13 @@ struct route_backend<cft_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
-            nvshmemi_handle_put<kScope, kLocal>(source, remote, bytes, plan.pe, !IsNbi);
+            nvshmemi_handle_put<kScope, kLocal>(source, remote, bytes, plan.pe, Issue == issue_mode::blocking);
         } else if (plan.shared_local) {
             nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(source, remote, bytes, plan.pe,
-                                                                     !IsNbi);
+                                                                     Issue == issue_mode::blocking);
         } else {
             nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(source, remote, bytes, plan.pe,
-                                                                     !IsNbi);
+                                                                     Issue == issue_mode::blocking);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -140,7 +140,7 @@ struct route_backend<cft_tma_route> {
     }
 
     /* The handle get drains before it returns, so get_nbi is eager. */
-    template <threadgroup Scope, bool IsNbi, typename Dest>
+    template <threadgroup Scope, issue_mode Issue, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
                                                             const void *remote, size_t bytes) {
         if (bytes == 0) {
@@ -150,13 +150,13 @@ struct route_backend<cft_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
-            nvshmemi_handle_get<kScope, kLocal>(remote, dest, bytes, plan.pe, !IsNbi);
+            nvshmemi_handle_get<kScope, kLocal>(remote, dest, bytes, plan.pe, Issue == issue_mode::blocking);
         } else if (plan.shared_local) {
             nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(remote, dest, bytes, plan.pe,
-                                                                     !IsNbi);
+                                                                     Issue == issue_mode::blocking);
         } else {
             nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_GLOBAL>(remote, dest, bytes, plan.pe,
-                                                                     !IsNbi);
+                                                                     Issue == issue_mode::blocking);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -169,13 +169,13 @@ struct route_backend<cft_tma_route> {
 
     /* Fabric operations are ordered only after completion, so the payload
      * completes before the signal and put_signal_nbi is eager. */
-    template <threadgroup Scope, bool IsNbi, typename Source>
+    template <threadgroup Scope, issue_mode Issue, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
                                                                    void *remote, const void *source,
                                                                    size_t bytes, uint64_t signal,
                                                                    int sig_op) {
-        const int status = put<Scope, false, Source>(plan, remote, source, bytes);
+        const int status = put<Scope, issue_mode::blocking, Source>(plan, remote, source, bytes);
         if (status != NVSHMEMX_SUCCESS) {
             return status;
         }

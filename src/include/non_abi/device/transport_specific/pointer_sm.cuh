@@ -13,13 +13,7 @@
 namespace nvshmemi {
 namespace transport_policy {
 
-/*
- * Pointer / SM: the peer's symmetric address is mapped with nvshmemi_ptr and
- * the participating threads copy through it with ordinary loads and stores.
- * A peer without a direct mapping is a missing capability for this explicit
- * route; it never falls back to another path. The data path is synchronous,
- * so the NBI spellings complete before they return.
- */
+/* The copies are synchronous, so the NBI forms complete before returning. */
 template <>
 struct route_backend<pointer_sm_route> {
     struct rma_plan {
@@ -30,8 +24,6 @@ struct route_backend<pointer_sm_route> {
     };
 
     __device__ static const char *name() { return "Pointer/SM"; }
-
-    /* ---- Preflight: per participant, before any work is issued ---- */
 
     template <threadgroup Scope, typename Local>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_rma(const void *remote,
@@ -54,15 +46,11 @@ struct route_backend<pointer_sm_route> {
         return pointer_preflight_signal(sig_addr, sig_op, pe, plan.peer);
     }
 
-    /* The copies are synchronous, so ordering needs no capability. */
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
         return NVSHMEMX_SUCCESS;
     }
 
-    /* ---- Issue: called only after the whole group agreed on preflight,
-     * which is also the pre-issue group barrier ---- */
-
-    template <threadgroup Scope, bool IsNbi, typename Source>
+    template <threadgroup Scope, issue_mode Issue, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *,
                                                             const void *source, size_t bytes) {
         nvshmemi_memcpy_threadgroup<scope_traits<Scope>::internal>(plan.peer, source, bytes);
@@ -70,7 +58,7 @@ struct route_backend<pointer_sm_route> {
         return NVSHMEMX_SUCCESS;
     }
 
-    template <threadgroup Scope, bool IsNbi, typename Dest>
+    template <threadgroup Scope, issue_mode Issue, typename Dest>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
                                                             const void *, size_t bytes) {
         nvshmemi_memcpy_threadgroup<scope_traits<Scope>::internal>(dest, plan.peer, bytes);
@@ -78,13 +66,13 @@ struct route_backend<pointer_sm_route> {
         return NVSHMEMX_SUCCESS;
     }
 
-    template <threadgroup Scope, bool IsNbi, typename Source>
+    template <threadgroup Scope, issue_mode Issue, typename Source>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
                                                                    const signal_plan &sig,
                                                                    void *dest, const void *source,
                                                                    size_t bytes, uint64_t signal,
                                                                    int sig_op) {
-        put<Scope, IsNbi, Source>(plan, dest, source, bytes);
+        put<Scope, Issue, Source>(plan, dest, source, bytes);
         if (scope_leader<Scope>()) {
             __threadfence_system();
             pointer_issue_signal(sig.peer, signal, sig_op);
@@ -102,9 +90,6 @@ struct route_backend<pointer_sm_route> {
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
     }
-
-    /* ---- Completion: the copies are synchronous, so quiet and fence only
-     * need system-scope ordering and flush only a group barrier ---- */
 
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int quiet() {

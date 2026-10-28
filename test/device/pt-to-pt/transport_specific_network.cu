@@ -3,23 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Functional coverage for the strict Auto / Network route, plus an Auto / Auto
- * control. The route never falls back to a P2P pointer, so once the job uses a
- * device network transport every positive case must succeed, including those
- * that target a P2P-mapped peer. In a P2P-only build, or a job NVSHMEM runs
- * over LD/ST alone, the route reports NOT_SUPPORTED and its data cases are a
- * clean skip. Shared-memory local operands and argument errors are rejected
- * with INVALID_VALUE in every build and job, before any work reaches the NIC;
- * only where a sibling preflight (the signal half of put_signal, or another
- * lane of the group) also finds the route unavailable does the more severe
- * NOT_SUPPORTED win, as the group-uniform agreement defines.
- * The dedicated launcher runs one PE per node with P2P disabled.
- *
- * Signalled cases launch a second CTA that receives the previous PE's payload
- * and signal concurrently and checks the payload as soon as the signal lands,
- * before any barrier or kernel boundary. Gets check their result in the
- * kernel right after the call that completes them. */
-
 #define NVSHMEMX_ENABLE_TRANSPORT_POLICY
 
 #include "transport_specific_common.cuh"
@@ -34,18 +17,18 @@ using Network = nvshmemx::transport_policy::Network;
 using AutoPolicy = nvshmemx::transport_policy::Auto;
 
 enum class op {
-    put,                 /* put */
-    put_nbi_flush,       /* put_nbi + flush, poison the source slice, quiet */
-    get,                 /* get */
-    get_nbi_quiet,       /* get_nbi + quiet */
-    put_signal,          /* put_signal */
-    put_signal_nbi,      /* put_signal_nbi + quiet */
-    signal_op,           /* signal_op + quiet */
-    put_nbi_fence,       /* put_nbi + fence + signal_op ADD 1 + quiet */
-    quiet,               /* quiet alone */
-    flush,               /* flush alone */
-    fence,               /* fence alone */
-    typed_count_overflow /* uint64 put whose element count overflows the byte count */
+    put,
+    put_nbi_flush,
+    get,
+    get_nbi_quiet,
+    put_signal,
+    put_signal_nbi,
+    signal_op,
+    put_nbi_fence,
+    quiet,
+    flush,
+    fence,
+    typed_count_overflow
 };
 
 __host__ __device__ constexpr bool is_get(op which) {
@@ -57,8 +40,7 @@ __host__ __device__ constexpr bool sends_signal(op which) {
            which == op::put_nbi_fence;
 }
 
-/* A SET put_signal from several issuers gives each issuer its own signal word:
- * a receiver of one shared word could not tell which slice had landed. */
+/* SET put_signal uses one signal word per issuer so each slice can be observed. */
 constexpr int kMaxIssuers = kThreads;
 
 template <typename P, threadgroup Scope>
@@ -69,8 +51,6 @@ __device__ int order(op which) {
                                 : nvshmemx_quiet<A, P, Scope>();
 }
 
-/* One threadgroup's operation on its slice. `local` is the put source or the
- * get destination; get sources are the peer's `source` slice. */
 template <typename P, threadgroup Scope, LocalSpace Local>
 __device__ int issue(op which, unsigned char *remote, unsigned char *local,
                      const unsigned char *remote_source, uint64_t *signal, uint64_t value,
@@ -89,7 +69,7 @@ __device__ int issue(op which, unsigned char *remote, unsigned char *local,
                 result = nvshmemx_flush<A, P, Scope>();
             }
             if (result == NVSHMEMX_SUCCESS) {
-                /* flush makes the source reusable; the peer must still see the original. */
+                /* flush permits source reuse; the peer must still see the original. */
                 fill_group<Scope>(local, bytes, kPoisonByte);
                 result = nvshmemx_quiet<A, P, Scope>();
             }
@@ -136,9 +116,6 @@ __device__ int issue(op which, unsigned char *remote, unsigned char *local,
     return result;
 }
 
-/* The receiving half of a signalled case with one signal word per issuer:
- * each of the first `issuers` threads waits for its issuer's word and checks
- * that issuer's slice at once. */
 __device__ void receive_slices_and_check(uint64_t *signal, uint64_t expected,
                                          const unsigned char *payload, size_t bytes, int issuers,
                                          int source_pe, int *status) {
@@ -161,7 +138,6 @@ __device__ void receive_slices_and_check(uint64_t *signal, uint64_t expected,
     }
 }
 
-/* This thread's position within its Scope group, for in-kernel checks. */
 template <threadgroup Scope>
 __device__ size_t group_lane() {
     return Scope == threadgroup::thread ? 0
@@ -174,21 +150,14 @@ __device__ size_t group_width() {
     return Scope == threadgroup::thread ? 1 : Scope == threadgroup::warp ? warpSize : blockDim.x;
 }
 
-/* Arguments of the concurrent receiver CTA (block 1, when launched). */
 struct receiver {
-    uint64_t expected; /* the signal value that completes the case */
-    size_t bytes;      /* payload bytes ordered before the signal */
-    int previous;      /* the PE sending to this one */
-    int signal_stride; /* 1: one signal word per issuer; 0: one shared word */
+    uint64_t expected;
+    size_t bytes;
+    int previous;
+    int signal_stride;
 };
 
-/* Each of the first `issuers` threadgroups of Scope moves its own contiguous
- * slice, signalling signal[group * signal_stride]. With InShared the local
- * operand is a dynamic shared-memory copy of `local`. Block 0 issues; block 1,
- * when launched, receives the previous PE's payload and signal concurrently.
- * Gets are checked right after they complete. Reports only failures; the
- * caller zeroes *status. */
-template <typename P, threadgroup Scope, LocalSpace Local, bool InShared>
+template <typename P, threadgroup Scope, LocalSpace Local, placement Operand>
 __global__ void op_kernel(op which, unsigned char *remote, unsigned char *local,
                           const unsigned char *remote_source, uint64_t *signal, uint64_t value,
                           int sig_op, size_t bytes, int issuers, int peer, int *status,
@@ -204,7 +173,7 @@ __global__ void op_kernel(op which, unsigned char *remote, unsigned char *local,
     }
     extern __shared__ __align__(16) unsigned char smem[];
     unsigned char *operand = local;
-    if constexpr (InShared) {
+    if constexpr (Operand == placement::shared) {
         copy_block(smem, local, bytes);
         __syncthreads();
         operand = smem;
@@ -228,9 +197,6 @@ __global__ void op_kernel(op which, unsigned char *remote, unsigned char *local,
     }
 }
 
-/* Group-uniform preflight at warp scope: the last lane of each warp names an
- * out-of-range PE, so every lane must return the group's status (INVALID_VALUE
- * while the route is available) and no warp may write its slice. */
 __global__ void divergent_warp_kernel(unsigned char *remote, const unsigned char *source,
                                       size_t bytes, int peer, int npes, int expected, int *status) {
     const int group = scope_group_index<threadgroup::warp>();
@@ -244,8 +210,6 @@ __global__ void divergent_warp_kernel(unsigned char *remote, const unsigned char
     }
 }
 
-/* Zero-length typed transfers move nothing and need no local operand; the
- * probe at the start of main uses the same call. */
 template <typename T>
 __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsigned char *out,
                              size_t bytes, int peer, int *status) {
@@ -272,8 +236,6 @@ __global__ void typed_kernel(unsigned char *remote, unsigned char *source, unsig
     }
 }
 
-/* A zero-length put_signal moves no payload and still delivers its signal:
- * SET into signal[0] and, through the NBI spelling, ADD 1 into signal[1]. */
 __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *source,
                                    uint64_t *signal, uint64_t set_value, int peer, int *status) {
     using A = AutoAddressing;
@@ -299,17 +261,15 @@ __global__ void zero_length_kernel(unsigned char *remote, const unsigned char *s
     }
 }
 
-/* ---- Host-side cases ------------------------------------------------------ */
-
 struct route_context {
     world w;
     bool active;
     int peer;
     int previous;
-    unsigned char *remote; /* symmetric put destination */
-    unsigned char *source; /* symmetric put source and peer get source */
-    unsigned char *out;    /* symmetric get destination */
-    uint64_t *signal;      /* symmetric */
+    unsigned char *remote;
+    unsigned char *source;
+    unsigned char *out;
+    uint64_t *signal;
     unsigned char *private_buffer;
     uint64_t *private_signal;
 
@@ -318,7 +278,6 @@ struct route_context {
     }
 };
 
-/* Sets `count` consecutive signal words to `value`. */
 void set_signals(uint64_t *device, int count, uint64_t value) {
     std::vector<uint64_t> host(count, value);
     CUDA_CHECK(cudaMemcpy(device, host.data(), count * sizeof(uint64_t), cudaMemcpyHostToDevice));
@@ -334,18 +293,13 @@ const char *scope_name() {
     return Scope == threadgroup::thread ? "thread" : Scope == threadgroup::warp ? "warp" : "block";
 }
 
-/* A single issuing CTA with no receiver. */
-template <typename P, threadgroup Scope, LocalSpace Local, bool InShared = false, typename... Args>
+template <typename P, threadgroup Scope, LocalSpace Local, placement Operand = placement::global,
+          typename... Args>
 void launch_op(Args... args) {
-    op_kernel<P, Scope, Local, InShared>
-        <<<1, kThreads, InShared ? kBytes : 0>>>(args..., receiver{});
+    op_kernel<P, Scope, Local, Operand>
+        <<<1, kThreads, Operand == placement::shared ? kBytes : 0>>>(args..., receiver{});
 }
 
-/* Data, signal, and ordering success with every threadgroup of Scope issuing.
- * A SET put_signal from several issuers sets one signal word per issuer to
- * the sender's value; a SET signal_op sets the shared word to it from every
- * issuer; an ADD adds the sender's value once per issuer to the shared word.
- * Signalled cases run a concurrent receiver CTA. */
 template <typename P, threadgroup Scope, LocalSpace Local>
 int data_case(const route_context &c, const char *route, const char *local, const char *name,
               op which, int sig_op = NVSHMEM_SIGNAL_SET) {
@@ -377,7 +331,7 @@ int data_case(const route_context &c, const char *route, const char *local, cons
         [&] {
             CUDA_CHECK(cudaMemset(c.w.status, 0, sizeof(*c.w.status)));
             unsigned char *local_operand = is_get(which) ? c.out : c.source;
-            op_kernel<P, Scope, Local, false><<<signals ? 2 : 1, kThreads>>>(
+            op_kernel<P, Scope, Local, placement::global><<<signals ? 2 : 1, kThreads>>>(
                 which, c.remote, local_operand, static_cast<const unsigned char *>(c.source),
                 c.signal, value, sig_op, kBytes, kIssuers, c.peer, c.w.status, recv);
         },
@@ -471,13 +425,10 @@ int zero_length_case(const route_context &c, const char *what) {
         });
 }
 
-/* Every Auto / Network data case for one context, with global and generic
- * local operands in global memory. */
 int network_cases(const route_context &c, const char *route) {
     int failures = 0;
     failures += all_scope_cases<Network, kGlobal>(c, route, "global");
     failures += all_scope_cases<Network, kGeneric>(c, route, "generic(global)");
-    /* The common scoped coverage: several concurrent issuers per CTA. */
     char name[96];
     snprintf(name, sizeof(name), "%s global", route);
     failures += thread_warp_cases<AutoAddressing, Network, kGlobal>(c.scoped(), name);
@@ -486,10 +437,6 @@ int network_cases(const route_context &c, const char *route) {
     return failures;
 }
 
-/* ---- Rejected calls ------------------------------------------------------- */
-
-/* A rejected call must not issue work: every PE's destination, get buffer, and
- * signal keep their sentinels. */
 template <typename Launch>
 int rejected_case(const route_context &c, const char *what, int expected, Launch launch) {
     return run_case(
@@ -511,11 +458,7 @@ int rejected_case(const route_context &c, const char *what, int expected, Launch
         });
 }
 
-/* A local operand in shared memory never reaches the transport: an explicit
- * shared value is rejected without classification and a generic one after
- * classifying as shared, at every scope and in every build. `combined` is the
- * expected status of put_signal, whose signal preflight also runs:
- * INVALID_VALUE, or NOT_SUPPORTED while the route is unavailable. */
+/* put_signal also runs the signal preflight, which may report NOT_SUPPORTED. */
 template <threadgroup Scope, LocalSpace Local>
 int shared_local_cases(const route_context &c, const char *local, int combined) {
     const op ops[] = {op::put,           op::put_nbi_flush, op::get,
@@ -531,7 +474,7 @@ int shared_local_cases(const route_context &c, const char *local, int combined) 
         const int expected = signals ? combined : NVSHMEMX_ERROR_INVALID_VALUE;
         failures += rejected_case(c, what, expected, [&] {
             unsigned char *local_operand = is_get(which) ? c.out : c.source;
-            launch_op<Network, Scope, Local, true>(
+            launch_op<Network, Scope, Local, placement::shared>(
                 which, c.remote, local_operand, static_cast<const unsigned char *>(c.source),
                 c.signal, 1, NVSHMEM_SIGNAL_SET, kBytes, issuers_for<Scope>(), c.peer, c.w.status);
         });
@@ -550,9 +493,7 @@ int memory_space_rejections(const route_context &c, int combined) {
     return failures;
 }
 
-/* One argument error at Scope. Arguments are checked before the capability, so
- * a single preflight returns INVALID_VALUE in every build and job; `expected`
- * differs only for the combined cases described above. */
+/* Arguments are checked before availability, so INVALID_VALUE in every build. */
 template <threadgroup Scope>
 int argument_case(const route_context &c, const char *what, op which, unsigned char *remote,
                   unsigned char *local, uint64_t *signal, int sig_op, int pe,
@@ -597,8 +538,6 @@ int argument_rejections(const route_context &c, int combined) {
     return failures;
 }
 
-/* The route is unavailable: every valid operation, ordering included, reports
- * NOT_SUPPORTED, never INTERNAL, and touches no buffer. */
 template <threadgroup Scope>
 int unavailable_scope_cases(const route_context &c) {
     const op ops[] = {op::put,        op::put_nbi_flush,  op::get,       op::get_nbi_quiet,
@@ -628,7 +567,6 @@ int unavailable_cases(const route_context &c) {
            unavailable_scope_cases<threadgroup::warp>(c) + unavailable_scope_cases<kBlock>(c);
 }
 
-/* A zero-length put runs the route's preflight and issues nothing. */
 __global__ void probe_kernel(unsigned char *remote, unsigned char *source, int peer, int *status) {
     const int result = nvshmemx_put<uint8_t, AutoAddressing, Network, kBlock, kGlobal, kRemoteDest>(
         remote, source, 0, peer);
@@ -637,8 +575,6 @@ __global__ void probe_kernel(unsigned char *remote, unsigned char *source, int p
     }
 }
 
-/* Auto / Auto control: one positive data, signal, and ordering run per scope,
- * plus the direct comparison with the portable API. */
 int auto_cases(const route_context &c, const compare_buffers &b) {
     int failures = 0;
     failures += scope_cases<AutoPolicy, kBlock, kGeneric>(c, "Auto", "generic(global)");
@@ -678,7 +614,6 @@ int main(int argc, char **argv) {
                           cudaMalloc(&status, sizeof(*status)) == cudaSuccess &&
                           cudaMalloc(&c.private_buffer, kBytes) == cudaSuccess &&
                           cudaMalloc(&c.private_signal, sizeof(uint64_t)) == cudaSuccess;
-    /* A partial symmetric allocation cannot be collectively freed. */
     if (!scratch || world_max(scratch, !local_ok) != 0) {
         fprintf(stderr, "PE %d: transport_specific_network setup failed\n", mype);
         nvshmem_global_exit(1);
@@ -694,7 +629,6 @@ int main(int argc, char **argv) {
 
     int failures = 0;
 
-    /* Probe the route's capability without issuing work. */
     CUDA_CHECK(cudaMemset(status, 0xff, sizeof(*status)));
     probe_kernel<<<1, kThreads>>>(c.remote, c.source, c.peer, status);
     CUDA_CHECK(cudaGetLastError());
@@ -711,7 +645,6 @@ int main(int argc, char **argv) {
         failures += 1;
         report(mype, "transport_specific_network", "Auto / Network capability probe", 1);
     } else {
-        /* Memory-space and argument rejections run in every build and job. */
         const int combined =
             unavailable ? NVSHMEMX_ERROR_NOT_SUPPORTED : NVSHMEMX_ERROR_INVALID_VALUE;
         const int rejection_failures = world_max(
@@ -720,7 +653,7 @@ int main(int argc, char **argv) {
         failures += rejection_failures;
     }
     if (any_probe_failed) {
-        /* Reported above; the route's status is not trustworthy. */
+        /* Already reported; the route status is not trustworthy. */
     } else if (unavailable) {
         const int unavailable_failures = world_max(scratch, unavailable_cases(c));
         if (mype == 0) {
@@ -734,7 +667,6 @@ int main(int argc, char **argv) {
         }
         failures += unavailable_failures;
     } else {
-        /* Ring peers: one PE per node on the dedicated launcher. */
         int network_local_failures = network_cases(c, "Network");
         network_local_failures += typed_case<uint32_t>(c, "Network typed uint32 put/get_nbi");
         network_local_failures += typed_case<uint64_t>(c, "Network typed uint64 put/get_nbi");
@@ -743,9 +675,7 @@ int main(int argc, char **argv) {
         report(mype, "transport_specific_network", "Auto / Network", network_failures);
         failures += network_failures;
 
-        /* The strict route also carries traffic to a P2P-mapped peer over the
-         * network transport. Peers form a ring inside each TEAM_SHARED clique;
-         * PEs without a mapped ring neighbour only join the barriers. */
+        /* Network never falls back to P2P, so mapped peers must succeed too. */
         const int shared_npes = nvshmem_team_n_pes(NVSHMEM_TEAM_SHARED);
         const int shared_mype = nvshmem_team_my_pe(NVSHMEM_TEAM_SHARED);
         route_context mapped = c;
