@@ -23,6 +23,7 @@ typedef unsigned int CUlogicalEndpointId;
 #define LE_HW_SW_REQUIREMENTS_MET 0
 #define LE_ATOMIC_HW_SW_REQUIREMENTS_MET 0
 inline constexpr int CFT_HANDLE_TX_SIZE = 16;
+inline constexpr int TMA_COPY_NUM_STAGES = 2;
 
 __device__ __forceinline__ bool nvshmemi_ld_and_check_valid_le_id(int) { return false; }
 
