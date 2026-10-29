@@ -109,18 +109,17 @@ struct is_supported_pair<
     static constexpr bool value = true;
 };
 
-template <typename Addressing, typename TransportPolicy,
-          bool Supported = is_supported_pair<Addressing, TransportPolicy>::value>
-struct route_selection {
-    using route = typename route_compatibility<Addressing, TransportPolicy>::route;
+/* Any complete route, so the static_assert in route_selection is the only diagnostic. */
+struct unsupported_pair {
+    using route = automatic_route;
 };
 
 template <typename Addressing, typename TransportPolicy>
-struct route_selection<Addressing, TransportPolicy, false> {
-    static_assert(is_supported_pair<Addressing, TransportPolicy>::value,
-                  "unsupported addressing/transport-policy pair");
-    /* Any complete route, so the static_assert is the only diagnostic. */
-    using route = automatic_route;
+struct route_selection {
+    static constexpr bool kSupported = is_supported_pair<Addressing, TransportPolicy>::value;
+    static_assert(kSupported, "unsupported addressing/transport-policy pair");
+    using route = typename cuda::std::conditional_t<
+        kSupported, route_compatibility<Addressing, TransportPolicy>, unsupported_pair>::route;
 };
 
 template <typename Addressing, typename TransportPolicy>

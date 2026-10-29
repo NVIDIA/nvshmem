@@ -151,8 +151,7 @@ struct route_backend<network_route> {
 
     template <threadgroup Scope>
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int quiet() {
-        nvshmemx_qp_handle_t qp = NVSHMEMX_QP_DEFAULT;
-        nvshmemi_transfer_quiet<scope_traits<Scope>::internal>(true, NVSHMEMX_PE_ALL, &qp, 1);
+        drain<scope_traits<Scope>::internal>(drain_fence::system);
         return NVSHMEMX_SUCCESS;
     }
 
@@ -160,8 +159,7 @@ struct route_backend<network_route> {
     __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int flush() {
         scope_sync<Scope>();
         if (scope_leader<Scope>()) {
-            nvshmemx_qp_handle_t qp = NVSHMEMX_QP_DEFAULT;
-            nvshmemi_transfer_quiet<NVSHMEMI_THREADGROUP_THREAD>(false, NVSHMEMX_PE_ALL, &qp, 1);
+            drain<NVSHMEMI_THREADGROUP_THREAD>(drain_fence::none);
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
@@ -176,6 +174,15 @@ struct route_backend<network_route> {
         }
         scope_sync<Scope>();
         return NVSHMEMX_SUCCESS;
+    }
+
+   private:
+    enum class drain_fence { none, system };
+
+    template <threadgroup_t Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE void drain(drain_fence fence) {
+        nvshmemx_qp_handle_t qp = NVSHMEMX_QP_DEFAULT;
+        nvshmemi_transfer_quiet<Scope>(fence == drain_fence::system, NVSHMEMX_PE_ALL, &qp, 1);
     }
 };
 

@@ -739,12 +739,14 @@ int unavailable_cases(const route_context &c) {
                           error_case::unregistered_quiet, NVSHMEMX_ERROR_NOT_SUPPORTED);
 }
 
-int probe(const route_context &c, bool add) {
+enum class probe_op { put, signal_add };
+
+int probe(const route_context &c, probe_op op) {
     if (!c.active) {
         return NVSHMEMX_SUCCESS;
     }
     CUDA_CHECK(cudaMemset(c.w.status, 0xff, sizeof(*c.w.status)));
-    if (add) {
+    if (op == probe_op::signal_add) {
         launch(add_probe_kernel, c.signal, c.peer, c.w.status);
     } else {
         launch(probe_kernel, c.remote, c.peer, c.w.status);
@@ -792,7 +794,7 @@ int main(int argc, char **argv) {
     c.pointer_mapped = world_max(scratch, nvshmem_ptr(c.remote, c.peer) == nullptr) == 0;
 
     int failures = 0;
-    const int route = probe(c, false);
+    const int route = probe(c, probe_op::put);
     const bool probe_failed = route != NVSHMEMX_SUCCESS && route != NVSHMEMX_ERROR_NOT_SUPPORTED;
     if (probe_failed) {
         fprintf(stderr, "PE %d: transport_specific_cft_tma capability probe returned %d\n", mype,
@@ -813,7 +815,7 @@ int main(int argc, char **argv) {
             report(mype, "transport_specific_cft_tma", "CFT / TMA unavailable status", failures);
         }
     } else {
-        const int add = probe(c, true);
+        const int add = probe(c, probe_op::signal_add);
         const bool add_failed = add != NVSHMEMX_SUCCESS && add != NVSHMEMX_ERROR_NOT_SUPPORTED;
         if (add_failed) {
             fprintf(stderr, "PE %d: transport_specific_cft_tma ADD probe returned %d\n", mype, add);

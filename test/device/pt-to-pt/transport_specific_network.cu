@@ -440,7 +440,7 @@ int network_cases(const route_context &c, const char *route) {
 template <typename Launch>
 int rejected_case(const route_context &c, const char *what, int expected, Launch launch) {
     return run_case(
-        c.w, true, what, expected,
+        c.w, c.active, what, expected,
         [&] {
             fill_payload<<<1, kThreads>>>(c.source, kBytes, c.w.mype);
             CUDA_CHECK(cudaMemset(c.remote, kSentinelByte, kBytes));

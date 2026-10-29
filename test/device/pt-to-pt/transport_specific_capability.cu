@@ -48,10 +48,12 @@ enum class variant {
 
 enum class mode { capability_only, blocking, nbi };
 
+enum class coverage { full, basic };
+
 struct kernel_args {
     variant which;
     mode run;
-    bool in_shared;
+    placement where;
     int registration;
     unsigned char *remote;
     unsigned char *local;
@@ -112,7 +114,7 @@ __global__ void capability_kernel(kernel_args a) {
         nvshmemx_give_smem(smem_base(), a.registration);
     }
     unsigned char *payload = smem_base() + kRegistered;
-    if (a.in_shared) {
+    if (a.where == placement::shared) {
         if constexpr (Dir == direction::put) {
             copy_block(payload, a.local, kBytes);
         } else {
@@ -123,7 +125,7 @@ __global__ void capability_kernel(kernel_args a) {
 
     if (static_cast<int>(threadIdx.x) < participants<Scope>()) {
         unsigned char *remote = a.remote;
-        unsigned char *local = a.in_shared ? payload : a.local;
+        unsigned char *local = a.where == placement::shared ? payload : a.local;
         size_t bytes = kBytes;
         int pe = a.peer;
         const bool last = static_cast<int>(threadIdx.x) == participants<Scope>() - 1;
@@ -158,7 +160,7 @@ __global__ void capability_kernel(kernel_args a) {
     }
     __syncthreads();
 
-    if (Dir == direction::get && a.in_shared) {
+    if (Dir == direction::get && a.where == placement::shared) {
         copy_block(a.local, payload, kBytes);
     }
     __syncthreads();
@@ -223,7 +225,7 @@ bool uniform(const std::vector<int> &statuses, int count, int *status) {
 
 template <typename A, typename P, threadgroup Scope, direction Dir, LocalSpace Local>
 int run_mode(const context &c, const char *what, variant which, expectation expected,
-             bool in_shared, int registration, mode run, bool *skipped) {
+             placement where, int registration, mode run, bool *skipped) {
     constexpr int kCount = participants<Scope>();
     const bool is_put = Dir == direction::put;
     fill_payload<<<1, kThreads>>>(c.source, kBytes, c.w.mype);
@@ -237,7 +239,7 @@ int run_mode(const context &c, const char *what, variant which, expectation expe
 
     const kernel_args args{which,
                            run,
-                           in_shared,
+                           where,
                            registration,
                            is_put ? c.remote : c.source,
                            is_put ? c.source : c.out,
@@ -309,7 +311,8 @@ int run_mode(const context &c, const char *what, variant which, expectation expe
 
 template <typename A, typename P, threadgroup Scope, direction Dir, LocalSpace Local>
 int run_case(const context &c, const char *route, const char *label, variant which,
-             expectation expected, bool in_shared = false, int registration = kNoRegistration) {
+             expectation expected, placement where = placement::global,
+             int registration = kNoRegistration) {
     char what[192];
     snprintf(what, sizeof(what), "%s %s-scope %s %s", route,
              Scope == kThread ? "thread"
@@ -320,8 +323,8 @@ int run_case(const context &c, const char *route, const char *label, variant whi
     bool skipped = false;
     for (mode run : {mode::capability_only, mode::blocking, mode::nbi}) {
         bool run_skipped = false;
-        failures += run_mode<A, P, Scope, Dir, Local>(c, what, which, expected, in_shared,
-                                                      registration, run, &run_skipped);
+        failures += run_mode<A, P, Scope, Dir, Local>(c, what, which, expected, where, registration,
+                                                      run, &run_skipped);
         skipped |= run_skipped;
     }
     if (skipped && c.w.mype == 0) {
@@ -333,27 +336,27 @@ int run_case(const context &c, const char *route, const char *label, variant whi
 /* With one bad participant the others reach the capability check, so an
  * unavailable route agrees on NOT_SUPPORTED. */
 template <typename A, typename P, direction Dir, LocalSpace Local>
-int argument_cases(const context &c, const char *route, bool in_shared, int registration,
+int argument_cases(const context &c, const char *route, placement where, int registration,
                    expectation divergent) {
     int failures = 0;
     failures += run_case<A, P, kBlock, Dir, Local>(c, route, "invalid PE", variant::bad_pe,
-                                                   kInvalid, in_shared, registration);
+                                                   kInvalid, where, registration);
     failures += run_case<A, P, kBlock, Dir, Local>(c, route, "divergent PE", variant::divergent_pe,
-                                                   divergent, in_shared, registration);
+                                                   divergent, where, registration);
     failures += run_case<A, P, kBlock, Dir, Local>(
-        c, route, "remote outside heap", variant::outside_heap, kInvalid, in_shared, registration);
+        c, route, "remote outside heap", variant::outside_heap, kInvalid, where, registration);
     failures += run_case<A, P, kBlock, Dir, Local>(c, route, "null local", variant::null_local,
-                                                   kInvalid, in_shared, registration);
+                                                   kInvalid, where, registration);
     return failures;
 }
 
 template <typename A, typename P, direction Dir, LocalSpace Local>
-int alignment_cases(const context &c, const char *route, bool in_shared) {
+int alignment_cases(const context &c, const char *route, placement where) {
     return run_case<A, P, kBlock, Dir, Local>(c, route, "unaligned size", variant::unaligned_size,
-                                              kInvalidWhenAvailable, in_shared, kRegistered) +
+                                              kInvalidWhenAvailable, where, kRegistered) +
            run_case<A, P, kBlock, Dir, Local>(c, route, "misaligned remote",
                                               variant::misaligned_remote, kInvalidWhenAvailable,
-                                              in_shared, kRegistered);
+                                              where, kRegistered);
 }
 
 expectation pointer_valid(const context &c) { return c.peer_mapped ? kSucceeds : kUnsupported; }
@@ -367,26 +370,27 @@ int pointer_sm_cases(const context &c) {
     int failures = 0;
     failures += run_case<Pointer, SM, kBlock, direction::put, kGlobal>(c, route, "global",
                                                                        variant::valid, valid);
-    failures += run_case<Pointer, SM, kBlock, direction::put, kShared>(c, route, "shared",
-                                                                       variant::valid, valid, true);
+    failures += run_case<Pointer, SM, kBlock, direction::put, kShared>(
+        c, route, "shared", variant::valid, valid, placement::shared);
     failures += run_case<Pointer, SM, kBlock, direction::put, kGeneric>(
-        c, route, "generic(shared)", variant::valid, valid, true);
+        c, route, "generic(shared)", variant::valid, valid, placement::shared);
     failures += run_case<Pointer, SM, kBlock, direction::get, kGlobal>(c, route, "global",
                                                                        variant::valid, valid);
-    failures += run_case<Pointer, SM, kBlock, direction::get, kShared>(c, route, "shared",
-                                                                       variant::valid, valid, true);
+    failures += run_case<Pointer, SM, kBlock, direction::get, kShared>(
+        c, route, "shared", variant::valid, valid, placement::shared);
     failures += run_case<Pointer, SM, kBlock, direction::get, kGeneric>(c, route, "generic(global)",
                                                                         variant::valid, valid);
     failures += run_case<Pointer, SM, kWarp, direction::put, kGlobal>(c, route, "global",
                                                                       variant::valid, valid);
     failures += run_case<Pointer, SM, kWarp, direction::get, kShared>(
-        c, route, "divergent PE", variant::divergent_pe, pointer_divergent(c, kInvalid), true);
+        c, route, "divergent PE", variant::divergent_pe, pointer_divergent(c, kInvalid),
+        placement::shared);
     failures += run_case<Pointer, SM, kThread, direction::get, kGlobal>(c, route, "global",
                                                                         variant::valid, valid);
     failures += argument_cases<Pointer, SM, direction::put, kGlobal>(
-        c, route, false, kNoRegistration, pointer_divergent(c, kInvalid));
+        c, route, placement::global, kNoRegistration, pointer_divergent(c, kInvalid));
     failures += argument_cases<Pointer, SM, direction::get, kGeneric>(
-        c, route, false, kNoRegistration, pointer_divergent(c, kInvalid));
+        c, route, placement::global, kNoRegistration, pointer_divergent(c, kInvalid));
     return failures;
 }
 
@@ -395,42 +399,42 @@ int pointer_tma_cases(const context &c, const char *route) {
     const expectation valid = pointer_valid(c);
     int failures = 0;
     failures += run_case<A, TMA, kBlock, direction::put, kShared>(
-        c, route, "shared", variant::valid, valid, true, kRegistered);
+        c, route, "shared", variant::valid, valid, placement::shared, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::put, kGlobal>(
-        c, route, "global", variant::valid, valid, false, kRegistered);
+        c, route, "global", variant::valid, valid, placement::global, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::put, kGeneric>(
-        c, route, "generic(global)", variant::valid, valid, false, kRegistered);
+        c, route, "generic(global)", variant::valid, valid, placement::global, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::get, kShared>(
-        c, route, "shared", variant::valid, valid, true, kRegistered);
+        c, route, "shared", variant::valid, valid, placement::shared, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::get, kGlobal>(
-        c, route, "global", variant::valid, valid, false, kRegistered);
+        c, route, "global", variant::valid, valid, placement::global, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::get, kGeneric>(
-        c, route, "generic(shared)", variant::valid, valid, true, kRegistered);
-    failures += run_case<A, TMA, kWarp, direction::put, kShared>(c, route, "shared", variant::valid,
-                                                                 valid, true, kRegistered);
+        c, route, "generic(shared)", variant::valid, valid, placement::shared, kRegistered);
+    failures += run_case<A, TMA, kWarp, direction::put, kShared>(
+        c, route, "shared", variant::valid, valid, placement::shared, kRegistered);
     failures += run_case<A, TMA, kThread, direction::put, kGeneric>(
-        c, route, "generic(shared)", variant::valid, valid, true, kRegistered);
+        c, route, "generic(shared)", variant::valid, valid, placement::shared, kRegistered);
     failures += run_case<A, TMA, kWarp, direction::put, kGeneric>(
         c, route, "generic(global)", variant::valid,
-        c.peer_mapped ? kInvalidWhenAvailable : kUnsupported, false, kRegistered);
+        c.peer_mapped ? kInvalidWhenAvailable : kUnsupported, placement::global, kRegistered);
     failures += run_case<A, TMA, kThread, direction::put, kGeneric>(
         c, route, "generic(global)", variant::valid,
-        c.peer_mapped ? kInvalidWhenAvailable : kUnsupported, false, kRegistered);
+        c.peer_mapped ? kInvalidWhenAvailable : kUnsupported, placement::global, kRegistered);
     failures += run_case<A, TMA, kWarp, direction::put, kShared>(
         c, route, "divergent PE", variant::divergent_pe,
-        pointer_divergent(c, kInvalidWhenAvailable), true, kRegistered);
+        pointer_divergent(c, kInvalidWhenAvailable), placement::shared, kRegistered);
     failures += run_case<A, TMA, kBlock, direction::put, kShared>(
-        c, route, "shared without registration", variant::valid, kUnsupported, true,
+        c, route, "shared without registration", variant::valid, kUnsupported, placement::shared,
         kNoRegistration);
     failures += run_case<A, TMA, kBlock, direction::get, kGlobal>(
-        c, route, "global without registration", variant::valid, kUnsupported, false,
+        c, route, "global without registration", variant::valid, kUnsupported, placement::global,
         kNoRegistration);
     failures += argument_cases<A, TMA, direction::put, kShared>(
-        c, route, true, kRegistered, pointer_divergent(c, kInvalidWhenAvailable));
+        c, route, placement::shared, kRegistered, pointer_divergent(c, kInvalidWhenAvailable));
     failures += argument_cases<A, TMA, direction::get, kGlobal>(
-        c, route, false, kRegistered, pointer_divergent(c, kInvalidWhenAvailable));
-    failures += alignment_cases<A, TMA, direction::put, kShared>(c, route, true);
-    failures += alignment_cases<A, TMA, direction::get, kGlobal>(c, route, false);
+        c, route, placement::global, kRegistered, pointer_divergent(c, kInvalidWhenAvailable));
+    failures += alignment_cases<A, TMA, direction::put, kShared>(c, route, placement::shared);
+    failures += alignment_cases<A, TMA, direction::get, kGlobal>(c, route, placement::global);
     return failures;
 }
 
@@ -438,29 +442,29 @@ int cft_tma_cases(const context &c) {
     const char *route = "CFT/TMA";
     int failures = 0;
     failures += run_case<CFT, TMA, kBlock, direction::put, kGlobal>(
-        c, route, "global", variant::valid, kSucceeds, false, kRegistered);
+        c, route, "global", variant::valid, kSucceeds, placement::global, kRegistered);
     failures += run_case<CFT, TMA, kBlock, direction::put, kShared>(
-        c, route, "shared", variant::valid, kSucceeds, true, kRegistered);
+        c, route, "shared", variant::valid, kSucceeds, placement::shared, kRegistered);
     failures += run_case<CFT, TMA, kBlock, direction::put, kGeneric>(
-        c, route, "generic(global)", variant::valid, kSucceeds, false, kRegistered);
+        c, route, "generic(global)", variant::valid, kSucceeds, placement::global, kRegistered);
     failures += run_case<CFT, TMA, kBlock, direction::get, kGlobal>(
-        c, route, "global", variant::valid, kSucceeds, false, kRegistered);
+        c, route, "global", variant::valid, kSucceeds, placement::global, kRegistered);
     failures += run_case<CFT, TMA, kBlock, direction::get, kShared>(
-        c, route, "shared", variant::valid, kSucceeds, true, kRegistered);
+        c, route, "shared", variant::valid, kSucceeds, placement::shared, kRegistered);
     failures += run_case<CFT, TMA, kBlock, direction::get, kGeneric>(
-        c, route, "generic(shared)", variant::valid, kSucceeds, true, kRegistered);
+        c, route, "generic(shared)", variant::valid, kSucceeds, placement::shared, kRegistered);
     failures += run_case<CFT, TMA, kBlock, direction::put, kGlobal>(
-        c, route, "global without registration", variant::valid, kUnsupported, false,
+        c, route, "global without registration", variant::valid, kUnsupported, placement::global,
         kNoRegistration);
     failures += run_case<CFT, TMA, kBlock, direction::get, kShared>(
-        c, route, "shared without registration", variant::valid, kUnsupported, true,
+        c, route, "shared without registration", variant::valid, kUnsupported, placement::shared,
         kNoRegistration);
-    failures += argument_cases<CFT, TMA, direction::put, kGlobal>(c, route, false, kRegistered,
-                                                                  kInvalidWhenAvailable);
-    failures += argument_cases<CFT, TMA, direction::get, kShared>(c, route, true, kRegistered,
-                                                                  kInvalidWhenAvailable);
-    failures += alignment_cases<CFT, TMA, direction::put, kGlobal>(c, route, false);
-    failures += alignment_cases<CFT, TMA, direction::get, kShared>(c, route, true);
+    failures += argument_cases<CFT, TMA, direction::put, kGlobal>(
+        c, route, placement::global, kRegistered, kInvalidWhenAvailable);
+    failures += argument_cases<CFT, TMA, direction::get, kShared>(
+        c, route, placement::shared, kRegistered, kInvalidWhenAvailable);
+    failures += alignment_cases<CFT, TMA, direction::put, kGlobal>(c, route, placement::global);
+    failures += alignment_cases<CFT, TMA, direction::get, kShared>(c, route, placement::shared);
     return failures;
 }
 
@@ -478,25 +482,25 @@ int network_cases(const context &c, const char *route) {
     failures += run_case<A, Network, kThread, direction::put, kGlobal>(c, route, "global",
                                                                        variant::valid, kSucceeds);
     failures += run_case<A, Network, kBlock, direction::put, kShared>(
-        c, route, "shared", variant::valid, kInvalid, true);
+        c, route, "shared", variant::valid, kInvalid, placement::shared);
     failures += run_case<A, Network, kBlock, direction::get, kShared>(
-        c, route, "shared", variant::valid, kInvalid, true);
+        c, route, "shared", variant::valid, kInvalid, placement::shared);
     failures += run_case<A, Network, kWarp, direction::put, kGeneric>(
-        c, route, "generic(shared)", variant::valid, kInvalid, true);
+        c, route, "generic(shared)", variant::valid, kInvalid, placement::shared);
     failures += run_case<A, Network, kBlock, direction::get, kGeneric>(
-        c, route, "generic(shared)", variant::valid, kInvalid, true);
+        c, route, "generic(shared)", variant::valid, kInvalid, placement::shared);
     failures += run_case<A, Network, kWarp, direction::put, kGlobal>(
         c, route, "divergent PE", variant::divergent_pe, kInvalidWhenAvailable);
     failures += argument_cases<A, Network, direction::put, kGlobal>(
-        c, route, false, kNoRegistration, kInvalidWhenAvailable);
+        c, route, placement::global, kNoRegistration, kInvalidWhenAvailable);
     failures += argument_cases<A, Network, direction::get, kGlobal>(
-        c, route, false, kNoRegistration, kInvalidWhenAvailable);
+        c, route, placement::global, kNoRegistration, kInvalidWhenAvailable);
     return failures;
 }
 
 /* The portable route keeps its fallback, so a valid call always succeeds. */
 template <typename A, typename P>
-int automatic_cases(const context &c, const char *route, bool full) {
+int automatic_cases(const context &c, const char *route, coverage depth) {
     int failures = 0;
     failures += run_case<A, P, kBlock, direction::put, kGeneric>(c, route, "generic(global)",
                                                                  variant::valid, kSucceeds);
@@ -504,7 +508,7 @@ int automatic_cases(const context &c, const char *route, bool full) {
                                                                  variant::valid, kSucceeds);
     failures += run_case<A, P, kBlock, direction::put, kGeneric>(c, route, "invalid PE",
                                                                  variant::bad_pe, kInvalid);
-    if (full) {
+    if (depth == coverage::full) {
         failures += run_case<A, P, kBlock, direction::put, kGlobal>(c, route, "global",
                                                                     variant::valid, kSucceeds);
         failures += run_case<A, P, kWarp, direction::get, kGlobal>(c, route, "global",
@@ -513,10 +517,10 @@ int automatic_cases(const context &c, const char *route, bool full) {
                                                                       variant::valid, kSucceeds);
         failures += run_case<A, P, kWarp, direction::put, kGeneric>(
             c, route, "divergent PE", variant::divergent_pe, kInvalid);
-        failures += argument_cases<A, P, direction::put, kGeneric>(c, route, false, kNoRegistration,
-                                                                   kInvalid);
-        failures += argument_cases<A, P, direction::get, kGlobal>(c, route, false, kNoRegistration,
-                                                                  kInvalid);
+        failures += argument_cases<A, P, direction::put, kGeneric>(c, route, placement::global,
+                                                                   kNoRegistration, kInvalid);
+        failures += argument_cases<A, P, direction::get, kGlobal>(c, route, placement::global,
+                                                                  kNoRegistration, kInvalid);
     }
     return failures;
 }
@@ -587,10 +591,10 @@ int main(int argc, char **argv) {
     report_route(c, "Auto / Network", route_failures);
     failures += route_failures;
 
-    route_failures = automatic_cases<AutoAddressing, AutoPolicy>(c, "Auto/Auto", true);
-    route_failures += automatic_cases<Pointer, AutoPolicy>(c, "Pointer/Auto", false);
-    route_failures += automatic_cases<CFT, AutoPolicy>(c, "CFT/Auto", false);
-    route_failures += automatic_cases<AutoAddressing, SM>(c, "Auto/SM", false);
+    route_failures = automatic_cases<AutoAddressing, AutoPolicy>(c, "Auto/Auto", coverage::full);
+    route_failures += automatic_cases<Pointer, AutoPolicy>(c, "Pointer/Auto", coverage::basic);
+    route_failures += automatic_cases<CFT, AutoPolicy>(c, "CFT/Auto", coverage::basic);
+    route_failures += automatic_cases<AutoAddressing, SM>(c, "Auto/SM", coverage::basic);
     report_route(c, "Auto / Auto and its aliases", route_failures);
     failures += route_failures;
 

@@ -694,7 +694,10 @@ int main(int argc, char **argv) {
     }
     failures += sm_failures;
 
-    const route_context portable{w, b, true, (mype + 1) % npes, (mype + npes - 1) % npes};
+    route_context portable{w, b};
+    portable.active = true;
+    portable.peer = (mype + 1) % npes;
+    portable.previous = (mype + npes - 1) % npes;
 
     const bool unmapped = nvshmem_ptr(b.remote, portable.peer) == nullptr;
     const route_context sm_unmapped{w, b, unmapped, portable.peer, portable.previous};
