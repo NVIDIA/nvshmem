@@ -187,12 +187,12 @@ struct cft_tma_bw : ts::payload_buffers {
             return available;
         }
 
+        ts::allow_max_dynamic_smem(ctx, cft_batch<P, Op, Nbi, C>);
         auto launch = [&](size_t bytes, int, size_t iterations) {
             if (ctx.mype != 0) {
                 return 0;
             }
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((cft_batch<P, Op, Nbi, C>), smem);
             cft_batch<P, Op, Nbi, C><<<1, kThreads, smem>>>(
                 remote, local, bytes, signal, registration, ctx.peer, iterations, ctx.statuses);
             return 1;

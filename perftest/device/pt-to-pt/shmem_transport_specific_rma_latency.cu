@@ -60,12 +60,12 @@ struct rma_latency : ts::payload_buffers {
             return available;
         }
 
+        ts::allow_max_dynamic_smem(ctx, latency_batch<R, P, Op, Nbi, S>);
         auto launch = [&](size_t bytes, int, size_t iterations) {
             if (ctx.mype != 0) {
                 return 0;
             }
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((latency_batch<R, P, Op, Nbi, S>), smem);
             latency_batch<R, P, Op, Nbi, S><<<1, kScopeThreads, smem>>>(
                 remote, local, bytes, registration, ctx.peer, iterations, ctx.statuses);
             return 1;

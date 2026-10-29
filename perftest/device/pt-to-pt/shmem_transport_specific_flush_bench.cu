@@ -94,12 +94,12 @@ struct flush_bench : ts::payload_buffers {
             return available;
         }
 
+        ts::allow_max_dynamic_smem(ctx, source_reuse_batch<R, P, C, Share>);
         auto launch = [&](size_t bytes, int, size_t iterations) {
             if (ctx.mype != 0) {
                 return 0;
             }
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((source_reuse_batch<R, P, C, Share>), smem);
             source_reuse_batch<R, P, C, Share><<<1, kThreads, smem>>>(
                 remote, local, bytes, registration, ctx.peer, iterations, ctx.statuses);
             return 1;
