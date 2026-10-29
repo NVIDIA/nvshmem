@@ -699,6 +699,19 @@ inline sweep_spec make_spec(route r, std::string variant, placement p, const cha
             p == placement::shared ? shared_capacity(ctx, r) : SIZE_MAX};
 }
 
+/* Raise the dynamic shared-memory limit once, so no timed launch pays for it. */
+template <typename Kernel>
+void allow_max_dynamic_smem(const context &ctx, Kernel kernel) {
+    if (use_cubin) {
+        return;
+    }
+    cudaFuncAttributes attributes;
+    CUDA_CHECK(cudaFuncGetAttributes(&attributes, kernel));
+    const size_t limit = ctx.properties.sharedMemPerBlockOptin - attributes.sharedSizeBytes;
+    CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                    static_cast<int>(limit)));
+}
+
 template <typename Launch>
 int timed_launch(context &ctx, Launch &launch, size_t bytes, int grid, size_t iterations,
                  float *milliseconds) {
@@ -730,7 +743,7 @@ outcome run_sweep(context &ctx, const sweep_spec &spec, Launch launch, Metric me
         } else {
             const int grid = static_cast<int>(units < spec.max_blocks ? units : spec.max_blocks);
             const size_t per_block = (units + grid - 1) / grid * spec.granule;
-            if (per_block > spec.per_block_limit) {
+            if (any_pe(ctx, per_block > spec.per_block_limit)) {
                 break;
             }
 

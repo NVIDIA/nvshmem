@@ -68,6 +68,7 @@ struct rma_bw : ts::payload_buffers {
             return available;
         }
 
+        ts::allow_max_dynamic_smem(ctx, rma_batch<R, P, Op, Nbi>);
         auto launch = [&](size_t bytes, int grid, size_t iterations) {
             if (!issuer) {
                 return 0;
@@ -76,7 +77,6 @@ struct rma_bw : ts::payload_buffers {
             const size_t payload =
                 P == placement::shared ? (units + grid - 1) / grid * spec.granule : 0;
             const size_t smem = registration + payload;
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((rma_batch<R, P, Op, Nbi>), smem);
             rma_batch<R, P, Op, Nbi><<<grid, threads, smem>>>(remote, local, bytes, registration,
                                                               ctx.peer, iterations, ctx.statuses);
             return grid;

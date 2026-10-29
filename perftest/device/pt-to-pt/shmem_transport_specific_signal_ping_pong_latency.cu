@@ -185,9 +185,9 @@ struct signal_ping_pong_bench : ts::payload_buffers {
             return available;
         }
 
+        ts::allow_max_dynamic_smem(ctx, signal_ping_pong<R, P, Nbi, SigOp, S>);
         auto launch = [&](size_t bytes, int, size_t iterations) {
             const size_t smem = registration + (P == placement::shared ? bytes : 0);
-            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM((signal_ping_pong<R, P, Nbi, SigOp, S>), smem);
             signal_ping_pong<R, P, Nbi, SigOp, S>
                 <<<1, kScopeThreads, smem>>>(remote, local, bytes, signal, ack, registration,
                                              ctx.mype, iterations, ctx.statuses);
