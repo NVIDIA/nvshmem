@@ -17,7 +17,7 @@ endif()
 
 if(NVSHMEM_MPI_SUPPORT)
    target_compile_definitions(nvshmem_perftest_helper PUBLIC NVSHMEMTEST_MPI_SUPPORT)
-   target_include_directories(nvshmem_perftest_helper PUBLIC $<BUILD_INTERFACE:${MPI_CXX_INCLUDE_DIRS}>)
+   target_include_directories(nvshmem_perftest_helper PUBLIC "$<BUILD_INTERFACE:${MPI_CXX_INCLUDE_DIRS}>")
 endif()
 
 target_compile_options(nvshmem_perftest_helper
