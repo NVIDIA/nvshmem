@@ -1852,20 +1852,25 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reduce_threadgroup(nvshme
     constexpr bool is_half_prec = is_half<TYPE>::value || is_bfloat<TYPE>::value;
     int reduce_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.reduce_algo;
 
+    // The multimem paths need 4-byte aligned addresses; nvshmemi_add_reduce_mcast_threadroup
+    // writes nothing for a 16-bit range that starts on an odd element.
     bool is_nvls_algo_supported =
         nvshmemi_device_has_nvls_multimem && is_rdxn_sum && is_float_v &&
         nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL &&
-        (nreduce * sizeof(TYPE)) % 4 == 0;
+        (nreduce * sizeof(TYPE)) % 4 == 0 && (uintptr_t)dest % 4 == 0 &&
+        (uintptr_t)source % 4 == 0;
     bool is_inplace_op = (source == dest);  // exact overlap
     // inplace ops cannot use 1-shot AR as there can be a race condition due to execution of
     // ld_reduce on a given MC offset on the switch and a posted stg to the same MC offset on any of
     // the GPUs, causing incorrect result.
     bool is_one_shot_supported =
         (is_nvls_algo_supported) && !(is_half_prec && nreduce == 1) && !(is_inplace_op);
+    // Two-shot gives each PE a slice of nreduce / size elements, which must keep 4-byte alignment.
     bool is_two_shot_supported =
         (is_nvls_algo_supported) &&
         !(is_half_prec && (nreduce <= nvshmemi_device_state_d.team_pool[team]->size ||
-                           (nreduce % nvshmemi_device_state_d.team_pool[team]->size > 0)));
+                           (nreduce % nvshmemi_device_state_d.team_pool[team]->size > 0) ||
+                           (nreduce / nvshmemi_device_state_d.team_pool[team]->size) % 2 != 0));
 
     /* When adding new algorithms in 3.x, start at 5. This is for backward compatibility reasons,
      * see cpu_coll.cpp.
