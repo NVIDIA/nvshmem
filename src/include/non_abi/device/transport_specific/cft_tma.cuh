@@ -122,7 +122,8 @@ struct route_backend<cft_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Source>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
-            nvshmemi_handle_put<kScope, kLocal>(source, remote, bytes, plan.pe, Issue == issue_mode::blocking);
+            nvshmemi_handle_put<kScope, kLocal>(source, remote, bytes, plan.pe,
+                                                Issue == issue_mode::blocking);
         } else if (plan.shared_local) {
             nvshmemi_handle_put<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(source, remote, bytes, plan.pe,
                                                                      Issue == issue_mode::blocking);
@@ -150,7 +151,8 @@ struct route_backend<cft_tma_route> {
         constexpr threadgroup_t kScope = scope_traits<Scope>::internal;
         constexpr nvshmemi_local_space_t kLocal = stable_local_space<Dest>;
         if constexpr (kLocal != NVSHMEMI_LOCAL_SPACE_UNKNOWN) {
-            nvshmemi_handle_get<kScope, kLocal>(remote, dest, bytes, plan.pe, Issue == issue_mode::blocking);
+            nvshmemi_handle_get<kScope, kLocal>(remote, dest, bytes, plan.pe,
+                                                Issue == issue_mode::blocking);
         } else if (plan.shared_local) {
             nvshmemi_handle_get<kScope, NVSHMEMI_LOCAL_SPACE_SHARED>(remote, dest, bytes, plan.pe,
                                                                      Issue == issue_mode::blocking);
