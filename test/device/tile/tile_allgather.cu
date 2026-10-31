@@ -7,6 +7,7 @@
 #include <string>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 #include "test_teams.h"
 #include "coll_common.h"
 #include "non_abi/device/common/nvshmem_common.cuh"
@@ -18,6 +19,18 @@ using namespace std;
 
 #define LARGEST_DT uint64_t
 #define NVSHMEM_INTERNAL_TEAMS 10
+
+/* With NVLS, nvshmemi_duplicate_team() also creates duplicate teams for the collective CTAs
+ * whenever a team is split, so each team takes this many NVSHMEM_MAX_TEAMS slots. */
+static int team_slots_per_team() {
+    const char *max_ctas = getenv("NVSHMEM_MAX_CTAS");
+    if (max_ctas) {
+        return std::max(1, atoi(max_ctas));
+    }
+    return std::max(NVSHMEMI_REDUCESCATTER_CTA_COUNT_DEFAULT,
+                    std::max(NVSHMEMI_FCOLLECT_CTA_COUNT_DEFAULT / 2,
+                             NVSHMEMI_REDUCE_CTA_COUNT_DEFAULT));
+}
 
 #define V4_SRC_TILE_SIZE_0 8
 #define V4_SRC_TILE_SIZE_1 4
@@ -360,6 +373,7 @@ int main(int argc, char **argv) {
     nvshmem_team_t *teams, *teams_dev;
 
     int num_teams;
+    int team_slots;
     /* teams per scope
      * thread: grid_size * block_size; //creating 1 team per thread
      * warp: grid_size * (block_size/WARP_SIZE); //creating 1 team per warp
@@ -387,9 +401,10 @@ int main(int argc, char **argv) {
         goto out;
     }
 
-    DEBUG_PRINT("Requested number of teams: %d\n", num_teams + NVSHMEM_INTERNAL_TEAMS);
+    team_slots = (num_teams + NVSHMEM_INTERNAL_TEAMS) * team_slots_per_team();
+    DEBUG_PRINT("Requested number of teams: %d\n", team_slots);
     if (!max_team_env_value) {
-        sprintf(size_string, "%d", num_teams + NVSHMEM_INTERNAL_TEAMS);
+        sprintf(size_string, "%d", team_slots);
         status = setenv("NVSHMEM_MAX_TEAMS", size_string, 1);
     }
     if (status) {
