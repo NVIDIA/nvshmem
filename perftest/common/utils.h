@@ -69,6 +69,18 @@ void init_test_case_kernel(CUfunction *kernel, const char *kernel_name);
         return -1;                                                                     \
     }
 
+/* Open MPI's predefined handles are addresses of objects inside libmpi, so they are looked up
+ * in the dlopen'ed library. MPICH-derived MPIs define them as integer constants in mpi.h, which
+ * are usable without linking libmpi. NVSHMEMTEST_MPI_LIB overrides the library name. */
+#ifdef OPEN_MPI
+#define NVSHMEMTEST_MPI_LIB_DEFAULT "libmpi.so.40"
+#define NVSHMEMTEST_MPI_HANDLE(type, handle, ompi_symbol) \
+    ((type)dlsym(nvshmemi_mpi_handle, ompi_symbol))
+#else
+#define NVSHMEMTEST_MPI_LIB_DEFAULT "libmpi.so.12"
+#define NVSHMEMTEST_MPI_HANDLE(type, handle, ompi_symbol) (handle)
+#endif
+
 typedef int (*fnptr_MPI_Init)(int *argc, char ***argv);
 typedef int (*fnptr_MPI_Bcast)(void *buffer, int count, MPI_Datatype datatype, int root,
                                MPI_Comm comm);

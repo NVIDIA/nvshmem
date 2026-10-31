@@ -200,7 +200,11 @@ MPI_Datatype MPI_UINT8_T_PLACEHOLDER;
 MPI_Datatype *mpi_uint8_ptr;
 
 int nvshmemi_load_mpi() {
-    nvshmemi_mpi_handle = dlopen("libmpi.so.40", RTLD_NOW | RTLD_GLOBAL | RTLD_DEEPBIND);
+    const char *mpi_lib = getenv("NVSHMEMTEST_MPI_LIB");
+    if (mpi_lib == NULL) {
+        mpi_lib = NVSHMEMTEST_MPI_LIB_DEFAULT;
+    }
+    nvshmemi_mpi_handle = dlopen(mpi_lib, RTLD_NOW | RTLD_GLOBAL | RTLD_DEEPBIND);
     if (nvshmemi_mpi_handle == NULL) {
         // Print the error number and description from errno.
         fprintf(stderr, "dlopen failed: errno = %d, description = %s\n", errno, strerror(errno));
@@ -211,9 +215,10 @@ int nvshmemi_load_mpi() {
             fprintf(stderr, "dlerror: %s\n", dlerror_msg);
         }
         fprintf(stderr,
-                "Unable to dlopen libmpi.so.40."
-                "Please add it to your LD_LIBRARY_PATH or run without"
-                " NVSHMEMTEST_USE_MPI_LAUNCHER.\n");
+                "Unable to dlopen %s. "
+                "Please add it to your LD_LIBRARY_PATH, set NVSHMEMTEST_MPI_LIB or run without"
+                " NVSHMEMTEST_USE_MPI_LAUNCHER.\n",
+                mpi_lib);
         return -1;
     }
     MPI_LOAD_SYM(MPI_Init);
@@ -357,8 +362,10 @@ void init_wrapper(int *c, char ***v) {
 
         mpi_fn_table.fn_MPI_Init(c, v);
 
-        MPI_COMM_WORLD_PLACEHOLDER = (MPI_Comm)dlsym(nvshmemi_mpi_handle, "ompi_mpi_comm_world");
-        MPI_UINT8_T_PLACEHOLDER = (MPI_Datatype)dlsym(nvshmemi_mpi_handle, "ompi_mpi_uint8_t");
+        MPI_COMM_WORLD_PLACEHOLDER =
+            NVSHMEMTEST_MPI_HANDLE(MPI_Comm, MPI_COMM_WORLD, "ompi_mpi_comm_world");
+        MPI_UINT8_T_PLACEHOLDER =
+            NVSHMEMTEST_MPI_HANDLE(MPI_Datatype, MPI_UINT8_T, "ompi_mpi_uint8_t");
 
         mpi_fn_table.fn_MPI_Comm_rank(MPI_COMM_WORLD_PLACEHOLDER, &rank);
         mpi_fn_table.fn_MPI_Comm_size(MPI_COMM_WORLD_PLACEHOLDER, &nranks);
@@ -370,7 +377,7 @@ void init_wrapper(int *c, char ***v) {
         // node-local rank from a shared-memory communicator split.
         MPI_Comm node_comm;
         int local_rank, dev_count;
-        MPI_Info info_null = (MPI_Info)dlsym(nvshmemi_mpi_handle, "ompi_mpi_info_null");
+        MPI_Info info_null = NVSHMEMTEST_MPI_HANDLE(MPI_Info, MPI_INFO_NULL, "ompi_mpi_info_null");
         mpi_fn_table.fn_MPI_Comm_split_type(MPI_COMM_WORLD_PLACEHOLDER, MPI_COMM_TYPE_SHARED, rank,
                                             info_null, &node_comm);
         mpi_fn_table.fn_MPI_Comm_rank(node_comm, &local_rank);

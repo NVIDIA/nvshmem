@@ -43,8 +43,24 @@ MPI_Datatype *mpi_uint8_ptr;
         return -1;                                                                     \
     }
 
+/* Open MPI's predefined handles are addresses of objects inside libmpi, so they are looked up
+ * in the dlopen'ed library. MPICH-derived MPIs define them as integer constants in mpi.h, which
+ * are usable without linking libmpi. NVSHMEMTEST_MPI_LIB overrides the library name. */
+#ifdef OPEN_MPI
+#define NVSHMEMTEST_MPI_LIB_DEFAULT "libmpi.so.40"
+#define NVSHMEMTEST_MPI_HANDLE(type, handle, ompi_symbol) \
+    ((type)dlsym(nvshmemi_mpi_handle, ompi_symbol))
+#else
+#define NVSHMEMTEST_MPI_LIB_DEFAULT "libmpi.so.12"
+#define NVSHMEMTEST_MPI_HANDLE(type, handle, ompi_symbol) (handle)
+#endif
+
 int nvshmemi_load_mpi() {
-    nvshmemi_mpi_handle = dlopen("libmpi.so.40", RTLD_NOW | RTLD_GLOBAL | RTLD_DEEPBIND);
+    const char *mpi_lib = getenv("NVSHMEMTEST_MPI_LIB");
+    if (mpi_lib == NULL) {
+        mpi_lib = NVSHMEMTEST_MPI_LIB_DEFAULT;
+    }
+    nvshmemi_mpi_handle = dlopen(mpi_lib, RTLD_NOW | RTLD_GLOBAL | RTLD_DEEPBIND);
     if (nvshmemi_mpi_handle == NULL) {
         // Print the error number and description from errno.
         fprintf(stderr, "dlopen failed: errno = %d, description = %s\n", errno, strerror(errno));
@@ -55,9 +71,10 @@ int nvshmemi_load_mpi() {
             fprintf(stderr, "dlerror: %s\n", dlerror_msg);
         }
         fprintf(stderr,
-                "Unable to dlopen libmpi.so.40."
-                "Please add it to your LD_LIBRARY_PATH or run without"
-                " NVSHMEMTEST_USE_MPI_LAUNCHER.\n");
+                "Unable to dlopen %s. "
+                "Please add it to your LD_LIBRARY_PATH, set NVSHMEMTEST_MPI_LIB or run without"
+                " NVSHMEMTEST_USE_MPI_LAUNCHER.\n",
+                mpi_lib);
         return -1;
     }
     MPI_LOAD_SYM(MPI_Init);
@@ -80,8 +97,9 @@ void nvshmemi_init_mpi(int *c, char ***v) {
 
     mpi_fn_table.fn_MPI_Init(c, v);
 
-    MPI_COMM_WORLD_PLACEHOLDER = (MPI_Comm)dlsym(nvshmemi_mpi_handle, "ompi_mpi_comm_world");
-    MPI_UINT8_T_PLACEHOLDER = (MPI_Datatype)dlsym(nvshmemi_mpi_handle, "ompi_mpi_uint8_t");
+    MPI_COMM_WORLD_PLACEHOLDER =
+        NVSHMEMTEST_MPI_HANDLE(MPI_Comm, MPI_COMM_WORLD, "ompi_mpi_comm_world");
+    MPI_UINT8_T_PLACEHOLDER = NVSHMEMTEST_MPI_HANDLE(MPI_Datatype, MPI_UINT8_T, "ompi_mpi_uint8_t");
 
     mpi_fn_table.fn_MPI_Comm_rank(MPI_COMM_WORLD_PLACEHOLDER, &rank);
     mpi_fn_table.fn_MPI_Comm_size(MPI_COMM_WORLD_PLACEHOLDER, &nranks);
