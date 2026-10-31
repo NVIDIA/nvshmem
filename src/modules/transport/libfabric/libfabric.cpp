@@ -1758,8 +1758,14 @@ static int nvshmemt_libfabric_quiet(struct nvshmem_transport *tcurr, int /*pe*/,
     if (libfabric_state->provider != NVSHMEMT_LIBFABRIC_PROVIDER_EFA) {
         for (int i = ep_start_idx; i < ep_end_idx; i++) {
             const nvshmemt_libfabric_endpoint_t &ep = *libfabric_state->eps[i];
-            status =
-                fi_cntr_wait(ep.counter, ep.submitted_ops, NVSHMEMT_LIBFABRIC_QUIET_TIMEOUT_MS);
+            const uint64_t error_ops_before = fi_cntr_readerr(ep.counter);
+            /* The timeout only bounds each wait. Operations still in flight after it, for example
+             * several MiB of puts queued behind each other, are not an error: keep waiting until
+             * they complete or an operation fails. */
+            do {
+                status = fi_cntr_wait(ep.counter, ep.submitted_ops,
+                                      NVSHMEMT_LIBFABRIC_QUIET_TIMEOUT_MS);
+            } while (status == -FI_ETIMEDOUT && fi_cntr_readerr(ep.counter) == error_ops_before);
             if (status) {
                 uint64_t completed_ops = fi_cntr_read(ep.counter);
                 uint64_t error_ops = fi_cntr_readerr(ep.counter);
