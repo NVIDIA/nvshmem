@@ -2611,6 +2611,13 @@ __device__ inline int nvshmemi_tile_allreduce(nvshmem_team_t team, src_tensor_t 
                 return NVSHMEMX_ERROR_INVALID_VALUE;
             }
 
+            // Only the root uses the multicast addresses, but every PE checks them so that a team
+            // without NVLS fails on all PEs instead of leaving the others to wait for the root.
+            if ((nvshmemx_mc_ptr(team, src_tensor.data()) == nullptr) ||
+                (nvshmemx_mc_ptr(team, dst_tensor.data()) == nullptr)) {
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
+
             __threadfence();
             nvshmemi_sync_algo_threadgroup<scope>(team);
             if (root != nvshmem_team_my_pe(team)) {
@@ -2704,6 +2711,12 @@ __device__ inline int nvshmemi_tile_reduce(nvshmem_team_t team, src_tensor_t src
     if constexpr (algo == nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI) {
         // check for NVLS support in hardware
         if constexpr (nvshmemi_device_has_nvls_multimem) {
+            // Only the root reads through the multicast address, but every PE checks it so that a
+            // team without NVLS fails on all PEs instead of leaving the others to wait for the root.
+            if (nvshmemx_mc_ptr(team, src_tensor.data()) == nullptr) {
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
+
             // As this algo PULLs data from other PEs, we need to ensure src data is ready
             // Ensure all PEs have reached this point and pushed their data to local mem
 
