@@ -78,9 +78,11 @@ int bootstrap_set_bootattr(int flags, void *nvattr, bootstrap_attr_t *boot_attr)
 
             break;
         case BOOTSTRAP_SHMEM:
-            if (nvshmem_attr) {
-                assert(boot_attr != NULL);
-                (*boot_attr).initialize_shmem = 0;
+            /* The plugin initializes OpenSHMEM itself unless the application already did and
+             * said so with NVSHMEMX_INIT_WITH_SHMEM (e.g. NVSHMEM_BOOTSTRAP=SHMEM with
+             * nvshmem_init()). */
+            if (boot_attr != NULL) {
+                (*boot_attr).initialize_shmem = (flags & NVSHMEMX_INIT_WITH_SHMEM) ? 0 : 1;
             }
 
             break;
