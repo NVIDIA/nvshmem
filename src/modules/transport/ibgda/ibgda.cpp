@@ -4542,12 +4542,14 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     int mype = transport->my_pe;
     int num_rc_eps;
     std::vector<bool> device_finalized;
+    std::vector<bool> endpoints_destroyed;
 
     if (!ibgda_state) {
         goto out;
     }
 
     device_finalized.resize(ibgda_state->common.n_raw_devices, false);
+    endpoints_destroyed.resize(ibgda_state->common.n_raw_devices, false);
 
     ibgda_device_lkeys.clear();
     ibgda_device_rkeys.clear();
@@ -4585,6 +4587,13 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     for (int i = 0; i < ibgda_state->n_devs_selected; i++) {
         dev_id = ibgda_state->selected_dev_ids[i];
+
+        // Duplicate logical slots share one raw device's endpoints and shared objects.
+        if (endpoints_destroyed[dev_id]) {
+            continue;
+        }
+
+        endpoints_destroyed[dev_id] = true;
         device = ((struct ibgda_device *)ibgda_state->common.devices + dev_id);
 
         for (int i = 0; i < device->dci.num_eps; ++i) {
