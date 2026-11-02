@@ -309,6 +309,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgr
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
         nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::disallowed>(
             team, dest, source, dest_offset, nelems);
@@ -316,6 +317,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgr
         nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
             team, dest, source, dest_offset, nelems);
     }
+#else
+    nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
+        team, dest, source, dest_offset, nelems);
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>

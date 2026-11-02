@@ -227,6 +227,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup_im
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root, int k) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
         nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::disallowed>(
             team, dest, source, nelems, PE_root, k);
@@ -234,6 +235,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
         nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
             team, dest, source, nelems, PE_root, k);
     }
+#else
+    nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(team, dest, source,
+                                                                              nelems, PE_root, k);
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>
@@ -325,6 +330,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
         nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::disallowed>(
             team, dest, source, nelems, PE_root);
@@ -332,6 +338,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup
         nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
             team, dest, source, nelems, PE_root);
     }
+#else
+    nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(team, dest, source,
+                                                                                 nelems, PE_root);
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>
