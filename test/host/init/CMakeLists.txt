@@ -1,4 +1,5 @@
 nvshmem_add_test(nonuniform_pes.cu)
+nvshmem_add_test(nonuniform_hierarchical.cu)
 nvshmem_add_test(cuobject_init.cpp)
 nvshmem_add_test(cuobject_init_no_rdc.cpp)
 nvshmem_add_test_no_device(host_api_no_rdc.cu)
