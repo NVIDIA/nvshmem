@@ -740,11 +740,10 @@ int nvshmemi_build_transport_map(nvshmemi_state_t *state) {
             }
         }
 
+        /* Do not leave here: the other PEs wait for this PE in the allgather below */
         if ((!reach_any) && (!nvshmemi_options.BYPASS_ACCESSIBILITY_CHECK)) {
-            status = NVSHMEMX_ERROR_NOT_SUPPORTED;
             fprintf(stderr, "%s:%d: [GPU %d] Peer GPU %d is not accessible, exiting ... \n",
                     __FILE__, __LINE__, state->mype, i);
-            goto out;
         }
     }
     INFO(NVSHMEM_TOPO, "[%d] transport bitmap: %x", state->mype, state->transport_bitmap);
@@ -754,6 +753,18 @@ int nvshmemi_build_transport_map(nvshmemi_state_t *state) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather of ipc handles failed \n");
 
+    /* Fail on every PE if any PE cannot reach a peer, so that no PE is left waiting */
+    if (!nvshmemi_options.BYPASS_ACCESSIBILITY_CHECK) {
+        for (int i = 0; i < state->npes * state->npes; i++) {
+            if (state->transport_map[i] == 0) {
+                status = NVSHMEMX_ERROR_NOT_SUPPORTED;
+                NVSHMEMI_ERROR_PRINT("[GPU %d] PE %d cannot reach PE %d", state->mype,
+                                     i / state->npes, i % state->npes);
+                goto out;
+            }
+        }
+    }
+
 out:
     if (local_map) {
         free(local_map);
@@ -761,6 +772,7 @@ out:
     if (status) {
         if (state->transport_map) {
             free(state->transport_map);
+            state->transport_map = NULL;
         }
     }
     return status;
