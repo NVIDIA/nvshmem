@@ -286,7 +286,8 @@ int nvshmemi_heap_registration::map_dynamic_p2p_chunk(CUmemGenericAllocationHand
         return NVSHMEMX_SUCCESS;
     }
 
-    switch (effective_handle_type_) {
+    // CUDA < 12.4 provides the fabric handle value through the compatibility shim, not the enum.
+    switch (static_cast<unsigned int>(effective_handle_type_)) {
         case CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR:
             return map_posix_p2p_chunk(handle, buf, size);
         case CU_MEM_HANDLE_TYPE_FABRIC:
