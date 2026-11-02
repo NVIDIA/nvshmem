@@ -57,7 +57,7 @@ def _make_tile_get_kernel(ct: Any, my_pe: Any, n_pes: Any, get_block: Any) -> An
 
 def run() -> None:
     """Put two Tiles of different extents to, and get a Tile from, the next rank."""
-    from cuda.core.experimental import Device, system
+    from cuda.core import Device, system
     from mpi4py import MPI
     import cuda.tile as ct
     import nvshmem.core
