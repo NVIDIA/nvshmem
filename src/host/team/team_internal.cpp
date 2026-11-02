@@ -1887,6 +1887,15 @@ int nvshmemi_team_create_internal_teams(nvshmemi_team_t *myteam) {
         return status;
     }
 
+    // Invalid subteam handles select flat collective fallbacks.
+    if (!nvshmemi_pe_topology.has_block_hierarchy(myteam->pe_mapping, myteam->size)) {
+        INFO(NVSHMEM_COLL,
+             "Skipping hierarchical subteams for team %d: non-uniform PEs per node or "
+             "incompatible PE ordering\n",
+             myteam->team_idx);
+        return status;
+    }
+
     nvshmemi_barrier(myteam->team_idx);
 
     if (nvshmemi_team_split_node(myteam, &myteam->team_node) != 0) {

@@ -54,6 +54,34 @@ struct nvshmemi_pe_topology_t {
         return true;
     }
 
+    // Require uniform PEs per node, node-major ordering, and matching local ranks.
+    bool has_block_hierarchy(const int *pes, int count) const {
+        if (count <= 0) {
+            return false;
+        }
+        // Infer the child team's group size.
+        int first_node = node_of_pe[pes[0]];
+        int pes_per_node = 0;
+        while (pes_per_node < count && node_of_pe[pes[pes_per_node]] == first_node) {
+            ++pes_per_node;
+        }
+        // Requires the same PE count on every node.
+        if (count % pes_per_node != 0) {
+            return false;
+        }
+        // Each node must contribute the same local ranks in the same order.
+        for (int row = pes_per_node; row < count; row += pes_per_node) {
+            int node = node_of_pe[pes[row]];
+            for (int column = 0; column < pes_per_node; ++column) {
+                int pe = pes[row + column];
+                if (node_of_pe[pe] != node || local_rank[pe] != local_rank[pes[column]]) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     bool is_roundrobin_distribution() const {
         if (!is_uniform()) {
             return false;
