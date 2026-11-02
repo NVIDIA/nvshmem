@@ -12,6 +12,7 @@
 #include <vector>
 #include "internal/host/nvshmemi_transport_view.hpp"
 #include "internal/host/nvshmemi_types.h"
+#include "internal/host_transport/cudawrap.h"
 
 class nvshmemi_handle_table;
 class nvshmemi_mem_p2p_transport;
