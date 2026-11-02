@@ -1365,12 +1365,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet_impl(int pe,
     }
 }
 
-/* Thread-scope quiet is frequently elected by a block or warp after a collective
- * operation. Keep its transport and CFT completion machinery out of the caller's
- * register allocation while retaining inlining for collective quiet scopes. */
+/* Keep CFT completion machinery out of callers on supported builds. Inline thread-scope quiet
+ * otherwise to avoid device function call overhead on latency-sensitive paths. */
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 inline __device__ NVSHMEMI_NOINLINE void nvshmemi_quiet_thread(int pe,
                                                                nvshmemx_qp_handle_t *qp_handle,
                                                                int num_qps) {
+#else
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_quiet_thread(int pe,
+                                                                    nvshmemx_qp_handle_t *qp_handle,
+                                                                    int num_qps) {
+#endif
     nvshmemi_quiet_impl<NVSHMEMI_THREADGROUP_THREAD>(pe, qp_handle, num_qps);
 }
 
