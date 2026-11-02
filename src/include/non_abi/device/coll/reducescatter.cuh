@@ -94,6 +94,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
         nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE,
                                                         nvshmemi_tma_use::disallowed>(
@@ -102,6 +103,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
         nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(
             team, dest, source, nreduce);
     }
+#else
+    nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(
+        team, dest, source, nreduce);
+#endif
 }
 
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>

@@ -1395,6 +1395,7 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void nvshmemi_gpu_rdxn_
                 sizeof(long)) >=
                    ((k - 1) * nreduce + k * teami->reduce_recexch.step2_nphases * nreduce +
                     teami->reduce_recexch.step2_nphases * nreduce)) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (teami->has_cft_routed_peer) {
             gpu_rdxn_recexch_threadgroup<TYPE, OP, SCOPE, nvshmemi_tma_use::disallowed>(
                 team, dest, source, nreduce);
@@ -1402,7 +1403,12 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void nvshmemi_gpu_rdxn_
             gpu_rdxn_recexch_threadgroup<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(
                 team, dest, source, nreduce);
         }
+#else
+        gpu_rdxn_recexch_threadgroup<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(team, dest, source,
+                                                                                 nreduce);
+#endif
     } else {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
         if (teami->has_cft_routed_peer) {
             gpu_rdxn_segment_threadgroup<TYPE, OP, SCOPE, nvshmemi_tma_use::disallowed>(
                 team, dest, source, nreduce);
@@ -1410,6 +1416,10 @@ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE __device__ void nvshmemi_gpu_rdxn_
             gpu_rdxn_segment_threadgroup<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(
                 team, dest, source, nreduce);
         }
+#else
+        gpu_rdxn_segment_threadgroup<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(team, dest, source,
+                                                                                 nreduce);
+#endif
     }
 #endif
 #endif
