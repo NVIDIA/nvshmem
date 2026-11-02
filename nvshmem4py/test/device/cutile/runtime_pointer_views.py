@@ -50,7 +50,7 @@ def _make_kernels(ct: Any, api: Any) -> Any:
 
 def run() -> None:
     """Store through a peer view and put bfloat16 data to the next rank."""
-    from cuda.core.experimental import Device, system
+    from cuda.core import Device, system
     from mpi4py import MPI
     import cuda.tile as ct
     import nvshmem.core

@@ -26,11 +26,11 @@ For a first validation, use two PEs on one node and an operation with easy-to-ch
 Use this MPI-initialized all-reduce as a first example after `$nvshmem-docs` confirms that the APIs apply to the user's version. It assigns each PE a local value of one plus its node-local rank, sums the symmetric source arrays across `TEAM_WORLD`, and prints the result. With two PEs on one node, each PE should print a destination array containing `3`.
 
 ```python
-from cuda.core.experimental import Device, system
+from cuda.core import Device, system
 from mpi4py import MPI
 import nvshmem.core as nvshmem
 
-local_rank = MPI.COMM_WORLD.Get_rank() % system.num_devices
+local_rank = MPI.COMM_WORLD.Get_rank() % system.get_num_devices()
 device = Device(local_rank)
 device.set_current()
 stream = device.create_stream()
