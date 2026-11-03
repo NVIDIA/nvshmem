@@ -747,6 +747,7 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_fence() {
         void *peer_base_addr = (void *)__ldg(                                                      \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);          \
         const bool can_use_handle_atomic =                                                         \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                           \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_ADD>(target, pe);              \
         if (nvshmemi_use_ldst_atomics_path() &&                                                    \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                          \
@@ -782,6 +783,7 @@ NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_fence() {
         void *peer_base_addr = (void *)__ldg(                                              \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);  \
         const bool can_use_handle_atomic =                                                 \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                   \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_ADD>(target, pe);      \
         if (nvshmemi_use_ldst_atomics_path() &&                                            \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                  \
@@ -823,6 +825,7 @@ NVSHMEM_TYPE_ATOMIC_FETCH_ADD_CAST(size, size_t, unsigned long long int)
     nvshmem##Prefix##_##Name##_atomic_add(Type *target, Type value, int pe) {           \
         /*need a better check for case when to use only proxy-based atomics*/           \
         const bool can_use_handle_atomic =                                              \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_ADD>(target, pe);         \
         if (nvshmemi_use_ldst_atomics_path() &&                                         \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {               \
@@ -869,6 +872,7 @@ NVSHMEM_TYPE_ATOMIC_ADD_EMULATE(size, size_t)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_INC>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -892,6 +896,7 @@ NVSHMEM_TYPE_ATOMIC_ADD_EMULATE(size, size_t)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_INC>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -939,6 +944,7 @@ NVSHMEM_TYPE_ATOMIC_FETCH_INC_EMULATE(size, size_t)
         Type *target, int pe) {                                                                  \
         /*need a better check for case when to use only proxy-based atomcis*/                    \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_ADD>(target, pe);                  \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -972,6 +978,7 @@ NVSHMEM_TYPE_ATOMIC_INC_EMULATE(size, size_t)
         void *peer_base_addr = (void *)__ldg(                                                   \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);       \
         const bool can_use_handle_atomic =                                                      \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                        \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_COMPARE_SWAP>(target, pe);        \
         if (nvshmemi_use_ldst_atomics_path() &&                                                 \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                       \
@@ -995,6 +1002,7 @@ NVSHMEM_TYPE_ATOMIC_INC_EMULATE(size, size_t)
         void *peer_base_addr = (void *)__ldg(                                                   \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);       \
         const bool can_use_handle_atomic =                                                      \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                        \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_COMPARE_SWAP>(target, pe);        \
         if (nvshmemi_use_ldst_atomics_path() &&                                                 \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                       \
@@ -1032,6 +1040,7 @@ NVSHMEM_TYPE_COMPARE_SWAP_CAST(ptrdiff, ptrdiff_t, unsigned long long int)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_AND>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -1055,6 +1064,7 @@ NVSHMEM_TYPE_COMPARE_SWAP_CAST(ptrdiff, ptrdiff_t, unsigned long long int)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_AND>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -1084,6 +1094,7 @@ NVSHMEM_TYPE_FETCH_AND_CAST(uint64, uint64_t, unsigned long long int)
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##Name##_atomic_and(     \
         Type *target, Type value, int pe) {                                                    \
         const bool can_use_handle_atomic =                                                     \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                       \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_AND>(target, pe);                \
         if (nvshmemi_use_ldst_atomics_path() &&                                                \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                      \
@@ -1109,6 +1120,7 @@ NVSHMEM_TYPE_AND_EMULATE(uint64, uint64_t)
         void *peer_base_addr = (void *)__ldg(                                                   \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);       \
         const bool can_use_handle_atomic =                                                      \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                        \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_OR>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                 \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                       \
@@ -1132,6 +1144,7 @@ NVSHMEM_TYPE_AND_EMULATE(uint64, uint64_t)
         void *peer_base_addr = (void *)__ldg(                                                   \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);       \
         const bool can_use_handle_atomic =                                                      \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                        \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_OR>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                 \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                       \
@@ -1161,6 +1174,7 @@ NVSHMEM_TYPE_FETCH_OR_CAST(uint64, uint64_t, unsigned long long int)
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##Name##_atomic_or(     \
         Type *target, Type value, int pe) {                                                   \
         const bool can_use_handle_atomic =                                                    \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                      \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_OR>(target, pe);                \
         if (nvshmemi_use_ldst_atomics_path() &&                                               \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                     \
@@ -1186,6 +1200,7 @@ NVSHMEM_TYPE_OR_EMULATE(uint64, uint64_t)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_XOR>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -1209,6 +1224,7 @@ NVSHMEM_TYPE_OR_EMULATE(uint64, uint64_t)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_FETCH_XOR>(target, pe);            \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -1238,6 +1254,7 @@ NVSHMEM_TYPE_FETCH_XOR_CAST(uint64, uint64_t, unsigned long long int)
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##Name##_atomic_xor(     \
         Type *target, Type value, int pe) {                                                    \
         const bool can_use_handle_atomic =                                                     \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                       \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_XOR>(target, pe);                \
         if (nvshmemi_use_ldst_atomics_path() &&                                                \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                      \
@@ -1263,6 +1280,7 @@ NVSHMEM_TYPE_XOR_EMULATE(uint64, uint64_t)
         void *peer_base_addr = (void *)__ldg(                                                    \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);        \
         const bool can_use_handle_atomic =                                                       \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                         \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_SWAP>(target, pe);                 \
         if (nvshmemi_use_ldst_atomics_path() &&                                                  \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                        \
@@ -1286,6 +1304,7 @@ NVSHMEM_TYPE_XOR_EMULATE(uint64, uint64_t)
         void *peer_base_addr = (void *)__ldg(                                                      \
             (const unsigned long long *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);          \
         const bool can_use_handle_atomic =                                                         \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                           \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_SWAP>(target, pe);                   \
         if (nvshmemi_use_ldst_atomics_path() &&                                                    \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                          \
@@ -1351,6 +1370,7 @@ NVSHMEM_TYPE_FETCH_EMULATE_CAST(ptrdiff, ptrdiff_t, ulonglong, unsigned long lon
     NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmem_##Name##_atomic_set(     \
         Type *target, Type value, int pe) {                                                    \
         const bool can_use_handle_atomic =                                                     \
+            nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_atomics_path(), pe) &&                       \
             nvshmemi_can_use_handle_atomic<Type, NVSHMEMI_AMO_SET>(target, pe);                \
         if (nvshmemi_use_ldst_atomics_path() &&                                                \
             !(can_use_handle_atomic && nvshmemi_is_le_prioritized(pe))) {                      \
