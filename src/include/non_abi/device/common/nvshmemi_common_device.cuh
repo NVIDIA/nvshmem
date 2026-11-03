@@ -1665,13 +1665,15 @@ template <typename T, threadgroup_t SCOPE,
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
+    void *dest_actual = dest;
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
         !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
                                                                              SCOPE, dest, source)) {
-        char *dest_actual =
-            (char *)(peer_base_addr) + ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base));
+        dest_actual = reinterpret_cast<char *>(peer_base_addr) +
+                      (reinterpret_cast<char *>(dest) -
+                       reinterpret_cast<char *>(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
         /* TMA fast path when this CTA registered smem.  Fall through to P2P
          * stores on alignment/size/registration failure. */
@@ -1683,20 +1685,34 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
                 return;
             }
         }
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
                                                                            SCOPE, dest, source)) {
-        nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
+        if (pe != nvshmemi_device_state_d.mype) {
+            nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
+            return;
+        }
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
         nvshmemi_cft_force_unsupported();
+        return;
 #endif
     } else {
         nvshmemi_rma_nbi<SCOPE, NVSHMEMI_OP_PUT, REGION_OPERATION>(
             (void *)dest, (void *)source, nelems * sizeof(T), pe, qp_index);
+        return;
     }
+    /* Opaque read/write operands prevent copy bounds and addresses from being
+     * hoisted across CFT/remote paths, reducing live ranges and register pressure.
+     * The empty asm preserves operand values at runtime. */
+    const void *copy_source = source;
+    size_t copy_bytes = nelems * sizeof(T);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    asm volatile("" : "+l"(dest_actual), "+l"(copy_source), "+l"(copy_bytes));
+#endif
+    /* P2P and self-PE handle operations share the ordinary copy fallback. */
+    nvshmemi_memcpy_threadgroup<SCOPE>(dest_actual, copy_source, copy_bytes);
 }
 
 template <typename T, threadgroup_t SCOPE,
