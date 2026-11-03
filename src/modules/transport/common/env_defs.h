@@ -170,6 +170,9 @@ NVSHMEMI_ENV_DEF(LIBFABRIC_SIGNAL_WAIT_SPIN_COUNT, int, 1024, NVSHMEMI_ENV_CAT_T
 
 #if defined(NVSHMEM_IBGDA_SUPPORT) || defined(NVSHMEM_ENV_ALL)
 /** GPU-initiated communication **/
+NVSHMEMI_ENV_DEF(IBGDA_ENABLE_Q_COUNTER, bool, true, NVSHMEMI_ENV_CAT_TRANSPORT,
+                 "Best-effort association of DevX DCI/RC QPs with the driver default Q-Counter "
+                 "discovered from an existing Verbs DCT. Set to 0 to disable.")
 NVSHMEMI_ENV_DEF(IBGDA_NUM_DCT, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of DCT QPs used in GPU-initiated communication transport.")
 NVSHMEMI_ENV_DEF(IBGDA_NUM_DCI, int, 1, NVSHMEMI_ENV_CAT_TRANSPORT,

@@ -3,13 +3,86 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <dlfcn.h>
+#include <errno.h>
 #include <infiniband/mlx5dv.h>
+#include <infiniband/verbs.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "transport_mlx5_common.h"
 #include "transport_common.h"
 #include "mlx5_ifc.h"
 #include "non_abi/c/nvshmemi_error_macros.h"
+
+/* IFC layout arrays describe bits, not the byte layout of command buffers. */
+static_assert(offsetof(struct mlx5_ifc_dctc_bits, counter_set_id) == 0x60,
+              "DCT counter_set_id must start at bit 0x60");
+static_assert(sizeof(((struct mlx5_ifc_dctc_bits *)0)->counter_set_id) == 0x8,
+              "DCT counter_set_id must be 8 bits");
+static_assert(sizeof(struct mlx5_ifc_dctc_bits) == 0x380, "Preserve the existing DCTC layout");
+static_assert(DEVX_ST_SZ_BYTES(query_dct_in) == 0x10, "Unexpected QUERY_DCT input size");
+static_assert(DEVX_ST_SZ_BYTES(query_dct_out) == 0x80, "Unexpected QUERY_DCT output size");
+
+int nvshmemt_mlx5_q_counter_init(void **mlx5_handle, nvshmemt_mlx5_devx_qp_query_fn *query_qp) {
+    if (!mlx5_handle || !query_qp) return NVSHMEMX_ERROR_INVALID_VALUE;
+    *mlx5_handle = nullptr;
+    *query_qp = nullptr;
+
+    void *handle = dlopen("libmlx5.so.1", RTLD_LAZY | RTLD_LOCAL);
+    if (!handle) handle = dlopen("libmlx5.so", RTLD_LAZY | RTLD_LOCAL);
+    if (!handle) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+
+    LOAD_SYM(handle, "mlx5dv_devx_qp_query", *query_qp);
+    if (!*query_qp) {
+        dlclose(handle);
+        return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+
+    *mlx5_handle = handle;
+    return NVSHMEMX_SUCCESS;
+}
+
+void nvshmemt_mlx5_q_counter_fini(void **mlx5_handle, nvshmemt_mlx5_devx_qp_query_fn *query_qp) {
+    if (query_qp) *query_qp = nullptr;
+    if (mlx5_handle && *mlx5_handle) {
+        dlclose(*mlx5_handle);
+        *mlx5_handle = nullptr;
+    }
+}
+
+int nvshmemt_mlx5_query_dct_q_counter(nvshmemt_mlx5_devx_qp_query_fn query_qp, struct ibv_qp *dct,
+                                      uint8_t *counter_set_id) {
+    if (!counter_set_id) return NVSHMEMX_ERROR_INVALID_VALUE;
+    *counter_set_id = 0;
+    if (!dct) return NVSHMEMX_ERROR_INVALID_VALUE;
+    if (!query_qp) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+
+    uint32_t cmd_in[DEVX_ST_SZ_BYTES(query_dct_in) / sizeof(uint32_t)] = {0};
+    uint32_t cmd_out[DEVX_ST_SZ_BYTES(query_dct_out) / sizeof(uint32_t)] = {0};
+    DEVX_SET(query_dct_in, cmd_in, opcode, MLX5_CMD_OP_QUERY_DCT);
+    DEVX_SET(query_dct_in, cmd_in, dctn, dct->qp_num);
+
+    /* A DCT is a Verbs object: QUERY_QP and devx_obj_query are not substitutes here. */
+    errno = 0;
+    int status = query_qp(dct, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
+    int query_errno = errno;
+    if (status || DEVX_GET(query_dct_out, cmd_out, status)) {
+        NVSHMEMI_WARN_PRINT(
+            "Q-Counter QUERY_DCT failed: dctn %u ret %d (%s) errno %d (%s) "
+            "devx_status 0x%x syndrome 0x%x",
+            dct->qp_num, status, nvshmemt_strerror_from_status(status), query_errno,
+            nvshmemt_strerror_from_errno(query_errno), DEVX_GET(query_dct_out, cmd_out, status),
+            DEVX_GET(query_dct_out, cmd_out, syndrome));
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
+
+    void *dctc = DEVX_ADDR_OF(query_dct_out, cmd_out, dctc);
+    uint8_t id = DEVX_GET(dctc, dctc, counter_set_id);
+    if (!id) return NVSHMEMX_ERROR_NOT_SUPPORTED;
+    *counter_set_id = id;
+    return NVSHMEMX_SUCCESS;
+}
 
 bool nvshmemt_ib_common_query_mlx5_caps(struct ibv_context *context) {
     int status;

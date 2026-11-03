@@ -243,8 +243,22 @@ struct ibgda_rc_handle {
     uint64_t iid;
 };
 
+enum ibgda_q_counter_state : uint8_t {
+    IBGDA_Q_COUNTER_UNINITIALIZED = 0,
+    IBGDA_Q_COUNTER_AVAILABLE,
+    IBGDA_Q_COUNTER_UNAVAILABLE,
+};
+
+struct ibgda_q_counter {
+    uint8_t id;
+    ibgda_q_counter_state state;
+    uint8_t disabled_qp_types;  // DCI and RC can independently reject the borrowed counter.
+};
+
 struct ibgda_device {
     struct nvshmemt_ib_common_device common_device;
+    /* Borrowed driver counters; never ALLOC/DEALLOC_Q_COUNTER these IDs. */
+    struct ibgda_q_counter default_q_counter[MAX_NUM_PORTS];
     struct {
         int num_eps;
         struct ibgda_ep **eps;
@@ -321,6 +335,8 @@ typedef struct {
     int last_num_rcs;
     int last_num_cqs;
     std::mutex rc_endpoint_lock;
+    void *q_counter_mlx5_handle;
+    nvshmemt_mlx5_devx_qp_query_fn q_counter_query_qp;
 } nvshmemt_ibgda_state_t;
 
 struct ibgda_device_local_only_mhandle_cache {
@@ -378,6 +394,53 @@ static int ibgda_destroy_ep(struct ibgda_ep *ep, nvshmemt_ibgda_state_t *ibgda_s
 /* =============================================================================
  * Utility functions start
  * ============================================================================= */
+
+static void ibgda_init_default_q_counter(nvshmemt_ibgda_state_t *ibgda_state,
+                                       struct ibgda_device *device, int portid) {
+    assert(portid > 0 && portid <= MAX_NUM_PORTS);
+    if (!ibgda_state->common.options->IBGDA_ENABLE_Q_COUNTER) return;
+
+    struct ibgda_q_counter &counter = device->default_q_counter[portid - 1];
+    if (counter.state != IBGDA_Q_COUNTER_UNINITIALIZED) return;
+    /* Cache failed discovery too: dynamic RC creation must not repeatedly query or warn. */
+    counter.state = IBGDA_Q_COUNTER_UNAVAILABLE;
+    counter.id = 0;
+    if (!ibgda_state->q_counter_query_qp) return;
+
+    struct ibgda_ep *dct = nullptr;
+    if (device->dct.eps) {
+        for (int i = 0; i < device->dct.num_eps; ++i) {
+            struct ibgda_ep *ep = device->dct.eps[i];
+            if (ep && ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCT && ep->portid == portid) {
+                dct = ep;
+                break;
+            }
+        }
+    }
+    if (!dct) {
+        NVSHMEMI_WARN_PRINT(
+            "No Verbs DCT on device %s port %d for default Q-Counter discovery; "
+            "DevX QPs on this port will use counter_set_id 0",
+            device->common_device.dev->name, portid);
+        return;
+    }
+
+    uint8_t id = 0;
+    int status = nvshmemt_mlx5_query_dct_q_counter(ibgda_state->q_counter_query_qp, dct->ib_qp, &id);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_WARN_PRINT(
+            "Default Q-Counter unavailable: device %s port %d dctn %u status %d; "
+            "DevX QPs on this port will use counter_set_id 0",
+            device->common_device.dev->name, portid, dct->qpn, status);
+        return;
+    }
+
+    counter.id = id;
+    counter.state = IBGDA_Q_COUNTER_AVAILABLE;
+    INFO(ibgda_state->common.log_level,
+         "Using default Q-Counter %u from Verbs DCT %u on device %s port %d for DevX QPs",
+         id, dct->qpn, device->common_device.dev->name, portid);
+}
 
 static int ibgda_parse_qp_map_by(nvshmemi_ibgda_device_qp_map_type_t *out_map_by, const char *str,
                                  bool allow_none) {
@@ -1594,10 +1657,42 @@ static void ibgda_get_device_cq(nvshmemi_ibgda_device_cq_t *dev_cq, const struct
     dev_cq->dbrec = (__be32 *)((uintptr_t)gcq->dbr_mobject->aligned.gpu_ptr);
 }
 
+static bool ibgda_qp_is_reset(const struct ibgda_ep *ep) {
+    uint32_t cmd_in[DEVX_ST_SZ_BYTES(query_qp_in) / sizeof(uint32_t)] = {0};
+    uint32_t cmd_out[DEVX_ST_SZ_BYTES(query_qp_out) / sizeof(uint32_t)] = {0};
+    DEVX_SET(query_qp_in, cmd_in, opcode, MLX5_CMD_OP_QUERY_QP);
+    DEVX_SET(query_qp_in, cmd_in, qpn, ep->qpn);
+
+    int status = mlx5dv_devx_obj_query(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
+    if (status || DEVX_GET(query_qp_out, cmd_out, status)) {
+        NVSHMEMI_WARN_PRINT(
+            "Unable to confirm RESET state for Q-Counter fallback: qpn %u ret %d (%s) "
+            "devx_status 0x%x syndrome 0x%x",
+            ep->qpn, status, nvshmemt_strerror_from_status(status),
+            DEVX_GET(query_qp_out, cmd_out, status), DEVX_GET(query_qp_out, cmd_out, syndrome));
+        return false;
+    }
+
+    void *qpc = DEVX_ADDR_OF(query_qp_out, cmd_out, qpc);
+    return DEVX_GET(qpc, qpc, state) == MLX5_QPC_STATE_RST;
+}
+
 static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_ep *ep,
-                             const struct ibgda_device *device, int portid) {
+                             struct ibgda_device *device, int portid) {
     int status = 0;
     int rst2init_errno = 0;
+    uint8_t counter_set_id = 0;
+    const uint8_t counter_qp_type = ep->qp_type == NVSHMEMI_IBGDA_DEVICE_QP_TYPE_DCI ? 0x1 : 0x2;
+
+    assert(portid > 0 && portid <= MAX_NUM_PORTS);
+    /* Also handles later RC-only calls and ports skipped by raw-device initialization. */
+    ibgda_init_default_q_counter(ibgda_state, device, portid);
+    struct ibgda_q_counter &counter = device->default_q_counter[portid - 1];
+    if (ibgda_state->common.options->IBGDA_ENABLE_Q_COUNTER &&
+        counter.state == IBGDA_Q_COUNTER_AVAILABLE &&
+        !(counter.disabled_qp_types & counter_qp_type)) {
+        counter_set_id = counter.id;
+    }
 
     uint8_t cmd_in[DEVX_ST_SZ_BYTES(rst2init_qp_in)] = {
         0,
@@ -1647,18 +1742,45 @@ static int ibgda_qp_rst2init(nvshmemt_ibgda_state_t *ibgda_state, struct ibgda_e
     }
 
     DEVX_SET(qpc, qpc, pm_state, MLX5_QPC_PM_STATE_MIGRATED);
-    DEVX_SET(qpc, qpc, counter_set_id, 0x0);  // Not connected to a counter set
+    DEVX_SET(qpc, qpc, counter_set_id, counter_set_id);
 
+    errno = 0;
     status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out, sizeof(cmd_out));
     rst2init_errno = errno;
+    if (counter_set_id && (status || DEVX_GET(rst2init_qp_out, cmd_out, status))) {
+        /* Never retry a timeout or an indeterminate transport failure. This QP has not yet
+         * been published; a successful query must confirm RESET before a single retry. */
+        bool retried = nvshmemt_mlx5_q_counter_retry(
+            status, DEVX_GET(rst2init_qp_out, cmd_out, status), counter_qp_type,
+            counter.disabled_qp_types, [&]() { return ibgda_qp_is_reset(ep); },
+            [&]() {
+                NVSHMEMI_WARN_PRINT(
+                    "Q-Counter %u association failed: type %s device %s port %d qpn %u ret %d "
+                    "devx_status 0x%x syndrome 0x%x; retrying confirmed RESET QP without a counter",
+                    counter_set_id, ibgda_qp_type_name(ep->qp_type),
+                    device->common_device.dev->name, portid, ep->qpn, status,
+                    DEVX_GET(rst2init_qp_out, cmd_out, status),
+                    DEVX_GET(rst2init_qp_out, cmd_out, syndrome));
+                DEVX_SET(qpc, qpc, counter_set_id, 0);
+                memset(cmd_out, 0, sizeof(cmd_out));
+                errno = 0;
+                status = mlx5dv_devx_obj_modify(ep->devx_qp, cmd_in, sizeof(cmd_in), cmd_out,
+                                                sizeof(cmd_out));
+                rst2init_errno = errno;
+                return !status && !DEVX_GET(rst2init_qp_out, cmd_out, status);
+            });
+        if (retried) counter_set_id = 0;
+    }
+    if (!status && DEVX_GET(rst2init_qp_out, cmd_out, status)) status = NVSHMEMX_ERROR_INTERNAL;
     NVSHMEMI_NZ_ERROR_JMP(
         status, NVSHMEMX_ERROR_INTERNAL, out,
         "IBGDA QP modify RESET->INIT failed: type %s device %s port %d link_layer %s "
-        "lid %u local_qpn %u ret %d errno %d (%s) devx_status 0x%x syndrome 0x%x\n",
+        "lid %u local_qpn %u counter_set_id %u ret %d errno %d (%s) devx_status 0x%x syndrome "
+        "0x%x\n",
         ibgda_qp_type_name(ep->qp_type), device->common_device.dev->name, portid,
-        nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn, status,
-        rst2init_errno, strerror(rst2init_errno), DEVX_GET(rst2init_qp_out, cmd_out, status),
-        DEVX_GET(rst2init_qp_out, cmd_out, syndrome));
+        nvshmemt_ib_common_link_layer_name(port_attr->link_layer), port_attr->lid, ep->qpn,
+        counter_set_id, status, rst2init_errno, strerror(rst2init_errno),
+        DEVX_GET(rst2init_qp_out, cmd_out, status), DEVX_GET(rst2init_qp_out, cmd_out, syndrome));
 
     ep->portid = portid;
 
@@ -4335,6 +4457,9 @@ static int ibgda_connect_device_endpoints(nvshmemt_ibgda_state_t *ibgda_state,
         return status;
     }
 
+    /* DCTs are now in RTR, so their hardware contexts can supply the default counter. */
+    ibgda_init_default_q_counter(ibgda_state, device, portid);
+
     // Setup DCI endpoints
     status = ibgda_setup_dci_endpoints(ibgda_state, device, portid);
     if (status) {
@@ -4531,6 +4656,9 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
         goto out;
     }
 
+    /* No more counter queries during teardown, including paths that exit cleanup early. */
+    nvshmemt_mlx5_q_counter_fini(&ibgda_state->q_counter_mlx5_handle,
+                               &ibgda_state->q_counter_query_qp);
     device_finalized.resize(ibgda_state->common.n_raw_devices, false);
 
     ibgda_device_lkeys.clear();
@@ -4610,6 +4738,7 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
         device_finalized[dev_id] = true;
 
         device = (struct ibgda_device *)ibgda_state->common.devices + dev_id;
+        memset(device->default_q_counter, 0, sizeof(device->default_q_counter));
         if (device->common_device.pd) {
             status = ftable.dealloc_pd(device->common_device.pd);
             // NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "ibv_dealloc_pd failed
@@ -5047,6 +5176,15 @@ int nvshmemt_init(nvshmem_transport_t *t, struct nvshmemi_cuda_fn_table *table, 
                                    ibgda_state->common.options->DISABLE_DATA_DIRECT,
                                    ibgda_state->common.log_level);
 
+    if (options->IBGDA_ENABLE_Q_COUNTER) {
+        int counter_status = nvshmemt_mlx5_q_counter_init(&ibgda_state->q_counter_mlx5_handle,
+                                                        &ibgda_state->q_counter_query_qp);
+        if (counter_status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_WARN_PRINT(
+                "mlx5dv_devx_qp_query unavailable; IBGDA default Q-Counter discovery is disabled");
+        }
+    }
+
 #ifdef NVSHMEM_USE_GDRCOPY
     if (options->DISABLE_GDRCOPY) {
         use_gpu_cpu_mapping = false;
@@ -5343,6 +5481,8 @@ out:
                 free(transport->device_pci_paths);
             }
             if (transport->state) {
+                nvshmemt_mlx5_q_counter_fini(&ibgda_state->q_counter_mlx5_handle,
+                                           &ibgda_state->q_counter_query_qp);
                 delete (nvshmemt_ibgda_state_t *)transport->state;
             }
             free(transport);

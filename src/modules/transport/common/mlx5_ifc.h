@@ -3078,7 +3078,9 @@ enum {
 struct mlx5_ifc_dctc_bits {
     u8 reserved_at_0[0x1d];
     u8 data_in_order[0x1];
-    u8 reserved_at_1e[0x362];
+    u8 reserved_at_1e[0x42];
+    u8 counter_set_id[0x8];
+    u8 reserved_at_68[0x318];
 };
 
 struct mlx5_ifc_packet_reformat_context_in_bits {
@@ -3440,6 +3442,7 @@ struct mlx5_ifc_ads_bits {
 };
 
 enum {
+    MLX5_QPC_STATE_RST = 0x0,
     MLX5_QPC_STATE_SQDRAINED = 0x5,
 };
 

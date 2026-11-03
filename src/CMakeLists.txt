@@ -775,7 +775,7 @@ if(NVSHMEM_IBDEVX_SUPPORT)
                              PRIVATE include
                              modules/transport/common
   )
-  target_link_libraries(nvshmem_transport_ibdevx PRIVATE ${MLX5_lib} CUDA::cudart_static)
+  target_link_libraries(nvshmem_transport_ibdevx PRIVATE ${MLX5_lib} CUDA::cudart_static ${CMAKE_DL_LIBS})
   if(HAVE_IBV_ACCESS_RELAXED_ORDERING)
     target_compile_definitions(nvshmem_transport_ibdevx PRIVATE HAVE_IBV_ACCESS_RELAXED_ORDERING=${HAVE_IBV_ACCESS_RELAXED_ORDERING})
   endif()
@@ -809,7 +809,7 @@ if(NVSHMEM_IBGDA_SUPPORT)
                              modules/transport/common
 
   )
-  target_link_libraries(nvshmem_transport_ibgda PRIVATE ${MLX5_lib} CUDA::cudart_static)
+  target_link_libraries(nvshmem_transport_ibgda PRIVATE ${MLX5_lib} CUDA::cudart_static ${CMAKE_DL_LIBS})
   if(NVSHMEM_USE_GDRCOPY)
     target_sources(nvshmem_transport_ibgda PRIVATE
                    modules/transport/common/transport_gdr_common.cpp
@@ -855,7 +855,7 @@ if(NVSHMEM_GPUNETIO_SUPPORT)
                              modules/transport/common
 
   )
-  target_link_libraries(nvshmem_transport_gpunetio PRIVATE ${MLX5_lib} CUDA::cudart_static)
+  target_link_libraries(nvshmem_transport_gpunetio PRIVATE ${MLX5_lib} CUDA::cudart_static ${CMAKE_DL_LIBS})
   target_link_libraries(nvshmem_transport_gpunetio PRIVATE doca_gpunetio)
   target_include_directories(nvshmem_transport_gpunetio PRIVATE ${GPUNETIO_INCLUDE})
   if(HAVE_MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED)
