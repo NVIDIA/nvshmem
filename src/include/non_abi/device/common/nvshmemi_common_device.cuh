@@ -1528,13 +1528,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
+    const char *source_actual = reinterpret_cast<const char *>(source);
     void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
     if (nvshmemi_peer_reachable(peer_base_addr) &&
         !nvshmemi_cft_preempts_pointer_path<nvshmemi_le_size_rule::tx_size_multiple>(
             pe, nelems * sizeof(T), SCOPE, source, dest)) {
-        char *source_actual = (char *)(peer_base_addr) +
-                              ((char *)source - (char *)(nvshmemi_device_state_d.heap_base));
+        source_actual = reinterpret_cast<const char *>(peer_base_addr) +
+                        (reinterpret_cast<const char *>(source) -
+                         reinterpret_cast<const char *>(nvshmemi_device_state_d.heap_base));
         size_t nbytes = nelems * sizeof(T);
         const auto registration = nvshmemi_tma_get_smem_registration();
         if (registration.is_valid()) {
@@ -1550,20 +1552,34 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
                 }
             }
         }
-        nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
                    pe, nelems * sizeof(T), SCOPE, source, dest)) {
-        nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
+        if (pe != nvshmemi_device_state_d.mype) {
+            nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
+            nvshmemi_threadgroup_sync<SCOPE>();
+            return;
+        }
+        if (dest == source) {
+            nvshmemi_threadgroup_sync<SCOPE>();
+            return;
+        }
+        // Self-PE CFT gets use the same local-copy fallback as the pointer path.
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
         nvshmemi_cft_force_unsupported();
+        return;
 #endif
     } else {
         nvshmemi_rma_nbi<SCOPE, NVSHMEMI_OP_GET, REGION_OPERATION>(
             (void *)source, (void *)dest, nelems * sizeof(T), pe, qp_index);
+        nvshmemi_threadgroup_sync<SCOPE>();
+        return;
     }
+    nvshmemi_memcpy_threadgroup<SCOPE>(reinterpret_cast<void *>(dest),
+                                     reinterpret_cast<const void *>(source_actual),
+                                     nelems * sizeof(T));
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
@@ -3003,6 +3019,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p_emulated(
     __syncwarp(mask);
 }
 
+/* Reload the endpoint-table pointer at each specialized producer phase. An
+ * ordinary load can reuse earlier lookup state across setup and synchronization,
+ * increasing register allocation. This controls compiler reuse, not ordering. */
+__device__ __forceinline__ nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast>
+nvshmemi_get_pipeline_handle_for_pe(int pe, const void *source) {
+    const auto *le_ids = reinterpret_cast<const unsigned long long *>(
+        *reinterpret_cast<void *const volatile *>(&nvshmemi_device_state_d.unicast_le_ids_));
+    const auto le_id = static_cast<CUlogicalEndpointId>(
+        PARSE_LE_ID(static_cast<uint64_t>(__ldg(le_ids + pe))));
+    return nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Unicast>(le_id, source);
+}
+
 /* Generic GET is used by warp scope.  Keep two fabric GET slots in flight and
  * use each handle barrier as the ready signal before TMA drains that SMEM tile
  * to local global memory. */
@@ -3032,6 +3060,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
 
     auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
     if (!myIdx) {
+        size_t num_chunks = NVSHMEMI_TEAM_ROUND_UP_DIV(len, smem_chunk_size);
+        size_t preissue_chunks =
+            num_chunks < TMA_COPY_NUM_STAGES ? num_chunks : TMA_COPY_NUM_STAGES;
+
         uint8_t *smem_data_buf[TMA_COPY_NUM_STAGES];
         size_t threadgroup_buffer_size = smem_chunk_size * TMA_COPY_NUM_STAGES;
         smem_data_buf[0] = reinterpret_cast<uint8_t *>(
@@ -3049,10 +3081,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_gener
                                       thrdgrp_idx_in_block * TMA_COPY_NUM_STAGES + 1);
         // Ensure mbarriers init visibility to async proxy
         fence_async_proxy();
-
-        size_t num_chunks = NVSHMEMI_TEAM_ROUND_UP_DIV(len, smem_chunk_size);
-        size_t preissue_chunks =
-            num_chunks < TMA_COPY_NUM_STAGES ? num_chunks : TMA_COPY_NUM_STAGES;
 
         /* Single issuer: wait the handle barrier, drain the ready SMEM tile,
          * wait for source-read before reuse, then reissue the freed slot. */
@@ -3143,6 +3171,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
         assert(((blockDim.x * blockDim.y * blockDim.z) % (4 * warpSize)) == 0);
     }
 
+    size_t num_chunks = NVSHMEMI_TEAM_ROUND_UP_DIV(len, smem_chunk_size);
+    size_t preissue_chunks = num_chunks < TMA_COPY_NUM_STAGES ? num_chunks : TMA_COPY_NUM_STAGES;
+
     uint32_t tid = nvshmemi_thread_id_in_threadgroup<SCOPE>();
     bool is_load = (tid == 0);
     bool is_store = (tid == warpSize);
@@ -3186,11 +3217,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     }
     nvshmemi_threadgroup_sync<SCOPE>();
 
-    size_t num_chunks = NVSHMEMI_TEAM_ROUND_UP_DIV(len, smem_chunk_size);
-    size_t preissue_chunks = num_chunks < TMA_COPY_NUM_STAGES ? num_chunks : TMA_COPY_NUM_STAGES;
-
     if (is_load) {
-        auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
+        auto src_handle = nvshmemi_get_pipeline_handle_for_pe(pe, src);
 
         /* Producer: keep both handle GET slots in flight when possible.  Publish
          * readiness only after fabric.submit; before reissuing a slot, wait until
@@ -3213,7 +3241,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     nvshmemi_threadgroup_sync<SCOPE>();
 
     if (is_load) {
-        auto src_handle = nvshmemi_fabric_handle_for_pe(pe, src);
+        auto src_handle = nvshmemi_get_pipeline_handle_for_pe(pe, src);
         for (size_t next_chunk = TMA_COPY_NUM_STAGES; next_chunk < num_chunks; next_chunk++) {
             size_t next_byte_offset_src = next_chunk * smem_chunk_size;
             uint32_t next_buf_idx = static_cast<uint32_t>(next_chunk & 1);
