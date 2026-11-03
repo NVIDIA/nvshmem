@@ -27,4 +27,36 @@ NVSHMEMI_CFT_P_INSTANTIATE(unsigned long)
 NVSHMEMI_CFT_P_INSTANTIATE(long long)
 NVSHMEMI_CFT_P_INSTANTIATE(unsigned long long)
 #undef NVSHMEMI_CFT_P_INSTANTIATE
+
+/*
+ * Keep only concrete device-library entry points here. The generic CFT helpers remain in
+ * nvshmemi_common_device.cuh so NVCC can instantiate the required type, operation, scope,
+ * size-rule, and local-space combinations at their call sites. Moving those templates here
+ * would require maintaining and exporting the complete explicit-instantiation matrix.
+ *
+ * Block get/put use concrete wrappers so they inherit the existing device-library
+ * --maxrregcount=32 policy. Compiling the full block slow paths in caller translation units can
+ * otherwise exceed the register budget of 1024-thread kernels and make them unlaunchable.
+ */
+__device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_get_block(const void *source, void *dest,
+                                                         size_t bytes, int pe, bool is_blocking) {
+    if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+            pe, bytes, NVSHMEMI_THREADGROUP_BLOCK, source, dest)) {
+        return false;
+    }
+    nvshmemi_handle_get<NVSHMEMI_THREADGROUP_BLOCK, NVSHMEMI_LOCAL_SPACE_UNKNOWN>(
+        source, dest, bytes, pe, is_blocking);
+    return true;
+}
+
+__device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_put_block(const void *source, void *dest,
+                                                         size_t bytes, int pe, bool is_blocking) {
+    if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(
+            pe, bytes, NVSHMEMI_THREADGROUP_BLOCK, dest, source)) {
+        return false;
+    }
+    nvshmemi_handle_put<NVSHMEMI_THREADGROUP_BLOCK, NVSHMEMI_LOCAL_SPACE_UNKNOWN>(
+        source, dest, bytes, pe, is_blocking);
+    return true;
+}
 #endif
