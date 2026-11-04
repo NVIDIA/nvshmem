@@ -567,6 +567,7 @@ set(NVSHMEM_PYTHON_SOURCES
 )
 
 set(NVSHMEM_DEVICE_SOURCES
+    device/common/logical_endpoint_device.cu
     device/init/init_device.cu
     device/launch/collective_launch.cpp
 )
