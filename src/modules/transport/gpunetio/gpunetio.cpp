@@ -1723,7 +1723,7 @@ static uint64_t gpunetio_mix_amo_target(uint64_t value) {
 gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_amo_ep(int pe, int qp_index, int n_pes,
                                                             int mype, uint64_t remote_offset) {
     if (!use_address_stable_amo || qp_index != NVSHMEMX_QP_DEFAULT ||
-        selected_dev_ids.size() <= 1 || pe == mype) {
+        selected_dev_ids.size() <= 1) {
         return get_next_cpu_ep(pe, qp_index, n_pes, mype);
     }
 
@@ -1739,6 +1739,10 @@ gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_amo_ep(int pe, int qp_index
     size_t selected_dev_slot = selected_qp % num_selected_slots;
     gpunetio_device &device = *devices[selected_dev_ids[selected_dev_slot]];
     int selected_qp_slot = 1 + static_cast<int>(selected_qp / num_selected_slots);
+    if (pe == mype) {
+        // CPU slot 0 is reserved for the host QP; loopback occupies only default slot 1.
+        selected_qp_slot = 1;
+    }
     return device.get_cpu_ep_from_qp_index(pe, selected_qp_slot, n_pes, mype);
 }
 

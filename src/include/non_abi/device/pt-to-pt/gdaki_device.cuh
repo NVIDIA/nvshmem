@@ -318,16 +318,16 @@ gdaki_mix_amo_target(uint64_t value) {
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool gdaki_use_address_stable_amo(
-    int pe, nvshmemx_qp_handle_t qp_index) {
+    nvshmemx_qp_handle_t qp_index) {
     CONSTANT_ADDRESS_SPACE nvshmemi_gpunetio_device_state_t *state = gdaki_get_state();
     return state->use_address_stable_amo && qp_index == NVSHMEMX_QP_DEFAULT &&
-           state->num_devices_initialized > 1 && pe != nvshmemi_device_state_d.mype;
+           state->num_devices_initialized > 1;
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_gpunetio_device_qp_t *
 gdaki_get_amo_qp(int pe, uint64_t remote_addr,
                  nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
-    if (!gdaki_use_address_stable_amo(pe, qp_index)) {
+    if (!gdaki_use_address_stable_amo(qp_index)) {
         return gdaki_get_qp(pe, qp_index);
     }
 
@@ -340,6 +340,10 @@ gdaki_get_amo_qp(int pe, uint64_t remote_addr,
     assert(num_default_qps_per_slot > 0);
     uint32_t selected_dev_slot = hash % num_selected_slots;
     uint32_t default_qp_slot = (hash / num_selected_slots) % num_default_qps_per_slot;
+    if (pe == nvshmemi_device_state_d.mype) {
+        // Each device's loopback occupies only the first default QP slot.
+        default_qp_slot = 0;
+    }
     uint32_t qp_idx = (selected_dev_slot * num_default_qps_per_slot + default_qp_slot) *
                           nvshmemi_device_state_d.npes +
                       pe;
@@ -1681,7 +1685,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_amo_nonfetch_impl(
 
 #ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp =
-        !gdaki_use_address_stable_amo(pe, qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
+        !gdaki_use_address_stable_amo(qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -1799,7 +1803,7 @@ nvshmemi_gdaki_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
 
 #ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp =
-        !gdaki_use_address_stable_amo(pe, qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
+        !gdaki_use_address_stable_amo(qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -1943,7 +1947,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_put
 
 #ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp =
-        !gdaki_use_address_stable_amo(pe, qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
+        !gdaki_use_address_stable_amo(qp_index) && gdaki_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -2344,11 +2348,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_gdaki_qp_quiet_impl(
         }
     }
 
-    // Quiet (single) local QP
+    // Quiet the (single) loopback QP on all devices
     if (index_in_scope == 0 &&
         (pe_hint == NVSHMEMX_PE_ANY || pe_hint == nvshmemi_device_state_d.mype)) {
-        qp = &state->globalmem.qps[nvshmemi_device_state_d.mype];
-        gdaki_quiet_with_cst<NIC_HANDLER>(qp, enforce_cst);
+        for (uint32_t dev_idx = 0; dev_idx < state->num_devices_initialized; ++dev_idx) {
+            uint32_t qp_idx =
+                dev_idx * state->num_default_rc_per_pe * nvshmemi_device_state_d.npes +
+                nvshmemi_device_state_d.mype;
+            qp = &state->globalmem.qps[qp_idx];
+            gdaki_quiet_with_cst<NIC_HANDLER>(qp, enforce_cst);
+        }
     }
 }
 
