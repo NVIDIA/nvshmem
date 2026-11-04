@@ -1924,16 +1924,16 @@ ibgda_mix_amo_target(uint64_t value) {
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE bool ibgda_use_address_stable_amo(
-    int pe, nvshmemx_qp_handle_t qp_index) {
+    nvshmemx_qp_handle_t qp_index) {
     CONSTANT_ADDRESS_SPACE nvshmemi_ibgda_device_state_t *state = ibgda_get_state();
     return state->use_address_stable_amo && qp_index == NVSHMEMX_QP_DEFAULT &&
-           state->num_devices_initialized > 1 && pe != nvshmemi_device_state_d.mype;
+           state->num_devices_initialized > 1;
 }
 
 __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE nvshmemi_ibgda_device_qp_t *
 ibgda_get_amo_qp(int pe, uint64_t remote_addr, bool *out_shared_among_ctas,
                  nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
-    if (!ibgda_use_address_stable_amo(pe, qp_index)) {
+    if (!ibgda_use_address_stable_amo(qp_index)) {
         return ibgda_get_qp(pe, out_shared_among_ctas, qp_index);
     }
 
@@ -1945,6 +1945,10 @@ ibgda_get_amo_qp(int pe, uint64_t remote_addr, bool *out_shared_among_ctas,
     if (ibgda_is_rc_enabled()) {
         uint32_t num_default_qps = state->num_default_rc_per_pe * state->num_devices_initialized;
         uint32_t qp_id = hash % num_default_qps;
+        if (pe == nvshmemi_device_state_d.mype) {
+            // Use a DCI on the same responder NIC selected by remote RC AMOs.
+            return ibgda_get_dci(pe, out_shared_among_ctas, qp_id / state->num_default_rc_per_pe);
+        }
         uint32_t qp_idx = qp_id * nvshmemi_device_state_d.npes + pe;
         *out_shared_among_ctas = true;
         return &state->globalmem.rcs[qp_idx];
@@ -3041,7 +3045,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_amo_nonfetch_impl(
 
 #ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp =
-        !ibgda_use_address_stable_amo(pe, qp_index) && ibgda_can_coalesce_warp_pe(amask, pe);
+        !ibgda_use_address_stable_amo(qp_index) && ibgda_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -3155,7 +3159,7 @@ nvshmemi_ibgda_amo_fetch_impl(void *rptr, const T value, const T compare, int pe
 
 #ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp =
-        !ibgda_use_address_stable_amo(pe, qp_index) && ibgda_can_coalesce_warp_pe(amask, pe);
+        !ibgda_use_address_stable_amo(qp_index) && ibgda_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
@@ -3303,7 +3307,7 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_ibgda_put
 
 #ifndef __clang_llvm_bitcode_lib__
     bool can_coalesce_warp =
-        !ibgda_use_address_stable_amo(pe, qp_index) && ibgda_can_coalesce_warp_pe(amask, pe);
+        !ibgda_use_address_stable_amo(qp_index) && ibgda_can_coalesce_warp_pe(amask, pe);
 #else
     bool can_coalesce_warp = false;
 #endif
