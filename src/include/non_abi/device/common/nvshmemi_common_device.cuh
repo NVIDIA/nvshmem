@@ -1639,6 +1639,38 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+template <typename T>
+__device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_p_slowpath(T *dest, T value, int pe) {
+    if (!nvshmemi_is_le_implemented(pe)) {
+        return false;
+    }
+    nvshmemi_handle_p<T>(dest, value, pe);
+    return true;
+}
+
+#if defined(__CUDACC_RDC__)
+#define NVSHMEMI_CFT_P_EXTERN_TEMPLATE(TYPE) \
+    extern template __device__ bool nvshmemi_cft_p_slowpath<TYPE>(TYPE *, TYPE, int);
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(__nv_bfloat16)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(half)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(float)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(double)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(char)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(signed char)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(unsigned char)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(short)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(unsigned short)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(int)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(unsigned int)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(long)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(unsigned long)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(long long)
+NVSHMEMI_CFT_P_EXTERN_TEMPLATE(unsigned long long)
+#undef NVSHMEMI_CFT_P_EXTERN_TEMPLATE
+#endif
+#endif
+
 template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
     T *dest, const T value, int pe, nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
@@ -1649,12 +1681,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = value;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_is_le_implemented(pe)) {
-        if (pe == nvshmemi_device_state_d.mype) {
-            *dest = value;
-        } else {
-            nvshmemi_handle_p<T>((void *)dest, value, pe);
-        }
+    } else if (nvshmemi_cft_p_slowpath<T>(dest, value, pe)) {
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
