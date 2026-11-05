@@ -409,7 +409,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int bcast_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.bcast_algo;
-    const bool has_hierarchical_subteams = nvshmemi_team_has_hierarchical_subteams(teami);
     switch (bcast_algo) {
         case 0:
             if (NVSHMEMI_BCAST_SYNC_SIZE * sizeof(long) >= (nelems * sizeof(T) * 2) &&
@@ -417,7 +416,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
                 nelems * sizeof(T) <= 16384) { /* LL algos */
                 if (nvshmemi_team_n_pes(team) > 32 &&
                     nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_BLOCK &&
-                    has_hierarchical_subteams) { /* hierarchical topo-aware */
+                    nvshmemi_team_has_hierarchical_subteams(teami)) { /* hierarchical topo-aware */
                     bcast_algo = 2;
                 } else {
                     bcast_algo = 3;
@@ -432,7 +431,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
             if (NVSHMEMI_BCAST_SYNC_SIZE * sizeof(long) >= (nelems * sizeof(T) * 2) &&
                 sizeof(T) >= sizeof(uint32_t) && nelems % 2 == 0 &&
                 nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_BLOCK) {
-                if (!has_hierarchical_subteams) {
+                if (!nvshmemi_team_has_hierarchical_subteams(teami)) {
                     bcast_algo = 3;
                 }
             } else {
