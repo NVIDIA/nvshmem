@@ -2034,6 +2034,7 @@ static int nvshmemi_team_populate_from_uid(nvshmemi_team_t *myteam, nvshmemi_tea
 
     copy_team_pe_mapping_to_host(mydeviceteam, myteam);
     nvshmemi_team_populate_from_world_pe_mapping(myteam);
+    myteam->start = myteam->pe_mapping[0];
     myteam->stride = nvshmemi_team_get_stride(myteam);
 
     /* Copy team to device */
