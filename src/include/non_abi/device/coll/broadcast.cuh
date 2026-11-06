@@ -523,12 +523,15 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
 
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
 
-    /* Handle multicast needs a prioritized multicast LE, registered TMA SMEM, a 16B-aligned
-     * destination heap offset, and a 16B-aligned global source for TMA staging.
+    /* Prefer handles when configured, or use them when the team has no usable multicast
+     * pointer. Disabling handle priority must not disable this fallback.
      */
-    if (!nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
-                                                            CFT_HANDLE_TX_SIZE, scope) ||
-        !nvshmemi_tma_smem_registered() ||
+    const bool use_handle =
+        nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
+                                                           CFT_HANDLE_TX_SIZE, scope) ||
+        (nvshmemi_mc_ptr(teami, dst_tensor.data()) == nullptr &&
+         nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, CFT_HANDLE_TX_SIZE, scope));
+    if (!use_handle || !nvshmemi_tma_smem_registered() ||
         !nvshmemi_is_addr_offset_aligned(dst_tensor.data(), CFT_HANDLE_TX_SIZE) ||
         __isShared(src_tensor.data()) ||
         !nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src_tensor.data())) {

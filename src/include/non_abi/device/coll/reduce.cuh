@@ -2303,13 +2303,17 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allreduce_try_handle
                                        (dst_stride_minor_dim == size_major_dim));
         const size_t reduce_bytes = is_fully_contiguous ? row_bytes * valid_minor_dim : row_bytes;
 
-        /* Handle pull-reduce needs an implemented multicast LE for this transfer size,
-         * registered TMA SMEM, global source/destination buffers, and a 16B-aligned source
-         * heap offset.
+        /* Use handles when prioritized or when the required multicast pointers are absent.
+         * One-shot only needs a source multicast pointer; two-shot also needs the destination.
          */
-        if (!nvshmemi_is_multicast_reduce_le_supported_and_prioritized<scope>(
+        const bool use_handle =
+            nvshmemi_is_multicast_reduce_le_supported_and_prioritized<scope>(
                 teami->mc_leid_with_flag, reduce_bytes) ||
-            !nvshmemi_tma_smem_registered() || __isShared(src_tensor.data()) ||
+            ((nvshmemi_mc_ptr(teami, src_tensor.data()) == nullptr ||
+              (!ONESHOT && nvshmemi_mc_ptr(teami, dst_tensor.data()) == nullptr)) &&
+             nvshmemi_is_multicast_reduce_le_implemented<scope>(teami->mc_leid_with_flag,
+                                                                reduce_bytes));
+        if (!use_handle || !nvshmemi_tma_smem_registered() || __isShared(src_tensor.data()) ||
             __isShared(dst_tensor.data()) ||
             !nvshmemi_is_addr_offset_aligned(src_tensor.data(), CFT_HANDLE_TX_SIZE)) {
             nvshmemi_cft_force_unsupported();
