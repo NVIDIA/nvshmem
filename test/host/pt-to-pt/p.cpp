@@ -76,6 +76,7 @@
         TYPE val;                                                                            \
         CUDA_CHECK(cudaMemcpyAsync(&val, devRefBuffer, sizeof(TYPE), cudaMemcpyDeviceToHost, \
                                    cstrm[mype]));                                            \
+        CUDA_CHECK(cudaStreamSynchronize(cstrm[mype]));                                      \
         for (pe = 0; pe < npes; pe++) {                                                      \
             for (int iter = 0; iter < niter; iter++) {                                       \
                 /*if(pe != mype) {*/                                                         \
@@ -99,6 +100,7 @@
         TYPE val;                                                                            \
         CUDA_CHECK(cudaMemcpyAsync(&val, devRefBuffer, sizeof(TYPE), cudaMemcpyDeviceToHost, \
                                    cstrm[mype]));                                            \
+        CUDA_CHECK(cudaStreamSynchronize(cstrm[mype]));                                      \
         for (pe = 0; pe < npes; pe++) {                                                      \
             for (int iter = 0; iter < niter; iter++) {                                       \
                 /*if(pe != mype) {*/                                                         \
