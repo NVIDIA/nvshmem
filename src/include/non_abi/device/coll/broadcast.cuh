@@ -562,10 +562,14 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
         return true;
     }
 
-    /* Strided tiles issue one handle copy per row, so every row starting address must remain
-     * 16B-aligned for both source and destination.
+    /* Strided tiles issue one handle copy per row. An aligned stride does not imply a
+     * supported payload: a 14-float row is 56B even with a 112B stride. Its masked CFT tail
+     * shares a 16B destination block with an adjacent tile, which can use multicast-pointer
+     * stores due to its misaligned start. Do not rely on atomic merging across these paths;
+     * reject unsupported row payloads before issuing any copies so they can fall back.
      */
-    if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
+    if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, row_bytes, scope) ||
+        ((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
         ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
         nvshmemi_cft_force_unsupported();
         return false;
