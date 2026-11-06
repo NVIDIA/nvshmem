@@ -1577,9 +1577,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
         nvshmemi_threadgroup_sync<SCOPE>();
         return;
     }
-    nvshmemi_memcpy_threadgroup<SCOPE>(reinterpret_cast<void *>(dest),
-                                     reinterpret_cast<const void *>(source_actual),
-                                     nelems * sizeof(T));
+    void *copy_dest = dest;
+    const void *copy_source = source_actual;
+    size_t copy_bytes = nelems * sizeof(T);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    /* Opaque read/write operands prevent copy address and bounds calculations from
+     * being hoisted across CFT/remote paths, reducing live ranges and register pressure.
+     * The empty asm preserves values and emits no instructions; it is not a memory fence. */
+    asm volatile("" : "+l"(copy_dest), "+l"(copy_source), "+l"(copy_bytes));
+#endif
+    nvshmemi_memcpy_threadgroup<SCOPE>(copy_dest, copy_source, copy_bytes);
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
