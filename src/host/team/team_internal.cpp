@@ -2034,8 +2034,14 @@ static int nvshmemi_team_populate_from_uid(nvshmemi_team_t *myteam, nvshmemi_tea
 
     copy_team_pe_mapping_to_host(mydeviceteam, myteam);
     nvshmemi_team_populate_from_world_pe_mapping(myteam);
-    myteam->start = myteam->pe_mapping[0];
     myteam->stride = nvshmemi_team_get_stride(myteam);
+
+    if (myteam->stride > 0) {
+        myteam->start = myteam->pe_mapping[0];
+    } else {
+        myteam->start = TEAM_SCALAR_INVALID;
+        myteam->stride = TEAM_SCALAR_INVALID;
+    }
 
     /* Copy team to device */
     copy_team_to_device(myteam, mydeviceteam);
@@ -2475,8 +2481,15 @@ int nvshmemi_team_split_from_non_strided_parent(nvshmemi_team_t *parent_team, in
         for (int i = 0; i < PE_size; ++i) {
             myteam->pe_mapping[i] = parent_team->pe_mapping[PE_start + i * PE_stride];
         }
-        myteam->start = myteam->pe_mapping[0];
         myteam->stride = nvshmemi_team_get_stride(myteam);
+
+        if (myteam->stride > 0) {
+            myteam->start = myteam->pe_mapping[0];
+        } else {
+            myteam->start = TEAM_SCALAR_INVALID;
+            myteam->stride = TEAM_SCALAR_INVALID;
+        }
+
         nvshmemi_team_populate_from_world_pe_mapping(myteam);
         if (myteam->stride == TEAM_SCALAR_INVALID &&
             myteam->config.version == NVSHMEMI_TEAM_CONFIG_VERSION_1_IDENTIFIER) {
