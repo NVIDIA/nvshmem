@@ -3052,8 +3052,8 @@ __device__ __forceinline__ nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast
 nvshmemi_get_pipeline_handle_for_pe(int pe, const void *source) {
     const auto *le_ids = reinterpret_cast<const unsigned long long *>(
         *reinterpret_cast<void *const volatile *>(&nvshmemi_device_state_d.unicast_le_ids_));
-    const auto le_id = static_cast<CUlogicalEndpointId>(
-        PARSE_LE_ID(static_cast<uint64_t>(__ldg(le_ids + pe))));
+    const auto le_id =
+        static_cast<CUlogicalEndpointId>(PARSE_LE_ID(static_cast<uint64_t>(__ldg(le_ids + pe))));
     return nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Unicast>(le_id, source);
 }
 
