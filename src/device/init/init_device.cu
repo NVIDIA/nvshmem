@@ -17,7 +17,6 @@
 #endif
 
 #include "non_abi/c/nvshmem_build_options.h"
-#include "non_abi/device/common/nvshmemi_common_device.cuh"
 #include "non_abi/c/nvshmemi_build_metadata.h"
 #include "non_abi/c/nvshmemi_error_macros.h"
 #include "internal/device/nvshmemi_device.h"
@@ -108,12 +107,6 @@ NVSHMEMI_DEVICE_PREFIX void nvshmem_global_exit(int status) {
         assert(0);
     }
 }
-#endif
-
-/* Bitcode and LTOIR are currently produced from this single translation unit.
- * Pull in the separately maintained logical-endpoint definitions for those builds. */
-#if defined(__clang_llvm_bitcode_lib__) || defined(NVSHMEM_BUILD_LTOIR_LIBRARY)
-#include "../common/logical_endpoint_device.cu"
 #endif
 
 #endif
