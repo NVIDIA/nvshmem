@@ -178,20 +178,6 @@ inline __device__ void fence_async_proxy() {
 template <typename T, nvshmemi_amo_t Amo>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_can_use_handle_atomic(T *target, int pe);
 
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_should_check_handle_atomic(bool use_ldst,
-                                                                                  int pe) {
-#if defined(NVSHMEM_FORCE_CFT)
-    /* Forced CFT must reach the unsupported-route check even without atomic support. */
-    return true;
-#elif LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    return (!use_ldst || nvshmemi_is_le_prioritized(pe)) && nvshmemi_unicast_le_available();
-#else
-    (void)use_ldst;
-    (void)pe;
-    return false;
-#endif
-}
-
 template <typename T, nvshmemi_amo_t Amo>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE T nvshmemi_handle_atomic_fetch(T *target, T value,
                                                                         T compare, int pe);
@@ -216,11 +202,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *sr
 template <typename T>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_p(void *__restrict__ dst, const T src,
                                                                 int pe);
-
-__device__ bool nvshmemi_cft_get_block(const void *source, void *dest, size_t bytes, int pe,
-                                       bool is_blocking);
-__device__ bool nvshmemi_cft_put_block(const void *source, void *dest, size_t bytes, int pe,
-                                       bool is_blocking);
 
 #endif  // LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 
@@ -1540,75 +1521,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_rma_nbi(void *rptr, void 
     nvshmemi_transfer_rma_nbi<SCOPE, CHANNEL_OP, REGION_OPERATION>(rptr, lptr, bytes, pe, qp_index);
 }
 
-#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-template <nvshmemi_le_size_rule SIZE_RULE, threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
-__device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_get_slowpath(const void *source, void *dest,
-                                                            size_t bytes, int pe,
-                                                            bool is_blocking) {
-    if (!nvshmemi_is_le_implemented<SIZE_RULE>(pe, bytes, SCOPE, source, dest)) {
-        return false;
-    }
-    nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, bytes, pe, is_blocking);
-    return true;
-}
-
-template <nvshmemi_le_size_rule SIZE_RULE, threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
-__device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_put_slowpath(const void *source, void *dest,
-                                                            size_t bytes, int pe,
-                                                            bool is_blocking) {
-    if (!nvshmemi_is_le_implemented<SIZE_RULE>(pe, bytes, SCOPE, dest, source)) {
-        return false;
-    }
-    nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, bytes, pe, is_blocking);
-    return true;
-}
-
-template <nvshmemi_le_size_rule SIZE_RULE, threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_cft_get_path(const void *source, void *dest,
-                                                                    size_t bytes, int pe,
-                                                                    bool is_blocking) {
-    if (!nvshmemi_unicast_le_available()) {
-        return false;
-    }
-    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        static_assert(SIZE_RULE == nvshmemi_le_size_rule::tx_size_multiple);
-#if defined(__CUDACC_RDC__)
-        return nvshmemi_cft_get_block(source, dest, bytes, pe, is_blocking);
-#else
-        /* Non-RDC callers need a definition in this translation unit. */
-        return nvshmemi_cft_get_slowpath<SIZE_RULE, SCOPE, LOCAL_SPACE>(source, dest, bytes, pe,
-                                                                        is_blocking);
-#endif
-    } else {
-        return nvshmemi_cft_get_slowpath<SIZE_RULE, SCOPE, LOCAL_SPACE>(source, dest, bytes, pe,
-                                                                        is_blocking);
-    }
-}
-
-template <nvshmemi_le_size_rule SIZE_RULE, threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_cft_put_path(const void *source, void *dest,
-                                                                    size_t bytes, int pe,
-                                                                    bool is_blocking) {
-    if (!nvshmemi_unicast_le_available()) {
-        return false;
-    }
-    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        static_assert(SIZE_RULE == nvshmemi_le_size_rule::any_size);
-#if defined(__CUDACC_RDC__)
-        return nvshmemi_cft_put_block(source, dest, bytes, pe, is_blocking);
-#else
-        /* Non-RDC callers need a definition in this translation unit. */
-        return nvshmemi_cft_put_slowpath<SIZE_RULE, SCOPE, LOCAL_SPACE>(source, dest, bytes, pe,
-                                                                        is_blocking);
-#endif
-    } else {
-        return nvshmemi_cft_put_slowpath<SIZE_RULE, SCOPE, LOCAL_SPACE>(source, dest, bytes, pe,
-                                                                        is_blocking);
-    }
-}
-
-#endif
-
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
           nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
@@ -1641,10 +1553,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get_nbi(
             }
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_cft_get_path<nvshmemi_le_size_rule::tx_size_multiple, SCOPE, LOCAL_SPACE>(
-                   source, dest, nelems * sizeof(T), pe, false)) {
-        nvshmemi_threadgroup_sync<SCOPE>();
-        return;
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+                   pe, nelems * sizeof(T), SCOPE, source, dest)) {
+        if (pe != nvshmemi_device_state_d.mype) {
+            nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
+            nvshmemi_threadgroup_sync<SCOPE>();
+            return;
+        }
+        if (dest == source) {
+            nvshmemi_threadgroup_sync<SCOPE>();
+            return;
+        }
+        // Self-PE CFT gets use the same local-copy fallback as the pointer path.
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1704,8 +1624,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_get(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest, (const void *)source_actual, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_cft_get_path<nvshmemi_le_size_rule::tx_size_multiple, SCOPE, LOCAL_SPACE>(
-                   source, dest, nelems * sizeof(T), pe, true)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::tx_size_multiple>(
+                   pe, nelems * sizeof(T), SCOPE, source, dest)) {
+        nvshmemi_handle_get<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, true);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1760,7 +1681,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_p(
                                ((char *)dest - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = value;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_unicast_le_available() && nvshmemi_cft_p_slowpath<T>(dest, value, pe)) {
+    } else if (nvshmemi_cft_p_slowpath<T>(dest, value, pe)) {
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1799,9 +1720,12 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
             }
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_cft_put_path<nvshmemi_le_size_rule::any_size, SCOPE, LOCAL_SPACE>(
-                   source, dest, nelems * sizeof(T), pe, false)) {
-        return;
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                           SCOPE, dest, source)) {
+        if (pe != nvshmemi_device_state_d.mype) {
+            nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, false);
+            return;
+        }
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1821,7 +1745,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     asm volatile("" : "+l"(dest_actual), "+l"(copy_source), "+l"(copy_bytes));
 #endif
-    /* P2P operations use the ordinary copy fallback. */
+    /* P2P and self-PE handle operations share the ordinary copy fallback. */
     nvshmemi_memcpy_threadgroup<SCOPE>(dest_actual, copy_source, copy_bytes);
 }
 
@@ -1864,8 +1788,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
         }
         nvshmemi_memcpy_threadgroup<SCOPE>((void *)dest_actual, (const void *)source, nbytes);
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_cft_put_path<nvshmemi_le_size_rule::any_size, SCOPE, LOCAL_SPACE>(
-                   source, dest, nelems * sizeof(T), pe, true)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                           SCOPE, dest, source)) {
+        nvshmemi_handle_put<SCOPE, LOCAL_SPACE>((void *)source, (void *)dest, nelems * sizeof(T),
+                                                pe, true);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1878,38 +1804,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put(
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-inline __device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_signal_slowpath(uint64_t *sig_addr,
-                                                                      uint64_t signal, int sig_op,
-                                                                      int pe) {
-    if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_is_le_implemented(pe)) {
-        nvshmemi_handle_p<uint64_t>(sig_addr, signal, pe);
-        return true;
-    }
-#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET
-    if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD &&
-        nvshmemi_can_use_handle_atomic<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, pe)) {
-        nvshmemi_handle_atomic_nonfetch<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, signal, pe);
-        return true;
-    }
-#endif
-    return false;
-}
-#endif
-
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
     uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     const void *peer_base_addr =
         (void *)__ldg((const long long unsigned *)nvshmemi_device_state_d.peer_heap_base_p2p + pe);
-#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT) && \
-    (defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) || defined(NVSHMEM_FORCE_CFT))
-    const bool cft_atomic_preempts =
-        sig_op == NVSHMEMI_AMO_SIGNAL_ADD &&
-        nvshmemi_should_check_handle_atomic(nvshmemi_use_ldst_path(), pe) &&
-        nvshmemi_can_use_handle_atomic<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, pe);
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    const bool can_use_handle = nvshmemi_is_le_implemented(pe);
+#endif
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    const bool can_use_atomic_handle = nvshmemi_is_le_atomic_implemented(pe, sig_addr);
 #else
-    constexpr bool cft_atomic_preempts = false;
+    const bool can_use_atomic_handle = false;
 #endif
     if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && nvshmemi_peer_reachable(peer_base_addr) &&
         !nvshmemi_cft_preempts_pointer_path(pe)) {
@@ -1917,20 +1823,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
         *dest_actual = signal;
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_SET && can_use_handle) {
+        nvshmemi_handle_p((void *)sig_addr, signal, pe);
+#endif
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && pe == nvshmemi_device_state_d.mype &&
                nvshmemi_use_ldst_path()) {
         atomicAdd_system((unsigned long long *)sig_addr, signal);
     } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && !nvshmemi_is_cft_forced() &&
                nvshmemi_use_ldst_path() && nvshmemi_peer_reachable(peer_base_addr) &&
-               !cft_atomic_preempts) {
+               (!can_use_atomic_handle || !nvshmemi_cft_preempts_pointer_path(pe))) {
         volatile uint64_t *dest_actual =
             (volatile uint64_t *)((char *)(peer_base_addr) +
                                   ((char *)sig_addr - (char *)(nvshmemi_device_state_d.heap_base)));
         /* sig_op == NVSHMEM_SIGNAL_ADD */
         atomicAdd_system((unsigned long long *)dest_actual, signal);
-#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_unicast_le_available() &&
-               nvshmemi_cft_signal_slowpath(sig_addr, signal, sig_op, pe)) {
+#if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    } else if (sig_op == NVSHMEMI_AMO_SIGNAL_ADD && can_use_atomic_handle) {
+        nvshmemi_handle_atomic_nonfetch<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, signal, pe);
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -1941,29 +1851,6 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_signal_op(
                                                  (nvshmemi_amo_t)sig_op, qp_index);
     }
 }
-
-#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-template <typename T, threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
-__device__ NVSHMEMI_NOINLINE bool nvshmemi_cft_put_signal_slowpath(
-    T *dest, const T *source, size_t nelems, uint64_t *sig_addr, uint64_t signal, int sig_op,
-    int pe, nvshmemx_qp_handle_t qp_index) {
-    const size_t bytes = nelems * sizeof(T);
-    if (!nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, bytes, SCOPE, dest,
-                                                                     source)) {
-        return false;
-    }
-
-    nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, bytes, pe, true);
-    nvshmemi_threadgroup_sync<SCOPE>();
-    if (nvshmemi_thread_id_in_threadgroup<SCOPE>() == 0) {
-        __threadfence_system();
-        fence_proxy_fabric2fabric_alias();
-        fence_proxy_generic2fabric_alias();
-        nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
-    }
-    return true;
-}
-#endif
 
 template <typename T, threadgroup_t SCOPE,
           nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
@@ -2001,9 +1888,19 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_signal(
             nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
         }
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    } else if (nvshmemi_unicast_le_available() &&
-               nvshmemi_cft_put_signal_slowpath<T, SCOPE, LOCAL_SPACE>(
-                   dest, source, nelems, sig_addr, signal, sig_op, pe, qp_index)) {
+    } else if (nvshmemi_is_le_implemented<nvshmemi_le_size_rule::any_size>(pe, nelems * sizeof(T),
+                                                                           SCOPE, dest, source)) {
+        nvshmemi_handle_put<SCOPE, LOCAL_SPACE>(source, dest, nelems * sizeof(T), pe, true);
+        nvshmemi_threadgroup_sync<SCOPE>();
+        if (!myIdx) {
+            __threadfence_system();
+            // Ensure that signal operation is ordered with respect
+            // to earlier fabric / generic operations
+            fence_proxy_fabric2fabric_alias();
+            fence_proxy_generic2fabric_alias();
+
+            nvshmemi_signal_op(sig_addr, signal, sig_op, pe, qp_index);
+        }
 #endif
 #if defined(NVSHMEM_FORCE_CFT)
     } else if (nvshmemi_is_cft_forced()) {
@@ -2696,16 +2593,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_TX_size_thread
     bool is_load = (tid == 0);
     bool is_store = (tid == warpSize);
 
-    uint32_t tid_in_blk;
-    uint32_t thrdgrp_idx_in_block;
-    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        tid_in_blk = tid;
-        thrdgrp_idx_in_block = 0;
-    } else {
-        tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
-        thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
-    }
+    uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
+    uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
     uintptr_t smem_base = registration.base;
 
     cuda::std::array<uint8_t *, TMA_COPY_NUM_STAGES> smem_data_buf;
@@ -3186,8 +3076,8 @@ __device__ __forceinline__ nvshmemi_fabric_handle<le_fabric_handle_kind::Unicast
 nvshmemi_get_pipeline_handle_for_pe(int pe, const void *source) {
     const auto *le_ids = reinterpret_cast<const unsigned long long *>(
         *reinterpret_cast<void *const volatile *>(&nvshmemi_device_state_d.unicast_le_ids_));
-    const auto le_id =
-        static_cast<CUlogicalEndpointId>(PARSE_LE_ID(static_cast<uint64_t>(__ldg(le_ids + pe))));
+    const auto le_id = static_cast<CUlogicalEndpointId>(
+        PARSE_LE_ID(static_cast<uint64_t>(__ldg(le_ids + pe))));
     return nvshmemi_fabric_handle_for_le_id<le_fabric_handle_kind::Unicast>(le_id, source);
 }
 
@@ -3338,16 +3228,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get_emulated_threa
     bool is_load = (tid == 0);
     bool is_store = (tid == warpSize);
 
-    uint32_t tid_in_blk;
-    uint32_t thrdgrp_idx_in_block;
-    if constexpr (SCOPE == NVSHMEMI_THREADGROUP_BLOCK) {
-        tid_in_blk = tid;
-        thrdgrp_idx_in_block = 0;
-    } else {
-        tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
-        thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
-    }
+    uint32_t tid_in_blk = nvshmemi_thread_id_in_threadgroup<NVSHMEMI_THREADGROUP_BLOCK>();
     uint32_t warp_idx_in_block = tid_in_blk / warpSize;
+    uint32_t thrdgrp_idx_in_block = tid_in_blk / nvshmemi_threadgroup_size<SCOPE>();
     uintptr_t smem_base = registration.base;
 
     cuda::std::array<uint8_t *, TMA_COPY_NUM_STAGES> smem_data_buf;
