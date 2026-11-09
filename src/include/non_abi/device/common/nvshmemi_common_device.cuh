@@ -189,10 +189,13 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_atomic_nonfetch(T 
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
 // forward declaration
 
+/* Keep the typed collective NBI PUT chain force-inlined through its public entry point.
+ * An outlined CFT body can otherwise impose a high register floor on large-CTA callers,
+ * including callers that only take the ordinary P2P path. */
 template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *src, void *dst,
-                                                                  size_t len, int pe,
-                                                                  bool is_blocking);
+__device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_handle_put(const void *src, void *dst,
+                                                                        size_t len, int pe,
+                                                                        bool is_blocking);
 
 template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_get(const void *src, void *dst,
@@ -1669,7 +1672,7 @@ template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
           nvshmemi_tma_use TMA_USE = nvshmemi_tma_use::allowed,
           nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemii_put_nbi(
+__device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemii_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     void *dest_actual = dest;
@@ -1726,7 +1729,7 @@ template <typename T, threadgroup_t SCOPE,
           nvshmemi_region_operation_t REGION_OPERATION = NVSHMEMI_REGION_OPERATION_NONE,
           nvshmemi_tma_use TMA_USE = nvshmemi_tma_use::allowed,
           nvshmemi_local_space_t LOCAL_SPACE = NVSHMEMI_LOCAL_SPACE_UNKNOWN>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_put_nbi(
+__device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_put_nbi(
     T *dest, const T *source, size_t nelems, int pe,
     nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT) {
     nvshmemi_threadgroup_sync<SCOPE>();
@@ -3437,9 +3440,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put_thread(
  * scopes retain their existing partitioned paths and thread scope uses the
  * serialized full-tile implementation above. */
 template <threadgroup_t SCOPE, nvshmemi_local_space_t LOCAL_SPACE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_handle_put(const void *src, void *dst,
-                                                                  size_t len, int pe,
-                                                                  bool is_blocking) {
+__device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_handle_put(const void *src, void *dst,
+                                                                        size_t len, int pe,
+                                                                        bool is_blocking) {
     if (pe == nvshmemi_device_state_d.mype) {
         nvshmemi_memcpy_threadgroup<SCOPE>(dst, src, len);
         return;
