@@ -156,7 +156,6 @@ macro(nvshmem_library_set_base_config LIBNAME)
 endmacro()
 
 set(NVSHMEM_DEVICE_SOURCES
-    common/logical_endpoint_device.cu
     init/init_device.cu
     init/init_host.cu
     launch/collective_launch.cpp
