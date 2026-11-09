@@ -452,8 +452,8 @@ DEFINE_NVSHMEM_GETMEM_THREADGROUP(warp)
 DEFINE_NVSHMEM_GETMEM_THREADGROUP(block)
 
 #define NVSHMEM_TYPE_PUT_NBI_THREADGROUP(Name, Type, Group)                                      \
-    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_##Name##_put_nbi_##Group( \
-        Type *dest, const Type *source, size_t nelems, int pe) {                                 \
+    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void                              \
+    nvshmemx_##Name##_put_nbi_##Group(Type *dest, const Type *source, size_t nelems, int pe) {   \
         nvshmemi_put_nbi<Type, nvshmemi_threadgroup_##Group, NVSHMEMI_REGION_OPERATION_NBI_RMA>( \
             dest, source, nelems, pe);                                                           \
     }
