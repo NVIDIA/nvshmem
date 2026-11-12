@@ -29,12 +29,6 @@ tar -xvf hydra-4.3.2.tar
 
 # Install hydra
 cd hydra-4.3.2
-touch aclocal.m4;
-touch Makefile.am;
-touch Makefile.in;
-touch ./modules/mpl/aclocal.m4;
-touch ./modules/mpl/Makefile.am;
-touch ./modules/mpl/Makefile.in;
 
 ./configure --prefix=$builddir --enable-cuda=no --enable-nvml=no
 make
