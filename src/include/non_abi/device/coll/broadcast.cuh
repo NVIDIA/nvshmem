@@ -1051,6 +1051,12 @@ __device__ inline int nvshmemi_tile_bcast(nvshmem_team_t team, src_tensor_t src_
             // NVLS ONE_SHOT broadcast is PUSH based algo, so we can directly start communicating
             // User should ensure src data is ready
 
+            // The push below writes through the multicast address and only asserts that it
+            // exists, so check it here; a team without NVLS has none.
+            if (nvshmemx_mc_ptr(team, dst_tensor.data()) == nullptr) {
+                return NVSHMEMX_ERROR_INVALID_VALUE;
+            }
+
             return nvshmemi_tile_bcast_nvls_threadgroup<src_tensor_t, dst_tensor_t, tuple_t, scope>(
                 team, src_tensor, dst_tensor, start_coord, boundary);
         } else {
