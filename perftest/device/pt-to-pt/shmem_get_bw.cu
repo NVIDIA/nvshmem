@@ -275,6 +275,10 @@ int main(int argc, char *argv[]) {
     double *d_msgrate_local = NULL, *d_msgrate_all = NULL;
     int exit_status = 1;
 
+    // Use valid block-scope defaults
+    min_size = 256;
+    num_blocks = 32;
+    threads_per_block = 256;
     read_args(argc, argv);
     if (threadgroup_scope.type == NVSHMEM_WARP && threads_per_block % kWarpSize != 0) {
         fprintf(stderr,

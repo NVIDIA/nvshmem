@@ -10,6 +10,7 @@
 
 #include "internal/host/nvshmem_internal.h"
 #include "internal/host/nvshmemi_region.h"
+#include "internal/host/device_rma.h"
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/nvshmem_nvtx.hpp"
 #include "non_abi/c/nvshmemi_error_macros.h"
@@ -43,10 +44,31 @@ void nvshmem_quiet(void) {
                 cudaStream_t custrm = nvshmemi_state->custreams[s];
                 CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(custrm), status, out);
                 nvshmemi_state->active_internal_streams[s] = 0;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+                nvshmemi_state->cft_active_internal_streams[s] = false;
+                nvshmemi_state->p2p_active_internal_streams[s] = false;
+#endif
             }
         }
         nvshmemi_state->used_internal_streams = 0;
     }
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    /* Stream-ordered quiet/flush may have cleared the generic activity bits without completing
+     * the work on the host. Preserve dedicated activity until host quiet observes completion. */
+    for (int s = 0; s < nvshmemi_options.MAX_PEER_STREAMS; s++) {
+        if (nvshmemi_state->cft_active_internal_streams[s] ||
+            nvshmemi_state->p2p_active_internal_streams[s]) {
+            CUDA_RUNTIME_CHECK_GOTO(cudaStreamSynchronize(nvshmemi_state->custreams[s]), status,
+                                    out);
+            nvshmemi_state->cft_active_internal_streams[s] = false;
+            nvshmemi_state->p2p_active_internal_streams[s] = false;
+        }
+    }
+    for (int pe = 0; pe < nvshmemi_state->npes; pe++) {
+        nvshmemi_state->cft_active_pes[pe] = false;
+        nvshmemi_state->cft_fence_pending[pe] = false;
+    }
+#endif
 
     for (int j = 0; j < nvshmemi_state->num_initialized_transports; j++) {
         if (tbitmap & 1) {
@@ -112,6 +134,7 @@ void nvshmemx_quiet_on_stream(cudaStream_t cstrm) {
         nvshmemi_call_proxy_quiet_entrypoint(cstrm);
         /* Otherwise, we only need to launch the quiet if we have a remote transport. */
     } else {
+        nvshmemi_device_rma_on_stream(cstrm, false);
         int tbitmap = nvshmemi_state->transport_bitmap;
 
         for (int j = 0; j < nvshmemi_state->num_initialized_transports; j++) {
@@ -143,6 +166,7 @@ void nvshmemx_flush_on_stream(cudaStream_t cstrm) {
 
     /* Ensure any internally-managed streams are ordered before cstrm. */
     nvshmemi_quiesce_internal_streams(cstrm);
+    nvshmemi_device_rma_on_stream(cstrm, true);
 
     /* For P2P-only deployments (NVLink, no network transports), st.global
      * puts have already consumed their source buffers when they retire.  No

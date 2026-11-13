@@ -62,17 +62,17 @@ int nvshmemi_options_init(void) {
     }
 }
 
-static void nvshmemi_options_print_heading(const char *h, int style) {
+static void nvshmemi_options_print_heading(FILE *output, const char *h, int style) {
     switch (style) {
         case NVSHMEMI_OPTIONS_STYLE_INFO:
-            printf("%s:\n", h);
+            fprintf(output, "%s:\n", h);
             break;
         case NVSHMEMI_OPTIONS_STYLE_RST:
-            printf("%s\n", h);
+            fprintf(output, "%s\n", h);
             for (const char *c = h; *c != '\0'; c++) {
-                putchar('~');
+                fputc('~', output);
             }
-            printf("\n\n");
+            fprintf(output, "\n\n");
             break;
         default:
             assert(0);  // FIXME
@@ -85,21 +85,22 @@ static void nvshmemi_options_print_heading(const char *h, int style) {
             char *desc_wrapped;                                                                   \
             case NVSHMEMI_OPTIONS_STYLE_INFO:                                                     \
                 desc_wrapped = nvshmemu_wrap(SHORT_DESC, NVSHMEMI_WRAPLEN, "\t", 1);              \
-                printf("  NVSHMEM_%-20s " NVSHPRI_##KIND " (type: %s, default: " NVSHPRI_##KIND   \
-                       ")\n\t%s\n",                                                               \
-                       #NAME, NVSHFMT_##KIND(nvshmemi_options.NAME), #KIND,                       \
-                       NVSHFMT_##KIND(DEFAULT), desc_wrapped);                                    \
+                fprintf(output,                                                                   \
+                        "  NVSHMEM_%-20s " NVSHPRI_##KIND " (type: %s, default: " NVSHPRI_##KIND  \
+                        ")\n\t%s\n",                                                              \
+                        #NAME, NVSHFMT_##KIND(nvshmemi_options.NAME), #KIND,                      \
+                        NVSHFMT_##KIND(DEFAULT), desc_wrapped);                                   \
                 free(desc_wrapped);                                                               \
                 break;                                                                            \
             case NVSHMEMI_OPTIONS_STYLE_RST:                                                      \
                 desc_wrapped = nvshmemu_wrap(SHORT_DESC, NVSHMEMI_WRAPLEN, NULL, 0);              \
-                printf(".. c:var:: NVSHMEM_%s\n", #NAME);                                         \
-                printf("\n");                                                                     \
-                printf("| *Type: %s*\n", #KIND);                                                  \
-                printf("| *Default: " NVSHPRI_##KIND "*\n", NVSHFMT_##KIND(DEFAULT));             \
-                printf("\n");                                                                     \
-                printf("%s\n", desc_wrapped);                                                     \
-                printf("\n");                                                                     \
+                fprintf(output, ".. c:var:: NVSHMEM_%s\n", #NAME);                                \
+                fprintf(output, "\n");                                                            \
+                fprintf(output, "| *Type: %s*\n", #KIND);                                         \
+                fprintf(output, "| *Default: " NVSHPRI_##KIND "*\n", NVSHFMT_##KIND(DEFAULT));    \
+                fprintf(output, "\n");                                                            \
+                fprintf(output, "%s\n", desc_wrapped);                                            \
+                fprintf(output, "\n");                                                            \
                 free(desc_wrapped);                                                               \
                 break;                                                                            \
             default:                                                                              \
@@ -108,72 +109,81 @@ static void nvshmemi_options_print_heading(const char *h, int style) {
     }
 
 void nvshmemi_options_print(int style) {
-    nvshmemi_options_print_heading("Standard options", style);
+    FILE *output = style == NVSHMEMI_OPTIONS_STYLE_INFO ? nvshmem_debug_file : stdout;
+    const bool lock_output = output == nvshmem_debug_file;
+    if (lock_output) {
+        pthread_mutex_lock(&nvshmem_debug_output_lock);
+    }
+    nvshmemi_options_print_heading(output, "Standard options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)       \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, \
                                NVSHMEMI_ENV_CAT_OPENSHMEM, style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    fprintf(output, "\n");
 
-    nvshmemi_options_print_heading("Bootstrap options", style);
+    nvshmemi_options_print_heading(output, "Bootstrap options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)       \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, \
                                NVSHMEMI_ENV_CAT_BOOTSTRAP, style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    fprintf(output, "\n");
 
-    nvshmemi_options_print_heading("Additional options", style);
+    nvshmemi_options_print_heading(output, "Additional options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)                               \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, NVSHMEMI_ENV_CAT_OTHER, \
                                style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    fprintf(output, "\n");
 
-    nvshmemi_options_print_heading("Collectives options", style);
+    nvshmemi_options_print_heading(output, "Collectives options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)       \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, \
                                NVSHMEMI_ENV_CAT_COLLECTIVES, style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    fprintf(output, "\n");
 
-    nvshmemi_options_print_heading("Transport options", style);
+    nvshmemi_options_print_heading(output, "Transport options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)       \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, \
                                NVSHMEMI_ENV_CAT_TRANSPORT, style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    fprintf(output, "\n");
 
     if (nvshmemi_options.INFO_HIDDEN) {
-        nvshmemi_options_print_heading("Hidden options", style);
+        nvshmemi_options_print_heading(output, "Hidden options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)                                \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, NVSHMEMI_ENV_CAT_HIDDEN, \
                                style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-        printf("\n");
+        fprintf(output, "\n");
     }
 
 #ifndef NVTX_DISABLE
     if (nvshmemi_options.NVTX) {
-        nvshmemi_options_print_heading("NVTX options", style);
+        nvshmemi_options_print_heading(output, "NVTX options", style);
 #define NVSHMEMI_ENV_DEF(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC)                              \
     NVSHMEMI_OPTIONS_PRINT_ENV(NAME, KIND, DEFAULT, CATEGORY, SHORT_DESC, NVSHMEMI_ENV_CAT_NVTX, \
                                style)
 #include "env_defs.h"
 
         if (style == NVSHMEMI_OPTIONS_STYLE_RST) {
-            printf(".. code-block:: none\n\n");
+            fprintf(output, ".. code-block:: none\n\n");
         }
 
-        nvshmem_nvtx_print_options();
+        nvshmem_nvtx_print_options(output);
 #undef NVSHMEMI_ENV_DEF
     }
 #endif /* !NVTX_DISABLE */
 
-    printf("\n");
+    fprintf(output, "\n");
+    fflush(output);
+    if (lock_output) {
+        pthread_mutex_unlock(&nvshmem_debug_output_lock);
+    }
 }

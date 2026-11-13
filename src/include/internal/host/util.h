@@ -37,6 +37,13 @@
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "non_abi/c/nvshmem_build_options.h"
 
+static inline size_t nvshmemi_get_tma_cft_smem_size(size_t requested_size) {
+    return nvshmemi_device_state.tma_policy != NVSHMEMX_TMA_DISABLE ||
+                   nvshmemi_device_state.has_cft_routed_peer
+               ? requested_size
+               : 0;
+}
+
 #ifndef likely
 #define likely(x) (__builtin_expect(!!(x), 1))
 #endif
@@ -45,25 +52,22 @@
 #define unlikely(x) (__builtin_expect(!!(x), 0))
 #endif
 
-#define NVSHMEMI_DEBUG_PRINT(...)                           \
-    do {                                                    \
-        if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {     \
-            fprintf(stderr, "%s:%d: ", __FILE__, __LINE__); \
-            fprintf(stderr, __VA_ARGS__);                   \
-            fprintf(stderr, "\n");                          \
-        }                                                   \
+#define NVSHMEMI_DEBUG_PRINT(...)                                          \
+    do {                                                                   \
+        if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {                    \
+            nvshmem_debug_log_unfiltered(__FILE__, __LINE__, __VA_ARGS__); \
+        }                                                                  \
     } while (0)
 
-#define NZ_DEBUG_JMP(status, err, label, ...)                                               \
-    do {                                                                                    \
-        if (unlikely(status != 0)) {                                                        \
-            if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {                                 \
-                fprintf(stderr, "%s:%d: non-zero status: %d ", __FILE__, __LINE__, status); \
-                fprintf(stderr, __VA_ARGS__);                                               \
-            }                                                                               \
-            status = err;                                                                   \
-            goto label;                                                                     \
-        }                                                                                   \
+#define NZ_DEBUG_JMP(status, err, label, ...)                                                 \
+    do {                                                                                      \
+        if (unlikely(status != 0)) {                                                          \
+            if (nvshmem_debug_level >= NVSHMEM_LOG_TRACE) {                                   \
+                nvshmem_debug_log_status_unfiltered(__FILE__, __LINE__, status, __VA_ARGS__); \
+            }                                                                                 \
+            status = err;                                                                     \
+            goto label;                                                                       \
+        }                                                                                     \
     } while (0)
 
 #define CUDA_DRIVER_CHECK(cmd)                    \

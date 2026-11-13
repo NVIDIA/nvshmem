@@ -87,6 +87,7 @@ void nvshmemi_nvls_rsc::invalidate_rsc(void) {
     cumc_handles_.clear();
     mc_base_ptr_ = NULL;
     mc_granularity_ = 0;
+    mc_bind_granularity_ = 0;
     rsc_refcount_ = 0;
     owner_team_ = NVSHMEM_TEAM_INVALID;
 }
@@ -102,6 +103,12 @@ int nvshmemi_nvls_rsc::export_group(uint64_t mem_size, char *shareable_handle) {
     status = CUPFN(
         nvshmemi_cuda_syms,
         cuMulticastGetGranularity(&mc_granularity_, &prop_, CU_MULTICAST_GRANULARITY_RECOMMENDED));
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                             "cuMulticastGetGranularity recommended failed\n");
+    status = CUPFN(nvshmemi_cuda_syms, cuMulticastGetGranularity(&mc_bind_granularity_, &prop_,
+                                                                 CU_MULTICAST_GRANULARITY_MINIMUM));
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                             "cuMulticastGetGranularity minimum failed\n");
 
     INFO(NVSHMEM_TEAM,
          "GPU [%d] mem_granularity: %zu mem_handle_type: %d n_devices: %d "
@@ -142,6 +149,11 @@ int nvshmemi_nvls_rsc::import_group(char *shareable_handle, CUmemGenericAllocati
                                     uint64_t mem_size) {
     nvshmemi_state_t *state = get_state();
     int status = -1;
+    set_group_prop(mem_size);
+    status = CUPFN(nvshmemi_cuda_syms, cuMulticastGetGranularity(&mc_bind_granularity_, &prop_,
+                                                                 CU_MULTICAST_GRANULARITY_MINIMUM));
+    NVSHMEMI_CU_NE_ERROR_JMP(nvshmemi_cuda_syms, status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
+                             "cuMulticastGetGranularity minimum failed\n");
     if (state->heap_obj->is_cuda_mem_handle_type_ipc()) {
         int fd = *(int *)shareable_handle;
         status = CUPFN(

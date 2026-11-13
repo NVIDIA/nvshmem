@@ -162,12 +162,12 @@ struct doca_verbs_cq_open {
     /**
      * @brief Set CQ cq_context after CQ creation
      */
-	void set_cq_context(void *cq_context) { m_cq_context = cq_context; }
+    void set_cq_context(void *cq_context) { m_cq_context = cq_context; }
 
     /**
      * @brief Get CQ cq_context after CQ creation
      */
-	void *get_cq_context() { return m_cq_context; }
+    void *get_cq_context() { return m_cq_context; }
 
    private:
     struct mlx5dv_devx_obj *m_cq_obj{};
@@ -200,27 +200,27 @@ enum { DOCA_MLX5_EVENT_TYPE_COMPLETION_EVENTS = 0x0 };
  */
 struct doca_verbs_comp_channel_open {
    public:
-      /**
-       * @brief constructor
-       *
-       * @param [in] verbs_ctx
-       * ibv_context
-       *
-       */
-      doca_verbs_comp_channel_open(struct ibv_context *ibv_ctx);
+    /**
+     * @brief constructor
+     *
+     * @param [in] verbs_ctx
+     * ibv_context
+     *
+     */
+    doca_verbs_comp_channel_open(struct ibv_context *ibv_ctx);
 
-      /**
-       * @brief destructor
-       */
-      ~doca_verbs_comp_channel_open();
+    /**
+     * @brief destructor
+     */
+    ~doca_verbs_comp_channel_open();
 
-      doca_error_t register_cq(struct doca_verbs_cq_open *cq);
+    doca_error_t register_cq(struct doca_verbs_cq_open *cq);
 
-      doca_error_t get_cq_event(void **cq_context);
-   
-private:
-   struct ibv_context *ibv_ctx;
-   struct mlx5dv_devx_event_channel *channel{};
-   std::set<struct doca_verbs_cq_open *> cqs;
-   bool degraded{false};
+    doca_error_t get_cq_event(void **cq_context);
+
+   private:
+    struct ibv_context *ibv_ctx;
+    struct mlx5dv_devx_event_channel *channel{};
+    std::set<struct doca_verbs_cq_open *> cqs;
+    bool degraded{false};
 };

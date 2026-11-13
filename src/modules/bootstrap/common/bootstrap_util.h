@@ -9,6 +9,7 @@
 #include <errno.h>   // for errno, EAGAIN, EINTR, EWOULDBLOCK
 #include <limits.h>  // for INT_MIN
 #include <stdio.h>   // for stderr, stdout, NULL
+#include "bootstrap_host_transport/nvshmemi_plugin_log.h"
 
 #define BOOTPRI_float "%0.2f"
 #define BOOTPRI_double "%0.2f"
@@ -59,20 +60,24 @@ extern int bootstrap_debug_enable;
         fprintf(stderr, "\n");                                           \
     } while (0)
 
-#define BOOTSTRAP_DEBUG_PRINT(...)                                           \
-    do {                                                                     \
-        if (bootstrap_debug_enable) {                                        \
-            fprintf(stdout, "%s:%s:%d: ", __FILE__, __FUNCTION__, __LINE__); \
-            fprintf(stdout, __VA_ARGS__);                                    \
-            fprintf(stdout, "\n");                                           \
-        }                                                                    \
+#define BOOTSTRAP_WARN_PRINT(...) \
+    nvshmemi_plugin_warn_at(stderr, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
+
+#define BOOTSTRAP_DEBUG_PRINT(...)                                                               \
+    do {                                                                                         \
+        if (bootstrap_debug_enable) {                                                            \
+            nvshmemi_plugin_log(NVSHMEMI_PLUGIN_LOG_INFO, NVSHMEMI_PLUGIN_LOG_BOOTSTRAP, stdout, \
+                                __FUNCTION__, __LINE__, __VA_ARGS__);                            \
+        }                                                                                        \
     } while (0)
 
-#define BOOTSTRAP_INFO_PRINT(...)     \
-    do {                              \
-        fprintf(stdout, __VA_ARGS__); \
-        fprintf(stdout, "\n");        \
+#define BOOTSTRAP_INFO_PRINT(...)                    \
+    do {                                             \
+        nvshmemi_plugin_printf(stdout, __VA_ARGS__); \
+        nvshmemi_plugin_printf(stdout, "\n");        \
     } while (0)
+
+#define BOOTSTRAP_RAW_PRINT(...) nvshmemi_plugin_printf(stdout, __VA_ARGS__)
 
 #define BOOTSTRAP_CHECK(call)                                                        \
     do {                                                                             \

@@ -20,6 +20,54 @@
 #define nvshmemi_gettid() (pid_t) syscall(SYS_gettid)
 
 extern "C" {
+int nvshmem_debug_file_active(void) { return nvshmem_debug_file != stdout; }
+
+void nvshmem_debug_log_unfiltered(const char *filefunc, int line, const char *fmt, ...) {
+    pthread_mutex_lock(&nvshmem_debug_output_lock);
+    fprintf(nvshmem_debug_file, "%s:%d: ", filefunc, line);
+    va_list vargs;
+    va_start(vargs, fmt);
+    (void)vfprintf(nvshmem_debug_file, fmt, vargs);
+    va_end(vargs);
+    fprintf(nvshmem_debug_file, "\n");
+    fflush(nvshmem_debug_file);
+    pthread_mutex_unlock(&nvshmem_debug_output_lock);
+}
+
+void nvshmem_debug_log_status_unfiltered(const char *filefunc, int line, int status,
+                                         const char *fmt, ...) {
+    pthread_mutex_lock(&nvshmem_debug_output_lock);
+    fprintf(nvshmem_debug_file, "%s:%d: non-zero status: %d ", filefunc, line, status);
+    va_list vargs;
+    va_start(vargs, fmt);
+    (void)vfprintf(nvshmem_debug_file, fmt, vargs);
+    va_end(vargs);
+    fflush(nvshmem_debug_file);
+    pthread_mutex_unlock(&nvshmem_debug_output_lock);
+}
+
+void nvshmem_debug_printf(const char *fmt, ...) {
+    pthread_mutex_lock(&nvshmem_debug_output_lock);
+    va_list vargs;
+    va_start(vargs, fmt);
+    (void)vfprintf(nvshmem_debug_file, fmt, vargs);
+    va_end(vargs);
+    fflush(nvshmem_debug_file);
+    pthread_mutex_unlock(&nvshmem_debug_output_lock);
+}
+
+void nvshmem_debug_warn(const char *fmt, ...) {
+    pthread_mutex_lock(&nvshmem_debug_output_lock);
+    fprintf(nvshmem_debug_file, "WARN: ");
+    va_list vargs;
+    va_start(vargs, fmt);
+    (void)vfprintf(nvshmem_debug_file, fmt, vargs);
+    va_end(vargs);
+    fprintf(nvshmem_debug_file, "\n");
+    fflush(nvshmem_debug_file);
+    pthread_mutex_unlock(&nvshmem_debug_output_lock);
+}
+
 void nvshmem_debug_log(nvshmem_debug_log_level level, unsigned long flags, const char *filefunc,
                        int line, const char *fmt, ...) {
     if (nvshmem_debug_level <= NVSHMEM_LOG_NONE) {
@@ -41,17 +89,19 @@ void nvshmem_debug_log(nvshmem_debug_log_level level, unsigned long flags, const
                (flags & nvshmem_debug_mask)) {
         len = snprintf(buffer, sizeof(buffer), "%s:%d:%d [%d] NVSHMEM INFO ", hostname, getpid(),
                        nvshmemi_gettid(), cudaDev);
-    }
+    } else if (level == NVSHMEM_LOG_TRACE && nvshmem_debug_level >= NVSHMEM_LOG_TRACE &&
+               (flags & nvshmem_debug_mask)) {
 #ifdef NVSHMEM_TRACE
-    else if (level == NVSHMEM_LOG_TRACE && nvshmem_debug_level >= NVSHMEM_LOG_TRACE &&
-             (flags & nvshmem_debug_mask)) {
         auto delta = std::chrono::high_resolution_clock::now() - nvshmem_epoch;
         double timestamp =
             std::chrono::duration_cast<std::chrono::duration<double>>(delta).count() * 1000;
         len = snprintf(buffer, sizeof(buffer), "%s:%d:%d [%d] %f %s:%d NVSHMEM TRACE ", hostname,
                        getpid(), nvshmemi_gettid(), cudaDev, timestamp, filefunc, line);
-    }
+#else
+        len = snprintf(buffer, sizeof(buffer), "%s:%d:%d [%d] %s:%d NVSHMEM TRACE ", hostname,
+                       getpid(), nvshmemi_gettid(), cudaDev, filefunc, line);
 #endif
+    }
     if (len) {
         va_list vargs;
         va_start(vargs, fmt);

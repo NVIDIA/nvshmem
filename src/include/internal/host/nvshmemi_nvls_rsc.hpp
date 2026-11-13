@@ -73,6 +73,7 @@ class nvshmemi_nvls_rsc final {
 
     int subscribe_multicast_endpoint(CUlogicalEndpointId le_mc_id);
     CUdevice get_current_dev(void) const { return current_dev_; }
+    size_t get_bind_granularity(void) const { return mc_bind_granularity_; }
 
    private:
     void invalidate_rsc(void);
@@ -85,6 +86,7 @@ class nvshmemi_nvls_rsc final {
     void *mc_base_ptr_ = NULL; /* This MC heap supports monotonically increasing UC memory mappings,
                                   that don't shrink over time */
     size_t mc_granularity_ = 0;
+    size_t mc_bind_granularity_ = 0;
     size_t rsc_refcount_ = 0;
     CUmulticastObjectProp prop_ = {};
     CUdevice current_dev_;

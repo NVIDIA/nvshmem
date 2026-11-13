@@ -201,3 +201,4 @@ nvshmem_library_set_base_config(nvshmem_device)
 
 set_source_files_properties(${NVSHMEM_DEVICE_SOURCES} PROPERTIES COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CUDA>:--maxrregcount=32>)
 target_sources(nvshmem_device PRIVATE ${NVSHMEM_DEVICE_SOURCES} ${NVSHMEM_DEVICE_SOURCES_NOMAXREGCOUNT})
+include("${CMAKE_CURRENT_SOURCE_DIR}/../private/device.cmake" OPTIONAL)

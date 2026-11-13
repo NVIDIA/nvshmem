@@ -301,6 +301,7 @@ int main(int argc, char *argv[]) {
     unsigned long long *d_validation_errors = NULL;
     int return_code = 0;
 
+    min_size = 256;
     read_args(argc, argv);
     if (threadgroup_scope.type == NVSHMEM_WARP && threads_per_block % kWarpSize != 0) {
         fprintf(stderr,

@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Staged RDMA transport for NVSHMEM.
- * Uses ibverbs RC QPs with host-staged bounce buffers.
- * Data path: GPU --(D2H)--> pinned bounce --(RDMA Write)--> remote bounce --(H2D)--> GPU
+ * Uses ibverbs RC QPs with staged bounce buffers.
+ * Data path: GPU --(copy)--> local bounce --(RDMA Write)--> remote bounce --(copy)--> GPU
+ * Bounce buffers live in pinned host memory (SYSMEM, default) or in GPU memory registered for
+ * GPUDirect RDMA (VIDMEM), selected by NVSHMEM_STAGED_BOUNCE_LOCATION.
  */
 
 #include <arpa/inet.h>
@@ -18,7 +20,6 @@
 #include <exception>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 #include <vector>
 
@@ -31,14 +32,14 @@
 #include "internal/host_transport/transport.h"
 #include "non_abi/c/nvshmemi_error_macros.h"
 #include "staged_config.h"
+#include "staged_gdrcopy.h"
 #include "transport_common.h"
 #include "transport_ib_common.h"
 
-#ifdef NVSHMEM_USE_GDRCOPY
-#include "transport_gdr_common.h"
-#endif
-
 namespace nvshmemi {
+
+static struct nvshmemt_ibv_function_table ftable;
+static void* ibv_handle;
 
 staged_qp_t::staged_qp_t(struct ibv_context* context, struct ibv_pd* pd, void* server_bounce)
     : context_(context), pd_(pd), server_bounce_(server_bounce) {}
@@ -48,7 +49,7 @@ staged_qp_t::~staged_qp_t() { close(); }
 int staged_qp_t::close() noexcept {
     int status = 0;
     if (qp_) {
-        int verbs_status = ibv_destroy_qp(qp_);
+        int verbs_status = ftable.destroy_qp(qp_);
         if (verbs_status != 0) {
             /* A live QP may still reference its CQs and control receive MR. */
             NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_qp failed during cleanup: %s",
@@ -58,9 +59,9 @@ int staged_qp_t::close() noexcept {
         qp_ = nullptr;
     }
     if (send_cq_) {
-        int verbs_status = ibv_destroy_cq(send_cq_);
+        int verbs_status = ftable.destroy_cq(send_cq_);
         if (verbs_status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_cq(send) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] ftable.destroy_cq(send) failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -68,9 +69,9 @@ int staged_qp_t::close() noexcept {
         }
     }
     if (recv_cq_) {
-        int verbs_status = ibv_destroy_cq(recv_cq_);
+        int verbs_status = ftable.destroy_cq(recv_cq_);
         if (verbs_status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_destroy_cq(recv) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] ftable.destroy_cq(recv) failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -78,9 +79,9 @@ int staged_qp_t::close() noexcept {
         }
     }
     if (ctrl_recv_mr_) {
-        int verbs_status = ibv_dereg_mr(ctrl_recv_mr_);
+        int verbs_status = ftable.dereg_mr(ctrl_recv_mr_);
         if (verbs_status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dereg_mr(control) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] ftable.dereg_mr(control) failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -106,20 +107,22 @@ int staged_rdma_state_t::close() noexcept {
     }
     qps_.qps.clear();
 
-    if (ib_.bounce_mr) {
-        int verbs_status = ibv_dereg_mr(ib_.bounce_mr);
-        if (verbs_status != 0) {
+    if (ib_.bounce_handle.mr) {
+        if (nvshmemt_ib_common_release_mem_handle(
+                &ftable, reinterpret_cast<nvshmem_mem_handle_t*>(&ib_.bounce_handle), 0) != 0) {
             /* A registered MR still references its allocation and PD. */
-            NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dereg_mr(bounce) failed during cleanup: %s",
-                                 nvshmemt_strerror_from_status(verbs_status));
+            NVSHMEMI_ERROR_PRINT("[STAGED] bounce deregistration failed during cleanup");
             return NVSHMEMX_ERROR_INTERNAL;
         }
-        ib_.bounce_mr = nullptr;
+        ib_.bounce_handle = {};
     }
     if (ib_.bounce_region) {
-        cudaError_t cuda_status = cudaFreeHost(ib_.bounce_region);
+        const bool vidmem = ib_.bounce_in_vidmem;
+        cudaError_t cuda_status =
+            vidmem ? cudaFree(ib_.bounce_region) : cudaFreeHost(ib_.bounce_region);
         if (cuda_status != cudaSuccess) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] cudaFreeHost(bounce) failed during cleanup: %s",
+            NVSHMEMI_ERROR_PRINT("[STAGED] %s(bounce) failed during cleanup: %s",
+                                 vidmem ? "cudaFree" : "cudaFreeHost",
                                  cudaGetErrorString(cuda_status));
             status = NVSHMEMX_ERROR_INTERNAL;
         } else {
@@ -129,7 +132,7 @@ int staged_rdma_state_t::close() noexcept {
         }
     }
     if (ib_.protection_domain) {
-        int verbs_status = ibv_dealloc_pd(ib_.protection_domain);
+        int verbs_status = ftable.dealloc_pd(ib_.protection_domain);
         if (verbs_status != 0) {
             /* The device context must outlive a PD that could not be released. */
             NVSHMEMI_ERROR_PRINT("[STAGED] ibv_dealloc_pd failed during cleanup: %s",
@@ -139,7 +142,7 @@ int staged_rdma_state_t::close() noexcept {
         ib_.protection_domain = nullptr;
     }
     if (ib_.context) {
-        int verbs_status = ibv_close_device(ib_.context);
+        int verbs_status = ftable.close_device(ib_.context);
         if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED] ibv_close_device failed during cleanup: %s",
                                  nvshmemt_strerror_from_status(verbs_status));
@@ -169,16 +172,16 @@ staged_cuda_state_t::~staged_cuda_state_t() {
 
 int staged_qp_t::initialize(int ib_port, uint16_t pkey_index, size_t index) {
     ctrl_recv_mr_ =
-        ibv_reg_mr(pd_, ctrl_recv_bufs_.data(), ctrl_recv_bufs_.size() * sizeof(staged_ctrl_msg_t),
-                   IBV_ACCESS_LOCAL_WRITE);
+        ftable.reg_mr(pd_, ctrl_recv_bufs_.data(),
+                      ctrl_recv_bufs_.size() * sizeof(staged_ctrl_msg_t), IBV_ACCESS_LOCAL_WRITE);
     if (!ctrl_recv_mr_) {
         NVSHMEMI_ERROR_PRINT("[STAGED] failed to register control receive buffers for QP %zu: %s",
                              index, strerror(errno));
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    send_cq_ = ibv_create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
-    recv_cq_ = ibv_create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
+    send_cq_ = ftable.create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
+    recv_cq_ = ftable.create_cq(context_, STAGED_CQ_DEPTH, nullptr, nullptr, 0);
     if (!send_cq_ || !recv_cq_) {
         NVSHMEMI_ERROR_PRINT("[STAGED] failed to create CQs for QP %zu", index);
         return NVSHMEMX_ERROR_INTERNAL;
@@ -193,7 +196,7 @@ int staged_qp_t::initialize(int ib_port, uint16_t pkey_index, size_t index) {
     qp_attr.cap.max_send_sge = 1;
     qp_attr.cap.max_recv_sge = 1;
     qp_attr.cap.max_inline_data = 128;
-    qp_ = ibv_create_qp(pd_, &qp_attr);
+    qp_ = ftable.create_qp(pd_, &qp_attr);
     if (!qp_) {
         NVSHMEMI_ERROR_PRINT("[STAGED] failed to create QP %zu: %s", index, strerror(errno));
         return NVSHMEMX_ERROR_INTERNAL;
@@ -205,7 +208,7 @@ int staged_qp_t::initialize(int ib_port, uint16_t pkey_index, size_t index) {
     attr.pkey_index = pkey_index;
     attr.qp_access_flags =
         IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_LOCAL_WRITE;
-    int status = ibv_modify_qp(
+    int status = ftable.modify_qp(
         qp_, &attr, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
     if (status) {
         NVSHMEMI_ERROR_PRINT("[STAGED] QP %zu INIT failed: %s", index, strerror(status));
@@ -282,22 +285,68 @@ static staged_qp_t& staged_get_qp(transport_staged_state_t* s, int qp_slot, int 
     return s->rdma.qp(qp_slot, pe);
 }
 
-static int staged_query_usable_gid(transport_staged_state_t* s, struct ibv_context* ctx, int port,
-                                   const struct ibv_port_attr* port_attr, int* gid_index,
-                                   union ibv_gid* gid) {
-    nvshmemt_ibv_function_table verbs{};
-    verbs.get_device_name = ibv_get_device_name;
-    verbs.query_gid = ibv_query_gid;
-
-    int status = ib_get_gid_index(&verbs, ctx, static_cast<uint8_t>(port), port_attr, gid_index,
-                                  s->log_level, &s->options);
-    if (status != NVSHMEMX_SUCCESS) {
-        return status;
-    }
-    if (ibv_query_gid(ctx, port, *gid_index, gid) != 0) {
+/* Staged uses a single NIC port: the first one the shared IB enumeration accepts, which honors
+ * NVSHMEM_HCA_LIST and picks a usable GID. Devices it opened but staged does not use are released.
+ */
+static int staged_open_hca(transport_staged_state_t* s) {
+    int num_devices = 0;
+    std::unique_ptr<struct ibv_device*, decltype(ftable.free_device_list)> dev_list(
+        ftable.get_device_list(&num_devices), ftable.free_device_list);
+    if (!dev_list || num_devices == 0) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] no IB devices found");
         return NVSHMEMX_ERROR_INTERNAL;
     }
-    return NVSHMEMX_SUCCESS;
+
+    std::vector<nvshmemt_ib_common_device> devices(static_cast<size_t>(num_devices));
+    std::array<int, MAX_NUM_PES_PER_NODE> dev_ids{};
+    std::array<int, MAX_NUM_PES_PER_NODE> port_ids{};
+    nvshmemt_ib_common_state ib{};
+    ib.devices = devices.data();
+    ib.dev_ids = dev_ids.data();
+    ib.port_ids = port_ids.data();
+    ib.n_raw_devices = num_devices;
+    ib.options = &s->options;
+    ib.log_level = s->log_level;
+
+    nvshmemt_ib_hca_filter filter{};
+    int status = nvshmemt_ib_common_parse_hca_filter(filter, ib);
+    if (status == 0) {
+        status = nvshmemt_ib_common_enumerate_devices(&ftable, ib, sizeof(devices[0]), filter,
+                                                      dev_list.get(), num_devices);
+    }
+    if (status != 0) {
+        return status;
+    }
+    nvshmemt_ib_common_warn_missing_hcas(filter);
+
+    const int dev_id = ib.dev_ids[0];
+    const int port = ib.port_ids[0];
+    for (int i = 0; i < num_devices; ++i) {
+        if (i == dev_id) {
+            continue;
+        }
+        if (devices[i].pd) {
+            ftable.dealloc_pd(devices[i].pd);
+        }
+        if (devices[i].context) {
+            ftable.close_device(devices[i].context);
+        }
+    }
+
+    const nvshmemt_ib_common_device& device = devices[dev_id];
+    const char* name = ftable.get_device_name(device.dev);
+    if (filter.user_selection && !filter.exclude_list && ib.n_dev_ids > 1) {
+        NVSHMEMI_WARN_PRINT("[STAGED] NVSHMEM_HCA_LIST matches %d ports; staged uses only %s:%d",
+                            ib.n_dev_ids, name, port);
+    }
+    INFO(s->log_level, "[STAGED] using device '%s' port %d", name, port);
+
+    s->rdma.set_context(device.context);
+    s->rdma.set_protection_domain(device.pd);
+    s->rdma.set_ib_port(port);
+    s->rdma.set_local_gid_index(static_cast<uint8_t>(device.gid_info[port - 1].local_gid_index));
+    s->rdma.set_local_gid(device.gid_info[port - 1].local_gid);
+    return 0;
 }
 
 static int staged_init_green_context(transport_staged_state_t* s) {
@@ -366,9 +415,8 @@ static int staged_init_green_context(transport_staged_state_t* s) {
     return 0;
 }
 
-static int staged_cuda_copy_sync(transport_staged_state_t* s, void* dst, const void* src,
+static int staged_cuda_copy_sync(transport_staged_state_t* /* s */, void* dst, const void* src,
                                  size_t bytes, cudaStream_t stream, const char* label) {
-    std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
     cudaError_t err = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDefault, stream);
     if (err != cudaSuccess) {
         NVSHMEMI_ERROR_PRINT("[STAGED] %s cudaMemcpyAsync failed: %s", label,
@@ -386,6 +434,23 @@ static int staged_cuda_copy_sync(transport_staged_state_t* s, void* dst, const v
     return 0;
 }
 
+/* Seeing CHUNK_DONE or RESPONSE does not make the NIC's earlier writes to a VIDMEM bounce visible.
+ * Unless the GPU orders GPUDirect RDMA writes, staged_copy() flushes them before reading the
+ * bounce. */
+static bool staged_is_gdr_flush_required(int device) {
+    int ordering = 0;
+    return cudaDeviceGetAttribute(&ordering, cudaDevAttrGPUDirectRDMAWritesOrdering, device) !=
+               cudaSuccess ||
+           ordering < cudaGPUDirectRDMAWritesOrderingOwner;
+}
+
+static bool staged_is_gdr_flush_supported(int device) {
+    int options = 0;
+    return cudaDeviceGetAttribute(&options, cudaDevAttrGPUDirectRDMAFlushWritesOptions, device) ==
+               cudaSuccess &&
+           (options & cudaFlushGPUDirectRDMAWritesOptionHost);
+}
+
 static int staged_allocate_bounce_region(transport_staged_state_t* s, size_t num_qps) {
     auto& rdma = s->rdma;
     if (num_qps == 0 || rdma.bounce_region() || rdma.bounce_mr()) {
@@ -401,25 +466,68 @@ static int staged_allocate_bounce_region(transport_staged_state_t* s, size_t num
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
 
-    const size_t bounce_region_size = ring_count * ring_bytes;
+    size_t bounce_region_size = ring_count * ring_bytes;
+    const bool vidmem = rdma.bounce_in_vidmem();
+    if (vidmem) {
+        s->cuda.flush_gdr_writes = staged_is_gdr_flush_required(s->cuda.device);
+        if (s->cuda.flush_gdr_writes && !staged_is_gdr_flush_supported(s->cuda.device)) {
+            NVSHMEMI_ERROR_PRINT(
+                "[STAGED] NVSHMEM_STAGED_BOUNCE_LOCATION=VIDMEM requires GPUDirect RDMA write "
+                "ordering or flush support on device %d",
+                s->cuda.device);
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+        INFO(s->log_level, "[STAGED] VIDMEM bounce: GPUDirect RDMA write flush %s",
+             s->cuda.flush_gdr_writes ? "required" : "not required");
+        if (bounce_region_size > SIZE_MAX - STAGED_VIDMEM_ALIGNMENT) {
+            return NVSHMEMX_ERROR_OUT_OF_MEMORY;
+        }
+        bounce_region_size = ROUNDUP(bounce_region_size, STAGED_VIDMEM_ALIGNMENT);
+    }
+
     void* bounce_region = nullptr;
-    cudaError_t cerr = cudaHostAlloc(&bounce_region, bounce_region_size, 0);
+    cudaError_t cerr = vidmem ? cudaMalloc(&bounce_region, bounce_region_size)
+                              : cudaHostAlloc(&bounce_region, bounce_region_size, 0);
     if (cerr != cudaSuccess) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] cudaHostAlloc failed for %zu bytes: %s", bounce_region_size,
+        NVSHMEMI_ERROR_PRINT("[STAGED] %s failed for %zu bytes: %s",
+                             vidmem ? "cudaMalloc" : "cudaHostAlloc", bounce_region_size,
                              cudaGetErrorString(cerr));
         return NVSHMEMX_ERROR_OUT_OF_MEMORY;
     }
 
-    struct ibv_mr* bounce_mr =
-        ibv_reg_mr(rdma.protection_domain(), bounce_region, bounce_region_size,
-                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
-    if (!bounce_mr) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] ibv_reg_mr failed: %s", strerror(errno));
-        cudaFreeHost(bounce_region);
-        return NVSHMEMX_ERROR_INTERNAL;
+    /* GPU memory registers through DMA-BUF when available, else through peer memory. */
+    bool dmabuf_support = false;
+    int status = 0;
+    if (vidmem) {
+        status = nvshmemt_ib_common_check_dmabuf_support(dmabuf_support, s->cuda.syms,
+                                                         s->options.IB_DISABLE_DMABUF);
+    }
+    nvshmemt_ib_common_mem_handle handle{};
+    if (status == 0) {
+        status = nvshmemt_ib_common_reg_mem_handle(
+            &ftable, nullptr, rdma.protection_domain(),
+            reinterpret_cast<nvshmem_mem_handle_t*>(&handle), bounce_region, bounce_region_size,
+            false, dmabuf_support, s->cuda.syms, s->log_level, false, false, nullptr);
+    }
+    if (status == 0 && vidmem && s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
+        status = staged_gdrcopy_map(s, bounce_region, bounce_region_size, bounce_region, nullptr);
+        if (status) {
+            nvshmemt_ib_common_release_mem_handle(
+                &ftable, reinterpret_cast<nvshmem_mem_handle_t*>(&handle), s->log_level);
+        }
+    }
+    if (status) {
+        NVSHMEMI_ERROR_PRINT("[STAGED] failed to register %zu bytes of bounce storage",
+                             bounce_region_size);
+        if (vidmem) {
+            cudaFree(bounce_region);
+        } else {
+            cudaFreeHost(bounce_region);
+        }
+        return status;
     }
 
-    rdma.set_bounce_storage(bounce_region, bounce_region_size, bounce_region, bounce_mr);
+    rdma.set_bounce_storage(bounce_region, bounce_region_size, bounce_region, handle);
     return 0;
 }
 
@@ -476,10 +584,9 @@ static int staged_create_qp_resources(transport_staged_state_t* s, int num_pes, 
         return status;
     }
 
-    INFO(s->log_level,
-         "[STAGED] allocating %zu QPs (%d per PE) and %zu bytes of pinned bounce "
-         "storage",
-         num_qps, rdma.qps_per_pe(), rdma.bounce_region_size());
+    INFO(s->log_level, "[STAGED] allocating %zu QPs (%d per PE) and %zu bytes of %s bounce storage",
+         num_qps, rdma.qps_per_pe(), rdma.bounce_region_size(),
+         rdma.bounce_in_vidmem() ? "GPU" : "pinned host");
 
     if (s->cuda.copy_policy == staged_copy_policy_t::STREAM) {
         CUresult cuerr = cuGreenCtxStreamCreate(&s->cuda.client_stream, s->cuda.green_ctx,
@@ -644,7 +751,7 @@ static int send_ctrl(transport_staged_state_t* s, staged_qp_t& qp, const staged_
         }
         if (wc.status != IBV_WC_SUCCESS) {
             NVSHMEMI_ERROR_PRINT("[STAGED] control message send failed: %s",
-                                 ibv_wc_status_str(wc.status));
+                                 ftable.wc_status_str(wc.status));
             staged_fail_control(s);
             return NVSHMEMX_ERROR_INTERNAL;
         }
@@ -684,7 +791,7 @@ static int post_rdma_write_wait(transport_staged_state_t* s, staged_qp_t& qp, vo
             return NVSHMEMX_ERROR_INTERNAL;
         }
         if (wc.status != IBV_WC_SUCCESS) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] RDMA Write failed: %s", ibv_wc_status_str(wc.status));
+            NVSHMEMI_ERROR_PRINT("[STAGED] RDMA Write failed: %s", ftable.wc_status_str(wc.status));
             return NVSHMEMX_ERROR_INTERNAL;
         }
         return 0;
@@ -695,135 +802,49 @@ static size_t staged_slot_offset(transport_staged_state_t* s, int slot) {
     return static_cast<size_t>(slot) * s->bounce_bytes;
 }
 
-static int staged_pointer_needs_cuda_copy(const void* ptr, bool* needs_cuda_copy) {
-    if (!needs_cuda_copy) {
-        return NVSHMEMX_ERROR_INVALID_VALUE;
-    }
-    *needs_cuda_copy = false;
-
+static bool staged_is_gpu_memory(const void* ptr) {
     cudaPointerAttributes attrs{};
-    cudaError_t error = cudaPointerGetAttributes(&attrs, ptr);
-    if (error == cudaErrorInvalidValue) {
-        /* Unregistered host memory is not known to the CUDA runtime. */
-        (void)cudaGetLastError();
-        return 0;
-    }
-    if (error != cudaSuccess) {
+    cudaError_t err = cudaPointerGetAttributes(&attrs, ptr);
+    if (err != cudaSuccess) {
+        /* Host pointers succeed (cudaMemoryTypeUnregistered), so this is a CUDA error. Treat the
+         * pointer as GPU memory: the GPU paths report errors, where a host memcpy could crash. */
         NVSHMEMI_ERROR_PRINT("[STAGED] cudaPointerGetAttributes(%p) failed: %s", ptr,
-                             cudaGetErrorString(error));
+                             cudaGetErrorString(err));
         (void)cudaGetLastError();
-        return NVSHMEMX_ERROR_INTERNAL;
+        return true;
     }
-
-    *needs_cuda_copy = attrs.type == cudaMemoryTypeDevice || attrs.type == cudaMemoryTypeManaged;
-    return 0;
+    return attrs.type == cudaMemoryTypeDevice || attrs.type == cudaMemoryTypeManaged;
 }
 
-#ifdef NVSHMEM_USE_GDRCOPY
-/* Caller holds memory.mem_handle_mutex in shared mode for the lifetime of the returned pointer. */
-static staged_mem_handle_info_t* staged_mem_handle_info_for_ptr(transport_staged_state_t* s,
-                                                                const void* ptr, size_t bytes) {
-    if (!ptr) {
-        return nullptr;
-    }
-
-    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
-    auto it = std::find_if(s->memory.mem_handle_infos.begin(), s->memory.mem_handle_infos.end(),
-                           [addr, bytes](const auto& entry) {
-                               const auto& info = entry.second;
-                               if (!info || !info->ptr) {
-                                   return false;
-                               }
-                               const uintptr_t begin = reinterpret_cast<uintptr_t>(info->ptr);
-                               if (addr < begin) {
-                                   return false;
-                               }
-                               const size_t offset = static_cast<size_t>(addr - begin);
-                               return offset <= info->size && bytes <= info->size - offset;
-                           });
-    return it == s->memory.mem_handle_infos.end() ? nullptr : it->second.get();
-}
-
-#endif
-
-enum class staged_copy_direction_t {
-    DEVICE_TO_HOST,
-    HOST_TO_DEVICE,
-};
-
-static int staged_copy_host_device(nvshmem_transport_t transport, void* dst, const void* src,
-                                   size_t bytes, cudaStream_t stream, const char* label,
-                                   staged_copy_direction_t direction) {
+/* Copy bytes from src to dst and wait until dst holds them; either side may be host or GPU memory.
+ * Reading the VIDMEM bounce means the NIC wrote it, so flush those writes first when needed. */
+static int staged_copy(nvshmem_transport_t transport, void* dst, const void* src, size_t bytes,
+                       cudaStream_t stream, const char* label) {
     auto* s = static_cast<transport_staged_state_t*>(transport->state);
     if (bytes == 0) {
         return 0;
     }
 
-    const void* gpu_ptr = direction == staged_copy_direction_t::DEVICE_TO_HOST ? src : dst;
-    bool needs_cuda_copy = false;
-    int status = staged_pointer_needs_cuda_copy(gpu_ptr, &needs_cuda_copy);
-    if (status != 0) {
-        return status;
+    if (s->cuda.flush_gdr_writes && s->rdma.bounce_contains(src)) {
+        cudaError_t err = cudaDeviceFlushGPUDirectRDMAWrites(
+            cudaFlushGPUDirectRDMAWritesTargetCurrentDevice, cudaFlushGPUDirectRDMAWritesToOwner);
+        if (err != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] %s GPUDirect RDMA write flush failed: %s", label,
+                                 cudaGetErrorString(err));
+            return NVSHMEMX_ERROR_INTERNAL;
+        }
     }
-    if (!needs_cuda_copy) {
+
+    const bool dst_on_gpu = staged_is_gpu_memory(dst);
+    const bool src_on_gpu = staged_is_gpu_memory(src);
+    if (!dst_on_gpu && !src_on_gpu) {
         memcpy(dst, src, bytes);
         return 0;
     }
-
-#ifdef NVSHMEM_USE_GDRCOPY
-    if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
-        std::shared_lock<std::shared_mutex> handle_lock(s->memory.mem_handle_mutex);
-        auto* info = staged_mem_handle_info_for_ptr(s, gpu_ptr, bytes);
-        if (!info || !info->cpu_mapping.mapped || !info->cpu_mapping.cpu_ptr) {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] %s requires a GPU CPU mapping for GPU address %p (bytes=%zu)", label,
-                gpu_ptr, bytes);
-            return NVSHMEMX_ERROR_INTERNAL;
-        }
-
-        const uintptr_t addr = reinterpret_cast<uintptr_t>(gpu_ptr);
-        const uintptr_t begin = reinterpret_cast<uintptr_t>(info->ptr);
-        void* mapped_gpu_ptr = static_cast<char*>(info->cpu_mapping.cpu_ptr) + (addr - begin);
-        std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-        int status =
-            direction == staged_copy_direction_t::DEVICE_TO_HOST
-                ? nvshmemt_gpu_cpu_copy_from(&s->memory.gpu_cpu_mapping_state, &info->cpu_mapping,
-                                             dst, mapped_gpu_ptr, bytes)
-                : nvshmemt_gpu_cpu_copy_to(&s->memory.gpu_cpu_mapping_state, &info->cpu_mapping,
-                                           mapped_gpu_ptr, src, bytes);
-        if (status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] %s GPU CPU mapping %s copy failed: %d", label,
-                                 direction == staged_copy_direction_t::DEVICE_TO_HOST
-                                     ? "device-to-host"
-                                     : "host-to-device",
-                                 status);
-            return NVSHMEMX_ERROR_INTERNAL;
-        }
-        if (direction == staged_copy_direction_t::HOST_TO_DEVICE) {
-            STORE_BARRIER();
-        }
-        return 0;
+    if (s->cuda.copy_policy == staged_copy_policy_t::STREAM) {
+        return staged_cuda_copy_sync(s, dst, src, bytes, stream, label);
     }
-#endif
-
-    if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] %s has no GPU CPU mapping; refusing CUDA fallback", label);
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
-    return staged_cuda_copy_sync(s, dst, src, bytes, stream, label);
-}
-
-static int staged_copy_to_host(nvshmem_transport_t transport, void* host_dst, const void* src,
-                               size_t bytes, cudaStream_t stream, const char* label) {
-    return staged_copy_host_device(transport, host_dst, src, bytes, stream, label,
-                                   staged_copy_direction_t::DEVICE_TO_HOST);
-}
-
-static int staged_copy_from_host(nvshmem_transport_t transport, void* dst, const void* host_src,
-                                 size_t bytes, cudaStream_t stream, const char* label) {
-    return staged_copy_host_device(transport, dst, host_src, bytes, stream, label,
-                                   staged_copy_direction_t::HOST_TO_DEVICE);
+    return staged_gdrcopy_copy(s, dst, dst_on_gpu, src, src_on_gpu, bytes, label);
 }
 
 static const char* staged_rma_name(const rma_verb_t& verb) {
@@ -923,8 +944,8 @@ static int staged_apply_amo_t(nvshmem_transport_t transport, void* target,
 
     T old_value{};
     T new_value{};
-    int status = staged_copy_to_host(transport, &old_value, target, sizeof(old_value), stream,
-                                     "AMO load target");
+    int status =
+        staged_copy(transport, &old_value, target, sizeof(old_value), stream, "AMO load target");
     if (status) {
         return status;
     }
@@ -934,8 +955,8 @@ static int staged_apply_amo_t(nvshmem_transport_t transport, void* target,
         return status;
     }
 
-    status = staged_copy_from_host(transport, target, &new_value, sizeof(new_value), stream,
-                                   "AMO store target");
+    status =
+        staged_copy(transport, target, &new_value, sizeof(new_value), stream, "AMO store target");
     if (status) {
         return status;
     }
@@ -1015,7 +1036,7 @@ static void staged_server_loop(nvshmem_transport_t transport, staged_startup_lat
 
             if (wc.status != IBV_WC_SUCCESS) {
                 NVSHMEMI_ERROR_PRINT("[STAGED server] control receive failed: %s",
-                                     ibv_wc_status_str(wc.status));
+                                     ftable.wc_status_str(wc.status));
                 staged_fail_control(s);
                 return;
             }
@@ -1046,9 +1067,9 @@ static void staged_server_loop(nvshmem_transport_t transport, staged_startup_lat
                       "[STAGED PE%d server] chunk_done req=%lu bytes=%zu slot=%zu dst=%p",
                       transport->my_pe, static_cast<unsigned long>(msg.request_id), len,
                       slot_offset, dst);
-                int status = staged_copy_from_host(
-                    transport, dst, static_cast<char*>(qp.server_bounce()) + slot_offset, len,
-                    s->cuda.server_stream, "PUT H2D");
+                int status = staged_copy(transport, dst,
+                                         static_cast<char*>(qp.server_bounce()) + slot_offset, len,
+                                         s->cuda.server_stream, "PUT H2D");
                 TRACE(s->log_level, "[STAGED PE%d server] h2d_done req=%lu bytes=%zu status=%d",
                       transport->my_pe, static_cast<unsigned long>(msg.request_id), len, status);
 
@@ -1064,8 +1085,8 @@ static void staged_server_loop(nvshmem_transport_t transport, staged_startup_lat
                 size_t len = static_cast<size_t>(msg.bytes);
                 bool rdma_write_failed = false;
 
-                int status = staged_copy_to_host(transport, qp.server_bounce(), src, len,
-                                                 s->cuda.server_stream, "GET D2H");
+                int status = staged_copy(transport, qp.server_bounce(), src, len,
+                                         s->cuda.server_stream, "GET D2H");
                 if (!status) {
                     status = post_rdma_write_wait(s, qp, qp.server_bounce(), len, msg.reply_addr,
                                                   msg.reply_rkey);
@@ -1138,35 +1159,8 @@ static int staged_execute_self_rma(nvshmem_transport_t transport, const staged_c
         return NVSHMEMX_ERROR_INTERNAL;
     }
 
-    if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
-        uint64_t remaining = total;
-        uint64_t offset = 0;
-        while (remaining > 0) {
-            size_t chunk =
-                remaining > s->bounce_bytes ? s->bounce_bytes : static_cast<size_t>(remaining);
-            int status = staged_copy_to_host(transport, s->rdma.client_bounce(), src + offset,
-                                             chunk, nullptr, "self RMA D2H");
-            if (status) {
-                return status;
-            }
-            status = staged_copy_from_host(transport, dst + offset, s->rdma.client_bounce(), chunk,
-                                           nullptr, "self RMA H2D");
-            if (status) {
-                return status;
-            }
-            remaining -= chunk;
-            offset += chunk;
-        }
-        return 0;
-    }
-
-    if (!s->cuda.client_stream) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] self RMA requires a Green client stream");
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
-    return staged_cuda_copy_sync(s, dst, src, static_cast<size_t>(total), s->cuda.client_stream,
-                                 "self RMA copy");
+    return staged_copy(transport, dst, src, static_cast<size_t>(total), s->cuda.client_stream,
+                       "self RMA copy");
 }
 
 static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t& op) {
@@ -1181,13 +1175,9 @@ static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t&
     int depth = std::max(1, s->pipeline_depth);
     uint64_t total_chunks = (total + slot_bytes - 1) / slot_bytes;
 
-    bool src_needs_cuda_copy = false;
-    int pointer_status = staged_pointer_needs_cuda_copy(src, &src_needs_cuda_copy);
-    if (pointer_status != 0) {
-        return pointer_status;
-    }
-    const bool cuda_copy =
-        src_needs_cuda_copy && s->cuda.copy_policy == staged_copy_policy_t::STREAM;
+    /* Copies on the GPU are asynchronous so one chunk's copy overlaps the previous chunk's RDMA. */
+    const bool cuda_copy = s->cuda.copy_policy == staged_copy_policy_t::STREAM &&
+                           (staged_is_gpu_memory(src) || s->rdma.bounce_in_vidmem());
     std::array<staged_response_state_t::ticket, STAGED_MAX_PIPELINE_DEPTH> response_tickets{};
 
     auto post_copy = [&](uint64_t chunk_idx) -> int {
@@ -1204,31 +1194,22 @@ static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t&
               static_cast<unsigned long>(offset), chunk, src + offset,
               static_cast<unsigned long>(remote_addr + offset));
 
-        if (!src_needs_cuda_copy) {
-            memcpy(bounce, src + offset, chunk);
-            return 0;
+        if (!cuda_copy) {
+            return staged_copy(transport, bounce, src + offset, chunk, s->cuda.client_stream,
+                               "PUT D2H");
         }
 
-        if (s->cuda.copy_policy == staged_copy_policy_t::GDRCOPY) {
-            return staged_copy_to_host(transport, bounce, src + offset, chunk,
-                                       s->cuda.client_stream, "PUT D2H");
+        cudaError_t cerr =
+            cudaMemcpyAsync(bounce, src + offset, chunk, cudaMemcpyDefault, s->cuda.client_stream);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaMemcpyAsync D2H failed: %s",
+                                 cudaGetErrorString(cerr));
+            return NVSHMEMX_ERROR_INTERNAL;
         }
-
-        {
-            std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
-            cudaError_t cerr = cudaMemcpyAsync(bounce, src + offset, chunk, cudaMemcpyDefault,
-                                               s->cuda.client_stream);
-            if (cerr != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] cudaMemcpyAsync D2H failed: %s",
-                                     cudaGetErrorString(cerr));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
-            cerr = cudaEventRecord(s->cuda.client_events[slot], s->cuda.client_stream);
-            if (cerr != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventRecord failed: %s",
-                                     cudaGetErrorString(cerr));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
+        cerr = cudaEventRecord(s->cuda.client_events[slot], s->cuda.client_stream);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventRecord failed: %s", cudaGetErrorString(cerr));
+            return NVSHMEMX_ERROR_INTERNAL;
         }
         return 0;
     };
@@ -1238,14 +1219,11 @@ static int staged_execute_put(nvshmem_transport_t transport, staged_client_op_t&
         if (!cuda_copy) {
             return 0;
         }
-        {
-            std::lock_guard<std::mutex> lk(s->cuda.copy_mutex);
-            cudaError_t cerr = cudaEventSynchronize(s->cuda.client_events[slot]);
-            if (cerr != cudaSuccess) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventSynchronize failed: %s",
-                                     cudaGetErrorString(cerr));
-                return NVSHMEMX_ERROR_INTERNAL;
-            }
+        cudaError_t cerr = cudaEventSynchronize(s->cuda.client_events[slot]);
+        if (cerr != cudaSuccess) {
+            NVSHMEMI_ERROR_PRINT("[STAGED] cudaEventSynchronize failed: %s",
+                                 cudaGetErrorString(cerr));
+            return NVSHMEMX_ERROR_INTERNAL;
         }
         return 0;
     };
@@ -1383,8 +1361,8 @@ static int staged_execute_get(nvshmem_transport_t transport, staged_client_op_t&
             return status;
         }
 
-        status = staged_copy_from_host(transport, dst + offset, s->rdma.client_bounce(), chunk,
-                                       s->cuda.client_stream, "GET H2D");
+        status = staged_copy(transport, dst + offset, s->rdma.client_bounce(), chunk,
+                             s->cuda.client_stream, "GET H2D");
         if (status) {
             return status;
         }
@@ -1407,20 +1385,20 @@ static int staged_store_amo_return(nvshmem_transport_t transport, const amo_memd
         g_elem_t ret{};
         ret.data = value;
         ret.flag = target.retflag;
-        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
-                                     s->cuda.client_stream, "AMO return store");
+        return staged_copy(transport, target.retptr, &ret, sizeof(ret), s->cuda.client_stream,
+                           "AMO return store");
     } else if (bytesdesc.elembytes == sizeof(uint16_t)) {
         uint16_t ret = static_cast<uint16_t>(value);
-        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
-                                     s->cuda.client_stream, "AMO return store");
+        return staged_copy(transport, target.retptr, &ret, sizeof(ret), s->cuda.client_stream,
+                           "AMO return store");
     } else if (bytesdesc.elembytes == sizeof(uint32_t)) {
         uint32_t ret = static_cast<uint32_t>(value);
-        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
-                                     s->cuda.client_stream, "AMO return store");
+        return staged_copy(transport, target.retptr, &ret, sizeof(ret), s->cuda.client_stream,
+                           "AMO return store");
     } else {
         uint64_t ret = value;
-        return staged_copy_from_host(transport, target.retptr, &ret, sizeof(ret),
-                                     s->cuda.client_stream, "AMO return store");
+        return staged_copy(transport, target.retptr, &ret, sizeof(ret), s->cuda.client_stream,
+                           "AMO return store");
     }
 }
 
@@ -1610,7 +1588,7 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
     struct ibv_port_attr port_attr{};
     int verbs_status = 0;
     if (!local_status) {
-        verbs_status = ibv_query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr);
+        verbs_status = ftable.query_port(s->rdma.context(), s->rdma.ib_port(), &port_attr);
     }
     if (verbs_status != 0) {
         NVSHMEMI_ERROR_PRINT("[STAGED PE%d] ibv_query_port failed for port %d: %s", me,
@@ -1762,9 +1740,9 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
         }
 
         int verbs_status =
-            ibv_modify_qp(qp.qp(), &rtr_attr,
-                          IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-                              IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
+            ftable.modify_qp(qp.qp(), &rtr_attr,
+                             IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+                                 IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
         if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTR failed for PE%d: %s", me, qp_slot,
                                  pe, strerror(verbs_status));
@@ -1781,9 +1759,9 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
         rts_attr.rnr_retry = 7;
         rts_attr.max_rd_atomic = 1;
         verbs_status =
-            ibv_modify_qp(qp.qp(), &rts_attr,
-                          IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-                              IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
+            ftable.modify_qp(qp.qp(), &rts_attr,
+                             IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                                 IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
         if (verbs_status != 0) {
             NVSHMEMI_ERROR_PRINT("[STAGED PE%d] QP slot %d RTS failed for PE%d: %s", me, qp_slot,
                                  pe, strerror(verbs_status));
@@ -1826,13 +1804,6 @@ static int nvshmemt_staged_connect_endpoints(nvshmem_transport_t t, int*, int, i
     return 0;
 }
 
-#ifdef NVSHMEM_USE_GDRCOPY
-static int staged_release_gpu_cpu_mapping(transport_staged_state_t* s,
-                                          staged_mem_handle_info_t& info) {
-    std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-    return nvshmemt_gpu_cpu_unmap(&s->memory.gpu_cpu_mapping_state, &info.cpu_mapping);
-}
-#endif
 static_assert(sizeof(staged_mem_handle_info_t*) <= NVSHMEM_MEM_HANDLE_SIZE,
               "staged memory-handle metadata pointer must fit in the opaque handle");
 
@@ -1860,17 +1831,8 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
 
     memset(mem_handle->reserved, 0, sizeof(mem_handle->reserved));
 
-#ifdef NVSHMEM_USE_GDRCOPY
     transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
-    if (s->cuda.copy_policy != staged_copy_policy_t::GDRCOPY) {
-        return 0;
-    }
-    bool needs_cuda_copy = false;
-    int status = staged_pointer_needs_cuda_copy(buf, &needs_cuda_copy);
-    if (status != 0) {
-        return status;
-    }
-    if (!needs_cuda_copy) {
+    if (s->cuda.copy_policy != staged_copy_policy_t::GDRCOPY || !staged_is_gpu_memory(buf)) {
         return 0;
     }
 
@@ -1894,44 +1856,14 @@ static int nvshmemt_staged_get_mem_handle(nvshmem_mem_handle_t* mem_handle, void
         }
     }
 
-    auto handle_info = std::make_unique<staged_mem_handle_info_t>();
-    handle_info->ptr = buf;
-    handle_info->size = length;
-    void* mapping_buf = alias_va_ptr ? alias_va_ptr : buf;
-    staged_mem_handle_info_t* stored_info = handle_info.get();
-    std::unique_lock<std::shared_mutex> handle_lock(s->memory.mem_handle_mutex);
-    auto [handle_it, inserted] =
-        s->memory.mem_handle_infos.emplace(stored_info, std::move(handle_info));
-    if (!inserted) {
-        return NVSHMEMX_ERROR_INTERNAL;
-    }
-
-    int mapping_status = 0;
-    {
-        /* Application code can register buffers concurrently. Serialize all GPU CPU mapping
-         * operations with worker copies and teardown. */
-        std::lock_guard<std::mutex> lk(s->memory.gpu_cpu_mapping_mutex);
-        mapping_status = nvshmemt_gpu_cpu_map(&s->memory.gpu_cpu_mapping_state, mapping_buf, length,
-                                              NVSHMEMT_GPU_CPU_MAPPING_FLAG_NONE,
-                                              &handle_it->second->cpu_mapping);
-    }
-    if (mapping_status != 0) {
-        s->memory.mem_handle_infos.erase(handle_it);
-        NVSHMEMI_ERROR_PRINT(
-            "[STAGED] CPU-mapping policy (%s) failed for %p len=%zu status=%d; "
-            "memory registration failed",
-            nvshmemt_gpu_cpu_mapping_backend_name(&s->memory.gpu_cpu_mapping_state), mapping_buf,
-            length, mapping_status);
-        return NVSHMEMX_ERROR_INTERNAL;
+    staged_mem_handle_info_t* stored_info = nullptr;
+    int status =
+        staged_gdrcopy_map(s, buf, length, alias_va_ptr ? alias_va_ptr : buf, &stored_info);
+    if (status != 0) {
+        return status;
     }
     staged_store_mem_handle_info(mem_handle, stored_info);
     return 0;
-#else
-    (void)buf;
-    (void)length;
-    (void)t;
-    return 0;
-#endif
 }
 
 static int nvshmemt_staged_release_mem_handle(nvshmem_mem_handle_t* mem_handle,
@@ -1941,28 +1873,12 @@ static int nvshmemt_staged_release_mem_handle(nvshmem_mem_handle_t* mem_handle,
         return 0;
     }
 
-#ifdef NVSHMEM_USE_GDRCOPY
-    transport_staged_state_t* s = static_cast<transport_staged_state_t*>(t->state);
-    {
-        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        auto handle_it = s->memory.mem_handle_infos.find(handle_info);
-        if (handle_it == s->memory.mem_handle_infos.end()) {
-            staged_store_mem_handle_info(mem_handle, nullptr);
-            return 0;
-        }
-
-        int status = staged_release_gpu_cpu_mapping(s, *handle_it->second);
-        if (status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping cleanup failed status=%d", status);
-            return NVSHMEMX_ERROR_INTERNAL;
-        }
-        s->memory.mem_handle_infos.erase(handle_it);
+    int status =
+        staged_gdrcopy_unmap(static_cast<transport_staged_state_t*>(t->state), handle_info);
+    if (status != 0) {
+        return status;
     }
     staged_store_mem_handle_info(mem_handle, nullptr);
-#else
-    (void)t;
-    staged_store_mem_handle_info(mem_handle, nullptr);
-#endif
     return 0;
 }
 
@@ -2019,28 +1935,16 @@ static int nvshmemt_staged_finalize(nvshmem_transport_t transport) {
 
     staged_stop_workers(s);
 
-    staged_mem_handle_registry_t mem_handle_infos;
-    {
-        std::unique_lock<std::shared_mutex> lk(s->memory.mem_handle_mutex);
-        mem_handle_infos.swap(s->memory.mem_handle_infos);
+    int gdrcopy_status = staged_gdrcopy_fini(s);
+    if (final_status == 0 && gdrcopy_status != 0) {
+        final_status = gdrcopy_status;
     }
-#ifdef NVSHMEM_USE_GDRCOPY
-    for (const auto& [_, info] : mem_handle_infos) {
-        int status = staged_release_gpu_cpu_mapping(s, *info);
-        if (status != 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] GPU CPU mapping final cleanup failed status=%d", status);
-            if (final_status == 0) {
-                final_status = NVSHMEMX_ERROR_INTERNAL;
-            }
-        }
-    }
-    nvshmemt_gpu_cpu_mapping_fini(&s->memory.gpu_cpu_mapping_state);
-#endif
 
     int rdma_status = s->rdma.close();
     if (final_status == 0 && rdma_status != 0) {
         final_status = rdma_status;
     }
+    nvshmemt_ibv_ftable_fini(&ibv_handle);
 
     return final_status;
 }
@@ -2049,8 +1953,7 @@ static int nvshmemt_staged_show_info(nvshmem_transport_t, int) { return 0; }
 
 /* ═══  init  ═════════════════════════════════════════════════════ */
 
-extern "C" int nvshmemt_init(nvshmem_transport_t* t,
-                             [[maybe_unused]] struct nvshmemi_cuda_fn_table* cuda_syms,
+extern "C" int nvshmemt_init(nvshmem_transport_t* t, struct nvshmemi_cuda_fn_table* cuda_syms,
                              int api_version) {
     if (NVSHMEM_TRANSPORT_MAJOR_VERSION(api_version) != NVSHMEM_TRANSPORT_PLUGIN_MAJOR_VERSION) {
         NVSHMEMI_ERROR_PRINT("[STAGED] incompatible transport API version %d (plugin major %d)",
@@ -2066,22 +1969,17 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t,
     }
 
     transport_staged_state_t* state = new transport_staged_state_t();
-    char selected_dev_name[64] = {};
-    nvshmemt_hca_info hca_list[STAGED_MAX_HCA_LIST] = {};
-    const char* hca_env = nullptr;
-    bool hca_list_requested = false;
-    bool hca_list_provided = false;
-    bool hca_list_is_exclude = false;
-    int hca_list_count = 0;
-    int num_devices = 0;
+    state->cuda.syms = cuda_syms;
     int fork_init_status = 0;
-    struct ibv_device** dev_list = nullptr;
 
     auto& options = state->options;
     int status = nvshmemi_env_options_init(&options);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "Unable to initialize transport options.");
     nvshmemt_ib_common_sanitize_timeout(&options);
+    status =
+        nvshmemt_ibv_ftable_init(&ibv_handle, &ftable, nvshmemt_common_get_log_level(&options));
+    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "Unable to load libibverbs.");
     nvshmemt_ib_common_sanitize_retry_cnt(&options);
     state->log_level = nvshmemt_common_get_log_level(&options);
     INFO(state->log_level, "[STAGED] API version=%d plugin major=%d",
@@ -2114,32 +2012,10 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t,
         INFO(state->log_level, "[STAGED] copy policy STREAM selected");
     } else if (strcasecmp(options.STAGED_COPY_POLICY, "GDRCOPY") == 0) {
         state->cuda.copy_policy = staged_copy_policy_t::GDRCOPY;
-#ifdef NVSHMEM_USE_GDRCOPY
-        if (options.DISABLE_GDRCOPY) {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] NVSHMEM_STAGED_COPY_POLICY=GDRCOPY requires GPU CPU mapping, but "
-                "NVSHMEM_DISABLE_GDRCOPY=1 is set");
-            status = NVSHMEMX_ERROR_INVALID_VALUE;
+        status = staged_gdrcopy_init(state, cuda_syms);
+        if (status) {
             goto out;
         }
-
-        if (!nvshmemt_gpu_cpu_mapping_init(&state->memory.gpu_cpu_mapping_state, cuda_syms,
-                                           state->log_level, options.GDRCOPY_USE_INTERNAL_DMABUF)) {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] NVSHMEM_STAGED_COPY_POLICY=GDRCOPY requires a usable GPU CPU "
-                "mapping backend; staged initialization failed");
-            status = NVSHMEMX_ERROR_INTERNAL;
-            goto out;
-        }
-        INFO(state->log_level, "[STAGED] copy policy GDRCOPY selected (%s backend)",
-             nvshmemt_gpu_cpu_mapping_backend_name(&state->memory.gpu_cpu_mapping_state));
-#else
-        NVSHMEMI_ERROR_PRINT(
-            "[STAGED] NVSHMEM_STAGED_COPY_POLICY=GDRCOPY requested, but NVSHMEM was "
-            "built without GPU CPU mapping support");
-        status = NVSHMEMX_ERROR_INVALID_VALUE;
-        goto out;
-#endif
     } else {
         NVSHMEMI_ERROR_PRINT(
             "[STAGED] invalid NVSHMEM_STAGED_COPY_POLICY='%s'; expected STREAM or GDRCOPY",
@@ -2148,177 +2024,43 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t,
         goto out;
     }
 
+    if (strcasecmp(options.STAGED_BOUNCE_LOCATION, "VIDMEM") == 0) {
+        state->rdma.set_bounce_in_vidmem(true);
+    } else if (strcasecmp(options.STAGED_BOUNCE_LOCATION, "SYSMEM") != 0) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] invalid NVSHMEM_STAGED_BOUNCE_LOCATION='%s'; expected SYSMEM or VIDMEM",
+            options.STAGED_BOUNCE_LOCATION);
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
+    }
+    INFO(state->log_level, "[STAGED] bounce location %s selected",
+         state->rdma.bounce_in_vidmem() ? "VIDMEM" : "SYSMEM");
+
     /* ── Open IB device ── */
-    hca_env = options.HCA_LIST;
-    hca_list_requested = options.HCA_LIST_provided && hca_env[0];
-    hca_list_provided = options.ENABLE_NIC_PE_MAPPING && hca_list_requested;
-    hca_list_is_exclude = hca_list_provided && hca_env[0] == '^';
-
-    if (hca_list_requested && !options.ENABLE_NIC_PE_MAPPING) {
-        NVSHMEMI_WARN_PRINT(
-            "[STAGED] ignoring NVSHMEM_HCA_LIST because NVSHMEM_ENABLE_NIC_PE_MAPPING=0; "
-            "using the first active filtered port");
-    }
     if (options.ENABLE_NIC_PE_MAPPING && options.HCA_PE_MAPPING_provided &&
-        options.HCA_PE_MAPPING[0]) {
-        if (hca_list_provided) {
-            NVSHMEMI_WARN_PRINT(
-                "[STAGED] ignoring NVSHMEM_HCA_PE_MAPPING because NVSHMEM_HCA_LIST is set");
-        } else {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] NVSHMEM_HCA_PE_MAPPING is not supported; select the single staged "
-                "HCA/port with NVSHMEM_HCA_LIST");
-            status = NVSHMEMX_ERROR_INVALID_VALUE;
-            goto out;
-        }
+        options.HCA_PE_MAPPING[0] && !(options.HCA_LIST_provided && options.HCA_LIST[0])) {
+        NVSHMEMI_ERROR_PRINT(
+            "[STAGED] NVSHMEM_HCA_PE_MAPPING is not supported; select the single staged "
+            "HCA/port with NVSHMEM_HCA_LIST");
+        status = NVSHMEMX_ERROR_INVALID_VALUE;
+        goto out;
     }
 
-    if (hca_list_provided) {
-        hca_list_count =
-            nvshmemt_parse_hca_list(hca_env, hca_list, STAGED_MAX_HCA_LIST, state->log_level);
-        if (hca_list_count <= 0) {
-            NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_HCA_LIST='%s' did not contain a usable HCA",
-                                 hca_env);
-            status = NVSHMEMX_ERROR_INVALID_VALUE;
-            goto out;
-        }
-
-        if (!hca_list_is_exclude) {
-            snprintf(selected_dev_name, sizeof(selected_dev_name), "%s", hca_list[0].name);
-            if (hca_list[0].port == 0) {
-                NVSHMEMI_ERROR_PRINT("[STAGED] NVSHMEM_HCA_LIST='%s' has invalid port 0", hca_env);
-                status = NVSHMEMX_ERROR_INVALID_VALUE;
-                goto out;
-            }
-            if (hca_list_count > 1) {
-                NVSHMEMI_WARN_PRINT(
-                    "[STAGED] NVSHMEM_HCA_LIST has %d entries; staged currently uses only the "
-                    "first (%s:%d)",
-                    hca_list_count, selected_dev_name, hca_list[0].port);
-            }
-        }
-    }
-
-    fork_init_status = ibv_fork_init();
+    fork_init_status = ftable.fork_init();
     if (fork_init_status != 0) {
         NVSHMEMI_WARN_PRINT("[STAGED] ibv_fork_init returned %d; continuing without fork safety",
                             fork_init_status);
     }
 
-    dev_list = ibv_get_device_list(&num_devices);
-    if (!dev_list || num_devices == 0) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] no IB devices found");
-        status = NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
-
-    for (int i = 0; i < num_devices && !state->rdma.context(); ++i) {
-        const char* name = ibv_get_device_name(dev_list[i]);
-        if (!name || !nvshmemt_check_hca_prefix(&options, name) ||
-            (!hca_list_is_exclude && selected_dev_name[0] &&
-             strcmp(name, selected_dev_name) != 0)) {
-            continue;
-        }
-
-        struct ibv_context* ctx = ibv_open_device(dev_list[i]);
-        if (!ctx) {
-            continue;
-        }
-
-        struct ibv_device_attr device_attr{};
-        if (ibv_query_device(ctx, &device_attr) != 0 || device_attr.phys_port_cnt == 0) {
-            ibv_close_device(ctx);
-            continue;
-        }
-
-        const int requested_port =
-            (!hca_list_is_exclude && selected_dev_name[0]) ? hca_list[0].port : -1;
-        for (int port = 1; port <= device_attr.phys_port_cnt; ++port) {
-            if (requested_port > 0 && port != requested_port) {
-                continue;
-            }
-            if (hca_list_is_exclude) {
-                bool excluded = false;
-                for (int hca = 0; hca < hca_list_count; ++hca) {
-                    const nvshmemt_hca_info& entry = hca_list[hca];
-                    if (strcmp(entry.name, name) == 0 && (entry.port == -1 || entry.port == port)) {
-                        excluded = true;
-                        break;
-                    }
-                }
-                if (excluded) {
-                    continue;
-                }
-            }
-
-            struct ibv_port_attr candidate_port_attr{};
-            if (ibv_query_port(ctx, port, &candidate_port_attr) != 0 ||
-                candidate_port_attr.state != IBV_PORT_ACTIVE ||
-                (candidate_port_attr.link_layer != IBV_LINK_LAYER_INFINIBAND &&
-                 candidate_port_attr.link_layer != IBV_LINK_LAYER_ETHERNET)) {
-                continue;
-            }
-
-            int gid_index = -1;
-            union ibv_gid gid{};
-            int gid_status =
-                staged_query_usable_gid(state, ctx, port, &candidate_port_attr, &gid_index, &gid);
-            if (gid_status != NVSHMEMX_SUCCESS) {
-                if (hca_list_provided && !hca_list_is_exclude) {
-                    NVSHMEMI_ERROR_PRINT("[STAGED] selected HCA '%s' port %d has no usable GID",
-                                         name, port);
-                    ibv_close_device(ctx);
-                    status = gid_status == NVSHMEMX_ERROR_INVALID_VALUE
-                                 ? NVSHMEMX_ERROR_INVALID_VALUE
-                                 : NVSHMEMX_ERROR_INTERNAL;
-                    goto out;
-                }
-                INFO(state->log_level,
-                     "[STAGED] skipping HCA '%s' port %d because no usable GID was found", name,
-                     port);
-                continue;
-            }
-
-            state->rdma.set_context(ctx);
-            state->rdma.set_ib_port(port);
-            state->rdma.set_local_gid_index(static_cast<uint8_t>(gid_index));
-            state->rdma.set_local_gid(gid);
-            snprintf(selected_dev_name, sizeof(selected_dev_name), "%s", name);
-            break;
-        }
-        if (!state->rdma.context()) {
-            ibv_close_device(ctx);
-        }
-    }
-    ibv_free_device_list(dev_list);
-    dev_list = nullptr;
-
-    if (!state->rdma.context()) {
-        if (hca_list_provided) {
-            NVSHMEMI_ERROR_PRINT(
-                "[STAGED] NVSHMEM_HCA_LIST='%s' did not match an active HCA/port with a usable GID",
-                hca_env);
-        } else {
-            NVSHMEMI_ERROR_PRINT("[STAGED] no usable HCA found");
-        }
-        status = hca_list_provided ? NVSHMEMX_ERROR_INVALID_VALUE : NVSHMEMX_ERROR_INTERNAL;
-        goto out;
-    }
-    INFO(state->log_level, "[STAGED] using device '%s' port %d", selected_dev_name,
-         state->rdma.ib_port());
-
-    /* ── PD ── */
-    state->rdma.set_protection_domain(ibv_alloc_pd(state->rdma.context()));
-    if (!state->rdma.protection_domain()) {
-        NVSHMEMI_ERROR_PRINT("[STAGED] ibv_alloc_pd failed");
-        status = NVSHMEMX_ERROR_INTERNAL;
+    status = staged_open_hca(state);
+    if (status) {
         goto out;
     }
 
     INFO(state->log_level,
-         "[STAGED] device=%s port=%d slot=%zu pipeline_depth=%d; one RC QP per PE will be "
-         "allocated during endpoint connection",
-         selected_dev_name, state->rdma.ib_port(), state->bounce_bytes, state->pipeline_depth);
+         "[STAGED] slot=%zu pipeline_depth=%d; one RC QP per PE will be allocated during "
+         "endpoint connection",
+         state->bounce_bytes, state->pipeline_depth);
 
     transport->state = state;
     transport->host_ops.can_reach_peer = nvshmemt_staged_can_reach_peer;
@@ -2347,13 +2089,9 @@ extern "C" int nvshmemt_init(nvshmem_transport_t* t,
     return 0;
 
 out:
-#ifdef NVSHMEM_USE_GDRCOPY
-    nvshmemt_gpu_cpu_mapping_fini(&state->memory.gpu_cpu_mapping_state);
-#endif
-    if (dev_list) {
-        ibv_free_device_list(dev_list);
-    }
+    staged_gdrcopy_fini(state);
     delete state;
+    nvshmemt_ibv_ftable_fini(&ibv_handle);
     free(transport);
     return status ? status : NVSHMEMX_ERROR_INTERNAL;
 }

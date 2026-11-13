@@ -379,6 +379,13 @@ int nvshmemt_ucx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, siz
                                "Failed to pack rkey for memory region in UCX transport.\n");
     }
 
+    /* The packed rkey is copied into a fixed-size buffer inside the memory handle. */
+    if (handle->rkey_packed_buf_len > NVSHMEMT_UCP_RKEY_PACKED_MAX_LEN) {
+        NVSHMEMT_UCX_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, error, UCS_ERR_BUFFER_TOO_SMALL,
+                               "Packed rkey (%zu bytes) exceeds the maximum supported size (%d).\n",
+                               handle->rkey_packed_buf_len, NVSHMEMT_UCP_RKEY_PACKED_MAX_LEN);
+    }
+
     if (!local_only) {
         handle_info =
             (nvshmemt_ucx_mem_handle_info_t *)calloc(1, sizeof(nvshmemt_ucx_mem_handle_info_t));
@@ -425,15 +432,16 @@ int nvshmemt_ucx_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, siz
             curr_ptr = (char *)curr_ptr + (1ULL << t->log2_cumem_granularity);
         } while (curr_ptr < (char *)buf + length);
     }
-    /* TODO: Find a way that doesn't rely on the rkey being smaller than an arbitrary value. */
-    assert(handle->rkey_packed_buf_len < NVSHMEMT_UCP_RKEY_PACKED_MAX_LEN);
-
     memcpy(handle->rkey_packed_buf, rkey, handle->rkey_packed_buf_len);
     ucp_rkey_buffer_release(rkey);
 
     return status;
 
 error:
+    if (rkey) {
+        ucp_rkey_buffer_release(rkey);
+    }
+
     if (handle->mem_handle) {
         ucp_mem_unmap(ucx_state->library_context, handle->mem_handle);
     }

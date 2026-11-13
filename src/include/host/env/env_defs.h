@@ -279,8 +279,9 @@ NVSHMEMI_ENV_DEF(DISABLE_NCCL, bool, false, NVSHMEMI_ENV_CAT_COLLECTIVES,
                  "Disable use of NCCL for collective operations")
 NVSHMEMI_ENV_DEF(BARRIER_DISSEM_KVAL, int, 2, NVSHMEMI_ENV_CAT_COLLECTIVES,
                  "Radix of the dissemination algorithm used for barriers")
-NVSHMEMI_ENV_DEF(BARRIER_TG_DISSEM_KVAL, int, 2, NVSHMEMI_ENV_CAT_COLLECTIVES,
-                 "Radix of the dissemination algorithm used for thread group barriers")
+NVSHMEMI_ENV_DEF(
+    BARRIER_TG_DISSEM_KVAL, int, 2, NVSHMEMI_ENV_CAT_COLLECTIVES,
+    "Radix of the dissemination algorithm used for thread group barriers (must be >= 2)")
 NVSHMEMI_ENV_DEF(REDUCE_RECEXCH_KVAL, int, 2, NVSHMEMI_ENV_CAT_HIDDEN,
                  "Radix of the recursive exchange reduction algorithm")
 NVSHMEMI_ENV_DEF(FCOLLECT_LL_THRESHOLD, size, (size_t)(1 << 11), NVSHMEMI_ENV_CAT_COLLECTIVES,
@@ -304,7 +305,7 @@ NVSHMEMI_ENV_DEF(
     "for every team to implement reduce and reducescatter collectives\n")
 
 NVSHMEMI_ENV_DEF(BCAST_TREE_KVAL, int, 2, NVSHMEMI_ENV_CAT_HIDDEN,
-                 "Radix of the broadcast tree algorithm")
+                 "Radix of the broadcast tree algorithm (must be >= 2)")
 NVSHMEMI_ENV_DEF(BCAST_ALGO, int, 0, NVSHMEMI_ENV_CAT_COLLECTIVES,
                  "Broadcast algorithm to be used.\n"
                  "  * 0 - use default algorithm selection strategy\n")

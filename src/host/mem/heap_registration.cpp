@@ -8,6 +8,7 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <utility>
@@ -22,6 +23,8 @@
 #include "internal/host/nvshmemi_types.h"
 #include "internal/host/sockets.h"
 #include "internal/host/util.h"
+#include "internal/host/unique_cuda_handle.hpp"
+#include "internal/host/unique_cuda_mapping.hpp"
 #include "internal/host_transport/cudawrap.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
@@ -65,46 +68,28 @@ class UniqueFd {
     std::optional<int> fd_;
 };
 
-class UniqueCudaAllocationHandle {
+/* Local handles own transport registrations until the gathered table takes ownership. */
+class PendingRemoteHandles {
    public:
-    explicit UniqueCudaAllocationHandle(CUmemGenericAllocationHandle handle) noexcept
-        : handle_{handle} {}
-    ~UniqueCudaAllocationHandle() { (void)reset(); }
-
-    UniqueCudaAllocationHandle(const UniqueCudaAllocationHandle &) = delete;
-    UniqueCudaAllocationHandle &operator=(const UniqueCudaAllocationHandle &) = delete;
-
-    UniqueCudaAllocationHandle(UniqueCudaAllocationHandle &&other) noexcept
-        : handle_{std::exchange(other.handle_, std::nullopt)} {}
-
-    UniqueCudaAllocationHandle &operator=(UniqueCudaAllocationHandle &&other) noexcept {
-        if (this != &other) {
-            UniqueCudaAllocationHandle moved{std::move(other)};
-            swap(moved);
+    PendingRemoteHandles(nvshmemi_mem_remote_transport &remote, nvshmemi_transport_view &transports)
+        : remote_(remote), transports_(transports), handles_(transports.num_transports()) {}
+    ~PendingRemoteHandles() {
+        if (owned_ &&
+            remote_.release_mem_handles(handles_.data(), transports_) != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_WARN_PRINT("release mem handles failed after registration failure\n");
         }
-        return *this;
     }
+    PendingRemoteHandles(const PendingRemoteHandles &) = delete;
+    PendingRemoteHandles &operator=(const PendingRemoteHandles &) = delete;
 
-    CUmemGenericAllocationHandle get() const noexcept {
-        assert(handle_.has_value());
-        return *handle_;
-    }
-
-    CUresult reset() noexcept {
-        if (!handle_) {
-            return CUDA_SUCCESS;
-        }
-        CUresult status = CUPFN(nvshmemi_cuda_syms, cuMemRelease(*handle_));
-        if (status == CUDA_SUCCESS) {
-            handle_.reset();
-        }
-        return status;
-    }
+    nvshmem_mem_handle_t *data() { return handles_.data(); }
+    void release() { owned_ = false; }
 
    private:
-    void swap(UniqueCudaAllocationHandle &other) noexcept { handle_.swap(other.handle_); }
-
-    std::optional<CUmemGenericAllocationHandle> handle_;
+    nvshmemi_mem_remote_transport &remote_;
+    nvshmemi_transport_view &transports_;
+    std::vector<nvshmem_mem_handle_t> handles_;
+    bool owned_ = true;
 };
 
 template <typename MapPeer>
@@ -169,7 +154,7 @@ int exchange_posix_fds(const UniqueFd &local_fd, const std::map<pid_t, int> &p2p
         if (peer_pid == pid) {
             continue;
         }
-        int received_fd{-1};
+        int received_fd = -1;
         NVSHMEMI_IPC_CHECK(ipcRecvFd(receive_sockets.at(peer_pid), &received_fd));
         peer_fds->emplace(pe, UniqueFd{received_fd});
     }
@@ -234,7 +219,7 @@ int nvshmemi_heap_registration::setup() {
 
 int nvshmemi_heap_registration::teardown() {
     nvshmemi_mem_remote_transport &remote_tran = remote_transport();
-    auto &internal_reg = table_->internal_reg();
+    nvshmemi_dense_mem_handle_registry &internal_reg = table_->internal_reg();
     int first_status = NVSHMEMX_SUCCESS;
 
     for (size_t j = 0; j < internal_reg.num_handle_sets(); j++) {
@@ -301,7 +286,8 @@ int nvshmemi_heap_registration::map_dynamic_p2p_chunk(CUmemGenericAllocationHand
         return NVSHMEMX_SUCCESS;
     }
 
-    switch (effective_handle_type_) {
+    // CUDA < 12.4 provides the fabric handle value through the compatibility shim, not the enum.
+    switch (static_cast<unsigned int>(effective_handle_type_)) {
         case CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR:
             return map_posix_p2p_chunk(handle, buf, size);
         case CU_MEM_HANDLE_TYPE_FABRIC:
@@ -314,7 +300,7 @@ int nvshmemi_heap_registration::map_dynamic_p2p_chunk(CUmemGenericAllocationHand
 
 int nvshmemi_heap_registration::map_posix_p2p_chunk(CUmemGenericAllocationHandle handle, void *buf,
                                                     size_t size) {
-    int raw_fd{-1};
+    int raw_fd = -1;
     int status = CUPFN(
         nvshmemi_cuda_syms,
         cuMemExportToShareableHandle(&raw_fd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
@@ -347,7 +333,7 @@ int nvshmemi_heap_registration::map_posix_p2p_chunk(CUmemGenericAllocationHandle
         UniqueFd fd{std::move(it->second)};
         peer_fds.erase(it);
 
-        CUmemGenericAllocationHandle peer_handle{};
+        CUmemGenericAllocationHandle peer_handle = 0;
         int import_status =
             CUPFN(nvshmemi_cuda_syms,
                   cuMemImportFromShareableHandle(
@@ -438,7 +424,7 @@ int nvshmemi_heap_registration::map_static_sysmem_p2p_chunk() {
 
 int nvshmemi_heap_registration::map_fabric_p2p_memory(int pe_id, CUmemFabricHandle handle,
                                                       void *buf, size_t size) {
-    CUmemGenericAllocationHandle peer_handle{};
+    CUmemGenericAllocationHandle peer_handle = 0;
     int status = CUPFN(nvshmemi_cuda_syms, cuMemImportFromShareableHandle(
                                                &peer_handle, &handle, CU_MEM_HANDLE_TYPE_FABRIC));
     if (status != CUDA_SUCCESS) {
@@ -451,8 +437,8 @@ int nvshmemi_heap_registration::map_fabric_p2p_memory(int pe_id, CUmemFabricHand
 int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
                                                         CUmemGenericAllocationHandle handle,
                                                         void *buf, size_t size) {
-    UniqueCudaAllocationHandle imported_handle{handle};
-    CUdevice gpu_device_id{};
+    nvshmemi::UniqueCudaAllocationHandle imported_handle{handle};
+    CUdevice gpu_device_id = 0;
     int status = CUPFN(nvshmemi_cuda_syms, cuCtxGetDevice(&gpu_device_id));
     if (status != CUDA_SUCCESS) {
         NVSHMEMI_ERROR_PRINT("cuCtxGetDevice failed\n");
@@ -469,10 +455,10 @@ int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
         NVSHMEMI_ERROR_PRINT("cuMemMap failed to map %zu bytes at %p\n", size, buf_map);
         return NVSHMEMX_ERROR_INTERNAL;
     }
+    nvshmemi::UniqueCudaMapping mapping{buf_map, size};
 
     status = imported_handle.reset();
     if (status != CUDA_SUCCESS) {
-        (void)CUPFN(nvshmemi_cuda_syms, cuMemUnmap(buf_map_device_ptr, size));
         NVSHMEMI_ERROR_PRINT("cuMemRelease failed\n");
         return NVSHMEMX_ERROR_INTERNAL;
     }
@@ -483,10 +469,10 @@ int nvshmemi_heap_registration::map_imported_p2p_memory(int pe_id,
     access.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     status = CUPFN(nvshmemi_cuda_syms, cuMemSetAccess(buf_map_device_ptr, size, &access, 1));
     if (status != CUDA_SUCCESS) {
-        (void)CUPFN(nvshmemi_cuda_syms, cuMemUnmap(buf_map_device_ptr, size));
         NVSHMEMI_ERROR_PRINT("cuMemSetAccess failed\n");
         return NVSHMEMX_ERROR_INTERNAL;
     }
+    mapping.release();
     return NVSHMEMX_SUCCESS;
 }
 
@@ -513,16 +499,12 @@ int nvshmemi_heap_registration::map_static_sysmem_p2p_memory(int pe_id) {
     return NVSHMEMX_SUCCESS;
 }
 
-int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
-                                                      nvshmemi_allocation_kind alloc_kind) {
-    int status = NVSHMEMX_SUCCESS;
-    bool local_handles_owned = true;
+int nvshmemi_heap_registration::register_local_remote_handles(nvshmem_mem_handle_t *handles,
+                                                              void *buf, size_t size) {
     nvshmemi_mem_remote_transport &remotetran = remote_transport();
-    std::vector<nvshmem_mem_handle_t> local_handles(transports_.num_transports());
-    std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
+    int status = NVSHMEMX_SUCCESS;
     void *remote_buf = buf;
     size_t remote_size = size;
-    size_t handle_idx{0};
 
     // Rail opt: static sysmem registers the entire heap range once for reuse.
     if (policy_ == nvshmemi_heap_registration_policy::STATIC_SYSMEM_FULL_HEAP &&
@@ -536,17 +518,37 @@ int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
         if (!transports_.is_active(i) || transports_.has_cap(i, mype_, NVSHMEM_TRANSPORT_CAP_MAP)) {
             continue;
         }
-        status = remotetran.register_mem_handle(local_handles.data(), i, remote_buf, remote_size,
-                                                transports_);
-        NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "register_mem_handle failed\n");
+        status = remotetran.register_mem_handle(handles, i, remote_buf, remote_size, transports_);
+        if (status != NVSHMEMX_SUCCESS) {
+            NVSHMEMI_ERROR_PRINT("register_mem_handle failed for transport %d\n", i);
+            return status;
+        }
+    }
+
+    return NVSHMEMX_SUCCESS;
+}
+
+int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
+                                                      nvshmemi_allocation_kind alloc_kind) {
+    int status = NVSHMEMX_SUCCESS;
+    nvshmemi_mem_remote_transport &remotetran = remote_transport();
+    PendingRemoteHandles local_handles{remotetran, transports_};
+    std::vector<nvshmem_mem_handle_t> gathered(transports_.num_transports() * npes_);
+    status = register_local_remote_handles(local_handles.data(), buf, size);
+
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        return status;
     }
 
     /* Allgather memory handles for all PEs. */
     status = nvshmemi_boot_handle.allgather(
-        (void *)local_handles.data(), (void *)gathered.data(),
+        local_handles.data(), gathered.data(),
         sizeof(nvshmem_mem_handle_t) * transports_.num_transports(), &nvshmemi_boot_handle);
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
-                          "allgather of mem handles failed\n");
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("allgather of mem handles failed\n");
+        return NVSHMEMX_ERROR_INTERNAL;
+    }
 
     /* Complete transport setup before publishing handles and their lookup index. */
     if (alloc_kind == nvshmemi_allocation_kind::INTERNAL &&
@@ -554,44 +556,37 @@ int nvshmemi_heap_registration::register_remote_chunk(void *buf, size_t size,
         if (!gather_mem_handles_done_) {
             status = remotetran.gather_mem_handles(transports_, gathered.data(), 0,
                                                    geometry_.logical_heap_size * npes_node_);
-            if (status == NVSHMEMX_SUCCESS) {
-                gather_mem_handles_done_ = true;
-            }
         }
     } else {
         status = remotetran.gather_mem_handles(transports_, gathered.data(),
                                                ((char *)buf - (char *)geometry_.heap_base), size);
     }
-    NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "gather_mem_handles failed\n");
+    status = nvshmemi_bootstrap_aggregate_status(status, npes_);
+    if (status != NVSHMEMX_SUCCESS) {
+        NVSHMEMI_ERROR_PRINT("gather_mem_handles failed\n");
+        return status;
+    }
+    if (alloc_kind == nvshmemi_allocation_kind::INTERNAL &&
+        nvshmemi_device_state.enable_rail_opt == 1) {
+        gather_mem_handles_done_ = true;
+    }
 
     /* Store gathered handles in the allocation-specific registry. */
-    handle_idx = alloc_kind == nvshmemi_allocation_kind::EXTERNAL
-                     ? table_->mmap_reg().push_mem_handles(std::move(gathered))
-                     : table_->internal_reg().push_mem_handles(std::move(gathered));
+    const size_t handle_idx = alloc_kind == nvshmemi_allocation_kind::EXTERNAL
+                                  ? table_->mmap_reg().push_mem_handles(std::move(gathered))
+                                  : table_->internal_reg().push_mem_handles(std::move(gathered));
 
     /* Update lookup state with the retrieved memory handles. */
     update_handle_index(buf, size, alloc_kind, handle_idx);
-    local_handles_owned = false;
-
-out:
-    if (local_handles_owned) {
-        const int cleanup_status =
-            remotetran.release_mem_handles(local_handles.data(), transports_);
-        if (cleanup_status != NVSHMEMX_SUCCESS) {
-            NVSHMEMI_WARN_PRINT("release mem handles failed after registration failure\n");
-            if (status == NVSHMEMX_SUCCESS) {
-                status = cleanup_status;
-            }
-        }
-    }
-    return status;
+    local_handles.release();
+    return NVSHMEMX_SUCCESS;
 }
 
 void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
                                                      nvshmemi_allocation_kind alloc_kind,
                                                      size_t handle_idx) {
-    auto &internal_reg = table_->internal_reg();
-    auto &mmap_reg = table_->mmap_reg();
+    nvshmemi_dense_mem_handle_registry &internal_reg = table_->internal_reg();
+    nvshmemi_sparse_mem_handle_registry &mmap_reg = table_->mmap_reg();
     size_t granularity = geometry_.mem_granularity;
 
     /* Rail-optimized internal memory reuses one index for the full heap. */
@@ -606,7 +601,8 @@ void nvshmemi_heap_registration::update_handle_index(void *buf, size_t size,
         /* User-provided mmap allocations use address-keyed sparse entries. */
         size_t addr_idx =
             ((char *)buf - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
-        for (size_t idx = 0; idx < size / granularity; idx++) {
+        const size_t index_count = (size + granularity - 1) / granularity;
+        for (size_t idx = 0; idx < index_count; idx++) {
             mmap_reg.set_index(addr_idx + idx, handle_idx, (char *)buf, size);
         }
     } else {
@@ -655,63 +651,58 @@ out:
 }
 
 int nvshmemi_heap_registration::unregister_vmm_chunk(off_t mc_offset, size_t size) {
-    int status = NVSHMEMX_SUCCESS;
-    nvshmemi_mem_remote_transport &remote_tran = remote_transport();
-    size_t granularity = geometry_.mem_granularity;
-    size_t adjusted_max_handle_len = granularity * (NVSHMEMI_MAX_HANDLE_LENGTH / granularity);
-    void *ptr = (char *)geometry_.heap_base + mc_offset;
-    void *curr_ptr = ptr;
-    size_t remaining_size = size;
-    size_t addr_idx;
-    size_t register_size = 0;
-    size_t handle_idx = 0;
+    const size_t granularity = geometry_.mem_granularity;
+    const size_t max_chunk_size = granularity * (NVSHMEMI_MAX_HANDLE_LENGTH / granularity);
+    if (max_chunk_size == 0 || mc_offset < 0 || size == 0 ||
+        static_cast<size_t>(mc_offset) % granularity != 0 ||
+        static_cast<size_t>(mc_offset) > geometry_.logical_heap_size ||
+        size > geometry_.logical_heap_size - static_cast<size_t>(mc_offset)) {
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    char *current = static_cast<char *>(geometry_.heap_base) + mc_offset;
+    nvshmemi_sparse_mem_handle_registry &mmap_reg = table_->mmap_reg();
+    size_t remaining = size;
+    while (remaining != 0) {
+        const size_t chunk_size = std::min(remaining, max_chunk_size);
+        const size_t first_index =
+            static_cast<size_t>(current - static_cast<char *>(geometry_.heap_base)) >>
+            geometry_.log2_mem_granularity;
+        const size_t granules = (chunk_size + granularity - 1) / granularity;
+        std::optional<size_t> handle_idx{};
+        size_t indexed_granules = 0;
 
-    auto &mmap_reg = table_->mmap_reg();
-
-    /* Process the same chunks used for remote registration. */
-    do {
-        register_size =
-            remaining_size > adjusted_max_handle_len ? adjusted_max_handle_len : remaining_size;
-        bool local_handle_set_released = false;
-
-        for (size_t idx = 0; idx < register_size / granularity; ++idx) {
-            addr_idx =
-                ((char *)curr_ptr - (char *)geometry_.heap_base) >> geometry_.log2_mem_granularity;
-            addr_idx += idx;
-
-            /* A failed registration may not have published this chunk's sparse index. */
-            if (!mmap_reg.has_index(addr_idx)) {
+        for (size_t i = 0; i < granules; ++i) {
+            if (!mmap_reg.has_index(first_index + i)) {
                 continue;
             }
-
-            const auto &entry = mmap_reg.get_index(addr_idx);
-            status = ((entry.start_addr != curr_ptr) || (entry.size != register_size));
-            NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "address indexing error\n");
-
-            handle_idx = entry.handle_idx;
-            /* Release each handle set once per registered chunk. */
-            if (!local_handle_set_released) {
-                nvshmem_mem_handle_t *my_handles = mmap_reg.get_mem_handle(handle_idx, mype_, 0);
-                status = remote_tran.release_mem_handles(my_handles, transports_);
-                NVSHMEMI_NE_ERROR_JMP(status, CUDA_SUCCESS, NVSHMEMX_ERROR_INTERNAL, out,
-                                      "release mem handles failed for mmaped buffer \n");
-                local_handle_set_released = true;
+            const nvshmemi_mem_handle_index_entry &entry = mmap_reg.get_index(first_index + i);
+            if (entry.start_addr != current || entry.size != chunk_size ||
+                (handle_idx && *handle_idx != entry.handle_idx)) {
+                NVSHMEMI_ERROR_PRINT("inconsistent mmap handle index\n");
+                return NVSHMEMX_ERROR_INTERNAL;
             }
-            /* Clear index entries to prevent stale lookups if the buffer is remapped. */
-            mmap_reg.clear_index(addr_idx);
+            handle_idx = entry.handle_idx;
+            ++indexed_granules;
         }
-
-        if (local_handle_set_released) {
-            mmap_reg.erase_mem_handles(handle_idx);
+        if (handle_idx) {
+            if (indexed_granules != granules) {
+                NVSHMEMI_ERROR_PRINT("incomplete mmap handle index\n");
+                return NVSHMEMX_ERROR_INTERNAL;
+            }
+            nvshmem_mem_handle_t *handles = mmap_reg.get_mem_handle(*handle_idx, mype_, 0);
+            const int status = remote_transport().release_mem_handles(handles, transports_);
+            if (status != NVSHMEMX_SUCCESS) {
+                return status;
+            }
+            for (size_t i = 0; i < granules; ++i) {
+                mmap_reg.clear_index(first_index + i);
+            }
+            mmap_reg.erase_mem_handles(*handle_idx);
         }
-
-        assert(remaining_size >= register_size);
-        remaining_size -= register_size;
-        curr_ptr = (char *)curr_ptr + register_size;
-    } while (remaining_size);
-
-out:
-    return status;
+        remaining -= chunk_size;
+        current += chunk_size;
+    }
+    return NVSHMEMX_SUCCESS;
 }
 
 int nvshmemi_heap_registration::plan_vmm_peer_bases() {

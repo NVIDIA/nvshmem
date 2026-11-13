@@ -44,7 +44,9 @@ packages = [
     "nvshmem.core.device",
     "nvshmem.core.device.numba",
     "nvshmem.core.device.numba_cuda_mlir",
-    "nvshmem.core.device.cute"
+    "nvshmem.core.device.cute",
+    "nvshmem.bindings.device.tile",
+    "nvshmem.core.device.tile"
 ]
 include-package-data = true
 
@@ -59,13 +61,15 @@ include-package-data = true
 "nvshmem.bindings.device.numba_cuda_mlir" = ["*.py", "entry_point.h"]
 "nvshmem.device.bindings.numba_cuda_mlir" = ["*.py"]
 "nvshmem.bindings.device.cute" = ["*.py"]
+"nvshmem.bindings.device.tile" = ["*.py"]
+"nvshmem.core.device.tile" = ["*.py"]
 
 
 [tool.setuptools_scm]
 write_to = "nvshmem/version.py"
 # TODO: setuptools_scm is meant to use a git tag for the version
 # Once we have releases, we should move to that system
-fallback_version = "0.4.0"
+fallback_version = "0.5.0"
 version_scheme = "guess-next-dev"
 
 [project.optional-dependencies]
@@ -84,6 +88,10 @@ mlir = [
 ]
 cute = [
     "nvidia-cutlass-dsl<CUTLASS_DSL_EXTRA_PLACEHOLDER>>=4.8.0,<5.0",
+]
+cutile = [
+    "cuda-tile",
+    "cuda-tile-preview",
 ]
 
 [tool.black]

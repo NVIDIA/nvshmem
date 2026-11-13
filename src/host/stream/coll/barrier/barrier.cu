@@ -67,7 +67,7 @@ int nvshmemi_call_barrier_on_stream_kernel(nvshmem_team_t team, cudaStream_t str
         in_cuda_graph = 1;
     }
 
-    size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    size_t smem_size = nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     if (num_threads_per_block <= 32) {
         barrier_on_stream_kernel_threadgroup<NVSHMEMI_THREADGROUP_WARP>
             <<<num_blocks, 32, smem_size, stream>>>(team, in_cuda_graph);
@@ -96,7 +96,7 @@ int nvshmemi_call_sync_on_stream_kernel(nvshmem_team_t team, cudaStream_t stream
         in_cuda_graph = 1;
     }
 
-    size_t smem_size = nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM);
+    size_t smem_size = nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     if (num_threads_per_block <= 32) {
         sync_on_stream_kernel_threadgroup<NVSHMEMI_THREADGROUP_WARP>
             <<<num_blocks, 32, smem_size, stream>>>(team, in_cuda_graph);

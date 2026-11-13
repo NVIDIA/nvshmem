@@ -17,8 +17,9 @@
 
 #include "bootstrap_host_transport/env_defs_internal.h"
 #include "internal/host_transport/cudawrap.h"
-#include "internal/host/scope_guard.h"
+#include "internal/common/scope_guard.h"
 #include "transport_common.h"
+#include "transport_nonuniform.hpp"
 #include "transport_ib_common.h"  // for nvshmemt_ib_common_mem_handle
 #include "transport_mlx5_common.h"
 #include "non_abi/device/transport/transport_constants.h"
@@ -346,6 +347,7 @@ struct nvshmemt_gpunetio_state_t {
     std::vector<int> dev_ids;
     std::vector<int> port_ids;
     std::vector<int> selected_dev_ids;
+    std::vector<int> selected_port_ids;
     // Global array of all QPs from all devices (to be transferred to GPU later on)
     std::vector<nvshmemi_gpunetio_device_qp_t> qp_h;
     // Global array of lkeys / rkeys
@@ -397,7 +399,7 @@ struct nvshmemt_gpunetio_state_t {
 
     void initialize_cache_state();
     int get_cuda_device_id(CUdevice *out);
-    int connect_global_setup(int num_selected_devs, int *selected_dev_ids);
+    int connect_global_setup(nvshmem_transport_t t, int num_selected_devs, int *selected_dev_ids);
     int configure_multinic_amo_routing(nvshmem_transport_t t);
     int setup_gpu_state(nvshmem_transport_t t);
     int connect_qps_only(nvshmem_transport_t t, int *out_qp_indices, int num_qps);
@@ -504,6 +506,8 @@ static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *ou
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB;
     } else if (req == "cpu") {
         *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+    } else if (req == "cpu_free_flow") {
+        *out_loc = DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW;
     } else {
         return NVSHMEMX_ERROR_INVALID_VALUE;
     }
@@ -511,7 +515,25 @@ static int gpunetio_parse_nic_handler_request(doca_gpu_dev_verbs_nic_handler *ou
 }
 
 static bool gpunetio_qp_requires_cpu_proxy(doca_gpu_verbs_qp_hl *qp) {
-    return qp->qp_gverbs->qp_cpu->nic_handler == DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY;
+    return (qp->qp_gverbs->qp_cpu->nic_handler & DOCA_GPUNETIO_VERBS_NIC_HANDLER_FLAG_CPU_PROXY) !=
+           0;
+}
+
+static const char *gpunetio_nic_handler_name(doca_gpu_dev_verbs_nic_handler handler) {
+    switch (handler) {
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_AUTO:
+            return "auto";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_DB:
+            return "gpu";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_GPU_SM_NO_DBR:
+            return "gpu_no_dbr";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY:
+            return "cpu";
+        case DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW:
+            return "cpu_free_flow";
+        default:
+            return "unknown";
+    }
 }
 
 // gpunetio_internal_buffer implementation
@@ -571,6 +593,10 @@ std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> gpunetio_ep::make(
         NVSHMEMI_ERROR_PRINT("doca_gpu_verbs_create_qp_hl failed.\n");
         return {nullptr, NVSHMEMX_ERROR_INTERNAL};
     }
+    if (ep->qp->qp_gverbs->qp_cpu->nic_handler ==
+        DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW) {
+        ep->qp->qp_gverbs->free_flow_ring_db_threshold = gpunetio_state->num_requests_in_batch;
+    }
 
     ep->device_ = device;
     ep->portid = portid_in;
@@ -596,6 +622,9 @@ std::pair<std::unique_ptr<gpunetio_ep>, nvshmemx_status> gpunetio_ep::make(
     ep->internal_buf = std::move(ibuf);
 
     TRACE(gpunetio_state->log_level, "Created QP: qp_idx=%d, qpn=%d", qp_idx, ep->qpn);
+    INFO(gpunetio_state->log_level, "GPUNetIO %s QP %u resolved NIC handler: %s",
+         kind == gpunetio_qp_kind::GPU ? "GPU" : "CPU", ep->qpn,
+         gpunetio_nic_handler_name(ep->qp->qp_gverbs->qp_cpu->nic_handler));
 
     if (ep->requires_cpu_proxy()) {
         gpunetio_activate_progress_function(t);
@@ -702,7 +731,7 @@ int gpunetio_ep::progress() {
         }
         return NVSHMEMX_SUCCESS;
     } else {
-        // GPU-kind EPs with CPU_PROXY: use doca_gpu_verbs_cpu_proxy_progress.
+        // Both CPU proxy handlers progress GPU-kind endpoints through GPUNetIO.
         int status = doca_gpu_verbs_cpu_proxy_progress(qp->qp_gverbs, nullptr);
         if (status) {
             NVSHMEMI_WARN_PRINT("doca_gpu_verbs_cpu_proxy_progress failed for ep %p \n",
@@ -1108,6 +1137,10 @@ int gpunetio_device::add_endpoints(nvshmem_transport_t t, int portid, int num_rc
         status = doca_gpu_verbs_create_qp_hl(&qp_init_attr, &qp_local_backup);
         NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
                               "doca_gpu_verbs_create_qp_hl failed for %s backup.", kind_str);
+        if (qp_local_backup->qp_gverbs->qp_cpu->nic_handler ==
+            DOCA_GPUNETIO_VERBS_NIC_HANDLER_CPU_PROXY_FREE_FLOW) {
+            qp_local_backup->qp_gverbs->free_flow_ring_db_threshold = state_->num_requests_in_batch;
+        }
         if (gpunetio_qp_requires_cpu_proxy(qp_local_backup)) {
             gpunetio_activate_progress_function(t);
         }
@@ -1601,7 +1634,8 @@ void nvshmemt_gpunetio_state_t::initialize_cache_state() {
 }
 
 // Phase 1: One-time global setup
-int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *selected_dev_ids) {
+int nvshmemt_gpunetio_state_t::connect_global_setup(nvshmem_transport_t t, int num_selected_devs,
+                                                    int *selected_dev_ids) {
     int status = get_cuda_device_id(&cached_gpu_device_id);
     if (status) {
         return status;
@@ -1612,6 +1646,7 @@ int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *
         this->selected_dev_ids.resize(num_selected_devs);
     }
 
+    std::vector<int> ports;
     // Validate device IDs
     for (int i = 0; i < num_selected_devs; i++) {
         if (selected_dev_ids[i] < 0 || selected_dev_ids[i] >= static_cast<int>(dev_ids.size())) {
@@ -1619,6 +1654,16 @@ int nvshmemt_gpunetio_state_t::connect_global_setup(int num_selected_devs, int *
             return NVSHMEMX_ERROR_INVALID_VALUE;
         }
         this->selected_dev_ids[i] = dev_ids[selected_dev_ids[i]];
+        ports.push_back(port_ids[selected_dev_ids[i]]);
+    }
+    bool nonuniform = false;
+    status = nvshmemt_limit_nonuniform_devices(t->boot_handle, this->selected_dev_ids, ports,
+                                               nonuniform);
+    if (status) {
+        return status;
+    }
+    if (nonuniform) {
+        selected_port_ids.swap(ports);
     }
 
     return NVSHMEMX_SUCCESS;
@@ -1678,7 +1723,7 @@ static uint64_t gpunetio_mix_amo_target(uint64_t value) {
 gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_amo_ep(int pe, int qp_index, int n_pes,
                                                             int mype, uint64_t remote_offset) {
     if (!use_address_stable_amo || qp_index != NVSHMEMX_QP_DEFAULT ||
-        selected_dev_ids.size() <= 1 || pe == mype) {
+        selected_dev_ids.size() <= 1) {
         return get_next_cpu_ep(pe, qp_index, n_pes, mype);
     }
 
@@ -1694,6 +1739,10 @@ gpunetio_ep *nvshmemt_gpunetio_state_t::get_next_cpu_amo_ep(int pe, int qp_index
     size_t selected_dev_slot = selected_qp % num_selected_slots;
     gpunetio_device &device = *devices[selected_dev_ids[selected_dev_slot]];
     int selected_qp_slot = 1 + static_cast<int>(selected_qp / num_selected_slots);
+    if (pe == mype) {
+        // CPU slot 0 is reserved for the host QP; loopback occupies only default slot 1.
+        selected_qp_slot = 1;
+    }
     return device.get_cpu_ep_from_qp_index(pe, selected_qp_slot, n_pes, mype);
 }
 
@@ -1794,6 +1843,8 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
         qp_d_temp = nullptr;
     }
 
+    uint32_t cached_nic_handler = NVSHMEMI_GPUNETIO_USCALAR_INVALID;
+
     // Populate QP host array with data from all devices and all eps
     for (size_t i = 0; i < selected_dev_ids.size(); ++i) {
         int dev_idx = selected_dev_ids[i];
@@ -1815,6 +1866,16 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
                 // Copy to the right index in the qp_h array holding *all* QPs for all devices
                 int global_ep_index = device->gpu_qp_handle_bases[j] + dst_pe;
                 assert(global_ep_index < num_rc_handles);
+
+                // Check if NIC handlers of all QPs agree, if yes, we can use the cached handler,
+                // otherwise, use the per-QP dispatch handler.
+                auto handler =
+                    device->rc_eps_gpu[device_ep_index]->qp->qp_gverbs->qp_cpu->nic_handler;
+                if (cached_nic_handler == NVSHMEMI_GPUNETIO_USCALAR_INVALID) {
+                    cached_nic_handler = static_cast<uint32_t>(handler);
+                } else if (cached_nic_handler != static_cast<uint32_t>(handler)) {
+                    cached_nic_handler = NVSHMEMI_GPUNETIO_NIC_HANDLER_PER_QP;
+                }
 
                 if (global_ep_index < last_num_rcs) {
                     continue;
@@ -1862,6 +1923,7 @@ int nvshmemt_gpunetio_state_t::setup_gpu_state(nvshmem_transport_t t) {
     CUDA_RUNTIME_CHECK_RET(cudaStreamSynchronize(my_stream), NVSHMEMX_ERROR_OUT_OF_MEMORY);
 
     gpunetio_device_state_h->globalmem.qps = qp_d;
+    gpunetio_device_state_h->cached_nic_handler = cached_nic_handler;
     gpunetio_device_state_h->may_skip_cst = skip_cst;
     gpunetio_device_state_h->use_address_stable_amo = use_address_stable_amo;
     gpunetio_device_state_h->num_devices_initialized = n_devs_selected;
@@ -1926,7 +1988,8 @@ int nvshmemt_gpunetio_state_t::connect_qps_only(nvshmem_transport_t t, int *out_
         int n_devs_selected = static_cast<int>(selected_dev_ids.size());
         int selected_dev_idx = last_device_index % n_devs_selected;
         int dev_idx = selected_dev_ids[selected_dev_idx];
-        int portid = port_ids[selected_dev_idx];
+        int portid = selected_port_ids.empty() ? port_ids[selected_dev_idx]
+                                               : selected_port_ids[selected_dev_idx];
         gpunetio_device &device = *devices[dev_idx];
 
         if (use_gdaki) {
@@ -1969,7 +2032,7 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
     }
 
     // Phase 1: Global setup (only on first call)
-    status = connect_global_setup(num_selected_devs, selected_dev_ids);
+    status = connect_global_setup(t, num_selected_devs, selected_dev_ids);
     if (status) {
         NVSHMEMI_ERROR_PRINT("connect_global_setup failed.\n");
         return NVSHMEMX_ERROR_INTERNAL;
@@ -1982,11 +2045,12 @@ int nvshmemt_gpunetio_state_t::connect_endpoints(nvshmem_transport_t t, int *sel
     }
 
     // Phase 2-3: Per-device processing (cached per device)
-    for (int i = 0; i < num_selected_devs; i++) {
-        int dev_idx = dev_ids[selected_dev_ids[i]];
+    for (size_t i = 0; i < this->selected_dev_ids.size(); i++) {
+        int dev_idx = this->selected_dev_ids[i];
         gpunetio_device &device = *devices[dev_idx];
         device.selected_dev_slot = i;
-        int portid = port_ids[selected_dev_ids[i]];
+        int portid =
+            selected_port_ids.empty() ? port_ids[selected_dev_ids[i]] : selected_port_ids[i];
 
         if (options->GPUNETIO_NUM_RC_PER_PE_GPU > 0) {
             status = device.add_endpoints(t, portid, options->GPUNETIO_NUM_RC_PER_PE_GPU,
@@ -2149,19 +2213,19 @@ static int nvshmemt_gpunetio_add_device_remote_mem_handles(nvshmem_transport_t t
     static_assert(sizeof(nvshmemt_ib_common_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
                   "static_assert(sizeof(T) <= NVSHMEM_MEM_HANDLE_SIZE) failed");
 
-    size_t num_elements;
-    // size must be divisible by cumem_granularity, which is a power of 2.
-    assert((size & ((1ULL << t->log2_cumem_granularity) - 1)) == 0);
-
-    num_elements = size >> t->log2_cumem_granularity;
+    const size_t granularity = 1ULL << t->log2_cumem_granularity;
+    const size_t granularity_mask = granularity - 1;
+    // Heap mappings start on a heap-granularity boundary, but a user buffer's physical size may
+    // be smaller than that granularity.
+    assert((heap_offset & granularity_mask) == 0);
+    size_t num_elements = (size >> t->log2_cumem_granularity) + ((size & granularity_mask) != 0);
 
     // With user buffers being mmaped at the end of the heap, incrementally adding to lkeys vector
     // won't be sufficient as buffers from end of heap could be registered. So we resize
     // gpunetio_device_rkeys vector to number of chunks  * n_pes * n_devs_selected and populate
     // entries as they are added.
     size_t chunk_idx = heap_offset >> t->log2_cumem_granularity;
-    size_t num_chunks =
-        (heap_offset + size + t->log2_cumem_granularity - 1) >> t->log2_cumem_granularity;
+    size_t num_chunks = chunk_idx + num_elements;
     // assuming all PEs have same num_devs
     int num_devs = reinterpret_cast<gpunetio_mem_handle *>(&mem_handles[t->index])->num_devs;
     if (gpunetio_state->device_rkeys.size() < num_chunks * n_pes * num_devs) {
@@ -2362,23 +2426,22 @@ static int nvshmemt_gpunetio_get_mem_handle(nvshmem_mem_handle_t *mem_handle, vo
         did_emplace = true;
     } else {
         size_t num_lkeys;
-        size_t num_elements;
-        // length must be divisible by cumem_granularity, which is a power of 2.
-        assert((length & ((1ULL << transport->log2_cumem_granularity) - 1)) == 0);
-
-        num_elements = length >> transport->log2_cumem_granularity;
+        const size_t granularity = 1ULL << transport->log2_cumem_granularity;
+        const size_t granularity_mask = granularity - 1;
+        const size_t heap_offset =
+            reinterpret_cast<char *>(buf) - reinterpret_cast<char *>(t->heap_base);
+        // Heap mappings start on a heap-granularity boundary, but a user buffer's physical size
+        // may be smaller than that granularity.
+        assert((heap_offset & granularity_mask) == 0);
+        size_t num_elements =
+            (length >> transport->log2_cumem_granularity) + ((length & granularity_mask) != 0);
 
         // With user buffers being mmaped at the of the heap, incremently adding to lkeys vector
         // won't be sufficient as buffers from end of heap could be registered. So we resize
         // gpunetio_device_lkeys vector to number of chunks  * n_devs_selected and populate entries
         // as they are added.
-        size_t chunk_idx =
-            (reinterpret_cast<char *>(buf) - reinterpret_cast<char *>(t->heap_base)) >>
-            t->log2_cumem_granularity;
-        size_t num_chunks =
-            (reinterpret_cast<char *>(buf) - reinterpret_cast<char *>(t->heap_base) + length +
-             t->log2_cumem_granularity - 1) >>
-            t->log2_cumem_granularity;
+        size_t chunk_idx = heap_offset >> t->log2_cumem_granularity;
+        size_t num_chunks = chunk_idx + num_elements;
         if (gpunetio_state->device_lkeys.size() < num_chunks * n_devs_selected) {
             gpunetio_state->device_lkeys.resize(num_chunks * n_devs_selected);
         }

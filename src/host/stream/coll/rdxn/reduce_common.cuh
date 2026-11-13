@@ -13,12 +13,15 @@
 #include "internal/host/util.h"
 #include "non_abi/device/coll/reduce.cuh"
 #include "c_api/nvshmem_api.h"
+#include "device/nvshmemx_defines.h"
 #include "non_abi/device/common/nvshmem_common.cuh"
 
 template <typename TYPE, rdxn_ops_t OP>
 __global__ void rdxn_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,
                                       size_t nreduce, int in_cuda_graph) {
 #ifdef __CUDA_ARCH__
+    extern __shared__ char smem[];
+    nvshmemx_give_smem(smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     nvshmem_team_t myteam = nvshmemi_device_state_d.team_pool[team]->team_dups[blockIdx.x];
     int nreduce_remain = (nreduce % gridDim.x);
     int nreduce_per_block = (nreduce / gridDim.x);
@@ -32,6 +35,7 @@ __global__ void rdxn_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYP
             myteam, dest + nreduce_per_block * blockIdx.x, source + nreduce_per_block * blockIdx.x,
             my_nreduce);
     }
+    nvshmemx_release_smem();
 #endif
 }
 
@@ -83,7 +87,9 @@ void nvshmemi_call_rdxn_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const 
         }
     }
 
-    rdxn_on_stream_kernel<TYPE, OP><<<num_blocks, num_threads_per_block, 0, stream>>>(
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
+    rdxn_on_stream_kernel<TYPE, OP><<<num_blocks, num_threads_per_block, smem_size, stream>>>(
         team, dest, source, nreduce, in_cuda_graph);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
 }

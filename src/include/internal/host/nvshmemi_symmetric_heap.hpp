@@ -192,6 +192,9 @@ class nvshmemi_symmetric_heap {
     template <typename T>
     int is_symmetric(T value);
 
+    /** Resolve the local GPU or its host NUMA socket without collective communication. */
+    int get_buffer_location(bool on_gpu, int &location_id) const;
+
     /*
      * Multicast expects memory buffers to be on different devices (GPU or CPU), which may
      * not be true in case of MPG and EGM buffers on same CPU socket. This function detects
@@ -244,6 +247,8 @@ class nvshmemi_symmetric_heap {
     // needed for selectively unbinding them on unmap
     std::unordered_map<void *, size_t> idx_in_mmap_mc_handles_;
     std::unordered_map<void *, size_t> mmap_handle_idx_in_cumem_handles_;
+    // Track the mapped physical range separately from the rounded mspace/VA allocation.
+    std::unordered_map<void *, size_t> mmap_physical_sizes_;
     // track alias virtual addresses for mmaped user buffers
     // map heap addr -> user buffer addr
     std::unordered_map<void *, void *> alias_va_map_;
@@ -310,8 +315,9 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
      * while memory allocated using nvshmem_malloc is referred to as internal
      * allocation in the code
      */
-    void *mmap_mem(void *ptr, size_t size, void *pref_addr, int flags);
+    void *mmap_mem(void *ptr, size_t physical_size, size_t va_size, void *pref_addr, int flags);
     int unmap_mem(void *ptr, size_t size);
+    size_t get_mmap_physical_size(void *ptr) const;
 
     /* Functions for logical endpoints */
     int reserve_unicast_endpoint(size_t size, bool counted_operations);
@@ -361,7 +367,15 @@ class nvshmemi_symmetric_heap_vidmem_dynamic_vmm final : public nvshmemi_symmetr
         return;
     }
 
-    int check_user_buffer_for_mmap(void *ptr, size_t &size, unsigned int *ptr_mem_type);
+    struct MmapAccess;
+    class PendingMmapRegistration;
+    int validate_user_buffer_for_mmap(void *ptr, size_t size, unsigned int &ptr_mem_type);
+    int check_user_buffer_for_mmap(void *ptr, size_t size, unsigned int &ptr_mem_type);
+    int get_mmap_access(void *buffer, unsigned int memory_type, int flags, MmapAccess &access);
+    int extend_mmap_space(void *address, size_t size);
+    int notify_mmap_observers(CUmemGenericAllocationHandle handle, off_t heap_offset, size_t size);
+    int publish_mmap_registration(CUmemGenericAllocationHandle handle, void *address,
+                                  size_t physical_size, size_t va_size);
     int converge_unicast_endpoint_status(int local_status);
     int bind_unicast_endpoint_memory(CUmemGenericAllocationHandle mem_handle, off_t heap_offset,
                                      off_t mem_offset, size_t size);

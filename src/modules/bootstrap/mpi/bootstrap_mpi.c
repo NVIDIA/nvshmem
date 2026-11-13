@@ -29,21 +29,21 @@ struct nvshmemi_options_s env_attr;
             char *desc_wrapped;                                                                    \
             case BOOTSTRAP_OPTIONS_STYLE_INFO:                                                     \
                 desc_wrapped = bootstrap_util_wrap_string(SHORT_DESC, 80, "\t", 1);                \
-                printf("  NVSHMEM_%-20s " BOOTPRI_##KIND " (type: %s, default: " BOOTPRI_##KIND    \
-                       ")\n\t%s\n",                                                                \
-                       #NAME, NVSHFMT_##KIND(env_attr.NAME), #KIND, NVSHFMT_##KIND(DEFAULT),       \
-                       desc_wrapped);                                                              \
+                BOOTSTRAP_RAW_PRINT("  NVSHMEM_%-20s " BOOTPRI_##KIND                              \
+                                    " (type: %s, default: " BOOTPRI_##KIND ")\n\t%s\n",            \
+                                    #NAME, NVSHFMT_##KIND(env_attr.NAME), #KIND,                   \
+                                    NVSHFMT_##KIND(DEFAULT), desc_wrapped);                        \
                 free(desc_wrapped);                                                                \
                 break;                                                                             \
             case BOOTSTRAP_OPTIONS_STYLE_RST:                                                      \
                 desc_wrapped = bootstrap_util_wrap_string(SHORT_DESC, 80, NULL, 0);                \
-                printf(".. c:var:: NVSHMEM_%s\n", #NAME);                                          \
-                printf("\n");                                                                      \
-                printf("| *Type: %s*\n", #KIND);                                                   \
-                printf("| *Default: " BOOTPRI_##KIND "*\n", NVSHFMT_##KIND(DEFAULT));              \
-                printf("\n");                                                                      \
-                printf("%s\n", desc_wrapped);                                                      \
-                printf("\n");                                                                      \
+                BOOTSTRAP_RAW_PRINT(".. c:var:: NVSHMEM_%s\n", #NAME);                             \
+                BOOTSTRAP_RAW_PRINT("\n");                                                         \
+                BOOTSTRAP_RAW_PRINT("| *Type: %s*\n", #KIND);                                      \
+                BOOTSTRAP_RAW_PRINT("| *Default: " BOOTPRI_##KIND "*\n", NVSHFMT_##KIND(DEFAULT)); \
+                BOOTSTRAP_RAW_PRINT("\n");                                                         \
+                BOOTSTRAP_RAW_PRINT("%s\n", desc_wrapped);                                         \
+                BOOTSTRAP_RAW_PRINT("\n");                                                         \
                 free(desc_wrapped);                                                                \
                 break;                                                                             \
             default:                                                                               \
@@ -59,7 +59,7 @@ static int bootstrap_mpi_showinfo(struct bootstrap_handle *handle, int style) {
                                 NVSHMEMI_ENV_CAT_BOOTSTRAP, style)
 #include "env_defs.h"
 #undef NVSHMEMI_ENV_DEF
-    printf("\n");
+    BOOTSTRAP_RAW_PRINT("\n");
     return 0;
 }
 

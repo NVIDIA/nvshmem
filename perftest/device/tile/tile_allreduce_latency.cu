@@ -17,9 +17,11 @@ size_t round_up(int val, int gran) { return ((val + gran - 1) / gran) * gran; }
                                                                                              \
     template <nvshmemx::tile_coll_algo_t algo, typename src_tensor_t, typename dst_tensor_t> \
     __global__ void test_tile_##TYPENAME##_##OP##_allreduce_kern##TG(                        \
-        nvshmem_team_t team, src_tensor_t *src, dst_tensor_t *dst, int nelems, int iter) {   \
+        nvshmem_team_t team, src_tensor_t *src, dst_tensor_t *dst, int nelems, int iter,     \
+        size_t dynamic_smem_size) {                                                          \
         int i;                                                                               \
         struct empty {};                                                                     \
+        NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);                                           \
         if (!blockIdx.x && (threadIdx.x < THREAD_COMP) && (nelems < ELEM_COMP)) {            \
             for (i = 0; i < iter; i++) {                                                     \
                 /* Only one tile, so root is always 0 */                                     \
@@ -28,12 +30,14 @@ size_t round_up(int val, int gran) { return ((val + gran - 1) / gran) * gran; }
                 nvshmemx::tile_collective_wait##TG<algo>(team, 0);                           \
             }                                                                                \
         }                                                                                    \
+        NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);                                        \
     }
 
-#define CALL_RDXN_KERNEL(TYPENAME, OP, TG, BLOCKS, THREADS, ALGO, TEAM, SRC_TENSOR, DST_TENSOR, \
-                         STREAM, ITER)                                                          \
-    test_tile_##TYPENAME##_##OP##_allreduce_kern##TG<ALGO, src_tensor_t, dst_tensor_t>          \
-        <<<BLOCKS, THREADS, 0, STREAM>>>(TEAM, SRC_TENSOR, DST_TENSOR, num_elems, ITER);
+#define CALL_RDXN_KERNEL(TYPENAME, OP, TG, BLOCKS, THREADS, ALGO, TEAM, SRC_TENSOR, DST_TENSOR,   \
+                         STREAM, ITER)                                                            \
+    test_tile_##TYPENAME##_##OP##_allreduce_kern##TG<ALGO, src_tensor_t, dst_tensor_t>            \
+        <<<BLOCKS, THREADS, dynamic_smem_size, STREAM>>>(TEAM, SRC_TENSOR, DST_TENSOR, num_elems, \
+                                                         ITER, dynamic_smem_size);
 
 #define CALL_RDXN_OPS_ALL_TG(TYPENAME, TYPE)                           \
     CALL_RDXN(x, _block, TYPENAME, TYPE, sum, INT_MAX, INT_MAX)        \
@@ -57,60 +61,62 @@ CALL_RDXN_OPS_ALL_TG(float, float)
         }                                                                               \
     } while (0)
 
-#define RUN_ITERS_OP(TYPENAME, TYPE, GROUP, OP, ELEM_COMP, ALGO)                                 \
-    do {                                                                                         \
-        float milliseconds;                                                                      \
-        cudaEvent_t start, stop;                                                                 \
-        cudaEventCreate(&start);                                                                 \
-        cudaEventCreate(&stop);                                                                  \
-        SET_SIZE_ARR(TYPE, ELEM_COMP);                                                           \
-                                                                                                 \
-        nvshmem_barrier_all();                                                                   \
-        j = 0;                                                                                   \
-        for (num_elems = min_elems; num_elems < ELEM_COMP; num_elems *= 2) {                     \
-            /* we keep shape and stride along dim 0 same, while increase size along dim 1 */     \
-            /* init team and tensors */                                                          \
-            /*nvshmem_team_t team = NVSHMEM_TEAM_WORLD;*/                                        \
-            constexpr int tsize_0 = (VLEN * sizeof(uint32_t)) / sizeof(TYPE);                    \
-            auto tile_shape = nvshmemx::make_shape<ConstInt<tsize_0>, int>(ConstInt<tsize_0>{},  \
-                                                                           num_elems / tsize_0); \
-            auto tile_stride =                                                                   \
-                nvshmemx::make_stride<ConstInt<1>, int>(ConstInt<1>{}, get<0>(tile_shape));      \
-            auto tile_layout = nvshmemx::make_layout(tile_shape, tile_stride);                   \
-            auto src_tensor = nvshmemx::Tensor<TYPE, decltype(tile_layout)>(                     \
-                reinterpret_cast<TYPE *>(source), tile_layout);                                  \
-            auto dst_tensor = nvshmemx::Tensor<TYPE, decltype(tile_layout)>(                     \
-                reinterpret_cast<TYPE *>(dest), tile_layout);                                    \
-                                                                                                 \
-            using src_tensor_t = decltype(src_tensor);                                           \
-            using dst_tensor_t = decltype(dst_tensor);                                           \
-            src_tensor_t *src_tensor_dev;                                                        \
-            dst_tensor_t *dst_tensor_dev;                                                        \
-            CUDA_CHECK(cudaMalloc((void **)&src_tensor_dev, sizeof(src_tensor_t)));              \
-            CUDA_CHECK(cudaMalloc((void **)&dst_tensor_dev, sizeof(dst_tensor_t)));              \
-            CUDA_CHECK(cudaMemcpy(src_tensor_dev, &src_tensor, sizeof(src_tensor_t),             \
-                                  cudaMemcpyHostToDevice));                                      \
-            CUDA_CHECK(cudaMemcpy(dst_tensor_dev, &dst_tensor, sizeof(dst_tensor_t),             \
-                                  cudaMemcpyHostToDevice));                                      \
-                                                                                                 \
-            CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb, ALGO, team,    \
-                             src_tensor_dev, dst_tensor_dev, stream, skip);                      \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-            nvshmem_barrier_all();                                                               \
-                                                                                                 \
-            cudaEventRecord(start, stream);                                                      \
-            CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb, ALGO, team,    \
-                             src_tensor_dev, dst_tensor_dev, stream, iter);                      \
-            cudaEventRecord(stop, stream);                                                       \
-            CUDA_CHECK(cudaStreamSynchronize(stream));                                           \
-                                                                                                 \
-            if (!mype) {                                                                         \
-                cudaEventElapsedTime(&milliseconds, start, stop);                                \
-                h_##OP##_lat[j] = (milliseconds * 1000.0) / (float)iter;                         \
-            }                                                                                    \
-            nvshmem_barrier_all();                                                               \
-            j++;                                                                                 \
-        }                                                                                        \
+#define RUN_ITERS_OP(TYPENAME, TYPE, GROUP, OP, ELEM_COMP, ALGO)                                  \
+    do {                                                                                          \
+        float milliseconds;                                                                       \
+        cudaEvent_t start, stop;                                                                  \
+        cudaEventCreate(&start);                                                                  \
+        cudaEventCreate(&stop);                                                                   \
+        SET_SIZE_ARR(TYPE, ELEM_COMP);                                                            \
+                                                                                                  \
+        nvshmem_barrier(team);                                                                    \
+        j = 0;                                                                                    \
+        for (num_elems = min_elems; num_elems < ELEM_COMP; num_elems *= 2) {                      \
+            /* we keep shape and stride along dim 0 same, while increase size along dim 1 */      \
+            /* init team and tensors */                                                           \
+            constexpr int tsize_0 = (VLEN * sizeof(uint32_t)) / sizeof(TYPE);                     \
+            auto tile_shape = nvshmemx::make_shape<ConstInt<tsize_0>, int>(ConstInt<tsize_0>{},   \
+                                                                           num_elems / tsize_0);  \
+            auto tile_stride =                                                                    \
+                nvshmemx::make_stride<ConstInt<1>, int>(ConstInt<1>{}, get<0>(tile_shape));       \
+            auto tile_layout = nvshmemx::make_layout(tile_shape, tile_stride);                    \
+            auto src_tensor = nvshmemx::Tensor<TYPE, decltype(tile_layout)>(                      \
+                reinterpret_cast<TYPE *>(source), tile_layout);                                   \
+            auto dst_tensor = nvshmemx::Tensor<TYPE, decltype(tile_layout)>(                      \
+                reinterpret_cast<TYPE *>(dest), tile_layout);                                     \
+                                                                                                  \
+            using src_tensor_t = decltype(src_tensor);                                            \
+            using dst_tensor_t = decltype(dst_tensor);                                            \
+            src_tensor_t *src_tensor_dev;                                                         \
+            dst_tensor_t *dst_tensor_dev;                                                         \
+            CUDA_CHECK(cudaMalloc((void **)&src_tensor_dev, sizeof(src_tensor_t)));               \
+            CUDA_CHECK(cudaMalloc((void **)&dst_tensor_dev, sizeof(dst_tensor_t)));               \
+            CUDA_CHECK(cudaMemcpy(src_tensor_dev, &src_tensor, sizeof(src_tensor_t),              \
+                                  cudaMemcpyHostToDevice));                                       \
+            CUDA_CHECK(cudaMemcpy(dst_tensor_dev, &dst_tensor, sizeof(dst_tensor_t),              \
+                                  cudaMemcpyHostToDevice));                                       \
+                                                                                                  \
+            auto kernel = test_tile_##TYPENAME##_##OP##_allreduce_kern##GROUP<ALGO, src_tensor_t, \
+                                                                              dst_tensor_t>;      \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(kernel, dynamic_smem_size);                         \
+            CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb, ALGO, team,     \
+                             src_tensor_dev, dst_tensor_dev, stream, skip);                       \
+            CUDA_CHECK(cudaStreamSynchronize(stream));                                            \
+            nvshmem_barrier(team);                                                                \
+                                                                                                  \
+            cudaEventRecord(start, stream);                                                       \
+            CALL_RDXN_KERNEL(TYPENAME, OP, GROUP, num_blocks, nvshm_test_num_tpb, ALGO, team,     \
+                             src_tensor_dev, dst_tensor_dev, stream, iter);                       \
+            cudaEventRecord(stop, stream);                                                        \
+            CUDA_CHECK(cudaStreamSynchronize(stream));                                            \
+                                                                                                  \
+            if (!mype) {                                                                          \
+                cudaEventElapsedTime(&milliseconds, start, stop);                                 \
+                h_##OP##_lat[j] = (milliseconds * 1000.0) / (float)iter;                          \
+            }                                                                                     \
+            nvshmem_barrier(team);                                                                \
+            j++;                                                                                  \
+        }                                                                                         \
     } while (0)
 
 #define RUN_ITERS(TYPENAME, TYPE, GROUP, ELEM_COMP, ALGO) \
@@ -121,6 +127,43 @@ int rdxn_calling_kernel(nvshmem_team_t team, void *dest, void *source, int mype,
     int status = 0;
     int nvshm_test_num_tpb = threads_per_block;
     int num_blocks = 1;
+    const size_t dynamic_smem_size = use_smem ? NVSHMEM_PERF_SMEM_SIZE_RECOMMENDED : 0;
+    const bool has_multicast_ptr =
+        nvshmemx_mc_ptr(team, source) != nullptr && nvshmemx_mc_ptr(team, dest) != nullptr;
+    if (!has_multicast_ptr) {
+        // CFT pull-reduce requires at least a warp and registered TMA scratch space.
+        run_options.run_thread = 0;
+        if (!mype) {
+            fprintf(stderr,
+                    "Skipping thread scope: tile CFT reduction does not support thread "
+                    "scope and the team has no multicast pointer mapping.\n");
+        }
+        if (dynamic_smem_size == 0) {
+            if (!mype) {
+                fprintf(stderr,
+                        "Tile reduction without multicast pointers requires registered "
+                        "TMA shared memory; enable --use_smem 1.\n");
+            }
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+        bool *supported_d;
+        bool supported = false;
+        CUDA_CHECK(cudaMalloc(&supported_d, sizeof(bool)));
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(check_tile_cft_support, dynamic_smem_size);
+        check_tile_cft_support<<<1, nvshm_test_num_tpb, dynamic_smem_size, stream>>>(
+            team, supported_d, dynamic_smem_size, true);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        CUDA_CHECK(cudaMemcpy(&supported, supported_d, sizeof(bool), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaFree(supported_d));
+        if (!supported) {
+            if (!mype) {
+                fprintf(stderr,
+                        "Tile reduction requires either multicast pointers or supported "
+                        "CFT pull-reduce with TMA enabled.\n");
+            }
+            return NVSHMEMX_ERROR_NOT_SUPPORTED;
+        }
+    }
     size_t num_elems = 1, min_elems, max_elems;
     int iter = iters;
     int skip = warmup_iters;
@@ -249,7 +292,7 @@ int main(int argc, char **argv) {
     init_wrapper(&argc, &argv);
     alloc_tables(&h_tables, 2, array_size);
 
-    mype = nvshmem_my_pe();
+    mype = nvshmem_team_my_pe(NVSHMEM_TEAM_MC_SHARED);
 
     CUDA_CHECK(cudaStreamCreateWithFlags(&cstrm, cudaStreamNonBlocking));
 
@@ -263,14 +306,15 @@ int main(int argc, char **argv) {
     CUDA_CHECK(cudaMemcpyAsync(d_source, h_source, max_size, cudaMemcpyHostToDevice, cstrm));
     CUDA_CHECK(cudaMemcpyAsync(d_dest, h_dest, max_size, cudaMemcpyHostToDevice, cstrm));
 
-    rdxn_calling_kernel(NVSHMEM_TEAM_WORLD, d_dest, d_source, mype, cstrm, run_options, h_tables);
+    status = rdxn_calling_kernel(NVSHMEM_TEAM_MC_SHARED, d_dest, d_source, mype, cstrm, run_options,
+                                 h_tables);
 
     DEBUG_PRINT("last error = %s\n", cudaGetErrorString(cudaGetLastError()));
 
     CUDA_CHECK(cudaMemcpyAsync(h_source, d_source, max_size, cudaMemcpyDeviceToHost, cstrm));
     CUDA_CHECK(cudaMemcpyAsync(h_dest, d_dest, max_size, cudaMemcpyDeviceToHost, cstrm));
 
-    nvshmem_barrier_all();
+    nvshmem_barrier(NVSHMEM_TEAM_MC_SHARED);
 
     CUDA_CHECK(cudaFreeHost(h_buffer));
     nvshmem_free(d_source);
@@ -281,5 +325,5 @@ int main(int argc, char **argv) {
     finalize_wrapper();
 
 out:
-    return 0;
+    return status;
 }

@@ -14,8 +14,11 @@
 #include <strings.h>  // for strncasecmp
 #include <cuda_fp16.h>
 #include <unordered_map>
+#include "bootstrap_host_transport/nvshmemi_plugin_log.h"
 #include "bootstrap_host_transport/env_defs_internal.h"  // for nvshmemi_opt...
 #include "internal/host_transport/transport.h"           // for nvshmem_tran...
+
+#define NVSHMEMI_WARN_PRINT(...) nvshmemi_plugin_warn(stdout, __VA_ARGS__)
 
 #define MAXPATHSIZE 1024
 #define MAX_TRANSPORT_EP_COUNT 1
@@ -48,18 +51,20 @@
 #define LOAD_BARRIER() MEM_BARRIER()
 #endif
 
-#define INFO(LOG_LEVEL, fmt, ...)                                                  \
-    do {                                                                           \
-        if (LOG_LEVEL >= TRANSPORT_LOG_INFO) {                                     \
-            fprintf(stderr, "%s %d " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
-        }                                                                          \
+#define INFO(LOG_LEVEL, fmt, ...)                                                                \
+    do {                                                                                         \
+        if (LOG_LEVEL >= TRANSPORT_LOG_INFO) {                                                   \
+            nvshmemi_plugin_log(NVSHMEMI_PLUGIN_LOG_INFO, NVSHMEMI_PLUGIN_LOG_TRANSPORT, stderr, \
+                                __FILE__, __LINE__, fmt, ##__VA_ARGS__);                         \
+        }                                                                                        \
     } while (0)
 
-#define TRACE(LOG_LEVEL, fmt, ...)                                                 \
-    do {                                                                           \
-        if (LOG_LEVEL >= TRANSPORT_LOG_TRACE) {                                    \
-            fprintf(stderr, "%s %d " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
-        }                                                                          \
+#define TRACE(LOG_LEVEL, fmt, ...)                                                                \
+    do {                                                                                          \
+        if (LOG_LEVEL >= TRANSPORT_LOG_TRACE) {                                                   \
+            nvshmemi_plugin_log(NVSHMEMI_PLUGIN_LOG_TRACE, NVSHMEMI_PLUGIN_LOG_TRANSPORT, stderr, \
+                                __FILE__, __LINE__, fmt, ##__VA_ARGS__);                          \
+        }                                                                                         \
     } while (0)
 
 static inline int nvshmemt_errno_from_status(int status) {

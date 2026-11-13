@@ -155,8 +155,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_internode_tree_thre
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
+template <typename T, threadgroup_t SCOPE, nvshmemi_tma_use TMA_USE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup_impl(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root, int k) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     const int myIdx = nvshmemi_thread_id_in_threadgroup<SCOPE>();
@@ -209,9 +209,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
 
         bool is_remote = (nvshmemi_ptr(pWrk, child) == NULL) ? true : false;
         if (!is_remote) {
-            nvshmemii_put_nbi<uint64_t, SCOPE>((uint64_t *)(pWrk + recv_offset),
-                                               (uint64_t *)(pWrk + recv_offset),
-                                               nelems * sizeof(T) / sizeof(uint32_t), child);
+            nvshmemii_put_nbi<uint64_t, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, TMA_USE>(
+                (uint64_t *)(pWrk + recv_offset), (uint64_t *)(pWrk + recv_offset),
+                nelems * sizeof(T) / sizeof(uint32_t), child);
         }
     }
 
@@ -222,6 +222,23 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
         teami->bcast_sync_offset += sizeof(T) * nelems * 2;
     }
     nvshmemi_threadgroup_sync<SCOPE>();
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_tree_threadgroup(
+    nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root, int k) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::disallowed>(
+            team, dest, source, nelems, PE_root, k);
+    } else {
+        nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
+            team, dest, source, nelems, PE_root, k);
+    }
+#else
+    nvshmemi_bcast_tree_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(team, dest, source,
+                                                                              nelems, PE_root, k);
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>
@@ -294,8 +311,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_nonLL_tree_threadgr
     nvshmemi_threadgroup_sync<SCOPE>();
 }
 
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup(
+template <typename T, threadgroup_t SCOPE, nvshmemi_tma_use TMA_USE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup_impl(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int i;
@@ -303,10 +320,28 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup
     if (root == nvshmemi_device_state_d.mype) {
         for (i = 0; i < teami->size; i++) {
             int pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, i);
-            nvshmemi_put_nbi<T, SCOPE>(dest, source, nelems, pe);
+            nvshmemi_put_nbi<T, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, TMA_USE>(dest, source,
+                                                                                nelems, pe);
         }
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_threadgroup(
+    nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::disallowed>(
+            team, dest, source, nelems, PE_root);
+    } else {
+        nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
+            team, dest, source, nelems, PE_root);
+    }
+#else
+    nvshmemi_bcast_put2all_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(team, dest, source,
+                                                                                 nelems, PE_root);
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>
@@ -328,10 +363,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_put2all_direct_thre
     nvshmemi_barrier_threadgroup<SCOPE>(team);
 }
 
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_team_has_hierarchical_subteams(
+    const nvshmemi_team_t *teami) {
+    return teami->is_team_node || teami->is_team_same_mype_node ||
+           (teami->team_node != NVSHMEM_TEAM_INVALID &&
+            teami->team_same_mype_node != NVSHMEM_TEAM_INVALID);
+}
+
 template <typename T, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_bcast_hierarchical_threadgroup(
     nvshmem_team_t team, T *dest, const T *source, size_t nelems, int PE_root) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+    if (!nvshmemi_team_has_hierarchical_subteams(teami)) {
+        nvshmemi_bcast_tree_threadgroup<T, SCOPE>(
+            team, dest, source, nelems, PE_root,
+            nvshmemi_device_state_d.gpu_coll_env_params_var.bcast_tree_kval);
+        return;
+    }
+
     if (teami->is_team_same_mype_node) {
         nvshmemi_bcast_internode_tree_threadgroup<T, SCOPE>(
             team, dest, source, nelems, PE_root,
@@ -366,8 +415,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
                 sizeof(T) >= sizeof(uint32_t) && nelems % 2 == 0 &&
                 nelems * sizeof(T) <= 16384) { /* LL algos */
                 if (nvshmemi_team_n_pes(team) > 32 &&
-                    nvshmemi_device_state_d.pe_dist ==
-                        NVSHMEMI_PE_DIST_BLOCK) { /* hierarchical topo-aware */
+                    nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_BLOCK &&
+                    nvshmemi_team_has_hierarchical_subteams(teami)) { /* hierarchical topo-aware */
                     bcast_algo = 2;
                 } else {
                     bcast_algo = 3;
@@ -382,6 +431,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
             if (NVSHMEMI_BCAST_SYNC_SIZE * sizeof(long) >= (nelems * sizeof(T) * 2) &&
                 sizeof(T) >= sizeof(uint32_t) && nelems % 2 == 0 &&
                 nvshmemi_device_state_d.pe_dist == NVSHMEMI_PE_DIST_BLOCK) {
+                if (!nvshmemi_team_has_hierarchical_subteams(teami)) {
+                    bcast_algo = 3;
+                }
             } else {
                 /*printf("User selected algo: %d, but it is not supported with currect config, \
                         using default algo selection strategy..\n", \
@@ -415,9 +467,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_broadcast_threadgroup(
             break;
     }
 
+#if defined(NVSHMEM_FORCE_CFT)
+    /* Tree algorithms can dereference mapped peer pointers directly. Route
+     * forced-CFT broadcasts through the put-to-all implementation instead. */
+    bcast_algo = 1;
+#endif
+
     switch (bcast_algo) {
         case 1: /* Brutefoce algorithm: send one to all followed by barrier */
-            if (nvshmemi_use_ldst_remote_atomics_path() && teami->are_gpus_p2p_connected) {
+            if (!nvshmemi_is_cft_forced() && nvshmemi_use_ldst_remote_atomics_path() &&
+                teami->are_gpus_p2p_connected) {
                 nvshmemi_bcast_put2all_direct_threadgroup<T, SCOPE>(team, dest, source, nelems,
                                                                     PE_root);
             } else {
@@ -464,15 +523,19 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
 
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
 
-    /* Handle multicast needs a prioritized multicast LE, registered TMA SMEM, a 16B-aligned
-     * destination heap offset, and a 16B-aligned global source for TMA staging.
+    /* Prefer handles when configured, or use them when the team has no usable multicast
+     * pointer. Disabling handle priority must not disable this fallback.
      */
-    if (!nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
-                                                            CFT_HANDLE_TX_SIZE, scope) ||
-        !nvshmemi_tma_smem_registered() ||
+    const bool use_handle =
+        nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
+                                                           CFT_HANDLE_TX_SIZE, scope) ||
+        (nvshmemi_mc_ptr(teami, dst_tensor.data()) == nullptr &&
+         nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, CFT_HANDLE_TX_SIZE, scope));
+    if (!use_handle || !nvshmemi_tma_smem_registered() ||
         !nvshmemi_is_addr_offset_aligned(dst_tensor.data(), CFT_HANDLE_TX_SIZE) ||
         __isShared(src_tensor.data()) ||
         !nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src_tensor.data())) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
     const int src_stride_minor_dim = get_stride_element<minor_dim>(src_tensor);
@@ -487,6 +550,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
         const size_t copy_bytes = row_bytes * valid_minor_dim;
         /* Fully contiguous tiles use one handle copy; ensure that transaction size is supported. */
         if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, copy_bytes, scope)) {
+            nvshmemi_cft_force_unsupported();
             return false;
         }
 
@@ -498,11 +562,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
         return true;
     }
 
-    /* Strided tiles issue one handle copy per row, so every row starting address must remain
-     * 16B-aligned for both source and destination.
+    /* Strided tiles issue one handle copy per row. An aligned stride does not imply a
+     * supported payload: a 14-float row is 56B even with a 112B stride. Its masked CFT tail
+     * shares a 16B destination block with an adjacent tile, which can use multicast-pointer
+     * stores due to its misaligned start. Do not rely on atomic merging across these paths;
+     * reject unsupported row payloads before issuing any copies so they can fall back.
      */
-    if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
+    if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, row_bytes, scope) ||
+        ((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
         ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
 
@@ -518,6 +587,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_bcast_try_handle_thr
     }
     return true;
 #else
+    nvshmemi_cft_force_unsupported();
     return false;
 #endif
 }

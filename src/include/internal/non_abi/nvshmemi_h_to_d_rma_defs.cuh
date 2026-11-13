@@ -73,8 +73,9 @@ __global__ void nvshmemi_proxy_rma_signal_entrypoint(void *rptr, void *lptr,
                                                      uint64_t signal, int sig_op, int pe,
                                                      const nvshmemi_op_t desc) {
 #ifdef __CUDA_ARCH__
-    nvshmemi_transfer_rma_nbi_translator((void *)rptr, (void *)lptr, bytesdesc, pe, desc);
-    nvshmemi_transfer_amo_nonfetch((void *)sig_addr, signal, pe, (nvshmemi_amo_t)sig_op);
+    nvshmemi_transfer_put_signal_nbi<NVSHMEMI_THREADGROUP_THREAD>(
+        (void *)rptr, (void *)lptr, (size_t)(bytesdesc.nelems * bytesdesc.elembytes),
+        (void *)sig_addr, signal, (nvshmemi_amo_t)sig_op, pe);
 #endif
 }
 

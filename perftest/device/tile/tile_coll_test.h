@@ -17,6 +17,7 @@
 #include "shmemx.h"
 #endif
 #include "utils.h"
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <sys/time.h>
@@ -83,6 +84,23 @@ typedef struct run_opt {
 int page_size_roundoff(int value) {
     int page_sz = getpagesize();
     return ((value + page_sz - 1) / page_sz) * page_sz;
+}
+
+// Callers have no multicast pointer: probe CFT capability independently of routing priority.
+__global__ void check_tile_cft_support(nvshmem_team_t team, bool *supported,
+                                       size_t dynamic_smem_size, bool reduction) {
+    NVSHMEM_PERF_GIVE_SMEM(dynamic_smem_size);
+#ifdef __CUDA_ARCH__
+    if (!threadIdx.x) {
+        auto *teami = nvshmemi_device_state_d.team_pool[team];
+        *supported = reduction
+                         ? nvshmemi_is_multicast_reduce_le_implemented<NVSHMEMI_THREADGROUP_WARP>(
+                               teami->mc_leid_with_flag, 16)
+                         : nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, 16,
+                                                                NVSHMEMI_THREADGROUP_WARP);
+    }
+#endif
+    NVSHMEM_PERF_RELEASE_SMEM(dynamic_smem_size);
 }
 
 #endif /*TILE_COLL_TEST_H*/

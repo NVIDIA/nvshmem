@@ -7,6 +7,10 @@ cmake_minimum_required(VERSION 3.15)
 option(NVSHMEM4PY_BUILD_ALL_WHEELS "Build all nvshmem4py wheels automatically during normal build" ON)
 set(NVSHMEM4PY_PYTHON_VERSIONS "" CACHE STRING "Specific Python versions to build wheels for (e.g., '3.12' or '3.12;3.11'). If empty, all available versions >= 3.9 are used.")
 set(NVSHMEM4PY_CUDA_VERSIONS "" CACHE STRING "Specific CUDA versions to build wheels for (e.g., '12' or '12;13'). If empty, defaults to '12;13'.")
+option(NVSHMEM4PY_BUILD_CUTILE_BINDINGS "Build the experimental NVSHMEM cuTile TileLib" OFF)
+set(NVSHMEM4PY_CUTILE_TILEIRAS "" CACHE FILEPATH "CUDA 13.5 tileiras that packages the cuTile TileLib")
+set(NVSHMEM4PY_CUTILE_TRANSLATOR "" CACHE FILEPATH
+    "cuda-tile-translate from the same build as NVSHMEM4PY_CUTILE_TILEIRAS")
 
 # NVSHMEM_FORCE_REBUILD_PYTHON_LIB is defined in NVSHMEMEnv.cmake
 
@@ -22,7 +26,8 @@ include(cmake/buildWheel.cmake)
 if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addCybind.cmake" OR
    EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbast.cmake" OR
    EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/addNumbastMlir.cmake" OR
-   EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake")
+   EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" OR
+   NVSHMEM4PY_BUILD_CUTILE_BINDINGS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
     # Shared Python env setup for binding generation to avoid
@@ -132,6 +137,17 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/cmake/generateCuteBindings.cmake" AND
 
     include(cmake/generateCuteBindings.cmake)
     generateCuteBindings()
+endif()
+
+# The cuTile TileLib is opt-in until CUDA toolkits ship its CUDA 13.5 tools.
+# Source packages carry the generated files instead of the generator.
+if(NVSHMEM4PY_BUILD_CUTILE_BINDINGS AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB AND
+   EXISTS "${CMAKE_SOURCE_DIR}/nvshmem4py/build_assets/cutile/generate_tilelib.py")
+    include(cmake/generateCutileTileLib.cmake)
+    generateCutileTileLib()
+    if(TARGET package_src_target)
+        add_dependencies(package_src_target build_bindings_cutile)
+    endif()
 endif()
 
 # Cybind and Numbast share the base binding-generator environment.
@@ -255,6 +271,10 @@ foreach(LINE IN LISTS PYTHON_LINE_LIST)
 
         if(TARGET build_bindings_cute AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
             add_dependencies(${WHEEL_TARGET} build_bindings_cute)
+        endif()
+
+        if(TARGET build_bindings_cutile AND NVSHMEM_BUILD_PYTHON_DEVICE_LIB)
+            add_dependencies(${WHEEL_TARGET} build_bindings_cutile)
         endif()
 
         set(PREV_WHEEL_TARGET ${WHEEL_TARGET})

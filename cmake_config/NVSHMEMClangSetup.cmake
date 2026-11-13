@@ -10,6 +10,8 @@
 # After inclusion the following variables are available:
 #   NVSHMEM_CLANG_EXECUTABLE        – path to the clang binary
 #   NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST – list of extra flags for bitcode builds
+#   _NVSHMEM_CLANG_BITCODE_WORKAROUND_FLAGS – internal workarounds for all bitcode builds
+#   _NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS – internal workarounds for test/perftest frontends
 
 include_guard(GLOBAL)
 
@@ -93,15 +95,25 @@ endif()
 #endif()
 
 # --- Workarounds ---------------------------------------------------------------
-# CUDA 13.2+ headers need _NV_RSQRT_SPECIFIER defined when using Clang (workaround for
-# crt/math_functions.hpp vs __clang_cuda_runtime_wrapper.h). The noexcept specifier has
-# no effect on bitcode generation, so defining it as empty is safe.
-# TODO: Remove this workaround if LLVM fixed it upstream.
-if(CUDAToolkit_VERSION_MAJOR GREATER 13 OR
-   (CUDAToolkit_VERSION_MAJOR EQUAL 13 AND NOT CUDAToolkit_VERSION_MINOR LESS 2))
-  list(APPEND NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST "-D_NV_RSQRT_SPECIFIER=")
+set(_NVSHMEM_CLANG_BITCODE_WORKAROUND_FLAGS "")
+# LLVM 23+ defines _NV_RSQRT_SPECIFIER in its CUDA runtime wrapper. Keep the
+# CUDA 13.2+ header workaround for older Clang versions.
+# TODO: Remove when older Clang versions are no longer supported.
+if(LLVM_VERSION_MAJOR LESS 23 AND
+   (CUDAToolkit_VERSION_MAJOR GREATER 13 OR
+    (CUDAToolkit_VERSION_MAJOR EQUAL 13 AND NOT CUDAToolkit_VERSION_MINOR LESS 2)))
+  list(APPEND _NVSHMEM_CLANG_BITCODE_WORKAROUND_FLAGS "-D_NV_RSQRT_SPECIFIER=")
   message(STATUS
     "Adding -D_NV_RSQRT_SPECIFIER= workaround "
     "(CUDA ${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}, "
     "LLVM ${LLVM_VERSION_MAJOR})")
+endif()
+
+# LLVM 23+ can runtime-unroll calls to external device APIs before linking,
+# duplicating their large implementations during inlining. Defer heuristic
+# runtime unrolling until the device library is linked, while keeping
+# constant-trip-count unrolling and later optimization enabled.
+set(_NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS "${_NVSHMEM_CLANG_BITCODE_WORKAROUND_FLAGS}")
+if(LLVM_VERSION_MAJOR GREATER_EQUAL 23)
+  list(APPEND _NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS -mllvm -unroll-runtime=false)
 endif()

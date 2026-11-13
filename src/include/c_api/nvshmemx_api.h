@@ -77,6 +77,10 @@ __device__ int nvshmemx_region_start_block(nvshmemx_region_handle_t *handle,
                                            const nvshmemx_region_attrs_t *attrs);
 __device__ int nvshmemx_region_stop_block(nvshmemx_region_handle_t handle);
 
+NVSHMEMI_HOSTDEVICE_PREFIX int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag);
+__device__ void nvshmemx_give_smem(void *smem, size_t size);
+__device__ void nvshmemx_release_smem(void);
+
 int nvshmemx_culibrary_init(CUlibrary library);
 int nvshmemx_culibrary_finalize(CUlibrary library);
 
@@ -619,6 +623,18 @@ NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI)
 
 NVSHMEMI_REPT_FOR_STANDARD_RMA_TYPES(NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP)
 #undef NVSHMEMX_DECL_TYPE_QP_PUT_SIGNAL_NBI_THREADGROUP
+
+/*
+ * Warp- and block-collective variants of nvshmem_quiet() and nvshmem_fence().
+ * All threads in the calling warp or block must call the same operation. The
+ * group synchronizes before the operation and again before any thread returns.
+ * Quiet completes preceding operations; fence orders preceding and subsequent
+ * puts to the same PE without guaranteeing completion.
+ */
+__device__ void nvshmemx_quiet_warp(void);
+__device__ void nvshmemx_quiet_block(void);
+__device__ void nvshmemx_fence_warp(void);
+__device__ void nvshmemx_fence_block(void);
 
 // Quiet/Fence with qp
 __device__ void nvshmemx_qp_quiet(int pe, nvshmemx_qp_handle_t *qp_handle, int num_qps);

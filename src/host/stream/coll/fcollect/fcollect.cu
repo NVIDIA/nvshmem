@@ -11,11 +11,14 @@
 #include "internal/host/util.h"
 #include "non_abi/device/coll/fcollect.cuh"
 #include "c_api/nvshmem_api.h"
+#include "device/nvshmemx_defines.h"
 
 template <typename TYPE>
 __global__ void fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const TYPE *source,
                                           size_t nelems, int in_cuda_graph) {
 #ifdef __CUDA_ARCH__
+    extern __shared__ char smem[];
+    nvshmemx_give_smem(smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     nvshmem_team_t myteam = nvshmemi_device_state_d.team_pool[team]->team_dups[blockIdx.x];
     int nelems_remain = (nelems % gridDim.x);
     int nelems_per_block = (nelems / gridDim.x);
@@ -29,6 +32,7 @@ __global__ void fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, const
             myteam, dest, source + nelems_per_block * blockIdx.x,
             nelems_per_block * blockIdx.x + nvshmemi_team_my_pe(myteam) * nelems, my_nelems);
     }
+    nvshmemx_release_smem();
 #endif
 }
 
@@ -80,7 +84,9 @@ void nvshmemi_call_fcollect_on_stream_kernel(nvshmem_team_t team, TYPE *dest, co
         }
     }
 
-    fcollect_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, 0, stream>>>(
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
+    fcollect_on_stream_kernel<TYPE><<<num_blocks, num_threads_per_block, smem_size, stream>>>(
         team, dest, source, nelems, in_cuda_graph);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
 }

@@ -219,6 +219,10 @@ struct nvshmemi_cuda_fn_table {
     DEFINE_SYM(cuDeviceGetFabricClusterUuid, 13040)
     DEFINE_SYM(cuDeviceGetCliqueCount, 13040)
     DEFINE_SYM(cuDeviceGetCliqueInfo, 13040)
+#if CUDART_VERSION >= 13050
+    /* Keep new entries at the end to preserve transport plugin table offsets. */
+    DEFINE_SYM(cuFabricCpyBatchAsync, 13050)
+#endif
 };
 #undef DEFINE_SYM
 

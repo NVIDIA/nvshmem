@@ -1,0 +1,127 @@
+/*
+ * Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef _NVSHMEMI_TRANSPORT_SPECIFIC_POINTER_SM_CUH_
+#define _NVSHMEMI_TRANSPORT_SPECIFIC_POINTER_SM_CUH_
+
+#include "non_abi/device/transport_specific/traits.cuh"
+
+#ifdef __CUDA_ARCH__
+
+namespace nvshmemi {
+namespace transport_policy {
+
+/* The copies are synchronous, so the NBI forms complete before returning. */
+template <>
+struct route_backend<pointer_sm_route> {
+    struct rma_plan {
+        void *peer;
+    };
+    struct signal_plan {
+        void *peer;
+    };
+
+    __device__ static const char *name() { return "Pointer/SM"; }
+
+    template <threadgroup Scope, typename Local>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_rma(const void *remote,
+                                                                      const void *local,
+                                                                      size_t bytes, int pe,
+                                                                      rma_plan &plan) {
+        plan.peer = nullptr;
+        const int status = check_rma_arguments(remote, local, bytes, pe);
+        if (status != NVSHMEMX_SUCCESS) {
+            return status;
+        }
+        plan.peer = pointer_peer(remote, pe);
+        return plan.peer != nullptr ? NVSHMEMX_SUCCESS : NVSHMEMX_ERROR_NOT_SUPPORTED;
+    }
+
+    template <threadgroup Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_signal(uint64_t *sig_addr,
+                                                                         int sig_op, int pe,
+                                                                         signal_plan &plan) {
+        return pointer_preflight_signal(sig_addr, sig_op, pe, plan.peer);
+    }
+
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int preflight_ordering() {
+        return NVSHMEMX_SUCCESS;
+    }
+
+    template <threadgroup Scope, issue_mode Issue, typename Source>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put(const rma_plan &plan, void *,
+                                                            const void *source, size_t bytes) {
+        nvshmemi_memcpy_threadgroup<scope_traits<Scope>::internal>(plan.peer, source, bytes);
+        scope_sync<Scope>();
+        return NVSHMEMX_SUCCESS;
+    }
+
+    template <threadgroup Scope, issue_mode Issue, typename Dest>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int get(const rma_plan &plan, void *dest,
+                                                            const void *, size_t bytes) {
+        nvshmemi_memcpy_threadgroup<scope_traits<Scope>::internal>(dest, plan.peer, bytes);
+        scope_sync<Scope>();
+        return NVSHMEMX_SUCCESS;
+    }
+
+    template <threadgroup Scope, issue_mode Issue, typename Source>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int put_signal(const rma_plan &plan,
+                                                                   const signal_plan &sig,
+                                                                   void *dest, const void *source,
+                                                                   size_t bytes, uint64_t signal,
+                                                                   int sig_op) {
+        put<Scope, Issue, Source>(plan, dest, source, bytes);
+        if (scope_leader<Scope>()) {
+            __threadfence_system();
+            pointer_issue_signal(sig.peer, signal, sig_op);
+        }
+        scope_sync<Scope>();
+        return NVSHMEMX_SUCCESS;
+    }
+
+    template <threadgroup Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int signal_op(const signal_plan &plan,
+                                                                  uint64_t signal, int sig_op) {
+        if (scope_leader<Scope>()) {
+            pointer_issue_signal(plan.peer, signal, sig_op);
+        }
+        scope_sync<Scope>();
+        return NVSHMEMX_SUCCESS;
+    }
+
+    template <threadgroup Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int quiet() {
+        return system_fence<Scope>();
+    }
+
+    template <threadgroup Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int flush() {
+        scope_sync<Scope>();
+        return NVSHMEMX_SUCCESS;
+    }
+
+    template <threadgroup Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int fence() {
+        return system_fence<Scope>();
+    }
+
+   private:
+    template <threadgroup Scope>
+    __device__ static NVSHMEMI_DEVICE_ALWAYS_INLINE int system_fence() {
+        scope_sync<Scope>();
+        if (scope_leader<Scope>()) {
+            __threadfence_system();
+        }
+        scope_sync<Scope>();
+        return NVSHMEMX_SUCCESS;
+    }
+};
+
+}  // namespace transport_policy
+}  // namespace nvshmemi
+
+#endif  // __CUDA_ARCH__
+
+#endif  // _NVSHMEMI_TRANSPORT_SPECIFIC_POINTER_SM_CUH_

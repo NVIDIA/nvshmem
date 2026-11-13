@@ -279,7 +279,7 @@ function(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
 
   # Internal test kernels use API declarations and link the precompiled bitcode device library.
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${CUBIN_NAME}
-	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
+	            COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${_NVSHMEM_CLANG_CUBIN_WORKAROUND_FLAGS} -c -emit-llvm ${CUBIN_DEBUG_FLAGS} -std=${TEST_CXX_ARG} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
                             --cuda-gpu-arch=${NVSHMEM_CLANG_ARCH} ${INCLUDE_DIRECTORIES} -DNVSHMEM_DEVICE_DECLARATIONS_ONLY
                             -DNVSHMEM_TEST_EXTERNAL_DEVICE_LIBRARY ${DIR_} -o ${NAME_}.bc.unoptimized
                     COMMAND llvm::llvm-link --only-needed ${NAME_}.bc.unoptimized ${BITCODE_LIB_PATH} -o ${NAME_}.bc.unoptimized.linked
@@ -307,102 +307,6 @@ function(nvshmem_add_cubin_test_prefix SOURCE PREFIX)
                         GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   endif()
 endfunction()
-
-macro(nvshmem_add_unit_test_prefix SOURCE PREFIX)
-  get_filename_component(NAME_ ${SOURCE} NAME_WE)
-  get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
-  string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
-  string(REPLACE ${SOURCE} "" DIR ${DIR})
-  set(NAME "${PREFIX}${NAME_}")
-  add_executable(${NAME} ${SOURCE})
-  set_target_properties(${NAME} PROPERTIES OUTPUT_NAME "${NAME_}" INSTALL_RPATH "$ORIGIN/../../../../lib" BUILD_WITH_INSTALL_RPATH TRUE)
-  # unit-test should never run on device
-  target_link_libraries(${NAME} nvshmem_unit_test_helper)
-
-  set_target_properties(${NAME} PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  CUDA_SEPARABLE_COMPILATION ON
-  )
-
-  target_compile_options(${NAME}
-  PRIVATE $<$<CONFIG:Debug>:-O0;-g;>
-  $<$<AND:$<BOOL:${NVSHMEM_VERBOSE}>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -v>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-O0;-g;-G>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${NVCC_THREADS}>>:-t4>
-  $<$<COMPILE_LANGUAGE:CUDA>:-Werror
-  all-warnings>
-  $<$<COMPILE_LANGUAGE:CXX>:-Werror
-  -Wall
-  -Wextra
-  -Wno-unused-variable
-  -Wno-unused-function
-  -Wno-unused-parameter
-  -Wno-missing-field-initializers>
-  )
-
-  install(TARGETS ${NAME} RUNTIME DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/${DIR}")
-  if (NVSHMEM_TEST_RELEASE_PREFIX)
-    install(TARGETS ${NAME} RUNTIME DESTINATION "${NVSHMEM_TEST_RELEASE_PREFIX}/${DIR}")
-  endif()
-endmacro()
-
-option(INSTALL_GTEST OFF)
-find_package(GTest)
-
-if(GTest_FOUND)
-include(FetchContent)
-
-FetchContent_Declare(
-googletest
-GIT_REPOSITORY https://github.com/google/googletest.git
-GIT_TAG "release-1.12.1"
-)
-
-FetchContent_MakeAvailable(googletest)
-
-
-macro(nvshmem_add_gtest_unit_test_prefix SOURCE PREFIX FILE)
-  get_filename_component(NAME_ ${SOURCE} NAME_WE)
-  get_filename_component(DIR_ ${SOURCE} ABSOLUTE)
-  string(REPLACE ${NVSHMEM_TEST_TLD} "" DIR ${DIR_})
-  string(REPLACE ${SOURCE} "" DIR_ ${DIR_})
-  string(REPLACE ${SOURCE} "" DIR ${DIR})
-  set(NAME "${PREFIX}${NAME_}")
-  if("${FILE}" STREQUAL "")
-    add_executable(${NAME} ${SOURCE})
-  else()
-    add_executable(${NAME} ${SOURCE} ${FILE})
-  endif()
-  target_include_directories(${NAME} PRIVATE ${DIR_})
-  target_link_libraries(${NAME} nvshmem_gtest_unit_test_helper)
-
-  set_target_properties(${NAME} PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  CUDA_SEPARABLE_COMPILATION ON
-  )
-
-  target_compile_options(${NAME} BEFORE
-  PRIVATE $<$<CONFIG:Debug>:-O0;-g;>
-  $<$<AND:$<BOOL:${NVSHMEM_VERBOSE}>,$<COMPILE_LANGUAGE:CUDA>>:-Xptxas -v>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Debug>>:-O0;-g;-G>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${NVCC_THREADS}>>:-t4>
-  $<$<COMPILE_LANGUAGE:CUDA>:-Werror
-  all-warnings>
-  $<$<COMPILE_LANGUAGE:CXX>:-Werror
-  -Wall
-  -Wextra
-  -Wno-unused-variable
-  -Wno-unused-function
-  -Wno-unused-parameter
-  -fprofile-arcs -ftest-coverage
-  -Wno-missing-field-initializers
-  >
-  )
-  target_compile_options(${NAME} PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-vla-cxx-extension>)
-
-  install(TARGETS ${NAME} RUNTIME DESTINATION "${NVSHMEM_TEST_INSTALL_PREFIX}/${DIR}")
-endmacro()
-endif()
 
 set(FATBIN_DEFS_LIST)
 
@@ -468,3 +372,6 @@ add_custom_target(kernel_nvshmem_no_rdc_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY
 add_subdirectory(apps)
 add_subdirectory(device)
 add_subdirectory(host)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/private/CMakeLists.txt")
+  add_subdirectory(private)
+endif()

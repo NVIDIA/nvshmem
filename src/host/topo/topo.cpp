@@ -4,11 +4,12 @@
  */
 
 #include "topo.h"
-#include <ctype.h>                                   // for tolower
-#include <cuda.h>                                    // for CUDA_SUCCESS
-#include <cuda_runtime.h>                            // for cudaDevice...
-#include <driver_types.h>                            // for cudaDevice...
-#include <algorithm>                                 // for sort
+#include <ctype.h>         // for tolower
+#include <cuda.h>          // for CUDA_SUCCESS
+#include <cuda_runtime.h>  // for cudaDevice...
+#include <driver_types.h>  // for cudaDevice...
+#include <algorithm>       // for sort
+#include <set>
 #include <array>                                     // for array
 #include <dirent.h>                                  // for opendir, readdir
 #include <limits.h>                                  // for PATH_MAX
@@ -785,6 +786,8 @@ int nvshmemi_detect_same_device(nvshmemi_state_t *state) {
     int status = NVSHMEMX_SUCCESS;
     nvshmem_transport_pe_info_t my_info;
     cudaDeviceProp prop;
+    std::set<std::pair<uint64_t, std::array<char, sizeof(my_info.gpu_uuid.bytes)>>> seen_gpus;
+    nvshmemi_is_mpg_run = false;
 
     my_info.pe = state->mype;
     status = nvshmemi_get_pcie_attrs(&my_info.pcie_id, state->device_id);
@@ -807,24 +810,23 @@ int nvshmemi_detect_same_device(nvshmemi_state_t *state) {
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out,
                           "allgather of ipc handles failed \n");
 
+    // Sharing is a property of the whole PE group. PEs on unshared GPUs must
+    // enter the same initialization and synchronization protocol as their peers.
     for (int i = 0; i < state->npes; i++) {
-        (state->pe_info + i)->pe = i;
-        if (i == state->mype) {
-            continue;
+        auto &info = state->pe_info[i];
+        info.pe = i;
+        std::array<char, sizeof(my_info.gpu_uuid.bytes)> uuid;
+        std::copy(std::begin(info.gpu_uuid.bytes), std::end(info.gpu_uuid.bytes), uuid.begin());
+        if (!seen_gpus.emplace(info.hostHash, uuid).second) {
+            nvshmemi_is_mpg_run = true;
         }
-
-        const auto &uuid_i = (state->pe_info + i)->gpu_uuid;
-        status = (((state->pe_info + i)->hostHash == my_info.hostHash) &&
-                  std::equal(std::begin(uuid_i.bytes), std::end(uuid_i.bytes),
-                             std::begin(my_info.gpu_uuid.bytes)));
-        if (status) {
-            INFO(NVSHMEM_INIT, "More than 1 PE per GPU detected. This is an MPG run.\n");
+    }
+    if (nvshmemi_is_mpg_run) {
+        INFO(NVSHMEM_INIT,
+             "More than 1 PE per GPU detected in the PE group. This is an MPG run.\n");
 #if defined(NVSHMEM_PPC64LE)
-            NVSHMEMI_ERROR_EXIT("MPG support is currently not available on P9 platforms");
+        NVSHMEMI_ERROR_EXIT("MPG support is currently not available on P9 platforms");
 #endif
-            nvshmemi_is_mpg_run = 1;
-            status = NVSHMEMX_SUCCESS;
-        }
     }
 
 out:
