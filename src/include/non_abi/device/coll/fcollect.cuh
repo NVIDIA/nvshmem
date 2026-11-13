@@ -149,7 +149,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_allpush_ll
              ii += groupSize) {
             next_pe = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
             if (NODE_SAFE) {
-                if (nvshmemi_ptr(pWrk, next_pe) == NULL) {
+                if (teami_node == NULL || nvshmemi_ptr(pWrk, next_pe) == NULL) {
                     nvshmemi_put_nbi<T, NVSHMEMI_THREADGROUP_THREAD>(
                         pWrk + pack_offset, pWrk + pack_offset, psync_remote_write_elements,
                         next_pe);
@@ -290,8 +290,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_allpush_ll
     }
 }
 
-template <typename T, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup(
+template <typename T, threadgroup_t SCOPE, nvshmemi_tma_use TMA_USE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup_impl(
     nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     int next_rank;
@@ -300,9 +300,27 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgr
     // nvshmemi_threadgroup_sync<SCOPE>();
     for (int ii = teami->my_pe; ii < teami->size + teami->my_pe; ii++) {
         next_rank = nvshmemi_team_translate_pe_to_team_world_wrap(teami, ii);
-        nvshmemi_put_nbi<T, SCOPE>(dest + dest_offset, source, nelems, next_rank);
+        nvshmemi_put_nbi<T, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, TMA_USE>(
+            dest + dest_offset, source, nelems, next_rank);
     }
     nvshmemi_barrier_threadgroup<SCOPE>(team);
+}
+
+template <typename T, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_allpush_threadgroup(
+    nvshmem_team_t team, T *dest, const T *source, int dest_offset, size_t nelems) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::disallowed>(
+            team, dest, source, dest_offset, nelems);
+    } else {
+        nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
+            team, dest, source, dest_offset, nelems);
+    }
+#else
+    nvshmemi_fcollect_allpush_threadgroup_impl<T, SCOPE, nvshmemi_tma_use::allowed>(
+        team, dest, source, dest_offset, nelems);
+#endif
 }
 
 template <typename T, threadgroup_t SCOPE>
@@ -345,6 +363,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_fcollect_nvls_allpush_thr
         }
 #endif
 
+#if defined(NVSHMEM_FORCE_CFT)
+        nvshmemi_cft_force_unsupported();
+        return;
+#endif
         nvshmemi_threadgroup_sync<SCOPE>();
         T *dst_ptr = (T *)nvshmemi_mc_ptr(teami, (void *)(dest + dest_offset));
         nvshmemi_mcast_memcpy_threadgroup<T, SCOPE>(dst_ptr, source, nelems * sizeof(T));
@@ -370,6 +392,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     int p2p_direct =
         (nvshmemi_device_state_d.job_connectivity <= NVSHMEMI_JOB_GPU_LDST_REMOTE_ATOMICS) &&
         teami->are_gpus_p2p_connected;
+#if defined(NVSHMEM_FORCE_CFT)
+    p2p_direct = 0;
+#endif
     const size_t fcollect_ll_threshold =
         nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold;
     const size_t fcollect_ll128_threshold =
@@ -380,10 +405,30 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
     bool is_nvls_algo_supported =
         nvshmemi_device_has_nvls_multimem &&
         nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL;
+    bool is_nvls_ll_supported = is_nvls_algo_supported;
+
+#if defined(NVSHMEM_FORCE_CFT)
+    /* NVLS LL uses multicast pointers directly and has no CFT-handle implementation. */
+    is_nvls_ll_supported = false;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && LE_HW_SW_REQUIREMENTS_MET
+    is_nvls_algo_supported =
+        is_nvls_algo_supported &&
+        nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, nelems * sizeof(T), SCOPE) &&
+        nvshmemi_tma_smem_registered() && !__isShared(source) && !__isShared(dest + dest_offset) &&
+        nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)source) &&
+        nvshmemi_is_addr_offset_aligned(dest + dest_offset, CFT_HANDLE_TX_SIZE);
+#else
+    is_nvls_algo_supported = false;
+#endif
+#endif
+
     bool valid_ll_configuration = (SCOPE != NVSHMEMI_THREADGROUP_THREAD &&
                                    ((sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0)) ||
                                     (is_half_prec && (nelems % 4 == 0) &&
                                      (nvshmemi_device_state_d.team_pool[team]->size % 2 == 0))));
+#if defined(NVSHMEM_FORCE_CFT)
+    valid_ll_configuration = false;
+#endif
     /* Disable non-NVLS LL unless every PE agreed that the job topology supports it. */
     valid_ll_configuration &= nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_supported;
     /* This 2-level selection logic is implemented to reduce code duplication of calling leaf
@@ -397,7 +442,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             } else if (sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0) &&
                        nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
                            (nelems * sizeof(T)) &&
-                       is_nvls_algo_supported && prefer_nvls_ll) {
+                       is_nvls_ll_supported && prefer_nvls_ll) {
                 fcollect_algo = FCOLLECT_NVLS_LL; /* NVLS LL algorithm */
             } else if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 fcollect_algo = FCOLLECT_NVLS; /* NVLS One shot algorithm */
@@ -424,7 +469,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void nvshmemi_fcollect_threadgrou
             if (sizeof(T) >= sizeof(uint32_t) && (nelems % 2 == 0) &&
                 nvshmemi_device_state_d.gpu_coll_env_params_var.fcollect_ll_threshold >=
                     (nelems * sizeof(T)) &&
-                is_nvls_algo_supported) {
+                is_nvls_ll_supported) {
                 fcollect_algo = FCOLLECT_NVLS_LL; /* Use NVLS LL */
             } else if (is_nvls_algo_supported && (nelems * sizeof(T)) % 4 == 0) {
                 fcollect_algo = FCOLLECT_NVLS; /* Switch to NVLS simple */
@@ -510,14 +555,18 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
 
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
 
-    /* Handle multicast needs a prioritized multicast LE, registered TMA SMEM, a 16B-aligned
-     * destination heap offset, and a 16B-aligned global source for TMA staging.
+    /* Prefer handles when configured, or use them when the team has no usable multicast
+     * pointer. Disabling handle priority must not disable this fallback.
      */
-    if (!nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
-                                                            CFT_HANDLE_TX_SIZE, scope) ||
-        !nvshmemi_tma_smem_registered() ||
+    const bool use_handle =
+        nvshmemi_is_multicast_le_supported_and_prioritized(teami->mc_leid_with_flag,
+                                                           CFT_HANDLE_TX_SIZE, scope) ||
+        (nvshmemi_mc_ptr(teami, dst) == nullptr &&
+         nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, CFT_HANDLE_TX_SIZE, scope));
+    if (!use_handle || !nvshmemi_tma_smem_registered() ||
         !nvshmemi_is_addr_offset_aligned(dst, CFT_HANDLE_TX_SIZE) || __isShared(src) ||
         !nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)src)) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
 
@@ -531,6 +580,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
         const size_t copy_bytes = row_bytes * valid_minor_dim;
         /* Fully contiguous tiles use one handle copy; ensure that transaction size is supported. */
         if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, copy_bytes, scope)) {
+            nvshmemi_cft_force_unsupported();
             return false;
         }
 
@@ -540,11 +590,16 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
         return true;
     }
 
-    /* Strided tiles issue one handle copy per row, so every row starting address must remain
-     * 16B-aligned for both source and destination.
+    /* Strided tiles issue one handle copy per row. An aligned stride does not imply a
+     * supported payload: a 14-float row is 56B even with a 112B stride. Its masked CFT tail
+     * shares a 16B destination block with an adjacent tile, which can use multicast-pointer
+     * stores due to its misaligned start. Do not rely on atomic merging across these paths;
+     * reject unsupported row payloads before issuing any copies so they can fall back.
      */
-    if (((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
+    if (!nvshmemi_is_multicast_le_implemented(teami->mc_leid_with_flag, row_bytes, scope) ||
+        ((src_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0 ||
         ((dst_stride_minor_dim * sizeof(T)) % CFT_HANDLE_TX_SIZE) != 0) {
+        nvshmemi_cft_force_unsupported();
         return false;
     }
 
@@ -559,6 +614,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE bool nvshmemi_tile_allgather_try_handle
 
     return true;
 #else
+    nvshmemi_cft_force_unsupported();
     return false;
 #endif
 }

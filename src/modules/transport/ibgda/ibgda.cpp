@@ -41,8 +41,9 @@
 #include "internal/host_transport/nvshmemi_transport_defines.h"  // for nvshmem_mem_handle_t, NVSHM...
 #include "internal/host_transport/transport.h"  // for nvshmem_transport, nvshmem_...
 #include "transport_common.h"                   // for nvshmemt_ibv_function_table
-#include "transport_ib_common.h"                // for nvshmemt_ib_common_mem_handle
-#include "transport_mlx5_common.h"              // for nvshmemt_ib_common_check_ni...
+#include "transport_nonuniform.hpp"
+#include "transport_ib_common.h"    // for nvshmemt_ib_common_mem_handle
+#include "transport_mlx5_common.h"  // for nvshmemt_ib_common_check_ni...
 #include "ibgda_qcounter.hpp"
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
@@ -1032,21 +1033,21 @@ int nvshmemt_ibgda_get_mem_handle(nvshmem_mem_handle_t *mem_handle, void *buf, s
         did_emplace = true;
     } else {
         size_t num_lkeys;
-        size_t num_elements;
-
-        // length must be divisible by cumem_granularity, which is a power of 2.
-        assert((length & ((1ULL << transport->log2_cumem_granularity) - 1)) == 0);
-
-        num_elements = length >> transport->log2_cumem_granularity;
+        const size_t granularity = 1ULL << transport->log2_cumem_granularity;
+        const size_t granularity_mask = granularity - 1;
+        const size_t heap_offset = (char *)buf - (char *)t->heap_base;
+        // Heap mappings start on a heap-granularity boundary, but a user buffer's physical size
+        // may be smaller than that granularity.
+        assert((heap_offset & granularity_mask) == 0);
+        size_t num_elements =
+            (length >> transport->log2_cumem_granularity) + ((length & granularity_mask) != 0);
 
         // With user buffers being mmaped at the of the heap, incremently adding to lkeys vector
         // won't be sufficient as buffers from end of heap could be registered. So we resize
         // ibgda_device_lkeys vector to number of chunks  * n_devs_selected and populate entries
         // as they are added.
-        size_t chunk_idx = ((char *)buf - (char *)t->heap_base) >> t->log2_cumem_granularity;
-        size_t num_chunks =
-            (((char *)buf - (char *)t->heap_base) + length + t->log2_cumem_granularity - 1) >>
-            t->log2_cumem_granularity;
+        size_t chunk_idx = heap_offset >> t->log2_cumem_granularity;
+        size_t num_chunks = chunk_idx + num_elements;
         if (ibgda_device_lkeys.size() < num_chunks * n_devs_selected) {
             ibgda_device_lkeys.resize(num_chunks * n_devs_selected);
         }
@@ -4730,6 +4731,21 @@ int nvshmemt_ibgda_connect_endpoints(nvshmem_transport_t t, int *selected_dev_id
         return status;
     }
 
+    std::vector<int> devices(ibgda_state->selected_dev_ids,
+                             ibgda_state->selected_dev_ids + ibgda_state->n_devs_selected);
+    std::vector<int> ports(ibgda_state->selected_port_ids,
+                           ibgda_state->selected_port_ids + ibgda_state->n_devs_selected);
+    bool nonuniform = false;
+    status = nvshmemt_limit_nonuniform_devices(t->boot_handle, devices, ports, nonuniform);
+    if (status) {
+        return status;
+    }
+    if (nonuniform) {
+        std::copy(devices.begin(), devices.end(), ibgda_state->selected_dev_ids);
+        std::copy(ports.begin(), ports.end(), ibgda_state->selected_port_ids);
+        ibgda_state->n_devs_selected = devices.size();
+    }
+
     status = ibgda_configure_multinic_amo_routing(t, ibgda_state);
     if (status) {
         return status;
@@ -4813,12 +4829,14 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
     int mype = transport->my_pe;
     int num_rc_eps;
     std::vector<bool> device_finalized;
+    std::vector<bool> endpoints_destroyed;
 
     if (!ibgda_state) {
         goto out;
     }
 
     device_finalized.resize(ibgda_state->common.n_raw_devices, false);
+    endpoints_destroyed.resize(ibgda_state->common.n_raw_devices, false);
 
     if (ibgda_state->common.options->IBGDA_QP_DIAGNOSTICS) {
         ibgda_diagnostics_software(transport);
@@ -4864,6 +4882,13 @@ int nvshmemt_ibgda_finalize(nvshmem_transport_t transport) {
 
     for (int i = 0; i < ibgda_state->n_devs_selected; i++) {
         dev_id = ibgda_state->selected_dev_ids[i];
+
+        // Duplicate logical slots share one raw device's endpoints and shared objects.
+        if (endpoints_destroyed[dev_id]) {
+            continue;
+        }
+
+        endpoints_destroyed[dev_id] = true;
         device = ((struct ibgda_device *)ibgda_state->common.devices + dev_id);
 
         for (int i = 0; i < device->dci.num_eps; ++i) {
@@ -4994,19 +5019,19 @@ int nvshmemt_ibgda_add_device_remote_mem_handles(nvshmem_transport_t t, int tran
     static_assert(sizeof(struct nvshmemt_ib_common_mem_handle) <= NVSHMEM_MEM_HANDLE_SIZE,
                   "static_assert(sizeof(T) <= NVSHMEM_MEM_HANDLE_SIZE) failed");
 
-    size_t num_elements;
-    // size must be divisible by cumem_granularity, which is a power of 2.
-    assert((size & ((1ULL << t->log2_cumem_granularity) - 1)) == 0);
-
-    num_elements = size >> t->log2_cumem_granularity;
+    const size_t granularity = 1ULL << t->log2_cumem_granularity;
+    const size_t granularity_mask = granularity - 1;
+    // Heap mappings start on a heap-granularity boundary, but a user buffer's physical size may
+    // be smaller than that granularity.
+    assert((heap_offset & granularity_mask) == 0);
+    size_t num_elements = (size >> t->log2_cumem_granularity) + ((size & granularity_mask) != 0);
 
     // With user buffers being mmaped at the of the heap, incremently adding to lkeys vector
     // won't be sufficient as buffers from end of heap could be registered. So we resize
     // ibgda_device_rkeys vector to number of chunks  * n_pes * n_devs_selected and populate entries
     // as they are added.
     size_t chunk_idx = heap_offset >> t->log2_cumem_granularity;
-    size_t num_chunks =
-        (heap_offset + size + t->log2_cumem_granularity - 1) >> t->log2_cumem_granularity;
+    size_t num_chunks = chunk_idx + num_elements;
     // assuming all PEs have same num_devs
     int num_devs = ((struct ibgda_mem_handle *)&mem_handles[t->index])->num_devs;
     if (ibgda_device_rkeys.size() < num_chunks * n_pes * num_devs) {

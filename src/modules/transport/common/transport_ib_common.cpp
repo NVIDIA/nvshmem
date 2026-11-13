@@ -16,6 +16,7 @@
 #include <string.h>            // for strerror
 #include <strings.h>           // for strcasecmp
 #include <unistd.h>            // for access, close, sysconf
+#include <string>              // for string
 #include <vector>              // for vector
 #include "non_abi/device/transport/transport_constants.h"
 #include "internal/host_transport/cudawrap.h"  // for nvshmemi_cuda_fn_table
@@ -1383,12 +1384,6 @@ bool nvshmemt_check_hca_prefix(const nvshmemi_options_s *options, const char *na
     } else {
         device_supported = strstr(name, hca_prefix) != nullptr;
     }
-    if (!device_supported) {
-        NVSHMEMI_WARN_PRINT(
-            "device %s is not supported (expected HCA interface: %s). Skipping...\n", name,
-            hca_prefix);
-    }
-
     return device_supported;
 }
 
@@ -1685,6 +1680,12 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
     int log_level = state.log_level;
     int status = 0;
     int offset = 0;
+    struct discovered_port {
+        int dev_id;
+        int port_id;
+        const char *name;
+    };
+    std::vector<discovered_port> usable_ports;
 
     if (num_devices < 0 || state.n_raw_devices < num_devices ||
         (num_devices > 0 && (!devices || !dev_list))) {
@@ -1698,6 +1699,8 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
 
     INFO(log_level,
          "Begin - Enumerating IB devices in the system ([<dev_id, device_name, num_ports>]) - ");
+    std::string skipped_devices;
+    int skipped_count = 0;
     for (int i = 0; i < num_devices; i++) {
         struct nvshmemt_ib_common_device *device =
             (struct nvshmemt_ib_common_device *)((char *)devices + i * device_struct_size);
@@ -1716,6 +1719,11 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
         bool device_supported = nvshmemt_check_hca_prefix(options, name);
 
         if (!device_supported) {
+            if (!skipped_devices.empty()) {
+                skipped_devices += ", ";
+            }
+            skipped_devices += name;
+            ++skipped_count;
             ftable->close_device(device->context);
             device->context = nullptr;
             continue;
@@ -1731,7 +1739,6 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
         int device_used = 0;
         for (int p = 1; p <= device->device_attr.phys_port_cnt; p++) {
             int allowed_device = 1;
-            int replicate_count = 1;
             if (filter.hca_list_count) {
                 allowed_device = filter.exclude_list;
                 for (int j = 0; j < filter.hca_list_count; j++) {
@@ -1750,7 +1757,6 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
                             filter.pe_hca_mapping[j].port == p) {
                             allowed_device = 1;
                             filter.pe_hca_mapping[j].found = 1;
-                            replicate_count = filter.pe_hca_mapping[j].count;
                         }
                     }
                 }
@@ -1801,20 +1807,7 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
                                               "ibv_alloc_pd failed \n");
             }
 
-            for (int k = 0; k < replicate_count; k++) {
-                if (offset >= MAX_NUM_PES_PER_NODE) {
-                    NVSHMEMI_ERROR_PRINT(
-                        "Too many device/port entries (%d), exceeds MAX_NUM_PES_PER_NODE "
-                        "(%d)\n",
-                        offset + 1, MAX_NUM_PES_PER_NODE);
-                    status = NVSHMEMX_ERROR_INTERNAL;
-                    goto out;
-                }
-                dev_ids[offset] = i;
-                port_ids[offset] = p;
-                offset++;
-            }
-
+            usable_ports.push_back({i, p, name});
             device_used = 1;
         }
 
@@ -1836,6 +1829,51 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
     }
     INFO(log_level, "End - Enumerating IB devices in the system");
 
+    {
+        // Helper to fill dev_ids and port_ids arrays
+        const auto append_port = [&](const discovered_port &port, int count) {
+            for (int k = 0; k < count; k++) {
+                if (offset >= MAX_NUM_PES_PER_NODE) {
+                    NVSHMEMI_ERROR_PRINT(
+                        "Too many device/port entries (%d), exceeds MAX_NUM_PES_PER_NODE "
+                        "(%d)\n",
+                        offset + 1, MAX_NUM_PES_PER_NODE);
+                    return NVSHMEMX_ERROR_INTERNAL;
+                }
+                dev_ids[offset] = port.dev_id;
+                port_ids[offset] = port.port_id;
+                offset++;
+            }
+            return NVSHMEMX_SUCCESS;
+        };
+
+        if (!filter.hca_list_count && filter.pe_hca_map_count) {
+            // HCA_PE_MAPPING is set. Expand entries in user order, including repeated entries and
+            // their own counts.
+            for (int j = 0; j < filter.pe_hca_map_count; j++) {
+                const auto &entry = filter.pe_hca_mapping[j];
+                for (const auto &port : usable_ports) {
+                    if (strcmp(entry.name, port.name) ||
+                        (entry.port != -1 && entry.port != port.port_id)) {
+                        continue;
+                    }
+                    status = append_port(port, entry.count);
+                    if (status) {
+                        goto out;
+                    }
+                }
+            }
+        } else {
+            // HCA_LIST and automatic selection retain discovery order.
+            for (const auto &port : usable_ports) {
+                status = append_port(port, 1);
+                if (status) {
+                    goto out;
+                }
+            }
+        }
+    }
+
     state.n_dev_ids = offset;
 
     status = nvshmemt_ib_common_filter_auto_link_layer(ftable, state, device_struct_size, filter,
@@ -1850,6 +1888,11 @@ int nvshmemt_ib_common_enumerate_devices(const struct nvshmemt_ibv_function_tabl
     }
 
 out:
+    if (skipped_count > 0) {
+        const char *hca_prefix = options->HCA_PREFIX_provided ? options->HCA_PREFIX : "^smi";
+        NVSHMEMI_WARN_PRINT("skipped %d IB device(s) not matching HCA prefix \"%s\": %s",
+                            skipped_count, hca_prefix, skipped_devices.c_str());
+    }
     if (status) {
         for (int i = 0; i < num_devices; i++) {
             struct nvshmemt_ib_common_device *device =

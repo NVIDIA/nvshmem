@@ -19,9 +19,16 @@
  */
 #define NVSHMEMI_TMA_BARRIER_REGION_BYTES 512
 #define NVSHMEMI_TMA_NUM_BARRIER_SLOTS 32
+/* The last two TMA barrier slots hold the transport-policy deferred-get
+ * barrier and its state; nvshmemx_give_smem() clears the state slot. */
+#define NVSHMEMI_TMA_DEFERRED_GET_BARRIER_SLOT (NVSHMEMI_TMA_NUM_BARRIER_SLOTS - 2)
+#define NVSHMEMI_TMA_DEFERRED_GET_STATE_SLOT (NVSHMEMI_TMA_NUM_BARRIER_SLOTS - 1)
 #define NVSHMEMI_TMA_MAX_CONCURRENT_GRIDS 4
 #define NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS 32
 #define NVSHMEMI_HANDLE_BARRIER_BYTES (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS * 16)
+/* CTA-local bitmap of live handle barriers. Keep a full aligned slot so the
+ * following counted-operation state remains 16-byte aligned. */
+#define NVSHMEMI_HANDLE_TRACKING_STATE_BYTES 16
 /* Keep counted-operation state separate from the generic TMA and handle
  * barrier pools so independently in-flight operations cannot alias it. */
 #define NVSHMEMI_COUNTED_STATE_SLOT_BYTES 16
@@ -36,7 +43,7 @@
 
 #define NVSHMEMI_SMEM_DATA_REGION_OFFSET                                 \
     (NVSHMEMI_TMA_BARRIER_REGION_BYTES + NVSHMEMI_HANDLE_BARRIER_BYTES + \
-     NVSHMEMI_COUNTED_STATE_BYTES)
+     NVSHMEMI_HANDLE_TRACKING_STATE_BYTES + NVSHMEMI_COUNTED_STATE_BYTES)
 
 #define REDUCE_PADDING 32
 #define TIMEOUT_PADDING 16
@@ -79,38 +86,40 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
      {0}}
 
 #define NVSHMEMI_TEAM_V4_IDENTIFIER ((4 << 16) + sizeof(nvshmemi_team_t))
-#define NVSHMEMI_TEAM_INITIALIZER                                                      \
-    {                                                                                  \
-        NVSHMEMI_TEAM_V4_IDENTIFIER, /* version */                                     \
-        TEAM_SCALAR_INVALID,         /* my_pe */                                       \
-        TEAM_SCALAR_INVALID,         /* start */                                       \
-        TEAM_SCALAR_INVALID,         /* stride */                                      \
-        TEAM_SCALAR_INVALID,         /* size */                                        \
-        TEAM_SCALAR_INVALID,         /* team_idx */                                    \
-        NVSHMEM_TEAM_CONFIG_INITIALIZER,                                               \
-        TEAM_SCALAR_INVALID, /* config_mask */                                         \
-        NULL,                /* nccl_comm */                                           \
-        NVSHMEMI_RED_REX_INITIALIZER,                                                  \
-        TEAM_ULSCALAR_INVALID,                          /* rdxn_count */               \
-        TEAM_USCALAR_INVALID,                           /* ll_flag */                  \
-        {TEAM_ULSCALAR_DEFAULT, TEAM_ULSCALAR_DEFAULT}, /* alltoall_pwrk[2] */         \
-        TEAM_ULSCALAR_DEFAULT,                          /* alltoall_count */           \
-        TEAM_ULSCALAR_INVALID,                          /* bcast_count */              \
-        TEAM_ULSCALAR_INVALID,                          /* bcast_sync_offset */        \
-        TEAM_ULSCALAR_INVALID,                          /* fcollect_count */           \
-        TEAM_USCALAR_INVALID,                           /* fcollect_ll_flag */         \
-        false,                                          /* are_gpus_p2p_connected */   \
-        false,                                          /* is_team_node */             \
-        TEAM_SCALAR_INVALID,                            /* team_node */                \
-        false,                                          /* is_team_same_mype_node */   \
-        TEAM_SCALAR_INVALID,                            /* team_same_mype_node */      \
-        NULL,                                           /* nvls_rsc */                 \
-        NULL,                                           /* nvls_rsc_base_ptr */        \
-        {TEAM_SCALAR_INVALID},                          /* team_dups */                \
-        NULL,                                           /* pe_mapping */               \
-        TEAM_ULSCALAR_INVALID,                          /* p2p_sync_on_stream_count */ \
-        false,                                          /* are_gpus_nvls_connected */  \
-        TEAM_ULSCALAR_DEFAULT,                          /* mc_leid_with_flag */        \
+#define NVSHMEMI_TEAM_INITIALIZER                                                         \
+    {                                                                                     \
+        NVSHMEMI_TEAM_V4_IDENTIFIER, /* version */                                        \
+        TEAM_SCALAR_INVALID,         /* my_pe */                                          \
+        TEAM_SCALAR_INVALID,         /* start */                                          \
+        TEAM_SCALAR_INVALID,         /* stride */                                         \
+        TEAM_SCALAR_INVALID,         /* size */                                           \
+        TEAM_SCALAR_INVALID,         /* team_idx */                                       \
+        NVSHMEM_TEAM_CONFIG_INITIALIZER,                                                  \
+        TEAM_SCALAR_INVALID, /* config_mask */                                            \
+        NULL,                /* nccl_comm */                                              \
+        NVSHMEMI_RED_REX_INITIALIZER,                                                     \
+        TEAM_ULSCALAR_INVALID,                          /* rdxn_count */                  \
+        TEAM_USCALAR_INVALID,                           /* ll_flag */                     \
+        {TEAM_ULSCALAR_DEFAULT, TEAM_ULSCALAR_DEFAULT}, /* alltoall_pwrk[2] */            \
+        TEAM_ULSCALAR_DEFAULT,                          /* alltoall_count */              \
+        TEAM_ULSCALAR_INVALID,                          /* bcast_count */                 \
+        TEAM_ULSCALAR_INVALID,                          /* bcast_sync_offset */           \
+        TEAM_ULSCALAR_INVALID,                          /* fcollect_count */              \
+        TEAM_USCALAR_INVALID,                           /* fcollect_ll_flag */            \
+        false,                                          /* are_gpus_p2p_connected */      \
+        false,                                          /* is_team_node */                \
+        TEAM_SCALAR_INVALID,                            /* team_node */                   \
+        false,                                          /* is_team_same_mype_node */      \
+        TEAM_SCALAR_INVALID,                            /* team_same_mype_node */         \
+        NULL,                                           /* nvls_rsc */                    \
+        NULL,                                           /* nvls_rsc_base_ptr */           \
+        {TEAM_SCALAR_INVALID},                          /* team_dups */                   \
+        NULL,                                           /* pe_mapping */                  \
+        TEAM_ULSCALAR_INVALID,                          /* p2p_sync_on_stream_count */    \
+        false,                                          /* are_gpus_nvls_ptr_connected */ \
+        false,                                          /* has_cft_routed_peer */         \
+        TEAM_ULSCALAR_DEFAULT,                          /* mc_leid_with_flag */           \
+        false,                                          /* supports_mc_endpoint */        \
     }
 
 #define NVSHMEMI_GPU_COLL_PARAMS_INITIALIZER                                       \
@@ -198,7 +207,10 @@ enum { NVSHMEMI_TEAM_DUP_COUNT = 128, NVSHMEMI_NVLS_MAX_CTA_COUNT = NVSHMEMI_TEA
         NULL,                                             /* region_slots */                      \
         NULL,                                             /* region_active_count */               \
         0,                                                /* region_slots_len */                  \
-        0                                                 /* region_slot_probe_limit */           \
+        0,                                                /* region_slot_probe_limit */           \
+        false,                                            /* mapped_peer_atomics */               \
+        false,                                            /* has_cft_routed_peer */               \
+        NULL                                              /* device_rma_state */                  \
     }
 #else
 #include <cuda/std/cstddef>
@@ -272,8 +284,10 @@ typedef struct {
     nvshmem_team_t team_dups[NVSHMEMI_TEAM_DUP_COUNT];
     int *pe_mapping; /* Pointer to the PE mapping array allocated after the struct */
     uint64_t p2p_sync_on_stream_count;
-    bool are_gpus_nvls_connected;
+    bool are_gpus_nvls_ptr_connected;
+    bool has_cft_routed_peer;
     uint64_t mc_leid_with_flag; /* Logical endpoint ID with valid flag for multicast */
+    bool supports_mc_endpoint;
 } nvshmemi_team_v4;
 
 typedef struct {
@@ -357,7 +371,7 @@ typedef struct {
                                     NVSHMEMX_TEAM_SAME_MYPE_NODE */
     nvshmem_team_t team_same_mype_node;
 } nvshmemi_team_v1;
-static_assert(sizeof(nvshmemi_team_v4) == 816, "team_v4 must be 816 bytes.");
+static_assert(sizeof(nvshmemi_team_v4) == 824, "team_v4 must be 824 bytes.");
 static_assert(sizeof(nvshmemi_team_v3) == 792, "team_v3 must be 792 bytes.");
 static_assert(sizeof(nvshmemi_team_v2) == 784, "team_v2 must be 784 bytes.");
 static_assert(sizeof(nvshmemi_team_v1) == 256, "team_v1 must be 256 bytes.");
@@ -480,9 +494,12 @@ typedef struct {
     uint32_t *region_active_count;
     uint32_t region_slots_len;
     uint32_t region_slot_probe_limit;
+    bool mapped_peer_atomics; /* Every P2P-mapped peer supports native GPU atomics */
+    bool has_cft_routed_peer;
+    void *device_rma_state; /* Optional runtime-owned device RMA completion state. */
 } nvshmemi_device_host_state_v1;
-static_assert(sizeof(nvshmemi_device_host_state_v1) == 848,
-              "device_host_state_v1 must be 848 bytes.");
+static_assert(sizeof(nvshmemi_device_host_state_v1) == 864,
+              "device_host_state_v1 must be 864 bytes.");
 
 typedef nvshmemi_device_host_state_v1 nvshmemi_device_host_state_t;
 

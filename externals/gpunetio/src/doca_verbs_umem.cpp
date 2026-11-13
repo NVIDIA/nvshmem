@@ -77,40 +77,47 @@ doca_verbs_umem_open::~doca_verbs_umem_open() { static_cast<void>(destroy()); }
 void doca_verbs_umem_open::create() {
     doca_error_t umem_status;
 
+    struct mlx5dv_devx_umem_in umem_in {
+        0,
+    };
+
+    umem_in.access = m_access_flags;
+    umem_in.pgsz_bitmap = sysconf(_SC_PAGESIZE);
+
+#if DOCA_GPUNETIO_HAVE_MLX5DV_UMEM_DMABUF != 1
+    if (m_dmabuf_fd != (int)DOCA_VERBS_DMABUF_INVALID_FD) {
+        DOCA_LOG(LOG_ERR, "Creating UMEM with DMABUF is not supported");
+        throw DOCA_ERROR_NOT_SUPPORTED;
+    }
+#endif
+
 #if DOCA_GPUNETIO_HAVE_MLX5DV_UMEM_DMABUF == 1
     if (m_dmabuf_fd != (int)DOCA_VERBS_DMABUF_INVALID_FD) {
-        struct mlx5dv_devx_umem_in umem_in {};
-
-        umem_in.access = m_access_flags;
-        umem_in.pgsz_bitmap = sysconf(_SC_PAGESIZE);
         umem_in.comp_mask = MLX5DV_UMEM_MASK_DMABUF;
         umem_in.dmabuf_fd = m_dmabuf_fd;
         /* umem_in.addr is interpreted as the starting offset of the dmabuf */
         umem_in.addr = reinterpret_cast<void *>(m_dmabuf_offset);
-        umem_in.size = m_size;
-
-        umem_status = doca_verbs_wrapper_mlx5dv_devx_umem_reg_ex(m_ibv_ctx, &umem_in, &m_umem);
-        if (umem_status != DOCA_SUCCESS) {
-            DOCA_LOG(
-                LOG_ERR,
-                "Failed to create UMEM, m_address %p m_size %zd m_access_flags %x m_dmabuf_fd %d "
-                "m_dmabuf_offset %zd err %d",
-                m_address, m_size, m_access_flags, m_dmabuf_fd, m_dmabuf_offset, errno);
-            throw umem_status;
-        }
     } else
 #endif
     {
-        umem_status = doca_verbs_wrapper_mlx5dv_devx_umem_reg(m_ibv_ctx, m_address, m_size,
-                                                              m_access_flags, &m_umem);
-        if (umem_status != DOCA_SUCCESS) {
-            DOCA_LOG(
-                LOG_ERR,
-                "Failed to create UMEM, m_address %p m_size %zd m_access_flags %x m_dmabuf_fd %d "
-                "m_dmabuf_offset %zd err %d",
-                m_address, m_size, m_access_flags, m_dmabuf_fd, m_dmabuf_offset, errno);
-            throw umem_status;
+        umem_in.addr = m_address;
+    }
+    umem_in.size = m_size;
+
+    umem_status = doca_verbs_wrapper_mlx5dv_devx_umem_reg_ex(m_ibv_ctx, &umem_in, &m_umem);
+    if (umem_status != DOCA_SUCCESS) {
+        if (m_dmabuf_fd != (int)DOCA_VERBS_DMABUF_INVALID_FD) {
+            DOCA_LOG(LOG_ERR,
+                     "Failed to create UMEM with DMABUF, m_address %p m_size %zd m_access_flags %x "
+                     "m_dmabuf_fd %d "
+                     "m_dmabuf_offset %zd err %d",
+                     m_address, m_size, m_access_flags, m_dmabuf_fd, m_dmabuf_offset, errno);
+        } else {
+            DOCA_LOG(LOG_ERR,
+                     "Failed to create UMEM, m_address %p m_size %zd m_access_flags %x err %d",
+                     m_address, m_size, m_access_flags, errno);
         }
+        throw umem_status;
     }
 
     m_umem_id = m_umem->umem_id;

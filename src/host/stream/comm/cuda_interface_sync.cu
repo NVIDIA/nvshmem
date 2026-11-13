@@ -5,6 +5,18 @@
 
 #include "internal/host/util.h"
 #include "internal/non_abi/nvshmemi_h_to_d_sync_defs.cuh"
+#include "device/nvshmemx_defines.h"
+
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+static __global__ void nvshmemi_cft_signal_add_kernel(uint64_t *sig_addr, uint64_t signal, int pe) {
+#ifdef __CUDA_ARCH__
+    extern __shared__ __align__(16) unsigned char nvshmemi_cft_signal_smem[];
+    nvshmemx_give_smem(nvshmemi_cft_signal_smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
+    nvshmemi_handle_atomic_nonfetch<uint64_t, NVSHMEMI_AMO_SIGNAL_ADD>(sig_addr, signal, pe);
+    nvshmemx_release_smem();
+#endif
+}
+#endif
 
 #define CALL_NVSHMEMI_TYPENAME_WAIT_UNTIL_ON_STREAM_KERNEL(TYPENAME, TYPE)                  \
     void call_nvshmemi_##TYPENAME##_wait_until_on_stream_kernel(                            \
@@ -49,3 +61,13 @@ void call_nvshmemi_signal_op_kernel(uint64_t *sig_addr, uint64_t signal, int sig
     nvshmemi_signal_op_kernel<<<1, 1, 0, cstrm>>>(sig_addr, signal, sig_op, pe);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
 }
+
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+void call_nvshmemi_cft_signal_add_kernel(uint64_t *sig_addr, uint64_t signal, int pe,
+                                         cudaStream_t cstrm) {
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
+    nvshmemi_cft_signal_add_kernel<<<1, 1, smem_size, cstrm>>>(sig_addr, signal, pe);
+    CUDA_RUNTIME_CHECK(cudaGetLastError());
+}
+#endif

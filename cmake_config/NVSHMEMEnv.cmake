@@ -64,6 +64,7 @@ message( "\n__FUNCTIONALITY__\n")
 nvshmem_add_default_on_option(NVSHMEM_USE_GDRCOPY "Enable CPU-mappable GPU-memory paths for remote-transport atomics")
 nvshmem_add_default_on_option(NVSHMEM_USE_MLX5DV "Enable directNIC feature")
 nvshmem_add_default_on_option(NVSHMEM_NVTX "Enable NVSHMEM NVTX support")
+nvshmem_add_default_on_option(NVSHMEM_ENABLE_TRANSPORT_POLICY "Build and install the transport-policy API")
 
 message( "\n__BUILD__\n")
 nvshmem_add_default_on_option(NVSHMEM_BUILD_TESTS "Build tests")
@@ -100,8 +101,12 @@ nvshmem_add_default_off_option(NVSHMEM_USE_NCCL "Enable compilation of NVSHMEM N
 nvshmem_add_default_off_option(NVSHMEM_ENABLE_ALL_DEVICE_INLINING "Inline all device library code")
 nvshmem_add_default_off_option(NVSHMEM_GPU_COLL_USE_LDST "Enables Load/Store in NVSHMEM collective operations")
 nvshmem_add_default_off_option(NVSHMEM_TIMEOUT_DEVICE_POLLING "Enable timeouts for NVSHMEM device-side polling functions (e.g. wait_until)")
-nvshmem_add_default_off_option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable NVSHMEM Logical Endpoint support")
+nvshmem_add_default_on_option(NVSHMEM_CFT_HANDLES_SUPPORT "Enable NVSHMEM Logical Endpoint support")
 nvshmem_add_default_off_option(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT "Prioritize logical endpoint over pointer based P2P for CFT handles")
+nvshmem_add_default_off_option(NVSHMEM_FORCE_CFT "Force CFT handles and report unsupported instead of falling back")
+if (NVSHMEM_FORCE_CFT AND NOT NVSHMEM_CFT_HANDLES_SUPPORT)
+  message(FATAL_ERROR "NVSHMEM_FORCE_CFT requires NVSHMEM_CFT_HANDLES_SUPPORT=ON")
+endif()
 
 message( "\n__BUILD__\n")
 nvshmem_add_default_off_option(NVSHMEM_DEBUG "Toggles NVSHMEM debug compilation settings")
@@ -228,6 +233,7 @@ NVSHMEM_USE_GDRCOPY=${NVSHMEM_USE_GDRCOPY} \
 NVSHMEM_USE_MLX5DV=${NVSHMEM_USE_MLX5DV} \
 NVSHMEM_CFT_HANDLES_SUPPORT=${NVSHMEM_CFT_HANDLES_SUPPORT} \
 NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT=${NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT} \
+NVSHMEM_FORCE_CFT=${NVSHMEM_FORCE_CFT} \
 NVSHMEM_VERBOSE=${NVSHMEM_VERBOSE} \
 CUDA_HOME=${CUDA_HOME} \
 LIBFABRIC_HOME=${LIBFABRIC_HOME} \

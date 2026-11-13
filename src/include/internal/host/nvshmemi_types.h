@@ -11,6 +11,7 @@
 #include <cuda_runtime.h>
 #include <tuple>
 #include <vector>
+#include "non_abi/device/common/nvshmem_common.cuh"
 #include "non_abi/device/common/nvshmemi_runtime_types.h"
 #include "internal/host_transport/nvshmemi_transport_defines.h"
 #include "internal/host_transport/transport.h"
@@ -64,6 +65,7 @@ typedef struct nvshmemi_state_dec {
     cudaStream_t my_stream;
     // proxy
     void *proxy;
+    nvshmemi_proxy_status proxy_level;
     cudaStream_t *custreams;
     cudaEvent_t *cuevents;
     bool *active_internal_streams;
@@ -78,6 +80,25 @@ typedef struct nvshmemi_state_dec {
     bool is_platform_nvls;
     bool is_platform_nvl;
     bool are_nics_ll128_compliant;
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+    uint64_t *cft_scalar_staging;
+    /*
+     * Host CFT copies run on hashed internal streams, but operations issued after a fence may
+     * select a user stream, mapped P2P, proxy, or host transport route. Track the destination PE
+     * and backing stream separately so fence can preserve cross-route ordering without globally
+     * draining every internal stream.
+     */
+    /* One event per destination PE; PEs may share an internal stream but not a fence boundary. */
+    cudaEvent_t *cft_fence_events;
+    /* PEs with asynchronous CFT work issued since the last fence. */
+    bool *cft_active_pes;
+    /* PEs whose recorded CFT fence event must order later operations. */
+    bool *cft_fence_pending;
+    /* CFT streams that host quiet must complete, including after quiet-on-stream. */
+    bool *cft_active_internal_streams;
+    /* Mapped-P2P streams that retain the legacy fence synchronization requirement. */
+    bool *p2p_active_internal_streams;
+#endif
 } nvshmemi_state_t;
 
 extern nvshmemi_state_t *nvshmemi_state;

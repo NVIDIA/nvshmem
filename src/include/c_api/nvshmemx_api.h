@@ -77,6 +77,10 @@ __device__ int nvshmemx_region_start_block(nvshmemx_region_handle_t *handle,
                                            const nvshmemx_region_attrs_t *attrs);
 __device__ int nvshmemx_region_stop_block(nvshmemx_region_handle_t handle);
 
+NVSHMEMI_HOSTDEVICE_PREFIX int nvshmemx_ask_smem(nvshmemx_smem_amount_t flag);
+__device__ void nvshmemx_give_smem(void *smem, size_t size);
+__device__ void nvshmemx_release_smem(void);
+
 int nvshmemx_culibrary_init(CUlibrary library);
 int nvshmemx_culibrary_finalize(CUlibrary library);
 

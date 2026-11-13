@@ -7,6 +7,7 @@
 #define _DEBUG_H_
 
 #include "non_abi/c/nvshmem_build_options.h"  // IWYU pragma: keep
+#include "non_abi/c/nvshmemi_error_macros.h"
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,7 +43,15 @@ typedef enum {
 extern "C" {
 void nvshmem_debug_log(nvshmem_debug_log_level level, unsigned long flags, const char *filefunc,
                        int line, const char *fmt, ...);
+void nvshmem_debug_log_unfiltered(const char *filefunc, int line, const char *fmt, ...);
+void nvshmem_debug_log_status_unfiltered(const char *filefunc, int line, int status,
+                                         const char *fmt, ...);
+void nvshmem_debug_printf(const char *fmt, ...);
+void nvshmem_debug_warn(const char *fmt, ...);
+int nvshmem_debug_file_active(void);
 }
+
+#define NVSHMEMI_WARN_PRINT(...) nvshmem_debug_warn(__VA_ARGS__)
 
 #define WARN(...) nvshmem_debug_log(NVSHMEM_LOG_WARN, NVSHMEM_ALL, __FILE__, __LINE__, __VA_ARGS__)
 #define INFO(FLAGS, ...) \

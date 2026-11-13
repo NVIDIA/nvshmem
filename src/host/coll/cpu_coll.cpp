@@ -38,6 +38,17 @@ bool nvshmemi_disable_self_write_ce_coll;
 
 static int nvshmemi_coll_common_cpu_read_env() {
     int status = 0;
+    if (nvshmemi_options.BARRIER_TG_DISSEM_KVAL < 2) {
+        NVSHMEMI_ERROR_PRINT("NVSHMEM_BARRIER_TG_DISSEM_KVAL must be >= 2 (got %d)",
+                             nvshmemi_options.BARRIER_TG_DISSEM_KVAL);
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+    if (nvshmemi_options.BCAST_TREE_KVAL < 2) {
+        NVSHMEMI_ERROR_PRINT("NVSHMEM_BCAST_TREE_KVAL must be >= 2 (got %d)",
+                             nvshmemi_options.BCAST_TREE_KVAL);
+        return NVSHMEMX_ERROR_INVALID_VALUE;
+    }
+
     nvshmemi_device_state.gpu_coll_env_params_var.barrier_tg_dissem_kval =
         nvshmemi_options.BARRIER_TG_DISSEM_KVAL;
     nvshmemi_device_state.gpu_coll_env_params_var.fcollect_ll_threshold =
@@ -62,7 +73,6 @@ static int nvshmemi_coll_common_cpu_read_env() {
 
     nvshmemi_device_state.gpu_coll_env_params_var.bcast_tree_kval =
         nvshmemi_options.BCAST_TREE_KVAL;
-    assert(nvshmemi_options.BCAST_TREE_KVAL >= 2);
 
     nvshmemi_device_state.gpu_coll_env_params_var.fcollect_algo = nvshmemi_options.FCOLLECT_ALGO;
 

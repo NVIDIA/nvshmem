@@ -2,6 +2,7 @@
 include(CheckCompilerFlag)
 include(CheckSourceCompiles)
 include(ExternalProject)
+include("${CMAKE_CURRENT_SOURCE_DIR}/private/config.cmake" OPTIONAL)
 
 check_compiler_flag(CUDA -t4 NVCC_THREADS)
 
@@ -39,6 +40,7 @@ ExternalProject_Add(nvshmem_device_project
                                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                                 -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                                 -DNVSHMEM_PREFIX=${NVSHMEM_PREFIX}
+                                ${NVSHMEM_PRIVATE_DEVICE_CMAKE_ARGS}
                                 -DNVSHMEM_DEBUG=${NVSHMEM_DEBUG}
                                 -DNVSHMEM_VERBOSE=${NVSHMEM_VERBOSE}
                                 -DNVSHMEM_DEVICELIB_CUDA_HOME=${NVSHMEM_DEVICELIB_CUDA_HOME}
@@ -106,11 +108,9 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   endif()
 
   # Filter architectures to only those supported by the discovered Clang.
-  # Clang/LLVM 22+ supports SM 100+, and CUDA 13.4+ toolchains enable SM 107.
+  # Clang/LLVM 22+ supports SM 100. SM 107 is not yet supported by 22 or 23.
   set(BITCODE_LIB_ARCHS "")
-  if(LLVM_VERSION_MAJOR GREATER_EQUAL 22 AND CUDAToolkit_VERSION VERSION_GREATER_EQUAL 13.4)
-    set(_CLANG_MAX_SM 107)
-  elseif(LLVM_VERSION_MAJOR GREATER_EQUAL 22)
+  if(LLVM_VERSION_MAJOR GREATER_EQUAL 22)
     set(_CLANG_MAX_SM 100)
   else()
     set(_CLANG_MAX_SM 90)
@@ -159,7 +159,7 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
   foreach(ARCH IN LISTS BITCODE_LIB_ARCHS)
     string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
     set(ARCH_BC_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.bc)
-    set(ARCH_BC_DEPFILE ${ARCH_BC_FILE}.d)
+    set(ARCH_BC_DEPFILE ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib/libnvshmem_device_${ARCH}.bc.d)
 
     if(_BITCODE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
       set(ARCH_OPT_COMMAND cp libnvshmem_device_${ARCH}.bc.unoptimized libnvshmem_device_${ARCH}.bc)
@@ -171,7 +171,8 @@ if(NVSHMEM_BUILD_BITCODE_LIBRARY)
 
     add_custom_command(OUTPUT ${ARCH_BC_FILE}
                       COMMAND ${NVSHMEM_CLANG_EXECUTABLE} ${NVSHMEM_CLANG_CXX_FLAGS_EXTRA_LIST} ${_NVSHMEM_CLANG_BITCODE_WORKAROUND_FLAGS} ${NVSHMEM_FILE_PREFIX_MAP_FLAGS} -MMD -MF ${ARCH_BC_DEPFILE} -MT ${ARCH_BC_FILE} -c -emit-llvm ${BITCODE_CLANG_FLAGS} -std=${BITCODE_CXX_STD} -x cuda --cuda-path=${CUDA_HOME} --cuda-device-only
-                      --cuda-gpu-arch=${ARCH} -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
+                      --cuda-gpu-arch=${ARCH} ${NVSHMEM_PRIVATE_DEVICE_INCLUDE_FLAGS}
+                      -I ${CMAKE_CURRENT_SOURCE_DIR}/include -I ${CUDA_HOME}/include/cccl
                       -I ${CMAKE_CURRENT_BINARY_DIR}/llvm_lib
                       ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
                       -D__clang_llvm_bitcode_lib__ ${CMAKE_CURRENT_SOURCE_DIR}/device/init/init_device.cu -o libnvshmem_device_${ARCH}.bc.unoptimized
@@ -248,11 +249,12 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
   foreach(ARCH IN LISTS LTOIR_LIB_ARCHS)
     string(REPLACE "sm_" "" ARCH_NUM ${ARCH})
     set(ARCH_LTOIR_FILE ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device_${ARCH}.ltoir)
-    set(ARCH_LTOIR_DEPFILE ${ARCH_LTOIR_FILE}.d)
+    set(ARCH_LTOIR_DEPFILE ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/libnvshmem_device_${ARCH}.ltoir.d)
 
     add_custom_command(
       OUTPUT ${ARCH_LTOIR_FILE}
       COMMAND cuda::nvcc ${NVSHMEM_CUDA_FILE_PREFIX_MAP_FLAGS} -MMD -MF ${ARCH_LTOIR_DEPFILE} -MT ${ARCH_LTOIR_FILE} -std=${LTOIR_CXX_STD} -arch=${ARCH} -dlto --ltoir
+              ${NVSHMEM_PRIVATE_DEVICE_INCLUDE_FLAGS}
               -I ${CMAKE_CURRENT_SOURCE_DIR}/include
               ${DEVICE_LIB_GPUNETIO_INCLUDE_FLAGS}
               -DNVSHMEM_BUILD_LTOIR_LIBRARY
@@ -309,6 +311,9 @@ if(NVSHMEM_BUILD_LTOIR_LIBRARY)
 
   add_custom_target(libnvshmem_device_ltoir ALL
                     DEPENDS ${LTOIR_VALIDATION_DEPENDS} ${LTOIR_ARCH_FILES})
+  # Code linked against this library, such as the cuTile TileLib's shims, is
+  # built for the same architectures.
+  set_target_properties(libnvshmem_device_ltoir PROPERTIES NVSHMEM_LTOIR_ARCHS "${LTOIR_LIB_ARCHS}")
 
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/libnvshmem_device.ltoir.fatbin
           DESTINATION lib/
@@ -930,6 +935,8 @@ set_target_properties(${ACTIVE_TRANSPORTS}
                       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/lib"
                       VERSION ${TRANSPORT_VERSION_MAJOR}.${TRANSPORT_VERSION_MINOR}.${TRANSPORT_VERSION_PATCH}
                       SOVERSION ${TRANSPORT_VERSION_MAJOR})
+# The libraries wheel ships exactly the plugins this build enables.
+set_property(GLOBAL PROPERTY NVSHMEM_PLUGIN_TARGETS ${ACTIVE_BOOTSTRAPS} ${ACTIVE_TRANSPORTS})
 ## End transports
 
 ## Start dependencies
@@ -988,14 +995,23 @@ target_sources(nvshmem_host PRIVATE ${NVSHMEM_HOST_SOURCES} ${NVSHMEM_HOST_SOURC
 add_executable(nvshmem-info)
 target_sources(nvshmem-info PRIVATE bin/nvshmem-info.cpp host/util/env_vars.cpp host/util/util.cpp host/init/init_nvtx.cpp)
 set_target_properties(nvshmem-info PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
-target_link_libraries(nvshmem-info CUDA::cudart_static CUDA::cuda_driver nvshmem_host nvshmem_device)
+target_link_libraries(nvshmem-info CUDA::cudart_static nvshmem_host nvshmem_device)
 target_include_directories(nvshmem-info PRIVATE include include/host/env)
 target_compile_definitions(nvshmem-info PRIVATE NVSHMEM_INFO_ONLY)
 # End nvshmem-info definitions.
 
 # Start header configuration and export
 configure_file(include/c_api/nvshmem_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/c_api/nvshmem_version.h @ONLY)
+foreach(_build_path CUDA_HOME LIBFABRIC_HOME MPI_HOME NCCL_HOME NVSHMEM_PREFIX
+                    PMIX_HOME SHMEM_HOME CUTLASS_HOME UCX_HOME)
+  if(NOT "${${_build_path}}" STREQUAL "")
+    string(REPLACE "${_build_path}=${${_build_path}}" "${_build_path}=<build-path>"
+           INFO_BUILD_VARS "${INFO_BUILD_VARS}")
+  endif()
+endforeach()
+unset(_build_path)
 configure_file(include/non_abi/c/nvshmemi_build_metadata.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmemi_build_metadata.h @ONLY)
+set(NVSHMEMX_TRANSPORT_POLICY_AVAILABLE ${NVSHMEM_ENABLE_TRANSPORT_POLICY})
 configure_file(include/non_abi/c/nvshmem_build_options.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/non_abi/c/nvshmem_build_options.h)
 
 set(INC_EXPORTS
@@ -1034,6 +1050,7 @@ set(INC_EXPORTS
     non_abi/device/coll/utils.cuh
     non_abi/device/common/logical_endpoint_device.cuh
     non_abi/device/common/logical_endpoint_types.h
+    non_abi/device/common/device_rma_completion.cuh
     non_abi/device/common/nvshmem_common.cuh
     non_abi/device/common/nvshmemi_batch_rma_pending_qps.cuh
     non_abi/device/common/nvshmemi_cccl_compat.h
@@ -1068,9 +1085,32 @@ set(INC_EXPORTS
 )
 
 
+# The transport-policy headers are part of a default-on package build, but applications
+# still have to define NVSHMEMX_ENABLE_TRANSPORT_POLICY themselves.
+set(NVSHMEM_TRANSPORT_POLICY_HEADERS
+    non_abi/device/transport_specific/types.cuh
+    non_abi/device/transport_specific/traits.cuh
+    non_abi/device/transport_specific/pointer_sm.cuh
+    non_abi/device/transport_specific/pointer_tma.cuh
+    non_abi/device/transport_specific/cft_tma.cuh
+    non_abi/device/transport_specific/network.cuh
+    non_abi/device/transport_specific/automatic.cuh
+    non_abi/device/transport_specific/api.cuh)
+if (NVSHMEM_ENABLE_TRANSPORT_POLICY)
+  list(APPEND INC_EXPORTS ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/non_abi/device/transport_specific")
+else()
+  # A reconfigure from ON to OFF must not leave transport-policy headers in the staged
+  # include tree, which is installed wholesale below.
+  foreach(_transport_policy_header ${NVSHMEM_TRANSPORT_POLICY_HEADERS})
+    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/include/${_transport_policy_header}")
+  endforeach()
+endif()
+
 foreach(INC ${INC_EXPORTS})
   configure_file(include/${INC} ${CMAKE_CURRENT_BINARY_DIR}/include/${INC} COPYONLY)
 endforeach(INC ${INC_EXPORTS})
+include("${CMAKE_CURRENT_SOURCE_DIR}/private/host.cmake" OPTIONAL)
 # End header configuration and export
 
 # start share configuration
@@ -1105,6 +1145,7 @@ endforeach(SHARE ${BOOTSTRAP_EXPORTS})
 
 set(BOOTSTRAP_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
+    bootstrap_host_transport/nvshmemi_plugin_log.h
     c_api/nvshmem_version.h
     c_api/nvshmemx_status.h
     c_api/nvshmemx_uniqueid.h
@@ -1142,13 +1183,14 @@ configure_file(${CMAKE_SOURCE_DIR}/nvshmem_transport.sym
 
 set(TRANSPORT_INC_EXPORTS
     bootstrap_host_transport/env_defs_internal.h
+    bootstrap_host_transport/nvshmemi_plugin_log.h
     c_api/nvshmem_api_constants.h
     c_api/nvshmem_types.h
     c_api/nvshmem_version.h
     c_api/nvshmemx_status.h
     c_api/nvshmemx_uniqueid.h
     internal/bootstrap_host_transport/nvshmemi_bootstrap_defines.h
-    internal/host/scope_guard.h
+    internal/common/scope_guard.h
     internal/host_transport/cudawrap.h
     internal/host_transport/nvshmemi_transport_defines.h
     internal/host_transport/region.hpp
@@ -1381,6 +1423,7 @@ install(
 install(
   DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../perftest/
   DESTINATION share/src/perftest/
+  PATTERN "private" EXCLUDE
   PATTERN "perftest_install" EXCLUDE
   PATTERN "perftestCommon.py" EXCLUDE
   PATTERN "perftest-ib.list" EXCLUDE
@@ -1471,6 +1514,7 @@ set(CPACK_SOURCE_IGNORE_FILES
 /scripts/iwyu_test_functionality.sh;\
 /scripts/testrunner.pl;\
 /src/build/;")
+list(APPEND CPACK_SOURCE_IGNORE_FILES ${NVSHMEM_PRIVATE_SOURCE_EXCLUSIONS})
 
 if(NOT NVSHMEM_INSTALL_FUNCTIONAL_TESTS)
   list(APPEND CPACK_SOURCE_IGNORE_FILES "/test/" "/docker/" "/nvshmem4py/test/")

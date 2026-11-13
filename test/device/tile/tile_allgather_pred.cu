@@ -4,6 +4,7 @@
  */
 
 #include "utils.h"
+#include "tile_test_support.h"
 #include <string>
 #include <iostream>
 #include <sstream>
@@ -324,34 +325,39 @@ DEFN_TYPENAME_ALLGATHER(, thread, , x, float, float, 4)
 DEFN_TYPENAME_ALLGATHER(, thread, , x, float, float, 2)
 DEFN_TYPENAME_ALLGATHER(, thread, , x, float, float, 1)
 
-#define DO_ALLGATHER_TEST(OP, SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, VLN)                       \
-    init_##TYPENAME##_tile_allgather_data_kernel<<<8, 256, 0, cstrm>>>(                            \
-        NVSHMEM_TEAM_WORLD, reinterpret_cast<TYPE *>(source),                                      \
-        V##VLN##_SRC_MATRIX_SHAPE /* src size 0*/, V##VLN##_SRC_MATRIX_SHAPE /* src size 1*/,      \
-        V##VLN##_SRC_TILE_SIZE_0, V##VLN##_SRC_TILE_SIZE_1, 1 /* dstStride major*/,                \
-        V##VLN##_SRC_MATRIX_SHAPE /* dstStride minor*/, 0 /*along major_dim*/);                    \
-    CUDA_CHECK(cudaGetLastError());                                                                \
-    CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                      \
-                                                                                                   \
-    assert(V##VLN##_SRC_MATRIX_SHAPE % V##VLN##_SRC_TILE_SIZE_0 == 0);                             \
-    assert(V##VLN##_SRC_MATRIX_SHAPE % V##VLN##_SRC_TILE_SIZE_1 == 0);                             \
-                                                                                                   \
-    DEBUG_PRINT("Launching test with scope: %s %s %s\n", #SC, #TYPENAME, #VLN);                    \
-    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##TYPENAME##_tile_allgather_kernel_v##VLN##SC_SUFFIX,   \
-                                      _dynamic_smem_size);                                         \
-    test_##TYPENAME##_tile_allgather_kernel_v##VLN##SC_SUFFIX<<<grid_size, block_size,             \
-                                                                _dynamic_smem_size, cstrm>>>(      \
-        teams_dev, (TYPE *)dest, (TYPE *)source, V##VLN##_SRC_MATRIX_SHAPE /* src tensor size 0*/, \
-        V##VLN##_SRC_MATRIX_SHAPE /* src tensor size 1*/,                                          \
-        V##VLN##_SRC_MATRIX_SHAPE /* dst tensor size 0*/,                                          \
-        V##VLN##_SRC_MATRIX_SHAPE * npes /* dst tensor size 1*/, npes, _dynamic_smem_size);        \
-    CUDA_CHECK(cudaGetLastError());                                                                \
-    CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                      \
-    TILE_CHECK_ERRS();                                                                             \
-    nvshmem_barrier_all();
+#define DO_ALLGATHER_TEST(OP, SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, VLN)                      \
+    if (tile_support.run("tile_allgather_pred/" #TYPENAME "/" #OP, #SC, false, VLN, sizeof(TYPE), \
+                         V##VLN##_SRC_TILE_SIZE_MAJOR, (V##VLN##_MAJOR_DIM == 0))) {              \
+        init_##TYPENAME##_tile_allgather_data_kernel<<<8, 256, 0, cstrm>>>(                       \
+            NVSHMEM_TEAM_MC_SHARED, reinterpret_cast<TYPE *>(source),                             \
+            V##VLN##_SRC_MATRIX_SHAPE /* src size 0*/, V##VLN##_SRC_MATRIX_SHAPE /* src size 1*/, \
+            V##VLN##_SRC_TILE_SIZE_0, V##VLN##_SRC_TILE_SIZE_1, 1 /* dstStride major*/,           \
+            V##VLN##_SRC_MATRIX_SHAPE /* dstStride minor*/, 0 /*along major_dim*/);               \
+        CUDA_CHECK(cudaGetLastError());                                                           \
+        CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                 \
+                                                                                                  \
+        assert(V##VLN##_SRC_MATRIX_SHAPE % V##VLN##_SRC_TILE_SIZE_0 == 0);                        \
+        assert(V##VLN##_SRC_MATRIX_SHAPE % V##VLN##_SRC_TILE_SIZE_1 == 0);                        \
+                                                                                                  \
+        DEBUG_PRINT("Launching test with scope: %s %s %s\n", #SC, #TYPENAME, #VLN);               \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(                                                        \
+            test_##TYPENAME##_tile_allgather_kernel_v##VLN##SC_SUFFIX, _dynamic_smem_size);       \
+        test_##TYPENAME##_tile_allgather_kernel_v##VLN##SC_SUFFIX<<<grid_size, block_size,        \
+                                                                    _dynamic_smem_size, cstrm>>>( \
+            teams_dev, (TYPE *)dest, (TYPE *)source,                                              \
+            V##VLN##_SRC_MATRIX_SHAPE /* src tensor size 0*/,                                     \
+            V##VLN##_SRC_MATRIX_SHAPE /* src tensor size 1*/,                                     \
+            V##VLN##_SRC_MATRIX_SHAPE /* dst tensor size 0*/,                                     \
+            V##VLN##_SRC_MATRIX_SHAPE * npes /* dst tensor size 1*/, npes, _dynamic_smem_size);   \
+        CUDA_CHECK(cudaGetLastError());                                                           \
+        CUDA_CHECK(cudaStreamSynchronize(cstrm));                                                 \
+        TILE_CHECK_ERRS();                                                                        \
+        nvshmem_barrier(NVSHMEM_TEAM_MC_SHARED);                                                  \
+    }
 
 int main(int argc, char **argv) {
     int status = 0;
+    nvshmemtest_tile_support tile_support;
     size_t max_shape =
         V4_SRC_MATRIX_SHAPE > V2_SRC_MATRIX_SHAPE ? V4_SRC_MATRIX_SHAPE : V2_SRC_MATRIX_SHAPE;
     max_shape = max_shape > V1_SRC_MATRIX_SHAPE ? max_shape : V1_SRC_MATRIX_SHAPE;
@@ -382,9 +388,10 @@ int main(int argc, char **argv) {
 
     init_wrapper(&argc, &argv);
 
-    npes = nvshmem_n_pes();
+    npes = nvshmem_team_n_pes(NVSHMEM_TEAM_MC_SHARED);
     CUDA_CHECK(cudaStreamCreateWithFlags(&cstrm, cudaStreamNonBlocking));
-    alloc_size = num_elems * (npes + 1) * sizeof(LARGEST_DT);
+    // Symmetric allocation sizes must match across WORLD, even for unequal MC_SHARED teams.
+    alloc_size = num_elems * (nvshmem_n_pes() + 1) * sizeof(LARGEST_DT);
     d_buffer = (LARGEST_DT *)nvshmem_calloc(alloc_size, 1);
     if (!d_buffer) {
         ERROR_PRINT("nvshmem_malloc failed \n");
@@ -412,7 +419,7 @@ int main(int argc, char **argv) {
 
     // create teams
     for (int i = 0; i < num_teams; i++) {
-        nvshmem_team_split_strided(NVSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0, &teams[i]);
+        nvshmem_team_split_strided(NVSHMEM_TEAM_MC_SHARED, 0, 1, npes, nullptr, 0, &teams[i]);
     }
 
     CUDA_CHECK(cudaMalloc((void **)&teams_dev, num_teams * sizeof(nvshmem_team_t)));
@@ -421,8 +428,10 @@ int main(int argc, char **argv) {
 
     source = d_buffer;
     dest = &source[num_elems];
+    tile_support = nvshmemtest_query_tile_support(NVSHMEM_TEAM_MC_SHARED, source, dest,
+                                                  _dynamic_smem_size, cstrm);
 
-    nvshmem_barrier_all();
+    nvshmem_barrier(NVSHMEM_TEAM_MC_SHARED);
 
     grid_size = GRID_SIZE_THRD_SCOPE;
     block_size = BLOCK_SIZE_THRD_SCOPE;
@@ -473,7 +482,7 @@ int main(int argc, char **argv) {
     DO_ALLGATHER_TEST(, block, _block, x, float, float, 1);
 
     COLL_CHECK_ERRS_D();
-    nvshmem_barrier_all();
+    nvshmem_barrier(NVSHMEM_TEAM_MC_SHARED);
     DEBUG_PRINT("%d Test passed\n", nvshmem_my_pe());
 
     // free teams
@@ -485,6 +494,7 @@ int main(int argc, char **argv) {
 
     nvshmem_free(d_buffer);
     CUDA_CHECK(cudaStreamDestroy(cstrm));
+    status = tile_support.finish();
     finalize_wrapper();
 
 out:

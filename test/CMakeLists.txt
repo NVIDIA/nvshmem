@@ -372,3 +372,6 @@ add_custom_target(kernel_nvshmem_no_rdc_dummy ALL DEPENDS ${CMAKE_CURRENT_BINARY
 add_subdirectory(apps)
 add_subdirectory(device)
 add_subdirectory(host)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/private/CMakeLists.txt")
+  add_subdirectory(private)
+endif()

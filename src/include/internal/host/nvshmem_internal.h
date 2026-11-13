@@ -111,7 +111,6 @@ extern nvshmemi_session_t *nvshmemi_default_session;
 extern bool nvshmemi_is_mpg_run;
 extern bool nvshmemi_is_limited_mpg_run;
 
-int nvshmemi_proxy_level(nvshmemi_state_t *state);
 int nvshmemi_common_init(nvshmemi_state_t *state, nvshmemx_init_attr_t *attr = NULL);
 int nvshmemi_init_g_buffer();
 int nvshmemi_init_symmetric_heap(nvshmemi_state_t *state, bool is_vmm, int heap_kind);
@@ -123,6 +122,10 @@ int nvshmemi_setup_connections(nvshmemi_state_t *state);
 int nvshmemi_setup_mops_kernels(nvshmemi_state_t *state);
 void nvshmemi_signal_op_on_stream(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                   cudaStream_t cstrm);
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && CUDART_VERSION >= 13050
+int nvshmemi_order_after_cft_fence(int pe, bool next_on_internal_stream, bool has_next_stream,
+                                   cudaStream_t next_stream);
+#endif
 __device__ void nvshmemi_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe,
                                    nvshmemx_qp_handle_t qp_index = NVSHMEMX_QP_DEFAULT);
 extern "C" {

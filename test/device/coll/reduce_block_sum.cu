@@ -59,16 +59,29 @@ NVSHMEMTEST_REPT_FOR_ARITH_REDUCE_TYPES_WITH_SCOPE2(DEFN_TYPENAME_OP_REDUCE, blo
 }
 #endif
 
-#define DO_RDXN_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)                              \
-    if (use_cubin) {                                                                            \
-        DO_RDXN_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP);                       \
-    } else {                                                                                    \
-        test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, \
-                                                            cstrm>>>(                           \
-            team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);                    \
-    }                                                                                           \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                     \
-    CUDA_RUNTIME_CHECK(cudaStreamSynchronize(cstrm));
+#define DO_RDXN_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP)                                \
+    do {                                                                                          \
+        size_t min_nelems = _min_size ? (_min_size + sizeof(TYPE) - 1) / sizeof(TYPE) : 1;        \
+        for (nelems = min_nelems; nelems <= ELEMS_PER_THREAD * num_threads; nelems *= 2) {        \
+            DEBUG_PRINT("block version, type = %s, num elements = %ld\n", #TYPENAME, nelems);     \
+            if (use_cubin) {                                                                      \
+                DO_RDXN_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE, OP);                 \
+            } else {                                                                              \
+                CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(                                                \
+                    test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX, _dynamic_smem_size);       \
+                test_##TYPENAME##_##OP##_reduce_kernel##SC_SUFFIX<<<1, num_threads,               \
+                                                                    _dynamic_smem_size, cstrm>>>( \
+                    team, (TYPE *)dest, (TYPE *)source, nelems, _dynamic_smem_size);              \
+            }                                                                                     \
+            CUDA_RUNTIME_CHECK(cudaGetLastError());                                               \
+            cudaError_t sync_status = cudaStreamSynchronize(cstrm);                               \
+            if (sync_status != cudaSuccess) {                                                     \
+                fprintf(stderr, "reduce %s_%s failed: team=%d scope=%s nelems=%zu bytes=%zu\n",   \
+                        #TYPENAME, #OP, team, #SC, nelems, nelems * sizeof(TYPE));                \
+            }                                                                                     \
+            CUDA_RUNTIME_CHECK(sync_status);                                                      \
+        }                                                                                         \
+    } while (0);
 
 int main(int argc, char **argv) {
     int status = 0;
@@ -81,6 +94,7 @@ int main(int argc, char **argv) {
     size_t nelems;
     char size_string[100];
     unsigned long long int errs;
+    _dynamic_smem_size = SMEM_SIZE_RECOMMENDED;
     read_args(argc, argv);
     DEBUG_PRINT("symmetric size %zu\n", alloc_size);
     sprintf(size_string, "%zu", alloc_size);
@@ -124,11 +138,7 @@ int main(int argc, char **argv) {
                    map_team_to_string[team].c_str(), nvshmem_team_my_pe(team),
                    nvshmem_team_n_pes(team));
             num_threads = NVSHM_TEST_NUM_TPB;
-            for (nelems = 1; nelems <= ELEMS_PER_THREAD * num_threads; nelems *= 2) {
-                DEBUG_PRINT("thread version, num elements = %ld\n", nelems);
-                NVSHMEMTEST_REPT_FOR_ARITH_REDUCE_TYPES_WITH_SCOPE2(DO_RDXN_TEST, block, _block, x,
-                                                                    sum)
-            }
+            NVSHMEMTEST_REPT_FOR_ARITH_REDUCE_TYPES_WITH_SCOPE2(DO_RDXN_TEST, block, _block, x, sum)
 
             COLL_CHECK_ERRS_D();
             nvshmem_barrier_all();

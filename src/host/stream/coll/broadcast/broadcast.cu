@@ -10,15 +10,19 @@
 
 #include "internal/host/util.h"
 #include "non_abi/device/coll/broadcast.cuh"
+#include "device/nvshmemx_defines.h"
 
 template <typename T>
 __global__ void broadcast_on_stream_kernel(nvshmem_team_t team, T *dest, const T *source,
                                            size_t nelems, int PE_root, int in_cuda_graph) {
 #ifdef __CUDA_ARCH__
+    extern __shared__ char smem[];
+    nvshmemx_give_smem(smem, nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
     if (!blockIdx.x) {
         nvshmemi_broadcast_threadgroup<T, NVSHMEMI_THREADGROUP_BLOCK>(team, dest, source, nelems,
                                                                       PE_root);
     }
+    nvshmemx_release_smem();
 #endif
 }
 
@@ -45,7 +49,9 @@ void nvshmemi_call_broadcast_on_stream_kernel(nvshmem_team_t team, T *dest, cons
         in_cuda_graph = 1;
     }
 
-    broadcast_on_stream_kernel<T><<<num_blocks, num_threads_per_block, 0, stream>>>(
+    const size_t smem_size =
+        nvshmemi_get_tma_cft_smem_size(nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM));
+    broadcast_on_stream_kernel<T><<<num_blocks, num_threads_per_block, smem_size, stream>>>(
         team, dest, source, nelems, PE_root, in_cuda_graph);
     CUDA_RUNTIME_CHECK(cudaGetLastError());
 }

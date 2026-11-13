@@ -13,13 +13,17 @@
 
 #include "non_abi/c/nvshmem_build_options.h"
 #include "non_abi/device/transport/nvshmem_common_transport.h"
+#include "internal/host_transport/nvshmemi_transport_defines.h"  // for NVSHMEM_MEM_HANDLE_SIZE
 
 #ifdef NVSHMEM_USE_GDRCOPY
 #include "transport_gdr_common.h"
 #endif
 
-/* This value is arbitrary. UCX doesn't give a max length for packed rkeys. */
-#define NVSHMEMT_UCP_RKEY_PACKED_MAX_LEN 256
+/*
+ * UCX doesn't give a max length for packed rkeys
+ * Bounded by the size of nvshmem_mem_handle_t (see static_assert below).
+ */
+#define NVSHMEMT_UCP_RKEY_PACKED_MAX_LEN 448
 
 #define NVSHMEMT_UCP_ADDR_MAX_LEN 1024
 
@@ -78,6 +82,9 @@ typedef struct {
     void *ptr;
     bool local_only;
 } nvshmemt_ucx_mem_handle_t;
+
+static_assert(sizeof(nvshmemt_ucx_mem_handle_t) <= NVSHMEM_MEM_HANDLE_SIZE,
+              "nvshmemt_ucx_mem_handle_t must fit in nvshmem_mem_handle_t");
 
 typedef struct {
     void *ptr;

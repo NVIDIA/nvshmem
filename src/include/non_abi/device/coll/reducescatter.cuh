@@ -34,8 +34,8 @@ namespace cg = cooperative_groups;
 
 #ifdef __CUDA_ARCH__
 
-template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
-__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup(
+template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE, nvshmemi_tma_use TMA_USE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup_impl(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
     nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
     TYPE *pWrk = (TYPE *)nvshmemi_team_get_psync(teami, REDUCE);
@@ -57,7 +57,7 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
     for (int i = 1; i < teami->size; i++) {  // don't send to self
         int peer_pe_idx = (teami->my_pe + i) % teami->size;
         int peer_pe = nvshmemi_team_translate_pe(team, peer_pe_idx, NVSHMEM_TEAM_WORLD);
-        nvshmemii_put_nbi<TYPE, SCOPE>(
+        nvshmemii_put_nbi<TYPE, SCOPE, NVSHMEMI_REGION_OPERATION_NONE, TMA_USE>(
             (TYPE *)((char *)pWrk + teami->my_pe * nreduce * sizeof(TYPE)),
             source + peer_pe_idx * nreduce, nreduce, peer_pe);
     }
@@ -92,6 +92,24 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_thr
 }
 
 template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
+__device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_allpush_threadgroup(
+    nvshmem_team_t team, TYPE *dest, const TYPE *source, size_t nreduce) {
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    if (nvshmemi_device_state_d.team_pool[team]->has_cft_routed_peer) {
+        nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE,
+                                                        nvshmemi_tma_use::disallowed>(
+            team, dest, source, nreduce);
+    } else {
+        nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(
+            team, dest, source, nreduce);
+    }
+#else
+    nvshmemi_reducescatter_allpush_threadgroup_impl<TYPE, OP, SCOPE, nvshmemi_tma_use::allowed>(
+        team, dest, source, nreduce);
+#endif
+}
+
+template <typename TYPE, rdxn_ops_t OP, threadgroup_t SCOPE>
 __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpush_threadgroup(
     nvshmem_team_t team, TYPE *dest, const TYPE *source, int source_offset, size_t nreduce) {
     if constexpr (nvshmemi_device_has_nvls_multimem) {
@@ -115,6 +133,10 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_nvls_allpus
         }
 #endif
 
+#if defined(NVSHMEM_FORCE_CFT)
+        nvshmemi_cft_force_unsupported();
+        return;
+#endif
         TYPE *src_ptr = (TYPE *)nvshmemi_mc_ptr(teami, (void *)(source + source_offset));
         nvshmemi_threadgroup_sync<SCOPE>();
         nvshmemi_local_reduce_mcast_threadgroup<TYPE, OP, SCOPE>(dest, src_ptr, nreduce);
@@ -159,6 +181,27 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_threadgroup
          (OP == RDXN_OPS_SUM && is_half_precondition)) &&
         (nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL) &&
         ((nreduce * sizeof(TYPE)) % 4 == 0);
+
+#if defined(NVSHMEM_FORCE_CFT)
+#if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    nvshmemi_team_t *teami = nvshmemi_device_state_d.team_pool[team];
+    if constexpr (is_handle_pullred_supported<TYPE, OP>()) {
+        is_nvls_algo_supported =
+            is_nvls_algo_supported &&
+            nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(teami->mc_leid_with_flag,
+                                                               nreduce * sizeof(TYPE)) &&
+            nvshmemi_tma_smem_registered() && !__isShared(dest) &&
+            !__isShared(source + source_offset) &&
+            nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)dest) &&
+            ((nvshmemi_threadgroup_size<SCOPE>() % warpSize) == 0) &&
+            nvshmemi_is_addr_offset_aligned(source + source_offset, CFT_HANDLE_TX_SIZE);
+    } else {
+        is_nvls_algo_supported = false;
+    }
+#else
+    is_nvls_algo_supported = false;
+#endif
+#endif
 
     int reducescatter_algo = nvshmemi_device_state_d.gpu_coll_env_params_var.reducescatter_algo;
     /* This 2-level selection logic is implemented to reduce code duplication of calling leaf

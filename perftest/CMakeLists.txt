@@ -302,3 +302,4 @@ endmacro()
 
 add_subdirectory(device)
 add_subdirectory(host)
+include("${CMAKE_CURRENT_SOURCE_DIR}/private/CMakeLists.txt" OPTIONAL)

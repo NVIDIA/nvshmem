@@ -9,22 +9,33 @@
 
 #include "ring_alltoall.h"
 
-#define TEST_NVSHMEM_ALL_CUBIN()                                                       \
-    void *args_all[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&mype,    \
-                        (void *)&npes};                                                \
-    CUfunction test_all_cubin;                                                         \
-    if (typeid(T) == typeid(int)) {                                                    \
-        init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_int)); \
-    }                                                                                  \
-    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, 1, 1, 1, 0, cstrm, args_all, NULL));
+__device__ void give_test_smem(size_t dynamic_smem_size) {
+    NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);
+}
 
-#define TEST_NVSHMEM_RING_CUBIN()                                                       \
-    void *args_ring[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&prevpe}; \
-    CUfunction test_ring_cubin;                                                         \
-    if (typeid(T) == typeid(int)) {                                                     \
-        init_test_case_kernel(&test_ring_cubin, NVSHMEMI_TEST_STRINGIFY(ring_int));     \
-    }                                                                                   \
-    CU_CHECK(cuLaunchKernel(test_ring_cubin, 1, 1, 1, 1, 1, 1, 0, cstrm, args_ring, NULL));
+#define TEST_NVSHMEM_ALL_CUBIN()                                                                   \
+    void *args_all[] = {(void *)&src_, (void *)&dest_, (void *)&len,                               \
+                        (void *)&mype, (void *)&npes,  (void *)&_dynamic_smem_size};               \
+    CUfunction test_all_cubin;                                                                     \
+    if (typeid(T) == typeid(int)) {                                                                \
+        init_test_case_kernel(&test_all_cubin, NVSHMEMI_TEST_STRINGIFY(alltoall_int));             \
+    }                                                                                              \
+    CU_CHECK(cuFuncSetAttribute(test_all_cubin, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,   \
+                                (int)_dynamic_smem_size));                                         \
+    CU_CHECK(cuLaunchKernel(test_all_cubin, 1, 1, 1, num_threads, 1, 1, _dynamic_smem_size, cstrm, \
+                            args_all, NULL));
+
+#define TEST_NVSHMEM_RING_CUBIN()                                                                 \
+    void *args_ring[] = {(void *)&src_, (void *)&dest_, (void *)&len, (void *)&prevpe,            \
+                         (void *)&_dynamic_smem_size};                                            \
+    CUfunction test_ring_cubin;                                                                   \
+    if (typeid(T) == typeid(int)) {                                                               \
+        init_test_case_kernel(&test_ring_cubin, NVSHMEMI_TEST_STRINGIFY(ring_int));               \
+    }                                                                                             \
+    CU_CHECK(cuFuncSetAttribute(test_ring_cubin, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, \
+                                (int)_dynamic_smem_size));                                        \
+    CU_CHECK(cuLaunchKernel(test_ring_cubin, 1, 1, 1, num_threads, 1, 1, _dynamic_smem_size,      \
+                            cstrm, args_ring, NULL));
 
 #define TEST_NVSHMEM_ALL_G_CUBIN(GROUP)                                                          \
     void *args_all_g[] = {(void *)&src_, (void *)&dest_, (void *)&len,                           \
@@ -54,7 +65,7 @@
 #define DEFINE_RMA_GET_WRAPPER(Group)                                                \
     __device__ void rma_get_wrapper_##Group(int *src, int *dest, size_t len, int pe, \
                                             size_t dynamic_smem_size) {              \
-        NVSHMEM_TEST_GIVE_SMEM(dynamic_smem_size);                                   \
+        (void)dynamic_smem_size;                                                     \
         nvshmemx_int_get_nbi_##Group(dest, src, len, pe);                            \
     }
 
@@ -65,6 +76,7 @@ DEFINE_RMA_GET_WRAPPER(block)
     template <typename T>                                                                          \
     __global__ void alltoall_##Group(T *src, T *dest, size_t len, int mype, int npes,              \
                                      size_t dynamic_smem_size) {                                   \
+        give_test_smem(dynamic_smem_size);                                                         \
         for (int i = 0; i < npes; i++) {                                                           \
             rma_get_wrapper_##Group(src + (size_t)mype * len, dest + (size_t)i * len, len, i,      \
                                     dynamic_smem_size);                                            \
@@ -76,6 +88,7 @@ DEFINE_RMA_GET_WRAPPER(block)
     template <typename T>                                                                          \
     __global__ void ring_##Group(T *src, T *dest, size_t len, int prevpe,                          \
                                  size_t dynamic_smem_size) {                                       \
+        give_test_smem(dynamic_smem_size);                                                         \
         rma_get_wrapper_##Group(src, dest, len, prevpe, dynamic_smem_size);                        \
         nvshmem_quiet();                                                                           \
         NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                              \
@@ -112,47 +125,63 @@ DEFINE_RMA_GET_WRAPPER(block)
 DEFINE_THREADGROUP_API(warp)
 DEFINE_THREADGROUP_API(block)
 
-__device__ void rma_get_wrapper(int *src, int *dest, size_t len, int pe) {
+__device__ void rma_get_wrapper(int *src, int *dest, size_t len, int pe, size_t dynamic_smem_size) {
+    (void)dynamic_smem_size;
     nvshmem_int_get_nbi(dest, src, len, pe);
 }
 
 template <typename T>
-__global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes) {
+__global__ void alltoall(T *src, T *dest, size_t len, int mype, int npes,
+                         size_t dynamic_smem_size) {
+    give_test_smem(dynamic_smem_size);
     for (int i = 0; i < npes; i++) {
-        rma_get_wrapper(src + (size_t)mype * len, dest + (size_t)i * len, len, i);
+        rma_get_wrapper(src + (size_t)mype * len, dest + (size_t)i * len, len, i,
+                        dynamic_smem_size);
     }
     nvshmem_quiet();
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
 template <typename T>
-__global__ void ring(T *src, T *dest, size_t len, int prevpe) {
-    rma_get_wrapper(src, dest, len, prevpe);
+__global__ void ring(T *src, T *dest, size_t len, int prevpe, size_t dynamic_smem_size) {
+    give_test_smem(dynamic_smem_size);
+    rma_get_wrapper(src, dest, len, prevpe, dynamic_smem_size);
     nvshmem_quiet();
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 }
 
-#define ALLTOALL_TEMP()                                                            \
-    for (int i = 0; i < npes; i++) {                                               \
-        rma_get_wrapper(src + (size_t)mype * len, dest + (size_t)i * len, len, i); \
-    }                                                                              \
-    nvshmem_quiet();
+#define ALLTOALL_TEMP()                                                           \
+    give_test_smem(dynamic_smem_size);                                            \
+    for (int i = 0; i < npes; i++) {                                              \
+        rma_get_wrapper(src + (size_t)mype * len, dest + (size_t)i * len, len, i, \
+                        dynamic_smem_size);                                       \
+    }                                                                             \
+    nvshmem_quiet();                                                              \
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 
-#define RING_TEMP()                          \
-    rma_get_wrapper(src, dest, len, prevpe); \
-    nvshmem_quiet();
+#define RING_TEMP()                                             \
+    give_test_smem(dynamic_smem_size);                          \
+    rma_get_wrapper(src, dest, len, prevpe, dynamic_smem_size); \
+    nvshmem_quiet();                                            \
+    NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);
 
 #if defined __cplusplus
 extern "C" {
 #endif
 
-__global__ void alltoall_int(int *src, int *dest, size_t len, int mype, int npes) {
+__global__ void alltoall_int(int *src, int *dest, size_t len, int mype, int npes,
+                             size_t dynamic_smem_size) {
     ALLTOALL_TEMP();
 }
 
-__global__ void ring_int(int *src, int *dest, int len, int prevpe) { RING_TEMP(); }
+__global__ void ring_int(int *src, int *dest, size_t len, int prevpe, size_t dynamic_smem_size) {
+    RING_TEMP();
+}
 
 #define DEFINE_Group(Group)                                                                   \
     __global__ void alltoall_int_##Group(int *src, int *dest, size_t len, int mype, int npes, \
                                          size_t dynamic_smem_size) {                          \
+        give_test_smem(dynamic_smem_size);                                                    \
         for (int i = 0; i < npes; i++) {                                                      \
             rma_get_wrapper_##Group(src + (size_t)mype * len, dest + (size_t)i * len, len, i, \
                                     dynamic_smem_size);                                       \
@@ -162,6 +191,7 @@ __global__ void ring_int(int *src, int *dest, int len, int prevpe) { RING_TEMP()
     }                                                                                         \
     __global__ void ring_int_##Group(int *src, int *dest, size_t len, int prevpe,             \
                                      size_t dynamic_smem_size) {                              \
+        give_test_smem(dynamic_smem_size);                                                    \
         rma_get_wrapper_##Group(src, dest, len, prevpe, dynamic_smem_size);                   \
         nvshmem_quiet();                                                                      \
         NVSHMEM_TEST_RELEASE_SMEM(dynamic_smem_size);                                         \
@@ -176,10 +206,13 @@ template <typename T>
 void launch_alltoall(void *src, void *dest, size_t len, int mype, int npes, cudaStream_t cstrm) {
     T *src_ = (T *)src;
     T *dest_ = (T *)dest;
+    const unsigned int num_threads = thread_scope_num_threads<T>(len, _min_size);
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(alltoall<T>, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_ALL_CUBIN();
     } else {
-        alltoall<T><<<1, 1, 0, cstrm>>>(src_, dest_, len, mype, npes);
+        alltoall<T><<<1, num_threads, _dynamic_smem_size, cstrm>>>(src_, dest_, len, mype, npes,
+                                                                   _dynamic_smem_size);
     }
 }
 
@@ -187,10 +220,13 @@ template <typename T>
 void launch_ring(void *src, void *dest, size_t len, int nextpe, int prevpe, cudaStream_t cstrm) {
     T *src_ = (T *)src;
     T *dest_ = (T *)dest;
+    const unsigned int num_threads = thread_scope_num_threads<T>(len, _min_size);
+    CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(ring<T>, _dynamic_smem_size);
     if (use_cubin) {
         TEST_NVSHMEM_RING_CUBIN();
     } else {
-        ring<T><<<1, 1, 0, cstrm>>>(src_, dest_, len, prevpe);
+        ring<T><<<1, num_threads, _dynamic_smem_size, cstrm>>>(src_, dest_, len, prevpe,
+                                                               _dynamic_smem_size);
     }
 }
 

@@ -14,6 +14,16 @@
 typedef void (*launch_alltoall_ptr_t)(void *, void *, size_t, int, int, cudaStream_t);
 typedef void (*launch_ring_ptr_t)(void *, void *, size_t, int, int, cudaStream_t);
 
+template <typename T>
+static unsigned int thread_scope_num_threads(size_t len, size_t min_size) {
+    /* These generic tests also exercise pointer/TMA fallback, whose CTA-wide
+     * staging buffer and barrier require serialized thread-scope callers.
+     * Concurrent CFT callers are covered by the CFT completion validation. */
+    (void)len;
+    (void)min_size;
+    return 1;
+}
+
 int setup(bool is_scalar, int disp, size_t max_size = MAX_MSG_SIZE, uint64_t max_iter = ITER,
           bool local_dest = false, int *argc = NULL, char ***argv = NULL);
 void cleanup();

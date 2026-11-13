@@ -38,8 +38,6 @@
 #SBATCH --output=nvshmem4py_test.out
 #SBATCH --error=nvshmem4py_test.out
 
-set -x
-
 ########################################
 # Resolve NVSHMEM_HOME
 ########################################
@@ -48,6 +46,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # explicit source tree is needed when the installed package is staged on
 # node-local scratch and sbatch executes a spooled script copy.
 PROJECT_DIR="${NVSHMEM4PY_PROJECT_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+# Runs as its own process, so elog() isn't inherited -- re-source.
+source "$PROJECT_DIR/docker/evlog_source_guard.sh"
+EVLOG_AVAILABLE=0
+source_evlog_or_warn && EVLOG_AVAILABLE=1
 
 if [ -z "$NVSHMEM_HOME" ]; then
     if [ -d "$PROJECT_DIR/build" ]; then
@@ -201,17 +204,19 @@ done
 ########################################
 VENV_DIR="${VENV_DIR:-$PROJECT_DIR/nvshmem4py_test_venv}"
 
-# Clean previous venv if it exists
-rm -rf "$VENV_DIR"
-if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
-    if command -v virtualenv >/dev/null 2>&1; then
-        virtualenv -p "$PYTHON_BIN" "$VENV_DIR"
-    else
-        echo "ERROR: Failed to create virtualenv with python3 -m venv, and virtualenv is not available."
-        exit 1
+_create_venv() {
+    rm -rf "$VENV_DIR"
+    if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
+        if command -v virtualenv >/dev/null 2>&1; then
+            virtualenv -p "$PYTHON_BIN" "$VENV_DIR"
+        else
+            echo "ERROR: Failed to create virtualenv with python3 -m venv, and virtualenv is not available."
+            return 1
+        fi
     fi
-fi
-source "$VENV_DIR/bin/activate"
+    source "$VENV_DIR/bin/activate"
+}
+ts_run "venv create ($VENV_DIR)" _create_venv || exit 1
 
 ########################################
 # Formatting check (lightweight, skip other deps)
@@ -237,16 +242,17 @@ case "$TEST_SUITE" in
         WHEEL_INSTALL_TARGET="${WHEEL}[mlir]"
         ;;
 esac
-pip install --force-reinstall "$WHEEL_INSTALL_TARGET"
+setup_start_s=$(date +%s)
+ts_run "pip install wheel ($WHEEL_INSTALL_TARGET)" pip install --force-reinstall "$WHEEL_INSTALL_TARGET"
 CUDA_NEXT_MAJOR=$((CUDA_MAJOR + 1))
-pip install "cuda-python>=${CUDA_MAJOR}.0,<${CUDA_NEXT_MAJOR}.0"
-pip install mpi4py --no-binary mpi4py
-pip install cupy-cuda${CUDA_MAJOR}x
-pip install cffi
+ts_run "pip install cuda-python" pip install "cuda-python>=${CUDA_MAJOR}.0,<${CUDA_NEXT_MAJOR}.0"
+ts_run "pip install mpi4py" pip install mpi4py --no-binary mpi4py
+ts_run "pip install cupy" pip install cupy-cuda${CUDA_MAJOR}x
+ts_run "pip install cffi" pip install cffi
 NUMBA_SPEC="${NUMBA_SPEC:-numba<0.66}"
 NUMBA_CUDA_SPEC="${NUMBA_CUDA_SPEC:-numba-cuda[cu${CUDA_MAJOR}]>=0.28.0}"
-pip install "$NUMBA_SPEC" "$NUMBA_CUDA_SPEC"
-pip install "cuda.core>=0.5.0"
+ts_run "pip install numba+numba-cuda" pip install "$NUMBA_SPEC" "$NUMBA_CUDA_SPEC"
+ts_run "pip install cuda.core" pip install "cuda.core>=0.5.0"
 # Keep PyTorch and the CUDA component wheels on the same CUDA minor version
 # as the toolkit used to build the NVSHMEM bitcode.  Mixing CUDA 12.8 toolkit
 # libraries with CUDA 12.9 Torch dependencies can break torch import.
@@ -254,27 +260,29 @@ CUDA_PKG_VERSION_SPEC="${CUDA_PKG_VERSION_SPEC:-${CUDA_VERSION_SHORT}.*}"
 TORCH_CUDA_FLAVOR="${TORCH_CUDA_FLAVOR:-cu${CUDA_MAJOR}${CUDA_MINOR}}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/${TORCH_CUDA_FLAVOR}}"
 TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
-pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
-pip install "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
-pip install pytest pytest-mpi
+ts_run "pip install torch" pip install --index-url "$TORCH_INDEX_URL" --extra-index-url https://pypi.org/simple "$TORCH_SPEC"
+ts_run "pip install nvidia-cuda-nvcc" pip install "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
+ts_run "pip install pytest+pytest-mpi" pip install pytest pytest-mpi
 CUTLASS_DSL_SPEC="nvidia-cutlass-dsl>=4.8.0,<5.0"
 if [ "$CUDA_MAJOR" = "13" ]; then
     CUTLASS_DSL_SPEC="nvidia-cutlass-dsl[cu13]>=4.8.0,<5.0"
 fi
-pip install "$CUTLASS_DSL_SPEC"
-pip install yapf
+ts_run "pip install cutlass-dsl" pip install "$CUTLASS_DSL_SPEC"
+ts_run "pip install yapf" pip install yapf
 
 # Some torch wheels can still pull incompatible CUDA component wheels into the
 # venv.  That mixes runtime/NVRTC/nvJitLink pieces across CUDA releases and
 # fails in the Numba/CuTe JIT path.  Force the versioned CUDA package family
 # back to the selected CUDA minor after PyTorch is installed.
 pip uninstall -y nvidia-nvjitlink 2>/dev/null || true
-pip install --force-reinstall \
+ts_run "pip force-reinstall CUDA component pins" pip install --force-reinstall \
     "nvidia-cuda-runtime-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
     "nvidia-cuda-nvrtc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
     "nvidia-cuda-nvcc-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
     "nvidia-cuda-cccl-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}" \
     "nvidia-nvjitlink-cu${CUDA_MAJOR}==${CUDA_PKG_VERSION_SPEC}"
+
+[ "$EVLOG_AVAILABLE" -eq 1 ] && elog "event=setup_done; elapsed=$(( $(date +%s) - setup_start_s ))s"
 
 date
 
@@ -463,41 +471,41 @@ echo "================================================"
 echo "CORE TESTS"
 echo "================================================"
 
-python3 "$TEST_DIR/wheel_sanity_test.py"
+ts_run "wheel sanity test" python3 "$TEST_DIR/wheel_sanity_test.py"
 if [ $? -ne 0 ]; then
     echo "Test failed: wheel sanity test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
-python3 -m pytest "$TEST_DIR/test_cute_library_lifetime.py" -v
+ts_run "CuTe library lifetime unit test" python3 -m pytest "$TEST_DIR/test_cute_library_lifetime.py" -v
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe library lifetime unit test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -x NVSHMEM_BOOTSTRAP=MPI -np $NP -- python3 "$TEST_DIR/init_test.py" -i mpi
+ts_run "MPI init test" $MPI_RUN -x NVSHMEM_BOOTSTRAP=MPI -np $NP -- python3 "$TEST_DIR/init_test.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: MPI init test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 unset NVSHMEM_BOOTSTRAP
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/init_test.py" -i uid
+ts_run "UID init test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/init_test.py" -i uid
 if [ $? -ne 0 ]; then
     echo "Test failed: UID init test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 unset NVSHMEM_BOOTSTRAP
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/init_test.py" -i emulated_mpi
+ts_run "Emulated MPI init test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/init_test.py" -i emulated_mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Emulated MPI init test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/collective_test.py" -i mpi
+ts_run "Collectives Test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/collective_test.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Collectives Test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -506,7 +514,7 @@ fi
 # Host AMOs are not implemented.
 # Cross-PE signal_op/signal_wait times out on PCIe; the NVLS suite retains that coverage.
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-signalop --skip-amo
+ts_run "RMA Test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-signalop --skip-amo
 if [ $? -ne 0 ]; then
     echo "Test failed: RMA Test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -520,28 +528,28 @@ echo "NUMBA TESTS"
 echo "================================================"
 
 unset NVSHMEM_BOOTSTRAP
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/test_get_version.py" -i mpi
+ts_run "Device get version test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/test_get_version.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Device get version test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 unset NVSHMEM_BOOTSTRAP
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/test_npe.py" -i mpi
+ts_run "Device number of processing elements test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/test_npe.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Device number of processing elements test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/test_ring.py" -i mpi
+ts_run "Simple int put on ring test" $MPI_RUN -np $NP -- python3 "$TEST_DIR/test_ring.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Simple int put on ring test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/test_collective.py" -i mpi
+ts_run "test_collective.py (xfail-eligible)" $MPI_RUN -np $NP -- python3 "$TEST_DIR/test_collective.py" -i mpi
 if [ $? -ne 0 ]; then
     # Known proxy timeout on PCIe multi-node with cooperative launch (Bug TBD).
     # Do not count as failure; treat as xfail.
@@ -549,7 +557,7 @@ if [ $? -ne 0 ]; then
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- python3 "$TEST_DIR/test_highlevel_bindings.py" -i mpi
+ts_run "test_highlevel_bindings.py (xfail-eligible)" $MPI_RUN -np $NP -- python3 "$TEST_DIR/test_highlevel_bindings.py" -i mpi
 if [ $? -ne 0 ]; then
     # Known proxy timeout on PCIe multi-node with barrier_all (Bug TBD).
     # Do not count as failure; treat as xfail.
@@ -572,7 +580,7 @@ else
     # nvjitlink crash from accumulated JIT compilations in a single process.
     export NVSHMEM_BOOTSTRAP=MPI
     for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
-        $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
+        ts_run "High-level API Collective test (${coll_func})" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
         if [ $? -ne 0 ]; then
             echo "Test failed: High-level API Collective test (${coll_func})."
             EXIT_CODE=$((EXIT_CODE + 1))
@@ -581,14 +589,14 @@ else
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
+ts_run "High-level API Barrier All Sync test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: High-level API Barrier All Sync test."
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_barrier.py -v -s
+ts_run "High-level API Barrier test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_barrier.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: High-level API Barrier test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -605,7 +613,7 @@ echo "================================================"
 pushd "$TEST_DIR/device/numba/" || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
+ts_run "High-level API RMA test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: High-level API RMA test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -631,7 +639,7 @@ fi
 # expanded NVLS suite.
 export NVSHMEM_BOOTSTRAP=MPI
 for test_program in test_get_version.py test_npe.py; do
-    $MPI_RUN -np $NP -- python3 "$NUMBA_CUDA_MLIR_TEST_DIR/$test_program" -i mpi
+    ts_run "Numba CUDA MLIR ${test_program}" $MPI_RUN -np $NP -- python3 "$NUMBA_CUDA_MLIR_TEST_DIR/$test_program" -i mpi
     if [ $? -ne 0 ]; then
         echo "Test failed: Numba CUDA MLIR ${test_program}"
         EXIT_CODE=$((EXIT_CODE + 1))
@@ -650,7 +658,7 @@ pushd "$NUMBA_CUDA_MLIR_TEST_DIR/device/numba_cuda_mlir/" || exit 1
 # compiler crashes from accumulated JIT compilations in a single process.
 export NVSHMEM_BOOTSTRAP=MPI
 for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
-    $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
+    ts_run "Numba-CUDA-MLIR high-level API Collective test (${coll_func})" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
     if [ $? -ne 0 ]; then
         echo "Test failed: Numba-CUDA-MLIR high-level API Collective test (${coll_func})."
         EXIT_CODE=$((EXIT_CODE + 1))
@@ -658,14 +666,14 @@ for coll_func in test_device_reduce test_device_reducescatter test_device_fcolle
 done
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
+ts_run "Numba-CUDA-MLIR high-level API Barrier All Sync test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba-CUDA-MLIR high-level API Barrier All Sync test."
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_barrier.py -v -s
+ts_run "Numba-CUDA-MLIR high-level API Barrier test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_barrier.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba-CUDA-MLIR high-level API Barrier test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -682,7 +690,7 @@ echo "================================================"
 pushd "$NUMBA_CUDA_MLIR_TEST_DIR/device/numba_cuda_mlir/" || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
+ts_run "Numba-CUDA-MLIR high-level API RMA test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba-CUDA-MLIR high-level API RMA test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -708,14 +716,14 @@ NUMBA_CUDA_MLIR_NVLS_MPI_RUN="$MPI_RUN -x NVSHMEM_BOOTSTRAP -x NVSHMEM_DISABLE_N
 pushd "$NUMBA_CUDA_MLIR_TEST_DIR/device/numba_cuda_mlir/" || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
+ts_run "Numba-CUDA-MLIR high-level API Memory test" $NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba-CUDA-MLIR high-level API Memory test"
     EXIT_CODE=$((EXIT_CODE + 1))
 fi
 
 export NVSHMEM_BOOTSTRAP=MPI
-$NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
+ts_run "Numba-CUDA-MLIR high-level API AMO test" $NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba-CUDA-MLIR high-level API AMO test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -724,7 +732,7 @@ fi
 popd || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- python3 "$NUMBA_CUDA_MLIR_TEST_DIR/test_ring_allreduce.py"
+ts_run "Numba-CUDA-MLIR ring all-reduce example test" $NUMBA_CUDA_MLIR_NVLS_MPI_RUN -np $NP -- python3 "$NUMBA_CUDA_MLIR_TEST_DIR/test_ring_allreduce.py"
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba-CUDA-MLIR ring all-reduce example test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -739,7 +747,7 @@ echo "================================================"
 pushd "$TEST_DIR/device/cute/" || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
+ts_run "CuTe DSL RMA test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL RMA test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -748,7 +756,7 @@ fi
 if [ "${NVSHMEM4PY_SKIP_CUTEDSL_COLLECTIVES:-0}" = "1" ]; then
     echo "Skipping CuTe DSL collective tests on this target"
 else
-    $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_coll.py -v -s
+    ts_run "CuTe DSL Collective test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_coll.py -v -s
     if [ $? -ne 0 ]; then
         echo "Test failed: CuTe DSL Collective test"
         EXIT_CODE=$((EXIT_CODE + 1))
@@ -770,7 +778,7 @@ if [ "${NVSHMEM4PY_SKIP_CUTEDSL_COLLECTIVES:-0}" = "1" ]; then
     echo "Skipping CuTe DSL high-level collective tests on this target"
 else
     for coll_func in test_device_reduce test_device_reducescatter test_device_fcollect test_device_alltoall test_device_broadcast; do
-        $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
+        ts_run "CuTe DSL high-level collective test (${coll_func})" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi "test_device_coll.py::${coll_func}" -v -s
         if [ $? -ne 0 ]; then
             echo "Test failed: CuTe DSL high-level collective test (${coll_func})."
             EXIT_CODE=$((EXIT_CODE + 1))
@@ -778,7 +786,7 @@ else
     done
 fi
 
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
+ts_run "CuTe DSL high-level sync test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_sync.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL high-level sync test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -795,7 +803,7 @@ echo "================================================"
 pushd "$TEST_DIR/device/cute/" || exit 1
 
 export NVSHMEM_BOOTSTRAP=MPI
-$MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
+ts_run "CuTe DSL high-level RMA test" $MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_rma.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL high-level RMA test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -835,7 +843,7 @@ echo "NVLS env: NVSHMEM_DISABLE_NCCL=$NVSHMEM_DISABLE_NCCL NVSHMEM_HCA_LIST=$NVS
 
 # Core memory test
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/memory_test.py" -i mpi
+ts_run "Memory Test" $NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/memory_test.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Memory Test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -844,7 +852,7 @@ fi
 # Numba device memory test
 pushd "$TEST_DIR/device/numba/" || exit 1
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -x NUMBA_CUDA_ENABLE_NRT=1 -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
+ts_run "Numba high-level API Memory test" $NVLS_MPI_RUN -x NUMBA_CUDA_ENABLE_NRT=1 -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba high-level API Memory test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -853,7 +861,7 @@ popd || exit 1
 
 # CuTe DSL device memory test
 pushd "$TEST_DIR/device/cute/" || exit 1
-$NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
+ts_run "CuTe DSL Memory test" $NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_mem.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL Memory test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -861,7 +869,7 @@ fi
 
 # CuTe DSL TMA-backed RMA test (TMA requires SM 90+). NVSHMEM reads the TMA
 # policy once per process, so it gets its own launch with the policy enabled.
-$NVLS_MPI_RUN -x NVSHMEM_TMA_POLICY=ENABLE -np $NP -- pytest --init-type mpi --with-mpi test_device_rma_tma.py -v -s
+ts_run "CuTe DSL TMA RMA test" $NVLS_MPI_RUN -x NVSHMEM_TMA_POLICY=ENABLE -np $NP -- pytest --init-type mpi --with-mpi test_device_rma_tma.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL TMA RMA test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -871,7 +879,7 @@ popd || exit 1
 # Numba AMO test (needs NVSwitch for device-initiated atomics)
 pushd "$TEST_DIR/device/numba/" || exit 1
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
+ts_run "Numba high-level API AMO test" $NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: Numba high-level API AMO test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -880,7 +888,7 @@ popd || exit 1
 
 # CuTe DSL AMO test
 pushd "$TEST_DIR/device/cute/" || exit 1
-$NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
+ts_run "CuTe DSL AMO test" $NVLS_MPI_RUN -np $NP -- pytest --init-type mpi --with-mpi test_device_amo.py -v -s
 if [ $? -ne 0 ]; then
     echo "Test failed: CuTe DSL AMO test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -890,7 +898,7 @@ popd || exit 1
 # Full RMA test including cross-PE signal_op (skipped in core suite for PCIe).
 # Host AMOs are not implemented.
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-amo
+ts_run "RMA Test (full, with signalop)" $NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/rma_test.py" -i mpi --skip-amo
 if [ $? -ne 0 ]; then
     echo "Test failed: RMA Test (full, with signalop)"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -898,7 +906,7 @@ fi
 
 # Ring allreduce test (proxy timeout on L40S CICD nodes, TBD)
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/test_ring_allreduce.py" -i mpi
+ts_run "Ring all-reduce example test" $NVLS_MPI_RUN -np $NP -- python3 "$TEST_DIR/test_ring_allreduce.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Ring all-reduce example test."
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -906,7 +914,7 @@ fi
 
 # Teams test (needs 8 GPUs, only available on EOS-class nodes)
 export NVSHMEM_BOOTSTRAP=MPI
-$NVLS_MPI_RUN -np $NP_TEAM -- python3 "$TEST_DIR/teams_test.py" -i mpi
+ts_run "Team Management Test" $NVLS_MPI_RUN -np $NP_TEAM -- python3 "$TEST_DIR/teams_test.py" -i mpi
 if [ $? -ne 0 ]; then
     echo "Test failed: Team Management Test"
     EXIT_CODE=$((EXIT_CODE + 1))
@@ -959,6 +967,12 @@ fi
 # Cleanup
 ########################################
 rm -rf "$VENV_DIR"
+
+if [ -n "$CUPY_CACHE_DIR" ] && [ -d "$CUPY_CACHE_DIR" ]; then
+    _cupy_cache_size=$(du -sh "$CUPY_CACHE_DIR" 2>/dev/null | cut -f1)
+    _cupy_cache_files=$(find "$CUPY_CACHE_DIR" -type f 2>/dev/null | wc -l)
+    echo "CuPy kernel cache: ${_cupy_cache_size} in ${_cupy_cache_files} files (${CUPY_CACHE_DIR})"
+fi
 
 echo "================================================"
 echo "Tests finished with exit code: $EXIT_CODE"

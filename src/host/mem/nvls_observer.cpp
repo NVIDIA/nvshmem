@@ -49,6 +49,11 @@ bool should_process_nvls_team_pool_entry(int team_idx) {
 
     return !is_mc_shared_alias && nvshmemi_team_support_nvls(nvshmemi_team_pool[team_idx]);
 }
+
+bool should_map_nvls_team_pool_entry(int team_idx) {
+    return should_process_nvls_team_pool_entry(team_idx) &&
+           nvshmemi_team_pool[team_idx]->nvls_rsc_base_ptr != nullptr;
+}
 }  // namespace
 
 /* ---- nvshmemi_heap_observer callbacks ---- */
@@ -446,7 +451,7 @@ int nvshmemi_nvls_observer::nvls_map_heap_memory(uint64_t size, off_t mmap_offse
     }
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) {
+        if (!should_map_nvls_team_pool_entry(i)) {
             continue;
         }
         status = nvls_map_heap_memory_by_size(nvshmemi_team_pool[i], size, mmap_offset, mc_offset);
@@ -522,7 +527,7 @@ int nvshmemi_nvls_observer::nvls_unmap_heap_memory(off_t mc_offset, uint64_t siz
     }
 
     for (int i = 0; i < nvshmemi_max_teams; i++) {
-        if (!should_process_nvls_team_pool_entry(i)) {
+        if (!should_map_nvls_team_pool_entry(i)) {
             continue;
         }
         status = nvls_unmap_heap_memory_by_size(nvshmemi_team_pool[i], mc_offset, size);

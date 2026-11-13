@@ -183,12 +183,12 @@ __device__ static __forceinline__ void doca_gpu_dev_common_mark_wqes_ready(uint6
                              (unsigned long long int)(to_wqe_idx + 1)) !=
                    (unsigned long long int)from_wqe_idx)
                 continue;
-            doca_gpu_dev_verbs_fence_acquire<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_GPU>();
+            doca_gpu_dev_verbs_fence_acquire_nvidia_nic();
         } else {
             doca_gpu_dev_verbs_fence_release<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_GPU>();
             cuda::atomic_ref<uint64_t, cuda::thread_scope_device> ready_index_aref(ready_index);
             while (ready_index_aref.load(cuda::memory_order_relaxed) != from_wqe_idx) continue;
-            doca_gpu_dev_verbs_fence_acquire<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_GPU>();
+            doca_gpu_dev_verbs_fence_acquire_nvidia_nic();
             ready_index_aref.store(to_wqe_idx + 1, cuda::memory_order_relaxed);
         }
     }
@@ -1096,9 +1096,11 @@ __device__ static __forceinline__ void doca_gpu_dev_verbs_wqe_prepare_atomic_ext
             doca_gpu_dev_verbs_atomic_32_masked_cs_seg_t *atomic_32_masked_cs_seg =
                 (doca_gpu_dev_verbs_atomic_32_masked_cs_seg_t *)&aseg_1;
             atomic_32_masked_cs_seg->swap_data = doca_gpu_dev_verbs_bswap32((uint32_t)swap_data);
-            atomic_32_masked_cs_seg->compare_data = doca_gpu_dev_verbs_bswap32((uint32_t)compare_data);
+            atomic_32_masked_cs_seg->compare_data =
+                doca_gpu_dev_verbs_bswap32((uint32_t)compare_data);
             atomic_32_masked_cs_seg->swap_mask = doca_gpu_dev_verbs_bswap32((uint32_t)swap_mask);
-            atomic_32_masked_cs_seg->compare_mask = doca_gpu_dev_verbs_bswap32((uint32_t)compare_mask);
+            atomic_32_masked_cs_seg->compare_mask =
+                doca_gpu_dev_verbs_bswap32((uint32_t)compare_mask);
         } else {
             cseg.opmod_idx_opcode =
                 doca_gpu_dev_verbs_bswap32(DOCA_GPUNETIO_IB_MLX5_OPCODE_ATOMIC_MASKED_CS |
@@ -1110,12 +1112,14 @@ __device__ static __forceinline__ void doca_gpu_dev_verbs_wqe_prepare_atomic_ext
             doca_gpu_dev_verbs_atomic_64_masked_cs_seg_t *atomic_64_masked_cs_data_seg =
                 (doca_gpu_dev_verbs_atomic_64_masked_cs_seg_t *)&aseg_1;
             atomic_64_masked_cs_data_seg->swap = doca_gpu_dev_verbs_bswap64((uint64_t)swap_data);
-            atomic_64_masked_cs_data_seg->compare = doca_gpu_dev_verbs_bswap64((uint64_t)compare_data);
+            atomic_64_masked_cs_data_seg->compare =
+                doca_gpu_dev_verbs_bswap64((uint64_t)compare_data);
 
             doca_gpu_dev_verbs_atomic_64_masked_cs_seg_t *atomic_64_masked_cs_mask_seg =
                 (doca_gpu_dev_verbs_atomic_64_masked_cs_seg_t *)&aseg_2;
             atomic_64_masked_cs_mask_seg->swap = doca_gpu_dev_verbs_bswap64((uint64_t)swap_mask);
-            atomic_64_masked_cs_mask_seg->compare = doca_gpu_dev_verbs_bswap64((uint64_t)compare_mask);
+            atomic_64_masked_cs_mask_seg->compare =
+                doca_gpu_dev_verbs_bswap64((uint64_t)compare_mask);
         }
     }
 

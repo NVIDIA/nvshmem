@@ -79,6 +79,9 @@ __host__ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE int nvshmemx_ask_smem(
  * Block-scoped TMA puts from global-memory sources use a double-buffered
  * staging path that additionally requires at least two full warps in the CTA;
  * smaller CTAs fall back to P2P stores.
+ * Independent thread- or warp-scoped TMA operations and CFT operations must
+ * not concurrently use the same registered CTA shared-memory buffer. The
+ * caller must serialize those operations.
  *
  * smem: Pointer to shared memory (must be 16-byte aligned)
  * size: Size in bytes (must be >= nvshmemx_ask_smem(NVSHMEMX_SMEM_MINIMUM))
@@ -106,13 +109,25 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_give_smem(void *smem, siz
     if (nvshmemi_tma_block_is_elected()) {
         int registration_slot = nvshmemi_tma_claim_smem_registration();
         if (registration_slot >= 0) {
+            /* No deferred get is pending in a newly registered buffer. */
+            uint64_t *deferred_get_state = nvshmemi_tma_barrier_slot(
+                reinterpret_cast<uintptr_t>(smem), NVSHMEMI_TMA_DEFERRED_GET_STATE_SLOT);
+            deferred_get_state[0] = 0;
+            deferred_get_state[1] = 0;
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
             uintptr_t smem_base = reinterpret_cast<uintptr_t>(smem);
-            for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
-                nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
+            nvshmemi_cft_thread_mutex_init(smem_base);
+            if (nvshmemi_unicast_le_available()) {
+                for (int slot = 0; slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS; slot++) {
+                    nvshmemi_handle_barrier_slot(smem_base, slot)->reset_pending_handle_state();
+                }
             }
+            handle_tracking_state_t *tracking = nvshmemi_handle_tracking_state(smem_base);
+            tracking->initialized_slots = 0;
+            tracking->pending_slots = 0;
+            tracking->reserved = 0;
             /* Publish the registration only after its deferred-completion
-             * metadata has been initialized. */
+             * metadata and thread-scope mutex have been initialized. */
             __threadfence_block();
 #endif
             nvshmemi_tma_publish_smem_registration(registration_slot,
@@ -141,7 +156,9 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_release_smem() {
     int registration_slot = nvshmemi_tma_find_smem_registration();
     if (registration_slot >= 0) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-        nvshmemi_handle_quiet_owned();
+        // All issuers must finish before thread 0 snapshots and drains the slots.
+        __syncthreads();
+        nvshmemi_handle_release_all();
         __syncthreads();
 #endif
         if (nvshmemi_tma_block_is_elected()) {
@@ -435,8 +452,8 @@ DEFINE_NVSHMEM_GETMEM_THREADGROUP(warp)
 DEFINE_NVSHMEM_GETMEM_THREADGROUP(block)
 
 #define NVSHMEM_TYPE_PUT_NBI_THREADGROUP(Name, Type, Group)                                      \
-    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemx_##Name##_put_nbi_##Group( \
-        Type *dest, const Type *source, size_t nelems, int pe) {                                 \
+    NVSHMEMI_DEVICE_PREFIX NVSHMEMI_DEVICE_ALWAYS_FORCE_INLINE void                              \
+    nvshmemx_##Name##_put_nbi_##Group(Type *dest, const Type *source, size_t nelems, int pe) {   \
         nvshmemi_put_nbi<Type, nvshmemi_threadgroup_##Group, NVSHMEMI_REGION_OPERATION_NBI_RMA>( \
             dest, source, nelems, pe);                                                           \
     }

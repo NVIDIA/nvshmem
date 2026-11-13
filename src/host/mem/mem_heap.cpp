@@ -49,10 +49,11 @@
 #include "internal/host_transport/nvshmemi_transport_defines.h"            // for nvshm...
 #include "internal/host_transport/transport.h"                             // for nvshm..
 #include "internal/host/nvshmemi_nvls_rsc.hpp"
-#include "internal/host/scope_guard.h"
+#include "internal/common/scope_guard.h"
 #include "internal/host/unique_cuda_handle.hpp"
 #include "internal/host/unique_cuda_mapping.hpp"
 #include "internal/host/nvshmemi_nvls_observer.hpp"
+#include "internal/host/nvshmemi_pe_topology.hpp"
 
 #ifdef NVSHMEM_USE_DLMALLOC
 #include "dlmalloc.h"
@@ -1773,7 +1774,6 @@ int nvshmemi_symmetric_heap_vidmem_dynamic_vmm::PendingMmapRegistration::reserve
         }
     }
     if (address_ != nullptr) {
-        assert(address_ >= mmap_start);
         // The preferred address is a hint; a reservation at another address is also valid.
         return NVSHMEMX_SUCCESS;
     }
@@ -2162,8 +2162,12 @@ int nvshmemi_symmetric_heap::check_buffers_on_same_device(bool onGPU, void *ptr)
     NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INTERNAL,
                           "allgather in check_buffers_on_same_device failed \n");
 
-    loc_id = scratch[0];
-    for (int i = 1; i < cfg_.npes_node; i++) {
+    loc_id = scratch[cfg_.mype];
+    for (int i = 0; i < cfg_.npes; i++) {
+        if (i == cfg_.mype ||
+            nvshmemi_pe_topology.node_of_pe[i] != nvshmemi_pe_topology.node_of_pe[cfg_.mype]) {
+            continue;
+        }
         status = (scratch[i] == loc_id) ? 1 : 0;
         NVSHMEMI_NZ_ERROR_RET(status, NVSHMEMX_ERROR_INVALID_VALUE,
                               "Memory buffers allocated are on same device, disable NVLS "
@@ -2596,6 +2600,9 @@ void *nvshmemx_mc_ptr(nvshmem_team_t team, const void *ptr) {
     }
     uintptr_t offset = (char *)ptr - (char *)nvshmemi_device_state.heap_base;
     if (ptr >= nvshmemi_device_state.heap_base && offset < nvshmemi_device_state.heap_size) {
+        if (nvshmemi_team_pool[team]->nvls_rsc_base_ptr == nullptr) {
+            return NULL;
+        }
         nvls::nvshmemi_nvls_rsc *nvls =
             reinterpret_cast<nvls::nvshmemi_nvls_rsc *>(nvshmemi_team_pool[team]->nvls_rsc);
         if (nvls == NULL) {

@@ -113,25 +113,30 @@ DEFN_ALLTOALLMEM_TEST_KERNEL(block, _block, x)
 }
 #endif
 
-#define DO_ALLTOALL_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                            \
-    if (use_cubin) {                                                                          \
-        DO_ALLTOALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);                     \
-    } else {                                                                                  \
-        test_##TYPENAME##_alltoall##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-            team, (TYPE *)d_dest, (TYPE *)d_source, nelems, iters, _dynamic_smem_size);       \
-    }                                                                                         \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                   \
-    cudaStreamSynchronize(cstrm);
+#define DO_ALLTOALL_TEST(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE)                                \
+    do {                                                                                          \
+        if (use_cubin) {                                                                          \
+            DO_ALLTOALL_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX, TYPENAME, TYPE);                     \
+        } else {                                                                                  \
+            CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_##TYPENAME##_alltoall##SC_SUFFIX,              \
+                                              _dynamic_smem_size);                                \
+            test_##TYPENAME##_alltoall##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
+                team, (TYPE *)d_dest, (TYPE *)d_source, nelems, iters, _dynamic_smem_size);       \
+        }                                                                                         \
+        CUDA_RUNTIME_CHECK(cudaGetLastError());                                                   \
+        CUDA_RUNTIME_CHECK(cudaStreamSynchronize(cstrm));                                         \
+    } while (0);
 
-#define DO_ALLTOALLMEM_TEST(SC, SC_SUFFIX, SC_PREFIX)                               \
-    if (use_cubin) {                                                                \
-        DO_ALLTOALLMEM_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX);                        \
-    } else {                                                                        \
-        test_alltoallmem##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>( \
-            team, d_dest, d_source, nelems, iters, _dynamic_smem_size);             \
-    }                                                                               \
-    CUDA_RUNTIME_CHECK(cudaGetLastError());                                         \
-    cudaStreamSynchronize(cstrm);
+#define DO_ALLTOALLMEM_TEST(SC, SC_SUFFIX, SC_PREFIX)                                       \
+    if (use_cubin) {                                                                        \
+        DO_ALLTOALLMEM_TEST_CUBIN(SC, SC_SUFFIX, SC_PREFIX);                                \
+    } else {                                                                                \
+        CHECK_AND_ENABLE_MAX_DYNAMIC_SMEM(test_alltoallmem##SC_SUFFIX, _dynamic_smem_size); \
+        test_alltoallmem##SC_SUFFIX<<<1, num_threads, _dynamic_smem_size, cstrm>>>(         \
+            team, d_dest, d_source, nelems, iters, _dynamic_smem_size);                     \
+    }                                                                                       \
+    CUDA_RUNTIME_CHECK(cudaGetLastError());                                                 \
+    CUDA_RUNTIME_CHECK(cudaStreamSynchronize(cstrm));
 
 int main(int argc, char **argv) {
     int status = 0;
@@ -146,6 +151,7 @@ int main(int argc, char **argv) {
 #ifdef _NVSHMEM_DEBUG
     int mype;
 #endif
+    _dynamic_smem_size = SMEM_SIZE_RECOMMENDED;
     read_args(argc, argv);
     alloc_size = MAX_ELEMS * MAX_NPES * 2 * sizeof(LARGEST_DT);
     if (use_mmap) {
@@ -237,7 +243,8 @@ int main(int argc, char **argv) {
     iters = 50;
     num_threads = 1;
     team = NVSHMEM_TEAM_WORLD;
-    for (nelems = 1; nelems < MAX_ELEMS; nelems *= 2) {
+    for (nelems = _min_size ? (_min_size + sizeof(float) - 1) / sizeof(float) : 1;
+         nelems < MAX_ELEMS; nelems *= 2) {
         DO_ALLTOALL_TEST(thread, , , float, float)
     }
     COLL_CHECK_ERRS_D();

@@ -12,6 +12,9 @@
 
 extern nvshmemi_team_t *nvshmemi_team_world;
 extern nvshmemi_team_t *nvshmemi_team_shared;
+extern nvshmemi_team_t *nvshmemi_team_mc_shared;
+extern nvshmemi_team_t *nvshmemi_team_cft_shared;
+extern nvshmemi_team_t *nvshmemi_team_cft_mc_shared;
 extern nvshmemi_team_t *nvshmemi_team_node;
 extern nvshmemi_team_t *nvshmemi_team_same_mype_node;
 extern nvshmemi_team_t *nvshmemi_team_same_gpu;

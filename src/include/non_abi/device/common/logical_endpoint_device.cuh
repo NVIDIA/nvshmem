@@ -6,10 +6,15 @@
 #ifndef __logical_endpoint_device_cuh__
 #define __logical_endpoint_device_cuh__
 
+#if !defined(__CUDACC_RTC__)
+#include <assert.h>
+#endif
 #include "non_abi/c/nvshmem_build_options.h"
 #include "non_abi/device/threadgroup/nvshmemi_common_device_defines.cuh"
 
 #ifdef __CUDA_ARCH__
+
+enum class nvshmemi_le_size_rule { any_size, tx_size_multiple };
 
 #if defined(__CUDACC_RTC__)
 
@@ -18,6 +23,7 @@ typedef unsigned int CUlogicalEndpointId;
 #define LE_HW_SW_REQUIREMENTS_MET 0
 #define LE_ATOMIC_HW_SW_REQUIREMENTS_MET 0
 inline constexpr int CFT_HANDLE_TX_SIZE = 16;
+inline constexpr int TMA_COPY_NUM_STAGES = 2;
 
 __device__ __forceinline__ bool nvshmemi_ld_and_check_valid_le_id(int) { return false; }
 
@@ -25,11 +31,18 @@ __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int) {
     return (CUlogicalEndpointId)-1;
 }
 
-__device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *, size_t) {
-    return false;
+/* Pure heap-offset arithmetic, so NVRTC gets the same answer as other builds. */
+__device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void *addr, size_t size) {
+    if (addr == nullptr) {
+        return false;
+    }
+    if (size == 0) {
+        return true;
+    }
+    return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
+template <nvshmemi_le_size_rule SIZE_RULE>
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int, size_t, threadgroup_t, const void *,
                                                            const void *) {
     return false;
@@ -41,16 +54,31 @@ __device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int, const voi
     return false;
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return false; }
-
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int, size_t, threadgroup_t,
-                                                                         const void *,
-                                                                         const void *) {
+__device__ __forceinline__ bool nvshmemi_is_cft_forced() {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#else
     return false;
+#endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int) { return false; }
+__device__ __forceinline__ void nvshmemi_cft_force_unsupported() {
+#if defined(NVSHMEM_FORCE_CFT)
+    asm volatile("trap;");
+#endif
+}
+
+__device__ __forceinline__ bool nvshmemi_is_le_prioritized(int) { return nvshmemi_is_cft_forced(); }
+
+template <nvshmemi_le_size_rule SIZE_RULE>
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int, size_t, threadgroup_t,
+                                                                   const void *, const void *) {
+    return nvshmemi_is_cft_forced();
+}
+
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int) {
+    return nvshmemi_is_cft_forced();
+}
 
 #else
 
@@ -68,10 +96,21 @@ __device__ __forceinline__ bool nvshmemi_ld_and_check_valid_le_id(int pe) {
 #if defined(NVSHMEM_CFT_HANDLES_SUPPORT)
     const long long unsigned* le_ids =
         reinterpret_cast<const long long unsigned*>(nvshmemi_device_state_d.unicast_le_ids_);
-    return IS_VALID_LE_ID((uint64_t)__ldg(le_ids + pe));
+    return le_ids != nullptr && IS_VALID_LE_ID((uint64_t)__ldg(le_ids + pe));
 #else
     return false;
 #endif
+}
+
+/* The host keeps this array accessible for compatibility with older device
+ * code, even when logical endpoints are unavailable. The local endpoint is
+ * reserved whenever unicast LE setup succeeds, so its valid bit is the
+ * availability signal; remote entries may be invalid independently. */
+__device__ __forceinline__ bool nvshmemi_unicast_le_available() {
+    const long long unsigned* le_ids =
+        reinterpret_cast<const long long unsigned*>(nvshmemi_device_state_d.unicast_le_ids_);
+    return le_ids != nullptr &&
+           IS_VALID_LE_ID((uint64_t)__ldg(le_ids + nvshmemi_device_state_d.mype));
 }
 
 __device__ __forceinline__ CUlogicalEndpointId nvshmemi_ld_and_get_le_id(int pe) {
@@ -168,21 +207,31 @@ __device__ __forceinline__ bool nvshmemi_is_addr_offset_aligned(const void* addr
     return ((((uintptr_t)addr - (uintptr_t)nvshmemi_device_state_d.heap_base) % size) == 0);
 }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
+template <nvshmemi_le_size_rule SIZE_RULE>
 __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe, size_t size, threadgroup_t scope,
                                                            const void* le_addr,
                                                            const void* tma_addr) {
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
-    if constexpr (REQUIRE_TX_SIZE_MULTIPLE) {
+    if constexpr (SIZE_RULE == nvshmemi_le_size_rule::tx_size_multiple) {
         if (size == 0 || (size % CFT_HANDLE_TX_SIZE) != 0) {
             return false;
         }
     }
 
-    /* The handle path stages global local buffers through shared memory; shared
-     * local buffers can be consumed or produced by fabric directly. */
-    return ((scope != NVSHMEMI_THREADGROUP_THREAD) && nvshmemi_tma_smem_registered() &&
-            is_thrdgrp_smem_rsc_available(scope) &&
+    bool has_smem_resources;
+    if (scope == NVSHMEMI_THREADGROUP_THREAD) {
+        const size_t thread_idx =
+            threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+        const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
+        has_smem_resources = handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
+                             nvshmemi_smem_data_buf_size(1) >= CFT_HANDLE_TX_SIZE;
+    } else {
+        has_smem_resources = is_thrdgrp_smem_rsc_available(scope);
+    }
+
+    /* Thread scope serializes access to the full staging tile. Other scopes
+     * retain their existing partitioned SMEM and barrier allocation. */
+    return (nvshmemi_tma_smem_registered() && has_smem_resources &&
             nvshmemi_is_addr_offset_aligned(le_addr, CFT_HANDLE_TX_SIZE) &&
             nvshmemi_tma_is_16b_aligned((size_t)(uintptr_t)tma_addr) &&
             nvshmemi_ld_and_check_valid_le_id(pe));
@@ -208,6 +257,11 @@ __device__ __forceinline__ bool nvshmemi_is_le_implemented(int pe) {
 
 __device__ __forceinline__ bool nvshmemi_is_le_atomic_implemented(int pe, const void* le_addr) {
 #if LE_ATOMIC_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
+    /* Logical endpoints do not support loopback atomics. Self-target operations
+     * stay on the local load/store atomic path. */
+    if (pe == nvshmemi_device_state_d.mype) {
+        return false;
+    }
     const size_t thread_idx =
         threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
     const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
@@ -229,6 +283,14 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_le_implemented(uint64_t le
     if (size == 0 || !nvshmemi_tma_smem_registered() || !IS_VALID_LE_ID(le_id_with_flag) ||
         ((size % CFT_HANDLE_TX_SIZE) != 0)) {
         return false;
+    }
+
+    if (scope == NVSHMEMI_THREADGROUP_THREAD) {
+        const size_t thread_idx =
+            threadIdx.x + threadIdx.y * blockDim.x + threadIdx.z * blockDim.x * blockDim.y;
+        const size_t handle_slot = (thread_idx / NVSHMEMI_WARP_SIZE) * TMA_COPY_NUM_STAGES;
+        return handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS &&
+               nvshmemi_smem_data_buf_size(1) >= CFT_HANDLE_TX_SIZE;
     }
 
     return is_thrdgrp_smem_rsc_available(scope);
@@ -264,7 +326,9 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_reduce_le_implemented(
 }
 
 __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_ld_and_check_valid_le_id(pe);
 #else
@@ -272,21 +336,40 @@ __device__ __forceinline__ bool nvshmemi_is_le_prioritized(int pe) {
 #endif
 }
 
-template <bool REQUIRE_TX_SIZE_MULTIPLE>
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe, size_t size,
-                                                                         threadgroup_t scope,
-                                                                         const void* le_addr,
-                                                                         const void* tma_addr) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
-    LE_HW_SW_REQUIREMENTS_MET
-    return nvshmemi_is_le_implemented<REQUIRE_TX_SIZE_MULTIPLE>(pe, size, scope, le_addr, tma_addr);
+__device__ __forceinline__ bool nvshmemi_is_cft_forced() {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
 #else
     return false;
 #endif
 }
 
-__device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+__device__ __forceinline__ void nvshmemi_cft_force_unsupported() {
+#if defined(NVSHMEM_FORCE_CFT)
+    assert(false && "NVSHMEM_FORCE_CFT: CFT route is unsupported");
+    asm volatile("trap;");
+#endif
+}
+
+template <nvshmemi_le_size_rule SIZE_RULE>
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int pe, size_t size,
+                                                                   threadgroup_t scope,
+                                                                   const void* le_addr,
+                                                                   const void* tma_addr) {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+    LE_HW_SW_REQUIREMENTS_MET
+    return nvshmemi_is_le_implemented<SIZE_RULE>(pe, size, scope, le_addr, tma_addr);
+#else
+    return false;
+#endif
+}
+
+__device__ __forceinline__ bool nvshmemi_cft_preempts_pointer_path(int pe) {
+#if defined(NVSHMEM_FORCE_CFT)
+    return true;
+#elif defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_le_implemented(pe);
 #else
@@ -296,7 +379,8 @@ __device__ __forceinline__ bool nvshmemi_is_le_supported_and_prioritized(int pe)
 
 __device__ __forceinline__ bool nvshmemi_is_multicast_le_supported_and_prioritized(
     uint64_t le_id_with_flag, size_t size, threadgroup_t scope) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) &&                                         \
+    (defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) || defined(NVSHMEM_FORCE_CFT)) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_multicast_le_implemented(le_id_with_flag, size, scope);
 #else
@@ -307,7 +391,8 @@ __device__ __forceinline__ bool nvshmemi_is_multicast_le_supported_and_prioritiz
 template <threadgroup_t SCOPE>
 __device__ __forceinline__ bool nvshmemi_is_multicast_reduce_le_supported_and_prioritized(
     uint64_t le_id_with_flag, size_t size) {
-#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) && defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) && \
+#if defined(NVSHMEM_CFT_HANDLES_SUPPORT) &&                                         \
+    (defined(NVSHMEM_PRIORITIZE_LOGICAL_ENDPOINT) || defined(NVSHMEM_FORCE_CFT)) && \
     LE_HW_SW_REQUIREMENTS_MET
     return nvshmemi_is_multicast_reduce_le_implemented<SCOPE>(le_id_with_flag, size);
 #else
@@ -386,9 +471,22 @@ struct mbarrier_primary_wait_raw_result {
     bool report;
 };
 
+struct alignas(16) handle_tracking_state_t {
+    uint32_t initialized_slots;
+    uint32_t pending_slots;
+    uint32_t thread_mutex;
+    uint32_t reserved;
+};
+
+static_assert(sizeof(handle_tracking_state_t) == NVSHMEMI_HANDLE_TRACKING_STATE_BYTES,
+              "handle tracking state must occupy its reserved SMEM slot");
+
 // to be allocated in shared memory
 struct alignas(16) handle_barrier_t {
     __mbarrier_t bar;
+    static constexpr uint8_t HANDLE_INITIALIZED = 1U << 0;
+    static constexpr uint8_t HANDLE_PENDING_PUBLISHED = 1U << 1;
+    static constexpr uint8_t HANDLE_TX_EXPECTED = 1U << 2;
 
     /*
      * A handle barrier occupies a 16-byte reserved SMEM slot while the
@@ -404,11 +502,36 @@ struct alignas(16) handle_barrier_t {
     uint32_t pending_handle_bytes;
     uint16_t pending_handle_owner;
     uint8_t pending_handle_active;
+    uint8_t pending_handle_slot;
 
     inline __device__ void reset_pending_handle_state() {
         pending_handle_bytes = 0;
         pending_handle_owner = 0;
         pending_handle_active = 0;
+        pending_handle_slot = 0;
+    }
+
+    inline __device__ handle_tracking_state_t* handle_tracking_state() {
+        assert(pending_handle_slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS);
+        return reinterpret_cast<handle_tracking_state_t*>(
+            reinterpret_cast<char*>(this) +
+            (NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS - pending_handle_slot) * sizeof(handle_barrier_t));
+    }
+
+    inline __device__ void mark_handle_slot_initialized() {
+        atomicOr(&handle_tracking_state()->initialized_slots, 1U << pending_handle_slot);
+    }
+
+    inline __device__ void clear_handle_slot_initialized() {
+        atomicAnd(&handle_tracking_state()->initialized_slots, ~(1U << pending_handle_slot));
+    }
+
+    inline __device__ void mark_handle_slot_pending() {
+        atomicOr(&handle_tracking_state()->pending_slots, 1U << pending_handle_slot);
+    }
+
+    inline __device__ void clear_handle_slot_pending() {
+        atomicAnd(&handle_tracking_state()->pending_slots, ~(1U << pending_handle_slot));
     }
 
     inline __device__ void init_raw(int arvCnt) {
@@ -424,10 +547,23 @@ struct alignas(16) handle_barrier_t {
         return ((size_bytes + (CFT_HANDLE_TX_SIZE - 1)) / CFT_HANDLE_TX_SIZE) * CFT_HANDLE_TX_SIZE;
     }
 
-    inline __device__ bool has_pending_handle() const { return pending_handle_active != 0; }
+    inline __device__ bool has_pending_handle() const {
+        return (pending_handle_active & HANDLE_INITIALIZED) != 0;
+    }
+
+    inline __device__ bool has_published_pending_handle() const {
+        return (pending_handle_active & HANDLE_PENDING_PUBLISHED) != 0;
+    }
 
     inline __device__ bool pending_handle_is_owned_by(uint32_t owner) const {
         return has_pending_handle() && pending_handle_owner == owner;
+    }
+
+    inline __device__ void publish_pending_handle() {
+        if (pending_handle_bytes != 0 && !has_published_pending_handle()) {
+            pending_handle_active |= HANDLE_PENDING_PUBLISHED;
+            mark_handle_slot_pending();
+        }
     }
 
     /* Complete the current handle operation batch. Keeping the barrier valid advances it
@@ -438,13 +574,20 @@ struct alignas(16) handle_barrier_t {
         }
 
         if (pending_handle_bytes != 0) {
-            uint64_t state = arrive_relaxed(pending_handle_bytes);
+            uint64_t state =
+                has_expected_handle_tx() ? arrive_relaxed() : arrive_relaxed(pending_handle_bytes);
             wait_primary(state);
             pending_handle_bytes = 0;
+            if (has_published_pending_handle()) {
+                clear_handle_slot_pending();
+                pending_handle_active &= ~HANDLE_PENDING_PUBLISHED;
+            }
+            pending_handle_active &= ~HANDLE_TX_EXPECTED;
         }
 
         if (invalidate) {
             inval_raw();
+            clear_handle_slot_initialized();
             reset_pending_handle_state();
         }
     }
@@ -452,7 +595,8 @@ struct alignas(16) handle_barrier_t {
     /* Reuse a live handle barrier when the same threadgroup issues another
      * operation. A different owner implies a slot collision with another handle
      * path, which is resolved by completing the old batch first. */
-    inline __device__ void prepare_handle(uint32_t owner) {
+    inline __device__ void prepare_handle(uint32_t owner, uint32_t slot) {
+        assert(slot < NVSHMEMI_NUM_HANDLE_BARRIER_SLOTS);
         if (has_pending_handle() && pending_handle_owner != owner) {
             drain_pending_handle(true);
         }
@@ -461,22 +605,40 @@ struct alignas(16) handle_barrier_t {
             init_raw(1);
             pending_handle_bytes = 0;
             pending_handle_owner = static_cast<uint16_t>(owner);
-            pending_handle_active = 1;
+            pending_handle_slot = static_cast<uint8_t>(slot);
+            pending_handle_active = HANDLE_INITIALIZED;
+            mark_handle_slot_initialized();
         }
     }
 
     inline __device__ void ensure_handle_tx_capacity(uint32_t size_bytes) {
         uint32_t completion_bytes = handle_completion_bytes(size_bytes);
         if (pending_handle_bytes != 0 &&
-            pending_handle_bytes + completion_bytes >= TMA_PUT_MAX_BATCH_SIZE) {
+            (!has_expected_handle_tx() ||
+             pending_handle_bytes + completion_bytes >= TMA_PUT_MAX_BATCH_SIZE)) {
             drain_pending_handle(false);
         }
     }
 
     inline __device__ void ensure_handle_get_tx_capacity(uint32_t size_bytes) {
         if (pending_handle_bytes != 0 &&
-            pending_handle_bytes + size_bytes >= TMA_GET_MAX_BATCH_SIZE) {
+            (has_expected_handle_tx() ||
+             pending_handle_bytes + size_bytes >= TMA_GET_MAX_BATCH_SIZE)) {
             drain_pending_handle(false);
+        }
+    }
+
+    inline __device__ bool has_expected_handle_tx() const {
+        return (pending_handle_active & HANDLE_TX_EXPECTED) != 0;
+    }
+
+    /* Establish the fabric completion count before issuing the operation.
+     * Deferring this until quiet allows complete_tx to race ahead of expect_tx. */
+    inline __device__ void add_expected_handle_tx(uint32_t size_bytes) {
+        uint32_t completion_bytes = handle_completion_bytes(size_bytes);
+        if (completion_bytes != 0) {
+            barrier_expect_tx(&bar, completion_bytes / CFT_HANDLE_TX_SIZE);
+            pending_handle_active |= HANDLE_TX_EXPECTED;
         }
     }
 
@@ -504,6 +666,17 @@ struct alignas(16) handle_barrier_t {
     }
 
     // track completion in complete_tx::16B
+    inline __device__ uint64_t arrive_relaxed() {
+        uint64_t state;
+        const unsigned long long smem_addr = static_cast<unsigned long long>(
+            __cvta_generic_to_shared(reinterpret_cast<void*>(&bar)));
+        asm volatile("mbarrier.arrive.relaxed.cta.shared::cta.b64 %0, [%1];"
+                     : "=l"(state)
+                     : "l"(smem_addr)
+                     : "memory");
+        return state;
+    }
+
     inline __device__ uint64_t arrive_relaxed(uint32_t size_bytes) {
         uint64_t state;
         uint32_t adjusted_size =
@@ -600,6 +773,12 @@ struct alignas(16) handle_barrier_t {
     }
 
     inline __device__ void inval() {
+        if (has_pending_handle()) {
+            if (has_published_pending_handle()) {
+                clear_handle_slot_pending();
+            }
+            clear_handle_slot_initialized();
+        }
         inval_raw();
         reset_pending_handle_state();
     }

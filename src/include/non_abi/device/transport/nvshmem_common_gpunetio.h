@@ -7,12 +7,15 @@
 #define _NVSHMEMI_GPUNETIO_COMMON_H_
 
 #define NVSHMEMI_GPUNETIO_QP_MANAGEMENT_PADDING 24
-#define NVSHMEMI_GPUNETIO_STATE_PADDING 108
+#define NVSHMEMI_GPUNETIO_STATE_PADDING 104
 
 #define NVSHMEMI_GPUNETIO_SCALAR_INVALID -1
 #define NVSHMEMI_GPUNETIO_USSCALAR_INVALID 0xFFFF
 #define NVSHMEMI_GPUNETIO_USCALAR_INVALID 0xFFFFFFFF
 #define NVSHMEMI_GPUNETIO_ULSCALAR_INVALID 0xFFFFFFFFFFFFFFFF
+
+// Sentinel for GPU QPs with different resolved NIC handlers
+#define NVSHMEMI_GPUNETIO_NIC_HANDLER_PER_QP 0xFFFFFFFEu
 
 #define NVSHMEMI_GPUNETIO_MIN_QP_DEPTH 128
 #define NVSHMEMI_GPUNETIO_MAX_QP_DEPTH 32768
@@ -89,6 +92,7 @@
         state.rc_map_type = NVSHMEMI_GPUNETIO_DEVICE_QP_MAP_TYPE_INVALID;     \
         state.region_batch_rma_pending_qps = NULL;                            \
         state.region_batch_rma_threshold = 0;                                 \
+        state.cached_nic_handler = NVSHMEMI_GPUNETIO_USCALAR_INVALID;         \
     } while (0);
 
 #else
@@ -211,6 +215,7 @@ struct nvshmemi_gpunetio_device_state_v1 {
     nvshmemi_gpunetio_device_qp_map_type_t rc_map_type;
     void *region_batch_rma_pending_qps;
     uint32_t region_batch_rma_threshold;
+    uint32_t cached_nic_handler;
     uint8_t reserved[NVSHMEMI_GPUNETIO_STATE_PADDING];
 };
 static_assert(sizeof(nvshmemi_gpunetio_device_state_v1) == 2256,

@@ -103,6 +103,9 @@ static int cudaPfnFuncLoader(struct nvshmemi_cuda_fn_table *table) {
     LOAD_SYM(table, cuDeviceGetFabricClusterUuid, 13040, , 1);
     LOAD_SYM(table, cuDeviceGetCliqueCount, 13040, , 1);
     LOAD_SYM(table, cuDeviceGetCliqueInfo, 13040, , 1);
+#if CUDART_VERSION >= 13050
+    LOAD_SYM(table, cuFabricCpyBatchAsync, 13050, , 1);
+#endif
     return NVSHMEMI_SUCCESS;
 }
 

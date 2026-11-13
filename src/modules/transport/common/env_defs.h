@@ -129,7 +129,9 @@ NVSHMEMI_ENV_DEF(HCA_LIST, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
 
 NVSHMEMI_ENV_DEF(HCA_PE_MAPPING, string, "", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies mapping of HCAs to PEs as a comma-separated list. Each entry "
-                 "in the comma separated list is of the form ``hca_name:port:count``.  For "
+                 "in the comma separated list is of the form ``hca_name:port:count``. "
+                 "Entries are expanded in the order listed, with each matching HCA/port "
+                 "repeated ``count`` times. For "
                  "example, ``mlx5_0:1:2,mlx5_0:2:2`` indicates that PE0, PE1 are mapped to "
                  "port 1 of mlx5_0, and PE2, PE3 are mapped to port 2 of mlx5_0. "
                  "``NVSHMEM_ENABLE_NIC_PE_MAPPING`` must be set to 1 for this variable to be "
@@ -235,10 +237,11 @@ NVSHMEMI_ENV_DEF(GPUNETIO_ENABLE_GDAKI, bool, false, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Set to enable GPU-initiated communication transport via GPUNetIO.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NIC_HANDLER, string, "auto", NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Specifies the processor used for ringing NIC's DB. "
-                 "Choices are: auto, gpu, cpu.\n\n"
+                 "Choices are: auto, gpu, cpu, cpu_free_flow.\n\n"
                  "- auto: use GPU SMs and fallback to CPU if it is not supported (default).\n"
                  "- gpu: use GPU SMs, regular DB.\n"
-                 "- cpu: use CPU.")
+                 "- cpu: use CPU.\n"
+                 "- cpu_free_flow: use CPU with independently published GPU WQE readiness.")
 NVSHMEMI_ENV_DEF(GPUNETIO_NUM_RC_PER_PE_GPU, int, 2, NVSHMEMI_ENV_CAT_TRANSPORT,
                  "Number of GPU-data-path RC QPs per peer PE in the GPUNetIO transport "
                  "(default 2, or 8 with directNIC). Only takes effect when "

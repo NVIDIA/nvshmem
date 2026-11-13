@@ -56,9 +56,20 @@ static base_request_t **channel_req;
 void *nvshmemi_proxy_progress(void *in);
 void *nvshmemi_proxy_progress_minimal(void *in);
 
-static void nvshmemi_proxy_atexit_finalize() {
-    if (nvshmemi_state && nvshmemi_state->proxy) {
-        (void)nvshmemi_proxy_finalize(nvshmemi_state);
+static void nvshmemi_proxy_atexit_stop() {
+    if (!nvshmemi_state || !nvshmemi_state->proxy) {
+        return;
+    }
+    proxy_state_t *proxy_state = (proxy_state_t *)nvshmemi_state->proxy;
+    nvshmemi_state->proxy = nullptr;
+    /* At process exit, ensure the proxy cannot call transport code before transport
+     * atexit handlers unload the transport libraries. Do not free CUDA resources here:
+     * cudaFree may wait implicitly for a kernel that is waiting for this proxy after an error.
+     */
+    proxy_state->progress_params.stop = 1;
+
+    if (!pthread_equal(pthread_self(), proxy_state->progress_thread)) {
+        (void)pthread_join(proxy_state->progress_thread, NULL);
     }
 }
 
@@ -499,7 +510,7 @@ post_cst_api_check:
 
 out:
     // Register every proxy generation after the transport exit handlers it uses.
-    if (!status && state->proxy && atexit(nvshmemi_proxy_atexit_finalize) != 0) {
+    if (!status && state->proxy && atexit(nvshmemi_proxy_atexit_stop) != 0) {
         NVSHMEMI_ERROR_PRINT("Failed to register proxy finalization at exit.\n");
         status = nvshmemi_proxy_finalize(state);
         if (!status) {
@@ -1623,6 +1634,11 @@ void progress_transports(proxy_state_t *proxy_state) {
 
     for (int i = 0; i < state->num_initialized_transports; i++) {
         struct nvshmem_transport *tcurr = state->transports[i];
+
+        /* A transport that failed to connect may have been finalized. */
+        if (!tcurr) {
+            continue;
+        }
 
         if (!((proxy_state->transport_bitmap) & (1 << i)) &&
             (tcurr->type != NVSHMEM_TRANSPORT_LIB_CODE_IBGDA &&
