@@ -43,6 +43,7 @@
       $ <path to hydra>/nvshmrun -n 2 -ppn 2 ./gemmAR_fusion_blackwell_fp16 --m=512 --n=512 --k=512
 */
 
+#include <algorithm>
 #include <iostream>
 
 #include <cutlass/cutlass.h>
@@ -420,6 +421,24 @@ int run(Options &options) {
     printf("%d Grid dimension: (%d, %d, %d), block: (%d, %d, %d), occupancy: %d\n", mype, grid.x,
            grid.y, grid.z, blockShape.x, blockShape.y, blockShape.z, sm_count);
     int max_concurrent_blocks = sm_count * max_active_blocks;
+    // The kernel launches in clusters, and a cluster only becomes resident when all of its blocks
+    // fit at once, so fewer blocks than sm_count * max_active_blocks may run concurrently.
+    cudaLaunchAttribute cluster_attr;
+    cluster_attr.id = cudaLaunchAttributeClusterDimension;
+    cluster_attr.val.clusterDim.x = cute::size<0>(ClusterShape_MNK{});
+    cluster_attr.val.clusterDim.y = cute::size<1>(ClusterShape_MNK{});
+    cluster_attr.val.clusterDim.z = cute::size<2>(ClusterShape_MNK{});
+    cudaLaunchConfig_t launch_config = {};
+    launch_config.gridDim = grid;
+    launch_config.blockDim = blockShape;
+    launch_config.dynamicSmemBytes = GemmKernel::SharedStorageSize;
+    launch_config.attrs = &cluster_attr;
+    launch_config.numAttrs = 1;
+    int max_active_clusters = 0;
+    CUDA_CHECK(cudaOccupancyMaxActiveClusters(
+        &max_active_clusters, (void const *)cutlass::device_kernel<GemmKernel>, &launch_config));
+    int cluster_size = cute::size(ClusterShape_MNK{});
+    max_concurrent_blocks = std::min(max_concurrent_blocks, max_active_clusters * cluster_size);
     if (max_concurrent_blocks < (grid.x * grid.y * grid.z)) {
         fprintf(stderr,
                 "Grid size exceeds maximum concurrent blocks. Using Tile-granular "
@@ -519,8 +538,8 @@ int main(int argc, char const **args) {
     CUDA_CHECK(cudaGetDevice(&current_device_id));
     CUDA_CHECK(cudaGetDeviceProperties(&props, current_device_id));
     cudaError_t error = cudaGetDeviceProperties(&props, 0);
-    if (props.major != 10 || props.minor != 0) {
-        std::cerr << "This example requires a GPU with compute capability 100a)." << std::endl;
+    if (props.major != 10 || (props.minor != 0 && props.minor != 3)) {
+        std::cerr << "This example requires a GPU with compute capability 100a or 103a." << std::endl;
         return 0;
     }
 
