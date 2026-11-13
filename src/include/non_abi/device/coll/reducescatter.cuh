@@ -180,7 +180,8 @@ __device__ NVSHMEMI_DEVICE_ALWAYS_INLINE void nvshmemi_reducescatter_threadgroup
         ((is_mcast_red_op && is_mcast_canoncial_type) ||
          (OP == RDXN_OPS_SUM && is_half_precondition)) &&
         (nvshmemi_device_state_d.team_pool[team]->nvls_rsc_base_ptr != NULL) &&
-        ((nreduce * sizeof(TYPE)) % 4 == 0);
+        ((nreduce * sizeof(TYPE)) % 4 == 0) && ((uintptr_t)dest % 4 == 0) &&
+        ((uintptr_t)source % 4 == 0);
 
 #if defined(NVSHMEM_FORCE_CFT)
 #if LE_HW_SW_REQUIREMENTS_MET && defined(NVSHMEM_CFT_HANDLES_SUPPORT)
