@@ -1731,6 +1731,10 @@ ibgda_quiet(nvshmemi_ibgda_device_qp_t *qp) {
     }
 #endif
     assert(likely(status == 0));
+    // CQE errors are fatal (see ibgda_poll_cq); release builds compile the assert out.
+    if (unlikely(status != 0)) {
+        __trap();
+    }
     return prod_idx;
 }
 
@@ -1749,6 +1753,10 @@ __device__ NVSHMEMI_STATIC NVSHMEMI_DEVICE_ALWAYS_INLINE void ibgda_wait_for_slo
             printf("ibgda_poll_cq failed with error=%d.\n", err);
         }
         assert(likely(status == 0));
+        // CQE errors are fatal (see ibgda_poll_cq); release builds compile the assert out.
+        if (unlikely(status != 0)) {
+            __trap();
+        }
     }
     IBGDA_MFENCE();
 }
