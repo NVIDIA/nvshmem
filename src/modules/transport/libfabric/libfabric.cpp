@@ -2343,7 +2343,19 @@ static int nvshmemt_libfabric_amo(struct nvshmem_transport *transport, int pe, v
         local_handle = &((nvshmemt_libfabric_mem_handle_t *)remote->ret_handle)->hdls[domain_idx];
     }
 
-    if (bytesdesc.elembytes == 8) {
+    if (verb.is_float) {
+        /* Floating-point atomic add: describe the operand as a floating-point type so that the
+         * target adds values instead of bit patterns. FI_FLOAT16 only exists from libfabric 2.0. */
+        if (bytesdesc.elembytes == 8) {
+            data = FI_DOUBLE;
+        } else if (bytesdesc.elembytes == 4) {
+            data = FI_FLOAT;
+        } else {
+            NVSHMEMI_ERROR_JMP(status, NVSHMEMX_ERROR_NOT_SUPPORTED, out,
+                               "Half-precision atomic add is not supported by the libfabric "
+                               "transport. Use an NVLink peer-access path.\n");
+        }
+    } else if (bytesdesc.elembytes == 8) {
         data = FI_UINT64;
     } else if (bytesdesc.elembytes == 4) {
         data = FI_UINT32;
