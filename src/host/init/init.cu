@@ -469,7 +469,7 @@ int nvshmemi_bootstrap(int flags, nvshmemx_init_attr_t *nvshmem_attr) {
     int mype_node = 0, npes_node = 0;
 
     bootstrap_attr_t attr = {};
-    status = bootstrap_set_bootattr(flags, nvshmem_attr, (nvshmem_attr) ? &attr : NULL);
+    status = bootstrap_set_bootattr(flags, nvshmem_attr, &attr);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "bootstrap_set_bootattr failed \n");
     status = bootstrap_init(flags, &attr, &nvshmemi_boot_handle, &bootstrap_mode);
     NVSHMEMI_NZ_ERROR_JMP(status, NVSHMEMX_ERROR_INTERNAL, out, "bootstrap_init failed \n");

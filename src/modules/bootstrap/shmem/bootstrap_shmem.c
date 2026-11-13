@@ -3,7 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* dladdr */
+#endif
 #include <assert.h>
+#include <dlfcn.h>
 #include <shmem.h>
 #include <stdbool.h>
 #include <strings.h>
@@ -430,6 +434,13 @@ int nvshmemi_bootstrap_plugin_init(void *arg, bootstrap_handle_t *handle,
     if (arg == NULL || *(int *)arg) {
         shmem_init();
         nvshmem_initialized_shmem = 1;
+        /* NVSHMEM unloads this plugin at finalize, which would also unload the OpenSHMEM library
+         * when the application does not link it. That library was initialized here and can still
+         * run exit handlers after shmem_finalize(), so keep it loaded. */
+        Dl_info shmem_lib;
+        if (dladdr((void *)shmem_init, &shmem_lib) && shmem_lib.dli_fname) {
+            (void)dlopen(shmem_lib.dli_fname, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+        }
     }
 
     handle->pg_rank = shmem_my_pe();
